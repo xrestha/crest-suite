@@ -20,6 +20,11 @@ paths:
 - **A dish with no costed ingredients shows "—", never `0.0% ✓`**, on the list, detail, cost card print,
   WhatsApp text and export (`recipeCostOf` / `menuFcPct`); a manual `cost_price` is shown as manual.
 - **Changing a dish's VAT keeps the price the guest pays** on both Recipe Costing and Menu Pricing (D15).
+- **On a PAN-bill outlet the typed price IS the guest's price (S792, D31, RECIPES-2).** The till never
+  adds VAT there; the pricing screens took 13% off anyway (typed 500, billed 442). `menuPriceVat.js` is
+  the one rule for every screen that prices a dish: only an explicit `is_vat_registered === false` is
+  PAN (the till's `?? true`), stored whole with `vat_rate 0`; an unknown basis disables price boxes and
+  refuses saves. Old rows are not rewritten — `PanPriceBanner` lists them for the owner to re-enter.
 - **A stock-count item no recipe points to, with the recipe's name, is adopted on save** rather than
   refused forever by `DUP_MIRROR_MSG`; the mirror-link writes are checked.
 - **Dish photos upload to the `dish-photos` bucket** (D16, `20260918150000`) — never with `upsert`, and
@@ -152,9 +157,13 @@ subject matter:
   fixed cost, valuing the choices' lines through `orderLineIngredients.deltaItems` — the same
   explosion the stock posting uses, so a plate is costed from the raw items it actually depletes.
   `useBuildCostRanges` is the one loader; Recipe Costing and Menu Pricing's IMS branch both render
-  it. **Do not teach `calcRecipeCost`/`recipeCost.js` about options** — every other reader of a
-  recipe's cost (Menu Engineering, Best Sellers, Recipe Margin, the owner report) means the fixed
-  part, and a third engine is how the same dish comes to cost two amounts on two screens.
+  it. **Do not teach `calcRecipeCost`/`recipeCost.js` about options** — a third engine is how the
+  same dish comes to cost two amounts on two screens.
+- **So the menu reports do not RATE it (S792, RECIPES-1).** The fixed part alone made an acai bowl
+  a 2.7% ✓ Star and Top Contributor. `isCostedByBuild()` (`buildYourOwnRating.js`, only while
+  Customization is on) makes it "Not rated — costed by build" on Menu Engineering (`me_class` NULL),
+  Recipe Margin, Best Sellers, Menu Repricing, the owner report's matrix, and Recipe Costing's tiles,
+  card, share, FC pills and export: listed with its sales, out of every verdict, ranking and cost total.
 
 A sub-recipe can be a choice's stock line, so deleting one is refused by
 `pos_option_ingredients.sub_recipe_id` as well — `deleteRecipe`'s pre-check still only looks at

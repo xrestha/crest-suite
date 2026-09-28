@@ -26,6 +26,7 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote } from '../../modules/dashboard/labourSource'
 
@@ -475,6 +476,10 @@ export default function OwnerDashboard() {
   }
 
   const revenueTotal = stats?.revenueTotal || 0
+  // Spend % so far, not Food Cost % (S792, owner decision D30): this page shows the OPEN month, which
+  // has no closing count, so it divides what was BOUGHT by sales. A closed month's Food Cost % is
+  // what was USED (Monthly Summary, the P&L, and the Owner Report frozen at close). Prime Cost % and
+  // True Net Margin % below are built on the same spend figure, and their tips say so.
   const fcPct = revenueTotal > 0 ? (stats.purchaseTotal / revenueTotal) * 100 : null
   const laborPct = revenueTotal > 0 && laborCostTotal != null ? (laborCostTotal / revenueTotal) * 100 : null
   // Prime Cost % = Food Cost % + Labor Cost % — the single number restaurant operators actually
@@ -671,7 +676,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/variance'))}>
             <div style={kpiLabelStyle}>
-              <Tip text={`Purchases net of bill discounts and returns ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
+              <Tip text={`${SPEND_SO_FAR_TIP} Purchases here are net of bill discounts and returns. Coloured against your food cost target as a guide — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}%, set in Settings → Thresholds.`} width={280}>{SPEND_SO_FAR_LABEL}</Tip>
             </div>
             <div title={settledFigure(fcPct, fcCardBand).title} style={{ ...kpiValueStyle(24), color: settledFigure(fcPct, fcCardBand).color }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : settledFigure(fcPct, fcCardBand).text}
@@ -702,7 +707,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard()}>
             <div style={kpiLabelStyle}>
-              <Tip text="Food Cost % + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
+              <Tip text="Spend % so far + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. For the running month the food half is what you have spent on stock, not what you used, because the month has not been counted yet. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
             </div>
             <div style={{ ...kpiValueStyle(24), color: primeFigure.color }} title={primeFigure.title}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : primeFigure.text}
@@ -724,7 +729,7 @@ export default function OwnerDashboard() {
               client who does NOT got a card that navigated to a page they cannot open. */}
           <div {...kpiCard(canOverheads ? () => navigate('/overheads') : null)}>
             <div style={kpiLabelStyle}>
-              <Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue. This is what the business actually keeps." width={260}>True Net Margin % (MTD)</Tip>
+              <Tip text="Revenue minus what you have spent on stock so far (net purchases), labor cost and overheads, as a % of revenue — what the business keeps. The stock half is spend, not stock used, until the month's count closes it." width={260}>True Net Margin % (MTD)</Tip>
             </div>
             {/* `canOverheads` gates the FIGURE, not just its colour: without Overheads this is not
                 a margin at all, so it must stay unbanded and unmarked rather than being painted a
@@ -827,7 +832,18 @@ export default function OwnerDashboard() {
                 <span key={k}><span aria-hidden="true" style={{ color: TREND_COLORS[k] }}>●</span> {label}</span>
               ))}
             </>}
-            footer={<p className="sr-only">Trend of Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across the last {trendChartData.length} closed periods, sourced from each period's frozen Monthly Owner Report snapshot.</p>}
+            // Visible, not sr-only (S792, D30): each point is the figure FROZEN on that month's Owner
+            // Report, and reports already made keep theirs. Before D30 a report froze Food Cost % as
+            // purchases ÷ sales; later ones freeze stock used ÷ sales. So the line can step at the
+            // switch with nothing about the kitchen having changed — the reader has to be told.
+            footer={<>
+              <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+                Each month shows the figures frozen on its Owner Report. Reports made before Food Cost % moved to
+                stock used ÷ sales froze purchases ÷ sales instead, so the Food Cost and Prime Cost lines can step
+                at that change.
+              </p>
+              <p className="sr-only">Trend of Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across the last {trendChartData.length} closed periods, sourced from each period's frozen Monthly Owner Report snapshot.</p>
+            </>}
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
                 <LineChart data={trendChartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>

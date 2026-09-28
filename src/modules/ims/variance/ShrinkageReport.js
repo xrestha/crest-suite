@@ -7,7 +7,9 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildUsageMap } from '../stockcount/stockReportCalc'
+import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
+import { linkedItemIdsOf, bandPctOf, isClosingCount } from './variancePopulation'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
@@ -32,11 +34,17 @@ function shrinkageStatus(count, covered) {
 // page, so an item a hair over recipe every month read "Consistent" in red on the report a client
 // uses to decide whether staff are stealing, while the Variance Report called the same months OK.
 // Pure over the observations buildReport stored, so a settings change re-bands without a re-read.
+// The percentage goes through the Variance Report's own surrogate (S792, D36): a month in which the
+// item's dishes sold nothing but its stock fell has no percentage (÷ 0), and `null` banded as "no
+// verdict", so that month could never count as shrinkage here while Variance called it Over.
 function bandItem(raw, settings) {
   let shrinkCount = 0
   let totalShrinkQty = 0
-  raw.observations.forEach(({ variance, theor, rate }) => {
-    const pct = theor > 0 ? (variance / theor) * 100 : null
+  raw.observations.forEach(({ variance, theor, actual, rate }) => {
+    const pct = bandPctOf({
+      theoreticalUsed: theor, actualUsed: actual,
+      variancePct: theor > 0 ? (variance / theor) * 100 : null,
+    })
     if (varianceBand(pct, variance * rate, settings, { measured: true }).key === 'over') {
       shrinkCount++
       totalShrinkQty += variance
@@ -189,8 +197,11 @@ export default function ShrinkageReport() {
     // staff meals are logged too, just like wastage, which was already excluded).
     const staffMap = makeMap(staffMeals, 'qty')
 
+    // Counts only (S792): a row whose physical_qty is NULL is not a count, and reading it as 0 made
+    // an uncounted month's whole shelf "shrinkage" — see isClosingCount.
     const closeMap = {}
     ;(closing || []).forEach(r => {
+      if (!isClosingCount(r)) return
       if (!closeMap[r.period_id]) closeMap[r.period_id] = {}
       closeMap[r.period_id][r.item_id] = parseFloat(r.physical_qty || 0)
     })
@@ -225,29 +236,42 @@ export default function ShrinkageReport() {
       theorMap[pid] = buildUsageMap(salesByPeriod[pid] || [], ingredientBreakdown, explosion)
     })
 
-    // Observations per item. A period is observed only when the item has recipe coverage AND a
-    // closing count in that period (S756). `closeMap[pid]?.[item.id] || 0` read "not counted" as
-    // "counted zero" — the S719 rule the Variance pages already follow — so an uncounted item in a
-    // closed month read as the whole shelf consumed, which is a large Over variance, and a few such
-    // months made it "Consistent" red shrinkage. Presence is `in`, never `> 0`: a count of 0 is a
-    // real count (S695). Skipped periods are counted and named on screen instead.
+    // The items the Variance Report judges (S792, D36/D17): every item a recipe at any depth — or a
+    // sold option line — consumes. Not "had theoretical usage this month": that was the population
+    // this page shared with the old Theoretical vs Actual, and it never saw an ingredient whose
+    // dishes sold nothing while its stock fell. An item in no recipe is never judged here, as on
+    // Variance (gas, foil, napkins have nothing to compare against).
+    const linkedItemIds = linkedItemIdsOf(ingredientBreakdown, selectDepletingSalesAcrossPeriods(sales || []), explosion)
+
+    // Observations per item. A period is observed when the item has a closing count in it AND
+    // either its dishes sold or its stock moved with nothing sold (D36) — the months the Variance
+    // Report would judge; a month where nothing sold and nothing moved has nothing to judge.
+    // `closeMap[pid]?.[item.id] || 0` read "not counted" as "counted zero" (S756) — the S719 rule the
+    // Variance pages already follow — so an uncounted item in a closed month read as the whole shelf
+    // consumed, which is a large Over variance, and a few such months made it "Consistent" red
+    // shrinkage. Presence is `in`, never `> 0`: a count of 0 is a real count (S695). A skipped month
+    // — expected use or stock on hand, but no count — is counted and named on screen instead.
     let uncountedItems = 0
     let uncountedItemPeriods = 0
     const rows = (items || []).map(item => {
+      if (!linkedItemIds.has(item.id)) return null
       const observations = []
       let skipped = 0
 
       periodIds.forEach(pid => {
-        const theor = theorMap[pid]?.[item.id] || 0
-        if (theor <= 0) return
-        if (!closeMap[pid] || !(item.id in closeMap[pid])) { skipped++; return }
+        const theor  = theorMap[pid]?.[item.id] || 0
         const open   = openMap[pid]?.[item.id]  || 0
-        const close  = closeMap[pid][item.id]
         const purch  = purchMap[pid]?.[item.id] || 0
+        if (!closeMap[pid] || !(item.id in closeMap[pid])) {
+          if (theor > 0 || open > 0 || purch > 0) skipped++
+          return
+        }
+        const close  = closeMap[pid][item.id]
         const waste  = wasteMap[pid]?.[item.id] || 0
         const staffMealQty = staffMap[pid]?.[item.id] || 0
         const actual = open + purch - close - waste - staffMealQty
-        observations.push({ variance: actual - theor, theor, rate: parseFloat(item.per_uom_rate || 0) })
+        if (theor <= 0 && actual === 0) return
+        observations.push({ variance: actual - theor, theor, actual, rate: parseFloat(item.per_uom_rate || 0) })
       })
 
       if (skipped > 0) { uncountedItems++; uncountedItemPeriods += skipped }
@@ -314,7 +338,8 @@ export default function ShrinkageReport() {
       <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
         Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: unlogged theft, over-portioning, unlogged spillage, or data entry errors. Anything you log on the Daily Wastage tab — theft included — is explained, and so leaves this figure.
-        Only items linked to recipes (with sales data) are analysed. A period counts as shrinkage when the item was
+        Only items that appear in a recipe are analysed — and a month in which one was used while none of its dishes
+        sold counts too, since all of that use is unexplained. A period counts as shrinkage when the item was
         over-used by more than your ±{flagPct}% tolerance <em>and</em> by more than NPR {VARIANCE_MATERIALITY_NPR.toLocaleString('en-IN')} — the
         same test the Variance Report uses.
       </div>
@@ -411,7 +436,7 @@ export default function ShrinkageReport() {
                     <Tip text={`Number of counted closed periods where this item was over-used beyond your ±${flagPct}% tolerance and by more than NPR ${VARIANCE_MATERIALITY_NPR}.`} width={260}>Shrinkage Count</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Number of periods where this item had recipe coverage (sales + recipe data) AND a closing count. Months it was not counted are shown separately and not judged." width={260}>Periods Tracked</Tip>
+                    <Tip text="Counted closed periods in which this item's dishes sold, or its stock moved while none of them sold — the months the Variance Report judges. Months it was not counted are shown separately and not judged." width={260}>Periods Tracked</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Average unexplained over-usage per period it occurred, in base UOM." width={220}>Avg Qty / Period</Tip>

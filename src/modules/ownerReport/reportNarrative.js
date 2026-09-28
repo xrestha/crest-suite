@@ -11,20 +11,28 @@ export function buildExecutiveSummary(snapshot, periodLabel) {
   const { combined, ims, hr } = snapshot
   if (!combined) return ''
 
+  // S792 (D30, schema v9): Food Cost % is food used (COGS) ÷ revenue; an older snapshot froze net
+  // purchases ÷ revenue and the sentence says so. On a v9 snapshot whose closing count had a material
+  // gap, the page shows no verdict on the food-cost ratios, so neither does the prose (S756, D6).
+  const cogsBasis = combined.foodCostBasis === 'cogs'
+  const withheld = cogsBasis && !!ims?.countGap?.material
   const clauses = []
   if (combined.revenueTotal != null) {
     clauses.push(`closed with ${fmt(combined.revenueTotal)} in revenue`)
   }
   if (ims && combined.foodCostPct != null) {
     const fc = combined.foodCostPct
-    const note = fc > 45 ? ' — well above the healthy 28–35% range'
+    const basis = cogsBasis ? '' : ' (on purchases)'
+    const note = withheld ? ' — not judged, because the closing count is incomplete'
+      : fc > 45 ? ' — well above the healthy 28–35% range'
       : fc > 35 ? ' — above the healthy 28–35% range'
       : ' — within the healthy 28–35% range'
-    clauses.push(`a Food Cost of ${fc.toFixed(1)}%${note}`)
+    clauses.push(`a Food Cost${basis} of ${fc.toFixed(1)}%${note}`)
   }
   if (ims && hr && combined.primeCostPct != null) {
     const pc = combined.primeCostPct
-    const note = pc > 65 ? ', well outside the 60–65% benchmark'
+    const note = withheld ? ''
+      : pc > 65 ? ', well outside the 60–65% benchmark'
       : pc > 60 ? ', at the edge of the 60–65% benchmark'
       : ', within the 60–65% benchmark'
     clauses.push(`a Prime Cost of ${pc.toFixed(1)}%${note}`)

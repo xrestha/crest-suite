@@ -6,7 +6,48 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { withTimeout } from '../../../utils/withTimeout'
+import { formatAdAsBs } from '../../../utils/bsCalendar'
+import { nprInt } from '../../../shared/nepalMoney'
 import { POOL_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
+import { bookPositionsByAsset, depreciationInputChanges } from './depreciationCompute'
+import { fiscalYearOfAdDate } from './taxPoolCompute'
+
+// S792 (COSTS-8, the D5 precedent): what an edit to the figures depreciation is worked out from
+// does to an asset that already has depreciation posted, as the paragraphs of a confirm dialog.
+// `posted` is { charged, runs } from the asset's posted schedule, or { unknown: true } when that
+// read failed — a check that could not run has not passed, so the dialog still appears and says
+// it could not count. Posted runs are immutable, so none of this rewrites them; what moves is the
+// book value (cost less posted charges, everywhere it is shown, past valuation dates included), the
+// next run's charge, and which fiscal year the Tax Depreciation tab counts the asset in.
+function editConsequences({ asset, changes, posted, taxPool }) {
+  const npr = v => `NPR ${nprInt(v)}`
+  const p = []
+  p.push(posted.unknown
+    ? 'Crest could not check whether depreciation has been posted for this asset, so it cannot say how much has already been charged. Posted runs are locked and keep their figures either way.'
+    : `${npr(posted.charged)} of depreciation is already posted for this asset, in ${posted.runs} run${posted.runs === 1 ? '' : 's'}. Those runs are locked and keep their figures.`)
+  if (changes.cost) {
+    p.push(`Cost goes from ${npr(changes.cost.from)} to ${npr(changes.cost.to)}. ` + (posted.unknown
+      ? 'Its book value becomes the new cost less whatever depreciation is posted'
+      : `Its book value becomes ${npr(changes.cost.to - posted.charged)} (the new cost less the depreciation already posted)`)
+      + ' on the Register, the Asset Card and the Valuation report, including for dates already valued.')
+  }
+  if (changes.acquired) {
+    p.push(`Acquisition date goes from ${formatAdAsBs(changes.acquired.from)} to ${formatAdAsBs(changes.acquired.to)}. Posted runs are not re-dated; the next run, or a disposal, counts the days held from the new date.`)
+  }
+  if (Math.abs(changes.annual.from - changes.annual.to) > 0.005) {
+    p.push(`Runs from now on charge ${npr(changes.annual.to)} a year instead of ${npr(changes.annual.from)}${changes.salvage ? `, and never take it below the new salvage value of ${npr(changes.salvage.to)}` : ''}.`)
+  }
+  if (taxPool && (changes.cost || changes.acquired)) {
+    const oldFy = fiscalYearOfAdDate(asset.acquisition_date)
+    const newFy = changes.acquired ? fiscalYearOfAdDate(changes.acquired.to) : oldFy
+    p.push(oldFy !== newFy
+      ? `Tax Depreciation counts it as bought in FY ${newFy} instead of FY ${oldFy}. A schedule already posted keeps it as it was, so if FY ${oldFy} is posted, check that FY ${newFy} does not count it a second time.`
+      : `Tax Depreciation counts it at the new cost only in FY ${oldFy}, the year it was bought, and only if that year's schedule is not posted yet; a posted schedule keeps the old figures.`)
+  }
+  return p.map((t, i) => <p key={i} style={{ margin: i === p.length - 1 ? 0 : '0 0 8px' }}>{t}</p>)
+}
 
 function emptyForm() {
   return {
@@ -38,7 +79,8 @@ function formFromAsset(asset) {
 // own defaults on select, then leaves both freely editable — never re-locked — exact shape of
 // PurchaseBillForm.jsx's item_id handler (seed once, no further coupling to the source field).
 export default function AssetFormModal({ categories, asset, onClose, onSaved }) {
-  const { scopedInsert, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [form, setForm] = useState(() => asset ? formFromAsset(asset) : emptyForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -89,6 +131,38 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
       notes: form.notes.trim() || null,
     }
 
+    // S792 (COSTS-8, D5): an edit to cost, dates, life or salvage on an asset with posted
+    // depreciation re-values it without touching the locked runs — so it is a decision, named
+    // before it lands. The posted schedule is read here rather than on open, so the answer is
+    // current at the moment of saving.
+    const changes = asset ? depreciationInputChanges(asset, payload) : null
+    if (changes) {
+      let posted
+      try {
+        const { data, error: readErr } = await withTimeout(scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
+          .eq('asset_id', asset.id).eq('is_posted', true).order('id'), 20000, 'Checking posted depreciation')
+        const position = readErr ? null : bookPositionsByAsset(data)[asset.id]
+        posted = readErr ? { unknown: true } : { charged: position?.charged || 0, runs: position?.rows || 0 }
+      } catch (_) {
+        posted = { unknown: true }
+      }
+      if (posted.unknown || posted.runs > 0) {
+        setSaving(false)
+        askConfirm({
+          title: 'Change the figures this asset is depreciated from?',
+          body: editConsequences({ asset, changes, posted, taxPool: payload.tax_pool || asset.tax_pool }),
+          confirmLabel: 'Save changes',
+          busyLabel: 'Saving…',
+          run: () => write(payload),
+        })
+        return
+      }
+    }
+    await write(payload)
+  }
+
+  async function write(payload) {
+    setSaving(true); setError('')
     const { error: err } = asset
       ? await scopedUpdate('assets_register', { ...payload, updated_at: new Date().toISOString() }).eq('id', asset.id)
       : await scopedInsert('assets_register', payload)
@@ -184,6 +258,7 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
+      {confirmEl}
     </Modal>
   )
 }

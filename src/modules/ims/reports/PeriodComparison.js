@@ -149,12 +149,14 @@ export default function PeriodComparison() {
     // `.order()` the months that lose their stock differ between loads. S719's rule, on the page
     // with the longest window in IMS.
     const results = await Promise.all([
-      // The ACTIVE, non-sub-recipe item set, and its rates (S756). Every stock-valued read below
-      // used to join `items(per_uom_rate)` with no filter, so an inactive item or a sub-recipe
-      // mirror row was valued into opening/closing/wastage/staff meals here while Monthly Summary
-      // and Annual Summary both drop it — the same month's COGS differed between the pages by
-      // exactly that stock. Now one rate map, the AnnualSummary rateMap/isTracked shape.
-      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      // The non-sub-recipe item set, and its rates (S756). Every stock-valued read below used to
+      // join `items(per_uom_rate)` with no filter, so a sub-recipe mirror row was valued into
+      // opening/closing/wastage/staff meals here while Monthly Summary and Annual Summary both drop
+      // it — the same month's COGS differed between the pages by exactly that stock. Now one rate
+      // map, the AnnualSummary rateMap/isTracked shape. HIDDEN items are in it since S792 (D29):
+      // an `is_active` filter here took a hidden item's purchases out of every past month's COGS,
+      // across the whole comparison window, while the frozen Owner Report kept them.
+      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')),
       // `discount_amount` + the bill-key columns feed allocateBillDiscounts(): a bill-level
       // discount is repeated on every line of the bill, and until it was deduped and spread this
       // page's "Net Purchases" and COGS sat above MonthlySummary's and Consolidated P&L's for the

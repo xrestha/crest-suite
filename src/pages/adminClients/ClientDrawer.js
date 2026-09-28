@@ -73,6 +73,10 @@ function retroBillWarnings(loaded, patch) {
     out.push((patch.is_vat_registered ?? true)
       ? 'Past bills printed as plain PAN bills will reprint as Tax Invoices (PB→TI) with a VAT breakdown added, since the bill type is decided when a bill is printed.'
       : 'Past Tax Invoices will reprint as plain PAN bills (TI→PB) with the VAT breakdown removed, since the bill type is decided when a bill is printed.')
+    // S792 (D31): same sentence as Settings.js's retroWarnings().
+    out.push((patch.is_vat_registered ?? true)
+      ? 'Menu prices entered while this outlet gave PAN bills carry no VAT, so the till adds no VAT to those dishes until each price is entered again on Menu Pricing.'
+      : 'Dishes priced with VAT will be charged at their price before VAT (13% less than the menu shows) until each price is entered again. Menu Pricing lists them.')
   }
   return out
 }
@@ -530,8 +534,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     // Settings page asked, the other editor for the same columns did not.
     const warnings = retroBillWarnings(loadedSettingsRef.current, patch)
     if (warnings.length) {
+      // Named by the FIELDS that moved, not the warning count: a bill-type change alone carries
+      // two sentences since S792 (the reprint and the menu-price consequence).
+      const codeMoved = 'invoice_prefix' in patch && (patch.invoice_prefix || '') !== (loadedSettingsRef.current?.invoice_prefix || '')
+      const typeMoved = 'is_vat_registered' in patch && (patch.is_vat_registered ?? true) !== (loadedSettingsRef.current?.is_vat_registered ?? true)
       askConfirm({
-        title: warnings.length > 1 ? 'Change the bill type and the invoice code?' : ('invoice_prefix' in patch && (patch.invoice_prefix || '') !== (loadedSettingsRef.current?.invoice_prefix || '') ? 'Change the invoice code?' : 'Change the bill type?'),
+        title: codeMoved && typeMoved ? 'Change the bill type and the invoice code?' : (codeMoved ? 'Change the invoice code?' : 'Change the bill type?'),
         confirmLabel: 'Save anyway', danger: true, busyLabel: 'Saving…',
         body: <>{warnings.map((w, i) => <p key={i} style={{ margin: '0 0 8px' }}>{w}</p>)}</>,
         run: () => commitClientSettings(what, patch),

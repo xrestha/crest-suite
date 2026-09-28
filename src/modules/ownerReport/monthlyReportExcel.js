@@ -29,12 +29,21 @@ export function exportMonthlyReportExcel(report, bizInfo) {
   const periodLabel = `${BS_MONTHS[bs_month - 1]} ${bs_year}`
   const wb = XLSX.utils.book_new()
 
+  // S792 (D30, schema v9): Food Cost % is food used (COGS) ÷ revenue; an older snapshot froze net
+  // purchases ÷ revenue. The sheet names which, since a figure without its basis cannot be checked.
+  const cogsBasis = snapshot.combined?.foodCostBasis === 'cogs'
+  const gap = cogsBasis ? snapshot.ims?.countGap : null
   const summaryRows = [{
     'Revenue (NPR)': round2(snapshot.combined?.revenueTotal),
     'Food Cost %': pct(snapshot.combined?.foodCostPct),
+    'Food Cost Basis': cogsBasis ? 'Food used (COGS) ÷ revenue' : 'Net purchases ÷ revenue (the earlier rule)',
     'Labor Cost %': pct(snapshot.combined?.laborCostPct),
     'Prime Cost %': pct(snapshot.combined?.primeCostPct),
     'Net Margin %': pct(snapshot.combined?.netMarginPct),
+    ...(gap ? {
+      'Items Without Closing Count': gap.uncountedCount ?? 0,
+      'Food Cost Judged': gap.material ? 'No: closing count incomplete' : 'Yes',
+    } : {}),
   }]
   XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Summary', bizInfo, periodLabel, summaryRows), 'Summary')
 
@@ -44,7 +53,10 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       'Opening Stock (NPR)': round2(ims.openingStockValueTotal),
       'Revenue (NPR)': round2(ims.revenueTotal), 'Purchases (NPR)': round2(ims.purchaseTotal),
       'Overheads (NPR)': round2(ims.overheadTotal), 'Wastage Value (NPR)': round2(ims.wastageValueTotal),
+      // v9 only: an older snapshot froze no COGS, and a blank there would read as zero.
+      ...(ims.staffMealsValueTotal != null ? { 'Staff Meals (NPR)': round2(ims.staffMealsValueTotal) } : {}),
       'Closing Stock (NPR)': round2(ims.closingStockValueTotal),
+      ...(ims.cogsTotal != null ? { 'Food Used / COGS (NPR)': round2(ims.cogsTotal) } : {}),
       'Cash Purchases (NPR)': round2(ims.cashNet), 'Credit Purchases (NPR)': round2(ims.creditNet),
       'Items Below Par': ims.reorder?.count ?? 0, 'Reorder Est. Value (NPR)': round2(ims.reorder?.estValueTotal),
       'Unpaid Credit — This Period (NPR)': round2(ims.payables?.unpaidTotal), 'Unpaid Credit Bills': ims.payables?.unpaidCount ?? 0,
@@ -92,6 +104,8 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       // `quadrant` is null for a dish with no price or no costed ingredients (schema v5) — the
       // cell says so rather than leaving a blank that reads as an export fault.
       Recipe: i.name, Category: i.category, Quadrant: i.quadrant || 'Not rated',
+      // Why a dish was not rated — including build-your-own (S792, RECIPES-1, v9).
+      'Why Not Rated': i.quadrant ? '' : (i.unrated || ''),
       'Selling Price (NPR)': round2(i.sellingPrice), 'Ingredient Cost (NPR)': round2(i.ingredientCost),
       'Food Cost %': i.fcPct == null ? '' : pct(i.fcPct), 'Qty Sold': i.qtySold, 'Revenue (NPR)': round2(i.revenue),
       'Contribution Margin (NPR)': round2(i.contributionMargin), 'Total Contribution (NPR)': round2(i.totalContribution),
@@ -132,6 +146,13 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       'Dead Stock Items': inv.deadSlowStock?.deadCount ?? 0, 'Slow Stock Items': inv.deadSlowStock?.slowCount ?? 0,
       'Value at Risk (NPR)': round2(inv.deadSlowStock?.totalValueAtRisk),
       'Variance Flagged Items': inv.variance?.flaggedCount ?? 0, 'Total Variance Value (NPR)': round2(inv.variance?.totalVarianceValue),
+      // v9 (S792): the tolerance the flags were judged at, and what could not be judged. An older
+      // section was a fixed ±10% and counted uncounted items as 0.
+      'Variance Tolerance': inv.variance?.tolerancePct != null ? `±${inv.variance.tolerancePct}%, NPR ${inv.variance.floorValue} floor` : '±10% (fixed, the earlier rule)',
+      ...(inv.variance?.tolerancePct != null ? {
+        'Variance Items Not Counted': inv.variance.uncountedCount ?? 0,
+        'Variance Items In No Recipe': inv.variance.noRecipeCount ?? 0,
+      } : {}),
       'Shrinkage Window (periods)': inv.shrinkageTrend?.periodsAnalyzed ?? 'N/A', 'Shrinkage Loss Value (NPR)': inv.shrinkageTrend ? round2(inv.shrinkageTrend.totalLossValue) : 'N/A',
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Inventory Depth', bizInfo, periodLabel, invSummaryRows), 'Inventory Summary')
@@ -143,17 +164,23 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     const deadAfter = inv.deadSlowStock?.deadAfterMonths || 3
     const dsRule = dsStreak
       ? `Dead = ${deadAfter}+ counted months in a row with no use; Slow = 1–2 months, or <20% used`
+        + (inv.deadSlowStock?.movement === 'staff_meals_count' ? '; staff meals count as use, wastage does not' : '')
       : 'Dead = no use in this month alone (one-month rule, before S756)'
     const deadSlowRows = (inv.deadSlowStock?.items || []).map(i => ({
       Item: i.name, Status: i.status,
       ...(dsStreak ? { 'Months Without Use': `${i.stillMonths || 0}${i.atLeast ? '+' : ''}` } : {}),
-      'Value at Risk (NPR)': round2(i.valueAtRisk), Used: round2(i.used), Closing: round2(i.closing),
+      'Value at Risk (NPR)': round2(i.valueAtRisk), Used: round2(i.used),
+      // v9 (S792): staff meals count as movement; absent on an older section.
+      ...(i.staffMeals != null ? { 'Staff Meals': round2(i.staffMeals) } : {}),
+      Closing: round2(i.closing),
       ...(dsStreak ? { 'Suggested Next Step': i.suggestion || '', 'Last Bought': i.lastBought || '', Supplier: i.supplier || '' } : {}),
       Rule: dsRule,
     }))
     if (deadSlowRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(deadSlowRows), 'Inventory - Dead-Slow')
 
-    const varianceRows = (inv.variance?.items || []).filter(i => i.flag !== 'ok').map(i => ({ Item: i.name, 'Actual Used': round2(i.actualUsed), 'Theoretical Used': round2(i.theoreticalUsed), 'Variance %': pct(i.variancePct), 'Value (NPR)': round2(i.value), Flag: i.flag }))
+    // Over/under only (a v1–v8 section also stored 'ok' rows). A v9 no-sales row has no percentage:
+    // its dishes sold nothing while the stock fell (D36), and the cell says so instead of a blank.
+    const varianceRows = (inv.variance?.items || []).filter(i => i.flag === 'over' || i.flag === 'under').map(i => ({ Item: i.name, 'Actual Used': round2(i.actualUsed), 'Theoretical Used': round2(i.theoreticalUsed), 'Variance %': i.variancePct == null ? 'no sales' : pct(i.variancePct), 'Value (NPR)': round2(i.value), Flag: i.flag }))
     if (varianceRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(varianceRows), 'Inventory - Variance')
 
     const shrinkageRows = (inv.shrinkageTrend?.items || []).map(i => ({ Item: i.name, Status: i.status, 'Shrink Count': i.shrinkCount, 'Covered Periods': i.coveredPeriods, 'Total Shrink Value (NPR)': round2(i.totalShrinkValue) }))
@@ -167,15 +194,20 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       const label = key === 'vsLastPeriod' ? 'vs Last Period' : 'vs Same Month Last Year'
       if (!t?.available) { trendRows.push({ Comparison: label, Metric: '—', 'This Period': '', Prior: '', Change: t?.reason || 'unavailable' }); return }
       const priorLabel = `${BS_MONTHS[t.period.bs_month - 1]} ${t.period.bs_year}`
-      const row = (metric, cur, prior, delta, isPct) => trendRows.push({
+      // S792 (D30): across the purchases → COGS change of Food Cost % the three ratios that contain
+      // it are two formulas, so they carry no change — and the cell says why rather than going blank.
+      const basisOf = s => (s?.combined?.foodCostBasis === 'cogs' ? 'cogs' : 'purchases')
+      const basisDiffers = basisOf(snapshot) !== basisOf(t.snapshot)
+      const row = (metric, cur, prior, delta, isPct, foodBased = false) => trendRows.push({
         Comparison: label, Metric: metric, 'This Period': isPct ? pct(cur) : round2(cur), Prior: `${priorLabel}: ${isPct ? pct(prior) : round2(prior)}`,
-        Change: delta == null ? '' : isPct ? `${delta.toFixed(1)}pp` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`,
+        Change: foodBased && basisDiffers ? 'not compared: different food-cost basis'
+          : delta == null ? '' : isPct ? `${delta.toFixed(1)}pp` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`,
       })
       row('Revenue (NPR)', snapshot.combined?.revenueTotal, t.snapshot?.combined?.revenueTotal, t.deltas?.revenueTotal, false)
-      if (snapshot.ims) row('Food Cost %', snapshot.combined?.foodCostPct, t.snapshot?.combined?.foodCostPct, t.deltas?.foodCostPct, true)
+      if (snapshot.ims) row('Food Cost %', snapshot.combined?.foodCostPct, t.snapshot?.combined?.foodCostPct, t.deltas?.foodCostPct, true, true)
       if (snapshot.hr) row('Labor Cost %', snapshot.combined?.laborCostPct, t.snapshot?.combined?.laborCostPct, t.deltas?.laborCostPct, true)
-      if (snapshot.ims && snapshot.hr) row('Prime Cost %', snapshot.combined?.primeCostPct, t.snapshot?.combined?.primeCostPct, t.deltas?.primeCostPct, true)
-      if (snapshot.ims && snapshot.hr) row('Net Margin %', snapshot.combined?.netMarginPct, t.snapshot?.combined?.netMarginPct, t.deltas?.netMarginPct, true)
+      if (snapshot.ims && snapshot.hr) row('Prime Cost %', snapshot.combined?.primeCostPct, t.snapshot?.combined?.primeCostPct, t.deltas?.primeCostPct, true, true)
+      if (snapshot.ims && snapshot.hr) row('Net Margin %', snapshot.combined?.netMarginPct, t.snapshot?.combined?.netMarginPct, t.deltas?.netMarginPct, true, true)
       if (snapshot.pos && t.snapshot?.pos) row('POS Net Sales (NPR)', snapshot.pos?.totalNetSales, t.snapshot?.pos?.totalNetSales, t.deltas?.posNetSales, false)
     })
     if (trendRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trendRows), 'Trend')

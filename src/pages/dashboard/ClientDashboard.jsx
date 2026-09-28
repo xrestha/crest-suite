@@ -10,7 +10,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
-  projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue,
+  projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, splitAtToday,
 } from '../../modules/dashboard/dailyForecast'
 import {
   adDateOf, adDateBack, rainPctValue, rainFactorForMonth, rainAhead, measuredRainEffect,
@@ -41,6 +41,8 @@ import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeC
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { valuePeriods } from '../../modules/ims/reports/periodCost'
+import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
@@ -156,7 +158,9 @@ function TrendTooltipContent({ active, payload, label, big }) {
   const shown = payload.filter(en => {
     if (en.value == null) return false
     const actualKey = PROJ_ACTUAL_KEY[en.dataKey]
-    if (actualKey && row[actualKey] != null) return false
+    // Today (S792 PLANNING-2) keeps both rows: what it has sold so far, and what the whole day is
+    // forecast to reach. There the projection is not an anchor restating the actual.
+    if (actualKey && row[actualKey] != null && !row.inProgress) return false
     return true
   }).sort((a, b) => Number(b.value) - Number(a.value))
   if (!shown.length) return null
@@ -176,7 +180,10 @@ function TrendTooltipContent({ active, payload, label, big }) {
         // target reads as a problem when it is the opposite — the one row on the chart where
         // under-running the pace is exactly what you wanted.
         const targetKey = TARGET_KEY[en.dataKey]
-        const target = targetKey ? row[targetKey] : null
+        // Today's actual is a part-day: labelled "so far" and given no verdict, because a
+        // morning's takings under a whole day's Target is not a day that ran below it.
+        const soFar = !!(targetKey && row.inProgress)
+        const target = targetKey && !soFar ? row[targetKey] : null
         const value = Number(en.value)
         const gap = target == null ? null : value - target
         // Percent of target, not rupees: the row already prints one NPR figure and the Target row
@@ -195,7 +202,7 @@ function TrendTooltipContent({ active, payload, label, big }) {
           : { glyph: gap > 0 ? '▲' : '▼', color: good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }
         return (
           <p key={en.dataKey} style={{ margin: '4px 0 0' }}>
-            <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(value).toLocaleString('en-IN')}
+            <span style={{ color: en.color }}>●</span> {en.name}{soFar && ' so far'} : NPR {Math.round(value).toLocaleString('en-IN')}
             {mark && (
               <span style={{ color: mark.color }}>
                 {' '}{mark.glyph}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
@@ -290,7 +297,9 @@ export default function ClientDashboard() {
   const [salesDayLog, setSalesDayLog] = useState(() => readDashboardCache('salesDayLog', effectiveClientId) ?? [])
   const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
   const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
-  const [fcTrend, setFcTrend]             = useState(() => readDashboardCache('fcTrend', effectiveClientId) ?? [])
+  // A closed month cached before S792 carries a purchases ÷ sales figure; it is dropped rather than
+  // drawn as a Food Cost % (D30) until the reload underneath repaints it on the used basis.
+  const [fcTrend, setFcTrend]             = useState(() => (readDashboardCache('fcTrend', effectiveClientId) ?? []).filter(p => p.open || p.basis === 'cogs'))
   const [hrStats, setHrStats]             = useState(() => readDashboardCache('hrStats', effectiveClientId) ?? null)
   const [posStats, setPosStats]           = useState(() => readDashboardCache('posStats', effectiveClientId) ?? null)
   // Which visual the merged Spend by Category / Top Items card is showing — plain UI state, not
@@ -717,6 +726,14 @@ export default function ClientDashboard() {
     // Days elapsed = the latest day holding either kind of entry. Purchases are judged over every
     // one of them, a day with no bill counting as zero; sales over the days with an entry.
     const elapsedDay = Math.max(lastActualSalesDay || 0, lastActualPurchDay || 0)
+    // S792 PLANNING-2/3: today is still trading, so it is never a sample — not in the pace, not in
+    // a Target built from this month, not in the rain log — and the forecast starts at today, drawn
+    // beside what today has sold so far (splitAtToday, dailyForecast.js).
+    const todayDay = isCurrentMonth ? bsToday.day : null
+    const { salesDone, purchElapsed, salesFrom, purchFrom } = splitAtToday({ salesDayNums, elapsedDay, today: todayDay })
+    // The dashed line joins the actual line at the last finished day with an entry.
+    const salesAnchorDay = salesDone.length ? salesDone[salesDone.length - 1] : null
+    const purchAnchorDay = purchDayNums.filter(d => d < purchFrom).pop() ?? null
 
     // The 28 days before this month began. A FAILED history read is not an empty history: taking
     // it as one would lock a new-client Target from one week of this month when four weeks were
@@ -753,15 +770,17 @@ export default function ClientDashboard() {
           .then(({ error }) => { if (error) console.error(`Failed to save ${column}`, error) })
         return snap
       }
+      // Finished days only (PLANNING-3): the Target is frozen for the month, so a morning's partial
+      // takings captured here would stand as that weekday's usual until the month ends.
       if (!nextSalesTargetSnap) {
-        const base = historyBase.sales || baseFromMonth({ kind: 'sales', valueMap: daySalesMap, dayNums: salesDayNums, weekdayOf })
+        const base = historyBase.sales || baseFromMonth({ kind: 'sales', valueMap: daySalesMap, dayNums: salesDone, weekdayOf })
         if (base) nextSalesTargetSnap = capture('sales', 'sales_projection_snapshot', base)
       }
       if (!nextPurchTargetSnap) {
-        // No bill at all this month means a client not recording purchases here, not a month of
-        // zero spend, so it gets no purchase target from its own days.
+        // No bill at all on a finished day means a client not recording purchases here, not a
+        // month of zero spend, so it gets no purchase target from its own days.
         const base = historyBase.purch
-          || (purchDayNums.length ? baseFromMonth({ kind: 'purch', valueMap: dayPurchMap, elapsed: elapsedDay, weekdayOf }) : null)
+          || (purchDayNums.some(d => d <= purchElapsed) ? baseFromMonth({ kind: 'purch', valueMap: dayPurchMap, elapsed: purchElapsed, weekdayOf }) : null)
         if (base) nextPurchTargetSnap = capture('purch', 'purch_projection_snapshot', base)
       }
     }
@@ -772,22 +791,23 @@ export default function ClientDashboard() {
     // The live forecast leans on the Target's weekday pattern (or, before one exists, the history
     // base), scaled to how this month is running against it.
     const salesTrend = (dailySalesOn && isCurrentMonth)
-      ? projectMonth({ base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDayNums, fromDay: lastActualSalesDay + 1, monthEndDay, weekdayOf })
+      ? projectMonth({ base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom, monthEndDay, weekdayOf })
       : null
     // The same call's inputs, kept for the rain adjustment to re-run at render (S784). Sales only:
     // purchases follow restock days, whatever the weather.
     const salesBase = nextSalesTargetSnap || historyBase.sales
     setAndCache(setSalesForecastInputs, 'salesForecastInputs', salesTrend ? {
       base: salesBase ? { byWeekday: salesBase.byWeekday } : null,
-      valueMap: daySalesMap, expectDays: salesDayNums, fromDay: lastActualSalesDay + 1,
+      valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom,
       monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay,
     } : null)
+    // The measured rain effect's samples: finished days only, like the pace.
     setAndCache(setSalesDayLog, 'salesDayLog', isCurrentMonth ? [
       ...historyDays.filter(x => x.sales != null).map(x => ({ ad: adDateBack(period.bs_year, period.bs_month, x.back), dow: x.dow, sales: x.sales })),
-      ...salesDayNums.map(d => ({ ad: adDateOf(period.bs_year, period.bs_month, d), dow: weekdayOf(d), sales: daySalesMap[d] })),
+      ...salesDone.map(d => ({ ad: adDateOf(period.bs_year, period.bs_month, d), dow: weekdayOf(d), sales: daySalesMap[d] })),
     ] : [])
     const purchTrend = (isCurrentMonth && elapsedDay > 0)
-      ? projectMonth({ base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: elapsedDay }, (_, i) => i + 1), fromDay: elapsedDay + 1, monthEndDay, weekdayOf })
+      ? projectMonth({ base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: purchElapsed }, (_, i) => i + 1), fromDay: purchFrom, monthEndDay, weekdayOf })
       : null
     const projDays = salesTrend?.projDays || {}
     const purchProjDays = purchTrend?.projDays || {}
@@ -811,11 +831,15 @@ export default function ClientDashboard() {
         day: `Day ${d}`,
         purchases: dayPurchMap[d] != null ? dayPurchMap[d] : null,
         sales: dailySalesOn && daySalesMap[d] != null ? daySalesMap[d] : null,
-        // dashed line: anchor at the last actual sales day so it connects, then projected days
+        // Today, still trading (S792 PLANNING-2): its actual is sold-so-far, drawn beside its
+        // forecast rather than replacing it. The tooltip and the projection's dot key off this.
+        inProgress: d === todayDay,
+        // dashed line: anchor at the last finished day with an entry so it connects, then the
+        // forecast days (today's included)
         salesProj: isProj ? projDays[d]
-          : (d === lastActualSalesDay && hasProj ? daySalesMap[d] : null),
+          : (d === salesAnchorDay && hasProj ? daySalesMap[d] : null),
         purchProj: isPurchProj ? purchProjDays[d]
-          : (d === lastActualPurchDay && hasPurchProj ? dayPurchMap[d] : null),
+          : (d === purchAnchorDay && hasPurchProj ? dayPurchMap[d] : null),
         // Frozen full-month line, unlike salesProj/purchProj above — non-null for every day in
         // range (not just from the last actual onward) so it's a static reference the actual line
         // can be compared against retroactively, not just a forward-looking tail.
@@ -1089,13 +1113,15 @@ export default function ClientDashboard() {
     // purchase/sales rows (loadStats' own Promise.all fetches the open period too); worth it to
     // decouple the two pipelines.
     const periodIds = [...closed.map(p => p.id), ...(currentPeriod ? [currentPeriod.id] : [])]
+    const closedIds = closed.map(p => p.id)
 
     const trendResults = await Promise.all([
       // Bill-key columns + `discount_amount` for allocateBillDiscounts(), as in loadStats — this
-      // chart's open-period point must equal the Food Cost % tile, and every closed month must
-      // equal what Consolidated P&L / Monthly Summary charge for it.
-      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').in('period_id', periodIds).order('id')) : { data: [] },
-      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
+      // chart's open-period point must equal the Spend % so far tile, and every closed month must
+      // equal the Food Cost % Consolidated P&L / Monthly Summary charge for it. `item_id` because
+      // a closed month is valued per item (below), over Monthly Summary's item set.
+      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
@@ -1113,12 +1139,31 @@ export default function ClientDashboard() {
       // RATIO, so a short denominator makes every month's Food Cost % fail HIGH. Exactly the
       // failure the comment two entries above describes for the `.neq` that used to sit there.
       fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+      // A CLOSED month plots Food Cost % = what was USED ÷ sales (S792, owner decision D30), the
+      // figure Monthly Summary and the P&L give the same month; it used to plot purchases ÷ sales
+      // under the same title, so the two charts named "Food Cost % … Trend" disagreed about every
+      // closed month. That needs the stock side for the closed months only — the open month has no
+      // count and plots Spend % so far. One row per item per period (per item per DAY for wastage
+      // and staff meals) across up to eleven months, so every read is paged (S720's multiplier).
+      // Items: every non-sub-recipe item, hidden ones included (D29), Monthly Summary's set.
+      closedIds.length ? fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
     ])
-    const [{ data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData }] = trendResults
+    const [
+      { data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData },
+      { data: trendItems }, { data: allOpening }, { data: allClosing }, { data: allWaste }, { data: allStaff },
+    ] = trendResults
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
     const hadRealError = closedErr || trendResults.some(r => r.error)
     setLoadErrors(prev => ({ ...prev, fcTrend: hadRealError ? 'Food Cost % trend failed to load.' : '' }))
+    // A failed read draws nothing (S792). With the stock side in the arithmetic, a closed month
+    // whose closing read failed would plot every shelf as used — a believable, alarming Food Cost %
+    // — and the banner above cannot say which point is wrong. Not cached, so a reload retries.
+    if (hadRealError) { setFcTrend([]); return }
 
     const priceMap = {}
     ;(recipeData || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price || 0) })
@@ -1146,11 +1191,26 @@ export default function ClientDashboard() {
       revMap[e.period_id] = (revMap[e.period_id] || 0) + parseFloat(e.qty_sold) * price - (parseFloat(e.discount) || 0)
     })
 
+    // Closed months: Food Cost % = COGS ÷ revenue, through periodCost.js's valuePeriods() — the same
+    // valuePeriodItems() Monthly Summary and the P&L call, over the same items, each month's bill
+    // discounts allocated on their own. `unjudged` is S756's D6 rule: a month closed with a material
+    // share of its stock uncounted plots its figure without a verdict colour, and takes no part in
+    // Best / Highest month, as on Monthly Summary, Annual Summary and Period Comparison.
+    // (The purchase and return rows include the open month's too; valuePeriods reads only the ids
+    // it is given.)
+    const valued = valuePeriods({
+      periodIds: closedIds, items: trendItems, opening: allOpening, closing: allClosing,
+      purchases: allPurch, returns: allRet, wastages: allWaste, staffMeals: allStaff,
+    })
     const points = closed.map(p => {
-      const net = (grossMap[p.id] || 0) - (retMap[p.id] || 0)
+      const v = valued[p.id]
       const rev = revMap[p.id] || 0
-      const fc  = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
-      return { label: `${BS_MONTHS_SHORT[p.bs_month - 1]} ${p.bs_year}`, fc, purchases: Math.round(net), revenue: Math.round(rev), open: false }
+      const fc  = rev > 0 && v ? parseFloat(((v.cogsVal / rev) * 100).toFixed(1)) : null
+      return {
+        label: `${BS_MONTHS_SHORT[p.bs_month - 1]} ${p.bs_year}`, fc, basis: 'cogs',
+        cogs: v ? Math.round(v.cogsVal) : null, revenue: Math.round(rev), open: false,
+        unjudged: !!v?.gap?.material,
+      }
     }).reverse()
 
     if (currentPeriod) {
@@ -1161,9 +1221,11 @@ export default function ClientDashboard() {
         // Purchases/revenue were withheld here (null) so the tooltip would omit them, which left
         // the one point most likely to look alarming as the only one you could not interrogate.
         // They are carried now; `open` is what the tooltip and the dot key off to say "so far".
+        // `basis: 'spend'` (D30): this point is Spend % so far — the tile's figure — not a Food
+        // Cost %, and the tooltip names it so.
         points.push({
           label: `${BS_MONTHS_SHORT[currentPeriod.bs_month - 1]} ${currentPeriod.bs_year}`,
-          fc, purchases: Math.round(net), revenue: Math.round(rev), open: true
+          fc, basis: 'spend', purchases: Math.round(net), revenue: Math.round(rev), open: true
         })
       }
     }
@@ -1253,6 +1315,10 @@ export default function ClientDashboard() {
     ? (ohBuckets.overhead || 0) + labour.amount + (ohBuckets.tax_fees || 0)
     : (stats?.overheadTotal || 0)
 
+  // Spend % so far, NOT Food Cost % (S792, D30). This page only ever shows the OPEN month, which has
+  // no closing count, so what it can divide by sales is what was BOUGHT. It was labelled Food Cost %
+  // under a tip saying it "settles once you finish the month-end stock count" — the formula never
+  // reads the count. The name `fcPct` is kept: it still bands on the food-cost thresholds.
   const fcPct = stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null
   const ohPct = stats?.revenueTotal > 0 && fixedCostTotal > 0 ? (fixedCostTotal / stats.revenueTotal) * 100 : null
   const netMarginPct = stats?.revenueTotal > 0
@@ -1375,13 +1441,17 @@ export default function ClientDashboard() {
   const fcOpenTooEarly = !!fcOpenPoint && periodTooEarly
   const fcChartData    = fcOpenTooEarly ? fcTrend.filter(p => !p.open) : fcTrend
   const fcSettled      = fcTrend.filter(p => !p.open)
-  // Blended (total purchases ÷ total revenue), not the mean of the monthly ratios: a mean weights a
-  // quiet month equally with a busy one and is not a food cost % of anything.
+  // Blended (total COGS ÷ total revenue), not the mean of the monthly ratios: a mean weights a
+  // quiet month equally with a busy one and is not a food cost % of anything. COGS since S792 (D30)
+  // — the settled months are Food Cost %, the used basis; the open Spend % point is never in it.
   const fcSettledRev   = fcSettled.reduce((sum, p) => sum + (p.revenue || 0), 0)
-  const fcSettledPurch = fcSettled.reduce((sum, p) => sum + (p.purchases || 0), 0)
-  const fcTrendAvg     = fcSettledRev > 0 ? (fcSettledPurch / fcSettledRev) * 100 : null
-  const fcTrendBest    = fcSettled.length > 0 ? fcSettled.reduce((best, p) => p.fc < best.fc ? p : best) : null
-  const fcTrendWorst   = fcSettled.length > 0 ? fcSettled.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
+  const fcSettledCogs  = fcSettled.reduce((sum, p) => sum + (p.cogs || 0), 0)
+  const fcTrendAvg     = fcSettledRev > 0 ? (fcSettledCogs / fcSettledRev) * 100 : null
+  // A month closed with a material share of its stock uncounted (D6) cannot be the best or the
+  // worst month: its figure is an artefact of the missing count, as on Period Comparison.
+  const fcJudged       = fcSettled.filter(p => !p.unjudged)
+  const fcTrendBest    = fcJudged.length > 0 ? fcJudged.reduce((best, p) => p.fc < best.fc ? p : best) : null
+  const fcTrendWorst   = fcJudged.length > 0 ? fcJudged.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
   const fcBands        = fcThresholds(settings)
   // The three KPI ratios' banders, resolved once. Food cost reads the client's own Settings
   // thresholds; net margin is `nmBand`'s published ≥20 / ≥10 rather than a second copy of the
@@ -1402,7 +1472,7 @@ export default function ClientDashboard() {
     : colors.redText
   const fcTrendSummary = fcChartData.length === 0
     ? 'No food cost history yet.'
-    : `Food cost percentage over the last ${fcChartData.length} month${fcChartData.length === 1 ? '' : 's'}: ${fcChartData.map(p => `${p.label} ${p.fc}%${p.open ? ' so far, month still open' : ''}`).join(', ')}.${fcTrendAvg != null ? ` Average across completed months: ${fcTrendAvg.toFixed(1)}%.` : ''}${fcOpenTooEarly ? ` ${fcOpenPoint.label} is only ${dayOfPeriod} days in and is not shown yet.` : ''}`
+    : `Food cost percentage over the last ${fcChartData.length} month${fcChartData.length === 1 ? '' : 's'}: ${fcChartData.map(p => `${p.label} ${p.fc}%${p.open ? ' spent so far (spend ÷ sales, month still open)' : p.unjudged ? ' (not judged: stock count incomplete)' : ''}`).join(', ')}.${fcTrendAvg != null ? ` Average across completed months: ${fcTrendAvg.toFixed(1)}%.` : ''}${fcOpenTooEarly ? ` ${fcOpenPoint.label} is only ${dayOfPeriod} days in and is not shown yet.` : ''}`
 
   // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of exactly the figures behind
   // the Est. Net Margin % card (revenue minus food cost and overheads), in the standard restaurant
@@ -1690,14 +1760,11 @@ export default function ClientDashboard() {
   const foodCostCard = canSales ? (
     <div {...kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))}>
       <div style={kpiLabelStyle}>
-        {/* Keeps the industry label — Owner Dashboard, the Group Console, the Monthly Owner Report,
-            Period Comparison and Help's glossary all call this Food Cost %, and renaming it on one
-            page out of six would trade a small precision gain for a real consistency loss. What is
-            fixed is the DESCRIPTION: this figure divides purchases by sales and ignores opening and
-            closing stock entirely (the deliberate periodic model), so "what portion of sales goes to
-            ingredient cost" was telling a non-accountant owner something the number does not say.
-            Whether the whole product should adopt a more literal name is a product-wide call. */}
-        <Tip text="What you spent on stock this period, against what you sold. Buy a month of rice in one go and this spikes — it settles once you finish the month-end stock count. Healthy range once settled: 28–35% for Nepal F&B." width={260}>Food Cost %</Tip>
+        {/* "Spend % so far", not "Food Cost %" (S792, owner decision D30). This tile divides what
+            was BOUGHT by sales and never reads a count; Monthly Summary, the P&L and every closed
+            month now call only what was USED Food Cost %, so one name carries one formula. The
+            product-wide call this comment used to defer was made: the literal name won. */}
+        <Tip text={SPEND_SO_FAR_TIP} width={280}>{SPEND_SO_FAR_LABEL}</Tip>
       </div>
       {/* Client-configured thresholds, not a fourth hardcoded copy of 35/45 — Settings offers
           fc_warning_pct/fc_critical_pct and this card is the headline they were added for. */}
@@ -1707,7 +1774,7 @@ export default function ClientDashboard() {
       <div style={kpiSubtextStyle}>
         {partialNote
           ? partialNote
-          : <><Tip text="Industry benchmark for Nepal cafes & restaurants. Green = healthy, yellow = watch, red = investigate immediately." width={240}>Target 28–35%</Tip> →</>}
+          : <><Tip text={`Coloured against your food cost target from Settings → Thresholds (watch above ${fcBands.warn}%, too high above ${fcBands.critical}%) as a guide: over a whole month what you buy is close to what you use, unless stock is building up or running down.`} width={260}>Food cost target ≤{fcBands.warn}%</Tip> →</>}
       </div>
     </div>
   ) : null
@@ -1748,13 +1815,13 @@ export default function ClientDashboard() {
   const netMarginCard = canOverheads ? (
     <div {...kpiCard(null)}>
       <div style={kpiLabelStyle}>
-        <Tip text="Revenue minus food cost, labor, overheads and tax & fees, as a % of revenue — what the business keeps after ingredient and fixed costs. Labor is your finalized HR payroll run for the month when one exists (gross pay + overtime + employer SSF); otherwise it is what is typed on the Overheads Labor tab. The two are never added together, so this matches the Overheads page for the same month. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%." width={280}>Est. Net Margin %</Tip>
+        <Tip text="Revenue minus what you have SPENT on stock so far this month (net purchases — not food cost, which needs the month-end stock count to know what was used), labor, overheads and tax & fees, as a % of revenue — what the business keeps after stock purchases and fixed costs. Buying a month of stock in one go lowers it; cooking from last month's stock raises it. Labor is your finalized HR payroll run for the month when one exists (gross pay + overtime + employer SSF); otherwise it is what is typed on the Overheads Labor tab. The two are never added together, so this matches the Overheads page for the same month. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%." width={280}>Est. Net Margin %</Tip>
       </div>
       <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).color }} title={verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).title}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).text}
       </div>
       {/* Inherits Food Cost's lumpiness through purchaseTotal, so it carries the same caveat. */}
-      <div style={kpiSubtextStyle}>{partialNote || (labour.verdictWithheld ? 'Not judged on this login · target ≥20%' : 'After food & overheads · target ≥20%')}</div>
+      <div style={kpiSubtextStyle}>{partialNote || (labour.verdictWithheld ? 'Not judged on this login · target ≥20%' : 'After stock bought & overheads · target ≥20%')}</div>
       {/* The labour source is named ON the tile, not only in a hover (S756, D22) — a screenshot of
           this card loses the Tip, and which wage figure a margin contains is what makes it true. */}
       {!loading && stats && labourLabel && (
@@ -2233,6 +2300,9 @@ export default function ClientDashboard() {
                 ) : (salesProjection || purchProjection) && (
                   <span style={{ color: 'var(--theme-text3)' }}>
                     · {salesTarget || purchTarget ? "forecast = your usual weekday pattern, adjusted to this month's pace" : "forecast = this month's daily average"}
+                    {/* S792 PLANNING-2: said in the footer, not only the tooltip, so a screenshot
+                        keeps why today's point sits below its dashed line. */}
+                    {' '}(today counts once the day is over)
                   </span>
                 )}
               </div>
@@ -2333,9 +2403,11 @@ export default function ClientDashboard() {
             // any day its actual is present; elsewhere reproduce the old config on Recharts' Dot.
             // Takes the projection's own dataKey and resolves the actual via PROJ_ACTUAL_KEY, the
             // same map the tooltip's suppression reads.
+            // Today is the exception (S792): its actual is a part-day and its forecast a whole one,
+            // two different points, so both dots show.
             const projActiveDot = projKey => props => {
               const actualKey = PROJ_ACTUAL_KEY[projKey]
-              return props.payload?.[actualKey] != null
+              return props.payload?.[actualKey] != null && !props.payload?.inProgress
                 ? null
                 : <Dot {...props} r={big ? 4 : 3} fill={DAILY_TREND_COLORS[actualKey]} />
             }
@@ -2423,7 +2495,14 @@ export default function ClientDashboard() {
                   <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcBands.warn}% Good</span>
                   <span style={{ color: 'var(--theme-amber-text)' }}>● {fcBands.warn}–{fcBands.critical}% Watch</span>
                   <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcBands.critical}% High</span>
-                  {!fcOpenTooEarly && <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period, part-month</span>}
+                  {!fcOpenTooEarly && fcOpenPoint && <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = this month so far: {SPEND_SO_FAR_LABEL}</span>}
+                </div>
+                {/* Two bases on one line, said out loud (S792, D30): closed months are what was
+                    USED ÷ sales, the running month what was SPENT, because it has no count yet. */}
+                <div style={{ fontSize: 11, marginTop: 6, color: 'var(--theme-text2)' }}>
+                  Closed months: {FOOD_COST_LABEL} — stock used ÷ sales, the figure Monthly Summary shows.
+                  {fcOpenPoint ? ' This month: spend ÷ sales until its stock count closes it.' : ''}
+                  {fcSettled.some(p => p.unjudged) ? ' A grey dot is a closed month whose stock count was incomplete — not judged.' : ''}
                 </div>
                 {/* A withheld month is stated, not silently dropped — otherwise the chart quietly
                     claims the current month has no figure at all. */}
@@ -2443,8 +2522,9 @@ export default function ClientDashboard() {
                   {big && fcTrendAvg != null && (
                     <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label={`Average · ${fcSettled.length} completed month${fcSettled.length === 1 ? '' : 's'}`} value={`${fcTrendAvg.toFixed(1)}%`} color={colors.text2} />
-                      <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} textColor={colors.greenText} />
-                      <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} textColor={colors.redText} />
+                      {/* Null when every closed month is unjudged (D6) — nothing may win or lose. */}
+                      {fcTrendBest && <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} textColor={colors.greenText} />}
+                      {fcTrendWorst && <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} textColor={colors.redText} />}
                     </div>
                   )}
                   <div style={{ minWidth: Math.max(0, fcChartData.length * 64), height: big ? h - 60 : h }}>
@@ -2462,11 +2542,18 @@ export default function ClientDashboard() {
                           itemStyle={{ color: 'var(--theme-text1)' }}
                           formatter={(v, _n, props) => {
                             const p = props.payload
-                            const so = p.open ? ' so far' : ''
-                            const lines = [`${v}%${p.open ? ' · part-month' : ''}`]
-                            if (p.purchases != null) lines.push(`Purchases${so}: NPR ${p.purchases.toLocaleString('en-IN')}`)
-                            if (p.revenue != null)   lines.push(`Revenue${so}: NPR ${p.revenue.toLocaleString('en-IN')}`)
-                            return [lines.join(' · '), 'Food Cost %']
+                            // The open month is Spend % so far and says so; a closed month is Food
+                            // Cost % and shows what it was built from — stock USED, not bought (D30).
+                            if (p.open) {
+                              const lines = [`${v}% · part-month`]
+                              if (p.purchases != null) lines.push(`Spent so far: NPR ${p.purchases.toLocaleString('en-IN')}`)
+                              if (p.revenue != null)   lines.push(`Revenue so far: NPR ${p.revenue.toLocaleString('en-IN')}`)
+                              return [lines.join(' · '), SPEND_SO_FAR_LABEL]
+                            }
+                            const lines = [`${v}%${p.unjudged ? ' · not judged: stock count incomplete' : ''}`]
+                            if (p.cogs != null)    lines.push(`Stock used: NPR ${p.cogs.toLocaleString('en-IN')}`)
+                            if (p.revenue != null) lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-IN')}`)
+                            return [lines.join(' · '), FOOD_COST_LABEL]
                           }}
                         />
                         <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accentInk} connectNulls={false} {...chartMotion()}
@@ -2474,7 +2561,8 @@ export default function ClientDashboard() {
                             const { cx, cy, payload } = props
                             // An unfinished month wears no verdict colour — same rule as the KPI
                             // card above, which greys out rather than painting a part-month red.
-                            const col = payload.open ? colors.text2 : fcDotColor(payload.fc)
+                            // Neither does a closed month whose count was incomplete (D6, S792).
+                            const col = payload.open || payload.unjudged ? colors.text2 : fcDotColor(payload.fc)
                             return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                           }}
                           activeDot={{ r: 5, fill: colors.accentInk }}
@@ -2559,7 +2647,8 @@ export default function ClientDashboard() {
                           <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
                           {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
                               isn't gold the pill would otherwise disagree with the slice it summarizes. */}
-                          {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
+                          {/* The tile's figure, so the tile's name (S792, D30): purchases ÷ sales. */}
+                          {fcPct != null && <StatPill label={SPEND_SO_FAR_LABEL} value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
                           <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
                         </div>
                       )}

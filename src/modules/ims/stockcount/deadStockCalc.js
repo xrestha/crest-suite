@@ -16,11 +16,21 @@
 //   not counted, inconsistent). It breaks the streak rather than counting as a still month — "we
 //   did not look" is not evidence that nothing moved. So is a month in which the item had no stock
 //   at all, and so is a gap in the period list: a streak is consecutive calendar months or nothing.
+//
+// S792 (PLANNING-4, settled by precedent): STAFF MEALS ARE MOVEMENT, WASTAGE IS NOT. "Still" and
+//   "slow" used to be judged on `used` — the COGS residual AFTER staff meals and wastage — so rice
+//   and dal eaten only by staff (opening 20 kg, bought 30, staff meals 30, counted 20) measured
+//   used 0, read still for three months, went Dead, and after a fourth read "Write it off as
+//   wastage — nothing has been used for 4 months" while the staff ate 30 kg a month. Staff meals
+//   are consumption (S551); D20 says Dead is "no movement". So a month's MOVEMENT is `used` plus
+//   staff meals, and that is what still/slow read. Wastage stays out on purpose: an item that is
+//   only ever thrown away is still flagged, because "buy less" is the right advice for it. `used`
+//   itself is unchanged — it is still the COGS figure the page prints in its Used column.
 
 import { computeUsed } from '../../../shared/imsFormulas'
 import { daysUntilExpiry, ageInDays } from '../reports/stockAgeingCalc'
 
-// Item is "Slow" if used < 20% of net available
+// Item is "Slow" if what moved (used + staff meals, S792) is < 20% of net available
 export const SLOW_THRESHOLD = 0.2
 // Consecutive still months before an item is called Dead.
 export const DEAD_AFTER_MONTHS = 3
@@ -37,7 +47,9 @@ export const QTY_EPS = 1e-6
  * One item in one month: `absent` (no stock and no count — nothing to judge), `uncounted` (had
  * stock, no closing count — consumption is unknowable), `inconsistent` (counted higher than was
  * available — a missing bill, and "never used" would be the wrong thing to say), or `judged` with
- * the measured `used`. Presence of the count is `hasCount`; a count of 0 is a count (S695).
+ * the measured `used` (the COGS residual, after staff meals and wastage) and `moved` (`used` plus
+ * staff meals — what still/slow are judged on, S792). Presence of the count is `hasCount`; a count
+ * of 0 is a count (S695).
  */
 export function judgeItemPeriod({ opening = 0, purchased = 0, returned = 0, wasted = 0, staffUsed = 0, hasCount = false, closing = 0 }) {
   const available = opening + purchased - returned
@@ -49,13 +61,20 @@ export function judgeItemPeriod({ opening = 0, purchased = 0, returned = 0, wast
   if (rawUsed < -QTY_EPS) return { state: 'inconsistent', available }
   // Inside the tolerance a residue either side of zero IS zero — so a row prints 0, not −0.0.
   const used = Math.abs(rawUsed) <= QTY_EPS ? 0 : rawUsed
-  return { state: 'judged', available, used, closing }
+  const rawMoved = used + staffUsed
+  const moved = Math.abs(rawMoved) <= QTY_EPS ? 0 : rawMoved
+  return { state: 'judged', available, used, moved, closing }
 }
 
+// What still/slow read (S792). `moved` is absent on a judgement built by hand before it existed,
+// so it falls back to `used` — the old meaning, and the same number when no staff meal was logged.
+const movedOf = j => (j.moved ?? j.used)
+
 /**
- * How many consecutive months, newest first, the item sat still: judged, used nothing, and each
- * month the calendar month before the one after it. `history` is `[{ monthIndex, judgement }]`
- * newest first. Anything else — uncounted, inconsistent, absent, a gap — ends the streak.
+ * How many consecutive months, newest first, the item sat still: judged, nothing moved (staff
+ * meals count as movement, wastage does not), and each month the calendar month before the one
+ * after it. `history` is `[{ monthIndex, judgement }]` newest first. Anything else — uncounted,
+ * inconsistent, absent, a gap — ends the streak.
  */
 export function stillStreak(history) {
   let n = 0
@@ -63,7 +82,7 @@ export function stillStreak(history) {
     const h = history[i]
     if (i > 0 && history[i - 1].monthIndex - h.monthIndex !== 1) break
     const j = h.judgement
-    if (!j || j.state !== 'judged' || j.used !== 0) break
+    if (!j || j.state !== 'judged' || movedOf(j) !== 0) break
     n += 1
   }
   return n
@@ -84,7 +103,7 @@ export function classifyItem(history) {
   const atLeast = stillMonths > 0 && stillMonths === history.length
   if (stillMonths >= DEAD_AFTER_MONTHS) return { status: 'Dead', stillMonths, atLeast }
   if (stillMonths >= 1) return { status: 'Slow', stillMonths, atLeast }
-  if (latest.available > 0 && latest.used / latest.available < SLOW_THRESHOLD) return { status: 'Slow', stillMonths: 0, atLeast: false }
+  if (latest.available > 0 && movedOf(latest) / latest.available < SLOW_THRESHOLD) return { status: 'Slow', stillMonths: 0, atLeast: false }
   return { status: null, stillMonths: 0, atLeast: false }
 }
 

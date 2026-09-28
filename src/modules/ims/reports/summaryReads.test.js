@@ -36,6 +36,10 @@ const FILES = [
 //    each page, which is why paging and the selected columns are still checked per page.
 const SHARED_COST = new Set(['MonthlySummary.js', 'ConsolidatedPnl.jsx'])
 const PERIOD_COST = path.join(__dirname, 'periodCost.js')
+// Budget vs Actual delegates its purchase arithmetic to budgetActuals.js (S792, FIGURES-9), which is
+// tested against Monthly Summary's own figures in budgetActuals.test.js; its READS stay here.
+const BUDGET_ACTUALS = path.join(__dirname, 'budgetActuals.js')
+const DELEGATES = { 'BudgetVsActual.js': /budgetActuals\(/ }
 
 // One row per item per period (staff_meals is per item per DAY), so every one of them scales with
 // the window these pages read. `items` is in the list because it is the read that yields the ids
@@ -97,7 +101,7 @@ describe.each(FILES)('%s nets the bill-level discount out of purchases', (name, 
   const shared = SHARED_COST.has(name)
 
   it('routes purchases through allocateBillDiscounts', () => {
-    expect(flat).toMatch(shared ? /periodStockMaps\(/ : /allocateBillDiscounts\(/)
+    expect(flat).toMatch(shared ? /periodStockMaps\(/ : DELEGATES[name] || /allocateBillDiscounts\(/)
   })
 
   it('selects the columns allocateBillDiscounts needs', () => {
@@ -116,7 +120,41 @@ describe.each(FILES)('%s nets the bill-level discount out of purchases', (name, 
     // The shape this replaces: summing the purchase row's own qty × rate ignores the bill's
     // discount entirely. Only allocateBillDiscounts' two derived values may feed a purchase
     // figure on these pages.
-    expect(flat).toMatch(shared ? /valuePeriodItems\(/ : /line(Gross|Net)/)
+    expect(flat).toMatch(shared ? /valuePeriodItems\(/ : DELEGATES[name] || /line(Gross|Net)/)
+  })
+})
+
+// 5. HIDING NEVER CHANGES HISTORY (S792, FIGURES-1 / owner decision D29). Every one of these pages
+//    read `items` with `.eq('is_active', true)` and valued purchases and returns only for the ids in
+//    that list, so hiding an item — Item Master's own advice on a unit change — took its purchases
+//    out of every past month's Net Purchases, COGS and FC%, closed months included, while the frozen
+//    Owner Report kept them. The item read that produces the valued ids must not filter on
+//    `is_active`; it must still drop sub-recipe mirrors (prep is counted at the raw-item level).
+//    Silent by construction: nothing errors, a past month just reads lower than it did.
+describe.each(FILES)('%s values hidden items in past months', (name, file) => {
+  const flat = flatten(file)
+  const itemReads = readSites(flat, 'items').map(at => flat.slice(at, at + 200))
+
+  it('reads items at least once', () => {
+    expect(itemReads.length).toBeGreaterThan(0)
+  })
+
+  it('filters no item read on is_active, and keeps every one on is_sub_recipe = false', () => {
+    for (const read of itemReads) {
+      // The chain runs to its `.order('id')`; the 200-character window can reach the next read.
+      const chain = read.slice(0, read.indexOf(".order('id'"))
+      expect(`${name}: ${chain}`).not.toMatch(/\.eq\(\s*'is_active'/)
+      expect(`${name}: ${chain}`).toMatch(/\.eq\(\s*'is_sub_recipe',\s*false\s*\)/)
+    }
+  })
+})
+
+describe('budgetActuals.js holds the arithmetic Budget vs Actual delegates to', () => {
+  const flat = flatten(BUDGET_ACTUALS)
+
+  it('nets bill discounts through allocateBillDiscounts, from lineNet', () => {
+    expect(flat).toMatch(/allocateBillDiscounts\(/)
+    expect(flat).toMatch(/lineNet/)
   })
 })
 

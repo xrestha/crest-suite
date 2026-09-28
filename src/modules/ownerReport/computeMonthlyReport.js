@@ -13,6 +13,8 @@ import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipe
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../ims/reports/supplierAttribution'
+import { periodRevenue, periodStockMaps, valuePeriodItems } from '../ims/reports/periodCost'
+import { findUncountedItems, UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
@@ -21,13 +23,15 @@ import { computeInventoryDepthSection } from './computeInventoryDepthSection'
 
 // ── Net purchases (pure) ─────────────────────────────────────────────────────
 // Purchases NET of bill discounts, less returns — the definition Consolidated P&L and Monthly
-// Summary use (S601/S720), so the frozen report's Purchases, Food Cost %, Prime Cost %, True Net
-// Margin % and Inventory Turnover agree with those pages for the same month. `discount_amount` is
-// a BILL-level figure repeated on every line; allocateBillDiscounts() dedupes it per bill and
-// spreads it across that bill's lines, so the rows passed in must carry `discount_amount`,
-// `purchase_group_id` and the `vendor_id`/`invoice_ref`/`bs_day` fallback key. Returns are taken at
-// list value, exactly as on those two pages. The Cash/Credit split is built off the same line
-// values so the two halves still add up to the total (every return comes off Cash, as before).
+// Summary use (S601/S720), so the frozen report's Purchases, Cash/Credit split and Inventory
+// Turnover agree with those pages for the same month. Food Cost %, Prime Cost % and Net Margin %
+// are NOT built on this since schema v9 (S792, D30): they use COGS, see computeImsSection.
+// `discount_amount` is a BILL-level figure repeated on every line; allocateBillDiscounts() dedupes
+// it per bill and spreads it across that bill's lines, so the rows passed in must carry
+// `discount_amount`, `purchase_group_id` and the `vendor_id`/`invoice_ref`/`bs_day` fallback key.
+// Returns are taken at list value, exactly as on those two pages. The Cash/Credit split is built
+// off the same line values so the two halves still add up to the total (every return comes off
+// Cash, as before).
 // Single-period input only: the fallback bill key carries no period.
 export function netPurchaseFigures(purchases, returns) {
   const allocated = allocateBillDiscounts(purchases || [])
@@ -62,26 +66,27 @@ async function computeImsSection(clientId, period) {
     // stock rows with no error for throwFirstError to see — and nothing ever recomputes it. A
     // missing items row values its stock at rate 0; a missing closing row reads as a zero count.
     fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id).order('id')),
-    // Two sales fetches, because one row set cannot answer both questions. REVENUE excludes comps
-    // (a comped dish collected nothing), CONSUMPTION includes them (its ingredients were still
-    // used). This was a single comp-excluding query feeding both, so theoretical usage — and the
-    // reorder shortfall built on it below — silently understated by the comp volume, and the
-    // section disagreed with the live Variance/Reorder pages, which have never filtered comps.
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
-    // bs_day + source feed the shared depletion rule in buildStockRows (S696); ingredient_deltas
-    // because a customized plate also consumes its options' stock lines (S758).
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
+    // ONE sales read answers both questions, because the comp filter runs in JS. REVENUE excludes
+    // comps (a comped dish collected nothing; periodRevenue drops them), CONSUMPTION includes them
+    // (its ingredients were still used). Until S792 revenue had its own read with a server-side
+    // `.neq('source', 'pos_comp')` — and `source` is nullable, so `NULL <> 'pos_comp'` dropped every
+    // legacy row: a Regenerate Snapshot froze a revenue LOWER than Monthly Summary's, the
+    // denominator of Food Cost %, Labour %, Prime % and Net Margin % (FIGURES-8, ims-figures.md
+    // S699). bs_day + source also feed the shared depletion rule in buildStockRows (S696), and
+    // ingredient_deltas a customized plate's option stock lines (S758).
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
     fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
-    // .eq('is_active', true) matches Stock.js's own Summary tab exactly (its `items` state is
-    // loaded with this same filter) — omitting it here previously let a leftover opening_stock
-    // row on a deactivated item inflate Opening Stock Value above what Stock Count itself shows
-    // for the same period (found live, S436: NPR 179,232 here vs NPR 179,189.95 on Stock Count).
-    // Sub-recipes are deliberately NOT excluded — Stock Count counts them too (its own "Sub-
-    // Recipes" category row), unlike the is_sub_recipe exclusion CLAUDE.md documents for
-    // Item Master/Purchases/POs/Requisitions/Reorder Report/Supplier Price Tracker.
-    fetchAllRows(() => scopedFrom('items', clientId, 'id, per_uom_rate, yield_pct, is_active, is_sub_recipe').eq('is_active', true).order('id')),
+    // EVERY item, active or not, since S792: the two uses below want different sets.
+    //   - Opening/Closing Stock and Wastage Value keep the active-only set, which matches Stock.js's
+    //     own Summary tab — without it a leftover opening_stock row on a deactivated item inflated
+    //     Opening Stock Value above what Stock Count showed for the same period (found live, S436:
+    //     NPR 179,232 here vs NPR 179,189.95 on Stock Count). Sub-recipes stay IN those, since Stock
+    //     Count counts them too (its own "Sub-Recipes" category row).
+    //   - COGS (Food Cost %, D30) is valued over every non-sub-recipe item with a row in the
+    //     month, hidden or not — hiding an item never changes history (D29, FIGURES-1).
+    fetchAllRows(() => scopedFrom('items', clientId, 'id, name, per_uom_rate, yield_pct, is_active, is_sub_recipe').order('id')),
     fetchAllRows(() => scopedFrom('par_levels', clientId, 'item_id, par_qty').order('id')),
     fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id).order('id')),
     fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id).order('id')),
@@ -96,23 +101,24 @@ async function computeImsSection(clientId, period) {
   // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S612).
   throwFirstError(results)
   const [
-    { data: purchases }, { data: returns }, { data: salesData }, { data: consumptionSales }, { data: recipes },
-    { data: overheadsData }, { data: wastagesData }, { data: items }, { data: parLevels },
+    { data: purchases }, { data: returns }, { data: salesData }, { data: recipes },
+    { data: overheadsData }, { data: wastagesData }, { data: allItems }, { data: parLevels },
     { data: opening }, { data: closing }, { data: payablePayments }, { data: staffMealsData },
   ] = results
+  // `is_active === true`, not truthy-ness: the old read was `.eq('is_active', true)`, which a NULL
+  // never passed either.
+  const items = (allItems || []).filter(i => i.is_active === true)
 
   // Net of bill discounts since schema v6 — v1–v5 snapshots summed a raw qty × rate here.
   const { purchaseTotal, cashNet, creditNet } = netPurchaseFigures(purchases, returns)
 
-  const priceMap = {}; (recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
-  const revenueTotal = (salesData || []).reduce((s, r) => {
-    const price = r.unit_price != null ? parseFloat(r.unit_price) : (priceMap[r.recipe_id] || 0)
-    return s + parseFloat(r.qty_sold || 0) * price - (parseFloat(r.discount) || 0)
-  }, 0)
+  // Monthly Summary's own revenue arithmetic (periodCost.js): the price charged at the time of sale,
+  // net of the row's discount, comps excluded in JS.
+  const revenueTotal = periodRevenue(salesData, recipes)
 
   const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
 
-  const itemRateMap = {}; (items || []).forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
+  const itemRateMap = {}; items.forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
   const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
   // Same qty × per_uom_rate valuation MonthlySummary.js/Stock.js use for their own Opening/
   // Closing Stock figures — an owner reading this report needs to see what stock the period
@@ -135,24 +141,55 @@ async function computeImsSection(clientId, period) {
   // than freezing zero usage; the delta walk adds customized plates' option stock lines (S758).
   const [ingredientBreakdown, deltaExplosion] = await Promise.all([
     recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
-    loadDeltaExplosion(supabase, (consumptionSales || []).map(s => s.ingredient_deltas)),
+    loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas)),
   ])
-  // consumptionSales, not salesData — comps consumed ingredients even though they earned nothing.
+  // Every sales row, comps included — comps consumed ingredients even though they earned nothing.
   // The on-hand / below-par figures come from the ONE calculation the live Reorder Report and
   // both dashboards use (S696, schema v4); v3 snapshots carried this section's own copy, which
-  // deducted neither wastage nor staff meals and summed sales raw. Sub-recipes are filtered here
-  // because the items read above keeps them for the stock-value figures (see its comment).
+  // deducted neither wastage nor staff meals and summed sales raw. Active, non-sub-recipe items:
+  // "on the shelf at close" is a question about the items still in use.
   const stockRows = buildStockRows({
-    items: (items || []).filter(i => !i.is_sub_recipe), // items query is already filtered to is_active=true
+    items: items.filter(i => !i.is_sub_recipe),
     opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
-    sales: consumptionSales, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
+    sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
   })
   const { count: reorderCount, estValueTotal: reorderEstValueTotal } = summarizeReorder(stockRows)
 
-  const foodCostPct = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
+  // ── Food Cost % = food USED (COGS) ÷ revenue (S792, owner decision D30) ──
+  // A closed month's food cost is what was used, not what was bought. Until schema v9 this was net
+  // purchases ÷ revenue, so a month that ended with more stock than it began (opening 1 L,
+  // purchases 5 L, closing 2.5 L, revenue 10 L) froze 50% ▲ here while Monthly Summary, Consolidated
+  // P&L, Annual Summary and Period Comparison said 35% for the same month (FIGURES-3). COGS is
+  // Monthly Summary's own arithmetic from periodCost.js — per-item values, purchases net of bill
+  // discounts, returns off, `computeUsed()` with staff meals in — over every non-sub-recipe item
+  // with a row this month, hidden or not (D29). Prep (sub-recipe) stock is outside COGS, as on
+  // Monthly Summary, so the Opening/Closing Stock rows above (which include prep, as Stock Count
+  // does) do not add up to it exactly when prep was counted.
+  const cogsItems = (allItems || []).filter(i => !i.is_sub_recipe)
+  const stockMaps = periodStockMaps({ opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData })
+  const cogs = valuePeriodItems(cogsItems, stockMaps)
+  const cogsTotal = cogs.cogsVal
+  const foodCostPct = revenueTotal > 0 ? (cogsTotal / revenueTotal) * 100 : null
+
+  // The count COGS rests on (S756, D6): an item with stock and NO closing count is counted as all
+  // used. The totals stand — they must tie to Monthly Summary — but the gap is frozen with them,
+  // and while it is material the report withholds the food-cost verdict, as Monthly Summary does.
+  // Counted = a row whose physical_qty is not null; a count of 0 is a count (S695).
+  const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
+  const purchaseQty = {}; const purchaseValue = {}
+  Object.entries(stockMaps.purchases).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
+  const gap = findUncountedItems({ items: cogsItems, openingQty: stockMaps.opening, purchaseQty, purchaseValue, countedIds, cogs: cogsTotal })
 
   return {
     revenueTotal, purchaseTotal, overheadTotal, wastageValueTotal, openingStockValueTotal, closingStockValueTotal, cashNet, creditNet, foodCostPct,
+    // New in schema v9 (D30). Absent on an older snapshot, whose foodCostPct is purchases ÷ revenue.
+    foodCostBasis: 'cogs', cogsTotal, staffMealsValueTotal: cogs.staffMealsVal,
+    countGap: {
+      presentCount: gap.presentCount, uncountedCount: gap.uncountedCount, uncountedValue: gap.uncountedValue,
+      material: gap.material,
+      // Names resolved at generation, like everything else in a frozen snapshot (S435).
+      names: gap.uncounted.slice(0, UNCOUNTED_NAME_LIMIT).map(u => u.name),
+    },
     reorder: { count: reorderCount, estValueTotal: reorderEstValueTotal },
     payables: { unpaidTotal: payablesUnpaidTotal, unpaidCount: payablesUnpaidCount },
   }
@@ -437,19 +474,25 @@ async function computePosSection(clientId, period) {
   }
 }
 
-// Prime Cost % / True Net Margin % — same formulas as OwnerDashboard.jsx. Always computed when
-// inputs exist; True Net Margin's *display* is gated behind hasFeature('overheads') by the
-// report page, not here (mirrors Owner Dashboard's own canOverheads pattern).
-function computeCombinedMetrics({ ims, hr }) {
+// Prime Cost % / True Net Margin %. Always computed when inputs exist; True Net Margin's *display*
+// is gated behind hasFeature('overheads') by the report page, not here (mirrors Owner Dashboard's
+// own canOverheads pattern).
+//
+// Since schema v9 (S792, D30) the food cost in all three is COGS — what was used — because the
+// report is always of a closed month. Net margin takes COGS too: revenue − food cost − labour −
+// overheads only adds up to 100% with Food Cost % beside it if both mean the same food cost, and
+// Consolidated P&L's Net Profit subtracts COGS for the same month. `foodCostBasis` names the basis
+// so a reader, and the Trend section comparing against older snapshots, can tell.
+export function computeCombinedMetrics({ ims, hr }) {
   if (!ims) return { revenueTotal: null, foodCostPct: null, laborCostPct: null, primeCostPct: null, netMarginPct: null }
   const revenueTotal = ims.revenueTotal || 0
   const foodCostPct = ims.foodCostPct
   const laborCostPct = hr && revenueTotal > 0 ? (hr.payroll.total / revenueTotal) * 100 : null
   const primeCostPct = foodCostPct != null && laborCostPct != null ? foodCostPct + laborCostPct : null
   const netMarginPct = hr && revenueTotal > 0
-    ? ((revenueTotal - ims.purchaseTotal - hr.payroll.total - ims.overheadTotal) / revenueTotal) * 100
+    ? ((revenueTotal - ims.cogsTotal - hr.payroll.total - ims.overheadTotal) / revenueTotal) * 100
     : null
-  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct }
+  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis }
 }
 
 // ── Trend section ────────────────────────────────────────────────────────────
@@ -478,7 +521,11 @@ async function lookupPriorSnapshot(clientId, bsYear, bsMonth) {
   return { available: true, reason: null, period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: report.snapshot }
 }
 
-function buildDeltas(current, prior) {
+// The basis a snapshot's Food Cost % was computed on. Absent before schema v9, when it was always
+// net purchases ÷ revenue.
+export const foodCostBasisOf = snapshot => snapshot?.combined?.foodCostBasis || 'purchases'
+
+export function buildDeltas(current, prior) {
   if (!prior) return null
   const pctDelta = (curVal, priorVal) => (curVal == null || priorVal == null) ? null : curVal - priorVal // percentage-point delta
   const moneyDelta = (curVal, priorVal) => {
@@ -487,12 +534,17 @@ function buildDeltas(current, prior) {
     const pctChange = priorVal !== 0 ? (absoluteChange / Math.abs(priorVal)) * 100 : null
     return { absoluteChange, pctChange }
   }
+  // A v9 Food Cost % is COGS ÷ revenue and a v8 one purchases ÷ revenue (D30). Across that line the
+  // difference is mostly the change of formula, not a change in the kitchen, so the three ratios
+  // that contain it get no delta, and the section says why rather than print a move that is not one.
+  const sameBasis = foodCostBasisOf(current) === foodCostBasisOf(prior)
   return {
+    foodCostBasisChanged: !sameBasis,
     revenueTotal: moneyDelta(current.combined?.revenueTotal, prior.combined?.revenueTotal),
-    foodCostPct: pctDelta(current.combined?.foodCostPct, prior.combined?.foodCostPct),
+    foodCostPct: sameBasis ? pctDelta(current.combined?.foodCostPct, prior.combined?.foodCostPct) : null,
     laborCostPct: pctDelta(current.combined?.laborCostPct, prior.combined?.laborCostPct),
-    primeCostPct: pctDelta(current.combined?.primeCostPct, prior.combined?.primeCostPct),
-    netMarginPct: pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct),
+    primeCostPct: sameBasis ? pctDelta(current.combined?.primeCostPct, prior.combined?.primeCostPct) : null,
+    netMarginPct: sameBasis ? pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct) : null,
     posNetSales: moneyDelta(current.pos?.totalNetSales, prior.pos?.totalNetSales),
     otHours: moneyDelta(current.hr?.payroll?.ot?.hours, prior.hr?.payroll?.ot?.hours),
     otAmount: moneyDelta(current.hr?.payroll?.ot?.amount, prior.hr?.payroll?.ot?.amount),
@@ -562,7 +614,30 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // (sales_entries.ingredient_deltas: "+30 g cheese", "−5 pcs momo" for a Half). NULL on every sale
 // without options, so a month with no customized plates computes exactly as v7 did; a month with
 // them does not, and the version is the only trace of that.
-export const CURRENT_SCHEMA_VERSION = 8
+// 9 (S792 stage 2): several figures changed meaning at once; one bump for all of them.
+//   - D30 / FIGURES-3: `combined.foodCostPct` is COGS ÷ revenue (food USED: opening + net purchases
+//     − wastage − staff meals − closing, Monthly Summary's arithmetic over every non-sub-recipe
+//     item with a row, hidden or not, D29), where v1–v8 froze net purchases ÷ revenue. Prime Cost %
+//     and Net Margin % follow it. New fields: `combined.foodCostBasis: 'cogs'`, `ims.foodCostBasis`,
+//     `ims.cogsTotal`, `ims.staffMealsValueTotal`, and `ims.countGap` (items with stock and no
+//     closing count; the verdict is withheld while it is material, D6). Trend gives no Food Cost /
+//     Prime / Net Margin delta across the v8→v9 line (`deltas.foodCostBasisChanged`).
+//   - FIGURES-8: revenue keeps legacy NULL-source sales rows (comps filtered in JS, not by `.neq`),
+//     so it can only rise against a v8 figure for a month holding such rows; Menu Engineering's qty
+//     and revenue likewise.
+//   - FIGURES-2 / SALES-3: `inventoryDepth.variance` and `.shrinkageTrend` are the live pages'
+//     arithmetic — paged reads, an uncounted item not judged, the client's tolerance and the NPR
+//     floor (frozen as `tolerancePct`/`floorValue`), credit notes and superseded manual days out of
+//     theoretical usage, staff meals in actual usage, D17 no-recipe items and D36 no-sales items.
+//     Variance drops the quantity totals (kg + L) and stores only the flagged rows, with counts of
+//     what was not judged; `variancePct` is null for a no-sales row.
+//   - PLANNING-4: `deadSlowStock` treats staff meals as movement (`movement: 'staff_meals_count'`,
+//     per-item `staffMeals`) — staff rice is no longer Dead.
+//   - RECIPES-1: while Crest Customization is on, build-your-own dishes are Not rated in
+//     `menuEngineering` (`quadrant: null`, `byo: true`, `byoCount`, `byoItems`) — the live menu
+//     reports' `isCostedByBuild` rule — not quadranted on their bowl-and-spoon cost.
+//   - TAX-7: `vendorPurchasing` names a deactivated or archived supplier instead of "Unknown Vendor".
+export const CURRENT_SCHEMA_VERSION = 9
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

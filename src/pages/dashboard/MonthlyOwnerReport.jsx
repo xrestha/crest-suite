@@ -6,7 +6,8 @@ import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useSettings } from '../../context/SettingsContext'
-import { fcThresholds } from '../../shared/imsFormulas'
+import { fcThresholds, varianceBand, COGS_FORMULA } from '../../shared/imsFormulas'
+import { gapHeadline } from '../../shared/uncountedItems'
 import { descendingBand, lcBand, pcBand, nmBand } from '../../shared/operatingBands'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 import SuiteGate from '../../components/SuiteGate'
@@ -300,6 +301,22 @@ export default function MonthlyOwnerReport() {
   // Net margin is the one inverted band on this page: higher is better. Still gated on
   // `canOverheads` — without it there is no margin to band.
   const nmBandOf = v => (!canOverheads || v == null) ? NONE : asTitled(nmBand(v))
+
+  // S792 (D30, schema v9): Food Cost % is food USED (COGS) ÷ revenue. A snapshot generated before
+  // that has no `foodCostBasis` and froze net purchases ÷ revenue — it keeps its figure, and the
+  // label says which basis it is, because a Tip does not print.
+  const cogsBasis = snapshot?.combined?.foodCostBasis === 'cogs'
+  const basisOf = s => (s?.combined?.foodCostBasis === 'cogs' ? 'cogs' : 'purchases')
+  // COGS rests on the closing count: an item with stock and no count is counted as all used. While
+  // that gap is material the three ratios that contain food cost are shown without a verdict, as on
+  // Monthly Summary (S756, D6). Only a v9 snapshot carries the gap.
+  const countGap = snapshot?.ims?.countGap
+  const verdictWithheld = cogsBasis && !!countGap?.material
+  const UNJUDGED = { color: undefined, mark: '', title: 'Not judged: the closing count is incomplete, so food cost reads high until every item with stock is counted.' }
+  const withheld = bandOf => v => (verdictWithheld && v != null ? UNJUDGED : bandOf(v))
+  const fcCellOf = withheld(fcBandOf)
+  const pcCellOf = withheld(pcBandOf)
+  const nmCellOf = v => (!canOverheads ? NONE : withheld(nmBandOf)(v))
   return (
     <div>
       <div className="page-header owner-report-page-header">
@@ -449,8 +466,17 @@ export default function MonthlyOwnerReport() {
                     </tr>
                     {snapshot.ims && (
                       <tr>
-                        <td><Tip text="Net purchases ÷ revenue × 100." width={220}>Food Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcBandOf(snapshot.combined?.foodCostPct).color }} title={fcBandOf(snapshot.combined?.foodCostPct).title}>{pct(snapshot.combined?.foodCostPct)} {fcBandOf(snapshot.combined?.foodCostPct).mark}</td>
+                        <td>
+                          <Tip
+                            text={cogsBasis
+                              ? `Food used (COGS) ÷ revenue × 100. Food used = ${COGS_FORMULA} — the same figure Monthly Summary shows for this month.`
+                              : 'Net purchases ÷ revenue × 100 — the rule this report was generated under. Regenerate Snapshot to use the food actually used (COGS), as Monthly Summary does.'}
+                            width={280}
+                          >
+                            {cogsBasis ? 'Food Cost %' : 'Food Cost % (on purchases)'}
+                          </Tip>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcCellOf(snapshot.combined?.foodCostPct).color }} title={fcCellOf(snapshot.combined?.foodCostPct).title}>{pct(snapshot.combined?.foodCostPct)} {fcCellOf(snapshot.combined?.foodCostPct).mark}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>28–35%</td>
                       </tr>
                     )}
@@ -464,20 +490,29 @@ export default function MonthlyOwnerReport() {
                     {snapshot.ims && snapshot.hr && (
                       <tr>
                         <td><Tip text="Food Cost % + Labor Cost % — the number operators benchmark against." width={240}>Prime Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcBandOf(snapshot.combined?.primeCostPct).color }} title={pcBandOf(snapshot.combined?.primeCostPct).title}>{pct(snapshot.combined?.primeCostPct)} {pcBandOf(snapshot.combined?.primeCostPct).mark}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcCellOf(snapshot.combined?.primeCostPct).color }} title={pcCellOf(snapshot.combined?.primeCostPct).title}>{pct(snapshot.combined?.primeCostPct)} {pcCellOf(snapshot.combined?.primeCostPct).mark}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≤60–65%</td>
                       </tr>
                     )}
                     {snapshot.ims && snapshot.hr && (
                       <tr>
-                        <td><Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue." width={260}>Net Margin %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmBandOf(snapshot.combined?.netMarginPct).color }} title={nmBandOf(snapshot.combined?.netMarginPct).title}>{!canOverheads ? 'Requires Overheads (Pro)' : `${pct(snapshot.combined?.netMarginPct)} ${nmBandOf(snapshot.combined?.netMarginPct).mark}`}</td>
+                        <td><Tip text={cogsBasis ? 'Revenue minus food used (COGS), labor cost and overheads, as a % of revenue.' : 'Revenue minus net purchases, labor cost and overheads, as a % of revenue — the rule this report was generated under.'} width={260}>Net Margin %</Tip></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmCellOf(snapshot.combined?.netMarginPct).color }} title={nmCellOf(snapshot.combined?.netMarginPct).title}>{!canOverheads ? 'Requires Overheads (Pro)' : `${pct(snapshot.combined?.netMarginPct)} ${nmCellOf(snapshot.combined?.netMarginPct).mark}`}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
+              {/* The count COGS rests on, frozen with it (v9). Printed, not a hover: it qualifies
+                  the three figures above on paper too. */}
+              {snapshot.ims && cogsBasis && countGap?.uncountedCount > 0 && (
+                <p style={{ fontSize: 11.5, color: 'var(--theme-amber-text)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                  △ {gapHeadline(countGap, periodLabel)}.
+                  {verdictWithheld && ' Food Cost, Prime Cost and Net Margin are shown without a verdict until the count is complete.'}
+                  {countGap.names?.length > 0 && ` Not counted: ${countGap.names.join(', ')}${countGap.uncountedCount > countGap.names.length ? ` and ${countGap.uncountedCount - countGap.names.length} more` : ''}.`}
+                </p>
+              )}
             </div>
 
             {snapshot.ims && (
@@ -489,8 +524,18 @@ export default function MonthlyOwnerReport() {
                       tip="Value of stock on hand at the start of the period (qty × per-unit rate), carried forward from last period's closing count." />
                     <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
                     <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red-text)' : undefined} />
+                    {/* v9 (S792): the two figures Food Cost % is now built from. Absent on an older
+                        snapshot, which froze no COGS — never rendered as NPR 0 there. */}
+                    {snapshot.ims.staffMealsValueTotal != null && (
+                      <Row label="Staff Meals" value={fmt(snapshot.ims.staffMealsValueTotal)}
+                        tip="Value of food logged as staff meals this period. It came off the same shelf, so it is part of food used." />
+                    )}
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
+                    {snapshot.ims.cogsTotal != null && (
+                      <Row label="Food Used (COGS)" value={fmt(snapshot.ims.cogsTotal)} color="var(--theme-accent-ink)"
+                        tip={`${COGS_FORMULA}, valued like Monthly Summary — the numerator of Food Cost %. Prep (sub-recipes) counted at Stock Count is left out, as on Monthly Summary, so the rows above add up to it exactly only when no prep was counted.`} />
+                    )}
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
                     <Row label="Credit Purchases" value={fmt(snapshot.ims.creditNet)} />
                     <Row label="Items Below Par (at close)" value={num(snapshot.ims.reorder?.count)}
@@ -615,11 +660,19 @@ export default function MonthlyOwnerReport() {
                             Guarded because a snapshot frozen before v5 has no such key, and an
                             absent count must not render as a real 0. */}
                         {me.quadrantCounts.Unrated > 0 && (
-                          <tr><td style={{ color: 'var(--theme-text2)', fontWeight: 700 }}>Not rated</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Unrated}</td><td style={{ color: 'var(--theme-text3)' }}>No selling price or no costed ingredients — nothing to judge</td></tr>
+                          <tr><td style={{ color: 'var(--theme-text2)', fontWeight: 700 }}>Not rated</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Unrated}</td><td style={{ color: 'var(--theme-text3)' }}>{me.byoCount > 0 ? 'No selling price, no costed ingredients, or build-your-own (costed by build) — nothing to judge' : 'No selling price or no costed ingredients — nothing to judge'}</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+                  {/* S792 (RECIPES-1, v9): named, so "not rated" is not read as "forgotten". A
+                      snapshot from before has no byoItems and rated these dishes on their fixed cost. */}
+                  {me.byoItems?.length > 0 && (
+                    <p style={{ fontSize: 11.5, color: 'var(--theme-text2)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                      <strong>Build-your-own, not rated — costed by build:</strong> {me.byoItems.map(i => i.name).join(', ')}.
+                      {' '}Each recipe holds only the fixed part (the bowl, the spoon), so one food-cost figure would be near zero; the real cost depends on what each guest picks. Recipe Costing shows the range.
+                    </p>
+                  )}
                   {me.dogs?.length > 0 && (
                     <div className="table-wrap">
                       <table className="data-table owner-report-table">
@@ -689,7 +742,10 @@ export default function MonthlyOwnerReport() {
                     <>
                       <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px', lineHeight: 1.5 }}>
                         {streak
-                          ? <>Dead = nothing used for {deadAfter} or more counted months in a row. Slow = nothing used for 1–2 months, or less than 20% of what was available used. A month without a stock count for an item is not judged and restarts the run.
+                          ? <>Dead = nothing used for {deadAfter} or more counted months in a row. Slow = nothing used for 1–2 months, or less than 20% of what was available used.
+                            {/* v9 (S792, PLANNING-4). A v7/v8 section judged staff rice as unused. */}
+                            {ds.movement === 'staff_meals_count' && ' Staff meals count as use; wastage does not.'}
+                            {' '}A month without a stock count for an item is not judged and restarts the run.
                             {ds.historyMonths != null && ds.historyMonths < deadAfter && <> Only {ds.historyMonths} month{ds.historyMonths === 1 ? '' : 's'} of records existed at generation, so nothing could be called Dead yet.</>}</>
                           : <>This snapshot was generated under the earlier one-month rule (Dead = no use in this month alone). Regenerate Snapshot to apply the current rule: Dead = {deadAfter} counted months in a row with no use.</>}
                       </p>
@@ -736,24 +792,57 @@ export default function MonthlyOwnerReport() {
                     )
                   })()}
 
-                  {inv.variance && (
+                  {inv.variance && (() => {
+                    const v = inv.variance
+                    // v9 (S792, FIGURES-2): the live Variance page's arithmetic, with the tolerance and
+                    // NPR floor it was judged at frozen in. An older section was a fixed ±10% with no
+                    // floor, counted uncounted items as 0 and summed sales raw — it keeps its figures
+                    // and its old label.
+                    const judgedAtTol = v.tolerancePct != null
+                    const nothingJudged = judgedAtTol && !(v.judgedCount > 0)
+                    const frozenSettings = { variance_flag_pct: v.tolerancePct }
+                    const totalBand = judgedAtTol && !nothingJudged
+                      ? varianceBand(v.totalTheoreticalValue > 0 ? (v.totalVarianceValue / v.totalTheoreticalValue) * 100 : null,
+                        v.totalVarianceValue, frozenSettings, { measured: true, floorValue: v.floorValue })
+                      : null
+                    const flaggedRows = (v.items || []).filter(i => i.flag === 'over' || i.flag === 'under')
+                    return (
                     <>
+                      {judgedAtTol && (v.uncountedCount > 0 || v.noRecipeCount > 0) && (
+                        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                          △ Not judged:
+                          {v.uncountedCount > 0 && <> {num(v.uncountedCount)} item{v.uncountedCount === 1 ? '' : 's'} with stock had no closing count</>}
+                          {v.uncountedCount > 0 && v.noRecipeCount > 0 && ';'}
+                          {v.noRecipeCount > 0 && <> {num(v.noRecipeCount)} {v.noRecipeCount === 1 ? 'is' : 'are'} in no recipe (gas, foil, napkins…), so nothing sold explains {v.noRecipeCount === 1 ? 'it' : 'them'}</>}.
+                          {' '}Neither is in the flagged count or the total below.
+                        </p>
+                      )}
                       <div className="table-wrap" style={{ marginBottom: 8 }}>
                         <table className="data-table owner-report-table"><tbody>
-                          <Row label="Items Flagged (Theoretical vs Actual, ±10%)" value={num(inv.variance.flaggedCount)}
-                            tip="Items where actual usage differed from recipe-theoretical usage by more than 10%." />
-                          <Row label="Total Variance Value" value={fmt(inv.variance.totalVarianceValue)} color={Math.abs(inv.variance.totalVarianceValue) > 0 ? 'var(--theme-amber-text)' : undefined} />
+                          <Row label={judgedAtTol ? `Items Flagged (Theoretical vs Actual, ±${v.tolerancePct}%)` : 'Items Flagged (Theoretical vs Actual, ±10%)'}
+                            value={nothingJudged ? '—' : num(v.flaggedCount)}
+                            tip={judgedAtTol
+                              ? `Items whose actual use differed from what recipes × sales say by more than ±${v.tolerancePct}% (your Settings tolerance when this was generated) and by at least NPR ${num(v.floorValue)}. Staff meals are part of actual use; credit notes do not reduce what recipes say. ${nothingJudged ? 'No item had a closing count, so nothing could be judged.' : ''}`
+                              : 'Items where actual usage differed from recipe-theoretical usage by more than 10% (the rule this report was generated under).'} />
+                          <Row label="Total Variance Value"
+                            value={nothingJudged ? '—' : `${fmt(v.totalVarianceValue)}${totalBand?.mark ? ` ${totalBand.mark}` : ''}`}
+                            color={totalBand ? totalBand.color : (!judgedAtTol && Math.abs(v.totalVarianceValue) > 0 ? 'var(--theme-amber-text)' : undefined)}
+                            tip={judgedAtTol ? 'Over counted, recipe-linked items only. Positive = more used than recipes explain.' : undefined} />
                         </tbody></table>
                       </div>
-                      {inv.variance.items?.filter(i => i.flag !== 'ok').length > 0 && (
+                      {flaggedRows.length > 0 && (
                         <div className="table-wrap" style={{ marginBottom: 8 }}>
                           <table className="data-table owner-report-table">
                             <thead><tr><th>Item</th><th style={{ textAlign: 'right' }}>Actual</th><th style={{ textAlign: 'right' }}>Theoretical</th><th style={{ textAlign: 'right' }}>Variance %</th><th style={{ textAlign: 'right' }}>Value</th></tr></thead>
                             <tbody>
-                              {inv.variance.items.filter(i => i.flag !== 'ok').slice(0, 10).map(i => (
+                              {flaggedRows.slice(0, 10).map(i => (
                                 <tr key={i.itemId}>
                                   <td>{i.name}</td><td style={{ textAlign: 'right' }}>{i.actualUsed.toFixed(1)}</td><td style={{ textAlign: 'right' }}>{i.theoreticalUsed.toFixed(1)}</td>
-                                  <td style={{ textAlign: 'right', color: i.flag === 'over' ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)' }}>{i.variancePct >= 0 ? '+' : ''}{i.variancePct.toFixed(1)}%</td>
+                                  {/* ▲/▼ as well as colour: the print block turns every cell black. A
+                                      no-sales row (D36, v9) has no percentage, only the stock that went. */}
+                                  <td style={{ textAlign: 'right', color: i.flag === 'over' ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }}>
+                                    {i.variancePct == null ? 'no sales' : `${i.variancePct >= 0 ? '+' : ''}${i.variancePct.toFixed(1)}%`} {i.flag === 'over' ? '▲' : '▼'}
+                                  </td>
                                   <td style={{ textAlign: 'right' }}>{fmt(i.value)}</td>
                                 </tr>
                               ))}
@@ -762,17 +851,31 @@ export default function MonthlyOwnerReport() {
                         </div>
                       )}
                     </>
-                  )}
+                    )
+                  })()}
 
-                  {inv.shrinkageTrend ? (
-                    <div className="table-wrap">
-                      <table className="data-table owner-report-table"><tbody>
-                        <Row label={`Shrinkage Trend (${inv.shrinkageTrend.periodsAnalyzed}-period window)`} value={`${num(inv.shrinkageTrend.consistentCount)} consistent, ${num(inv.shrinkageTrend.anyFlaggedCount)} flagged`}
-                          tip="Items with unexplained over-consumption across multiple closed periods ending at this one — distinct from a single period's Variance above." />
-                        <Row label="Total Shrinkage Loss Value" value={fmt(inv.shrinkageTrend.totalLossValue)} color={inv.shrinkageTrend.totalLossValue > 0 ? 'var(--theme-red-text)' : undefined} />
-                      </tbody></table>
-                    </div>
-                  ) : (
+                  {inv.shrinkageTrend ? (() => {
+                    const sh = inv.shrinkageTrend
+                    const judgedAtTol = sh.tolerancePct != null   // v9 (S792); older: any positive variance
+                    return (
+                    <>
+                      {judgedAtTol && sh.uncountedItems > 0 && (
+                        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                          △ {num(sh.uncountedItems)} item{sh.uncountedItems === 1 ? '' : 's'} had {num(sh.uncountedItemPeriods)} month{sh.uncountedItemPeriods === 1 ? '' : 's'} without a closing count in this window; those months are not judged.
+                        </p>
+                      )}
+                      <div className="table-wrap">
+                        <table className="data-table owner-report-table"><tbody>
+                          <Row label={`Shrinkage Trend (${sh.periodsAnalyzed}-period window)`} value={`${num(sh.consistentCount)} consistent, ${num(sh.anyFlaggedCount)} flagged`}
+                            tip={judgedAtTol
+                              ? `Items over-used, beyond what recipes × sales explain, in closed months ending with this one. A month counts only when the item was counted and over-used by more than ±${sh.tolerancePct}% and at least NPR ${num(sh.floorValue)}. "Consistent" = in two-thirds or more of the months it could be judged.`
+                              : 'Items with unexplained over-consumption across multiple closed periods ending at this one — distinct from a single period\'s Variance above.'} />
+                          <Row label="Total Shrinkage Loss Value" value={fmt(sh.totalLossValue)} color={sh.totalLossValue > 0 ? 'var(--theme-red-text)' : undefined} />
+                        </tbody></table>
+                      </div>
+                    </>
+                    )
+                  })() : (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>Not enough closed period history yet for a shrinkage trend.</p>
                   )}
                 </div>
@@ -839,6 +942,17 @@ export default function MonthlyOwnerReport() {
                             </tbody>
                           </table>
                         </div>
+                      )}
+                      {/* S792 (D30): across the v8 → v9 line the two Food Cost % figures are two
+                          formulas, so the three ratios containing it carry no change (buildDeltas
+                          left them null). Say why, or the dashes read as missing data. */}
+                      {t?.available && snapshot.ims && basisOf(snapshot) !== basisOf(t.snapshot) && (
+                        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                          Food Cost, Prime Cost and Net Margin are not compared: {priorLabel} was generated
+                          on {basisOf(t.snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue and this
+                          report on {basisOf(snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue.
+                          To compare them, regenerate {priorLabel}'s snapshot and then this one (this report keeps the copy of {priorLabel} it was made with).
+                        </p>
                       )}
                     </div>
                   )

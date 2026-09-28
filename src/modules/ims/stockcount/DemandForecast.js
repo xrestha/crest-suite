@@ -39,6 +39,18 @@ const dayOf = f => bsToAd(f.bs.year, f.bs.month, f.bs.day).getDay()
 const bsLabel = f => `${f.bs.day} ${BS_MONTHS[f.bs.month - 1]} ${f.bs.year}`
 const bsKey = bs => bs.year * 10000 + bs.month * 100 + bs.day
 
+// One stored run, the newest (S792 PLANNING-1). A Recompute whose clear-up failed leaves two runs
+// side by side, and the reshape below would keep whichever copy of each day it met last. A run is
+// its run_id; rows from before that column have none but were written by one INSERT, so they share
+// generated_at (the statement's now()), which stands in for it.
+function newestRunOnly(rows) {
+  if (rows.length === 0) return rows
+  const runOf = r => r.run_id ?? `at:${r.generated_at}`
+  const newest = rows.reduce((a, b) => (new Date(b.generated_at) > new Date(a.generated_at) ? b : a))
+  const keep = runOf(newest)
+  return rows.filter(r => runOf(r) === keep)
+}
+
 // What stands behind "In store": the one on-hand calculation (buildStockRows, S696), for the open
 // period or else the latest — never a local copy of opening + purchases − usage (S756, D21).
 // Throws on any failed read; the caller turns that into its own notice rather than an empty shelf.
@@ -192,9 +204,12 @@ export default function DemandForecast() {
     setLoadError(null)
     setExpandedIdx(null)
     const results = await Promise.all([
-      scopedFrom('demand_forecast_daily')
+      // Paged (S792 PLANNING-1): one row per day plus one per dish forecast that day, so a 30-day
+      // run on a 40-dish menu is ~1,230 rows, and past 1,000 the later days lost their dishes and
+      // "Ingredients to buy" under-read with no error. `id` is the unique tiebreak paging needs.
+      fetchAllRows(() => scopedFrom('demand_forecast_daily')
         .eq('horizon_days', horizon)
-        .order('bs_year').order('bs_month').order('bs_day'),
+        .order('bs_year').order('bs_month').order('bs_day').order('id')),
       scopedFrom('demand_forecast_run_log')
         .order('run_at', { ascending: false }).limit(1),
     ])
@@ -209,7 +224,7 @@ export default function DemandForecast() {
     // same per-day shape the recompute path already produces, so the table renders identically
     // whether its data came from a fresh run or a prior one.
     const byDay = {}
-    for (const r of (rows || [])) {
+    for (const r of newestRunOnly(rows || [])) {
       const key = `${r.bs_year}:${r.bs_month}:${r.bs_day}`
       const day = byDay[key] = byDay[key] || {
         bs: { year: r.bs_year, month: r.bs_month, day: r.bs_day },

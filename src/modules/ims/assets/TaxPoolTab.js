@@ -10,7 +10,7 @@ import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd } from '../
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
 import { printWithTitle } from '../../../utils/printTitle'
 import {
-  acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangibleAmortization,
+  acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangiblePool, priorPoolRun,
 } from './taxPoolCompute'
 import { POOL_LABELS, POOL_EXAMPLES, POOL_RATES, DISCLAIMER_TEXT } from './taxPoolConstants'
 
@@ -42,6 +42,12 @@ export default function TaxPoolTab({ assets }) {
   // Errors live apart from `msg` (S658) — see the same split in DepreciationRunTab. `msg` is now
   // only ever the one-line success confirmation beside the Post button.
   const [err, setErr] = useState(null)
+  // S792 (COSTS-5): set by preview() when the year before has no posted schedule, so every pool
+  // opened at 0 — `{ priorLabel, earlierLabel }`, the latter set when an even earlier year WAS
+  // posted (a skipped year, not a first one). And Pool E's amortization that did not fit the pool
+  // (COSTS-6), so a smaller figure than the assets' schedules add up to is explained, not silent.
+  const [openingGap, setOpeningGap] = useState(null)
+  const [poolECapped, setPoolECapped] = useState(null)
 
   const fyLabel = getBsFiscalYear(fyStart, 4)
   const canPost = hasImsAccess('manager')
@@ -99,11 +105,13 @@ export default function TaxPoolTab({ assets }) {
   }
 
   async function preview() {
-    setLoading(true); setMsg(''); setErr(null)
+    setLoading(true); setMsg(''); setErr(null); setOpeningGap(null); setPoolECapped(null)
     const priorFyLabel = getBsFiscalYear(fyStart - 1, 4)
-    const { data: priorRun, error: priorRunErr } = await scopedFrom('assets_tax_pool_runs')
-      .eq('fiscal_year', priorFyLabel).eq('status', 'posted')
-      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    // Every posted year, not only the prior one (S792, COSTS-5): one row per posted schedule, so a
+    // handful. Knowing whether an EARLIER year was posted is what tells a skipped year — every
+    // pool silently opening at 0 — from a business's first year.
+    const { data: postedRuns, error: priorRunErr } = await scopedFrom('assets_tax_pool_runs', 'id, fiscal_year, created_at')
+      .eq('status', 'posted').order('created_at', { ascending: false }).order('id')
     // A failed read used to compute every pool's opening WDV as 0 — a preview that read as a
     // first-ever run and could be POSTED as one (S682). Refuse to compute instead.
     const refuse = error => {
@@ -112,6 +120,7 @@ export default function TaxPoolTab({ assets }) {
       setLoading(false)
     }
     if (priorRunErr) { refuse(priorRunErr); return }
+    const { priorRun, earlierLabel } = priorPoolRun({ runs: postedRuns, fiscalYearStartBs: fyStart })
     let priorLinesByPool = {}
     if (priorRun) {
       const { data: priorLines, error: priorLinesErr } = await scopedFrom('assets_tax_pool_lines').eq('run_id', priorRun.id)
@@ -159,35 +168,52 @@ export default function TaxPoolTab({ assets }) {
 
     // Pool E — intangibles, straight-line per asset, not a shared-rate declining balance pool.
     // Aggregate: prior year's closing carried forward + this year's additions (at cost) minus
-    // this year's total amortization across active Pool E assets.
+    // this year's amortization across active Pool E assets — each on its own schedule, stopping
+    // at the end of its useful life, and never more than the pool holds (S792, COSTS-6).
     const priorE = priorLinesByPool.E
-    let eAdditions = 0, eAmortization = 0
-    assets.filter(a => a.tax_pool === 'E' && a.status === 'active').forEach(a => {
-      const acquiredThisFy = a.acquisition_date >= fyStartAdStr && a.acquisition_date <= fyEndAdStr
-      const { annual_amortization, first_year_amount } = computeIntangibleAmortization({
-        cost: a.total_cost, usefulLifeYears: a.useful_life_years, acquisitionDate: a.acquisition_date, fiscalYearStartBs: fyStart,
-      })
-      if (acquiredThisFy) { eAdditions += a.total_cost; eAmortization += first_year_amount }
-      else eAmortization += annual_amortization
-    })
-    const eOpening = priorE ? priorE.closing_wdv : 0
-    const eClosing = Math.max(0, eOpening + eAdditions - eAmortization)
+    const eOpening = priorE ? parseFloat(priorE.closing_wdv) || 0 : 0
+    const e = computeIntangiblePool({ assets, openingWdv: eOpening, fiscalYearStartBs: fyStart })
     poolLines.push({
-      pool: 'E', opening_wdv: eOpening, additions_full: eAdditions, additions_two_third: 0, additions_one_third: 0,
+      pool: 'E', opening_wdv: eOpening, additions_full: e.additions, additions_two_third: 0, additions_one_third: 0,
       disposal_proceeds: 0, repair_expense_total: 0, repair_expense_deductible: 0, repair_expense_capitalized: 0,
-      depreciation_base: eOpening + eAdditions, depreciation_amount: eAmortization, closing_wdv: eClosing,
+      depreciation_base: e.depreciation_base, depreciation_amount: e.depreciation_amount, closing_wdv: e.closing_wdv,
     })
 
+    setOpeningGap(priorRun ? null : { priorLabel: priorFyLabel, earlierLabel })
+    setPoolECapped(e.scheduled - e.depreciation_amount > 0.005 ? { scheduled: e.scheduled, held: e.depreciation_base } : null)
     setLines(poolLines)
     setLoading(false)
+  }
+
+  // S792 (COSTS-5): a skipped year locks every pool at an opening of 0, and the posted schedule
+  // then carries that into every year after it. A first year opens at 0 legitimately, so only the
+  // skipped-year case is asked about; the banner over the table speaks for both.
+  async function post() {
+    if (!lines) return
+    setMsg(''); setErr(null)
+    if (openingGap?.earlierLabel) {
+      askConfirm({
+        title: `FY ${openingGap.priorLabel} has no posted schedule`,
+        danger: true,
+        body: (
+          <p style={{ margin: 0 }}>
+            Every pool for FY {fyLabel} opens at 0, because its opening values come from FY {openingGap.priorLabel}, which was never
+            posted (FY {openingGap.earlierLabel} was). Posting locks these figures, and next year opens from them. To carry the real
+            values forward, post FY {openingGap.priorLabel} first, then preview FY {fyLabel} again.
+          </p>
+        ),
+        confirmLabel: 'Post with every pool at 0',
+        run: checkAndPost,
+      })
+      return
+    }
+    await checkAndPost()
   }
 
   // A fiscal year can be posted twice — there is deliberately no unique constraint, since a
   // correction is a new run — and the next year's opening WDV then reads whichever posted last.
   // Look first, and make a second schedule for the same year a decision naming the first (S756).
-  async function post() {
-    if (!lines) return
-    setMsg(''); setErr(null)
+  async function checkAndPost() {
     setPosting(true)
     const { data: existing, error: existingErr } = await scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
       .eq('fiscal_year', fyLabel).eq('status', 'posted').order('created_at').order('id')
@@ -311,12 +337,21 @@ ${text}`, detail })
 
       {lines && (
         <div id="tax-pool-print-area">
+          {/* S792 (COSTS-5): inside the print area, so a printed schedule carries it too. */}
+          {openingGap && (
+            <div role="status" style={{ marginBottom: 12, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Every pool opens at 0.</strong>{' '}
+              {openingGap.earlierLabel
+                ? <>FY {openingGap.priorLabel} has no posted schedule, so FY {fyLabel} has no closing values to open from — FY {openingGap.earlierLabel} was posted, but its values only reach this year through FY {openingGap.priorLabel}. Switch the Fiscal Year above to {openingGap.priorLabel}, post it, then preview FY {fyLabel} again.</>
+                : <>No tax pool schedule is posted for FY {openingGap.priorLabel}, the year before. That is right only if the business owned none of these assets before FY {fyLabel}; if it did, the opening values below are missing, so check them with your accountant before posting.</>}
+            </div>
+          )}
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Pool</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="What this pool was worth at the start of the fiscal year — last year's Closing WDV carried forward, or 0 if this pool has never been used before." width={280}>Opening WDV</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="What this pool was worth at the start of the fiscal year — last year's posted Closing WDV carried forward. If last year has no posted schedule it is 0, and a note above the table says so." width={280}>Opening WDV</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Cost of anything new bought into this pool during the fiscal year (new equipment, furniture, vehicles, etc.)." width={260}>Additions</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Money received from selling or scrapping equipment in this pool during the fiscal year." width={260}>Disposals</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Repair/maintenance spend on this pool — the first number is what you can deduct this year (capped at 5% of Closing WDV); the second, if shown, is the extra that rolls into next year instead." width={300}>Repair (Deductible / Capitalized)</Tip></th>
@@ -352,6 +387,13 @@ ${text}`, detail })
               </tfoot>
             </table>
           </div>
+          {poolECapped && (
+            <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)' }}>
+              Pool E: its assets' own schedules add up to NPR {fmt(poolECapped.scheduled)} this year, but the pool only
+              holds NPR {fmt(poolECapped.held)}, so only that much is claimed.
+              {openingGap ? ' Its opening value is missing (see above), which is usually why.' : ''}
+            </p>
+          )}
           <div className="print-only" style={{ marginTop: 32, fontSize: 10, color: '#aaa', borderTop: '1px solid #eee', paddingTop: 12, textAlign: 'center' }}>
             {DISCLAIMER_TEXT} · Generated by Crest Suite · {new Date().toLocaleDateString('en-IN')}
           </div>

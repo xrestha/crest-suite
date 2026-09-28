@@ -29,9 +29,13 @@ const DEFAULT_CATEGORIES = [
 
 const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
 
+// S792 (FIGURES-1, owner decision D29): hiding never changes history. Past months keep every
+// purchase and count the item is on, on the monthly summary and every other report; hiding only
+// takes it off the pickers and the stock sheet from now on. The old wording said a hidden item left
+// stock valuation and the monthly summary, which D29 ruled out.
 const HIDE_INSTEAD =
-  'Hide it instead: it stops being offered on new entries and keeps every record it is already on. ' +
-  'Note that a hidden item is also left out of stock valuation and the monthly summary, so hide it once its stock is down to zero.'
+  'Hide it instead: it keeps every record it is already on, and past months keep its purchases and counts. ' +
+  'Hiding only takes it off the pickers and the stock sheet from now on, so hide it once its stock is down to zero.'
 
 // `rate` here is the price of ONE base unit — the only price the form collects and the exact value
 // written to items.rate. There is no pack size on the form or in the row; see the note on `pack`.
@@ -725,6 +729,28 @@ export default function Items() {
     return writeItem(editingId, payload, onSaved)
   }
 
+  // S792 (MASTER-5): what a save wrote goes into `book` straight away. `book` is rebuilt only by
+  // checkAllUsage(), which a save does not run, so the next add in the same visit minted its code
+  // from a book without the code just issued — two items added in a row both became ITM-010 — and
+  // the duplicate-name check could not see a name added minutes earlier (the unique index caught
+  // that one, with a message blaming another tab). `item_code` has no unique index, and Recipe
+  // Import resolves an ingredient by code first, so a shared code linked the wrong item. A rename
+  // also moves the name, so the old one stops reading as taken.
+  function rememberInBook(row, previousName) {
+    setBook(b => {
+      // Not read yet, or the read failed: getNextItemCode and the name check fall back to `items`,
+      // which the save reloads. A partial book here would read as the whole one.
+      if (!b) return b
+      const byName = new Map(b.byName)
+      const prevKey = (previousName || '').trim().toLowerCase()
+      if (prevKey && byName.get(prevKey)?.id === row.id) byName.delete(prevKey)
+      const key = (row.name || '').trim().toLowerCase()
+      if (key && row.id) byName.set(key, row)
+      const codes = row.item_code && !b.codes.includes(row.item_code) ? [...b.codes, row.item_code] : b.codes
+      return { byName, codes }
+    })
+  }
+
   async function writeItem(editingId, payload, onSaved) {
     setSaving(true)
     showError('')
@@ -739,9 +765,14 @@ export default function Items() {
         setSaving(false)
         return false
       }
+      rememberInBook({ id: editingId, name: payload.name, is_sub_recipe: false }, items.find(i => i.id === editingId)?.name)
     } else {
-      const { error } = await scopedInsert('items', { ...payload, item_code: getNextItemCode() })
+      const itemCode = getNextItemCode()
+      // `single` returns the row, so the book can key the new name to its id: an edit of the item
+      // just added must not read as a clash with itself.
+      const { data, error } = await scopedInsert('items', { ...payload, item_code: itemCode }, { single: true })
       if (error) { showSaveError(error); setSaving(false); return false }
+      rememberInBook({ id: data?.id, name: payload.name, item_code: itemCode, is_sub_recipe: false })
     }
     setSaving(false)
     onSaved?.()
@@ -1272,7 +1303,7 @@ export default function Items() {
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
                   <th>Status</th>
-                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead, which keeps its history but also leaves it out of stock valuation. R = Recipes, P = Purchases, OS/CS = Stock counts, W = Wastage, SM = Staff Meals, RQ = Requisitions, VR = Vendor Returns, PAR = Par Levels, PO = Purchase Orders, MV = Stock Movements." width={320}>Used In</Tip></th>
+                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. R = Recipes, P = Purchases, OS/CS = Stock counts, W = Wastage, SM = Staff Meals, RQ = Requisitions, VR = Vendor Returns, PAR = Par Levels, PO = Purchase Orders, MV = Stock Movements." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
               </thead>

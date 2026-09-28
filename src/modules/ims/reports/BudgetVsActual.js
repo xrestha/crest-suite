@@ -12,7 +12,7 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { budgetActuals } from './budgetActuals'
 import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
@@ -29,6 +29,9 @@ export default function BudgetVsActual() {
   const [saving, setSaving] = useState({})     // { category_id: bool }
   const [dirty, setDirty] = useState({})       // { category_id: bool } — typed into since last save
   const [unbudgeted, setUnbudgeted] = useState(0)
+  // Spend on lines whose item Monthly Summary does not value either (a prep item's mirror row) —
+  // kept out of the Totals so they still tie, and named under the table (S792, FIGURES-9).
+  const [excluded, setExcluded] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [saveError, setSaveError] = useState(null)
@@ -69,7 +72,11 @@ export default function BudgetVsActual() {
     const catList = cats || categories
     setLoadError(null)
     const results = await Promise.all([
-      fetchAllRows(() => scopedFrom('items', 'id, category_id').eq('is_active', true).order('id')),
+      // Monthly Summary's item population exactly (S792, FIGURES-9): every non-sub-recipe item,
+      // HIDDEN ONES INCLUDED (D29 — hiding an item never takes its spend out of a past month). This
+      // read was `is_active = true` with no sub-recipe filter, the opposite on both counts, so its
+      // total could not tie to the Net Purchases it says it matches.
+      fetchAllRows(() => scopedFrom('items', 'id, category_id').eq('is_sub_recipe', false).order('id')),
       // `discount_amount` + the bill-key columns feed allocateBillDiscounts(). "Actual net" here
       // was gross − returns with the bill-level discount left in, so the figure a client checks
       // their budget against was higher than the Net Purchases figure Monthly Summary shows for
@@ -84,45 +91,23 @@ export default function BudgetVsActual() {
     // A failed read must not render NPR-0 actuals beside real budgets — or blank budget boxes a
     // save would then write zeros over (S612).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); setUnbudgeted(0); setDirty({}); return }
+    if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); setUnbudgeted(0); setExcluded(0); setDirty({}); return }
     const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = results
 
-    // NPR value per item from purchase_entries, NET of the bill's allocated discount
-    // (base units both sides — see item-master-rates.md).
-    const purchMap = {}
-    ;allocateBillDiscounts(purchases).forEach(p => {
-      purchMap[p.item_id] = (purchMap[p.item_id] || 0) + p.lineNet
-    })
-    const retMap = {}
-    ;(returns || []).forEach(r => {
-      retMap[r.item_id] = (retMap[r.item_id] || 0) + parseFloat(r.qty) * parseFloat(r.rate)
-    })
-
-    // Net purchase value per category.
+    // Net purchase value per category, NET of each bill's allocated discount (base units both
+    // sides — see item-master-rates.md), through budgetActuals.js so the arithmetic is tested
+    // against Monthly Summary's own.
     //
-    // `items.category_id` is NULLABLE, and the loop below only ever claimed items belonging to a
-    // real category — so every rupee spent on an uncategorised item fell out of the Actual column
-    // AND out of the Totals row, silently. The page then reported Under Budget on spend it had
-    // not counted, and its total disagreed with Monthly Summary's Net Purchases for the same
-    // period with nothing on either page saying why. Monthly Summary fixed this by grouping the
-    // orphans into a synthetic row; same answer here, and it is deliberately not budgetable —
-    // there is no category to set a budget against, so it reports what was spent and says so.
-    const actualMap = {}
-    catList.forEach(cat => {
-      const catItems = (items || []).filter(i => i.category_id === cat.id)
-      actualMap[cat.id] = catItems.reduce((s, i) => s + (purchMap[i.id] || 0) - (retMap[i.id] || 0), 0)
-    })
-    const uncatItems = (items || []).filter(i => !i.category_id)
-    const uncategorised = uncatItems.reduce((s, i) => s + (purchMap[i.id] || 0) - (retMap[i.id] || 0), 0)
-    // A purchase line whose item is inactive, or absent from the item master entirely, is claimed
-    // by no category either — count it rather than losing it, on the S567 rule that a rollup which
-    // silently fails to claim a row produces a believable wrong total.
-    const claimed = new Set((items || []).map(i => i.id))
-    const unclaimed = Object.entries(purchMap).reduce((s, [id, v]) => claimed.has(id) ? s : s + v, 0)
-      - Object.entries(retMap).reduce((s, [id, v]) => claimed.has(id) ? s : s + v, 0)
+    // `items.category_id` is NULLABLE, and a loop that only claimed items belonging to a real
+    // category let every rupee spent on an uncategorised item fall out of the Actual column AND
+    // the Totals row, silently. Those items are an unbudgetable row of their own, as Monthly
+    // Summary groups them into "Uncategorized": there is no category to set a budget against, so
+    // the row reports what was spent and says so.
+    const { byCategory, uncategorised, excluded: notValued } = budgetActuals({ items, categories: catList, purchases, returns })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    setActuals(actualMap)
-    setUnbudgeted(uncategorised + unclaimed)
+    setActuals(byCategory)
+    setUnbudgeted(uncategorised)
+    setExcluded(notValued)
 
     // Budget map: category_id → amount
     const budgetMap = {}
@@ -191,11 +176,12 @@ export default function BudgetVsActual() {
     : '—'
 
   const totalBudget   = categories.reduce((s, c) => s + (parseFloat(budgets[c.id]) || 0), 0)
-  // The Totals row is the client's whole net spend for the period, so it INCLUDES the unbudgeted
-  // remainder — that is what makes it reconcile against Monthly Summary's Net Purchases. The
-  // variance is deliberately measured against the budgeted categories only, since there is no
-  // budget for the remainder to be over or under; the row above the total names the gap rather
-  // than letting the two figures disagree silently (the S594 rule).
+  // The Totals row is the period's net spend over the items Monthly Summary values, so it INCLUDES
+  // the uncategorised remainder and EXCLUDES `excluded` — that is what makes it reconcile against
+  // Monthly Summary's Net Purchases (S792, FIGURES-9: before it, hidden items' spend was in this
+  // total and not in that one). The variance is deliberately measured against the budgeted
+  // categories only, since there is no budget for the remainder to be over or under; the row above
+  // the total names the gap rather than letting the two figures disagree silently (the S594 rule).
   const totalBudgetedActual = categories.reduce((s, c) => s + (actuals[c.id] || 0), 0)
   const totalActual   = totalBudgetedActual + unbudgeted
   const totalVariance = totalBudget - totalBudgetedActual
@@ -266,7 +252,7 @@ export default function BudgetVsActual() {
                   <th style={{ width: 36, textAlign: 'center', color: 'var(--theme-text2)' }}>S.No</th>
                   <th>Category</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Enter your target spend for this category. Saved automatically when you click outside the field.">Budget (NPR)</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Net purchases = gross purchases minus vendor returns for this category this period.">Actual Net (NPR)</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net purchases = gross purchases minus bill discounts minus vendor returns, for this category this period. Items you have since hidden still count in the months they were bought.">Actual Net (NPR)</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Budget − Actual. Positive (green) = under budget. Negative (red) = over budget. Not coloured while the month is still open — its spend is not final.">Variance (NPR)</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Variance as % of budget. Shows how far over or under your target you are." width={220}>Variance %</Tip></th>
                   <th style={{ textAlign: 'center' }}>Status</th>
@@ -328,16 +314,15 @@ export default function BudgetVsActual() {
                     </tr>
                   )
                 })}
-                {/* Spend that belongs to no budgetable category — an item with no category set,
-                    an item deactivated since the bill was entered, or a purchase line whose item
-                    is no longer in the master. It used to be dropped from the Actual column and
-                    from the Totals row alike, so this page's total could not be reconciled
-                    against Monthly Summary's Net Purchases and the reader was never told why. */}
+                {/* Spend on items with no category set. It used to be dropped from the Actual
+                    column and from the Totals row alike, so this page's total could not be
+                    reconciled against Monthly Summary's Net Purchases and the reader was never
+                    told why. A hidden item is no longer here (S792): it counts in its own category. */}
                 {unbudgeted !== 0 && (
                   <tr>
                     <td style={{ textAlign: 'center', color: 'var(--theme-text2)' }}>{categories.length + 1}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text2)' }}>
-                      <Tip text="Net purchases of items with no category set, items deactivated since the bill was entered, or lines whose item is no longer in the item master. Set a category on the item in Item Master to bring this spend into a budget line." width={280}>Uncategorised / unbudgetable</Tip>
+                      <Tip text="Net purchases of items with no category set. Monthly Summary lists the same spend as Uncategorized. Set a category on the item in Item Master to bring this spend into a budget line." width={280}>Uncategorised / unbudgetable</Tip>
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(unbudgeted)}</td>
@@ -354,7 +339,7 @@ export default function BudgetVsActual() {
                   <td></td>
                   <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                     {unbudgeted !== 0
-                      ? <Tip text="Budget totals the categories you have set one for. Actual is the period's whole net purchase value, including the unbudgetable row above — which is what lets it reconcile against Monthly Summary. Variance compares budget against the budgeted categories only." width={290}>Totals</Tip>
+                      ? <Tip text="Budget totals the categories you have set one for. Actual is the period's whole net purchase value, including the unbudgetable row above — the same figure as Monthly Summary's Net Purchases. Variance compares budget against the budgeted categories only." width={290}>Totals</Tip>
                       : 'Totals'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
@@ -374,6 +359,14 @@ export default function BudgetVsActual() {
               </tfoot>
             </table>
           </div>
+          {/* Named, not dropped (S792): a line Monthly Summary does not value either is kept out
+              of the Totals so the two still tie — and the reader is told it exists. */}
+          {excluded !== 0 && (
+            <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+              Not in the totals: {fmt(excluded)} of purchases of prep (sub-recipe) items. Monthly Summary leaves them out
+              too, because their raw ingredients are already counted.
+            </p>
+          )}
         </div>
       )}
     </div>

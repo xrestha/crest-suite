@@ -15,7 +15,7 @@ import { nepalCivilDate } from '../../../shared/nepalTime'
 import {
   EPS, SUPPLIER_CREDIT_MODE, isCreditRow, valueBillLines, groupIntoBills, allocatePayment,
   planSupplierLumpSum, supplierCreditSlots, billPaymentProblems, planBillPayment,
-  expandCreditPartners, linesToReopen,
+  expandCreditPartners, linesToReopen, linesToCloseByReturns,
 } from './payablesAllocation'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -100,6 +100,8 @@ export default function OutstandingPayables() {
   // this is not a refusal — it names the state the bill is now in. Page-level because load()
   // collapses the expanded row the pay form (and its own error slot) lives in (S682).
   const [settleWarn, setSettleWarn]       = useState(null)
+  // The bill being closed because it has nothing left to pay (S792, PURCHASES-8); null otherwise.
+  const [closingKey, setClosingKey]       = useState(null)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmBusy, setConfirmBusy]     = useState(false)
   const tabReq = useLatestRequest()
@@ -286,6 +288,8 @@ export default function OutstandingPayables() {
     // spread back across lines to the paisa, a negative remaining kept as a credit — lives in
     // payablesAllocation.js (S756 stage 3) so the supplier-credit lookup values a bill with the same
     // arithmetic as this table. Its comments carry the S510/S723/S747 history that used to sit here.
+    // `returnedByEntry` is at LIST rate on purpose: since S792 (owner decision D33) the helper
+    // credits each return at its bill's discounted price, so the discount is applied once, there.
     const enriched = valueBillLines(data || [], pmtMap, returnedByEntry, today)
     const byBill = {}
     enriched.forEach(e => { (byBill[e.billKey] = byBill[e.billKey] || []).push(e) })
@@ -475,6 +479,27 @@ export default function OutstandingPayables() {
       }
     }
     setSavingPayment(false)
+    load(activeTab)
+  }
+
+  // S792 (PURCHASES-8). A Credit bill with nothing left to pay — every item on it went back, or a
+  // return left the supplier owing US — can take no payment, and only a payment ever stamped
+  // `paid_at`, so it sat on this tab for ever under a red "90+ days" chip with no control that could
+  // close it. Closing stamps its unstamped lines with today's date (Nepal), which moves it to Paid
+  // History; a credit on it stays usable from there, since the supplier-credit read covers every
+  // bill the supplier has. Offered only when nothing is owed (linesToCloseByReturns), so it cannot
+  // close a bill that still has money on it.
+  async function closeSettledByReturns(bill) {
+    const ids = linesToCloseByReturns(bill)
+    if (ids.length === 0 || closingKey) return
+    setClosingKey(bill.key)
+    setSettleWarn(null)
+    const fail = await writePaidAt(ids, todayIso())
+    setClosingKey(null)
+    if (fail) {
+      // Chunks are not atomic, so name where the bill may be rather than claiming nothing changed.
+      setSettleWarn({ ...fail, text: `Bill #${bill.invoice_ref || '—'} could not be fully closed. It may still show under Outstanding with nothing to pay; reload the page and close it again if it is still listed. ${fail.text}` })
+    }
     load(activeTab)
   }
 
@@ -884,7 +909,7 @@ export default function OutstandingPayables() {
       <div className="stat-grid">
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: net of goods returned and any bill discount, plus 13% VAT on VAT-inclusive lines. A bill over-settled by a late return counts against this as a credit." width={280}>Total Remaining</Tip></div>
+            <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: less any bill discount, less goods returned at the discounted price the supplier charged for them, plus 13% VAT on VAT-inclusive lines. A bill over-settled by a late return counts against this as a credit." width={280}>Total Remaining</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {Object.keys(byVendor).length} vendor{Object.keys(byVendor).length !== 1 ? 's' : ''}</div>
           </div>
@@ -1127,12 +1152,16 @@ export default function OutstandingPayables() {
                                 <td>
                                   {b.isCredit
                                     ? <span className="badge badge-purple" style={{ whiteSpace: 'nowrap' }}>Credit</span>
+                                    // Not an aging chip (S792, PURCHASES-8): a red "90+ days" on a
+                                    // bill that owes nothing reads as the most urgent bill on the page.
+                                    : b.remaining <= EPS
+                                    ? <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Nothing owed</span>
                                     : b.isPartial
                                     ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-purple-text)', background: 'color-mix(in srgb, var(--theme-purple) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
                                     : <span style={{ fontSize: 11, fontWeight: 700, color: b.aging.color, background: `color-mix(in srgb, ${b.aging.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.aging.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.aging.label}</span>
                                   }
                                 </td>
-                                <td style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Close' : '＋ Pay Bill'}</td>
+                                <td style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : b.remaining <= EPS ? '▼ Details' : '＋ Pay Bill'}</td>
                               </>) : (<>
                                 <td style={{ color: 'var(--theme-green-text)', fontWeight: 600, fontSize: 13 }}>
                                   {fmtBsDate(b.settledOn) || '—'}
@@ -1262,7 +1291,22 @@ export default function OutstandingPayables() {
                                       <div style={{ fontSize: 12, color: b.isCredit ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>
                                         {b.isCredit
                                           ? `Over-settled by ${fmt(-b.remaining)} — goods were returned after this bill was paid, so the supplier owes that back. There is nothing to pay here. To use the credit, open another unpaid bill from ${b.vendorName} and fill in "Use supplier credit", or ask the supplier for a credit note.`
-                                          : 'Nothing left to pay on this bill.'}
+                                          : 'Nothing left to pay on this bill — the goods on it were returned, or what was paid already covers what is owed.'}
+                                        {/* S792 (PURCHASES-8): no payment can ever close a bill like this,
+                                            so it gets its own way off this tab. */}
+                                        {linesToCloseByReturns(b).length > 0 && (
+                                          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                            <Tip text={b.isCredit
+                                              ? "Moves this bill to Paid History, dated today. The supplier's credit on it stays: it is still offered as \"Use supplier credit\" on their other unpaid bills."
+                                              : 'Moves this bill to Paid History, dated today. Nothing is paid and no payment is recorded — there is nothing left to pay on it.'} width={280}>
+                                              <button className="btn btn-ghost" style={{ padding: '6px 14px', fontSize: 12 }}
+                                                onClick={() => closeSettledByReturns(b)}
+                                                disabled={closingKey != null}>
+                                                {closingKey === b.key ? 'Closing…' : 'Close this bill'}
+                                              </button>
+                                            </Tip>
+                                          </div>
+                                        )}
                                       </div>
                                     )}
 

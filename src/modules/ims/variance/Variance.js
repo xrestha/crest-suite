@@ -12,7 +12,8 @@ import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { buildUsageMap } from '../stockcount/stockReportCalc'
-import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
+import { linkedItemIdsOf, varianceRowBand, hasVarianceActivity, isUncountedGap, closingCountMap } from './variancePopulation'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -36,24 +37,10 @@ function dispPurch(baseQty, item) {
 // four columns along, and this page's Flagged count disagreed with Theoretical vs Actual's
 // "Items Over Tolerance" for the same month. Everything reads `band.flag` now.
 //
-// Returns varianceBand's object plus `flag`: 'over' | 'under' | 'ok' | 'unmeasured' | 'no_recipe'.
-function bandOfRow(row, settings) {
-  if (!row.measured) return { ...varianceBand(null, null, settings, { measured: false }), flag: 'unmeasured' }
-  // Owner decision D17 (S756): an item that appears in NO recipe (gas, foil, napkins) has a
-  // theoretical usage of 0 by construction, so every month it was used it read as a red Over —
-  // the loudest verdict on the page, permanently, for stock nothing was ever expected to explain.
-  // It gets its own grey state, stays listed with what was used, and is kept out of the flagged
-  // count and the loss total.
-  if (row.noRecipe) return { ...varianceBand(null, null, settings, { measured: false }), flag: 'no_recipe' }
-  // Recipe-linked but nothing sold this month: variance % is undefined (÷ 0), yet any use is past
-  // every tolerance. A signed surrogate lets the band still apply the materiality floor, so a
-  // NPR 30 trace reads ≈ rather than Over. Display keeps printing "—" for the percentage.
-  const pct = row.theoreticalUsed > 0 ? row.variancePct
-    : row.actualUsed === 0 ? 0
-    : Math.sign(row.actualUsed) * Number.MAX_SAFE_INTEGER
-  const b = varianceBand(pct, row.value, settings, { measured: true })
-  return { ...b, flag: b.key === 'over' || b.key === 'under' ? b.key : 'ok' }
-}
+// That verdict — D17's "no recipe linked" state and the signed surrogate for "its dishes sold
+// nothing but the stock fell" included — lives in ./variancePopulation.js since S792 (FIGURES-4 /
+// D36), unchanged, so Theoretical vs Actual and Shrinkage judge the same items the same way
+// rather than keeping copies of it.
 
 const FLAG_TEXT = { over: 'over', under: 'under', ok: 'ok', unmeasured: 'not measurable', no_recipe: 'no recipe linked' }
 
@@ -202,15 +189,19 @@ export default function Variance() {
     // Every item that any recipe (at any depth) consumes. D17's "no recipe linked" test is this
     // set, NOT "theoretical usage was 0 this month" — a recipe ingredient whose dishes did not sell
     // is still judged, because stock vanishing with nothing sold is exactly what this page is for.
-    const linkedItemIds = new Set()
-    Object.values(breakdown).forEach(ings => (ings || []).forEach(({ item_id }) => linkedItemIds.add(item_id)))
+    // An item reached only through an option (extra cheese on a dish whose recipe has none) is
+    // still something sales explain, so it is judged rather than parked as "no recipe linked"
+    // (S758). One definition, shared with Theoretical vs Actual and Shrinkage (S792, D36).
+    const linkedItemIds = linkedItemIdsOf(breakdown, selectDepletingSales(sales || []), explosion)
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
-    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
+    // Counts only (S792): a row whose physical_qty is NULL is not a count, and reading it as 0 made
+    // an uncounted item's whole shelf a "loss" — see closingCountMap.
+    const closeMap = closingCountMap(closing)
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // Local, not the state setter's value: setState is async, so the row builder below would read
-    // the PREVIOUS period's answer.
-    const hasClosingRows = (closing || []).length > 0
+    // the PREVIOUS period's answer. Counts, not rows: a month holding only NULL rows is uncounted.
+    const hasClosingRows = Object.keys(closeMap).length > 0
     setHasClosing(hasClosingRows)
 
     // PATCHED: build purchMap net of returns
@@ -238,13 +229,6 @@ export default function Variance() {
     // depleting rows only, and adds each customized row's option deltas × qty (S758): a Half or an
     // extra-cheese plate consumes its options' stock lines, not the plain recipe.
     const theoreticalMap = buildUsageMap(sales || [], breakdown, explosion)
-
-    // An item reached only through an option (extra cheese on a dish whose recipe has none) is
-    // still something sales explain, so it is judged rather than parked as "no recipe linked" (S758).
-    selectDepletingSales(sales || []).forEach(s => {
-      if (!s.ingredient_deltas) return
-      deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id }) => linkedItemIds.add(item_id))
-    })
 
     const rows = (items || []).map(item => {
       const openQty      = openMap[item.id] || 0
@@ -294,7 +278,7 @@ export default function Variance() {
     const totalTheoreticalValue = judgedRows.reduce((s, r) => s + r.theoreticalUsed * r.rate, 0)
     const totalVarianceValue  = judgedRows.reduce((s, r) => s + r.value, 0)
     // An item with no stock presence at all was never going to be counted and is not a gap.
-    const uncounted           = rows.filter(r => !r.hasCount && (r.openQty > 0 || r.purchQty > 0 || r.theoreticalUsed > 0)).length
+    const uncounted           = rows.filter(isUncountedGap).length
 
     setSummary({
       totalActual, totalTheoretical, totalTheoreticalValue, totalVarianceValue,
@@ -303,9 +287,9 @@ export default function Variance() {
     setReport(rows)
   }
 
-  const hasActivity = r => r.actualUsed !== 0 || r.theoreticalUsed > 0 || r.openQty > 0 || r.purchQty > 0
+  const hasActivity = hasVarianceActivity
   // One band per row per data/settings change, read by the cells, the badge, the count and the filter.
-  const banded = useMemo(() => report.map(r => ({ ...r, band: bandOfRow(r, settings) })), [report, settings])
+  const banded = useMemo(() => report.map(r => ({ ...r, band: varianceRowBand(r, settings) })), [report, settings])
   const flaggedCount = banded.filter(r => r.band.flag === 'over' || r.band.flag === 'under').length
   const noRecipeCount = banded.filter(r => r.band.flag === 'no_recipe' && hasActivity(r)).length
 

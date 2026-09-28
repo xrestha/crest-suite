@@ -21,6 +21,8 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
 import { FilterChips } from '../../../components/Tabs'
+import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
+import PanPriceBanner from './PanPriceBanner'
 
 
 function vatOf(r) {
@@ -54,7 +56,14 @@ export default function MenuPricing() {
   // refuse the write otherwise.
   const customizationOn = !!clientModules?.customization
   const [customizeFor, setCustomizeFor] = useState(null)
-  const { settings } = useSettings()
+  const settingsCtx = useSettings()
+  const { settings } = settingsCtx
+  // What a typed menu price means on this outlet (S792, RECIPES-2 / D31), in BOTH branches below:
+  // 'vat' — it includes the dish's VAT, taken off before it is stored; 'pan' — a PAN-bill outlet,
+  // where the till adds no VAT, so it is stored whole with vat_rate 0; null — not known yet, and no
+  // price is saved. Before this, this page divided a PAN-bill outlet's NPR 500 by 1.13 and the till
+  // charged NPR 442 while the page kept showing "Current Price NPR 500". menuPriceVat.js.
+  const vatMode = vatModeOf(settingsCtx, clientId)
   // `fcFigure` is the one rendered form of a banded food-cost figure — colour, the ✓/△/▲ mark and
   // the band name as a title, together. This page used to take the three apart into its own
   // wrappers and reassemble them at each cell, which is exactly the shape that lets a call site
@@ -219,9 +228,10 @@ export default function MenuPricing() {
       // POS-only clients can't link Item Master ingredients (no IMS access), so a recipe with
       // no ingredient-derived cost falls back to the manually entered cost_price from Add Item.
       const cost    = costMap[r.id] || parseFloat(r.cost_price) || 0
-      const vat     = vatOf(r)
+      // The dish's OWN rate. What the guest pays on top of the stored price depends on the outlet
+      // too, so `vat` and `inclVat` are worked out in `priced` below, where vatMode is known (S792).
+      const storedVat = vatOf(r)
       const exVat   = parseFloat(r.selling_price || 0)
-      const inclVat = exVat > 0 ? exVat * (1 + vat) : 0
       // NULL, not 0, when there is no cost to divide by the price. `(0 / price) * 100` is a real
       // 0.0%, and fcBand bands 0% as Healthy — so a dish with no ingredients and no cost price
       // printed "0.0% ✓" in green and sorted to the top of the best performers. This page's own
@@ -230,7 +240,7 @@ export default function MenuPricing() {
       const fcPct   = exVat > 0 && cost > 0 ? (cost / exVat) * 100 : null
       // pos_enabled defaults to true if null (column newly added)
       // ingCost (S760): the ingredient-only cost, the fixed part of a build-your-own dish's range.
-      return { ...r, cost, ingCost: costMap[r.id] || 0, vat, exVat, inclVat, fcPct, pos_enabled: r.pos_enabled !== false }
+      return { ...r, cost, ingCost: costMap[r.id] || 0, storedVat, exVat, fcPct, pos_enabled: r.pos_enabled !== false }
     })
 
     setRecipes(processed)
@@ -255,9 +265,21 @@ export default function MenuPricing() {
     recipes.forEach(r => { tabCounts[r.category] = (tabCounts[r.category] || 0) + 1 })
     return { tabs: ['All', ...Object.keys(tabCounts).sort()], tabCounts }
   }, [recipes])
+  // Each row with the price the GUEST pays (S792, D31): `vat` is the VAT the till adds on top of the
+  // stored price — the dish's own rate on a VAT outlet, none on a PAN-bill one — and `inclVat` is
+  // that price. Every "Current Price", draft conversion, sort and export below reads these, so the
+  // page shows what the till charges. With the mode unknown the stored rate is shown (display only;
+  // no price is saved in that state).
+  const priced = useMemo(() => recipes.map(r => {
+    const vat = guestVatRate(r.storedVat, vatMode)
+    return { ...r, vat, inclVat: r.exVat > 0 ? r.exVat * (1 + vat) : 0 }
+  }), [recipes, vatMode])
+  // S792 (D31): the dishes the till charges less than the menu price the owner last saw here.
+  const panMismatches = useMemo(() => vatMode === 'pan' ? panPriceMismatches(recipes) : [], [vatMode, recipes])
+
   const display = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const list = recipes.filter(r =>
+    const list = priced.filter(r =>
       (catTab === 'All' || r.category === catTab) &&
       (!q || r.name.toLowerCase().includes(q) || (r.category || '').toLowerCase().includes(q))
     )
@@ -300,7 +322,7 @@ export default function MenuPricing() {
       .map((r, i) => [r, pos.has(r.id) ? pos.get(r.id) : frozenIds.length + i])
       .sort((a, b) => a[1] - b[1])
       .map(([r]) => r)
-  }, [recipes, catTab, search, sortKey, sortDir, drafts, frozenIds])
+  }, [priced, catTab, search, sortKey, sortDir, drafts, frozenIds])
 
   function toggleSort(key) {
     setFrozenIds(null)
@@ -341,10 +363,19 @@ export default function MenuPricing() {
   async function saveRow(recipe) {
     const raw = parseFloat(drafts[recipe.id])
     if (!raw || raw <= 0) { setErrors(e => ({ ...e, [recipe.id]: 'Enter a valid price' })); return }
-    const newExVat = raw / (1 + recipe.vat)
+    // S792 (D31): stored on the outlet's basis — the dish's VAT taken off on a VAT outlet (its
+    // vat_rate untouched, as before), whole with vat_rate 0 on a PAN-bill one. Unknown: not saved.
+    const stored = storedFromMenuPrice(raw, recipe.storedVat, vatMode)
+    if (!stored) {
+      setErrors(e => ({ ...e, [recipe.id]: 'Not saved yet' }))
+      setPageError(`“${recipe.name}” — the new price was not saved. ${VAT_MODE_UNKNOWN_TEXT}`)
+      return
+    }
+    const newExVat = stored.selling_price
+    const patch = vatMode === 'pan' ? { selling_price: newExVat, vat_rate: 0 } : { selling_price: newExVat }
     setSaving(s => ({ ...s, [recipe.id]: true }))
     setPageError(null)
-    const { error } = await scopedUpdate('recipes', { selling_price: parseFloat(newExVat.toFixed(4)) })
+    const { error } = await scopedUpdate('recipes', patch)
       .eq('id', recipe.id)
     if (error) {
       // Was the bare string 'Save failed', which names neither what state the price is in nor what
@@ -361,7 +392,8 @@ export default function MenuPricing() {
       setRecipes(rs => rs.map(r => {
         if (r.id !== recipe.id) return r
         const newFcPct = newExVat > 0 && r.cost > 0 ? (r.cost / newExVat) * 100 : null
-        return { ...r, exVat: newExVat, inclVat: raw, fcPct: newFcPct, selling_price: newExVat }
+        // `inclVat` is derived in `priced`; the stored rate moves only on a PAN-bill outlet.
+        return { ...r, exVat: newExVat, fcPct: newFcPct, selling_price: newExVat, ...(vatMode === 'pan' ? { vat_rate: 0, storedVat: 0 } : {}) }
       }))
       setDrafts(d => { const n = { ...d }; delete n[recipe.id]; return n })
     }
@@ -373,7 +405,10 @@ export default function MenuPricing() {
     if (!addForm.name.trim()) { setAddError('Name is required.'); return }
     const priceNum = parseFloat(addForm.price)
     if (!priceNum || priceNum <= 0) { setAddError('Enter a valid price.'); return }
-    const exVat = priceNum / (1 + addForm.vatRate)
+    // S792 (D31): the typed price on the outlet's basis — shared by both branches' dialogs. On a
+    // PAN-bill outlet the VAT choice is not offered and the price is stored whole with vat_rate 0.
+    const stored = storedFromMenuPrice(priceNum, addForm.vatRate, vatMode)
+    if (!stored) { setAddError(`Nothing was saved. ${VAT_MODE_UNKNOWN_TEXT}`); return }
     const costPriceNum = parseFloat(addForm.costPrice)
     setAddSaving(true); setAddError('')
     const payload = {
@@ -383,8 +418,8 @@ export default function MenuPricing() {
       // button stuck on Saving… and nothing was written (S756). Editing an uncategorised dish keeps it
       // uncategorised rather than quietly filing it under Other.
       category:      String(addForm.category ?? '').trim() || (editingId ? null : 'Other'),
-      selling_price: parseFloat(exVat.toFixed(4)),
-      vat_rate:      addForm.vatRate,
+      selling_price: stored.selling_price,
+      vat_rate:      stored.vat_rate,
       cost_price:    costPriceNum > 0 ? costPriceNum : null,
     }
     let error = null
@@ -486,6 +521,53 @@ export default function MenuPricing() {
   // does not have grants nothing. Layout.js's `menuPricingAccess` nav predicate is the same set.
   if (!(isAdmin || isOwner || hasPosAccess('manager') || hasImsAccess('manager'))) return <Navigate to="/dashboard" replace />
 
+  // S792 (RECIPES-2 / D31) — rendered in BOTH returns below, which is why they are built once here
+  // (a fix that reached one branch only is S690's lesson on this exact page).
+  const pan = vatMode === 'pan'
+  // The Add/Edit dialog's VAT choice. A PAN-bill outlet has none to make: the till adds no VAT
+  // whatever a dish's rate says, so offering "VAT 13%" would only re-create the price the guest is
+  // not charged. While the outlet's basis is unknown the choice is shown but not pressable.
+  const vatChoiceBlock = pan ? (
+    <div>
+      <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</span>
+      <Tip text="This outlet is set up as not VAT-registered, so it gives PAN bills and the till adds no VAT to any item. If that is wrong, ask Crest support to change the outlet's VAT registration." width={280}>
+        <span style={{ fontSize: 13, color: 'var(--theme-text1)' }}>None — PAN bill</span>
+      </Tip>
+    </div>
+  ) : (
+    <div>
+      <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</span>
+      <div role="group" aria-label="VAT" style={{ display: 'flex', gap: 8 }}>
+        {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
+          <button key={opt.val} aria-pressed={addForm.vatRate === opt.val} disabled={vatMode == null} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))}
+            style={{
+              flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
+              background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+              color: addForm.vatRate === opt.val ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
+              border: `1px solid ${addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+              fontWeight: addForm.vatRate === opt.val ? 700 : 400,
+            }}>{opt.label}</button>
+        ))}
+      </div>
+    </div>
+  )
+  const addPriceLabel = pan ? `Menu Price (${PAN_LABEL}) *` : addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'
+  const addPriceNote = pan
+    ? <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>What the guest pays — stored as typed.</div>
+    : vatMode == null
+      ? <div role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>△ {VAT_MODE_UNKNOWN_TEXT}</div>
+      : addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0
+        ? <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}</div>
+        : null
+  // A row still carrying a VAT rate on a PAN-bill outlet: the till charges the price shown, and the
+  // mark says what the menu showed before, so the row can be found without the banner.
+  const panMark = r => pan && r.storedVat > 0 && r.exVat > 0 ? (
+    <Tip text={`Priced with VAT taken off: the menu showed NPR ${Math.round(r.exVat * (1 + r.storedVat))}, and the till charges the price here. Re-enter the price guests should pay.`} width={260}>
+      <span style={{ color: 'var(--theme-amber-text)', marginLeft: 4 }}>△</span>
+    </Tip>
+  ) : null
+  const panCaption = <Tip text="This outlet gives PAN bills, so the till adds no VAT: the price shown is what the guest pays, and FC% is food cost ÷ that price." width={260}> · PAN bill (no VAT)</Tip>
+
   /* ── POS-only view (no IMS) ─────────────────────────────────────────────── */
   if (!clientModules?.ims) return (
     <div className="page-container">
@@ -507,6 +589,9 @@ export default function MenuPricing() {
       )}
 
       <ActionError error={pageError} />
+      {!loading && !loadError && (
+        <PanPriceBanner mismatches={panMismatches} fixHint="Open Edit on each one and save the price guests should pay — it is then stored as typed." />
+      )}
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
         <input
@@ -561,7 +646,7 @@ export default function MenuPricing() {
                   <Tip text="What this item costs you to buy/produce, entered via Edit. Used to value Complimentary Slips and comp reporting." width={260}>Cost Price</Tip>
                 </th>
                 <th style={{ textAlign: 'right', width: 140 }}>
-                  <Tip text="VAT-inclusive menu price." width={180}>Price</Tip>
+                  <Tip text={pan ? 'What the guest pays. This outlet gives PAN bills, so the till adds no VAT.' : 'VAT-inclusive menu price.'} width={180}>Price</Tip>
                 </th>
               </tr>
             </thead>
@@ -578,7 +663,7 @@ export default function MenuPricing() {
                     <strong>{r.name}</strong>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                       {r.category}
-                      {r.vat > 0
+                      {pan ? panCaption : r.vat > 0
                         ? <Tip text={`Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT.`} width={200}> · {vatLabel(r.vat)}</Tip>
                         : <Tip text="No VAT on this item." width={160}> · No VAT</Tip>}
                       {' · '}
@@ -608,6 +693,7 @@ export default function MenuPricing() {
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
                     {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                    {panMark(r)}
                   </td>
                 </tr>
               ))}
@@ -633,7 +719,7 @@ export default function MenuPricing() {
               style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', marginBottom: 10, flexShrink: 0 }}
             />
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {recipes
+              {priced
                 .filter(r => r.id !== suggestModal.id && r.name.toLowerCase().includes(pairingSearch.toLowerCase()))
                 .map(r => (
                   <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: pairingDraft.has(r.id) ? 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))' : 'transparent' }}>
@@ -679,33 +765,16 @@ export default function MenuPricing() {
                     .filter((v, i, a) => a.indexOf(v) === i).map(c => <option key={c} value={c} />)}
                 </datalist>
               </div>
-              <div>
-                <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</span>
-                <div role="group" aria-label="VAT" style={{ display: 'flex', gap: 8 }}>
-                  {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
-                    <button key={opt.val} aria-pressed={addForm.vatRate === opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))} style={{
-                      flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
-                      background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                      color: addForm.vatRate === opt.val ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
-                      border: `1px solid ${addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                      fontWeight: addForm.vatRate === opt.val ? 700 : 400,
-                    }}>{opt.label}</button>
-                  ))}
-                </div>
-              </div>
+              {vatChoiceBlock}
               <div>
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f3">
-                  {addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'}
+                  {addPriceLabel}
                 </label>
                 <input id="menupr-f3" type="number" min="0" step="any" value={addForm.price}
                   onChange={e => setAddForm(f => ({ ...f, price: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. 290"
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
-                {addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
-                    Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}
-                  </div>
-                )}
+                {addPriceNote}
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f4">
@@ -806,13 +875,15 @@ export default function MenuPricing() {
       'On POS': r.pos_enabled ? 'Yes' : 'No',
       'Item': r.name,
       'Category': r.category || '',
-      'VAT': vatLabel(r.vat),
+      // S792 (D31): on a PAN-bill outlet the sheet's prices are what the guest pays, with no VAT —
+      // the price sent back in New Price is stored as typed, so the header must say so.
+      'VAT': pan ? 'None — PAN bill' : vatLabel(r.vat),
       'Food Cost (NPR)': r.cost > 0 ? Math.round(r.cost * 100) / 100 : '',
-      'Current Price incl VAT (NPR)': r.inclVat > 0 ? Math.round(r.inclVat) : '',
+      [pan ? 'Current Price, no VAT (NPR)' : 'Current Price incl VAT (NPR)']: r.inclVat > 0 ? Math.round(r.inclVat) : '',
       // Blank, not "0.0%", where there is no cost to divide — the sheet is sent out and priced
       // against, and a 0% food cost reads as a fact rather than as a missing recipe.
       'FC %': r.fcPct !== null ? `${r.fcPct.toFixed(1)}%` : '',
-      'New Price (incl VAT)': '',
+      [pan ? 'New Price (no VAT)' : 'New Price (incl VAT)']: '',
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
@@ -870,6 +941,9 @@ export default function MenuPricing() {
       )}
 
       <ActionError error={pageError} className="no-print" />
+      {!loading && !loadError && (
+        <PanPriceBanner mismatches={panMismatches} fixHint="Type the price guests should pay in each dish's New Price box and press Save — it is then stored as typed." />
+      )}
 
       {/* Search + category tabs */}
       <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
@@ -930,11 +1004,15 @@ export default function MenuPricing() {
                 {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items, or to 86 it for the day when you run out — just remember to turn it back on once restocked.', 'On POS', 72, 'pos')}
                 {th('left',  'Recipe name, category, and VAT status. A VAT-registered item\'s selling price includes VAT at the rate set on that item. No VAT items are sold at the price as entered.', 'Item', undefined, 'name')}
                 {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100, 'cost')}
-                {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120, 'price')}
-                {th('right', `Food cost ÷ ex-VAT selling price. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — the thresholds set in Settings → Thresholds. A plate of momo costing NPR 105 sold at NPR 300 is 35%.`, 'FC %', 80, 'fc')}
-                {th('right', 'Enter a new VAT-inclusive menu price. The ex-VAT price and FC% are back-calculated automatically. Press Enter to save.', 'New Price (incl VAT)', 150)}
+                {th('right', pan
+                  ? 'What the guest pays now. This outlet gives PAN bills, so the till adds no VAT to the stored price. △ marks a dish priced with VAT taken off before.'
+                  : 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120, 'price')}
+                {th('right', `Food cost ÷ ${pan ? 'the price the guest pays' : 'ex-VAT selling price'}. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — the thresholds set in Settings → Thresholds. A plate of momo costing NPR 105 sold at NPR 300 is 35%.`, 'FC %', 80, 'fc')}
+                {th('right', pan
+                  ? 'Enter the new price the guest pays. It is stored as typed (PAN bill, no VAT), and FC% is worked out from it. Press Enter to save.'
+                  : 'Enter a new VAT-inclusive menu price. The ex-VAT price and FC% are back-calculated automatically. Press Enter to save.', pan ? 'New Price' : 'New Price (incl VAT)', 150)}
                 {th('right', 'Projected FC% at the new price. Updates live as you type.', 'New FC %', 90, 'newFc')}
-                {th('right', 'Difference between new and current VAT-inclusive price. Green = price increase, red = price decrease.', 'Change', 90, 'change')}
+                {th('right', `Difference between new and current ${pan ? '' : 'VAT-inclusive '}price. Green = price increase, red = price decrease.`, 'Change', 90, 'change')}
                 {th(null, null, '', 72)}
               </tr>
             </thead>
@@ -986,7 +1064,7 @@ export default function MenuPricing() {
                       {isByo && <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                         {r.category}
-                        {r.vat > 0
+                        {pan ? panCaption : r.vat > 0
                           ? <Tip text={`VAT-registered item. Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT. FC% is calculated on the ex-VAT portion.`} width={260}> · {vatLabel(r.vat)}</Tip>
                           : <Tip text="No VAT on this item. Menu price = ex-VAT price. FC% = food cost ÷ full selling price." width={240}> · No VAT</Tip>
                         }
@@ -1017,6 +1095,7 @@ export default function MenuPricing() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                      {panMark(r)}
                     </td>
                     {/* "—" covers two different absences now: no price to divide by, and no cost
                         to divide. The second used to print 0.0% ✓ in green. */}
@@ -1039,6 +1118,9 @@ export default function MenuPricing() {
                         className="print-blank-input"
                         type="number" min="0" step="any"
                         value={draft !== undefined ? draft : ''}
+                        // S792: nothing can be priced while the outlet's VAT basis is unknown.
+                        disabled={vatMode == null}
+                        title={vatMode == null ? VAT_MODE_UNKNOWN_TEXT : undefined}
                         placeholder={r.inclVat > 0 ? r.inclVat.toFixed(0) : '0'}
                         onChange={e => setDraft(r.id, e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && changed && saveRow(r)}
@@ -1082,7 +1164,7 @@ export default function MenuPricing() {
                   </tr>
                   {byo && !byo.empty && byoOpen && (
                     <tr id={`mp-byo-${r.id}`}>
-                      <td colSpan={10}><BuildCostDetail range={byo} settings={settings} /></td>
+                      <td colSpan={10}><BuildCostDetail range={byo} settings={settings} vatNote={!pan} /></td>
                     </tr>
                   )}
                   </Fragment>
@@ -1136,25 +1218,11 @@ export default function MenuPricing() {
                 </datalist>
               </div>
 
-              <div>
-                <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</span>
-                <div role="group" aria-label="VAT" style={{ display: 'flex', gap: 8 }}>
-                  {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
-                    <button key={opt.val} aria-pressed={addForm.vatRate === opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))}
-                      style={{
-                        flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
-                        background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                        color: addForm.vatRate === opt.val ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
-                        border: `1px solid ${addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                        fontWeight: addForm.vatRate === opt.val ? 700 : 400,
-                      }}>{opt.label}</button>
-                  ))}
-                </div>
-              </div>
+              {vatChoiceBlock}
 
               <div>
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f7">
-                  {addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'}
+                  {addPriceLabel}
                 </label>
                 <input id="menupr-f7"
                   type="number" min="0" step="any"
@@ -1164,11 +1232,7 @@ export default function MenuPricing() {
                   placeholder="e.g. 290"
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
                 />
-                {addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
-                    Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}
-                  </div>
-                )}
+                {addPriceNote}
               </div>
 
               <ActionError error={addError} />

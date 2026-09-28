@@ -1,7 +1,7 @@
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 import {
   acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangibleAmortization,
-  parseAdDateLocal,
+  parseAdDateLocal, intangibleAmortizationForYear, computeIntangiblePool, priorPoolRun, fiscalYearOfAdDate,
 } from './taxPoolCompute'
 
 const FY_START = 2082 // fiscal year 2082/83: Shrawan 2082 -> Ashadh 2083
@@ -166,5 +166,97 @@ describe('computeIntangibleAmortization', () => {
     })
     expect(result.annual_amortization).toBe(0)
     expect(result.first_year_amount).toBe(0)
+  })
+})
+
+// S792 (COSTS-6): Pool E stops at the end of each asset's useful life.
+describe('intangibleAmortizationForYear', () => {
+  const stored = (y, m, d) => formatAd(bsToAd(y, m, d))
+  const yearsOf = (acquisitionDate, cost, life, fromFy, n) =>
+    Array.from({ length: n }, (_, i) => intangibleAmortizationForYear({ cost, usefulLifeYears: life, acquisitionDate, fiscalYearStartBs: fromFy + i }).amount)
+
+  test('software 30,000 over 3 years bought in Shrawan 2079: three full years, then nothing', () => {
+    expect(yearsOf(stored(2079, 4, 10), 30000, 3, 2079, 5)).toEqual([10000, 10000, 10000, 0, 0])
+  })
+
+  test('bought in Magh: a half first year leaves a half final year, and the total is the cost', () => {
+    const years = yearsOf(stored(2079, 10, 5), 30000, 3, 2079, 5)
+    expect(years).toEqual([5000, 10000, 10000, 5000, 0])
+    expect(years.reduce((s, v) => s + v, 0)).toBe(30000)
+  })
+
+  test('a cost that does not divide evenly leaves no stray paisa after its last year', () => {
+    const years = yearsOf(stored(2079, 4, 10), 10000, 3, 2079, 4)
+    expect(years[3]).toBe(0)
+    expect(years.reduce((s, v) => s + v, 0)).toBeCloseTo(10000, 2)
+  })
+
+  test('nothing in a year before the one it was bought in', () => {
+    const r = intangibleAmortizationForYear({ cost: 30000, usefulLifeYears: 3, acquisitionDate: stored(2083, 4, 1), fiscalYearStartBs: FY_START })
+    expect(r).toEqual({ amount: 0, acquiredThisYear: false })
+  })
+
+  test('flags the year it was bought', () => {
+    expect(intangibleAmortizationForYear({ cost: 30000, usefulLifeYears: 3, acquisitionDate: stored(2082, 6, 1), fiscalYearStartBs: FY_START }).acquiredThisYear).toBe(true)
+  })
+})
+
+describe('computeIntangiblePool', () => {
+  const stored = (y, m, d) => formatAd(bsToAd(y, m, d))
+  const software = { tax_pool: 'E', status: 'active', total_cost: 30000, useful_life_years: 3, acquisition_date: stored(2080, 4, 10) }
+
+  test('never deducts more than the pool holds', () => {
+    // FY 82/83 is the software's third year (10,000 scheduled), but the pool opened at 0.
+    const e = computeIntangiblePool({ assets: [software], openingWdv: 0, fiscalYearStartBs: FY_START })
+    expect(e.scheduled).toBe(10000)
+    expect(e.depreciation_amount).toBe(0)
+    expect(e.closing_wdv).toBe(0)
+  })
+
+  test('a live pool is charged the year\'s amortization; a spent asset adds nothing; this year\'s purchase is an addition', () => {
+    const spent = { ...software, acquisition_date: stored(2078, 4, 10) } // its three years ended with FY 80/81
+    const bought = { tax_pool: 'E', status: 'active', total_cost: 12000, useful_life_years: 4, acquisition_date: stored(2082, 10, 1) }
+    const other = { tax_pool: 'D', status: 'active', total_cost: 99999, useful_life_years: 1, acquisition_date: stored(2082, 5, 1) }
+    const e = computeIntangiblePool({ assets: [software, spent, bought, other], openingWdv: 10000, fiscalYearStartBs: FY_START })
+    expect(e.additions).toBe(12000)
+    expect(e.scheduled).toBe(10000 + 1500) // software's last year + half of 3,000 for a Magh purchase
+    expect(e.depreciation_base).toBe(22000)
+    expect(e.depreciation_amount).toBe(11500)
+    expect(e.closing_wdv).toBe(10500)
+  })
+})
+
+// S792 (COSTS-5): the prior year's run, and whether a missing one is a skipped year.
+describe('priorPoolRun', () => {
+  test('the prior year posted: its latest run, no gap', () => {
+    const runs = [
+      { id: 'a', fiscal_year: '81/82', created_at: '2025-08-01T00:00:00Z' },
+      { id: 'b', fiscal_year: '81/82', created_at: '2025-09-01T00:00:00Z' },
+      { id: 'c', fiscal_year: '80/81', created_at: '2024-08-01T00:00:00Z' },
+    ]
+    const r = priorPoolRun({ runs, fiscalYearStartBs: FY_START })
+    expect(r.priorLabel).toBe('81/82')
+    expect(r.priorRun.id).toBe('b')
+    expect(r.earlierLabel).toBeNull()
+  })
+
+  test('the prior year skipped but an earlier one posted: names both', () => {
+    const runs = [
+      { id: 'c', fiscal_year: '79/80', created_at: '2023-08-01T00:00:00Z' },
+      { id: 'd', fiscal_year: '80/81', created_at: '2024-08-01T00:00:00Z' },
+      { id: 'e', fiscal_year: '83/84', created_at: '2027-08-01T00:00:00Z' }, // a later year is not "earlier"
+    ]
+    expect(priorPoolRun({ runs, fiscalYearStartBs: FY_START })).toEqual({ priorLabel: '81/82', priorRun: null, earlierLabel: '80/81' })
+  })
+
+  test('nothing posted at all: a first year, not a gap', () => {
+    expect(priorPoolRun({ runs: [], fiscalYearStartBs: FY_START })).toEqual({ priorLabel: '81/82', priorRun: null, earlierLabel: null })
+  })
+})
+
+describe('fiscalYearOfAdDate', () => {
+  test('Ashadh closes one fiscal year and Shrawan opens the next', () => {
+    expect(fiscalYearOfAdDate(formatAd(bsToAd(2082, 3, 30)))).toBe('81/82')
+    expect(fiscalYearOfAdDate(formatAd(bsToAd(2082, 4, 1)))).toBe('82/83')
   })
 })

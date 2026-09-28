@@ -1,4 +1,4 @@
-import { toNum, parseSalesReport, findDateRange, dateMismatchWarning } from './SalesImportButton'
+import { toNum, parseSalesReport, findDateRange, dateMismatchWarning, matchImportRows, negativeImportMessage } from './SalesImportButton'
 import { adToBs } from '../../../utils/bsCalendar'
 
 describe('toNum (S756)', () => {
@@ -81,5 +81,53 @@ describe('the file date range (S756, D28)', () => {
     expect(dateMismatchWarning({ from: day(16), to: day(16) }, day(16))).toBeNull()
     expect(dateMismatchWarning({ from: day(15), to: day(15) }, day(16))).toMatch(/for 15 .* 2083, but you are filling in 16 .* 2083/)
     expect(dateMismatchWarning({ from: day(1), to: day(31) }, day(16))).toMatch(/more than one day/)
+  })
+})
+
+// S792, SALES-5. A day with more returns than sales imported as −2 on the grid, and Save Day's
+// `qty > 0` filter then dropped the row without a word — the refund vanished and the day's revenue
+// read high. The import is refused, naming the dishes.
+describe('a net-negative dish refuses the import (SALES-5)', () => {
+  const RECIPES = [{ id: 'r-momo', name: 'Chicken Momo' }, { id: 'r-tea', name: 'Masala Tea' }]
+
+  test('the parser keeps the negative net, so the check can see it', () => {
+    const aoa = [
+      ['Product Name', 'Sale', 'Return', 'Net'],
+      ['Chicken Momo', '1', '3', '-2'],
+    ]
+    expect(parseSalesReport(aoa).rows[0].qty).toBe(-2)
+  })
+
+  test('names every dish that nets below zero, and no other', () => {
+    const { negative, qtyMap } = matchImportRows([
+      { productName: 'chicken momo', qty: -2, discount: 0 },
+      { productName: 'Masala Tea', qty: 4, discount: 0 },
+    ], RECIPES)
+    expect(negative).toEqual([{ name: 'Chicken Momo', qty: -2 }])
+    expect(qtyMap.get('r-tea')).toBe(4)
+  })
+
+  test('summed per dish first: +5 and −2 on two lines is a sale of 3', () => {
+    const { negative, qtyMap } = matchImportRows([
+      { productName: 'Chicken Momo', qty: 5, discount: 0 },
+      { productName: 'Chicken Momo', qty: -2, discount: 0 },
+    ], RECIPES)
+    expect(negative).toEqual([])
+    expect(qtyMap.get('r-momo')).toBe(3)
+  })
+
+  test('an unmatched negative line is listed as unmatched, not refused (it never reaches the grid)', () => {
+    const { negative, unmatchedNames } = matchImportRows([{ productName: 'Mystery', qty: -1, discount: 0 }], RECIPES)
+    expect(negative).toEqual([])
+    expect(unmatchedNames).toEqual(['Mystery'])
+  })
+
+  test('the refusal names the dishes and says nothing was filled in', () => {
+    expect(negativeImportMessage([])).toBeNull()
+    const msg = negativeImportMessage([{ name: 'Chicken Momo', qty: -2 }])
+    expect(msg).toMatch(/^Nothing was filled in/)
+    expect(msg).toMatch(/Chicken Momo \(-2\)/)
+    const many = negativeImportMessage(Array.from({ length: 7 }, (_, i) => ({ name: `Dish ${i}`, qty: -1 })))
+    expect(many).toMatch(/Dish 4 \(-1\), and 2 more/)
   })
 })

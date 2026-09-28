@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { calcBillTotals, methodOf } from '../purchases/purchasesHelpers'
+import { billOwedAfterReturns } from './payablesAllocation'
 import { allocateBillDiscounts, mergeFactors } from './supplierAttribution'
 import { netFactors, returnBase, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
 import { readPriorBillLines } from './readPriorBillLines'
@@ -59,6 +60,9 @@ export default function VendorReport() {
   const [vendorSearch, setVendorSearch] = useState('')
   const [showVendorDrop, setShowVendorDrop] = useState(false)
   const [paymentsMap, setPaymentsMap] = useState({})
+  // purchase_entry_id -> list value (qty × rate) of every return against that Credit line, in ANY
+  // month (S792, TAX-2 / D10) — for what is owed on the bill, never for this month's Returns or Net.
+  const [owedReturns, setOwedReturns] = useState({})
   const [drilldownVendor, setDrilldownVendor] = useState(null)
   const [drilldownDay, setDrilldownDay] = useState(null)
   const [expandedBillKey, setExpandedBillKey] = useState(null)
@@ -121,7 +125,7 @@ export default function VendorReport() {
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 vendor
     // ledger (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); return }
+    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); setOwedReturns({}); return }
     const [{ data: p }, { data: r }] = results
 
     // S756 (owner decision D10): a return sits in the month the goods went back and may be against a
@@ -134,7 +138,7 @@ export default function VendorReport() {
     if (outsideIds.length > 0) {
       const prior = await readPriorBillLines(outsideIds)
       if (!periodReq.isCurrent(periodId)) return
-      if (prior.error) { setLoadError(prior.error); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); return }
+      if (prior.error) { setLoadError(prior.error); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); setOwedReturns({}); return }
       priorLines = prior.data
     }
     setPurchases(p || [])
@@ -148,20 +152,38 @@ export default function VendorReport() {
       // renders settled credit bills as unpaid, and the id list is a URL besides. Outstanding
       // Payables and Vendor Balance Confirmation both read this table the same way and were fixed;
       // this was the third page and it was still bare.
-      const { data: pmts, error: pmtErr } = await fetchAllRowsChunked(creditIds, ids =>
-        scopedFrom('payable_payments').in('purchase_entry_id', ids).order('id'))
+      //
+      // S792 (TAX-2, D10): every return against these Credit lines, from ANY month, read beside the
+      // payments. A return may sit in a later month than its bill, and `r` above holds only this
+      // month's — so a Bhadra bill whose goods partly went back in Ashwin, and whose reduced amount
+      // was then paid in Outstanding Payables, read "Partial — due NPR <the return>" here while
+      // Outstanding Payables (which reads returns by line, any month) showed it Paid. These rows feed
+      // the Payable / status arithmetic only; this month's Returns and Net stay this month's.
+      const [pmtRes, owedRetRes] = await Promise.all([
+        fetchAllRowsChunked(creditIds, ids =>
+          scopedFrom('payable_payments').in('purchase_entry_id', ids).order('id')),
+        fetchAllRowsChunked(creditIds, ids =>
+          scopedFrom('vendor_returns', 'id, purchase_entry_id, qty, rate').in('purchase_entry_id', ids).order('id')),
+      ])
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      // Cash/Credit splits and the payment-status column derive from this map — refuse rather
-      // than render every credit bill as unpaid (S612).
-      if (pmtErr) { setLoadError(pmtErr.message); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); return }
+      // Cash/Credit splits and the payment-status column derive from these — refuse rather than
+      // render every credit bill as unpaid, or as owing goods already sent back (S612).
+      const creditErr = pmtRes.error || owedRetRes.error
+      if (creditErr) { setLoadError(creditErr); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); setOwedReturns({}); return }
       const map = {}
-      ;(pmts || []).forEach(pm => {
+      ;(pmtRes.data || []).forEach(pm => {
         if (!map[pm.purchase_entry_id]) map[pm.purchase_entry_id] = []
         map[pm.purchase_entry_id].push(pm)
       })
       setPaymentsMap(map)
+      const owed = {}
+      ;(owedRetRes.data || []).forEach(r => {
+        owed[r.purchase_entry_id] = (owed[r.purchase_entry_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+      })
+      setOwedReturns(owed)
     } else {
       setPaymentsMap({})
+      setOwedReturns({})
     }
   }
 
@@ -375,35 +397,48 @@ export default function VendorReport() {
       const paymentMethod = methodOf(e)
 
       // What the vendor actually invoiced, which is the only thing `payable_payments.amount` can
-      // honestly be measured against. Outstanding Payables — the sole WRITER of those rows — nets
-      // returns off each line at list rate and then runs `calcBillTotals`, so the discount and the
-      // 13% VAT land on the returns-netted base. Replicated exactly here rather than approximated,
-      // because a settlement check that disagrees with the page doing the settling is worse than
-      // no check.
+      // honestly be measured against. Outstanding Payables — the sole WRITER of those rows — values
+      // a bill through `billOwedAfterReturns` (payablesAllocation.js), so this calls the same
+      // function rather than approximating it: a settlement check that disagrees with the page
+      // doing the settling is worse than no check. Since S792 (owner decision D33) that function
+      // credits a return at the bill's discounted price; it was list price with the whole discount
+      // kept, here and there alike.
       //
       // It used to compare `paid` against `total`: ex-VAT, pre-discount and pre-return. A 10,000
       // bill with a 1,000 discount, paid in full at 9,000, therefore read **Partial — NPR 1,000
       // outstanding** on a bill that was settled.
-      const returnedByEntry = {}
+      //
+      // A Credit bill's returns come from `owedReturns`, read by line from ANY month (S792, TAX-2),
+      // because Outstanding Payables nets a later month's return too; the Returns and Net columns
+      // stay on this month's own returns. Every other bill has only this month's to go on.
+      const returnedHere = {}
       billReturns.forEach(r => {
-        returnedByEntry[r.purchase_entry_id] =
-          (returnedByEntry[r.purchase_entry_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+        returnedHere[r.purchase_entry_id] =
+          (returnedHere[r.purchase_entry_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
       })
-      const owed = calcBillTotals(
-        billEntries.map(p => ({
-          qty: 1,
-          rate: Math.max(0, (parseFloat(p.qty) || 0) * (parseFloat(p.rate) || 0) - (returnedByEntry[p.id] || 0)),
-          vat_inclusive: p.vat_inclusive,
-        })),
-        disc
-      ).grandTotal
+      const isCreditBill = paymentMethod === 'Credit'
+      const returnedByEntry = isCreditBill
+        ? Object.fromEntries(billEntries.map(p => [p.id, owedReturns[p.id] || 0]))
+        : returnedHere
+      const owed = billOwedAfterReturns(billEntries, returnedByEntry, disc)
+      // List value returned against this bill in a LATER month — named under the Payable figure,
+      // since nothing else in this month's row shows it.
+      const returnedLater = isCreditBill
+        ? billEntries.reduce((s, p) => s + (returnedByEntry[p.id] || 0) - (returnedHere[p.id] || 0), 0)
+        : 0
+
+      // What was actually paid: the payment rows, summed. `Total paid` in the payment history used
+      // to print `total − remaining`, and since S727 those are two different bases (ex-VAT list vs
+      // what is owed), so a 10,000 VAT bill paid 11,300 in full read "Total paid 10,000" (TAX-1).
+      const paid = isCreditBill
+        ? billEntries.reduce((s, p) =>
+          s + (paymentsMap[p.id] || []).reduce((s2, pm) => s2 + parseFloat(pm.amount), 0), 0)
+        : 0
 
       let status, remaining = 0
-      if (paymentMethod !== 'Credit') {
+      if (!isCreditBill) {
         status = { label: 'Paid', color: 'var(--theme-green-text)' }
       } else {
-        const paid = billEntries.reduce((s, p) =>
-          s + (paymentsMap[p.id] || []).reduce((s2, pm) => s2 + parseFloat(pm.amount), 0), 0)
         // No Math.max(0, …) — S723. A return against an already-settled bill makes the vendor owe
         // US, and clamping that to zero deletes the state rather than reporting it. Outstanding
         // Payables dropped the same clamp for the same reason and surfaces it as a Credit.
@@ -426,7 +461,7 @@ export default function VendorReport() {
         key: gid, vendor_id: e.vendor_id, vendorName: e.vendors?.name || 'Unassigned',
         day: e.bs_day, invoice: e.invoice_ref, itemCount: billEntries.length,
         total, discount: disc, returned: returnedAmt, net, owed, paymentMethod, status, remaining,
-        entries: billEntries, billReturns, payments,
+        paid, returnedLater, entries: billEntries, billReturns, payments,
       })
     })
 
@@ -464,7 +499,7 @@ export default function VendorReport() {
           status: line
             ? { label: 'Earlier bill', color: 'var(--theme-text2)' }
             : { label: 'No bill', color: 'var(--theme-amber-text)' },
-          remaining: 0, entries: [], billReturns: [], payments: [],
+          remaining: 0, paid: 0, returnedLater: 0, entries: [], billReturns: [], payments: [],
         })
       }
       const v = ix.retValueOf(r)
@@ -474,7 +509,7 @@ export default function VendorReport() {
     })
     lateRows.forEach(row => bills.push(row))
     return bills.sort((a, b) => a.day - b.day)
-  }, [ix, paymentsMap, selectedPeriod, purchases, returns, periods])
+  }, [ix, paymentsMap, owedReturns, selectedPeriod, purchases, returns, periods])
 
   const drilldownBills = drilldownVendor
     ? allBills.filter(b => b.vendor_id === drilldownVendor.id && (drilldownDay == null || b.day === drilldownDay))
@@ -1232,7 +1267,7 @@ export default function VendorReport() {
                       <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Discount</th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT, after discount and returns — the same basis as the Net Spend column on the vendor row that opened this." width={250}>Net</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced: returns netted off, bill discount applied, 13% VAT on the taxable part. This is the figure payments are measured against, and it is what Outstanding Payables shows for the same bill." width={280}>Payable</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced: bill discount applied, goods returned taken off at the discounted price, 13% VAT on the taxable part. For a Credit bill it counts goods returned in ANY month, including after this one — the Returns and Net columns count only this month's. This is the figure payments are measured against, and it is what Outstanding Payables shows for the same bill." width={300}>Payable</Tip></th>
                       <th>Status</th>
                       <th></th>
                     </tr>
@@ -1275,6 +1310,10 @@ export default function VendorReport() {
                               {/* A return row has no payable of its own here: what is owed is
                                   measured on its bill, in that bill's month (S756). */}
                               {b.owed == null ? '—' : `NPR ${b.owed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+                              {/* S792 (TAX-2): the one thing in this row from another month, so it is named. */}
+                              {b.returnedLater > EPS && (
+                                <div style={{ fontSize: 11, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>net of a later month&apos;s return</div>
+                              )}
                               {b.paymentMethod === 'Credit' && Math.abs(b.remaining) > EPS && (
                                 <div style={{ fontSize: 11, color: b.remaining < 0 ? 'var(--theme-purple-text)' : 'var(--theme-red-text)' }}>
                                   {b.remaining < 0 ? 'credit ' : 'due '}NPR {Math.abs(b.remaining).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
@@ -1377,7 +1416,7 @@ export default function VendorReport() {
                                           ))}
                                           <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                             <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
-                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {(b.total - b.remaining).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {b.paid.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                                             <td />
                                           </tr>
                                         </tbody>

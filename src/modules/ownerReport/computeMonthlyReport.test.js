@@ -10,7 +10,10 @@ jest.mock('../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jes
 jest.mock('../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 
 // eslint-disable-next-line import/first
-import { netPurchaseFigures, estimatePayrollAccrual, CURRENT_SCHEMA_VERSION } from './computeMonthlyReport'
+import {
+  netPurchaseFigures, estimatePayrollAccrual, CURRENT_SCHEMA_VERSION,
+  computeCombinedMetrics, buildDeltas, foodCostBasisOf,
+} from './computeMonthlyReport'
 // eslint-disable-next-line import/first
 import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
 
@@ -141,6 +144,71 @@ describe('computeMonthlyReport reads what the two helpers need', () => {
   })
 
   test('the schema version moved for the change of meaning', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(6)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(9)
+  })
+
+  // S792 (FIGURES-8): revenue is the denominator of every ratio on the report, and `source` is
+  // nullable, so a server-side .neq froze a short revenue for any month holding legacy rows.
+  test('revenue reads source and filters comps in JS, through periodRevenue', () => {
+    const at = flat.indexOf("from('sales_entries')")
+    expect(at).toBeGreaterThan(-1)
+    expect(flat.slice(at, at + 200)).toMatch(/\.select\('[^']*\bsource\b[^']*'\)/)
+    expect(flat).not.toMatch(/\.neq\(\s*'source'/)
+    expect(flat).toMatch(/periodRevenue\(salesData, recipes\)/)
+  })
+
+  // S792 (D30): Food Cost % is COGS ÷ revenue, through Monthly Summary's own arithmetic, over every
+  // non-sub-recipe item — active or hidden (D29) — so the items read carries no is_active filter.
+  test('Food Cost % is COGS ÷ revenue, valued by periodCost.js over every non-sub-recipe item', () => {
+    expect(flat).toMatch(/valuePeriodItems\(cogsItems, stockMaps\)/)
+    expect(flat).toMatch(/foodCostPct = revenueTotal > 0 \? \(cogsTotal \/ revenueTotal\) \* 100 : null/)
+    expect(flat).toMatch(/cogsItems = \(allItems \|\| \[\]\)\.filter\(i => !i\.is_sub_recipe\)/)
+    const at = flat.indexOf("scopedFrom('items'")
+    expect(flat.slice(at, at + 160)).not.toMatch(/is_active', true/)
+  })
+})
+
+describe('combined metrics on the COGS basis (S792, D30)', () => {
+  // FIGURES-3's own month: opening 1 L, purchases 5 L, closing 2.5 L, revenue 10 L. On purchases
+  // it froze 50% ▲; used, it is 35% — what Monthly Summary says for the same month.
+  const ims = {
+    revenueTotal: 1000000, purchaseTotal: 500000, cogsTotal: 350000, overheadTotal: 100000,
+    foodCostPct: 35, foodCostBasis: 'cogs',
+  }
+  const hr = { payroll: { total: 250000 } }
+
+  test('Food, Prime and Net Margin all use the food that was used', () => {
+    const c = computeCombinedMetrics({ ims, hr })
+    expect(c.foodCostPct).toBeCloseTo(35, 9)
+    expect(c.laborCostPct).toBeCloseTo(25, 9)
+    expect(c.primeCostPct).toBeCloseTo(60, 9)
+    // (10 L − 3.5 L − 2.5 L − 1 L) / 10 L — not the 15% net purchases would give.
+    expect(c.netMarginPct).toBeCloseTo(30, 9)
+    expect(c.foodCostBasis).toBe('cogs')
+  })
+
+  test('an older snapshot with no basis field reads as the purchases basis', () => {
+    expect(foodCostBasisOf({ combined: { foodCostPct: 50 } })).toBe('purchases')
+    expect(foodCostBasisOf({ combined: { foodCostBasis: 'cogs' } })).toBe('cogs')
+  })
+})
+
+describe('Trend across the v8 → v9 line (S792)', () => {
+  const v9 = { combined: { revenueTotal: 110, foodCostPct: 35, laborCostPct: 25, primeCostPct: 60, netMarginPct: 30, foodCostBasis: 'cogs' } }
+  const v8 = { combined: { revenueTotal: 100, foodCostPct: 50, laborCostPct: 26, primeCostPct: 76, netMarginPct: 14 } }
+
+  test('no Food Cost / Prime / Net Margin delta against a purchases-basis snapshot', () => {
+    const d = buildDeltas(v9, v8)
+    expect(d).toMatchObject({ foodCostBasisChanged: true, foodCostPct: null, primeCostPct: null, netMarginPct: null })
+    // Revenue and labour mean the same on both sides and still compare.
+    expect(d.laborCostPct).toBeCloseTo(-1, 9)
+    expect(d.revenueTotal.absoluteChange).toBeCloseTo(10, 9)
+  })
+
+  test('two snapshots on the same basis compare as before', () => {
+    const d = buildDeltas(v9, { combined: { ...v9.combined, foodCostPct: 33 } })
+    expect(d.foodCostBasisChanged).toBe(false)
+    expect(d.foodCostPct).toBeCloseTo(2, 9)
+    expect(buildDeltas(v8, { combined: { ...v8.combined, foodCostPct: 48 } }).foodCostPct).toBeCloseTo(2, 9)
   })
 })

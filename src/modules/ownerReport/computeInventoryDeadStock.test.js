@@ -87,6 +87,30 @@ describe('buildDeadStockSection', () => {
     expect(s.items.find(i => i.itemId === 'C')).toBeUndefined()
   })
 
+  // S792 (PLANNING-4): the snapshot reaches the page's verdict through the same module, so staff
+  // rice — eaten, never sold — is movement here too, and the section says which rule it used.
+  test('an item eaten only as staff meals is not Dead, and staff meals ride beside Used', () => {
+    const staffOnly = ['p1', 'p2', 'p3']
+    const s = build({
+      openings: staffOnly.map(p => open(p, 'B', 20)),
+      purchases: staffOnly.map(p => ({ period_id: p, item_id: 'B', qty: 30, bs_day: 1 })),
+      staffMeals: staffOnly.map(p => ({ period_id: p, item_id: 'B', qty: 30 })),
+      closings: staffOnly.map(p => close(p, 'B', 20)),
+    })
+    expect(s.movement).toBe('staff_meals_count')
+    expect(s.items.find(i => i.itemId === 'B')).toBeUndefined()
+    expect(s).toMatchObject({ assessedCount: 1, deadCount: 0 })
+  })
+
+  test('a flagged item carries its staff meals, and a little movement is Slow, not still', () => {
+    // A: still in p2, then the staff ate 0.5 of 10 in p3 — 5% moved, under the 20% Slow line.
+    const s = build({
+      staffMeals: [{ period_id: 'p3', item_id: 'A', qty: 0.5 }],
+      closings: [close('p1', 'A', 10), close('p2', 'A', 10), close('p3', 'A', 9.5)],
+    })
+    expect(s.items.find(i => i.itemId === 'A')).toMatchObject({ status: 'Slow', stillMonths: 0, staffMeals: 0.5, used: 0 })
+  })
+
   test('a count of 0 is a count, and counted above available is inconsistent', () => {
     const s = build({
       openings: [open('p3', 'A', 5), open('p3', 'B', 2)],

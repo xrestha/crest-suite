@@ -114,7 +114,8 @@ export default function DeadStock() {
       byMonth('purchase_entries', 'period_id, item_id, qty, bs_day, expiry_date, vendor_id'),
       fetchAllRowsChunked(ids, c => scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', c).order('id')),
       byMonth('wastages', 'period_id, item_id, qty'),
-      // Staff meals count as consumption (imsFormulas.js).
+      // Staff meals are consumption (imsFormulas.js), and since S792 they are MOVEMENT too: the
+      // still/slow verdict reads used + staff meals (deadStockCalc.js), so staff rice is not Dead.
       byMonth('staff_meals', 'period_id, item_id, qty'),
       byMonth('closing_stock', 'period_id, item_id, physical_qty'),
       // Every vendor, not only active ones: this resolves a NAME on history (S708) — an archived
@@ -200,6 +201,9 @@ export default function DeadStock() {
         purchased:   f.purchased,
         returned:    f.returned,
         wasted:      f.wasted,
+        // Shown beside Used (S792): a row whose Used is — but which is only "Moving slowly" is
+        // explained by what the staff ate, which is movement.
+        staffMeals:  f.staffUsed,
         used:        latest.used,
         closing:     f.closing,
         available:   latest.available,
@@ -241,7 +245,7 @@ export default function DeadStock() {
   const scopeLine = `${periodLabel} · ${assessable} item${assessable === 1 ? '' : 's'} assessed`
     + (uncounted > 0 ? ` · ${uncounted} not counted` : '')
     + (inconsistent > 0 ? ` · ${inconsistent} with inconsistent figures` : '')
-    + ` · Dead = nothing used for ${DEAD_AFTER_MONTHS}+ counted months in a row`
+    + ` · Dead = nothing used for ${DEAD_AFTER_MONTHS}+ counted months in a row (staff meals count as use)`
 
   function fmt(n) {
     return n ? npr(n) : '—'
@@ -274,6 +278,7 @@ export default function DeadStock() {
       'Returned Qty':         r.returned  || '',
       'Net Available':        r.available || '',
       'Wasted Qty':           r.wasted    || '',
+      'Staff Meals Qty':      r.staffMeals || '',
       'Used Qty':             r.used      || '',
       'Closing Qty':          r.closing   || '',
       'Value at Risk (NPR)':  r.valueAtRisk ? Number(r.valueAtRisk.toFixed(0)) : '',
@@ -286,6 +291,7 @@ export default function DeadStock() {
       notes: [
         `Consumption is ${COGS_FORMULA}.`,
         `Dead = nothing used for ${DEAD_AFTER_MONTHS} or more months in a row. Slow = nothing used for 1–2 months, or less than ${SLOW_THRESHOLD * 100}% of what was available used this month.`,
+        'Staff meals count as use: stock the staff ate has moved. Wastage does not: an item that is only ever thrown away is still flagged.',
         'A month with no closing count for an item is not judged and breaks the run — it is never counted as a month without use.',
         'Only items with a closing count for the selected month can be judged; the rest are excluded and counted in the scope line above.',
       ],
@@ -358,6 +364,7 @@ export default function DeadStock() {
         <p className="no-print" style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px', lineHeight: 1.6 }}>
           <strong>Dead</strong> means nothing was used for {DEAD_AFTER_MONTHS} or more counted months in a row.
           {' '}<strong>Slow</strong> means nothing was used for one or two months, or less than {SLOW_THRESHOLD * 100}% of what was available was used.
+          {' '}Staff meals count as use; wastage does not.
           {' '}A month without a stock count for an item is not judged and restarts the run.
           {historyLength < DEAD_AFTER_MONTHS && <> Only {historyLength} month{historyLength === 1 ? '' : 's'} of records exist so far, so nothing can be called Dead yet.</>}
         </p>
@@ -461,6 +468,9 @@ export default function DeadStock() {
                   <Tip text="Quantity recorded as wastage this period." width={200}>Wasted</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
+                  <Tip text="Quantity logged as staff meals this period. It counts as movement: stock the staff ate is not dead stock." width={240}>Staff Meals</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
                   <Tip text={`${COGS_FORMULA}. The quantity actually consumed this period.`} width={260}>Used</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
@@ -470,7 +480,7 @@ export default function DeadStock() {
                   <Tip text="Closing stock × per-unit rate. NPR value currently sitting idle in inventory." width={240}>Value at Risk</Tip>
                 </th>
                 <th>
-                  <Tip text={`Dead = nothing used for ${DEAD_AFTER_MONTHS} or more counted months in a row. Slow = nothing used for 1–2 months, or less than ${SLOW_THRESHOLD * 100}% of the stock available this month used. A month with no stock count for the item is not judged and restarts the run.`} width={300}>Status</Tip>
+                  <Tip text={`Dead = nothing used for ${DEAD_AFTER_MONTHS} or more counted months in a row. Slow = nothing used for 1–2 months, or less than ${SLOW_THRESHOLD * 100}% of the stock available this month used. Staff meals count as use; wastage does not. A month with no stock count for the item is not judged and restarts the run.`} width={300}>Status</Tip>
                 </th>
                 <th>
                   <Tip text={`How many months in a row, ending with ${periodLabel}, nothing of this item was used. "+" means the run reaches back to the oldest month this report reads, so it may be longer.`} width={280}>Still For</Tip>
@@ -489,6 +499,7 @@ export default function DeadStock() {
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.opening)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.purchased - r.returned)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.wasted)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtQty(r.staffMeals)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.used)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.closing)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{fmt(r.valueAtRisk)}</td>

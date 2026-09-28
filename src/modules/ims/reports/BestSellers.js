@@ -17,6 +17,8 @@ import { recipeCostOf, unratedReason } from '../../../shared/imsFormulas'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { FilterChips } from '../../../components/Tabs'
+import { extrasCostByRecipe, loadExtrasCosting } from '../recipes/extrasCost'
+import { BYO_REASON, BYO_TIP, isCostedByBuild } from '../recipes/buildYourOwnRating'
 
 // Recharts SVG props (fill, tick) don't resolve CSS vars — these fixed hexes back only
 // the two chart call sites below; everything else uses the theme-token constants beneath.
@@ -39,6 +41,14 @@ const MUTED = 'var(--theme-text2)'
  * figure on the page.
  */
 function MarginCell({ row }) {
+  // S792 RECIPES-1: a build-your-own dish is not rated, and says so where the verdict would be.
+  if (row.byo) {
+    return (
+      <td style={{ textAlign: 'right', color: MUTED }}>
+        <Tip text={BYO_TIP} width={320}><span style={{ whiteSpace: 'nowrap' }}>By build</span></Tip>
+      </td>
+    )
+  }
   if (row.margin == null) {
     return (
       <td style={{ textAlign: 'right', color: MUTED }} title={row.costReason || 'Margin needs a food cost and positive revenue'}>—</td>
@@ -52,7 +62,7 @@ function MarginCell({ row }) {
 }
 
 export default function BestSellers() {
-  const { clientId, profile, hasImsAccess } = useAuth()
+  const { clientId, profile, hasImsAccess, customizationEnabled } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const periodReq = useLatestRequest()
@@ -96,12 +106,16 @@ export default function BestSellers() {
       // a short qty for one dish does not shorten a column, it moves that dish DOWN the order,
       // and the guide's own advice for the bottom of that order is "candidates for menu
       // removal". A dish deleted off the menu because rows nobody was shown went missing.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
+      //
+      // `ingredient_deltas` (S792 RECIPES-3): a customized sale's unit_price includes its choices'
+      // upcharges, so its choices' STOCK has to be in COGS too — see recipes/extrasCost.js.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       // NULL-safe (S714): .neq on a nullable column drops NULL rows too, so an uncategorised
       // dish was missing from the ranking with nothing to say a row had been filtered out.
       // `cost_price` is the manual cost Menu Pricing's + Add Item writes — without it a dish
       // costed by hand read as costed there and uncosted here, i.e. 100% margin (S724).
-      scopedFrom('recipes', 'id, name, category, selling_price, cost_price').or('category.is.null,category.neq.Sub-Recipe'),
+      // `is_build_your_own` (S792 RECIPES-1): such a dish is not rated — recipes/buildYourOwnRating.js.
+      scopedFrom('recipes', 'id, name, category, selling_price, cost_price, is_build_your_own').or('category.is.null,category.neq.Sub-Recipe'),
     ])
     // A failed read must not rank a confident NPR 0 (S612 silent-zero rule).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
@@ -116,13 +130,28 @@ export default function BestSellers() {
     // computeRecipeCosts THROWS on a failed read (S695/S711) and this call site did not catch
     // it, so a dead `items` read rejected the loader's promise before `setLoading(false)` and
     // left the page on the loading state indefinitely — no error card, nothing to retry (S715).
-    let costMap = {}
+    // The rows this page counts: every sale except comps, credit notes included (their negative qty
+    // reverses the sale). The extras' cost is taken over exactly these, so it covers the same plates
+    // as the revenue and the recipe cost beside it.
+    const counted = (entries || []).filter(e => e.source !== 'pos_comp')   // see the read above — filtered here, not server-side
+
+    // The extras' stock (S792 RECIPES-3) is read beside the recipe walk and under the same catch:
+    // `loadExtrasCosting` throws on a failed read too, and a failed rate read must stop the page
+    // rather than cost every extra at 0 — the flattering margin the fix exists to remove.
+    let costMap = {}, extrasCosting = null
     try {
-      if (recipeIds.length > 0) costMap = await computeRecipeCosts(supabase, recipeIds)
+      const [costs, extras] = await Promise.all([
+        recipeIds.length > 0 ? computeRecipeCosts(supabase, recipeIds) : {},
+        loadExtrasCosting(supabase, scopedFrom, counted),
+      ])
+      costMap = costs
+      extrasCosting = extras
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); setRows([]); setLoading(false); return
     }
+    if (!periodReq.isCurrent(periodId)) return
+    const extrasMap = extrasCostByRecipe(counted, extrasCosting)
 
     const currentPriceMap = {}
     ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price || 0) })
@@ -132,8 +161,7 @@ export default function BestSellers() {
     // used the recipe's current price for every row, so past-period revenue silently shifted
     // whenever a menu price changed later.
     const qtyMap = {}, revenueMap = {}
-    for (const e of entries || []) {
-      if (e.source === 'pos_comp') continue   // see the read above — filtered here, not server-side
+    for (const e of counted) {
       const qty = parseFloat(e.qty_sold || 0)
       const price = e.unit_price != null ? parseFloat(e.unit_price) : (currentPriceMap[e.recipe_id] || 0)
       qtyMap[e.recipe_id] = (qtyMap[e.recipe_id] || 0) + qty
@@ -150,15 +178,23 @@ export default function BestSellers() {
         // sorted to the top of "By Margin %", and added to Gross Profit as if it were real. A
         // dish nobody has costed is not the most profitable thing on the menu; it is a dish
         // nobody has costed, and `Recipes.js`'s own + New Recipe creates one on every click.
-        const cost     = recipeCostOf(costMap, r)
-        const cogs     = cost == null ? null : qty * cost
+        //
+        // S792 RECIPES-1: a build-your-own dish's recipe is its bowl and spoon, so it topped the By
+        // Margin sort at ~97%. It keeps its place by Revenue and Volume — those are not cost
+        // verdicts — but is not rated on margin and is left out of the COGS figures, like an
+        // uncosted dish but with its own reason and count.
+        const byo      = isCostedByBuild(r, customizationEnabled)
+        const cost     = byo ? null : recipeCostOf(costMap, r)
+        // The stock of the extras guests added (S792 RECIPES-3): what they paid for them is in
+        // `revenue` through unit_price, so what they used belongs in COGS.
+        const cogs     = cost == null ? null : qty * cost + (extrasMap[r.id] || 0)
         const profit   = cost == null ? null : revenue - cogs
         // Revenue must be positive for the ratio to mean anything: a fully-discounted dish, or one
         // a Credit Note has reversed past zero, produces a percentage whose sign is noise.
         const margin   = (cost != null && revenue > 0) ? (profit / revenue) * 100 : null
         return {
-          name: r.name, category: r.category, qty, revenue, cogs, profit, margin,
-          costReason: cost == null ? unratedReason(0, currentPriceMap[r.id]) : null,
+          name: r.name, category: r.category, qty, revenue, cogs, profit, margin, byo,
+          costReason: byo ? BYO_REASON : cost == null ? unratedReason(0, currentPriceMap[r.id]) : null,
         }
       })
 
@@ -175,7 +211,10 @@ export default function BestSellers() {
   const ranked = [...filteredRows]
     .filter(r => r[sortBy] != null)
     .sort((a, b) => b[sortBy] - a[sortBy])
-  const unrankable = filteredRows.length - ranked.length
+  // Build-your-own dishes are unrankable on margin for a different reason from an uncosted dish
+  // (S792 RECIPES-1), so the two are counted and worded apart.
+  const unrankableByo = filteredRows.filter(r => r.byo && r[sortBy] == null).length
+  const unrankable = filteredRows.length - ranked.length - unrankableByo
 
   const top10 = ranked.slice(0, 10)
   // The bottom list starts AFTER the top one. It used to be `[...sorted].reverse().slice(0, 10)`,
@@ -220,7 +259,8 @@ export default function BestSellers() {
   // uncosted dish contributes its revenue and no COGS, which does not read as missing data — it
   // reads as an unusually profitable month.
   const costedRows = filteredRows.filter(r => r.cogs != null)
-  const uncostedCount = filteredRows.length - costedRows.length
+  const byoCount = filteredRows.filter(r => r.byo).length
+  const uncostedCount = filteredRows.length - costedRows.length - byoCount
   const costedRevenue = costedRows.reduce((s, r) => s + r.revenue, 0)
   const costedCogs = costedRows.reduce((s, r) => s + r.cogs, 0)
   const costedProfit = costedRows.reduce((s, r) => s + r.profit, 0)
@@ -337,7 +377,7 @@ export default function BestSellers() {
                       <th>Item</th>
                       <th style={{ textAlign: 'right' }}>Qty</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Revenue, ex-VAT: each sale valued at the price actually charged on it, less discounts. A sale recorded before Crest started capturing that price falls back to the dish's current selling price." width={280}>Revenue</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B. Shows — for a dish with no costed ingredients and no manual cost, because there is no COGS to subtract." width={260}>Margin</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B. COGS is the recipe's cost plus the stock of any extras guests added, as revenue includes what they paid for them. Shows — for a dish with no costed ingredients and no manual cost, because there is no COGS to subtract, and By build for a build-your-own dish." width={280}>Margin</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -369,7 +409,7 @@ export default function BestSellers() {
                       <th>Item</th>
                       <th style={{ textAlign: 'right' }}>Qty</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Revenue, ex-VAT: each sale valued at the price actually charged on it, less discounts. A sale recorded before Crest started capturing that price falls back to the dish's current selling price." width={280}>Revenue</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B. Shows — for a dish with no costed ingredients and no manual cost, because there is no COGS to subtract." width={260}>Margin</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B. COGS is the recipe's cost plus the stock of any extras guests added, as revenue includes what they paid for them. Shows — for a dish with no costed ingredients and no manual cost, because there is no COGS to subtract, and By build for a build-your-own dish." width={280}>Margin</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -404,6 +444,12 @@ export default function BestSellers() {
               {unrankable === 1 ? ' it has' : ' they have'} neither costed ingredients nor a manual cost. Add one in Recipe Costing or Menu Pricing.
             </p>
           )}
+          {unrankableByo > 0 && sortBy === 'margin' && (
+            <p style={{ fontSize: 12, color: MUTED, marginTop: 12 }}>
+              {unrankableByo} build-your-own {unrankableByo === 1 ? 'dish is' : 'dishes are'} not ranked here — {unrankableByo === 1 ? 'it is' : 'they are'}{' '}
+              <Tip text={BYO_TIP} width={320}>not rated — costed by build</Tip>. Recipe Costing shows what each costs as a range.
+            </p>
+          )}
 
           {/* Summary strip. Revenue and Items Sold span every dish; the three cost-derived figures
               span only the costed ones and say so, rather than counting an uncosted dish's revenue
@@ -412,7 +458,7 @@ export default function BestSellers() {
             {[
               { label: 'Total Revenue',  tip: 'Every dish sold this period, valued at the price actually charged, less discounts.',
                 val: fmt(totalRevenueAll), color: GREEN },
-              { label: 'Total COGS',     tip: 'Ingredient cost of the dishes that have one. Dishes with no cost are left out of this and of the two figures beside it.',
+              { label: 'Total COGS',     tip: 'Ingredient cost of the dishes that have one, including the stock of extras guests added. Dishes with no cost, and build-your-own dishes, are left out of this and of the two figures beside it.',
                 val: fmt(costedCogs), color: RED },
               { label: 'Gross Profit',   tip: 'Revenue − COGS across the costed dishes only.',
                 val: fmt(costedProfit), color: GOLD },
@@ -429,11 +475,17 @@ export default function BestSellers() {
               </div>
             ))}
           </div>
-          {uncostedCount > 0 && (
+          {(uncostedCount > 0 || byoCount > 0) && (
             <p style={{ fontSize: 12, color: MUTED, marginTop: 10 }}>
               COGS, Gross Profit and Overall Margin cover {costedRows.length} of {filteredRows.length} items
-              — {uncostedCount} {uncostedCount === 1 ? 'has' : 'have'} no food cost recorded, so {uncostedCount === 1 ? 'its' : 'their'} revenue
-              is counted above while {uncostedCount === 1 ? 'its' : 'their'} cost is not known.
+              {uncostedCount > 0 && (
+                <> — {uncostedCount} {uncostedCount === 1 ? 'has' : 'have'} no food cost recorded, so {uncostedCount === 1 ? 'its' : 'their'} revenue
+                is counted above while {uncostedCount === 1 ? 'its' : 'their'} cost is not known</>
+              )}
+              {byoCount > 0 && (
+                <>{uncostedCount > 0 ? ';' : ' —'} {byoCount} {byoCount === 1 ? 'is' : 'are'} build-your-own, costed by build rather than by one
+                food cost, so {byoCount === 1 ? 'its' : 'their'} revenue is counted above and {byoCount === 1 ? 'its' : 'their'} cost is not</>
+              )}.
             </p>
           )}
         </>

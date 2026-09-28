@@ -116,6 +116,7 @@ export function baseFromHistory(days) {
 // A new client's base from its own open month, once there is a week of it, per weekday.
 //   sales: the days WITH an entry.
 //   purch: every calendar day up to `elapsed`, a day without a bill counting as zero.
+// Finished days only: the caller passes splitAtToday's salesDone / purchElapsed, never today.
 export function baseFromMonth({ kind, valueMap, dayNums, elapsed, weekdayOf }) {
   let samples
   if (kind === 'sales') {
@@ -128,8 +129,35 @@ export function baseFromMonth({ kind, valueMap, dayNums, elapsed, weekdayOf }) {
   return { source: 'month', byWeekday: weekdayAverages(samples, meanOf(samples)), sampleDays: samples.length }
 }
 
+// The day in progress is never a sample (S792 PLANNING-2/3; the rule Demand Forecast has kept since
+// S694). POS stamps sales_entries.bs_day with today at every bill close, so from the morning's first
+// bill today used to read as a finished day: at 10 a.m. a 30,000-a-day outlet's 2,000 was judged as
+// a whole day's trade (day 1: every remaining day forecast 23% low), today's remaining trade was
+// never forecast, today was a zero-purchase day until the restock bill was typed, and a new
+// client's Target could freeze that 2,000 as the weekday's usual for the whole month.
+//
+// So only days before `today` are judged, and forecast days start at today at the latest, so today
+// is drawn as sold-so-far beside its forecast. `today` null means no day is in progress (a past
+// month): nothing is dropped and the forecast starts after the last entry, as before.
+//   salesDone:     the days with a sales entry that are over — the pace sample, the Target's days.
+//   purchElapsed:  the purchase days that are over, each counting (a day with no bill is a zero).
+//   salesFrom / purchFrom: the first forecast day.
+export function splitAtToday({ salesDayNums, elapsedDay, today }) {
+  const lastSales = salesDayNums.length ? salesDayNums[salesDayNums.length - 1] : 0
+  const upTo = from => (today == null ? from : Math.min(from, today))
+  return {
+    salesDone: today == null ? salesDayNums : salesDayNums.filter(d => d < today),
+    purchElapsed: today == null ? elapsedDay : Math.max(0, Math.min(elapsedDay, today - 1)),
+    salesFrom: upTo(lastSales + 1),
+    purchFrom: upTo(elapsedDay + 1),
+  }
+}
+
 // The live month-end forecast. `expectDays` are the days this month's pace is judged over (sales:
 // days with an entry; purchases: every day up to `elapsed`), and forecast days run from `fromDay`.
+// A forecast day that already holds an entry is today, still trading (splitAtToday): it counts in
+// the month-end total at the larger of what it has sold and its forecast, never both, because a
+// day ends at no less than it has already taken.
 // With a base, each future day is its weekday's base × a pace factor that leans toward this
 // month as days accrue; without one, it is this month's plain average once MIN_DAYS_FOR_FORECAST
 // days exist. Never a slope, so it cannot run to zero; never a ceiling, so it cannot pin to one.
@@ -159,10 +187,11 @@ export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay,
   let projSum = 0
   for (let d = fromDay; d <= monthEndDay; d++) {
     const v = Math.round(perDay(d))
-    projDays[d] = v; projSum += v
+    projDays[d] = v
+    projSum += valueMap[d] == null ? v : Math.max(v, Number(valueMap[d]))
   }
-  const monthActual = sum(Object.values(valueMap).map(Number))
-  return { projDays, projectedTotal: Math.round(monthActual + projSum), paceFactor }
+  const actualBefore = sum(Object.entries(valueMap).filter(([d]) => Number(d) < fromDay).map(([, v]) => Number(v)))
+  return { projDays, projectedTotal: Math.round(actualBefore + projSum), paceFactor }
 }
 
 // The frozen Target, as stored in monthly_periods.sales/purch_projection_snapshot.

@@ -30,6 +30,53 @@ describe('RecipeCostCardPrint with an unknown food cost', () => {
   })
 })
 
+// S792 RECIPES-1: a build-your-own dish's recipe is the bowl and the spoon. The card printed
+// "Food Cost % 2.7%" and "Gross Margin % 97.3%" for an acai bowl whose plate costs half its price.
+describe('RecipeCostCardPrint for a build-your-own dish', () => {
+  const bowl = {
+    id: 'b1', name: 'Acai Bowl', category: 'Food', selling_price: 300, vat_rate: 0.13, is_build_your_own: true,
+    recipe_ingredients: [{ id: 'x', item_id: 'i1', qty_per_portion: 1, items: { name: 'Bowl', uom: 'PCS', per_uom_rate: 8, yield_pct: 100 } }],
+  }
+
+  test('reads "Not rated — costed by build", never a food cost % or margin from the fixed part', () => {
+    render(<RecipeCostCardPrint recipe={bowl} recipes={[bowl]} settings={{}} overheadData={null} showNutrition={false} buildYourOwn />)
+    expect(valueUnder('Food Cost %')).toBe('Not rated — costed by build')
+    expect(valueUnder('Gross Margin %')).toBe('Not rated — costed by build')
+    expect(valueUnder('Food Cost (by build)')).toBe('— costed by build')
+    // The ingredient table still totals the fixed part — that is what the recipe is.
+    expect(screen.getByText('NPR 8.00')).toBeTruthy()
+  })
+
+  test('prints the cost range when the page has one', () => {
+    const range = { empty: false, lowCost: 128, highCost: 296 }
+    render(<RecipeCostCardPrint recipe={bowl} recipes={[bowl]} settings={{}} overheadData={null} showNutrition={false} buildYourOwn byoRange={range} />)
+    expect(valueUnder('Food Cost (by build)')).toMatch(/128\.00.*296\.00/)
+  })
+
+  test('without the flag the same dish is rated as before', () => {
+    render(<RecipeCostCardPrint recipe={bowl} recipes={[bowl]} settings={{}} overheadData={null} showNutrition={false} />)
+    expect(valueUnder('Food Cost %')).toBe('2.7%')
+  })
+})
+
+// S792 RECIPES-2 / D31: on a PAN-bill outlet the till adds no VAT, so the card must not print a
+// "Menu Price (incl. 13% VAT)" the guest is never charged.
+describe('RecipeCostCardPrint on a PAN-bill outlet', () => {
+  test('one menu price, no VAT in it, even for a dish still carrying a 13% rate', () => {
+    const momo = { ...noIngredients, cost_price: 132.74 }
+    render(<RecipeCostCardPrint recipe={momo} recipes={[momo]} settings={{}} overheadData={null} showNutrition={false} vatMode="pan" />)
+    expect(valueUnder('Menu Price (no VAT — PAN bill)')).toBe('NPR 442')
+    expect(screen.queryByText(/incl\. 13% VAT/)).toBeNull()
+    expect(screen.queryByText('Selling Price (ex-VAT)')).toBeNull()
+  })
+
+  test('a VAT outlet keeps both prices', () => {
+    render(<RecipeCostCardPrint recipe={noIngredients} recipes={[noIngredients]} settings={{}} overheadData={null} showNutrition={false} vatMode="vat" />)
+    expect(valueUnder('Menu Price (incl. 13% VAT)')).toBe('NPR 500')
+    expect(valueUnder('Selling Price (ex-VAT)')).toBe('NPR 442.48')
+  })
+})
+
 describe('Recipes.js source', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'Recipes.js'), 'utf8')
   const code = SRC.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')

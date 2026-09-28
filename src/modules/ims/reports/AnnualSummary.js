@@ -100,7 +100,9 @@ export default function AnnualSummary() {
     // collapses to net purchases for those months and the FC% column reports it in confident
     // type. S719's rule: multiply rows-per-item-per-period by the window length first.
     const results = await Promise.all([
-      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      // Every non-sub-recipe item, HIDDEN ONES INCLUDED (S792, D29): past months keep every
+      // purchase and count, so hiding an item never rewrites a closed month's COGS here.
+      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')),
       fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds).order('id')),
       // `discount_amount` and the bill-key columns are selected so allocateBillDiscounts() can run:
@@ -131,12 +133,14 @@ export default function AnnualSummary() {
       { data: staffMeals }, { data: sales }, { data: recipes }
     ] = results
 
-    // `rateMap` doubles as the ACTIVE, non-sub-recipe item set, and both jobs matter. It valued
+    // `rateMap` doubles as the non-sub-recipe item set, and both jobs matter. It once valued
     // opening/closing/wastage/staff-meals at 0 for an item deactivated mid-year while
     // grossPurch/retVal read the purchase row's OWN rate and so kept counting that item's spend in
     // full — an internally inconsistent row whose COGS was overstated by exactly the closing value
-    // it had just thrown away. MonthlySummary drops such an item from every column (its category
-    // loops run over active items only); this page now does the same, so the two agree.
+    // it had just thrown away (S720: an item is in every column of a row or in none). Since S792
+    // (D29) the set includes HIDDEN items: dropping them from every column kept the row consistent
+    // but took a hidden item's whole history out of every past month, closed ones included, while
+    // the frozen Owner Report kept it. Monthly Summary values the same set, so the two agree.
     const rateMap = {}
     ;(items || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
     const isTracked = id => Object.prototype.hasOwnProperty.call(rateMap, id)

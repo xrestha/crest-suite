@@ -8,10 +8,20 @@
 // The grouped P&L derives the same raw aggregates in SQL (`get_group_pnl`), which cannot import
 // this file. A change to either convention here must be mirrored there by hand.
 //
-// The callers do the reads. Two conventions live in those reads, not here: `items` is active,
-// non-sub-recipe items only (S436; prep is counted at the raw-item level), and `sales_entries`
-// selects `source` with no server-side `.neq` (S756), because `source` is nullable.
+// The callers do the reads. Two conventions live in those reads, not here: `items` is every
+// non-sub-recipe item, HIDDEN ONES INCLUDED (prep is counted at the raw-item level), and
+// `sales_entries` selects `source` with no server-side `.neq` (S756), because `source` is nullable.
+//
+// Hidden items are in the read since S792 (FIGURES-1, owner decision D29: hiding never changes
+// history). Every one of these pages read `items` with `.eq('is_active', true)` and valued
+// purchases and returns only for the ids in that list, so an item bought and used all year and then
+// hidden — which Item Master tells the owner to do on a unit change — left every past month's Net
+// Purchases, COGS and Food Cost %, closed months included, while the frozen Owner Report kept it.
+// `is_active` now belongs to pickers and "on the shelf now" views only. A period is valued over
+// every item with a row in it (`periodValuationItems`); S720's within-row rule still holds, since an
+// item is in every column of a row or in none.
 import { computeUsed } from '../../../shared/imsFormulas'
+import { findUncountedItems } from '../../../shared/uncountedItems'
 import { allocateBillDiscounts } from './supplierAttribution'
 
 /**
@@ -94,4 +104,77 @@ export function valuePeriodItems(items, maps) {
     wastage: wastageVal, staffMeals: staffMealsVal, closing: closingVal,
   })
   return { openingVal, purchaseVal, discountVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal }
+}
+
+/**
+ * Every item id with a row in the period — an opening figure, a purchase line, a return, a closing
+ * row (a count of 0 and a blank count both count as a ROW), a wastage or a staff meal. Takes the raw
+ * rows, not `periodStockMaps` output, so a page whose purchase read carries no rate (Stock Report)
+ * can ask the same question.
+ */
+export function periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals } = {}) {
+  const ids = new Set()
+  for (const rows of [opening, closing, purchases, returns, wastages, staffMeals]) {
+    for (const r of rows || []) if (r && r.item_id != null) ids.add(r.item_id)
+  }
+  return ids
+}
+
+/**
+ * The items a period is valued over (S792, D29): every active item, plus every HIDDEN item that has
+ * a row in the period. `items` is the caller's read of every non-sub-recipe item, active or not;
+ * `rowIds` is `periodRowIds(...)` for the same period.
+ *
+ * The totals would be the same over the whole read — a hidden item with no row contributes zero —
+ * so this exists for what a page LISTS and COUNTS: a category's "N items", the uncounted-items
+ * banner, Stock Report's rows. A hidden item nothing happened to in the month is not part of it.
+ * `is_active` is nullable (DEFAULT true, no NOT NULL), so only an explicit `false` is hidden.
+ */
+export function periodValuationItems(items, rowIds) {
+  const has = id => (rowIds instanceof Set ? rowIds.has(id) : !!rowIds?.[id])
+  return (items || []).filter(i => i && (i.is_active !== false || has(i.id)))
+}
+
+/**
+ * The uncounted-items gap (S756, D6) for one period, from the same maps its COGS came from. A
+ * closing row whose `physical_qty` is null is not a count; one holding 0 is (closePeriod.js's
+ * `physical_qty IS NOT NULL` rule), which is why this reads the raw closing rows and not the map.
+ */
+export function periodGap({ items, maps, closing, cogs }) {
+  const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
+  const purchaseQty = {}; const purchaseValue = {}
+  Object.entries(maps.purchases || {}).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
+  return findUncountedItems({ items, openingQty: maps.opening || {}, purchaseQty, purchaseValue, countedIds, cogs })
+}
+
+/**
+ * Several periods valued at once — the Dashboard's Food Cost trend reads eleven closed months in one
+ * batch. Every row carries `period_id`. Each period is valued on its own, so its purchases get their
+ * own `allocateBillDiscounts` pass: the fallback bill key (vendor | invoice | day) carries no period,
+ * and allocating a year-wide batch folds two legacy bills from different months into one (FIGURES-6).
+ * Returns period id → `valuePeriodItems` output plus that period's `gap` and `itemCount`.
+ */
+export function valuePeriods({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals }) {
+  const byPeriod = rows => {
+    const m = new Map()
+    for (const r of rows || []) {
+      const list = m.get(r.period_id)
+      if (list) list.push(r); else m.set(r.period_id, [r])
+    }
+    return m
+  }
+  const tables = {
+    opening: byPeriod(opening), closing: byPeriod(closing), purchases: byPeriod(purchases),
+    returns: byPeriod(returns), wastages: byPeriod(wastages), staffMeals: byPeriod(staffMeals),
+  }
+  const out = {}
+  for (const pid of periodIds || []) {
+    const rows = {}
+    for (const [k, m] of Object.entries(tables)) rows[k] = m.get(pid) || []
+    const maps = periodStockMaps(rows)
+    const valued = periodValuationItems(items, periodRowIds(rows))
+    const v = valuePeriodItems(valued, maps)
+    out[pid] = { ...v, itemCount: valued.length, gap: periodGap({ items: valued, maps, closing: rows.closing, cogs: v.cogsVal }) }
+  }
+  return out
 }

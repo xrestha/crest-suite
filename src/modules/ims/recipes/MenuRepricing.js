@@ -3,7 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost'
+import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tip from '../../../components/Tip'
@@ -15,15 +15,21 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { FilterChips } from '../../../components/Tabs'
-
-// vat_rate may be 0 (No VAT); null/undefined falls back to 13%.
-function vatOf(r) {
-  return (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
-}
+import { vatOf } from './recipeCostCalc'
+import { vatModeOf, repricingOf, PAN_LABEL } from './menuPriceVat'
+import { isCostedByBuild, BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
+import { isMissingColumn } from '../../customization/customizationData'
 
 export default function MenuRepricing() {
-  const { clientId, profile, hasImsAccess } = useAuth()
-  const { settings } = useSettings()
+  const { clientId, profile, hasImsAccess, customizationEnabled } = useAuth()
+  const settingsCtx = useSettings()
+  const { settings } = settingsCtx
+  // S792 (RECIPES-2 / D31): the suggested menu price is the number to PRINT on the menu, so it is
+  // VAT-inclusive on a VAT outlet and has no VAT in it on a PAN-bill one, where the till adds none.
+  // It used to tell a PAN-bill cafe to print a price 13% above what the till charges once entered.
+  // Unknown (settings still loading, or their read failed): no suggestion is shown at all.
+  const vatMode = vatModeOf(settingsCtx, clientId)
+  const pan = vatMode === 'pan'
   // Banding goes through `fcFigure(pct, settings)` at the one cell that prints it — colour, the
   // ✓/△/▲ mark and the band name arrive together, so a call site cannot take the colour and drop
   // the mark (S608), and a null cannot reach `toFixed`. The three separate wrappers this page used
@@ -76,12 +82,20 @@ export default function MenuRepricing() {
       // it is tested in JS below, in the one NULL-safe form the Dashboard tile also uses (S724).
       scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, target_fc_pct, cost_price, is_active')
         .or('category.is.null,category.neq.Sub-Recipe'),
+      // S792 (RECIPES-1): which dishes are build-your-own, read on its own so the recipes read above
+      // never names a column a database without the S760 migration lacks — the same tolerance
+      // customizationData.js gives it. Without Customization no dish is costed by build.
+      customizationEnabled
+        ? fetchAllRows(() => scopedFrom('recipes', 'id').eq('is_build_your_own', true).order('id'))
+          .then(r => isMissingColumn(r.error) ? { data: [], error: null } : r)
+        : Promise.resolve({ data: [], error: null }),
     ])
     // A failed read must not render the celebratory "no underpriced dishes 🎉" empty state (S612).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
-    const [{ data: salesData }, { data: recipes }] = results
+    const [{ data: salesData }, { data: recipes }, { data: byoRows }] = results
+    const byoIds = new Set((byoRows || []).map(r => r.id))
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
@@ -116,33 +130,27 @@ export default function MenuRepricing() {
         // — and with "Only underpriced" on by default, a menu nobody has costed renders the
         // celebratory "No underpriced dishes 🎉" empty state this file already guards against for
         // load failures. Unknown is not the same as fine.
-        const cost     = recipeCostOf(costMap, r)
+        // S792 (RECIPES-1): a build-your-own dish's recipe is the bowl and the spoon, so its
+        // "current FC%" was ~3% and it could never be underpriced. It is not rated here: no FC%, no
+        // suggestion, never in the Underpriced count or the Monthly Opportunity, and counted apart.
+        const byBuild = isCostedByBuild({ ...r, is_build_your_own: byoIds.has(r.id) }, customizationEnabled)
+        const cost     = byBuild ? null : recipeCostOf(costMap, r)
         const qty      = parseFloat(qtyMap[r.id] || 0)
         const targetPct = parseFloat(r.target_fc_pct) || 30
         const currentFcPct = menuFcPct(cost, price)
-        const vat = vatOf(r)
-        // VAT-inclusive, rounded up to NPR 5 — the number to print on the menu.
-        const suggestedMenuPrice = cost == null ? null : getSuggestedPrice(cost, vat, targetPct / 100)
-        // The gap is measured against the price the page actually TELLS YOU TO CHARGE, de-VATed
-        // back to the ex-VAT basis every other column on this page uses. It used to be measured
-        // against the raw `cost / target` figure, which is neither rounded nor the number in the
-        // Suggested Menu Price column beside it — so repricing to what the page said captured a
-        // different amount from the Monthly Opportunity it promised (S724).
-        const suggestedExVat = suggestedMenuPrice == null ? null : suggestedMenuPrice / (1 + vat)
-        const priceGap = suggestedExVat == null ? null : Math.max(0, suggestedExVat - price)
+        // The suggestion (the number to print on the menu, rounded up to NPR 5), the gap measured
+        // against THAT rounded price (S724) and the monthly opportunity are worked out at render by
+        // repricingOf(), because what the menu price includes depends on the outlet's VAT status
+        // (S792, D31) and that can arrive after this load.
         return {
           id: r.id,
           name: r.name,
           category: r.category,
           price, cost, qty, targetPct, currentFcPct,
-          priceGap,
-          // Only a positive gap on positive volume is an opportunity. A Credit Note can push a
-          // period's net qty negative, which used to make this negative — hidden by the table's
-          // `> 0 ? … : '—'` while still being summed into the KPI above it.
-          monthlyOpportunity: priceGap == null ? null : Math.max(0, priceGap * qty),
-          suggestedMenuPrice,
-          notCosted: cost == null,
-          costReason: cost == null ? unratedReason(0, price) : null,
+          storedVat: vatOf(r),
+          byBuild,
+          notCosted: !byBuild && cost == null,
+          costReason: byBuild ? BYO_TIP : cost == null ? unratedReason(0, price) : null,
           underpriced: currentFcPct != null && currentFcPct > targetPct,
         }
       })
@@ -152,14 +160,28 @@ export default function MenuRepricing() {
     setLoading(false)
   }
 
-  const underpricedRows = rows.filter(r => r.underpriced)
+  // The suggestion columns, on the outlet's VAT basis (S792, D31) — repricingOf() in menuPriceVat.js,
+  // tested. A build-your-own dish gets none: it is not rated here. While the basis is unknown every
+  // suggestion is null, and the page shows no figures at all (see `pricesKnown` below).
+  const pricedRows = rows.map(r => r.byBuild
+    ? { ...r, suggestedMenuPrice: null, priceGap: null, monthlyOpportunity: null }
+    : { ...r, ...repricingOf(r, vatMode) })
+  const underpricedRows = pricedRows.filter(r => r.underpriced)
   const totalOpportunity = underpricedRows.reduce((s, r) => s + (r.monthlyOpportunity || 0), 0)
-  const notCostedRows = rows.filter(r => r.notCosted)
+  const notCostedRows = pricedRows.filter(r => r.notCosted)
+  const byBuildRows = pricedRows.filter(r => r.byBuild)
   const biggestLeak = [...underpricedRows].sort((a, b) =>
     (b.monthlyOpportunity - a.monthlyOpportunity) || (b.priceGap - a.priceGap))[0]
   // `.filter(Boolean)` because `recipes.category` is nullable and S714 made those rows visible —
   // without it an uncategorised dish added a blank, unlabelled tab to the bar (S724).
   const categories = ['All', ...Array.from(new Set(rows.map(r => r.category).filter(Boolean))).sort()]
+  // No figure renders until the outlet's VAT basis is known: every suggestion, gap and opportunity
+  // depends on it. A failed settings read says so instead of waiting for ever.
+  const pricesKnown = vatMode != null
+  const vatBasisError = !pricesKnown && settingsCtx.settingsLoadError
+    ? 'Crest could not read whether this outlet charges VAT, so no menu price can be suggested. Reload the page to try again.'
+    : null
+  const figuresReady = !loading && !loadError && pricesKnown
 
   // A dish with no cost has no gap, no opportunity and no FC% to sort on — those rows go to the
   // end of every sort rather than wherever a NaN comparison happens to drop them.
@@ -171,7 +193,7 @@ export default function MenuRepricing() {
     return bv - av
   }
 
-  let display = rows
+  let display = pricedRows
   if (onlyUnderpriced) display = display.filter(r => r.underpriced)
   if (onlyWithSales)   display = display.filter(r => r.qty > 0)
   if (catFilter !== 'All') display = display.filter(r => r.category === catFilter)
@@ -199,13 +221,14 @@ export default function MenuRepricing() {
       'Category':                   r.category,
       'Qty Sold':                   r.qty || '',
       'Food Cost / Portion':        r.cost != null ? r.cost.toFixed(2) : '',
-      'Current Price (ex-VAT)':     r.price.toFixed(2),
+      // S792 (D31): on a PAN-bill outlet the prices carry no VAT, and the headers say so.
+      [pan ? 'Current Price (no VAT)' : 'Current Price (ex-VAT)']: r.price.toFixed(2),
       'Current FC%':                r.currentFcPct != null ? r.currentFcPct.toFixed(1) + '%' : '',
       'Target FC%':                 r.targetPct.toFixed(0) + '%',
-      'Suggested Menu Price (incl VAT)': r.suggestedMenuPrice != null ? r.suggestedMenuPrice.toFixed(0) : '',
-      'Price Gap (ex-VAT)':         r.priceGap != null ? r.priceGap.toFixed(2) : '',
+      [pan ? `Suggested Menu Price (${PAN_LABEL})` : 'Suggested Menu Price (incl VAT)']: r.suggestedMenuPrice != null ? r.suggestedMenuPrice.toFixed(0) : '',
+      [pan ? 'Price Gap' : 'Price Gap (ex-VAT)']: r.priceGap != null ? r.priceGap.toFixed(2) : '',
       'Monthly Opportunity (NPR)':  r.monthlyOpportunity ? r.monthlyOpportunity.toFixed(0) : '',
-      'Status':                     r.notCosted ? 'Not costed' : r.underpriced ? 'Underpriced' : 'At or below target',
+      'Status':                     r.byBuild ? BYO_STATUS : r.notCosted ? 'Not costed' : r.underpriced ? 'Underpriced' : 'At or below target',
     }))
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Menu Repricing')
     XLSX.writeFile(wb, `MenuRepricing-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
@@ -235,13 +258,15 @@ export default function MenuRepricing() {
             ))}
           </select>
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Menu Repricing - ${periodLabel}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!display.length}>Export Excel</button>
+          {/* A file leaves the building, so it waits for the same figures the screen does (S728). */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || !display.length}>Export Excel</button>
         </div>
       </div>
 
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
-          Underpriced Dishes / Monthly Opportunity read as confident green zeros (S594). */}
-      {!loading && !loadError && (
+          Underpriced Dishes / Monthly Opportunity read as confident green zeros (S594). It waits
+          for the outlet's VAT basis too, since the opportunity is measured on it (S792). */}
+      {figuresReady && (
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">
@@ -275,6 +300,15 @@ export default function MenuRepricing() {
           </div>
         )}
       </div>
+      )}
+      {/* S792 (RECIPES-1): build-your-own dishes are counted, never silently absent. */}
+      {figuresReady && byBuildRows.length > 0 && (
+        <p className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '-4px 0 12px' }}>
+          <Tip text={BYO_TIP} width={320}>
+            {byBuildRows.length} build-your-own {byBuildRows.length === 1 ? 'dish is' : 'dishes are'} not rated here — costed by build
+          </Tip>
+          {' '}— their cost range is on Recipe Costing.
+        </p>
       )}
 
       {/* Sort + filter bar */}
@@ -311,20 +345,25 @@ export default function MenuRepricing() {
         />
       )}
 
-      {loading ? (
+      {loading || (!loadError && !pricesKnown && !vatBasisError) ? (
         <div className="loading-state">Loading...</div>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
+      ) : vatBasisError ? (
+        <ReportLoadError error={vatBasisError} />
       ) : display.length === 0 ? (
         <div className="empty-state">
           {/* The 🎉 is a claim about every priced dish, so it may only be made when every priced
               dish was actually testable. With dishes that have no cost, the honest answer is that
               none of the ones we COULD check are underpriced — and here is what we could not. */}
+          {/* A build-your-own dish was not checked either (S792), so it withholds the 🎉 too. */}
           {!onlyUnderpriced
             ? 'No priced recipes found for this period.'
-            : notCostedRows.length === 0
+            : notCostedRows.length === 0 && byBuildRows.length === 0
               ? 'No underpriced dishes — every priced dish is at or below its target food cost. 🎉'
-              : `None of the costed dishes are underpriced — but ${notCostedRows.length} ${notCostedRows.length === 1 ? 'dish has' : 'dishes have'} no food cost recorded and could not be checked at all. Add ingredients in Recipe Costing, or a cost in Menu Pricing, then look again.`}
+              : notCostedRows.length === 0
+                ? `None of the rated dishes are underpriced. ${byBuildRows.length} build-your-own ${byBuildRows.length === 1 ? 'dish is' : 'dishes are'} not rated here — costed by build; see ${byBuildRows.length === 1 ? 'its' : 'their'} cost range on Recipe Costing.`
+                : `None of the costed dishes are underpriced — but ${notCostedRows.length} ${notCostedRows.length === 1 ? 'dish has' : 'dishes have'} no food cost recorded and could not be checked at all. Add ingredients in Recipe Costing, or a cost in Menu Pricing, then look again.`}
         </div>
       ) : (
         <div className="table-wrap">
@@ -339,7 +378,7 @@ export default function MenuRepricing() {
                   <Tip text="Total ingredient cost per portion based on current item rates." width={240}>Food Cost / Portion</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Current selling price excluding VAT (as entered in Recipe Costing)." width={240}>Current Price</Tip>
+                  <Tip text={pan ? 'What the guest pays now. This outlet gives PAN bills, so there is no VAT in it.' : 'Current selling price excluding VAT (as entered in Recipe Costing).'} width={240}>Current Price</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Food Cost ÷ Current Price. How much of each sale goes to ingredients right now." width={260}>Current FC%</Tip>
@@ -348,10 +387,12 @@ export default function MenuRepricing() {
                   <Tip text="The food-cost % you set as the goal for this dish (Recipe Costing → Target FC%)." width={260}>Target FC%</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Price to charge to hit the target FC%, VAT-inclusive and rounded up to NPR 5 — the number to print on the menu. Shows — when the dish has no food cost to work back from." width={320}>Suggested Menu Price</Tip>
+                  <Tip text={`Price to charge to hit the target FC%, ${pan ? 'with no VAT in it (this outlet gives PAN bills, so the till adds none)' : 'VAT-inclusive'} and rounded up to NPR 5 — the number to print on the menu. Shows — when the dish has no food cost to work back from, or is build-your-own.`} width={320}>Suggested Menu Price</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="How much you're under per portion: the Suggested Menu Price beside it, taken back to ex-VAT, less the current ex-VAT price. Measured against the rounded price actually suggested, so repricing to it captures exactly the Monthly Opportunity shown." width={340}>Price Gap</Tip>
+                  <Tip text={pan
+                    ? "How much you're under per portion: the Suggested Menu Price beside it, less the current price. Measured against the rounded price actually suggested, so repricing to it captures exactly the Monthly Opportunity shown."
+                    : "How much you're under per portion: the Suggested Menu Price beside it, taken back to ex-VAT, less the current ex-VAT price. Measured against the rounded price actually suggested, so repricing to it captures exactly the Monthly Opportunity shown."} width={340}>Price Gap</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Price Gap × Qty Sold this period. Extra margin captured by repricing to target." width={280}>Monthly Opportunity</Tip>
@@ -371,7 +412,11 @@ export default function MenuRepricing() {
                     {r.cost != null ? `NPR ${r.cost.toFixed(2)}` : '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>NPR {r.price.toFixed(0)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: r.currentFcPct != null ? 700 : 400, ...fcFig.style }} title={fcFig.title || r.costReason}>{fcFig.text}</td>
+                  {r.byBuild ? (
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', whiteSpace: 'nowrap' }} title={BYO_TIP}>{BYO_STATUS}</td>
+                  ) : (
+                    <td style={{ textAlign: 'right', fontWeight: r.currentFcPct != null ? 700 : 400, ...fcFig.style }} title={fcFig.title || r.costReason}>{fcFig.text}</td>
+                  )}
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.targetPct.toFixed(0)}%</td>
                   {/* A suggested price is derived from a cost. With no cost this used to print
                       "NPR 0" in green under a column captioned "the number to print on the menu". */}
@@ -393,7 +438,8 @@ export default function MenuRepricing() {
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={10}>
                   Total ({display.filter(r => r.underpriced).length} underpriced
-                  {display.filter(r => r.notCosted).length > 0 ? `, ${display.filter(r => r.notCosted).length} not costed` : ''})
+                  {display.filter(r => r.notCosted).length > 0 ? `, ${display.filter(r => r.notCosted).length} not costed` : ''}
+                  {display.filter(r => r.byBuild).length > 0 ? `, ${display.filter(r => r.byBuild).length} build-your-own not rated` : ''})
                 </td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                   {fmtNPR(display.reduce((s, r) => s + (r.monthlyOpportunity || 0), 0))}

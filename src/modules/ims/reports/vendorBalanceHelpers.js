@@ -5,8 +5,8 @@
 // Feeds Nepal IRD Annexure 13 (अनुसूची १३) disclosure — Opening/Purchases/Payments/Closing balance
 // per vendor for a fiscal year — and doubles as NSA 17 (External Confirmations) audit evidence.
 import { bsToAd, daysInBsMonth } from '../../../utils/bsCalendar'
-import { calcBillTotals, billKeyOf } from '../purchases/purchasesHelpers'
-import { SUPPLIER_CREDIT_MODE } from './payablesAllocation'
+import { billKeyOf } from '../purchases/purchasesHelpers'
+import { SUPPLIER_CREDIT_MODE, billOwedAfterReturns } from './payablesAllocation'
 
 // AD start/end of the BS fiscal year that begins in `fyStartYear` (Shrawan 1 -> last day of the
 // following year's Ashadh). `end` is pushed to end-of-day so same-day comparisons against dates
@@ -92,7 +92,7 @@ function billDiscountOf(lines) {
   return Math.max(0, ...lines.map(l => parseFloat(l.discount_amount || 0) || 0))
 }
 
-// VAT-correct grand total for a bill's lines via calcBillTotals. `netByEntry` (optional) nets a
+// VAT-correct grand total for a bill's lines via billOwedAfterReturns (calcBillTotals underneath). `netByEntry` (optional) nets a
 // qty*rate return amount out of each line first — omit it (or pass an empty map) for the bill's
 // GROSS total as originally billed. Rounded to currency precision (2dp) immediately: this report
 // fetches a bill's lines with no guaranteed order, and floating-point addition isn't associative —
@@ -102,18 +102,20 @@ function billDiscountOf(lines) {
 // amount still showed a phantom NPR 0.01 balance here. Rounding here (rather than only at display
 // time via fmt()) means the running-balance walk itself operates on clean currency amounts, so a
 // fully-settled bill nets to exactly 0.00 instead of carrying sub-paisa float noise forward.
+//
+// S792 (owner decision D33): a return comes off at the DISCOUNTED price, through the same
+// billOwedAfterReturns Outstanding Payables uses. This kept the whole discount on the netted lines,
+// so a return was credited at list price: a fully returned 10,000 bill with a 1,000 discount walked
+// to 0 − 1,000, the schedule printed a Return of 10,000 against a Purchase of 9,000, and the letter
+// closed on "Advance / Credit Balance NPR 1,000" for the supplier to sign.
 function billGrandTotal(lines, netByEntry) {
-  const discount = billDiscountOf(lines)
-  const calcLines = lines.map(l => ({
-    qty: 1,
-    rate: Math.max(0, l.qty * l.rate - (netByEntry?.[l.id] || 0)),
-    vat_inclusive: l.vat_inclusive,
-  }))
-  return Math.round(calcBillTotals(calcLines, discount).grandTotal * 100) / 100
+  return Math.round(billOwedAfterReturns(lines, netByEntry || {}, billDiscountOf(lines)) * 100) / 100
 }
 
 // Walks a bill's returns in date order, computing each one's own VAT/discount-adjusted impact —
-// NOT a flat qty*rate figure, since VAT recalculates on the shrinking post-return base each time.
+// NOT a flat qty*rate figure: since D33 (S792) each return comes off at its line's discounted price
+// plus 13% where that line carried VAT, and the walk takes each as the difference between two
+// rounded bill totals, so the returns always add up to exactly the drop in the bill.
 // Returns an array of { returnRow, date, effectiveValue }, one per return, in chronological order.
 // Starting from the bill's GROSS total means the returned array's effectiveValues always sum to
 // exactly (grossTotal − finalNetTotal), so "Purchase" (gross) and "Return" (effective) lines shown

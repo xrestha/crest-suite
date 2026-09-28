@@ -1,7 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { nprExact } from '../../../shared/nepalMoney'
+import { returnChangeReopensBill, returnEditReopensBill } from '../reports/payablesAllocation'
+import { isNetworkError } from '../../../shared/errorText'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
@@ -16,6 +20,10 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 const EMPTY_RETURN = { bill_period_id: '', vendor_filter: '', purchase_entry_id: '', qty: '', bs_day: '', notes: '' }
 
 const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '')
+
+// What deleting a return has to know about its bill (S792 stage 2): every line's figures and its
+// settle stamp. `invoice_ref` names the bill in the sentences below.
+const BILL_LINE_COLUMNS = 'id, qty, rate, vat_inclusive, discount_amount, paid_at, invoice_ref, purchase_group_id'
 
 // Vendor Returns tab — record + list returns against an existing purchase entry. Rate, vendor,
 // and payment method are always inherited from the linked purchase (a return can't have its own).
@@ -39,7 +47,13 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
   // .btn-primary's CSS pairs its background with --theme-accent-text, calibrated for --theme-accent
   // — overriding just the background to red here left the text color mismatched to accent, not red.
   const { scopedFrom, scopedUpdate, scopedInsert, scopedDelete } = useScopedDb()
+  const { isAdmin, hasImsAccess } = useAuth()
+  // Clearing a bill's settle stamp is an UPDATE of purchase_entries, which the database lets only an
+  // IMS manager, the Owner or admin make (ims_rank_guard, S756) — the same logins Outstanding
+  // Payables is for. Checked here so a staff login is told before anything is written.
+  const canReopenBills = isAdmin || hasImsAccess('manager')
   const { ask: askConfirm, confirmEl } = useConfirm()
+  const [checkingId, setCheckingId] = useState(null)   // the return whose bill is being read before its delete
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returnForm, setReturnForm]         = useState(EMPTY_RETURN)
   const [returnSaving, setReturnSaving]     = useState(false)
@@ -185,40 +199,280 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
     }
 
     if (editingReturnId) {
-      // `.select('id')` (S756): an update an RLS policy filters to nothing is `error: null`, so the
-      // form closed as if saved over a return that had not changed. Zero rows back is proof.
-      const { data: updated, error } = await scopedUpdate('vendor_returns', payload).eq('id', editingReturnId).select('id')
-      if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not updated — it still shows its previous figures. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
-      if (!updated?.length) { setReturnError('The return was not updated — it still shows its previous figures. It may have been deleted since you opened it (the list behind this form has been reloaded), or your login is not allowed to change it — ask your manager or the Owner.'); setReturnSaving(false); onChanged(); return }
-    } else {
-      const { error } = await scopedInsert('vendor_returns', payload)
-      if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not recorded. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
+      // S792 stage 2 review (P1). An edit changes what the return takes off its bill — a smaller
+      // qty, or a re-link to another line or another bill — so a bill settled BY this return owes
+      // again exactly as it does when the return is deleted, and its stamps would keep it in Paid
+      // History. The delete's read, decision and order of writes, asked of the return as it will be
+      // written (returnEditReopensBill). A re-link off the bill is a delete there; the bill it moves
+      // to only gains a return, which can never make it owe more, so it is not read.
+      const id = editingReturnId
+      const original = (returns || []).find(r => r.id === id) || { id, purchase_entry_id: null }
+      const next = { purchase_entry_id: payload.purchase_entry_id, qty: payload.qty, rate: payload.rate }
+      const pre = await readReturnBill(original, next)
+      if (pre.error) { refuseEditUnchecked(pre.error); setReturnSaving(false); return }
+      const d = pre.decision
+      if (!d?.reopen) { await writeReturnEdit(id, payload, pre); return }
+      setReturnSaving(false)
+      if (!canReopenBills) {
+        setReturnError(`The return was not updated — it still shows its previous figures. ${billName(pre.invoiceRef)} is marked settled, and this change means ${nprExact(d.owedAgain)} is owed on it again, so the bill has to move back to Outstanding Payables. Reopening a settled bill needs an IMS manager or the Owner — ask one of them to make this change.`)
+        return
+      }
+      askConfirm({
+        title: 'Update this return?',
+        confirmLabel: 'Update Return', busyLabel: 'Saving…',
+        body: <p style={{ margin: 0 }}>This bill{pre.invoiceRef ? ` (#${pre.invoiceRef})` : ''} is marked settled; with this change <strong>{nprExact(d.owedAgain)}</strong> is owed on it again and the bill moves back to Outstanding Payables.</p>,
+        run: async () => {
+          setReturnSaving(true)
+          // Read again, fresh, as the delete does: the dialog may have stood open.
+          const fresh = await readReturnBill(original, next)
+          if (fresh.error) { refuseEditUnchecked(fresh.error); setReturnSaving(false); onChanged(); return }
+          await writeReturnEdit(id, payload, fresh)
+        },
+      })
+      return
     }
+    const { error } = await scopedInsert('vendor_returns', payload)
+    if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not recorded. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
+    finishSave()
+  }
 
+  function finishSave() {
     setReturnSaving(false)
     setShowReturnForm(false)
     setEditingReturnId(null)
     onChanged()
   }
 
-  function deleteReturn(ret) {
+  // The edit's writes, in the delete's order: the stamps first (the write that can refuse), then
+  // the return, and the stamps put back if the return did not land. `bill` is readReturnBill's.
+  async function writeReturnEdit(id, payload, bill) {
+    const d = bill.decision
+    const name = billName(bill.invoiceRef)
+    let cleared = []
+    if (d?.reopen) {
+      const c = await clearStamps(d, bill.lines)
+      if (c.failed) {
+        setReturnError(clearFailureText(c, { lead: 'The return was not updated', change: 'this change', name, owedAgain: d.owedAgain, askTo: 'make this change' }))
+        setReturnSaving(false); onChanged(); return
+      }
+      cleared = c.cleared
+    }
+    // `.select('id')` (S756): an update an RLS policy filters to nothing is `error: null`, so the
+    // form closed as if saved over a return that had not changed. Zero rows back is proof.
+    const { data: updated, error } = await scopedUpdate('vendor_returns', payload).eq('id', id).select('id')
+    if (!error && updated?.length) { finishSave(); return }
+    // A lost response is not a refusal: the update may have landed (S792 stage 2 review, P2).
+    // Look before undoing anything, and claim nothing a look could not settle.
+    const landed = error && isNetworkError(error) ? await returnWriteLanded(id, payload) : false
+    if (landed === true) { finishSave(); return }
+    if (landed === null) {
+      const a = asActionError(error)
+      setReturnError({ text: `Crest lost the connection while saving this return and could not check whether the change went through.${cleared.length ? ` ${name} was already moved back to Outstanding Payables for it.` : ''} Saving again is safe either way — press Update Return once the connection is back. ${a.text}`, detail: a.detail })
+      setReturnSaving(false); onChanged(); return
+    }
+    const billState = await putBillBack(bill.lines, cleared, name)
+    if (error) {
+      const a = asActionError(error)
+      setReturnError({ text: `The return was not updated — it still shows its previous figures.${billState} ${a.text}`, detail: a.detail })
+    } else {
+      setReturnError(`The return was not updated — it still shows its previous figures.${billState} It may have been deleted since you opened it (the list behind this form has been reloaded), or your login is not allowed to change it — ask your manager or the Owner.`)
+    }
+    setReturnSaving(false); onChanged()
+  }
+
+  // ── Deleting a return from a settled bill (S792 stage 2) ─────────────────────────────────────
+  //
+  // A return lowers what its bill owes, so a bill can be settled BY one: paid down to what the
+  // return left, or closed from Outstanding Payables once its goods all went back ("Close this
+  // bill", PURCHASES-8). Deleting that return makes the bill owe again — and its `paid_at` stamps
+  // still file it under Paid History, where nothing can be paid on it and no total counts it as
+  // owed. So the delete reads the bill first, and when returnChangeReopensBill says the bill is
+  // settled now and would owe money without this return, the stamps are cleared and the bill goes
+  // back to Outstanding Payables with the right balance. A stamp with no payment rows behind it on
+  // a bill whose figures never showed it settled is a bill paid before payable_payments existed,
+  // and is left alone (the helper's rule).
+  //
+  // Every line of the bill, every return against those lines from ANY month (a late return sits
+  // in its own month, D10), and every payment on them — resolves { lines, invoiceRef, decision }
+  // (decision null when the return belongs to no bill) or { error }. A bill written before grouping
+  // has no purchase_group_id and is its own single line, as Outstanding Payables treats it. `next`
+  // is an edit's return as it will be written (saveReturn); without it the question is a delete.
+  async function readReturnBill(ret, next = null) {
+    if (!ret.purchase_entry_id) return { decision: null }   // an unlinked return belongs to no bill
+    const { data: line, error: lineErr } = await supabase.from('purchase_entries').select(BILL_LINE_COLUMNS).eq('id', ret.purchase_entry_id).maybeSingle()
+    if (lineErr) return { error: lineErr }
+    if (!line) return { decision: null }
+    let lines = [line]
+    if (line.purchase_group_id) {
+      const { data, error } = await fetchAllRows(() => supabase.from('purchase_entries').select(BILL_LINE_COLUMNS)
+        .eq('purchase_group_id', line.purchase_group_id).order('id'))
+      if (error) return { error }
+      if (data?.length) lines = data
+    }
+    const ids = lines.map(l => l.id)
+    const [rets, pays] = await Promise.all([
+      fetchAllRowsChunked(ids, chunk => scopedFrom('vendor_returns', 'id, purchase_entry_id, qty, rate').in('purchase_entry_id', chunk).order('id')),
+      fetchAllRowsChunked(ids, chunk => scopedFrom('payable_payments', 'id, purchase_entry_id, amount').in('purchase_entry_id', chunk).order('id')),
+    ])
+    const failed = rets.error || pays.error
+    if (failed) return { error: failed }
+    return {
+      lines,
+      invoiceRef: line.invoice_ref,
+      decision: next
+        ? returnEditReopensBill({ lines, returns: rets.data, payments: pays.data, returnId: ret.id, next })
+        : returnChangeReopensBill({ lines, returns: rets.data, payments: pays.data, returnId: ret.id }),
+    }
+  }
+
+  // A check that could not run has not passed: the delete is refused rather than risk leaving a
+  // bill filed as settled while it owes money.
+  function refuseUnchecked(error) {
+    const { text, detail } = asActionError(error)
+    setActionError({ text: `This return is still recorded — it was not deleted. Crest could not check whether its bill is settled, and deleting a return from a settled bill has to move that bill back to Outstanding Payables. Try again in a moment. ${text}`, detail })
+  }
+
+  // The same refusal for an edit, in the form.
+  function refuseEditUnchecked(error) {
+    const { text, detail } = asActionError(error)
+    setReturnError({ text: `The return was not updated — it still shows its previous figures. Crest could not check whether its bill is settled, and changing a return on a settled bill can move that bill back to Outstanding Payables. Try again in a moment. ${text}`, detail })
+  }
+
+  const billName = ref => (ref ? `Bill #${ref}` : 'Its bill')
+
+  // Puts back the stamps cleared before a delete that then did not land, each line's own date.
+  async function restoreStamps(lines, clearedIds) {
+    const byDate = new Map()
+    lines.filter(l => clearedIds.includes(l.id) && l.paid_at).forEach(l => {
+      byDate.set(l.paid_at, [...(byDate.get(l.paid_at) || []), l.id])
+    })
+    for (const [date, ids] of byDate) {
+      const { data, error } = await supabase.from('purchase_entries').update({ paid_at: date }).in('id', ids).select('id')
+      if (error || (data?.length || 0) < ids.length) return false
+    }
+    return true
+  }
+
+  // What the sentence says about a bill whose stamps were cleared for a return write that then did
+  // not land: put back, or — if that failed too — where it is now and the way out.
+  async function putBillBack(lines, cleared, name) {
+    if (!cleared.length) return ''
+    return (await restoreStamps(lines, cleared))
+      ? ` ${name} is still settled, as it was.`
+      : ` ${name} was moved back to Outstanding Payables on the way and could not be put back: it owes nothing there, so open Outstanding Payables and use Close this bill on it.`
+  }
+
+  // Clears a settled bill's stamps before the return write that makes it owe again. It goes FIRST
+  // because it is the write that can refuse: it needs a manager where the return needs any IMS
+  // login, so refused here nothing has changed. Only `paid_at` changes, so a closed month's guard
+  // lets it through (closed-periods.md). `.select('id')`: an update filtered to nothing is
+  // `error: null`. A lost response may have cleared them after all, so the stamps are put back —
+  // safe whether or not the clear landed — and only a failed put-back leaves the bill uncertain.
+  // Resolves { cleared } or { failed, error, uncertain }.
+  async function clearStamps(d, lines) {
+    const { data, error } = await supabase.from('purchase_entries').update({ paid_at: null }).in('id', d.stampedIds).select('id')
+    if (!error && data?.length) return { cleared: data.map(r => r.id) }
+    const uncertain = !!error && isNetworkError(error) && !(await restoreStamps(lines, d.stampedIds))
+    return { failed: true, error, uncertain }
+  }
+
+  // The sentence for a clear that did not go through. The return write was never sent, so `lead`
+  // (what is still as it was) holds whatever happened to the bill; "nothing was changed" only when
+  // the bill is known to be as it was too.
+  function clearFailureText(c, { lead, change, name, owedAgain, askTo }) {
+    const a = c.error ? asActionError(c.error) : null
+    const why = c.uncertain
+      ? 'the connection dropped while it was being moved, so Crest cannot tell whether it moved. If it now shows on Outstanding Payables owing nothing, use Close this bill on it there.'
+      : c.error ? 'that could not be done.'
+      : `this login is not allowed to reopen it. Ask an IMS manager or the Owner to ${askTo}.`
+    return {
+      text: `${lead}${c.uncertain ? '.' : ' — nothing was changed.'} ${name} is marked settled, and ${change} means ${nprExact(owedAgain)} is owed on it again, so the bill has to move back to Outstanding Payables first — and ${why}${a ? ` ${a.text}` : ''}`,
+      detail: a?.detail || (c.error ? undefined : 'purchase_entries paid_at update matched 0 rows'),
+    }
+  }
+
+  // After a return write whose response was lost (isNetworkError), whether it landed, read back —
+  // a dead fetch proves only that the answer did not arrive (error-messages.md), and the bill's
+  // stamps may be put back only if the write really did not. A delete landed when the row is gone;
+  // an update when the row holds what was sent. Resolves true, false, or null when the read-back
+  // failed too — then nothing is undone and the sentence says what cannot be known.
+  async function returnWriteLanded(id, sent = null) {
+    const { data, error } = await scopedFrom('vendor_returns', 'id, period_id, purchase_entry_id, qty, bs_day, notes').eq('id', id).maybeSingle()
+    if (error) return null
+    if (!sent) return !data
+    if (!data) return false   // gone: an update had nothing to land on
+    return data.period_id === sent.period_id && data.purchase_entry_id === sent.purchase_entry_id
+      && Math.abs((parseFloat(data.qty) || 0) - sent.qty) < 1e-9
+      && data.bs_day === sent.bs_day && (data.notes || null) === sent.notes
+  }
+
+  async function deleteReturn(ret) {
+    if (checkingId) return
+    setActionError(null)
     const value = (parseFloat(ret.qty) || 0) * (parseFloat(ret.rate) || 0)
+    setCheckingId(ret.id)
+    const pre = await readReturnBill(ret)
+    setCheckingId(null)
+    if (pre.error) { refuseUnchecked(pre.error); return }
+    const reopening = !!pre.decision?.reopen
+    if (reopening && !canReopenBills) {
+      setActionError(`This return is still recorded — it was not deleted. ${billName(pre.invoiceRef)} is marked settled, and deleting this return means ${nprExact(pre.decision.owedAgain)} is owed on it again, so the bill has to move back to Outstanding Payables. Reopening a settled bill needs an IMS manager or the Owner — ask one of them to delete this return.`)
+      return
+    }
     // The product's own consequence dialog, with the money in it (S682 moved bill delete off
     // window.confirm; this one had been left behind). And the delete's error is READ: a bare
     // await meant a refused delete reloaded the same rows and the return "came back" unexplained.
     askConfirm({
       title: 'Delete this return?',
       confirmLabel: 'Delete Return', danger: true, busyLabel: 'Deleting…',
-      body: <p style={{ margin: 0 }}>{ret.items?.name || 'This return'}, NPR {Math.round(value).toLocaleString('en-IN')}, goes back onto this period's net purchases and the vendor's payable. This cannot be undone.</p>,
+      body: <>
+        <p style={{ margin: 0 }}>{ret.items?.name || 'This return'}, NPR {Math.round(value).toLocaleString('en-IN')}, goes back onto this period's net purchases and the vendor's payable. This cannot be undone.</p>
+        {reopening && (
+          <p style={{ margin: '8px 0 0' }}>
+            This bill{pre.invoiceRef ? ` (#${pre.invoiceRef})` : ''} is marked settled; deleting the return means <strong>{nprExact(pre.decision.owedAgain)}</strong> is owed again and the bill moves back to Outstanding Payables.
+          </p>
+        )}
+      </>,
       run: async () => {
         setActionError(null)
+        // Read again, fresh: the dialog may have stood open while a payment was recorded or the
+        // bill was closed, and the stamp must follow the bill as it is at the moment of the delete.
+        const fresh = await readReturnBill(ret)
+        if (fresh.error) { refuseUnchecked(fresh.error); onChanged(); return }
+        const d = fresh.decision
+        const name = billName(fresh.invoiceRef)
+        // The stamp is cleared FIRST (clearStamps says why), so a refusal there changes nothing.
+        let cleared = []
+        if (d?.reopen) {
+          const c = await clearStamps(d, fresh.lines)
+          if (c.failed) {
+            setActionError(clearFailureText(c, { lead: 'This return is still recorded', change: 'deleting this return', name, owedAgain: d.owedAgain, askTo: 'delete this return' }))
+            onChanged()
+            return
+          }
+          cleared = c.cleared
+        }
         const { data: removed, error } = await scopedDelete('vendor_returns').eq('id', ret.id).select('id')
-        if (error) {
-          const { text, detail } = asActionError(error)
-          setActionError({ text: `This return is still recorded — it was not deleted. ${text}`, detail })
-        } else if (!removed?.length) {
-          // Zero rows removed with no error (S756): a policy filtered the delete, or it was already gone.
-          setActionError('Nothing was removed. If the return is still in the list below (it has been reloaded), your login is not allowed to delete it — ask your manager or the Owner. If it is gone, it was already deleted.')
+        if (error || !removed?.length) {
+          // A lost response is not a refusal: the delete may have landed (S792 stage 2 review, P2),
+          // and re-stamping the bill then would file it as settled while it owes. Look first.
+          const landed = error && isNetworkError(error) ? await returnWriteLanded(ret.id) : false
+          if (landed === true) { onChanged(); return }   // it went through, and the bill is where it belongs
+          if (landed === null) {
+            const a = asActionError(error)
+            setActionError({ text: `Crest lost the connection while deleting this return and could not check whether the delete went through.${cleared.length ? ` ${name} was already moved back to Outstanding Payables for it.` : ''} Once the connection is back, look for the return in the list below: if it is gone, it was deleted; if it is still there, delete it again — that is safe either way. ${a.text}`, detail: a.detail })
+            onChanged()
+            return
+          }
+          // The delete did not land, so the bill is put back exactly as it was.
+          const billState = await putBillBack(fresh.lines, cleared, name)
+          if (error) {
+            const { text, detail } = asActionError(error)
+            setActionError({ text: `This return is still recorded — it was not deleted.${billState} ${text}`, detail })
+          } else {
+            // Zero rows removed with no error (S756): a policy filtered the delete, or it was already gone.
+            setActionError(`Nothing was removed.${billState} If the return is still in the list below (it has been reloaded), your login is not allowed to delete it — ask your manager or the Owner. If it is gone, it was already deleted.`)
+          }
         }
         onChanged()
       },
@@ -514,7 +768,10 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                       {!isLocked && (
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEditReturn(ret)}>Edit</button>
-                          <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteReturn(ret)}>Del</button>
+                          {/* Reads the return's bill before asking (S792 stage 2), so it says so while it does. */}
+                          <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteReturn(ret)} disabled={!!checkingId}>
+                            {checkingId === ret.id ? 'Checking…' : 'Del'}
+                          </button>
                         </div>
                       )}
                     </td>

@@ -13,7 +13,7 @@ import AssetFormModal from './AssetFormModal'
 import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { latestPostedByAsset } from './depreciationCompute'
+import { bookPositionsByAsset, bookValue } from './depreciationCompute'
 
 const fmt = nprInt
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -21,7 +21,10 @@ const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeri
 export default function AssetRegisterTab({ categories, assets, onReload }) {
   const { clientId, isAdmin } = useAuth()
   const { scopedFrom } = useScopedDb()
-  const [nbvByAssetId, setNbvByAssetId] = useState(() => readPageCache('fixed-assets', 'nbv', clientId) ?? {})
+  // Depreciation charged per asset (net of reversals), not a closing NBV (S792, COSTS-2): the NBV
+  // is cost less this, so a cost edited since posting shows at once. A new cache section, so a
+  // pre-S792 'nbv' entry (closing NBVs) is never read back as charges.
+  const [chargedByAssetId, setChargedByAssetId] = useState(() => readPageCache('fixed-assets', 'charged', clientId) ?? {})
   // A failed NBV read must not render every asset at full cost / 0% depreciated — and must never
   // be written into the cache (S682).
   const [nbvError, setNbvError] = useState(null)
@@ -42,17 +45,16 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
 
   useEffect(() => { loadNbv() }, [assets]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Latest posted closing_nbv per asset, resolved once here (not one query per asset) — this is
-  // the ONE view allowed sessionDataCache's read-revisit cache (a pure display read, never a
-  // batch-save baseline like Stock.js's "Save All").
+  // Posted depreciation per asset, resolved once here (not one query per asset) — this is the ONE
+  // view allowed sessionDataCache's read-revisit cache (a pure display read, never a batch-save
+  // baseline like Stock.js's "Save All").
   async function loadNbv() {
-    if (assets.length === 0) { setNbvByAssetId({}); return }
+    if (assets.length === 0) { setChargedByAssetId({}); return }
     // Paged (one row per asset per run crosses the 1000-row cap inside a year of monthly runs, and
-    // a truncated read shows the assets past the cut at full cost), and resolved through
-    // latestPostedByAsset so an adjustment run beats the run it reverses on a shared period_end
-    // instead of whichever row PostgREST returned last (S756).
-    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_end, created_at, closing_nbv')
-      .eq('is_posted', true).order('period_end', { ascending: true }).order('created_at', { ascending: true }).order('id'))
+    // a truncated read shows the assets past the cut at full cost), and summed through
+    // bookPositionsByAsset, so every run and reversal counts whatever period it covers (S792).
+    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
+      .eq('is_posted', true).order('period_end', { ascending: true }).order('id'))
     if (error) {
       const a = asActionError(error)
       setNbvError({ text: 'Could not load the posted depreciation, so the Net Book Value column is not real — it shows the last figures this browser saw, or cost. Reload before relying on it. ' + a.text, detail: a.detail })
@@ -60,9 +62,9 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
     }
     setNbvError(null)
     const map = {}
-    Object.entries(latestPostedByAsset(data)).forEach(([assetId, row]) => { map[assetId] = row.closing_nbv })
-    setNbvByAssetId(map)
-    writePageCache('fixed-assets', 'nbv', clientId, map)
+    Object.entries(bookPositionsByAsset(data)).forEach(([assetId, p]) => { map[assetId] = p.charged })
+    setChargedByAssetId(map)
+    writePageCache('fixed-assets', 'charged', clientId, map)
   }
 
   const locations = useMemo(() => [...new Set(assets.map(a => a.location).filter(Boolean))], [assets])
@@ -73,7 +75,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
     (filterLocation === 'all' || a.location === filterLocation)
   )
 
-  function nbvOf(asset) { return nbvByAssetId[asset.id] ?? asset.total_cost }
+  function nbvOf(asset) { return bookValue(asset, { charged: chargedByAssetId[asset.id] || 0 }) }
   function pctDepreciatedOf(asset) {
     return asset.total_cost > 0 ? ((asset.total_cost - nbvOf(asset)) / asset.total_cost) * 100 : 0
   }
@@ -138,7 +140,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                 <th style={{ textAlign: 'right' }}>Unit Cost</th>
                 <th style={{ textAlign: 'right' }}>Total Cost</th>
                 <th>Acquired</th>
-                <th style={{ textAlign: 'right' }}><Tip text="Book value as of the latest posted depreciation run, or total cost if never posted." width={250}>Current NBV</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Total cost less every depreciation charge posted for the asset, reversals included, whatever period each one covers — or total cost if nothing has been posted." width={270}>Current NBV</Tip></th>
                 <th style={{ textAlign: 'right' }}>% Depreciated</th>
                 <th>Status</th>
                 <th></th>

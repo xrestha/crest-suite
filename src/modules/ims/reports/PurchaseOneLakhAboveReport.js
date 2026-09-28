@@ -12,10 +12,12 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, mergeFactors } from './supplierAttribution'
 import {
   buildVendorSummary, netFactors, annexure13Rows, summariseUnlinkedReturns, ONE_LAKH,
+  returnLinesOutsidePeriod, priorBillFactors,
 } from './purchaseTaxSplit'
+import { readPriorBillLines } from './readPriorBillLines'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { Navigate } from 'react-router-dom'
 
@@ -106,7 +108,22 @@ export default function PurchaseOneLakhAboveReport() {
     // caller passes is now the only difference between this rollup and VatReport's — per-line
     // allocation makes the discount arithmetic identical either way (purchaseTaxSplit.js).
     const allocated = allocateBillDiscounts(entries)
-    setVendors(buildVendorSummary(allocated, returns, netFactors(allocated)))
+    // S792 (TAX-3, D10): a return in this fiscal year may be against a bill from the LAST one (up
+    // to 12 months back), and that bill is not among this year's entries — so returnBase had no
+    // discount factor for it and credited the list rate, overstating the supplier's Returned by the
+    // bill's discount share and understating their Net, VAT and Total Invoiced, which can take a
+    // supplier under the one-lakh line. Read those bills whole, exactly as VAT Report, Non-VAT Report,
+    // Payment Summary and Vendor Report already do. The return stays in the year it happened (D10).
+    // A failed read fails the report: falling back to the list rate would be the silent version.
+    let factors = netFactors(allocated)
+    const outsideIds = returnLinesOutsidePeriod(entries, returns)
+    if (outsideIds.length > 0) {
+      const prior = await readPriorBillLines(outsideIds)
+      if (!fyReq.isCurrent(key)) return
+      if (prior.error) { setLoadError(prior.error); setVendors([]); setLoading(false); return }
+      factors = mergeFactors(factors, priorBillFactors(prior.data))
+    }
+    setVendors(buildVendorSummary(allocated, returns, factors))
     // Unlinked returns (their bill was deleted or re-saved) still come off their supplier here —
     // a return is a return whichever half it was — but at list rate and with no VAT reversed, since
     // nothing records either. Named, so the reader knows those two figures are approximate (S756).

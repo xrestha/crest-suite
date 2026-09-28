@@ -125,6 +125,44 @@ export function findDateRange(metaRows) {
   return { from: sorted[0], to: sorted[sorted.length - 1] }
 }
 
+// The file's rows matched to this client's dishes, summed per dish (S792, SALES-5).
+//
+// `negative` names every dish whose NET quantity for the file comes out below zero — a day with more
+// returns than sales. The grid used to take it as typed: it showed −2 and a negative Day Revenue,
+// then Save Day's `qty > 0` filter dropped the row without a word (and deleted that dish's saved
+// row for the day), so the day's revenue came out overstated by the refund. Sales Entry records
+// sales, not refunds, so the import is refused and the dishes named rather than choosing for the
+// owner. Summed first: a dish on two lines of +5 and −2 is a sale of 3, not a refusal.
+export function matchImportRows(rows, recipes) {
+  const byName = new Map((recipes || []).map(r => [lc(r.name), r]))
+  const qtyMap = new Map()
+  const discountMap = new Map()
+  const unmatchedNames = []
+  const names = new Map()
+  ;(rows || []).forEach(row => {
+    const recipe = byName.get(lc(row.productName))
+    if (!recipe) { unmatchedNames.push(row.productName); return }
+    names.set(recipe.id, recipe.name)
+    qtyMap.set(recipe.id, (qtyMap.get(recipe.id) || 0) + row.qty)
+    if (row.discount) discountMap.set(recipe.id, (discountMap.get(recipe.id) || 0) + row.discount)
+  })
+  const negative = [...qtyMap.entries()]
+    .filter(([, qty]) => qty < 0)
+    .map(([id, qty]) => ({ name: names.get(id), qty }))
+  return { qtyMap, discountMap, unmatchedNames, negative }
+}
+
+// The refusal for `negative` above, naming the dishes (at most five, then a count).
+export function negativeImportMessage(negative) {
+  if (!negative?.length) return null
+  const shown = negative.slice(0, 5).map(n => `${n.name} (${n.qty.toLocaleString('en-IN')})`).join(', ')
+  const more = negative.length > 5 ? `, and ${negative.length - 5} more` : ''
+  const one = negative.length === 1
+  return `Nothing was filled in: this file has more returns than sales for ${one ? 'this dish' : 'these dishes'} — ${shown}${more}. ` +
+    'A day\'s sales cannot be below zero, and filling it in would lose the refund when you save. ' +
+    `Take the returned plates off the day they were sold, leave ${one ? 'this dish' : 'these dishes'} at 0 here, or correct the file — then import again.`
+}
+
 const fmtBs = d => `${d.day} ${BS_MONTHS[d.month - 1]} ${d.year}`
 const sameBsDay = (a, b) => a.year === b.year && a.month === b.month && a.day === b.day
 
@@ -182,16 +220,10 @@ export default function SalesImportButton({ recipes, onMatched, disabled, select
           return
         }
 
-        const byName = new Map(recipes.map(r => [lc(r.name), r]))
-        const qtyMap = new Map()
-        const discountMap = new Map()
-        const unmatchedNames = []
-        rows.forEach(row => {
-          const recipe = byName.get(lc(row.productName))
-          if (!recipe) { unmatchedNames.push(row.productName); return }
-          qtyMap.set(recipe.id, (qtyMap.get(recipe.id) || 0) + row.qty)
-          if (row.discount) discountMap.set(recipe.id, (discountMap.get(recipe.id) || 0) + row.discount)
-        })
+        const { qtyMap, discountMap, unmatchedNames, negative } = matchImportRows(rows, recipes)
+        // SALES-5 (S792): refused before the confirm, so nothing reaches the grid.
+        const refusal = negativeImportMessage(negative)
+        if (refusal) { setImportError(refusal); return }
 
         const matched = rows.length - unmatchedNames.length
         // D28: the date is checked and SAID, in the confirm the user is already reading, and kept

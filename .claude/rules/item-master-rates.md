@@ -153,11 +153,12 @@ now names what was already destroyed, what is still holding the item, and says p
 retrying will not get past it. Same family as the consequence-not-constraint rule in
 `error-messages.md`.
 
-**Hiding is not the free alternative every refusal implies.** Six report reads carry
-`.eq('is_active', true)` per the S436 rule that stock is never valued off an inactive item, so
-hiding an item that still holds stock takes its value out of stock valuation and the monthly
-summary. `HIDE_INSTEAD` is the one string all the refusals share, and it says so. Hide once the
-stock is at zero.
+**Hiding never changes a past month (S792, owner decision D29, FIGURES-1).** Six report reads
+used to carry `.eq('is_active', true)` per S436, so hiding an item that still held stock took its
+purchases out of every past month's COGS and Food Cost %. Period figures now value every
+non-sub-recipe item with a row in the period (`periodValuationItems`, `periodCost.js`); hiding
+only leaves the pickers and on-the-shelf views. `HIDE_INSTEAD` and the Used In tooltip say so.
+Hide once the stock is at zero all the same: a hidden item is off the count sheet.
 
 ## `base_unit` is derived, never chosen (S706)
 
@@ -218,9 +219,12 @@ that is reported in the preview and skipped by the apply pass), and the Export/I
 breaks a table on its first failing chunk, so one duplicate pair in an old backup would have
 abandoned the client's whole item book — `dedupeItemNames` renames on the way in and reports it).
 
-**`item_code` is deliberately left unconstrained.** Same client-side-max root cause, but nothing
-keys off it, and pushing HQ's codes into a branch that minted its own would turn every such push
-into an abort. Minting from a fresh unfiltered read is the proportionate fix.
+**`item_code` is deliberately left unconstrained.** Same client-side-max root cause, and pushing
+HQ's codes into a branch that minted its own would turn every such push into an abort. Minting
+from a fresh unfiltered read is the proportionate fix — plus, since S792 (MASTER-5), a save adds
+its code to `book` at once (`rememberInBook`), so two adds in one visit no longer mint the same
+code. Something DOES key off it now: Recipe Import resolves an ingredient by code first
+(`recipeImportParse.js`) and refuses a code on two items, naming both, rather than guess.
 
 ## The delete guard is server-side (S707)
 

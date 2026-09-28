@@ -57,6 +57,14 @@ const FILES = [
   // Joined in S747 with its grouped path, get_group_pnl, which had the SQL form of the same filter.
   // Revenue is the top line of the statement and the denominator of every margin beneath it.
   ['ConsolidatedPnl.jsx', path.join(__dirname, '..', '..', '..', 'pages', 'dashboard', 'ConsolidatedPnl.jsx')],
+  // The frozen Monthly Owner Report joined in S792 (FIGURES-8). Its revenue is the denominator of
+  // Food Cost %, Labour %, Prime % and Net Margin %, and its Menu Engineering qty map sets the
+  // popularity median — both FROZEN, so a dropped legacy row stays dropped. The two rebuilt
+  // inventory sections are listed so their sales reads cannot lose `source` again.
+  ['computeMonthlyReport.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeMonthlyReport.js')],
+  ['computeMenuEngineeringSection.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeMenuEngineeringSection.js')],
+  ['computeInventoryVariance.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeInventoryVariance.js')],
+  ['computeInventoryShrinkageTrend.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeInventoryShrinkageTrend.js')],
 ]
 
 describe.each(FILES)('%s reads sales_entries in a way NULL-source rows survive', (_name, file) => {
@@ -96,6 +104,13 @@ const DEPLETION_FILES = [
   ['Variance.js', path.join(__dirname, '..', 'variance', 'Variance.js')],
   ['TheoreticalVariance.js', path.join(__dirname, '..', 'variance', 'TheoreticalVariance.js')],
   ['ShrinkageReport.js', path.join(__dirname, '..', 'variance', 'ShrinkageReport.js')],
+  // S792 (SALES-3): the frozen Owner Report's variance and shrinkage-trend sections summed sales
+  // raw — a credit note and its choice lines SUBTRACTED usage, a till + manual day counted twice —
+  // and were on no list, which is why S717's "the last page summing raw" missed them. The IMS
+  // section's reorder figure goes through buildStockRows and is pinned here too.
+  ['computeInventoryVariance.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeInventoryVariance.js')],
+  ['computeInventoryShrinkageTrend.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeInventoryShrinkageTrend.js')],
+  ['computeMonthlyReport.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeMonthlyReport.js')],
 ]
 
 describe.each(DEPLETION_FILES)('%s runs sales through the shared depletion rule', (_name, file) => {

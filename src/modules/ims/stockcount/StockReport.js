@@ -15,9 +15,11 @@ import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { buildStockRows } from './stockReportCalc'
+import { periodRowIds, periodValuationItems } from '../reports/periodCost'
 
 const npr = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
-const STATUS_LABEL = { out: 'OUT', low: 'LOW', ok: 'OK', idle: 'NO ACTIVITY' }
+const STATUS_LABEL = { out: 'OUT', low: 'LOW', ok: 'OK', idle: 'NO ACTIVITY', hidden: 'HIDDEN' }
+const HIDDEN_TIP = 'Hidden in Item Master. Shown because it had stock or movement this period, so the month’s stock value still includes it (hiding an item never changes a past month). Never flagged low or out, because it is no longer bought.'
 
 export default function StockReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -76,8 +78,14 @@ export default function StockReport() {
       // complete-looking and simply had no rows for the tail of the book, and Total Stock Value
       // was short by whatever those items were worth. Same shape as S706/S708: the consumer was
       // paged and the producer was not.
+      //
+      // Hidden items are read too (S792, D29). This page is both "what is on the shelf" and the
+      // month's stock VALUE, and for a closed month that value is history: an `is_active` filter
+      // took a hidden item's counted stock out of every past month's Total Stock Value. It keeps
+      // the ones that had a row this period (periodValuationItems below) and marks them Hidden,
+      // out of the Low / Out counts — the on-the-shelf half of the page still means active items.
       fetchAllRows(() => scopedFrom('items', '*, categories(name)')
-        .eq('is_active', true).eq('is_sub_recipe', false).order('name').order('id')),
+        .eq('is_sub_recipe', false).order('name').order('id')),
       // Opening, closing, returns and staff meals are paged for the reason Stock Count states on
       // its own copy: each is one row per item per period, so a client past 1000 items silently
       // loses stock — and truncation returns NO error, so the firstError() check below passes
@@ -108,10 +116,13 @@ export default function StockReport() {
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
     const [
-      { data: items }, { data: opening }, { data: closing }, { data: purchases },
+      { data: allItems }, { data: opening }, { data: closing }, { data: purchases },
       { data: returns }, { data: wastages }, { data: staffMeals }, { data: clientRecipes },
       { data: sales }, { data: pars }
     ] = results
+    // Every active item, plus each hidden one with a row this period (D29) — a hidden item nothing
+    // happened to is not part of the month and would only pad the list with "No activity" rows.
+    const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals }))
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -133,7 +144,10 @@ export default function StockReport() {
       setLoadError(err); setRows([]); return
     }
 
+    // A hidden item keeps its figures but not its reorder verdict: it is no longer bought, so "Low"
+    // or "Out" would be a prompt to buy something the owner has retired.
     const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion })
+      .map(r => (r.item.is_active === false ? { ...r, status: 'hidden' } : r))
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
@@ -196,6 +210,7 @@ export default function StockReport() {
     ? <span className="badge badge-red">Out</span>
     : st === 'low' ? <span className="badge badge-amber">Low</span>
     : st === 'idle' ? <span className="badge badge-gray" title="No opening, purchases, usage, wastage or count this period">No activity</span>
+    : st === 'hidden' ? <span className="badge badge-gray" title={HIDDEN_TIP}>Hidden</span>
     : <span className="badge badge-green">OK</span>
 
   return (
@@ -265,6 +280,7 @@ export default function StockReport() {
           <option value="out">Out of Stock</option>
           <option value="ok">In Stock</option>
           <option value="idle">No activity</option>
+          {rows.some(r => r.status === 'hidden') && <option value="hidden">Hidden (had stock this period)</option>}
         </select>
         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''} · NPR {npr(filteredValue)}</span>
       </div>

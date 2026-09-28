@@ -14,6 +14,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
 import { allocateBillDiscounts } from '../reports/supplierAttribution'
+import { periodRowIds, periodValuationItems } from '../reports/periodCost'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -79,6 +80,9 @@ const sameStored = (fieldKey, a, b) => (isNoRow(fieldKey, a) && isNoRow(fieldKey
 const FIELD_TAB = { opening: 'opening', closing: 'closing', wastage: 'wastage', staff_meal: 'staff_meal' }
 const fieldKeyOf = tab => FIELD_TAB[tab] || null
 
+// The Summary's Hidden badge (S792, D29) — worded like Stock Report's, the other page that keeps them.
+const HIDDEN_ITEM_TIP = 'Hidden in Item Master. Shown because it had stock or movement this month, so the month’s figures still include it — hiding an item never changes a past month. It is not on the entry tabs, because a hidden item is no longer counted; show it again in Item Master to count it.'
+
 export default function Stock() {
   const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, hasFeature, hasImsAccess, imsCountOnly } = useAuth()
   // The export's letterhead (S756, owner decision): the one extra read this page makes for it.
@@ -90,6 +94,12 @@ export default function Stock() {
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [allItems, setItems] = useState([])
+  // Items hidden in Item Master (S792, D29: hiding an item never changes history). They are never
+  // on an entry grid — a hidden item cannot be counted — but the Summary values a month over every
+  // item with a row in it, so a count, purchase or wastage recorded before the hide stays in that
+  // month's figures. `summaryRowIds` is which items had a row in the period on screen.
+  const [hiddenItems, setHiddenItems] = useState([])
+  const [summaryRowIds, setSummaryRowIds] = useState(() => new Set())
   const [allCategories, setCategories] = useState([])
   // Which categories THIS account has been given to count (S737). null = not read yet / not
   // applicable. Only ever populated for a raw ims_role of 'staff' — admin and Owner resolve to
@@ -149,6 +159,17 @@ export default function Stock() {
     [allCategories, scopeOn, myCategoryIds],
   )
   const itemOptions = useMemo(() => items.map(i => ({ value: i.id, label: i.name })), [items])
+  // What the Summary, its uncounted-items banner and its Excel export value (S792, D29): every
+  // active item this account sees, plus each hidden one that had a row this period — the population
+  // Monthly Summary values (periodValuationItems), so hiding an item no longer takes its stock out
+  // of a past month here while that page keeps it. Sub-recipes stay in, as they always have on this
+  // page: prep is counted as stock here, which is the one difference the Summary's note names. The
+  // entry grids, the touch cards and the Print Sheet stay on `items` — active only. Hidden items are
+  // listed after the active ones, in name order, and carry a Hidden badge.
+  const summaryItems = useMemo(() => {
+    const hidden = scopeOn ? hiddenItems.filter(i => myCategoryIds?.has(i.category_id)) : hiddenItems
+    return periodValuationItems([...items, ...hidden], summaryRowIds)
+  }, [items, hiddenItems, summaryRowIds, scopeOn, myCategoryIds])
   const [stockData, setStockData] = useState({})
   const [purchases, setPurchases] = useState({})
   const [returns, setReturns] = useState({}) // { item_id: total_returned_qty }
@@ -171,6 +192,13 @@ export default function Stock() {
   const [wEntry, setWEntry] = useState({ item_id: '', qty: '', reason: DEFAULT_WASTAGE_REASON })
   const [wBusy, setWBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  // A month switch in flight (S792, STOCK-6). handlePeriodChange moves the label at once while the
+  // seven reads run, so the grids, the touch cards ("✓ Saved" included), the Summary and its Export
+  // showed the previous month's figures under the new month's name — and an export in that window
+  // was Bhadra's register in a file named for Shrawan. Everything that shows or writes figures
+  // waits on `figuresLoading` below; only the request still current may clear it (periodReq).
+  const [periodLoading, setPeriodLoading] = useState(false)
+  const figuresLoading = loading || periodLoading
   const [saving, setSaving] = useState({})
   // DERIVED, not stored (S761): `profile` arrives after the first render, so a count account's
   // stored default would be 'opening' for a beat — and `imsCountOnly` flipping later would leave
@@ -302,6 +330,10 @@ export default function Stock() {
 
   async function init() {
     setLoading(true)
+    // `loading` covers the page from here; a month switch this load supersedes can no longer
+    // clear its own flag (it is not the current request any more), so it is cleared here.
+    setPeriodLoading(false)
+    setClosedCarry(null)
     setLoadError(null)
 
     if (!navigator.onLine) {
@@ -340,6 +372,7 @@ export default function Stock() {
             setStockData(sd)
             // Queued figures count as recorded: the queue is what will write them.
             resetStored(open.id, sd)
+            restoreSummaryPopulation(cached)
             setPurchases(cached.purchases    || {})
             setReturns(cached.returns        || {})
             setPurchaseValues(cached.purchaseValues || null)
@@ -354,6 +387,7 @@ export default function Stock() {
             setPendingItems(new Set(pending.filter(op => op.periodId === open.id).map(op => op.itemId)))
           } else {
             resetStored(open.id, {})
+            restoreSummaryPopulation(null)
           }
         }
       }
@@ -378,16 +412,22 @@ export default function Stock() {
       isCounter
         ? scopedFrom('ims_count_assignments', 'category_id').eq('profile_id', profile.id)
         : Promise.resolve({ data: [], error: null }),
+      // The hidden items, for the Summary only (S792, D29) — kept apart from the list above so no
+      // entry grid, save path or offline item cache can ever reach one. In the failure check below
+      // like every other read: a Summary that silently lost its hidden items' stock is the defect
+      // this read exists to end.
+      fetchAllRows(() => scopedFrom('items', '*, categories(name)').eq('is_active', false).order('name').order('id')),
     ])
     // A failed read is not "no periods yet" — that empty state is a claim about the client. The
     // assignment read is in this check on purpose: dropping its error would leave myCategoryIds
     // null, which renders as "nothing is yours" — a claim, not an absence.
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: i }, { data: c }, { data: assigned }] = initResults
+    const [{ data: p }, { data: i }, { data: c }, { data: assigned }, { data: hidden }] = initResults
     setMyCategoryIds(new Set((assigned || []).map(a => a.category_id)))
     setPeriods(p || [])
     setItems(i || [])
+    setHiddenItems(hidden || [])
     setCategories(c || [])
     // Warming the offline cache is an accelerator, never the data path — the server read above
     // has already succeeded. A rejection here (no store, quota) must not fail a load that worked.
@@ -401,12 +441,22 @@ export default function Stock() {
       periodReq.begin(open.id)   // the auto-selected period claims the page like a chosen one
       setSelectedPeriod(open)
       clampWDay(open)
-      await loadStockData(open.id, i || [])
+      await loadStockData(open.id, i || [], hidden || [])
     }
     setLoading(false)
   }
 
-  async function loadStockData(periodId, itemList) {
+  // The Summary's hidden items and row ids for one month, from the offline copy of that month
+  // (S792, D29). A copy written before these were cached has neither, and the Summary then values
+  // active items only — what it did before — rather than inventing a population.
+  function restoreSummaryPopulation(cached) {
+    setSummaryRowIds(new Set(cached?.rowIds || []))
+    if (cached?.hiddenItems) setHiddenItems(cached.hiddenItems)
+  }
+
+  // `hiddenList` is the client's hidden items — the ones with a row this period go into the offline
+  // copy, so the Summary of a month opened offline values the same items it did online.
+  async function loadStockData(periodId, itemList, hiddenList = hiddenItems) {
     // Every one of these is paged. PostgREST's silent 1000-row cap (S528/S529) is worst here of
     // anywhere: a truncated read produces a *plausible* COGS rather than an error, and this is the
     // page a month is closed from. `wastages` is the one that realistically crosses it — daily
@@ -449,18 +499,29 @@ export default function Stock() {
       setStockData({}); setPurchases({}); setReturns({}); setRequisitioned({}); setPurchFreq({})
       setPurchaseValues({}); setReturnValues({}); setCountedBy({})
       setDailyWastage({}); setDailyRows([])
+      setSummaryRowIds(new Set())
       resetStored(periodId, {})
       return
     }
     const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes] = results
 
+    // Which items had any row this month (S792, D29) — what admits a hidden item to the Summary.
+    const rowIds = periodRowIds({ opening, closing, purchases: purch, returns: rets, wastages, staffMeals: staffMealsData })
+    setSummaryRowIds(rowIds)
+
     const data = {}
     const items = itemList || []
     items.forEach(item => { data[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
-    ;(opening || []).forEach(r => { if (data[r.item_id]) data[r.item_id].opening = r.qty })
+    // A row for an item not in the list — a hidden item, since S792 (D29) — is KEPT rather than
+    // dropped, so the Summary can value it. It is never rendered on an entry grid (those iterate
+    // `items`), and every save path iterates the visible items, so holding its figures here writes
+    // nothing. Before this the four loops below discarded such rows, which is how hiding an item
+    // took its opening, count, wastage and staff meals out of the month's Summary.
+    const cellOf = id => (data[id] || (data[id] = { opening: '', closing: '', wastage: '', staff_meal: '' }))
+    ;(opening || []).forEach(r => { cellOf(r.item_id).opening = r.qty })
     const countedMap = {}
     ;(closing || []).forEach(r => {
-      if (data[r.item_id]) data[r.item_id].closing = r.physical_qty
+      cellOf(r.item_id).closing = r.physical_qty
       if (r.physical_qty != null) countedMap[r.item_id] = r.counted_by_name || null
     })
     setCountedBy(countedMap)
@@ -479,13 +540,13 @@ export default function Stock() {
         dated.push(r)
       }
     })
-    Object.keys(catchAllMap).forEach(id => { if (data[id]) data[id].wastage = catchAllMap[id] })
+    Object.keys(catchAllMap).forEach(id => { cellOf(id).wastage = catchAllMap[id] })
     setDailyWastage(dailyMap)
     setDailyRows(dated)
 
     const staffMealMap = {}
     ;(staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
-    Object.keys(staffMealMap).forEach(id => { if (data[id]) data[id].staff_meal = staffMealMap[id] })
+    Object.keys(staffMealMap).forEach(id => { cellOf(id).staff_meal = staffMealMap[id] })
 
     setStockData(data)
     resetStored(periodId, data)
@@ -521,12 +582,25 @@ export default function Stock() {
     setRequisitioned(reqMap)
 
     try {
-      await cacheStockData(periodId, { stockData: data, purchases: purchMap, returns: retMap, purchaseValues: purchValMap, returnValues: retValMap, requisitioned: reqMap })
+      await cacheStockData(periodId, {
+        stockData: data, purchases: purchMap, returns: retMap, purchaseValues: purchValMap, returnValues: retValMap, requisitioned: reqMap,
+        rowIds: [...rowIds], hiddenItems: (hiddenList || []).filter(h => rowIds.has(h.id)),
+      })
     } catch (_) {}
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    setPeriodLoading(true)      // with the label, in the same render (STOCK-6)
+    try {
+      await switchPeriod(periodId)
+    } finally {
+      // A slower, earlier switch finishing late must not reopen the page over a load still running.
+      if (periodReq.isCurrent(periodId)) setPeriodLoading(false)
+    }
+  }
+
+  async function switchPeriod(periodId) {
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     clampWDay(p)
@@ -538,6 +612,7 @@ export default function Stock() {
       if (cached) {
         setStockData(cached.stockData    || {})
         resetStored(periodId, cached.stockData)
+        restoreSummaryPopulation(cached)
         setPurchases(cached.purchases    || {})
         setReturns(cached.returns        || {})
         setPurchaseValues(cached.purchaseValues || null)
@@ -552,6 +627,7 @@ export default function Stock() {
         setStockData(blank); setPurchases({}); setReturns({}); setRequisitioned({})
         setPurchaseValues({}); setReturnValues({})
         setDailyWastage({}); setDailyRows([])
+        restoreSummaryPopulation(null)
         resetStored(periodId, blank)
         setPageNotice('This month has not been opened on this device while online, so its saved figures are not available offline. Anything you enter now is queued and will sync when you reconnect.')
       }
@@ -712,6 +788,7 @@ export default function Stock() {
       await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
       markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
       noteDirectWrite(selectedPeriod.id, fieldKey, [{ itemId }])
+      noteClosedCorrection(selectedPeriod.id, fieldKey, [{ itemId, qty }])
       return true
     }).catch(async err => {
       // A dropped connection is held, not lost — see queueOnNetworkFailure. Anything else is a
@@ -895,22 +972,10 @@ export default function Stock() {
         break
       }
     }
-    // Carry each closed month's added closing counts into the month after it (the next one that
-    // EXISTS — closePeriod.js' rule). A blank count carries nothing, as the month-end carry does.
-    const carryFailures = []
-    const byPeriod = new Map()
-    added.filter(op => op.fieldKey === 'closing' && op.qty != null).forEach(op => {
-      if (!byPeriod.has(op.periodId)) byPeriod.set(op.periodId, [])
-      byPeriod.get(op.periodId).push(op)
-    })
-    for (const [periodId, ops] of byPeriod) {
-      const period = heldClosed.periods.find(p => p.id === periodId)
-      const next = period ? nextExistingPeriod(heldClosed.periods, period) : null
-      if (!next) continue
-      const { error } = await supabase.from('opening_stock').upsert(
-        ops.map(op => ({ period_id: next.id, item_id: op.itemId, qty: op.qty })), { onConflict: 'period_id,item_id' })
-      if (error) carryFailures.push({ next, error })
-    }
+    // Carry each closed month's added closing counts into the month after it.
+    const { carried, failures: carryFailures } = await carryClosingIntoNext(
+      added.filter(op => op.fieldKey === 'closing').map(op => ({ periodId: op.periodId, itemId: op.itemId, qty: op.qty })),
+      heldClosed.periods)
     const left = heldClosed.ops.filter(op => !added.includes(op))
     setPendingSync(prev => Math.max(0, prev - added.length))
     setHeldClosed(left.length ? { ...heldClosed, ops: left } : null)
@@ -918,14 +983,87 @@ export default function Stock() {
       const { text, detail } = asActionError(carryFailures[0].error)
       setHeldError({ text: `The figures were added to the closed month, but ${monthOf(carryFailures[0].next)}'s opening stock could not be updated from them. Use Resync Opening Stock on the Periods page to carry them on. ${text}`, detail })
     } else if (added.length) {
-      setPageNotice(`${added.length} figure${added.length === 1 ? ' was' : 's were'} added to the closed month${byPeriod.size ? ', and the closing counts carried into the next month’s opening stock' : ''}. Regenerate Snapshot on that month’s Monthly Report to bring the frozen report up to date.`)
+      setPageNotice(`${added.length} figure${added.length === 1 ? ' was' : 's were'} added to the closed month${carried.length ? ', and the closing counts carried into the next month’s opening stock' : ''}. Regenerate Snapshot on that month’s Monthly Report to bring the frozen report up to date.`)
     }
     setHeldBusy(false)
     // The month on screen may be one of those just written; show what the server now holds.
-    if (added.some(op => op.periodId === selectedPeriod?.id)
-        || [...byPeriod.keys()].some(pid => nextExistingPeriod(heldClosed.periods, heldClosed.periods.find(p => p.id === pid))?.id === selectedPeriod?.id)) {
+    if (added.some(op => op.periodId === selectedPeriod?.id) || carried.some(c => c.next.id === selectedPeriod?.id)) {
       await loadStockData(selectedPeriod.id, items)
     }
+  }
+
+  // Closing counts into the opening stock of the month after theirs — the next one that EXISTS
+  // (closePeriod.js' rule) — for the items given only, never a re-carry of the whole month, so an
+  // opening figure someone has since corrected on the next month is left alone. A blank count
+  // carries nothing, as the month-end carry does. Shared by D38's held offline figures and a
+  // closed-month correction made on this page (S792, STOCK-5). `entries`: [{ periodId, itemId, qty }].
+  async function carryClosingIntoNext(entries, periodList) {
+    const byPeriod = new Map()
+    entries.filter(e => e.qty != null).forEach(e => {
+      if (!byPeriod.has(e.periodId)) byPeriod.set(e.periodId, [])
+      byPeriod.get(e.periodId).push(e)
+    })
+    const carried = [], failures = []
+    for (const [periodId, list] of byPeriod) {
+      const period = periodList.find(p => p.id === periodId)
+      const next = period ? nextExistingPeriod(periodList, period) : null
+      if (!next) continue
+      const { error } = await supabase.from('opening_stock').upsert(
+        list.map(e => ({ period_id: next.id, item_id: e.itemId, qty: e.qty })), { onConflict: 'period_id,item_id' })
+      if (error) failures.push({ next, error })
+      else carried.push({ periodId, next, count: list.length })
+    }
+    return { carried, failures }
+  }
+
+  // Closing counts corrected on this page in a CLOSED month (S792, STOCK-5), not yet carried on.
+  // The month-end carry-forward ran at close, so the Owner fixing Bhadra's count — the sanctioned
+  // D1 path, and where the counter's "give these to the account owner" figures end up — changed
+  // Bhadra's COGS and left Ashwin opening on the old figure, and nothing on the page said so.
+  // { [periodId]: { [itemId]: qty|null } } — the latest figure per item; a blank carries nothing.
+  // Kept PER MONTH (S792 stage 2 review, P4): it was one month's list, so correcting Shrawan after
+  // Bhadra replaced Bhadra's un-carried corrections, and Ashwin went on opening on the old counts
+  // with nothing left on the page to say so. The prompt shows the month on screen.
+  const [closedCarry, setClosedCarry] = useState({})
+  const [closedCarryBusy, setClosedCarryBusy] = useState(false)
+  function noteClosedCorrection(periodId, fieldKey, entries) {
+    if (fieldKey !== 'closing') return
+    const period = periods.find(p => p.id === periodId)
+    if (period?.status !== 'closed' || !nextExistingPeriod(periods, period)) return
+    setClosedCarry(prev => {
+      const counts = { ...(prev[periodId] || {}) }
+      entries.forEach(e => { counts[e.itemId] = e.qty })
+      return { ...prev, [periodId]: counts }
+    })
+  }
+  async function carryClosedCorrections() {
+    const periodId = selectedPeriod?.id
+    const counts = periodId ? closedCarry[periodId] : null
+    if (!counts) return
+    const period = periods.find(p => p.id === periodId)
+    const next = period ? nextExistingPeriod(periods, period) : null
+    setClosedCarryBusy(true)
+    setSaveError(null)
+    setPageNotice(null)
+    const { carried, failures } = await carryClosingIntoNext(
+      Object.entries(counts).map(([itemId, qty]) => ({ periodId, itemId, qty })), periods)
+    setClosedCarryBusy(false)
+    if (failures.length) {
+      // An upsert of the same rows: pressing it again converges whether or not this one landed.
+      const { text, detail } = asActionError(failures[0].error)
+      setSaveError({ text: `${monthOf(next)}'s opening stock was not updated from the corrected counts, so it may still open on the old figures. Press the button again, or use Resync Opening Stock on the Periods page. ${text}`, detail })
+      return
+    }
+    // Only this month's entry, and only the figures that were carried: a count corrected again
+    // while the carry was running is still waiting for its own.
+    setClosedCarry(prev => {
+      const left = { ...(prev[periodId] || {}) }
+      Object.entries(counts).forEach(([itemId, qty]) => { if (left[itemId] === qty) delete left[itemId] })
+      const { [periodId]: _done, ...others } = prev
+      return Object.keys(left).length ? { ...others, [periodId]: left } : others
+    })
+    const n = carried.reduce((s, c) => s + c.count, 0)
+    setPageNotice(`${n} corrected closing count${n === 1 ? ' was' : 's were'} carried into ${monthOf(next)}'s opening stock. Regenerate Snapshot on ${monthOf(period)}'s Monthly Report${next?.status === 'closed' ? ` and on ${monthOf(next)}'s` : ''} to bring the frozen report up to date.`)
   }
 
   // The Owner's other answer: these figures should not be added at all. They leave the device.
@@ -1070,6 +1208,7 @@ export default function Stock() {
     }).then(ok => {
       markStored(periodId, fieldKey, entries, countedByFields())
       noteDirectWrite(periodId, fieldKey, entries)
+      noteClosedCorrection(periodId, fieldKey, entries)
       return ok
     }).catch(async err => {
       // Worth most here: this is the click at the end of a 300-item count.
@@ -1350,9 +1489,10 @@ export default function Stock() {
   function getSummary() {
     const byCategory = {}
     const knownCatIds = new Set(categories.map(c => c.id))
+    // summaryItems, not items (S792, D29): a hidden item with a row this month stays in its category.
     const groups = [
-      ...categories.map(c => ({ name: c.name, catItems: items.filter(i => i.category_id === c.id) })),
-      { name: UNCATEGORISED, catItems: items.filter(i => !i.category_id || !knownCatIds.has(i.category_id)) },
+      ...categories.map(c => ({ name: c.name, catItems: summaryItems.filter(i => i.category_id === c.id) })),
+      { name: UNCATEGORISED, catItems: summaryItems.filter(i => !i.category_id || !knownCatIds.has(i.category_id)) },
     ]
     groups.forEach(({ name, catItems }) => {
       const openingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.opening) || 0) * parseFloat(i.per_uom_rate || 0), 0)
@@ -1374,19 +1514,21 @@ export default function Stock() {
   // two different counts: `toQty(closing) != null` is the same blank-vs-0 line every save path draws
   // (a 0 is a count, a blank is not). Active, non-sub-recipe items only, per the owner's rule —
   // this page counts prep too, but a missing prep count is not what the summaries are warning about.
+  // Built over the Summary's items (S792, D29), so the COGS the gap is measured against is the COGS
+  // the Totals show; findUncountedItems itself passes over a hidden item — it cannot be counted.
   function getUncountedGap() {
     const openingQty = {}
     const countedIds = new Set()
     let cogs = 0
-    items.forEach(item => {
+    summaryItems.forEach(item => {
       const row = stockData[item.id] || {}
       openingQty[item.id] = parseFloat(row.opening) || 0
       if (toQty(row.closing) != null) countedIds.add(item.id)
       cogs += getCogsValue(item)
     })
     const purchaseValue = {}
-    items.forEach(item => { purchaseValue[item.id] = purchaseValueOf(item) })
-    return findUncountedItems({ items, openingQty, purchaseQty: purchases, purchaseValue, countedIds, cogs })
+    summaryItems.forEach(item => { purchaseValue[item.id] = purchaseValueOf(item) })
+    return findUncountedItems({ items: summaryItems, openingQty, purchaseQty: purchases, purchaseValue, countedIds, cogs })
   }
 
   async function exportExcel() {
@@ -1394,7 +1536,8 @@ export default function Stock() {
     const wb = XLSX.utils.book_new()
     const gap = getUncountedGap()
     const uncountedIds = new Set(gap.uncounted.map(u => u.id))
-    const rows = items.map(item => {
+    // The Summary's items (S792, D29), so the sheet totals to the Totals row on screen.
+    const rows = summaryItems.map(item => {
       const row      = stockData[item.id] || {}
       const rate     = parseFloat(item.per_uom_rate || 0)
       const openQty  = parseFloat(row.opening  || 0)
@@ -1426,6 +1569,8 @@ export default function Stock() {
         'Counted By':        row.closing !== '' && row.closing != null ? (countedBy[item.id] || '') : '',
         // Marked as on screen (S756 D6): this item's COGS counts its whole stock as used.
         'Closing counted':   uncountedIds.has(item.id) ? 'NOT COUNTED' : '',
+        // Marked as on screen (S792, D29): hidden in Item Master, kept because it had a row this month.
+        'Hidden':            item.is_active === false ? 'HIDDEN' : '',
         'Used Qty':          usedQty   || '',
         'COGS (NPR)':        Math.round(getCogsValue(item)) || '',
         'Requisitioned Qty': requisitioned[item.id] || '',
@@ -1434,12 +1579,16 @@ export default function Stock() {
     // The warning travels with the sheet (S756 D6), under the same letterhead every other report
     // export carries (owner decision, S756 stage 4).
     const note = gapNote(gap, periodLabel)
+    const hiddenCount = summaryItems.filter(i => i.is_active === false).length
+    const hiddenNote = hiddenCount
+      ? `${hiddenCount} item${hiddenCount === 1 ? ' is' : 's are'} hidden in Item Master and still included, because ${hiddenCount === 1 ? 'it' : 'they'} had stock or movement in ${periodLabel} — hiding an item never changes a past month.`
+      : null
     const ws = sheetWithLetterhead(XLSX, {
       title: 'Stock Register',
       biz,
       scopeLine: `Period : ${periodLabel}${selectedPeriod?.status === 'open' ? ' (PROVISIONAL — period still open, figures can change)' : ' (period closed)'}`,
       rows,
-      notes: note ? [note] : [],
+      notes: [note, hiddenNote].filter(Boolean),
     })
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Register')
     XLSX.writeFile(wb, `Stock-Register-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
@@ -1531,6 +1680,30 @@ export default function Stock() {
       {isLocked && (
         <ClosedPeriodBanner />
       )}
+      {/* The Owner and admin may correct a closed month here (S756), and before S792 were told
+          nothing: the red banner is suppressed with the lock, and a corrected closing count never
+          reached the next month's opening stock (STOCK-5). Amber, because the edit will succeed. */}
+      {canEditClosedPeriods && selectedPeriod?.status === 'closed' && (() => {
+        const next = nextExistingPeriod(periods, selectedPeriod)
+        const pending = Object.values(closedCarry[selectedPeriod.id] || {}).filter(q => q != null).length
+        return (
+          <>
+            <ClosedPeriodBanner canEdit periodLabel={periodLabel} style={{ marginBottom: pending ? 8 : 20 }}
+              note={next ? `A corrected closing count does not reach ${monthOf(next)}'s opening stock on its own: once you save one, carry it across with the button that appears here.` : undefined} />
+            {pending > 0 && next && (
+              <div className="no-print" role="status" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ flex: 1, minWidth: 220 }}>
+                  <strong style={{ color: 'var(--theme-amber-text)' }}>{pending} corrected closing count{pending === 1 ? ' is' : 's are'} not in {monthOf(next)}&rsquo;s opening stock yet.</strong>{' '}
+                  {monthOf(next)} opened on the count {periodLabel} had when it closed.
+                </span>
+                <button type="button" className="btn btn-primary btn-sm" disabled={closedCarryBusy} aria-busy={closedCarryBusy || undefined} onClick={carryClosedCorrections}>
+                  {closedCarryBusy ? 'Carrying…' : `Carry into ${monthOf(next)}’s opening stock`}
+                </button>
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {!isOnline && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--theme-amber-text)' }}>
@@ -1626,6 +1799,15 @@ export default function Stock() {
       />
 
       <TabPanel idBase="stock" active={activeTab}>
+      {/* While a month's figures load (S792, STOCK-6), no tab that shows or writes them renders:
+          not the grids or the touch cards, not the Summary and its Export, not the Print Sheet or
+          Daily Wastage. Settings is the client's, not the month's, and stays. */}
+      {figuresLoading && activeTab !== 'settings' && (
+        <div className="card" role="status" style={{ padding: 28, textAlign: 'center', color: 'var(--theme-text2)', fontSize: 13 }}>
+          Loading {periodLabel}…
+        </div>
+      )}
+      {(!figuresLoading || activeTab === 'settings') && <>
       {/* Summary Tab */}
       {activeTab === 'summary' && blindOn && (
         /* Blind counting is on and this tab is the whole register — opening, purchases, closing
@@ -1690,6 +1872,8 @@ export default function Stock() {
                     wastage and staff meals are valued at the current Item Master rate. These figures
                     also <strong>include sub-recipes</strong> (prep counted as stock), which Monthly
                     Summary leaves out, so its COGS differs from this page by the value of that prep.
+                    An item hidden in Item Master stays in any month it had stock or movement in, just
+                    as on Monthly Summary; the item table below marks it Hidden.
                   </p>
                   <div className="table-wrap">
                     <table className="data-table">
@@ -1754,7 +1938,7 @@ export default function Stock() {
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             {/* A failed client-name read would ship the register with a blank CompanyName line (S754 rule). */}
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!!biz.error}
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={!!biz.error || figuresLoading}
               title={biz.error ? 'Your business name could not be loaded, so the export is paused — reload the page and try again.' : undefined}>
               Export Excel
             </button>
@@ -1794,7 +1978,7 @@ export default function Stock() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(() => { const uncountedIds = new Set(getUncountedGap().uncounted.map(u => u.id)); return items.map(item => {
+                  {(() => { const uncountedIds = new Set(getUncountedGap().uncounted.map(u => u.id)); return summaryItems.map(item => {
                     const row      = stockData[item.id] || {}
                     const used     = getUsed(item.id)
                     const notCounted = uncountedIds.has(item.id)
@@ -1832,6 +2016,10 @@ export default function Stock() {
                           {/* S756 D6: stock this period, no closing count — Used and COGS count all of it. */}
                           {notCounted && (
                             <span className="badge badge-amber" style={{ marginLeft: 6 }} title="Has stock this period but no closing count — Used and COGS treat all of it as consumed">not counted</span>
+                          )}
+                          {/* S792, D29: kept in the month it had a row in; not on any entry tab. */}
+                          {item.is_active === false && (
+                            <span className="badge badge-gray" style={{ marginLeft: 6 }} title={HIDDEN_ITEM_TIP}>Hidden</span>
                           )}
                         </td>
                         <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
@@ -2387,6 +2575,7 @@ export default function Stock() {
           </>
         )
       })()}
+      </>}
       </TabPanel>
       </>}
       {pendingConfirm && (

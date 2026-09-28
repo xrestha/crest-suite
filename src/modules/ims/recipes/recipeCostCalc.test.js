@@ -1,4 +1,4 @@
-import { calcSubRecipeCostPerUnit, calcRecipeCost } from './recipeCostCalc'
+import { calcSubRecipeCostPerUnit, calcRecipeCost, vatOf } from './recipeCostCalc'
 
 // Helpers — an ingredient row as the Recipes page shapes it (joined `items` for a raw ingredient,
 // bare `sub_recipe_id` for a nested sub-recipe).
@@ -59,5 +59,14 @@ describe('calcRecipeCost — a dish over nested sub-recipes', () => {
     }
     // 5 * 4 (sauce) + 2 * 30 (raw) = 80
     expect(calcRecipeCost(dish, [stock, roux, sauce, dish])).toBeCloseTo(80, 9)
+  })
+})
+
+// S792 D31: menuPriceVat.js reads a dish's VAT through this, so its NULL rule is pinned here.
+describe('vatOf', () => {
+  it('reads NULL as 13% and keeps a real 0', () => {
+    expect(vatOf({ vat_rate: null })).toBe(0.13)
+    expect(vatOf({ vat_rate: 0 })).toBe(0)
+    expect(vatOf({ vat_rate: '0.13' })).toBe(0.13)
   })
 })

@@ -1,7 +1,7 @@
 // Pure money arithmetic behind Outstanding Payables — no React, no Supabase — so the three ways a
 // supplier bill gets paid can be tested rather than eyeballed (S756 stage 3):
 //
-//   1. one payment against one bill               allocatePayment            (unchanged since S505)
+//   1. one payment against one bill               allocatePayment            (S505; whole-bill settle S792)
 //   2. ONE lump sum against a supplier's bills     planSupplierLumpSum        (D9)
 //   3. part of a supplier's credit onto a bill     planBillPayment + credit   (D11)
 //
@@ -28,6 +28,48 @@ export function isCreditRow(p) {
   return !!p?.credit_link_id || p?.payment_mode === SUPPLIER_CREDIT_MODE
 }
 
+// ── What a bill is owed once goods have gone back (S792, owner decision D33) ─────────────────────
+
+const lineGrossOf = l => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0)
+
+/**
+ * The grand total a supplier is owed on one bill after returns: the one answer Outstanding
+ * Payables, the balance letter (vendorBalanceHelpers.js) and Vendor Report's Payable column share.
+ *
+ * `lines` are the bill's purchase lines (`id`, `qty`, `rate`, `vat_inclusive`), every line of it.
+ * `returnedByEntry` is `{ [lineId]: qty × rate of what went back }` — `vendor_returns.rate` is the
+ * line's LIST rate. `discount` is the bill's one discount (max over its lines, never a sum).
+ *
+ * A return is credited at the DISCOUNTED price (D33). This was `calcBillTotals(returns-netted
+ * lines, WHOLE discount)`: the return came off at list price and the bill kept every rupee of its
+ * discount. On a 6,000 + 4,000 bill with a 1,000 discount and the 4,000 line sent back, the
+ * supplier's credit note says 3,600 and 5,400 is still owed; the page said 5,000. Returned whole,
+ * the bill read 0 − 1,000 and the balance letter closed on "Advance / Credit Balance NPR 1,000" —
+ * the supplier asked to sign that they owe us the discount. VAT Report, Payment Summary and
+ * Supplier Contribution already credited returns this way (`returnBase`, S722/S756 D10).
+ *
+ * The arithmetic is the discount scaled by the share of the bill's gross that stayed: every line
+ * then keeps its own `1 − discount / gross` factor, so a return comes off at `list × factor`, plus
+ * 13% where its line carried VAT — exactly `returnBase` × VAT, i.e. `billPayables()` in
+ * purchaseTaxSplit.js. It is linear in the returns, so two returns against one bill are simply
+ * additive, and returns alone can take a bill to 0 but never below it (each line is floored at
+ * nothing left, and what is left keeps the discount's own share of it). Unrounded.
+ */
+export function billOwedAfterReturns(lines, returnedByEntry, discount) {
+  const list = lines || []
+  const gross = list.reduce((s, l) => s + lineGrossOf(l), 0)
+  const kept = list.map(l => ({
+    qty: 1,
+    rate: Math.max(0, lineGrossOf(l) - ((returnedByEntry || {})[l.id] || 0)),
+    vat_inclusive: l.vat_inclusive,
+  }))
+  const keptGross = kept.reduce((s, l) => s + l.rate, 0)
+  const d = Math.max(0, parseFloat(discount) || 0)
+  // A bill with no gross at all (every line free) keeps the old answer rather than inventing one.
+  const keptDiscount = gross > 0 ? d * (keptGross / gross) : d
+  return calcBillTotals(kept, keptDiscount).grandTotal
+}
+
 // ── Valuing lines and grouping bills ─────────────────────────────────────────────────────────────
 //
 // Moved out of the page unchanged so the supplier-credit lookup (which reads one vendor's whole
@@ -37,7 +79,8 @@ export function isCreditRow(p) {
 /**
  * Stamp each purchase_entries line with netLine / paidTotal / value / remaining.
  * `rows` must be COMPLETE bills (every line) — a bill's discount is not linear in its lines (S723).
- * Mutates and returns the enriched lines.
+ * `returnedByEntry` is list value per line (qty × vendor_returns.rate); the D33 discount is applied
+ * here, in billOwedAfterReturns, not by the caller. Mutates and returns the enriched lines.
  */
 export function valueBillLines(rows, paymentsByEntry, returnedByEntry, today = new Date()) {
   const enriched = (rows || []).map(e => {
@@ -45,7 +88,8 @@ export function valueBillLines(rows, paymentsByEntry, returnedByEntry, today = n
     const adDate = bsToAd(pr.bs_year, pr.bs_month, e.bs_day || 1)
     const daysOld = Math.max(0, Math.floor((today - adDate) / (1000 * 60 * 60 * 24)))
     // Net of returns, still EXCLUDING bill-level discount and VAT — those are bill-level, not
-    // line-level, so they're applied in the grouping pass below.
+    // line-level, so they're applied in the grouping pass below. Only the spread uses this: the
+    // bill's total comes from billOwedAfterReturns.
     const netLine = Math.max(0, parseFloat(e.qty) * parseFloat(e.rate) - (returnedByEntry[e.id] || 0))
     const paidTotal = (paymentsByEntry[e.id] || []).reduce((s, p) => s + parseFloat(p.amount), 0)
     return { ...e, period: pr, netLine, paidTotal, daysOld, aging: aging(daysOld), billKey: billKeyOf(e, pr) }
@@ -74,12 +118,10 @@ export function valueBillLines(rows, paymentsByEntry, returnedByEntry, today = n
     // vendor|invoice|day fallback) keyed each LINE separately and summed the discount once per
     // line: a five-line bill's discount came off five times and the payable read too low.
     const billDiscount = Math.max(0, ...lines.map(l => parseFloat(l.discount_amount || 0) || 0))
-    // qty 1 × rate netLine: calcBillTotals only ever multiplies the two, and the returns
-    // netting above already collapsed each line to a single net figure.
-    const { grandTotal } = calcBillTotals(
-      lines.map(l => ({ qty: 1, rate: l.netLine, vat_inclusive: l.vat_inclusive })),
-      billDiscount
-    )
+    // S792 (D33): a return comes off at the price the supplier actually charged. This was
+    // calcBillTotals over the returns-netted lines with the WHOLE discount kept, so a return was
+    // credited at list price — see billOwedAfterReturns for what that did to a fully returned bill.
+    const grandTotal = billOwedAfterReturns(lines, returnedByEntry, billDiscount)
     // Rounded to currency precision immediately — a per-line rate can carry 3+ decimals (e.g.
     // NPR/gram costing), so the bill's true net total can land sub-paisa (e.g. NPR 1400.00175)
     // even though every displayed figure shows only 2dp. Left unrounded, "Pay in full" (which
@@ -174,15 +216,51 @@ function splitAcrossLines(lines, amount) {
 }
 
 /**
+ * The lines a payment settles (their `paid_at` gets stamped), given `rawById` — what this payment
+ * puts on each line, unrounded.
+ *
+ * A line that received money settles when it has now been paid its own value, as since S505. And,
+ * since S792 (PURCHASES-8), when the BILL owes nothing after this payment, every one of its lines
+ * that is still unstamped settles too — including lines that received nothing. Only lines that
+ * received money used to be stamped, so a bill whose first line was paid and then returned (that
+ * line now over-paid) and whose second line was then paid the bill's remaining never closed: the
+ * second line got the bill's balance, which is less than its own value, and nothing was stamped.
+ * The bill sat on Outstanding for ever at "0 remaining". Half a paisa of tolerance, as the lump sum
+ * uses: `remaining` is a sum of 2dp figures and carries float noise, never a real balance.
+ */
+function settledLineIds(entries, rawById) {
+  const lines = entries || []
+  const after = lines.reduce((s, e) => s + e.remaining - (rawById.get(e.id) || 0), 0)
+  const wholeBill = after < 0.005
+  return lines
+    .filter(e => (rawById.has(e.id) && e.paidTotal + rawById.get(e.id) >= e.value - EPS) || (wholeBill && !e.paid_at))
+    .map(e => e.id)
+}
+
+/**
  * One payment spread across a bill's unpaid lines, oldest first. Returns the payable_payments rows
- * to insert and the ids of lines this payment settles. Behaviour identical to the page's S505 copy.
+ * to insert and the ids of lines this payment settles. `entries` must be every line of the bill.
  */
 export function allocatePayment(entries, amount, date, note, paymentMode) {
   const parts = splitAcrossLines(entries, amount)
   return {
     rows: parts.map(p => ({ purchase_entry_id: p.line.id, amount: p.amount, paid_at: date, note, payment_mode: paymentMode || null })),
-    settleIds: parts.filter(p => p.line.paidTotal + p.raw >= p.line.value - EPS).map(p => p.line.id),
+    settleIds: settledLineIds(entries, new Map(parts.map(p => [p.line.id, p.raw]))),
   }
+}
+
+/**
+ * The lines to stamp when a bill with nothing left to pay is closed by hand (S792, PURCHASES-8):
+ * every line not stamped yet, or [] when the bill still owes something.
+ *
+ * A Credit bill whose goods all went back owes 0, receives no payment, and so never had a line
+ * stamped — it stayed on Outstanding with a red "90+ days" chip and no control that could close it.
+ * The same holds for a bill left in credit by a return (the vendor owes US): nothing can be paid on
+ * it, and its credit stays usable from Paid History (supplierCreditSlots reads every bill).
+ */
+export function linesToCloseByReturns(bill) {
+  if (!bill || !(bill.remaining <= EPS)) return []
+  return (bill.entries || []).filter(e => !e.paid_at).map(e => e.id)
 }
 
 // ── D9: one lump sum for a supplier ──────────────────────────────────────────────────────────────
@@ -355,9 +433,7 @@ export function planBillPayment(bill, { cash = 0, credit = 0, date, note, paymen
     rows.push({ purchase_entry_id: p.line.id, amount: p.amount, paid_at: date, note, payment_mode: paymentMode || null })
   })
 
-  const settleIds = bill.entries
-    .filter(e => rawById.has(e.id) && e.paidTotal + rawById.get(e.id) >= e.value - EPS)
-    .map(e => e.id)
+  const settleIds = settledLineIds(bill.entries, rawById)
   return { rows, settleIds, creditPairs }
 }
 
@@ -392,4 +468,106 @@ export function linesToReopen(removedRows) {
   const net = new Map()
   ;(removedRows || []).forEach(r => net.set(r.purchase_entry_id, (net.get(r.purchase_entry_id) || 0) + parseFloat(r.amount)))
   return [...net.entries()].filter(([, v]) => v > EPS).map(([id]) => id)
+}
+
+// ── Deleting a return from a settled bill (S792 stage 2) ─────────────────────────────────────────
+
+/**
+ * What a bill totals on Outstanding Payables: billOwedAfterReturns spread back across the lines and
+ * rounded per line, exactly as valueBillLines does, so a decision taken here is taken on the figure
+ * that page will show — not on one a paisa away from it.
+ */
+function billTotalAsListed(lines, returnedByEntry, discount) {
+  const grand = billOwedAfterReturns(lines, returnedByEntry, discount)
+  const nets = lines.map(l => Math.max(0, lineGrossOf(l) - (returnedByEntry[l.id] || 0)))
+  const netSum = nets.reduce((s, n) => s + n, 0)
+  return nets.reduce((s, n) => s + (netSum > 0 ? Math.round(n * (grand / netSum) * 100) / 100 : 0), 0)
+}
+
+/**
+ * Whether deleting one vendor return puts a SETTLED bill back in debt — and so whether its
+ * `paid_at` stamps must be cleared, which is what moves a bill from Paid History back to
+ * Outstanding Payables (the tabs are keyed on `paid_at`, S723).
+ *
+ * A return lowers what a bill owes, so a bill can be settled BY a return: paid down to what the
+ * return left, or closed with "Close this bill" once its goods all went back (PURCHASES-8). Delete
+ * that return and the bill owes again — while its stamps still file it under Paid History, where
+ * nothing can be paid on it and nothing adds it to what the supplier is owed.
+ *
+ * Reopens only when all three hold:
+ *   - the bill is stamped (any line carries `paid_at`);
+ *   - by its RECORDED figures it is settled now: payments ≥ what it owes after its returns. A bill
+ *     stamped with no payment rows that still shows money owed was paid before payable_payments
+ *     existed; its stamp is the only record of that payment, and flipping it would put a paid bill
+ *     back on Outstanding;
+ *   - without this return it would owe more than EPS. A bill left in credit by several returns can
+ *     lose one and still be settled.
+ *
+ * `lines` every line of the bill (`id`, `qty`, `rate`, `vat_inclusive`, `discount_amount`,
+ * `paid_at`). `returns` every vendor_returns row against those lines, from ANY month (`id`,
+ * `purchase_entry_id`, `qty`, `rate` — the line's list rate; the discount is applied here, D33).
+ * `payments` every payable_payments row on those lines (`purchase_entry_id`, `amount`; a supplier
+ * credit half is signed and counts as it does on the page). `returnId` is the return being deleted;
+ * `newQty` (default 0) is what it would become — 0 is a delete, so an edit can ask the same question.
+ *
+ * Returns { reopen, stampedIds, owedNow, owedAfter, paid, owedAgain } — money to the paisa, and
+ * `owedAgain` 0 unless `reopen`.
+ */
+export function returnChangeReopensBill({ lines, returns, payments, returnId, newQty = 0 }) {
+  const list = lines || []
+  const ids = new Set(list.map(l => l.id))
+  const stampedIds = list.filter(l => l.paid_at).map(l => l.id)
+  // One bill-level discount, repeated on every line — max, never a sum (S601/S747).
+  const discount = Math.max(0, ...list.map(l => parseFloat(l.discount_amount) || 0))
+  const returnedBy = rows => {
+    const m = {}
+    rows.forEach(r => {
+      if (!ids.has(r.purchase_entry_id)) return
+      m[r.purchase_entry_id] = (m[r.purchase_entry_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+    })
+    return m
+  }
+  const all = returns || []
+  const changed = all.map(r => (r.id === returnId ? { ...r, qty: Math.max(0, parseFloat(newQty) || 0) } : r))
+  const round = n => Math.round(n * 100) / 100
+  const owedNow = round(billTotalAsListed(list, returnedBy(all), discount))
+  const owedAfter = round(billTotalAsListed(list, returnedBy(changed), discount))
+  const paid = round((payments || []).reduce((s, p) => s + (ids.has(p.purchase_entry_id) ? parseFloat(p.amount) || 0 : 0), 0))
+  const settledNow = paid >= owedNow - EPS
+  const gap = round(owedAfter - paid)
+  const reopen = stampedIds.length > 0 && settledNow && gap > EPS
+  return { reopen, stampedIds, owedNow, owedAfter, paid, owedAgain: reopen ? gap : 0 }
+}
+
+/**
+ * returnChangeReopensBill for an EDIT of a return (S792 stage 2 review, P1): the same question, the
+ * same three rules and the same result, asked of the return AS IT WILL BE WRITTEN. `newQty` covers
+ * an edit that keeps its line; an edit can also re-link the return to another line, and the form
+ * writes the new line's rate with it. `next` is `{ purchase_entry_id, qty, rate }`, or null for a
+ * delete.
+ *
+ * `lines`, `returns` and `payments` are the bill the return sits on NOW. A return re-linked to a
+ * line outside `lines` leaves this bill, which here is its delete. A move to another line of the
+ * SAME bill is not a delete: the return stays on the bill, at that line's rate and VAT — treating
+ * it as one would clear the stamps of a bill the write leaves settled.
+ *
+ * The bill a return moves TO only gains a return, and a return can only lower what a bill owes
+ * (billOwedAfterReturns is non-increasing in every line's returns), so that bill never needs this
+ * question asked — beyond the per-line paisa rounding Outstanding Payables itself shows, which a
+ * real return outweighs. Asked anyway (`returnId` absent from `returns`), it says so: pinned in
+ * payablesAllocation.test.js.
+ */
+export function returnEditReopensBill({ lines, returns, payments, returnId, next = null }) {
+  const onBill = new Set((lines || []).map(l => l.id))
+  const others = (returns || []).filter(r => r.id !== returnId)
+  const edited = next && onBill.has(next.purchase_entry_id)
+    ? [...others, { id: returnId, purchase_entry_id: next.purchase_entry_id, qty: next.qty, rate: next.rate }]
+    : others
+  // Valued through the helper above, so both questions read a bill one way.
+  const now = returnChangeReopensBill({ lines, returns, payments, returnId: null })
+  const owedAfter = returnChangeReopensBill({ lines, returns: edited, payments, returnId: null }).owedNow
+  const settledNow = now.paid >= now.owedNow - EPS
+  const gap = Math.round((owedAfter - now.paid) * 100) / 100
+  const reopen = now.stampedIds.length > 0 && settledNow && gap > EPS
+  return { reopen, stampedIds: now.stampedIds, owedNow: now.owedNow, owedAfter, paid: now.paid, owedAgain: reopen ? gap : 0 }
 }

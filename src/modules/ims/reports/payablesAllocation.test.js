@@ -5,8 +5,10 @@
 import {
   valueBillLines, groupIntoBills, allocatePayment, planSupplierLumpSum, supplierCreditSlots,
   billPaymentProblems, planBillPayment, compareBillsOldestFirst, expandCreditPartners,
-  linesToReopen, isCreditRow, SUPPLIER_CREDIT_MODE,
+  linesToReopen, isCreditRow, SUPPLIER_CREDIT_MODE, billOwedAfterReturns, linesToCloseByReturns,
+  returnChangeReopensBill, returnEditReopensBill,
 } from './payablesAllocation'
+import { billPayables } from './purchaseTaxSplit'
 
 const P = (y, m) => ({ bs_year: y, bs_month: m, client_id: 'c1' })
 
@@ -244,5 +246,295 @@ describe('deleting a credit entry takes its partner with it', () => {
       { purchase_entry_id: 'plain', amount: 250 },
     ]
     expect(linesToReopen(removed).sort()).toEqual(['plain', 'target'])
+  })
+})
+
+// S792, owner decision D33 (PURCHASES-3). A return against a discounted bill comes off at the price
+// the supplier actually charged. These were verified to fail against the pre-D33 arithmetic
+// (calcBillTotals over the returns-netted lines with the WHOLE discount kept) before being kept.
+describe('D33 — a return is credited at the discounted price', () => {
+  // A Credit bill: line A 6,000 + line B 4,000, one bill discount of 1,000 (so 10% off each line).
+  const discounted = () => [
+    row('dA', 'gD', P(2083, 5), { rate: 6000, ref: 'D', discount: 1000 }),
+    row('dB', 'gD', P(2083, 5), { rate: 4000, ref: 'D', discount: 1000 }),
+  ]
+
+  test('all of line B goes back: the supplier credits 3,600 and is owed 5,400 (was 5,000)', () => {
+    const [b] = billsOf(discounted(), [], [{ purchase_entry_id: 'dB', qty: 1, rate: 4000 }])
+    expect(b.total).toBeCloseTo(5400, 2)
+    expect(b.remaining).toBeCloseTo(5400, 2)
+  })
+
+  test('the whole bill goes back: nothing is owed, and the supplier does not owe us the discount', () => {
+    const [b] = billsOf(discounted(), [], [
+      { purchase_entry_id: 'dA', qty: 1, rate: 6000 }, { purchase_entry_id: 'dB', qty: 1, rate: 4000 },
+    ])
+    expect(b.total).toBeCloseTo(0, 2)
+    expect(b.remaining).toBeCloseTo(0, 2)
+    expect(b.isCredit).toBe(false)
+  })
+
+  test('a heavy return on an unpaid bill leaves a small bill, never a credit badge', () => {
+    // 9,500 of a 10,000 one-line bill back: 500 at list, 450 at the price charged.
+    const [b] = billsOf([row('h1', 'gH', P(2083, 5), { rate: 10000, ref: 'H', discount: 1000 })], [],
+      [{ purchase_entry_id: 'h1', qty: 1, rate: 9500 }])
+    expect(b.remaining).toBeCloseTo(450, 2)
+    expect(b.isCredit).toBe(false)
+  })
+
+  test('paid 9,000, then half the goods back: the credit offered is the credit note, 4,500 (was 5,000)', () => {
+    const [b] = billsOf(discounted(),
+      [{ purchase_entry_id: 'dA', amount: 5400 }, { purchase_entry_id: 'dB', amount: 3600 }],
+      [{ purchase_entry_id: 'dA', qty: 1, rate: 3000 }, { purchase_entry_id: 'dB', qty: 1, rate: 2000 }])
+    expect(b.remaining).toBeCloseTo(-4500, 2)
+    expect(supplierCreditSlots([b]).available).toBeCloseTo(4500, 2)
+  })
+
+  test('a mixed VAT bill owes exactly what Payment Summary says: bill total less each return at its discounted price plus its VAT', () => {
+    const period = P(2083, 5)
+    const rows = [
+      row('mv', 'gM', period, { qty: 10, rate: 600, vat: true, ref: 'M', discount: 700 }),
+      row('mn', 'gM', period, { qty: 8, rate: 500, vat: false, ref: 'M', discount: 700 }),
+    ]
+    const returns = [
+      { purchase_entry_id: 'mv', qty: 3, rate: 600, purchase_entries: { vat_inclusive: true } },
+      { purchase_entry_id: 'mn', qty: 2, rate: 500, purchase_entries: { vat_inclusive: false } },
+    ]
+    const pay = billPayables(rows, returns, period)
+    const expected = pay.bills[0].total - pay.returns.reduce((s, r) => s + r.value, 0)
+    expect(billOwedAfterReturns(rows, { mv: 1800, mn: 1000 }, 700)).toBeCloseTo(expected, 6)
+    // The page's bill total is its lines' 2dp values added up, so it may sit a paisa off.
+    const [b] = billsOf(rows, [], returns)
+    expect(Math.abs(b.total - expected)).toBeLessThanOrEqual(0.011)
+  })
+
+  test('linear in the returns: two returns off one line are worth what one return of both is', () => {
+    const lines = [{ id: 'x', qty: 10, rate: 100, vat_inclusive: true }, { id: 'y', qty: 1, rate: 1000, vat_inclusive: false }]
+    const full = billOwedAfterReturns(lines, {}, 200)
+    const once = billOwedAfterReturns(lines, { x: 300 }, 200)
+    const twice = billOwedAfterReturns(lines, { x: 100 }, 200) - billOwedAfterReturns(lines, { x: 300 }, 200)
+    // 300 of VAT goods back at 90% (200 off a 2,000 bill) plus 13%.
+    expect(full - once).toBeCloseTo(300 * 0.9 * 1.13, 6)
+    expect((full - billOwedAfterReturns(lines, { x: 100 }, 200)) + twice).toBeCloseTo(full - once, 6)
+  })
+
+  test('with no returns it is calcBillTotals unchanged', () => {
+    const lines = [{ id: 'x', qty: 10, rate: 100, vat_inclusive: true }, { id: 'y', qty: 1, rate: 1000, vat_inclusive: false }]
+    // 2,000 − 200 + 13% of the 1,000 VAT half net of its 100 share of the discount.
+    expect(billOwedAfterReturns(lines, {}, 200)).toBeCloseTo(1800 + 900 * 0.13, 6)
+  })
+})
+
+// S792 (PURCHASES-8). A Credit bill with nothing left to pay must be able to leave Outstanding.
+describe('a bill with nothing left to pay closes', () => {
+  test('paying the remaining settles every unstamped line, including one that could not reach its own value', () => {
+    // Line p1 was paid 1,000 and stamped, then 600 of it went back; p2 (1,000) is unpaid. The bill
+    // owes 400 and all of it lands on p2, which never reaches its own 1,000 — so nothing used to be
+    // stamped and the bill sat on Outstanding at "0 remaining" for ever.
+    const rows = [
+      row('p1', 'gP', P(2083, 5), { rate: 1000, ref: 'P', paid_at: '2026-09-01' }),
+      row('p2', 'gP', P(2083, 5), { rate: 1000, ref: 'P' }),
+    ]
+    const [b] = billsOf(rows, [{ purchase_entry_id: 'p1', amount: 1000 }], [{ purchase_entry_id: 'p1', qty: 1, rate: 600 }])
+    expect(b.remaining).toBeCloseTo(400, 2)
+    const { rows: out, settleIds } = allocatePayment(b.entries, 400, 'd', null, 'Cash')
+    expect(out.map(r => [r.purchase_entry_id, r.amount])).toEqual([['p2', 400]])
+    expect(settleIds).toEqual(['p2'])
+    // The per-bill form and the lump sum reach the same answer.
+    expect(planBillPayment(b, { cash: 400, date: 'd' }).settleIds).toEqual(['p2'])
+    expect(planSupplierLumpSum([b], 400, { date: 'd' }).settleIds).toEqual(['p2'])
+  })
+
+  test('a part payment still settles nothing', () => {
+    const rows = [
+      row('q1', 'gQ', P(2083, 5), { rate: 1000, ref: 'Q' }),
+      row('q2', 'gQ', P(2083, 5), { rate: 1000, ref: 'Q' }),
+    ]
+    const [b] = billsOf(rows)
+    expect(allocatePayment(b.entries, 1500, 'd', null, 'Cash').settleIds).toEqual(['q1'])
+    expect(allocatePayment(b.entries, 999, 'd', null, 'Cash').settleIds).toEqual([])
+  })
+
+  test('a Credit bill whose goods all went back, never paid, is offered for closing — every line', () => {
+    const [b] = billsOf([
+      row('f1', 'gF', P(2083, 5), { rate: 500, ref: 'F', discount: 50 }),
+      row('f2', 'gF', P(2083, 5), { rate: 500, ref: 'F', discount: 50 }),
+    ], [], [{ purchase_entry_id: 'f1', qty: 1, rate: 500 }, { purchase_entry_id: 'f2', qty: 1, rate: 500 }])
+    expect(b.remaining).toBeCloseTo(0, 2)
+    expect(linesToCloseByReturns(b)).toEqual(['f1', 'f2'])
+  })
+
+  test('a bill left in credit by a return closes too, and its stamped line is left as it is', () => {
+    const [b] = billsOf([
+      row('c1', 'gC', P(2083, 5), { rate: 1000, ref: 'C', paid_at: '2026-09-01' }),
+      row('c2', 'gC', P(2083, 5), { rate: 500, ref: 'C' }),
+    ], [{ purchase_entry_id: 'c1', amount: 1000 }], [{ purchase_entry_id: 'c1', qty: 1, rate: 1000 }])
+    expect(b.isCredit).toBe(true)
+    expect(linesToCloseByReturns(b)).toEqual(['c2'])
+  })
+
+  test('a bill that still owes anything is never offered for closing', () => {
+    const [b] = billsOf([row('o1', 'gO', P(2083, 5), { rate: 500, ref: 'O' })], [], [{ purchase_entry_id: 'o1', qty: 1, rate: 499 }])
+    expect(b.remaining).toBeCloseTo(1, 2)
+    expect(linesToCloseByReturns(b)).toEqual([])
+    expect(linesToCloseByReturns(null)).toEqual([])
+  })
+})
+
+// S792 stage 2 — deleting a return from a bill Paid History holds as settled. The return is what
+// settled it, so without it the bill owes again and must move back to Outstanding; the stamp is
+// cleared only when the bill's own recorded figures show it settled, never on a legacy stamp.
+describe('deleting a return from a settled bill reopens it', () => {
+  const ret = (id, lineId, qty, rate) => ({ id, purchase_entry_id: lineId, qty, rate })
+
+  test('paid down to what the return left: deleting the return puts the returned value back on it', () => {
+    const lines = [row('s1', 'gS', P(2083, 5), { rate: 1000, ref: 'S', paid_at: '2026-09-05' })]
+    const d = returnChangeReopensBill({
+      lines, returns: [ret('r1', 's1', 1, 400)], payments: [{ purchase_entry_id: 's1', amount: 600 }], returnId: 'r1',
+    })
+    expect(d).toMatchObject({ reopen: true, stampedIds: ['s1'], owedNow: 600, owedAfter: 1000, paid: 600, owedAgain: 400 })
+  })
+
+  test('a bill closed by hand once every item went back (no payment rows) reopens at the discounted price', () => {
+    const lines = [
+      row('h1', 'gH', P(2083, 5), { rate: 500, ref: 'H', discount: 50, paid_at: '2026-09-20' }),
+      row('h2', 'gH', P(2083, 5), { rate: 500, ref: 'H', discount: 50, paid_at: '2026-09-20' }),
+    ]
+    const d = returnChangeReopensBill({ lines, returns: [ret('r1', 'h1', 1, 500), ret('r2', 'h2', 1, 500)], payments: [], returnId: 'r1' })
+    // 500 kept of a 1,000 bill keeps half of its 50 discount (D33).
+    expect(d).toMatchObject({ reopen: true, stampedIds: ['h1', 'h2'], owedNow: 0, owedAfter: 475, paid: 0, owedAgain: 475 })
+  })
+
+  test('a legacy stamp — paid before payable_payments existed, figures still owing — is never flipped', () => {
+    const lines = [row('l1', null, P(2080, 2), { rate: 1000, ref: 'L', paid_at: '2023-06-01' })]
+    const d = returnChangeReopensBill({ lines, returns: [ret('r1', 'l1', 1, 200)], payments: [], returnId: 'r1' })
+    expect(d.owedNow).toBe(800)
+    expect(d.reopen).toBe(false)
+    expect(d.owedAgain).toBe(0)
+  })
+
+  test('a bill still in credit after losing one of its returns stays settled', () => {
+    const lines = [row('k1', 'gK', P(2083, 5), { rate: 1000, ref: 'K', paid_at: '2026-09-05' })]
+    const d = returnChangeReopensBill({
+      lines, returns: [ret('r1', 'k1', 1, 300), ret('r2', 'k1', 1, 200)], payments: [{ purchase_entry_id: 'k1', amount: 1000 }], returnId: 'r2',
+    })
+    expect(d).toMatchObject({ reopen: false, owedNow: 500, owedAfter: 700, paid: 1000, owedAgain: 0 })
+  })
+
+  test('a bill already on Outstanding (nothing stamped) needs nothing cleared', () => {
+    const lines = [row('u1', 'gU', P(2083, 5), { rate: 1000, ref: 'U' })]
+    const d = returnChangeReopensBill({ lines, returns: [ret('r1', 'u1', 1, 400)], payments: [{ purchase_entry_id: 'u1', amount: 600 }], returnId: 'r1' })
+    expect(d.stampedIds).toEqual([])
+    expect(d.reopen).toBe(false)
+  })
+
+  test('decides on the figure Outstanding Payables shows — a mixed VAT bill with a discount', () => {
+    const rows = [
+      row('m1', 'gM', P(2083, 5), { rate: 6000, ref: 'M', vat: true, discount: 1000, paid_at: '2026-09-05' }),
+      row('m2', 'gM', P(2083, 5), { rate: 4000, ref: 'M', vat: false, discount: 1000, paid_at: '2026-09-05' }),
+    ]
+    const returns = [ret('r1', 'm2', 1, 4000)]
+    const [withReturn] = billsOf(rows, [], returns)
+    const [withoutReturn] = billsOf(rows)
+    const payments = [{ purchase_entry_id: 'm1', amount: withReturn.total }]
+    const d = returnChangeReopensBill({ lines: rows, returns, payments, returnId: 'r1' })
+    expect(d.owedNow).toBeCloseTo(withReturn.total, 2)
+    expect(d.owedAfter).toBeCloseTo(withoutReturn.total, 2)
+    expect(d.reopen).toBe(true)
+    expect(d.owedAgain).toBeCloseTo(withoutReturn.total - withReturn.total, 2)
+  })
+
+  test('supplier credit taken out of the bill counts against what it was paid', () => {
+    // Paid 1,000, 400 went back, and that 400 credit was used on another bill (a −400 half here).
+    const lines = [row('c1', 'gC2', P(2083, 5), { rate: 1000, ref: 'C2', paid_at: '2026-09-05' })]
+    const payments = [
+      { purchase_entry_id: 'c1', amount: 1000 },
+      { purchase_entry_id: 'c1', amount: -400, payment_mode: SUPPLIER_CREDIT_MODE, credit_link_id: 'x' },
+    ]
+    const d = returnChangeReopensBill({ lines, returns: [ret('r1', 'c1', 1, 400)], payments, returnId: 'r1' })
+    expect(d).toMatchObject({ reopen: true, owedNow: 600, paid: 600, owedAfter: 1000, owedAgain: 400 })
+  })
+
+  test('an edit that shrinks the return asks the same question (newQty)', () => {
+    const lines = [row('e1', 'gE', P(2083, 5), { qty: 10, rate: 100, ref: 'E', paid_at: '2026-09-05' })]
+    const base = { lines, returns: [ret('r1', 'e1', 4, 100)], payments: [{ purchase_entry_id: 'e1', amount: 600 }], returnId: 'r1' }
+    expect(returnChangeReopensBill({ ...base, newQty: 3 })).toMatchObject({ reopen: true, owedAfter: 700, owedAgain: 100 })
+    expect(returnChangeReopensBill({ ...base, newQty: 4 }).reopen).toBe(false)
+  })
+
+  test('returns and payments on another bill\'s lines are ignored', () => {
+    const lines = [row('i1', 'gI', P(2083, 5), { rate: 1000, ref: 'I', paid_at: '2026-09-05' })]
+    const d = returnChangeReopensBill({
+      lines,
+      returns: [ret('r1', 'i1', 1, 400), ret('r9', 'other', 1, 999)],
+      payments: [{ purchase_entry_id: 'i1', amount: 600 }, { purchase_entry_id: 'other', amount: 5000 }],
+      returnId: 'r1',
+    })
+    expect(d).toMatchObject({ reopen: true, owedNow: 600, paid: 600, owedAgain: 400 })
+  })
+})
+
+// S792 stage 2 review (P1): editing a return asks the delete's question of the return as it will be
+// written. Same line → the newQty question; re-linked off the bill → a delete there; moved to another
+// line of the same bill → still on it, at that line's figures; and the bill it moves TO never reopens.
+describe('editing a return asks the same question of the return as it will be written', () => {
+  const ret = (id, lineId, qty, rate) => ({ id, purchase_entry_id: lineId, qty, rate })
+  const paid = amount => [{ purchase_entry_id: 'e1', amount }]
+
+  test('next null is the delete, figure for figure', () => {
+    const lines = [row('e1', 'gE', P(2083, 5), { rate: 1000, ref: 'E', paid_at: '2026-09-05' })]
+    const args = { lines, returns: [ret('r1', 'e1', 1, 400)], payments: paid(600), returnId: 'r1' }
+    expect(returnEditReopensBill({ ...args, next: null })).toEqual(returnChangeReopensBill(args))
+  })
+
+  test('same line, new qty: the newQty question, figure for figure', () => {
+    const lines = [row('e1', 'gE', P(2083, 5), { qty: 10, rate: 100, ref: 'E', paid_at: '2026-09-05' })]
+    const args = { lines, returns: [ret('r1', 'e1', 4, 100)], payments: paid(600), returnId: 'r1' }
+    const cut = returnEditReopensBill({ ...args, next: { purchase_entry_id: 'e1', qty: 1, rate: 100 } })
+    expect(cut).toEqual(returnChangeReopensBill({ ...args, newQty: 1 }))
+    expect(cut).toMatchObject({ reopen: true, owedAfter: 900, owedAgain: 300 })
+    // Raising the qty only lowers what is owed.
+    expect(returnEditReopensBill({ ...args, next: { purchase_entry_id: 'e1', qty: 6, rate: 100 } }).reopen).toBe(false)
+  })
+
+  test('re-linked to a line on another bill: a delete on the bill it leaves', () => {
+    const lines = [row('e1', 'gE', P(2083, 5), { rate: 1000, ref: 'E', paid_at: '2026-09-05' })]
+    const args = { lines, returns: [ret('r1', 'e1', 1, 400)], payments: paid(600), returnId: 'r1' }
+    const moved = returnEditReopensBill({ ...args, next: { purchase_entry_id: 'elsewhere', qty: 1, rate: 400 } })
+    expect(moved).toEqual(returnChangeReopensBill(args))
+    expect(moved).toMatchObject({ reopen: true, owedAgain: 400 })
+  })
+
+  test('moved to another line of the SAME bill: still on it, valued at that line', () => {
+    const lines = [
+      row('a1', 'gA', P(2083, 5), { rate: 400, ref: 'A', paid_at: '2026-09-05' }),
+      row('a2', 'gA', P(2083, 5), { rate: 400, ref: 'A', paid_at: '2026-09-05' }),
+      row('a3', 'gA', P(2083, 5), { rate: 300, ref: 'A', paid_at: '2026-09-05' }),
+    ]
+    const args = { lines, returns: [ret('r1', 'a1', 1, 400)], payments: [{ purchase_entry_id: 'a2', amount: 700 }], returnId: 'r1' }
+    // A like-for-like line: the bill still owes 700, paid 700 — nothing to clear. As a delete it would
+    // have cleared the stamps of a bill the write leaves settled.
+    expect(returnEditReopensBill({ ...args, next: { purchase_entry_id: 'a2', qty: 1, rate: 400 } }))
+      .toMatchObject({ reopen: false, owedNow: 700, owedAfter: 700 })
+    expect(returnChangeReopensBill(args).reopen).toBe(true)
+    // A cheaper line takes 100 less off the bill, so 100 is owed again.
+    expect(returnEditReopensBill({ ...args, next: { purchase_entry_id: 'a3', qty: 1, rate: 300 } }))
+      .toMatchObject({ reopen: true, owedAfter: 800, owedAgain: 100 })
+  })
+
+  test('the bill a return moves TO only gains it, and never reopens', () => {
+    const rows = [
+      row('m1', 'gM', P(2083, 5), { qty: 7, rate: 857.13, ref: 'M', vat: true, discount: 333.33, paid_at: '2026-09-05' }),
+      row('m2', 'gM', P(2083, 5), { qty: 3, rate: 1234.57, ref: 'M', vat: false, discount: 333.33, paid_at: '2026-09-05' }),
+      row('m3', 'gM', P(2083, 5), { qty: 11, rate: 99.99, ref: 'M', vat: true, discount: 333.33, paid_at: '2026-09-05' }),
+    ]
+    const returns = [ret('rx', 'm3', 2, 99.99)]
+    const settled = returnChangeReopensBill({ lines: rows, returns, payments: [], returnId: null })
+    const payments = [{ purchase_entry_id: 'm1', amount: settled.owedNow }]   // paid to the paisa
+    ;[['m1', 1, 857.13], ['m2', 0.5, 1234.57], ['m3', 3, 99.99], ['m2', 3, 1234.57]].forEach(([lineId, qty, rate]) => {
+      const d = returnEditReopensBill({ lines: rows, returns, payments, returnId: 'incoming', next: { purchase_entry_id: lineId, qty, rate } })
+      expect(d.reopen).toBe(false)
+      expect(d.owedAfter).toBeLessThan(d.owedNow)
+    })
   })
 })

@@ -2,7 +2,10 @@
 // (S774). Every expected figure below is worked by hand from the fixture, so a change to either
 // convention fails here before it reaches the two pages.
 import { computeUsed } from '../../../shared/imsFormulas'
-import { periodRevenue, periodStockMaps, valuePeriodItems } from './periodCost'
+import {
+  periodRevenue, periodStockMaps, valuePeriodItems,
+  periodRowIds, periodValuationItems, periodGap, valuePeriods,
+} from './periodCost'
 
 describe('periodRevenue', () => {
   const recipes = [
@@ -102,5 +105,117 @@ describe('periodStockMaps and valuePeriodItems', () => {
   it('returns zeros for an empty period', () => {
     const v = valuePeriodItems([A], periodStockMaps({}))
     expect(Object.values(v).every(x => x === 0)).toBe(true)
+  })
+})
+
+describe('the valued item set: hiding an item never changes a past month (S792, D29)', () => {
+  // Rice was bought and used all month, then hidden in Item Master (its advice on a unit change).
+  const A    = { id: 'A', name: 'Oil', per_uom_rate: '10', is_active: true }
+  const RICE = { id: 'R', name: 'Rice (bag)', per_uom_rate: '20', is_active: false }
+  const OLD  = { id: 'Z', name: 'Retired long ago', per_uom_rate: '5', is_active: false }
+  // is_active is nullable (DEFAULT true, no NOT NULL): only an explicit false is hidden.
+  const NULLISH = { id: 'N', name: 'Legacy row', per_uom_rate: '1', is_active: null }
+  const rows = {
+    opening:   [{ item_id: 'A', qty: '2' }, { item_id: 'R', qty: '5' }],
+    closing:   [{ item_id: 'A', physical_qty: '1' }, { item_id: 'R', physical_qty: '3' }],
+    purchases: [{ item_id: 'R', qty: '10', rate: '20', purchase_group_id: 'g1', discount_amount: '0' }],
+    returns: [], wastages: [], staffMeals: [],
+  }
+  const maps = periodStockMaps(rows)
+
+  it('names every item with a row of any kind', () => {
+    const ids = periodRowIds({
+      opening: [{ item_id: 'a' }], closing: [{ item_id: 'b', physical_qty: null }],
+      purchases: [{ item_id: 'c' }], returns: [{ item_id: 'd' }],
+      wastages: [{ item_id: 'e' }], staffMeals: [{ item_id: 'f' }, { item_id: null }],
+    })
+    expect([...ids].sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(periodRowIds().size).toBe(0)
+  })
+
+  it('keeps active items and the hidden ones with a row, and drops a hidden item nothing happened to', () => {
+    const valued = periodValuationItems([A, RICE, OLD, NULLISH], periodRowIds(rows))
+    expect(valued.map(i => i.id)).toEqual(['A', 'R', 'N'])
+  })
+
+  it("keeps the hidden item's purchases and stock in the month's COGS", () => {
+    const valued = periodValuationItems([A, RICE, OLD, NULLISH], periodRowIds(rows))
+    const v = valuePeriodItems(valued, maps)
+    // Oil: 2×10 − 1×10 = 10. Rice: 5×20 + 200 − 3×20 = 240.
+    expect(v.purchaseVal).toBeCloseTo(200)
+    expect(v.cogsVal).toBeCloseTo(250)
+    // The pre-S792 read (active items only) lost the whole of Rice from the month.
+    expect(valuePeriodItems([A], maps).cogsVal).toBeCloseTo(10)
+  })
+
+  it('counts a hidden item the same in every column of its row (S720)', () => {
+    const v = valuePeriodItems([RICE], maps)
+    expect(v.openingVal).toBeCloseTo(100)
+    expect(v.purchaseVal).toBeCloseTo(200)
+    expect(v.closingVal).toBeCloseTo(60)
+    expect(v.cogsVal).toBeCloseTo(240)
+  })
+
+  it('names uncounted stock by physical_qty IS NOT NULL, and leaves a hidden item out of the gap', () => {
+    const r = {
+      ...rows,
+      // Oil has a closing ROW with a null count — not a count; Rice has no closing row at all.
+      closing: [{ item_id: 'A', physical_qty: null }],
+    }
+    const m = periodStockMaps(r)
+    const gap = periodGap({ items: [A, RICE], maps: m, closing: r.closing, cogs: 300 })
+    expect(gap.uncounted.map(u => u.id)).toEqual(['A'])   // Rice is hidden: Stock Count cannot offer it
+    expect(gap.presentCount).toBe(1)
+    // A count of 0 is a count.
+    const zero = periodGap({ items: [A], maps: m, closing: [{ item_id: 'A', physical_qty: '0' }], cogs: 300 })
+    expect(zero.uncountedCount).toBe(0)
+  })
+})
+
+describe('valuePeriods: several months at once, each valued on its own', () => {
+  const A = { id: 'A', name: 'Oil', per_uom_rate: '10', is_active: true }
+  const H = { id: 'H', name: 'Hidden flour', per_uom_rate: '2', is_active: false }
+  // A legacy bill (no purchase_group_id) with the same vendor, invoice and day number in two months:
+  // the fallback bill key carries no period, so a year-wide allocation merged them into one bill
+  // and credited ONE discount (max) across both (FIGURES-6). Per month, each keeps its own.
+  const legacy = { purchase_group_id: null, vendor_id: 'v', invoice_ref: '', bs_day: 5, discount_amount: '10' }
+  const args = {
+    periodIds: ['p1', 'p2'],
+    items: [A, H],
+    opening: [{ period_id: 'p1', item_id: 'A', qty: '1' }],
+    closing: [{ period_id: 'p1', item_id: 'A', physical_qty: '1' }, { period_id: 'p2', item_id: 'H', physical_qty: '0' }],
+    purchases: [
+      { ...legacy, period_id: 'p1', item_id: 'A', qty: '10', rate: '10' },
+      { ...legacy, period_id: 'p2', item_id: 'H', qty: '50', rate: '2' },
+      { ...legacy, period_id: 'p3', item_id: 'A', qty: '99', rate: '10' },   // a month not asked for
+    ],
+    returns: [], wastages: [{ period_id: 'p2', item_id: 'H', qty: '5' }], staffMeals: [],
+  }
+  const out = valuePeriods(args)
+
+  it('returns only the months asked for', () => {
+    expect(Object.keys(out).sort()).toEqual(['p1', 'p2'])
+  })
+
+  it("allocates each month's bill discounts on their own", () => {
+    expect(out.p1.discountVal).toBeCloseTo(10)
+    expect(out.p2.discountVal).toBeCloseTo(10)
+  })
+
+  it('matches valuePeriodItems for the month, hidden items included', () => {
+    // p1: 1×10 + (100 − 10) − 1×10 = 90
+    expect(out.p1.cogsVal).toBeCloseTo(90)
+    // p2: the hidden flour — 0 + (100 − 10) − 5×2 − 0 = 80
+    expect(out.p2.cogsVal).toBeCloseTo(80)
+    expect(out.p2.itemCount).toBe(2)   // Oil (active) + the hidden flour, which had rows
+  })
+
+  it('carries each month its own uncounted-items gap', () => {
+    expect(out.p1.gap.uncountedCount).toBe(0)
+    expect(out.p2.gap.uncountedCount).toBe(0)   // the hidden flour is never asked about
+  })
+
+  it('returns an empty map for no months', () => {
+    expect(valuePeriods({ periodIds: [], items: [A] })).toEqual({})
   })
 })

@@ -8,15 +8,16 @@ import ChartCard from '../../../components/ChartCard'
 import StatPill from '../../../components/StatPill'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
-import { computePortfolioValuation, latestPostedByAsset } from './depreciationCompute'
+import { computeValuationAsOf } from './depreciationCompute'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import ReportLoadError from '../../../components/ReportLoadError'
 
 const fmt = nprInt
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
 
-// Whole-portfolio valuation, as of any posted period — SUM(closing_nbv) across active assets
-// with personal_use_percent = 0, computed on read (no stored aggregate), per spec.
+// Whole-portfolio valuation, as of any posted period end — cost less the depreciation posted for
+// periods ending on or before it, across every asset HELD on that date with personal_use_percent
+// = 0 (disposed since included), computed on read (no stored aggregate). S792: COSTS-2, COSTS-4.
 export default function ValuationReportTab({ assets }) {
   const { profile } = useAuth()
   const { scopedFrom } = useScopedDb()
@@ -31,8 +32,8 @@ export default function ValuationReportTab({ assets }) {
     setLoading(true)
     // Paged, with tiebreakers: one row per asset per run crosses the 1000-row cap, and a truncated
     // read values the assets past the cut at full cost (S756).
-    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_end, created_at, closing_nbv')
-      .eq('is_posted', true).order('period_end', { ascending: true }).order('created_at', { ascending: true }).order('id'))
+    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
+      .eq('is_posted', true).order('period_end', { ascending: true }).order('id'))
     if (error) { setLoadError(error); setLoading(false); return }
     setLoadError(null)
     setPosted(data || [])
@@ -42,25 +43,17 @@ export default function ValuationReportTab({ assets }) {
 
   const periodOptions = useMemo(() => [...new Set(posted.map(p => p.period_end))].sort().reverse(), [posted])
 
-  const valuation = useMemo(() => {
-    if (!asOf) return null
-    const eligible = assets.filter(a => a.status === 'active' && (a.personal_use_percent ?? 0) === 0 && a.acquisition_date <= asOf)
-    // latestPostedByAsset breaks a period_end tie by created_at, so an adjustment run beats the
-    // run it reverses; the old `>` comparison kept whichever of the two came first (S756).
-    const latestByAsset = latestPostedByAsset(posted.filter(p => p.period_end <= asOf))
-    const rows = eligible.map(a => ({
-      categoryName: a.assets_categories?.name || 'Uncategorized',
-      totalCost: a.total_cost,
-      nbv: latestByAsset[a.id] ? latestByAsset[a.id].closing_nbv : a.total_cost,
-    }))
-    return computePortfolioValuation(rows)
-  }, [assets, posted, asOf])
+  // S792: the assets held on the date — including one disposed AFTER it (COSTS-4) — each at cost
+  // less the charges and reversals for periods ending on or before it (COSTS-2). It used to take
+  // the closing NBV of the latest row by period end, which a reversal of an earlier run, or a
+  // back-dated run posted later, never reached.
+  const valuation = useMemo(() => (asOf ? computeValuationAsOf({ assets, postedRows: posted, asOf }) : null), [assets, posted, asOf])
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }} className="no-print">
         <div className="form-field">
-          <label htmlFor="valuat-f1"><Tip text="Any period a depreciation run has been posted for — the report reflects each asset's NBV as of this date." width={260}>As Of</Tip></label>
+          <label htmlFor="valuat-f1"><Tip text="The end of any period a depreciation run has been posted for. Every asset owned on this date is counted — including one sold or written off later — at its cost less the depreciation posted for periods ending on or before it, reversals included." width={290}>As Of</Tip></label>
           <select id="valuat-f1" className="form-select" value={asOf} onChange={e => setAsOf(e.target.value)} disabled={periodOptions.length === 0}>
             {periodOptions.length === 0 && <option value="">No posted periods yet</option>}
             {periodOptions.map(d => <option key={d} value={d}>{fmtDate(d)}</option>)}
@@ -122,7 +115,7 @@ export default function ValuationReportTab({ assets }) {
                   <th>Category</th>
                   <th style={{ textAlign: 'right' }}>Total Cost</th>
                   <th style={{ textAlign: 'right' }}>Accumulated Depreciation</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Net Book Value — Total Cost minus Accumulated Depreciation — what these assets are worth on the books today." width={260}>NBV</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net Book Value — Total Cost minus Accumulated Depreciation — what these assets were worth on the books on the As Of date." width={260}>NBV</Tip></th>
                 </tr>
               </thead>
               <tbody>

@@ -3,12 +3,21 @@
 // in any environment without REACT_APP_SUPABASE_URL set, which includes a plain checkout and CI.
 // Mocked the same way scopedDb.test.js already does it; every test below passes its own mock
 // client into the function under test, so nothing here needs the real one.
-import { persistSalesDay, isMissingFunctionError, findSupersededRows } from './persistSalesDay'
+import { persistSalesDay, isMissingFunctionError, findSupersededRows, depleteManualSales, repostSupersededMovements } from './persistSalesDay'
 import { errorInfo } from '../../../shared/errorText'
+import { supabase as moduleClient } from '../../../supabaseClient'
 
 // babel-jest hoists jest.mock above the imports, so it still runs first; placed after them only
 // to satisfy import/first.
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
+// Only the lock-ordering suite at the bottom reaches the ingredient explosion (its own tested
+// module); a plain function, since CRA's resetMocks wipes a jest.fn implementation before each test.
+jest.mock('../../../utils/recipeCost', () => ({
+  explodeRecipeIngredients: async () => ({
+    r1: [{ item_id: 'flour', qty: 0.2 }],
+    r2: [{ item_id: 'flour', qty: 0.1 }, { item_id: 'oil', qty: 0.05 }],
+  }),
+}))
 
 // Minimal stand-in for a PostgrestBuilder: chainable, records what was called on it, and is
 // thenable (the real builder is a thenable too, not a Promise — see withTimeout.js).
@@ -274,5 +283,60 @@ describe('findSupersededRows — what a save will silently delete (S457)', () =>
     const sb = makeMockSupabase({ selectResult: { data: null, error: { message: 'permission denied' } } })
     await expect(findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['r1'] }))
       .rejects.toThrow('permission denied')
+  })
+})
+
+// S792 stage 2 review (P3). repostSupersededMovements read the superseded days' sales OUTSIDE the
+// per-day lock and only then queued its delete + insert. So a read that stalled could resolve after
+// a newer save of the same day had written its movements, and the rebuild then replaced them with
+// pre-save figures. The read is inside the lock now: whichever of the two runs second writes last.
+describe('the superseded-days re-post reads inside the day lock (S792 P3)', () => {
+  const settle = () => new Promise(r => setTimeout(r, 20))
+  // A builder for the handed client whose answer can be held back until `gate` resolves.
+  function gatedBuilder(result, gate) {
+    const b = {
+      eq: () => b, in: () => b, gt: () => b, lt: () => b, or: () => b, select: () => b,
+      order: () => b, limit: () => b, range: () => b,
+      then: (res, rej) => (gate || Promise.resolve()).then(() => result).then(res, rej),
+    }
+    return b
+  }
+
+  test('a stalled read cannot land its pre-save rows over a newer save of the day', async () => {
+    const writes = []
+    moduleClient.from.mockImplementation(() => ({
+      delete: () => { writes.push(['delete']); return gatedBuilder({ error: null }) },
+      insert: (rows) => { writes.push(['insert', rows]); return gatedBuilder({ data: [], error: null }) },
+    }))
+
+    // The re-post from a Bulk save: day 4 still held r2 × 10 when its read went out, and that
+    // read stalls. Its POS guard read answers at once.
+    let releaseRead
+    const stalled = new Promise(r => { releaseRead = r })
+    const repostClient = {
+      from: () => ({
+        select: (cols) => cols.includes('qty_sold')
+          ? gatedBuilder({ data: [{ recipe_id: 'r2', bs_day: 4, qty_sold: 10, source: 'manual' }], error: null }, stalled)
+          : gatedBuilder({ data: [], error: null }),
+      }),
+    }
+    const repost = repostSupersededMovements(repostClient, { clientId: 'c1', periodId: 'p1', days: [4] })
+    await settle()
+
+    // Meanwhile day 4 is saved again, as a daily figure: r1 × 3.
+    const saveClient = { from: () => ({ select: () => gatedBuilder({ data: [], error: null }) }) }
+    const save = depleteManualSales(saveClient, { clientId: 'c1', periodId: 'p1', bsDay: 4, rows: [{ recipe_id: 'r1', qty_sold: 3 }] })
+    await settle()
+    // The save waits its turn behind the re-post, which holds the day while its read is out.
+    expect(writes).toEqual([])
+
+    releaseRead()
+    await Promise.all([repost, save])
+    expect(writes.map(w => w[0])).toEqual(['delete', 'insert', 'delete', 'insert'])
+    // The newer save wrote last, so the day ends on its figure — not the stalled read's.
+    const last = writes[writes.length - 1][1]
+    expect(last).toHaveLength(1)
+    expect(last[0]).toMatchObject({ item_id: 'flour', period_id: 'p1', bs_day: 4, source: 'manual', client_id: 'c1' })
+    expect(last[0].qty).toBeCloseTo(-0.6)
   })
 })

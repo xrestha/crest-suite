@@ -524,6 +524,16 @@ export default function Overheads() {
 
   const hasSales = revenue > 0
 
+  // D7 (S792 COSTS-3): an OPEN month is not judged. Rent, labour and fees are whole-month figures
+  // (a new month even starts from last month's, copied as a draft) while revenue is sales so far,
+  // so from day 1 every % sat over its target and the page said "✗ Operating at a loss" in red.
+  // Monthly Summary and Budget vs Actual withhold the verdict until the month closes (S756); so
+  // does this page now: the figures show, marked "so far", in neutral ink with no ✓/✗.
+  // `noVerdict` also covers the unreadable-payroll case, which withholds for its own reason.
+  const periodOpen = selectedPeriodObj?.status === 'open'
+  const noVerdict = verdictWithheld || periodOpen
+  const ofRevenue = periodOpen ? 'of revenue so far' : 'of revenue'
+
   // `null` in means `null` out: an absent figure has no ratio, and banding it would band a zero.
   function pct(amount, base) {
     if (amount == null) return null
@@ -570,8 +580,8 @@ export default function Overheads() {
     { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: 'var(--theme-green)', textColor: 'var(--theme-green-text)' },
     { key: 'tax',    label: 'Tax & Fees', amount: entered.tax   ? totals.tax_fees  : null, target: 5,  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
-      color:     verdictWithheld ? 'var(--theme-text2)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
-      textColor: verdictWithheld ? 'var(--theme-text1)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
+      color:     noVerdict ? 'var(--theme-text2)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
+      textColor: noVerdict ? 'var(--theme-text1)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
   ] : null
 
   // Food Cost and Labor band through the shared definitions (S756) — the client's own
@@ -580,6 +590,12 @@ export default function Overheads() {
   // the ✓/△/▲ mark carried beside the colour. Overhead and Tax & Fees have no shared band and keep
   // this page's own target comparison.
   function bandOf(row, pctVal) {
+    // An open month (D7): the percentage, no band — a whole month's rent over a week's sales is
+    // not a line running over its target.
+    if (periodOpen) {
+      return { text: 'var(--theme-text1)', fill: 'var(--theme-text2)', label: pctVal != null ? `${pctVal.toFixed(1)}%` : '—',
+        title: `${selectedPeriodObj?.label || 'This month'} is still open: judged once it closes.` }
+    }
     if (row.key === 'food') {
       const f = fcFigure(pctVal, settings)
       return { text: f.style.color, fill: FC_FILL[f.band.key] || FC_FILL.none, label: f.text, title: f.title }
@@ -640,6 +656,14 @@ export default function Overheads() {
   const breakEvenRev    = contribMargin > 0 && totalFixed > 0 ? totalFixed / contribMargin : null
   const breakEvenDishes = avgDishPrice > 0 && breakEvenRev ? Math.ceil(breakEvenRev / avgDishPrice) : null
   const isAboveBreakEven = breakEvenRev != null && revenue >= breakEvenRev
+  // The card's verdict hue, or null for none. COSTS-10: with no fixed costs entered there is no
+  // break-even figure, and `isAboveBreakEven` false painted "Actual Revenue" red beside "Enter
+  // overhead costs above" — a verdict on a number nobody computed. An open month (D7) and an
+  // unreadable payroll are not judged either. Purchases above revenue in a CLOSED month is a real
+  // finding, so it keeps its red.
+  const beTone = noVerdict ? null
+    : breakEvenRev != null ? (isAboveBreakEven ? 'green' : 'red')
+    : contribMargin <= 0 ? 'red' : null
 
   const period  = periods.find(p => p.id === periodId)
   // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
@@ -724,7 +748,7 @@ export default function Overheads() {
             // latter is a measurement, and nobody measured it (S713).
             label: 'Fixed Overheads', value: entered.oh ? fmt(totals.overhead) : '—',
             sub: !entered.oh ? 'Not entered yet'
-               : fmtPct(totals.overhead, revenue) ? `${fmtPct(totals.overhead, revenue)} of revenue` : 'No sales data',
+               : fmtPct(totals.overhead, revenue) ? `${fmtPct(totals.overhead, revenue)} ${ofRevenue}` : 'No sales data',
             color: 'var(--theme-accent-ink)',
             tip: 'Rent, utilities, tech, marketing — costs that exist regardless of how many customers you serve.'
           },
@@ -732,22 +756,22 @@ export default function Overheads() {
             label: 'Labor Costs', value: entered.labor ? fmt(labourEffective) : '—',
             sub: labourSource === 'unreadable' && !entered.labor ? 'Payroll cannot be read on this login'
                : !entered.labor ? (hrOn ? 'No finalized payroll run, nothing entered' : 'Not entered yet')
-               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} of revenue${labourSource === 'payroll' ? ' · payroll' : ''}` : 'No sales data',
+               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} ${ofRevenue}${labourSource === 'payroll' ? ' · payroll' : ''}` : 'No sales data',
             color: 'var(--theme-text1)',
             tip: labourSource === 'payroll'
-              ? 'Your finalized HR payroll run for this period — gross pay plus employer SSF. It supersedes whatever is typed on the Labor tab; the two are never added together. Industry target: ~30% of revenue.'
+              ? 'Your finalized HR payroll run for this period — gross pay plus overtime plus employer SSF. It supersedes whatever is typed on the Labor tab; the two are never added together. Industry target: ~30% of revenue.'
               : 'Salaries, wages, and benefits, as entered on the Labor tab. Industry target: ~30% of revenue.'
           },
           {
             label: 'Tax & Fees', value: entered.tax ? fmt(totals.tax_fees) : '—',
             sub: !entered.tax ? 'Not entered yet'
-               : fmtPct(totals.tax_fees, revenue) ? `${fmtPct(totals.tax_fees, revenue)} of revenue` : 'No sales data',
+               : fmtPct(totals.tax_fees, revenue) ? `${fmtPct(totals.tax_fees, revenue)} ${ofRevenue}` : 'No sales data',
             color: 'var(--theme-purple-text)',
             tip: 'VAT compliance, card processing fees, bank charges, licenses. Often forgotten but real.'
           },
           {
             label: 'Total Fixed Costs', value: fmt(totalFixed),
-            sub: fmtPct(totalFixed, revenue) ? `${fmtPct(totalFixed, revenue)} of revenue` : 'Overhead + Labor + Tax',
+            sub: fmtPct(totalFixed, revenue) ? `${fmtPct(totalFixed, revenue)} ${ofRevenue}` : 'Overhead + Labor + Tax',
             color: 'var(--theme-text1)',
             tip: 'Overhead + Labor + Tax & Fees. Every month you must earn more than this just to survive. A bucket you have not entered is missing from it, not zero.'
           },
@@ -906,7 +930,7 @@ export default function Overheads() {
             <div>
               <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>P&L Summary</h3>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>
-                Revenue: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(dishes).toLocaleString('en-IN')} dishes sold &nbsp;·&nbsp; {period?.label || '—'}
+                Revenue{periodOpen ? ' so far' : ''}: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(dishes).toLocaleString('en-IN')} dishes sold &nbsp;·&nbsp; {period?.label || '—'}
               </p>
             </div>
             <Tip text="Food cost uses net purchases ÷ revenue (purchase-based): purchases less bill discounts and vendor returns. For COGS-based food cost, see Monthly Summary." width={240}>
@@ -926,11 +950,11 @@ export default function Overheads() {
               const band       = !isProfit && !isMissing ? bandOf(row, numPct) : null
               const barColor   = isMissing ? 'var(--theme-border)'
                 : isProfit
-                  ? (verdictWithheld ? 'var(--theme-text2)' : row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
+                  ? (noVerdict ? 'var(--theme-text2)' : row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
                   : band.fill
               const barText    = isMissing ? 'var(--theme-text3)'
                 : isProfit
-                  ? (verdictWithheld ? 'var(--theme-text1)' : row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
+                  ? (noVerdict ? 'var(--theme-text1)' : row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
                   : band.text
               const barWidth   = numPct == null ? 0 : Math.min(Math.abs(numPct), 100)
 
@@ -993,18 +1017,27 @@ export default function Overheads() {
             </p>
           )}
 
+          {/* D7: said in words, not only by the missing colour. */}
+          {periodOpen && (
+            <p role="status" style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+              {period?.label || 'This month'} is still open. Fixed costs here are whole-month figures and revenue is sales so far, so the percentages and profit are shown without a verdict until the month closes.
+            </p>
+          )}
+
           {/* Net profit callout */}
           {netProfit != null && (
             <div style={{
               marginTop: 20, padding: '12px 16px', borderRadius: 'var(--radius-sm)',
-              background: verdictWithheld ? 'color-mix(in srgb, var(--theme-text2) 6%, transparent)' : netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)' : 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
-              border: `1px solid ${verdictWithheld ? 'var(--theme-border)' : netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : 'color-mix(in srgb, var(--theme-red) 25%, transparent)'}`,
+              background: noVerdict ? 'color-mix(in srgb, var(--theme-text2) 6%, transparent)' : netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)' : 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+              border: `1px solid ${noVerdict ? 'var(--theme-border)' : netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : 'color-mix(in srgb, var(--theme-red) 25%, transparent)'}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center'
             }}>
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                {verdictWithheld ? 'Net profit before payroll — not judged on this login' : netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
+                {verdictWithheld ? 'Net profit before payroll — not judged on this login'
+                  : periodOpen ? 'Net profit so far — not judged while the month is open'
+                  : netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
               </span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: verdictWithheld ? 'var(--theme-text1)' : netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: noVerdict ? 'var(--theme-text1)' : netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                 {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
               </span>
             </div>
@@ -1031,8 +1064,8 @@ export default function Overheads() {
             const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
             const prPct = netProfit != null ? pct(netProfit, revenue) : null
             const pr  = { key: 'profit',   label: prPct != null && prPct < 0 ? 'Loss' : 'Net Profit',
-                          color:     verdictWithheld ? 'var(--theme-text2)' : prPct != null && prPct < 0 ? 'var(--theme-red)'      : 'var(--theme-green)',
-                          textColor: verdictWithheld ? 'var(--theme-text1)' : prPct != null && prPct < 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
+                          color:     noVerdict ? 'var(--theme-text2)' : prPct != null && prPct < 0 ? 'var(--theme-red)'      : 'var(--theme-green)',
+                          textColor: noVerdict ? 'var(--theme-text1)' : prPct != null && prPct < 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
                           amount: netProfit, pct: prPct || 0 }
             const segments = [fc, lb, oh, tx, pr].filter(s => s.amount != null && s.pct > 0.2)
             return (
@@ -1041,7 +1074,7 @@ export default function Overheads() {
                     P&L Summary header — a report that states a scope must state it everywhere the
                     report goes, and this bar carries the same purchase-based Food Cost. */}
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>
-                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Revenue {fmt(revenue)}</span>
+                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Revenue{periodOpen ? ' so far' : ''} {fmt(revenue)}</span>
                   <span style={{ color: 'var(--theme-text3)' }}> &nbsp;·&nbsp; Food Cost is purchase-based (net purchases), not COGS
                   {missingLines.length > 0 ? ` · no ${missingLines.join(', ')} recorded, so the profit slice absorbs ${missingLines.length === 1 ? 'it' : 'them'}` : ''}</span>
                 </div>
@@ -1201,10 +1234,10 @@ export default function Overheads() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
 
           {/* Break-even */}
-          <div className="card" style={verdictWithheld ? undefined : {
-            background: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 4%, transparent)' : 'color-mix(in srgb, var(--theme-red) 4%, transparent)',
-            borderColor: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-red) 20%, transparent)'
-          }}>
+          <div className="card" style={beTone ? {
+            background: `color-mix(in srgb, var(--theme-${beTone}) 4%, transparent)`,
+            borderColor: `color-mix(in srgb, var(--theme-${beTone}) 20%, transparent)`,
+          } : undefined}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
               <Tip text="The minimum revenue / dishes needed to cover all fixed costs. Below this = loss. Above = profit begins. Dishes, not covers: this is portions sold, and one guest usually orders several." width={250}>Break-Even Analysis</Tip>
             </div>
@@ -1218,26 +1251,30 @@ export default function Overheads() {
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{breakEvenDishes ? breakEvenDishes.toLocaleString('en-IN') : '—'}</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Revenue</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: verdictWithheld ? 'var(--theme-text1)' : isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{fmt(revenue)}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Revenue{periodOpen ? ' so far' : ''}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: beTone ? `var(--theme-${beTone}-text)` : 'var(--theme-text1)' }}>{fmt(revenue)}</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Dishes</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: verdictWithheld ? 'var(--theme-text1)' : isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(dishes).toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Dishes{periodOpen ? ' so far' : ''}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: beTone ? `var(--theme-${beTone}-text)` : 'var(--theme-text1)' }}>{Math.round(dishes).toLocaleString('en-IN')}</div>
               </div>
             </div>
             <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
-              background: verdictWithheld ? 'color-mix(in srgb, var(--theme-text2) 8%, transparent)' : isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'color-mix(in srgb, var(--theme-red) 10%, transparent)',
-              color: verdictWithheld ? 'var(--theme-text1)' : isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
+              background: beTone ? `color-mix(in srgb, var(--theme-${beTone}) 10%, transparent)` : 'color-mix(in srgb, var(--theme-text2) 8%, transparent)',
+              color: beTone ? `var(--theme-${beTone}-text)` : 'var(--theme-text1)'
             }}>
               {verdictWithheld
                 ? 'Not judged on this login — payroll cannot be read here, so the real fixed costs may be higher'
+                : breakEvenRev && periodOpen
+                  ? `So far: ${fmt(revenue)} of the ${fmt(breakEvenRev)} needed. Not judged while ${period?.label || 'the month'} is open.`
                 : isAboveBreakEven && breakEvenRev
                 ? `✓ Above break-even by ${fmt(revenue - breakEvenRev)}`
                 : breakEvenRev
                   ? `✗ Below break-even by ${fmt(breakEvenRev - revenue)}`
                   : contribMargin <= 0
-                    ? `✗ Purchase cost (${(fcPct * 100).toFixed(1)}% FC) exceeds revenue — break-even is undefined`
+                    ? (periodOpen
+                      ? `Purchases so far (${(fcPct * 100).toFixed(1)}% of revenue) are above revenue so far, so break-even cannot be worked out yet`
+                      : `✗ Purchase cost (${(fcPct * 100).toFixed(1)}% FC) exceeds revenue — break-even is undefined`)
                     : totalFixed === 0
                       ? 'Enter overhead costs above and save to calculate'
                       : 'Unable to calculate'}

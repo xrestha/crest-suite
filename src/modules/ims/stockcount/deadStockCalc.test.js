@@ -32,6 +32,13 @@ describe('judgeItemPeriod', () => {
   test('staff meals are consumption', () => {
     expect(judgeItemPeriod({ opening: 5, staffUsed: 2, hasCount: true, closing: 3 }).used).toBe(0)
   })
+
+  // S792 (PLANNING-4): `used` stays the COGS residual for the Used column; `moved` adds staff meals
+  // back, and it is what still/slow read. Wastage is not movement.
+  test('staff meals are movement; wastage is not', () => {
+    expect(judgeItemPeriod({ opening: 5, staffUsed: 2, hasCount: true, closing: 3 })).toMatchObject({ used: 0, moved: 2 })
+    expect(judgeItemPeriod({ opening: 5, wasted: 2, hasCount: true, closing: 3 })).toMatchObject({ used: 0, moved: 0 })
+  })
 })
 
 describe('stillStreak', () => {
@@ -79,6 +86,27 @@ describe('classifyItem', () => {
 
   test('a streak reaching the oldest month read is flagged as "at least"', () => {
     expect(classifyItem(hist(still, still, still))).toMatchObject({ atLeast: true })
+  })
+
+  // PLANNING-4's own example: rice eaten only by staff — opening 20 kg, bought 30, staff meals 30,
+  // counted 20 — measured `used` 0 every month, went Dead after three, and after a fourth was
+  // "Write it off as wastage" while the staff ate 30 kg a month.
+  test('staff rice is moving, not Dead (S792)', () => {
+    const staffRice = judgeItemPeriod({ opening: 20, purchased: 30, staffUsed: 30, hasCount: true, closing: 20 })
+    expect(staffRice).toMatchObject({ state: 'judged', used: 0, moved: 30 })
+    expect(classifyItem(hist(staffRice, staffRice, staffRice, staffRice))).toMatchObject({ status: null, stillMonths: 0 })
+  })
+
+  test('staff meals lift an item out of Slow: 120 of 150 eaten by staff is not "buy less"', () => {
+    const month = judgeItemPeriod({ opening: 50, purchased: 100, staffUsed: 120, hasCount: true, closing: 28 })
+    expect(month.used).toBeCloseTo(2, 9)
+    expect(classifyItem(hist(month)).status).toBeNull()
+  })
+
+  test('an item only ever thrown away is still flagged — wastage is not movement', () => {
+    const binned = judgeItemPeriod({ opening: 10, wasted: 4, hasCount: true, closing: 6 })
+    expect(binned).toMatchObject({ used: 0, moved: 0 })
+    expect(classifyItem(hist(binned, binned, binned))).toMatchObject({ status: 'Dead', stillMonths: 3 })
   })
 })
 

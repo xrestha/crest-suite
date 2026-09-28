@@ -57,7 +57,18 @@ VAT and Non-VAT directly, and Payment Report, Vendor Report, Supplier Contributi
 `computeVendorPurchasingSection` through `applyPriorBillFactors` / `mergeFactors` in
 `supplierAttribution.js` (`vendorNetByItem({ priorFactors })`). A reader that only looks at this
 month's bills falls back to the list rate, which is the defect to watch for in a fifth reader. Vendor
-Report's drilldown lists earlier-bill and unlinked return rows.
+Report's drilldown lists earlier-bill and unlinked return rows. Purchase 1L+ joined them in S792
+(TAX-3); a cross-year return sits in the year it went back, and Help sends that question to the accountant.
+
+**Owner decision D33 (S792): what a bill OWES credits a return at the DISCOUNTED price.**
+`billOwedAfterReturns()` in `payablesAllocation.js` (pinned equal to `billPayables()`) is the one
+answer for Outstanding Payables, the balance letter (`vendorBalanceHelpers` `billGrandTotal`) and
+Vendor Report's Payable. It was `calcBillTotals(returns-netted lines, WHOLE discount)`, so a fully
+returned discounted bill closed the letter on an "advance" worth the discount. A bill owing nothing
+gets "Nothing owed" and **Close this bill** (`linesToCloseByReturns`). **Deleting or editing a return
+that settled its bill reopens it** (`returnChangeReopensBill` / `returnEditReopensBill`; a re-link
+off the bill is its delete): `ReturnsTab` clears `paid_at` FIRST — the write that can refuse
+(IMS manager+) — then writes the return, and restores the stamps if that fails.
 
 **Also S756:** editing a bill with returns against it is refused (`purchase_bill_has_returns`, D26);
 `discount_amount >= 0` is a CHECK; the Purchases register values every bill over ALL its lines under
@@ -186,9 +197,9 @@ pre-discount, pre-return total. A 10,000 bill with a 1,000 discount, paid in ful
 **`Partial — NPR 1,000 outstanding`**.
 
 **Settle against the basis used by whatever WRITES the payment rows, and replicate it rather than
-approximating it.** Outstanding Payables nets returns per line at list rate and then runs
-`calcBillTotals`, so the discount and the VAT land on the returns-netted base; the drilldown now
-does exactly that. The `Math.max(0, …)` is gone for S723's reason — a credit is money — so an
+approximating it.** Outstanding Payables then netted returns per line at list rate and ran
+`calcBillTotals`, and the drilldown copied that; since S792 both call `billOwedAfterReturns`
+(D33, above), which credits the return at the discounted price. The `Math.max(0, …)` is gone for S723's reason — a credit is money — so an
 over-returned bill reads **Credit**.
 
 **And show the number the badge is judged against.** A `Partial` chip beside a Net column it was
@@ -582,10 +593,11 @@ filtered on it — so using the feature was what triggered the defect.
 **The general rule: `.eq('is_active', true)` belongs on a PICKER, which asks what may be chosen
 NOW. A report asks what happened, and its vendor list is its row set.** Before copying that filter
 into a new query, ask which of the two the list is. The live consumers that are correctly pickers:
-`TadaClaims`, `SupplierPriceTracker`, `GatePasses`, `computeVendorPurchasingSection`,
-`ClientDashboard`'s count, and `Purchases.js` — the last of which pairs it with
-`PurchaseBillPage`'s `_inactive` backfill, so an existing bill still names a vendor the picker no
-longer offers. That backfill is the pattern to copy where a picker must also render history.
+`TadaClaims`, `SupplierPriceTracker`, `GatePasses`, `ClientDashboard`'s count, and `Purchases.js`
+— the last of which pairs it with `PurchaseBillPage`'s `_inactive` backfill, so an existing bill
+still names a vendor the picker no longer offers. That backfill is the pattern to copy where a
+picker must also render history. `computeVendorPurchasingSection` was on this list and was not a
+picker: its active-only name map froze an archived supplier as "Unknown Vendor" (S792, TAX-7).
 
 ### The vendor delete guard is a trigger, and there is deliberately no force-delete (S708)
 

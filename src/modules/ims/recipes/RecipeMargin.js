@@ -15,9 +15,11 @@ import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { FilterChips } from '../../../components/Tabs'
+import { extrasCostByRecipe, loadExtrasCosting } from './extrasCost'
+import { BYO_REASON, BYO_TIP, isCostedByBuild } from './buildYourOwnRating'
 
 export default function RecipeMargin() {
-  const { clientId, profile, hasImsAccess } = useAuth()
+  const { clientId, profile, hasImsAccess, customizationEnabled } = useAuth()
   const { settings } = useSettings()
   // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
   // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
@@ -71,7 +73,10 @@ export default function RecipeMargin() {
       // 20260713065928 exists to stop: a closed period's contribution silently restated itself
       // whenever anyone edited a menu price. It also made every POS bill discount invisible, since
       // those are folded into unit_price and never written to `discount`.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
+      //
+      // `ingredient_deltas` (S792 RECIPES-3): a customized sale's unit_price includes its choices'
+      // upcharges, so its choices' STOCK has to be in the cost too — see extrasCost.js.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       // NULL-safe (S714): a nullable column's NULL rows are dropped by .neq as well. `is_active`
       // is nullable too (DEFAULT true, no NOT NULL), so `.eq('is_active', true)` dropped rows that
       // are neither active nor inactive — and made this page's population differ from Best
@@ -79,7 +84,8 @@ export default function RecipeMargin() {
       // Tested in JS below for exactly that reason: one NULL-safe form, not a second dialect of it.
       // `cost_price` is the manual cost Menu Pricing's + Add Item writes — this page had no
       // fallback to it, so a hand-costed dish read as costed there and free to make here.
-      scopedFrom('recipes', 'id, name, category, selling_price, cost_price, is_active')
+      // `is_build_your_own` (S792 RECIPES-1): such a dish is not rated here — buildYourOwnRating.js.
+      scopedFrom('recipes', 'id, name, category, selling_price, cost_price, is_active, is_build_your_own')
         .or('category.is.null,category.neq.Sub-Recipe'),
     ])
     // A failed read must not zero every margin and contribution figure (S612 silent-zero rule).
@@ -93,23 +99,37 @@ export default function RecipeMargin() {
     // costs any sub-recipe-based ingredient (sauces, batters, prepped components) at zero and
     // ignores trim/prep loss, understating food cost and margin for exactly those dishes.
     const recipeIds = (recipes || []).map(r => r.id)
+    // The rows this page counts: every sale except comps, credit notes included (their negative qty
+    // reverses the sale). The extras' cost is taken over exactly these, so it covers the same plates
+    // as the revenue and the recipe cost beside it.
+    const counted = (salesData || []).filter(s => s.source !== 'pos_comp')   // see the read above — filtered here, not server-side
+
     // computeRecipeCosts THROWS on a failed read (S695/S711) and this call site did not catch
     // it, so a dead `items` read rejected the loader's promise before `setLoading(false)` and
     // left the page on the loading state indefinitely — no error card, nothing to retry (S715).
-    let costMap = {}
+    // The extras' stock (S792 RECIPES-3) is read beside the recipe walk and under the same catch:
+    // `loadExtrasCosting` throws on a failed read too, and a failed rate read must stop the page
+    // rather than cost every extra at 0 — the flattering margin the fix exists to remove.
+    let costMap = {}, extrasCosting = null
     try {
-      costMap = await computeRecipeCosts(supabase, recipeIds)
+      const [costs, extras] = await Promise.all([
+        computeRecipeCosts(supabase, recipeIds),
+        loadExtrasCosting(supabase, scopedFrom, counted),
+      ])
+      costMap = costs
+      extrasCosting = extras
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); setRows([]); setLoading(false); return
     }
+    if (!periodReq.isCurrent(periodId)) return
+    const extrasMap = extrasCostByRecipe(counted, extrasCosting)
 
     // Revenue is built exactly the way `Sales.js`'s `recipeRevenue()` builds it, which is the
     // house basis: each sale at its own captured price, rows predating that column falling back to
     // the recipe's current price, less discounts. Not `qty × today's price`.
     const qtyMap = {}, pricedRev = {}, unpricedQty = {}, discMap = {}
-    for (const s of (salesData || [])) {
-      if (s.source === 'pos_comp') continue   // see the read above — filtered here, not server-side
+    for (const s of counted) {
       const qty = parseFloat(s.qty_sold || 0)
       qtyMap[s.recipe_id] = (qtyMap[s.recipe_id] || 0) + qty
       if (s.unit_price != null) pricedRev[s.recipe_id] = (pricedRev[s.recipe_id] || 0) + qty * parseFloat(s.unit_price)
@@ -121,28 +141,37 @@ export default function RecipeMargin() {
       .filter(r => r.selling_price != null && r.is_active !== false)
       .map(r => {
         const price  = parseFloat(r.selling_price || 0)
+        // S792 RECIPES-1: a build-your-own dish's recipe is its bowl and spoon, so rating it here
+        // made a NPR 8 cost against NPR 300 the Top Contributor. It is listed with its sales and
+        // not rated — no cost, margin, FC% or contribution, and out of every total — exactly as an
+        // uncosted dish is, but with its own reason and its own count.
+        const byo    = isCostedByBuild(r, customizationEnabled)
         // null, never 0, when nothing has costed this dish (S713's rule, reached on this page in
         // S724). `parseFloat(costMap[r.id] || 0)` made FC% a flat 0.0% that `fcBand` paints green
         // with a ✓ — "Healthy", on a dish whose food cost is simply unknown — and made Contribution
         // per Portion the entire selling price, which is enough to win the Top Contributor KPI.
-        const cost   = recipeCostOf(costMap, r)
+        const cost   = byo ? null : recipeCostOf(costMap, r)
         const margin = cost == null ? null : price - cost
         const qty    = parseFloat(qtyMap[r.id] || 0)
         const discount = parseFloat(discMap[r.id] || 0)
         const revenue = (pricedRev[r.id] || 0) + (unpricedQty[r.id] || 0) * price - discount
-        const cogs   = cost == null ? null : cost * qty
+        // The stock of the extras guests added (S792 RECIPES-3): their upcharges are already in
+        // `revenue` through unit_price, so their cost belongs in COGS. `cost` and `margin` stay the
+        // dish AS LISTED — a per-portion figure at today's price, with nothing added.
+        const extrasCost = extrasMap[r.id] || 0
+        const cogs   = cost == null ? null : cost * qty + extrasCost
         const fcPct  = menuFcPct(cost, price)
         return {
           id: r.id,
           name: r.name,
           category: r.category,
-          price, cost, margin, qty, discount, revenue, cogs,
+          price, cost, margin, qty, discount, revenue, cogs, extrasCost, byo,
           // What the dish actually contributed: revenue at the prices charged, less ingredient
-          // cost. It will not always equal margin × qty — that is the point, since a price change
-          // or a bill discount is exactly the difference between the two.
+          // cost. It will not always equal margin × qty — that is the point, since a price change,
+          // a bill discount or an extra a guest added is exactly the difference between the two.
           totalContribution: cost == null ? null : revenue - cogs,
           fcPct,
-          costReason: cost == null ? unratedReason(0, price) : null,
+          costReason: byo ? BYO_REASON : cost == null ? unratedReason(0, price) : null,
         }
       })
 
@@ -158,17 +187,22 @@ export default function RecipeMargin() {
   const inCat           = catFilter === 'All' ? rows : rows.filter(r => r.category === catFilter)
   const withSales       = rows.filter(r => r.qty > 0)
   const catWithSales    = inCat.filter(r => r.qty > 0)
-  // Contribution, cost and FC% can only be summed over dishes that have a cost.
+  // Contribution, cost and FC% can only be summed over dishes that have a cost. A build-your-own
+  // dish has none here either (S792 RECIPES-1) and is counted on its own, because the next step for
+  // it is not the uncosted dish's "add a recipe or a manual cost".
   const totals = (list) => {
     const costed = list.filter(r => r.totalContribution != null)
     const revenue = costed.reduce((s, r) => s + r.revenue, 0)
     const cost    = costed.reduce((s, r) => s + r.cogs, 0)
+    const byoCount = list.filter(r => r.byo).length
     return {
       contrib: costed.reduce((s, r) => s + r.totalContribution, 0),
       revenue, cost,
+      extras: costed.reduce((s, r) => s + r.extrasCost, 0),
       fcPct: revenue > 0 ? (cost / revenue) * 100 : null,
       costedCount: costed.length,
-      uncostedCount: list.length - costed.length,
+      byoCount,
+      uncostedCount: list.length - costed.length - byoCount,
     }
   }
   const pageTotals      = totals(withSales)
@@ -181,6 +215,10 @@ export default function RecipeMargin() {
   // `.filter(Boolean)` because `recipes.category` is nullable and S714 made those rows visible —
   // without it an uncategorised dish added a blank, unlabelled tab to the bar (S724).
   const categories      = ['All', ...Array.from(new Set(rows.map(r => r.category).filter(Boolean))).sort()]
+  // The extras column appears only when a costed dish sold with choices this period (S792
+  // RECIPES-3) — a client without Crest Customization never has one, and an always-on column of
+  // dashes would claim a cost it does not have.
+  const showExtras      = rows.some(r => r.cost != null && r.extrasCost !== 0)
 
   // A dish with no cost has no contribution, margin or FC% to sort on. Sorting it as `null`
   // produces NaN comparisons and an arbitrary order, so those rows go to the end of every sort
@@ -214,6 +252,8 @@ export default function RecipeMargin() {
     // An unknown figure exports BLANK, never 0.0% — this sheet leaves the building and gets priced
     // against, and a zero in it is a number someone will trust (S713's rule for Menu Pricing's
     // export, applied here in S724).
+    // S792: the extras' stock cost rides along when the page shows it, and a blank row says why it
+    // is blank — "not rated, costed by build" and "no food cost" are different next steps.
     const data = display.map((r, i) => ({
       '#':                       i + 1,
       'Recipe':                  r.name,
@@ -223,8 +263,10 @@ export default function RecipeMargin() {
       'Contribution / Portion':  r.margin != null ? r.margin.toFixed(2) : '',
       'Qty Sold':                r.qty || '',
       'Revenue (NPR)':           r.revenue ? r.revenue.toFixed(0) : '',
+      ...(showExtras ? { 'Extras Stock Cost (NPR)': r.cost != null && r.extrasCost ? r.extrasCost.toFixed(0) : '' } : {}),
       'Total Contribution (NPR)':r.totalContribution != null ? r.totalContribution.toFixed(0) : '',
       'FC%':                     r.fcPct != null ? r.fcPct.toFixed(1) + '%' : '',
+      'Note':                    r.costReason || '',
     }))
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Recipe Margin')
     XLSX.writeFile(wb, `RecipeMargin-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
@@ -264,13 +306,13 @@ export default function RecipeMargin() {
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">
-            <Tip text="Revenue less ingredient cost, across every costed recipe with sales this period — the whole period, not the category tab selected below. Revenue is valued at the prices actually charged, so it will not always equal Contribution per Portion × Qty." width={320}>Total Contribution</Tip>
+            <Tip text="Revenue less ingredient cost, across every costed recipe with sales this period — the whole period, not the category tab selected below. Revenue is valued at the prices actually charged, extras guests paid for included, and the cost includes the stock those extras used, so it will not always equal Contribution per Portion × Qty." width={320}>Total Contribution</Tip>
           </div>
           <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{fmtNPR(totalContrib)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
-            <Tip text="Weighted average FC% = Total Food Cost ÷ Total Revenue across the costed recipes sold this period." width={280}>Weighted Avg FC%</Tip>
+            <Tip text="Weighted average FC% = Total Food Cost ÷ Total Revenue across the costed recipes sold this period. Food cost includes the stock of any extras guests added, as revenue includes what they paid for them." width={280}>Weighted Avg FC%</Tip>
           </div>
           <div className="stat-value" style={{ color: fcColor(avgFcPct) }} title={fcLabel(avgFcPct)}>
             {avgFcPct != null ? `${avgFcPct.toFixed(1)}% ${fcMark(avgFcPct)}` : '—'}
@@ -288,10 +330,20 @@ export default function RecipeMargin() {
           figures with nothing on the page saying how many. */}
       {!loading && !loadError && pageTotals.uncostedCount > 0 && (
         <p className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
-          {pageTotals.uncostedCount} of {pageTotals.uncostedCount + pageTotals.costedCount} recipes sold this period
+          {pageTotals.uncostedCount} of {withSales.length} recipes sold this period
           {pageTotals.uncostedCount === 1 ? ' has' : ' have'} no food cost — neither costed ingredients nor a manual cost — so
           {pageTotals.uncostedCount === 1 ? ' it is' : ' they are'} listed with a — and left out of the totals above.
           Add ingredients in Recipe Costing, or a cost in Menu Pricing.
+        </p>
+      )}
+      {/* S792 RECIPES-1: counted apart from the uncosted dishes, because the next step differs —
+          nothing is missing from a build-your-own recipe; its plate is the guest's picks. */}
+      {!loading && !loadError && pageTotals.byoCount > 0 && (
+        <p className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
+          {pageTotals.byoCount} of {withSales.length} recipes sold this period
+          {pageTotals.byoCount === 1 ? ' is' : ' are'} build-your-own, so {pageTotals.byoCount === 1 ? 'it is' : 'they are'}{' '}
+          <Tip text={BYO_TIP} width={320}>not rated — costed by build</Tip> and left out of the totals above.
+          Recipe Costing shows what each costs as a range.
         </p>
       )}
 
@@ -345,14 +397,19 @@ export default function RecipeMargin() {
                   <Tip text="Selling price excluding VAT (as entered in Recipe Costing)." width={220}>Selling Price</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Total ingredient cost per portion based on current item rates, or the manual cost entered in Menu Pricing. Shows — when the dish has neither." width={280}>Food Cost / Portion</Tip>
+                  <Tip text="Total ingredient cost per portion of the dish as listed, based on current item rates, or the manual cost entered in Menu Pricing. Shows — when the dish has neither. Extras a guest adds are not in this figure; their stock is costed in Total Contribution." width={280}>Food Cost / Portion</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Selling Price − Food Cost per portion, at today's price. What each sale earns if you sell one more right now." width={280}>Contribution / Portion</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>Qty Sold</th>
+                {showExtras && (
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text="What the stock on guests' choices cost this period, at today's item rates: extra cheese, a Large size's bigger portion, less a 'no onion'. Counted in Total Contribution, because what guests paid for those choices is counted in its revenue. A credit note takes its plate's extras back off." width={320}>Extras' Stock</Tip>
+                  </th>
+                )}
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="What this recipe actually contributed this period: revenue at the prices charged on each sale, less discounts, less ingredient cost. It will not always equal Contribution per Portion × Qty — a price change or a bill discount during the period is exactly that difference." width={340}>Total Contribution</Tip>
+                  <Tip text="What this recipe actually contributed this period: revenue at the prices charged on each sale (what guests paid for extras included), less discounts, less ingredient cost — the recipe's and the stock of any extras added. It will not always equal Contribution per Portion × Qty — a price change, a bill discount or an extra during the period is exactly that difference." width={340}>Total Contribution</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Food Cost ÷ Selling Price. Banded against your own thresholds in Settings → Thresholds. Shows — when the dish has no food cost, rather than 0%." width={300}>FC%</Tip>
@@ -375,14 +432,25 @@ export default function RecipeMargin() {
                   <td><strong>{r.name}</strong></td>
                   <td>{r.category}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.price.toFixed(0)}</td>
-                  <td style={{ textAlign: 'right' }} title={r.cost == null ? r.costReason : undefined}>
-                    {r.cost != null ? `NPR ${r.cost.toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                  <td style={{ textAlign: 'right' }} title={r.cost == null && !r.byo ? r.costReason : undefined}>
+                    {r.cost != null
+                      ? `NPR ${r.cost.toFixed(2)}`
+                      : r.byo
+                        // S792 RECIPES-1: the row state, named, where a figure would be.
+                        ? <Tip text={BYO_TIP} width={320}><span style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>By build</span></Tip>
+                        : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: r.margin != null ? 600 : 400, color: r.margin == null ? 'var(--theme-text3)' : r.margin >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}
                       title={r.margin == null ? r.costReason : undefined}>
                     {r.margin != null ? `NPR ${r.margin.toFixed(2)}` : '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString('en-IN') : '—'}</td>
+                  {showExtras && (
+                    <td style={{ textAlign: 'right', color: r.cost != null && r.extrasCost ? 'var(--theme-text1)' : 'var(--theme-text3)' }}
+                        title={r.cost == null ? r.costReason : undefined}>
+                      {r.cost != null && r.extrasCost ? fmtNPR(r.extrasCost) : '—'}
+                    </td>
+                  )}
                   <td style={{ textAlign: 'right', fontWeight: 600, color: r.totalContribution != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}
                       title={r.totalContribution == null ? r.costReason : undefined}>
                     {r.totalContribution != null ? fmtNPR(r.totalContribution) : '—'}
@@ -399,9 +467,11 @@ export default function RecipeMargin() {
                 <td colSpan={6}>
                   Total ({catTotals.costedCount} costed {catTotals.costedCount === 1 ? 'recipe' : 'recipes'} sold
                   {catFilter !== 'All' ? ` in ${catFilter}` : ''}
-                  {catTotals.uncostedCount > 0 ? `, ${catTotals.uncostedCount} uncosted excluded` : ''})
+                  {catTotals.uncostedCount > 0 ? `, ${catTotals.uncostedCount} uncosted excluded` : ''}
+                  {catTotals.byoCount > 0 ? `, ${catTotals.byoCount} build-your-own excluded` : ''})
                 </td>
                 <td style={{ textAlign: 'right' }}>{catWithSales.reduce((s, r) => s + r.qty, 0).toLocaleString('en-IN')}</td>
+                {showExtras && <td style={{ textAlign: 'right' }}>{fmtNPR(catTotals.extras)}</td>}
                 <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(catTotals.contrib)}</td>
                 <td style={{ textAlign: 'right', ...fcFigure(catTotals.fcPct, settings).style }} title={fcFigure(catTotals.fcPct, settings).title}>
                   {fcFigure(catTotals.fcPct, settings).text}

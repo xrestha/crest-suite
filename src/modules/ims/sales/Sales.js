@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -6,14 +6,15 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
 import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, SAVE_TIMEOUT_MS } from './persistSalesDay'
-import { isManualSource } from './salesDepletion'
+import { isManualSource, bulkTillHandover } from './salesDepletion'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -202,6 +203,24 @@ export default function Sales() {
   // opposite mode's rows: { target, rows, superseded }. See findSupersededRows() (S457) and
   // requestSave's note on `target` (S756).
   const [pendingSave, setPendingSave] = useState(null)
+  // One save at a time, in either mode (S792, SALES-4). `bulkSaving`/`dailySaving` disable the
+  // buttons, but a state flag only lands on the next render — a second click, or Enter and a click
+  // on the supersede modal's Delete & Save, could both get in first and write the same day twice.
+  const saveInFlight = useRef(false)
+  // What the period's rows say about a Bulk total the till also sold (owner decision D35, S792):
+  // bulkTillHandover in salesDepletion.js, the same rule every stock report applies. Null until
+  // loadAllDaySums has read the period.
+  const [tillHandover, setTillHandover] = useState(null)
+  // The till's first day this month, and whether the month was started by hand before it. For a
+  // client whose sales POS owns, those pre-till days have no till figure at all — the Bulk total the
+  // D35 notice asks them to replace, or the daily figures typed before POS went live — so Daily Entry
+  // stays open for them, and only for them. Nothing typed there duplicates a till sale AS OF LOAD:
+  // the till's first day is read from what IMS holds, so till bills not yet posted to IMS (an
+  // unsynced offline till, or a hand-off awaiting the Periods backfill) are not seen, so
+  // `tillStart` can read later than the till's real first day — and a day typed here can then
+  // turn out to be one the till also sold.
+  const tillStart = tillHandover?.tillStart ?? null
+  const preTillOpen = posOwnsSales && !!tillHandover?.manualBeforeTill && tillStart > 1
 
   // The dishes this page shows, enters and SAVES (S792, D29 — SALES-1). A hidden dish that already
   // sold this month stays on the page, listed after the menu and marked Hidden: save_sales_day
@@ -252,9 +271,14 @@ export default function Sales() {
   // viewMode starts at 'bulk' and clientModules only resolves once the profile has loaded, so a
   // POS client's first render can legitimately land on a tab that is about to become disabled.
   // Move them off it rather than leaving a disabled tab rendered as the active one.
+  // Daily Entry is the exception when the month has pre-till days to enter (D35, `preTillOpen`); it
+  // waits for the period's rows before deciding, so a reload after a save does not bounce the owner
+  // off the tab they are working in.
   useEffect(() => {
-    if (posOwnsSales && ENTRY_TABS.includes(viewMode)) setViewMode(READ_ONLY_TAB)
-  }, [posOwnsSales, viewMode])
+    if (!posOwnsSales || !ENTRY_TABS.includes(viewMode)) return
+    if (viewMode === 'daily' && (tillHandover === null || preTillOpen)) return
+    setViewMode(READ_ONLY_TAB)
+  }, [posOwnsSales, viewMode, tillHandover, preTillOpen])
 
   async function init() {
     setLoading(true)
@@ -374,8 +398,9 @@ export default function Sales() {
     // Paged (S613): POS writes one row per bill per recipe, so a month crosses the silent
     // 1000-row cap — and allDaySums doubles as a save-time fallback baseline, so a truncated
     // read here would not just misreport, it could be written back.
+    // bs_day feeds the D35 hand-over (S792): the till's first day and the Bulk totals it overlaps.
     const { data, error } = await fetchAllRows(() => supabase
-      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price, source').eq('period_id', periodId).order('id'))
+      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price, source, bs_day').eq('period_id', periodId).order('id'))
     // These maps are every PERIOD figure on the page — the three stat cards and the whole Period
     // Summary tab — so a failed read here must block the page, not fall back to "nothing sold".
     // (They are not a save baseline: buildBulkRows merges `sales` and buildDailyRows `dailySales`.
@@ -402,6 +427,9 @@ export default function Sales() {
     setAllDayDiscounts(discAgg)
     setAllDayPricedRev(pricedAgg)
     setAllDayUnpricedQty(unpricedAgg)
+    // Every row, comps included — a comp is a till sale for this purpose, exactly as it is for the
+    // depletion rule the notice describes.
+    setTillHandover(bulkTillHandover(data || []))
   }
 
   async function loadMonthlyEntries(periodId) {
@@ -504,14 +532,29 @@ export default function Sales() {
     return parseFloat(recipe.selling_price) || 0
   }
 
-  function buildBulkRows() {
-    // Merge: saved DB values as base, typed bulkForm values as override
+  // Merge: saved DB values as base, typed bulkForm values as override. Shared by the payload and
+  // the negative-quantity check below, so the two cannot disagree about what a save contains.
+  function mergedBulkValues() {
     const merged = {}
     recipes.forEach(r => {
       const saved = sales[r.id] || 0
       const typed = bulkForm[r.id] !== undefined ? parseFloat(bulkForm[r.id]) : null
       merged[r.id] = typed !== null ? typed : saved
     })
+    return merged
+  }
+
+  // A quantity below zero is dropped by both payloads' `qty > 0` filter — and the save then deletes
+  // whatever that dish had stored for the day — so a refund typed or imported as −2 vanished and the
+  // day's revenue read high (S792, SALES-5). The import refuses such a file; this is the net for a
+  // figure typed by hand. Sales Entry records sales: a return comes off the day the plate was sold.
+  function negativeQuantityNames(isBulk) {
+    const merged = isBulk ? mergedBulkValues() : mergedDailyValues().merged
+    return recipes.filter(r => (merged[r.id] || 0) < 0).map(r => r.name)
+  }
+
+  function buildBulkRows() {
+    const merged = mergedBulkValues()
     // Bulk rows carry no discount of their own (Daily Entry owns that field), so the RPC's
     // COALESCE leaves it at the column default of 0 — same as the old insert did.
     const typedRows = recipes
@@ -554,10 +597,13 @@ export default function Sales() {
     // Both writing tabs are unreachable when POS owns sales, so this can't be hit through the UI.
     // It stays as the last line of defence for any path that doesn't go through a tab — the Excel
     // import button, a stale render mid-load, a future caller — since the cost of being wrong here
-    // is writing manual rows that contradict the till.
-    if (posOwnsSales) return
+    // is writing manual rows that contradict the till. The one opening is a day before the till's
+    // first sale this month, in a month that was started by hand (D35, `preTillOpen`).
+    if (posOwnsSales && !(mode === 'daily' && preTillOpen && selectedDay < tillStart)) return
     const isBulk = mode === 'bulk'
     if (isBulk ? bulkSaving : dailySaving) return
+    // A save already running (or waiting on the supersede modal) owns the page (S792, SALES-4).
+    if (saveInFlight.current || pendingSave) return
     const setSaving = isBulk ? setBulkSaving : setDailySaving
     const setErr = isBulk ? setBulkSaveError : setDailySaveError
     const target = { mode, periodId: selectedPeriod.id, bsDay: isBulk ? 0 : selectedDay, clientId }
@@ -578,6 +624,14 @@ export default function Sales() {
       return
     }
 
+    const negatives = negativeQuantityNames(isBulk)
+    if (negatives.length > 0) {
+      const one = negatives.length === 1
+      const shown = negatives.slice(0, 5).join(', ')
+      setErr(`${one ? 'This item has' : 'These items have'} a quantity below zero, which a save would drop without a word — losing the refund it stands for: ${shown}${negatives.length > 5 ? `, and ${negatives.length - 5} more` : ''}. Sales Entry records sales, so take returned plates off the ${isBulk ? 'figure for the days' : 'day'} they were sold, enter 0 here if nothing sold, then save again.`)
+      return
+    }
+
     if (!isBulk) {
       const orphanDiscounts = discountsWithoutQty()
       if (orphanDiscounts.length > 0) {
@@ -587,6 +641,7 @@ export default function Sales() {
       }
     }
 
+    saveInFlight.current = true   // released below, and claimed again by commitSave in the same tick
     setSaving(true)
     setErr('')
     const abortCtl = new AbortController()
@@ -609,6 +664,7 @@ export default function Sales() {
     } finally {
       clearTimeout(timeoutId)
       setSaving(false)
+      saveInFlight.current = false
     }
     if (!prepared) return
     // Navigation is disabled while the check runs, but an admin switching client re-runs init()
@@ -650,14 +706,29 @@ export default function Sales() {
   // Step 2: the write itself. Reached either directly (nothing to supersede) or from the modal.
   // Everything it writes comes from `target` and `rows`, never from the page's current selection.
   async function commitSave(target, rows, superseded) {
+    const setErr = target.mode === 'bulk' ? setBulkSaveError : setDailySaveError
+
+    // The modal can sit open for as long as it takes someone to read it.
+    if (!targetStillOnScreen(target)) { setErr(movedOnMessage(target)); return }
+    // One save at a time (S792, SALES-4): the supersede modal's Enter and its Delete & Save click,
+    // or a second Save press before the button disables, must not write the same day twice.
+    if (saveInFlight.current) return
+    saveInFlight.current = true
+    let saved = false
+    try {
+      saved = await commitSaveNow(target, rows, superseded)
+    } finally {
+      saveInFlight.current = false
+    }
+    if (saved) await reloadAfterSave(target)
+  }
+
+  async function commitSaveNow(target, rows, superseded) {
     const { mode, periodId, bsDay } = target
     const isBulk = mode === 'bulk'
     const setSaving = isBulk ? setBulkSaving : setDailySaving
     const setErr = isBulk ? setBulkSaveError : setDailySaveError
     const setSaved = isBulk ? setBulkSaved : setDailySaved
-
-    // The modal can sit open for as long as it takes someone to read it.
-    if (!targetStillOnScreen(target)) { setErr(movedOnMessage(target)); return }
 
     setSaving(true)
     setErr('')
@@ -678,6 +749,8 @@ export default function Sales() {
     // abort signal is attached to nothing and firing it does nothing at all. Every call is now
     // additionally raced against a wall clock via withTimeout(), which can't be defeated by a
     // promise that simply never settles. See src/utils/withTimeout.js for the full writeup.
+    // S792: on success the flag now also waits for the day's stock update, under its own
+    // withTimeout — see below.
     let saveSucceeded = false
     const abortCtl = new AbortController()
     const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
@@ -686,27 +759,54 @@ export default function Sales() {
       // can no longer leave this day deleted with nothing written back (S456).
       await persistSalesDay(supabase, { periodId, bsDay, rows, signal: abortCtl.signal })
       saveSucceeded = true
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
     } catch (err) {
       console.error(`${mode} save error:`, err)
       setErr(saveErrorMessage(err))
     } finally {
       clearTimeout(timeoutId)
-      setSaving(false)
+      // A refused save frees the button at once; a saved one keeps it until the stock update
+      // below has settled (S792, SALES-4).
+      if (!saveSucceeded) setSaving(false)
     }
-    if (!saveSucceeded) return
-    // Manual-sales stock depletion — best-effort, non-blocking (see depleteManualSales' own
-    // try/catch); the sales save itself already committed above regardless of this outcome.
-    depleteManualSales(supabase, { clientId: target.clientId, periodId, bsDay, rows })
+    if (!saveSucceeded) return false
+    // Manual-sales stock depletion, AWAITED since S792 (SALES-4). It used to be fired and
+    // forgotten, and the button came back as soon as the RPC did — so "save, spot a typo, save
+    // again" started a second depletion of the same day while the first was still exploding
+    // recipes, and the ledger (Stock Movements, Book Stock, Reorder) ended up depleted twice.
+    // persistSalesDay.js serialises the writes per day as well; waiting here keeps the button
+    // honest. Still best-effort — both helpers catch and log their own failures, the sales save has
+    // already committed — and bounded by the same wall clock as the save (the S449/S454 lesson: a
+    // hung request must never freeze the button). Past it the update finishes in the background,
+    // still ahead of any later save of the same day.
+    //
     // The rows this save superseded in the OTHER mode were deleted by the RPC, but their stock
     // movements were not — rebuild those days so the ledger does not deplete them twice (S756).
     // A Bulk save wiped dated rows on the days the precheck listed; a Daily save wiped the Bulk row.
     const supersededDays = !superseded?.total ? []
       : isBulk ? superseded.byRecipe.flatMap(e => e.days) : [0]
-    if (supersededDays.length > 0) {
-      repostSupersededMovements(supabase, { clientId: target.clientId, periodId, days: supersededDays })
+    try {
+      await withTimeout(Promise.all([
+        depleteManualSales(supabase, { clientId: target.clientId, periodId, bsDay, rows }),
+        supersededDays.length > 0
+          ? repostSupersededMovements(supabase, { clientId: target.clientId, periodId, days: supersededDays })
+          : null,
+      ]), SAVE_TIMEOUT_MS, 'Stock update')
+    } catch (err) {
+      console.error(`${mode} save: the sales are saved; the stock update for them is still running and will finish in the background:`, err)
+    } finally {
+      setSaving(false)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
     }
+    return true
+  }
+
+  // After a save has landed. Outside the one-save-at-a-time guard, like it is outside what gates the
+  // button (S449): a hung reload must not block the next save — which refuses on its own until the
+  // reloaded baseline lands, since each loader clears its baseline key first.
+  async function reloadAfterSave(target) {
+    const { mode, periodId, bsDay } = target
+    const isBulk = mode === 'bulk'
     // Refresh the displayed data — best-effort. Both modes reload both maps, since a save in
     // either one may have just superseded rows belonging to the other. If this hangs or fails,
     // the save itself already succeeded; the table just won't reflect it until the next reload.
@@ -764,6 +864,7 @@ export default function Sales() {
     setDailyDiscounts({}); setDiscountForm({})
     setPosDaySales({}); setPosDayDiscounts({}); setPosDayPricedRev({}); setPosDayUnpricedQty({})
     setAllDaySums({}); setAllDayDiscounts({}); setAllDayPricedRev({}); setAllDayUnpricedQty({})
+    setTillHandover(null)
     setMonthlyEntries([])
     setBulkSaveError(''); setDailySaveError('')
     await Promise.all([loadSales(periodId), loadAllDaySums(periodId)])
@@ -918,6 +1019,17 @@ export default function Sales() {
 
   // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
   const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
+  // Daily Entry on a client whose sales POS owns: only a day before the till's first sale, in a
+  // month started by hand (D35, `preTillOpen` above), takes figures. Every other day is the till's
+  // and shows read-only; requestSave refuses it too.
+  const dayIsPreTill = preTillOpen && selectedDay < tillStart
+  const dailyLocked = isLocked || (posOwnsSales && !dayIsPreTill)
+  const monthNo = selectedPeriod?.bs_month
+  // "1st–11th Bhadra", or "1st Bhadra" when the till started on day 2.
+  const preTillRange = tillStart > 1
+    ? (tillStart === 2 ? formatBsDay(1, monthNo) : `${bsDayOrdinal(1)}–${formatBsDay(tillStart - 1, monthNo)}`)
+    : ''
+  const dishName = id => menuRecipes.find(r => r.id === id)?.name || 'A dish no longer on the menu'
   // Both Save buttons sit ABOVE the "No active recipes" empty state, so an empty menu — whether the
   // client has none or the read failed — left a live Save over nothing. Both payload builders
   // iterate `recipes`, and save_sales_day reads an empty payload as "clear this day".
@@ -984,7 +1096,47 @@ export default function Sales() {
           to work for a two-module client, not an error or a lockout they need to resolve. */}
       {posOwnsSales && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
-          🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.</span>
+          🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.
+            {preTillOpen && <> The exception is {preTillRange}: this month began before the till&apos;s first sale on {formatBsDay(tillStart, monthNo)}, so Daily Entry stays open for those days to enter or correct by hand.</>}
+          </span>
+        </div>
+      )}
+      {/* Owner decision D35 (S792): a Bulk (month) total for a dish the till has also sold. A Bulk
+          total cannot say which days it covers, so it keeps counting for stock beside the till until
+          the days before the till are entered as daily figures — saving the first of them replaces
+          the Bulk total (save_sales_day's cross-mode rule). Amber: it is a figure that may be counted
+          twice, and the owner is the one who can resolve it. */}
+      {!loading && !loadError && tillHandover?.needsReentry.length > 0 && (() => {
+        const list = tillHandover.needsReentry
+        const one = list.length === 1
+        return (
+          <div role="note" className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>
+              △ {one
+                ? `${dishName(list[0].recipeId)} has a Bulk (month) total of ${list[0].bulkQty.toLocaleString('en-IN')} and was`
+                : `${list.length} dishes have a Bulk (month) total and were`} also sold on the till, which started on {formatBsDay(tillStart, monthNo)}.
+            </strong>{' '}
+            A Bulk total cannot say which days it covers, so stock still counts all of it beside the till — if it included days
+            the till also recorded, those plates are counted twice, in revenue and in stock. Enter {preTillRange} as daily
+            figures on Daily Entry: saving the first of those days replaces {one ? 'the' : 'that dish’s'} Bulk total, and from
+            then on only the daily figures and the till count.
+            {!one && (
+              <span style={{ display: 'block', marginTop: 4 }}>
+                {list.map(e => `${dishName(e.recipeId)} (Bulk ${e.bulkQty.toLocaleString('en-IN')})`).join(', ')}
+              </span>
+            )}
+          </div>
+        )
+      })()}
+      {!loading && !loadError && tillHandover?.ignoredForStock.length > 0 && (
+        <div role="note" className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          🛈 {tillHandover.ignoredForStock.map(e => dishName(e.recipeId)).join(', ')}{' '}
+          {tillHandover.ignoredForStock.length === 1 ? 'has a Bulk total' : 'have Bulk totals'} that stock does not count,{' '}
+          {tillHandover.ignoredForStock.every(e => e.reason === 'till_from_day_one')
+            ? 'because the till sold from the first day of the month, so there is no earlier day for it to cover'
+            : 'because the days before the till’s first sale already hold daily figures'}. Revenue still counts{' '}
+          {tillHandover.ignoredForStock.length === 1 ? 'it' : 'them'}: if it repeats sales already recorded, clear it on Bulk Entry
+          {posOwnsSales ? ' (open to your Crest administrator while POS runs your sales)' : ''}.
         </div>
       )}
       {/* Stat cards.
@@ -1032,7 +1184,8 @@ export default function Sales() {
         <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Sales entry views"
           onKeyDown={e => { moveRovingFocus(e, '[role="tab"]')?.click() }}>
           {Object.entries(TAB_LABELS).map(([key, label]) => {
-            const tabDisabled = posOwnsSales && ENTRY_TABS.includes(key)
+            // Daily Entry stays open for a hand-started month's pre-till days (D35, `preTillOpen`).
+            const tabDisabled = posOwnsSales && ENTRY_TABS.includes(key) && !(key === 'daily' && preTillOpen)
             // aria-disabled, NOT the disabled attribute: a disabled <button> swallows mouse events
             // and never bubbles them, so Tip (which binds onMouseEnter on its wrapper span) would
             // never fire and the user would get a greyed-out tab with no way to find out why.
@@ -1040,7 +1193,12 @@ export default function Sales() {
               <button key={key} type="button" role="tab" aria-selected={viewMode === key}
                 id={`sales-tab-${key}`}
                 aria-controls="sales-panel" tabIndex={rovingTabIndex(viewMode === key)}
-                onClick={() => { if (!tabDisabled) setViewMode(key) }} aria-disabled={tabDisabled}
+                onClick={() => {
+                  if (tabDisabled) return
+                  // Land a POS client on a day they can enter, not on today's till day.
+                  if (key === 'daily' && posOwnsSales && preTillOpen && selectedDay >= tillStart) setSelectedDay(1)
+                  setViewMode(key)
+                }} aria-disabled={tabDisabled}
                 className={`panel-tab${viewMode === key ? ' panel-tab--active' : ''}`}
                 style={tabDisabled ? { cursor: 'not-allowed', color: 'var(--theme-text3)' } : undefined}
               >{tabDisabled ? `🔒 ${label}` : label}</button>
@@ -1213,6 +1371,15 @@ export default function Sales() {
               <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter qty sold per menu item for a single day. Use Bulk Entry for period totals instead.
               </div>
+              {/* POS runs this client's sales; only the pre-till days of a hand-started month are
+                  open here (D35, S792). Say which day this is, so a read-only grid is explained. */}
+              {posOwnsSales && preTillOpen && (
+                <div role="note" className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+                  {dayIsPreTill
+                    ? <>{formatBsDay(selectedDay, monthNo)} is before the till&apos;s first sale this month ({formatBsDay(tillStart, monthNo)}), so its sales are entered here by hand. {preTillRange} {tillStart === 2 ? 'is' : 'are'} open for entry.</>
+                    : <>{formatBsDay(selectedDay, monthNo)} is a till day — its sales come from Crest POS and cannot be typed here. Pick a day in {preTillRange} to enter the sales from before the till.</>}
+                </div>
+              )}
               <div className="card">
                 <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -1264,11 +1431,11 @@ export default function Sales() {
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     {/* Waits for the day's baseline too: a load landing after an import clears the
                         form, which would silently throw the imported figures away (S756). */}
-                    <SalesImportButton recipes={recipes} disabled={isLocked || noMenu || !dailyReady || saveBusy} onMatched={handleImportMatched}
+                    <SalesImportButton recipes={recipes} disabled={dailyLocked || noMenu || !dailyReady || saveBusy} onMatched={handleImportMatched}
                       selectedDate={selectedPeriod ? { year: selectedPeriod.bs_year, month: selectedPeriod.bs_month, day: selectedDay } : null} />
                     <button
                       className="btn btn-ghost"
-                      disabled={isLocked}
+                      disabled={dailyLocked}
                       onClick={() => {
                         const cleared = {}
                         recipes.forEach(r => { cleared[r.id] = '' })
@@ -1280,7 +1447,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('daily')}
-                      disabled={dailySaving || isLocked || noMenu || !dailyReady}
+                      disabled={dailySaving || dailyLocked || noMenu || !dailyReady}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                 </div>
@@ -1356,13 +1523,13 @@ export default function Sales() {
                                 value={rawVal}
                                 onChange={e => setDailyForm(f => ({ ...f, [recipe.id]: e.target.value }))}
                                 placeholder="0"
-                                disabled={isLocked}
+                                disabled={dailyLocked}
                                 style={disabledStyle({
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
                                   borderColor: qty > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)'
-                                }, isLocked)}
+                                }, dailyLocked)}
                               />
                             </td>
                             {hasPosDay && (
@@ -1379,13 +1546,13 @@ export default function Sales() {
                                 value={discRaw}
                                 onChange={e => setDiscountForm(f => ({ ...f, [recipe.id]: e.target.value }))}
                                 placeholder="0"
-                                disabled={isLocked}
+                                disabled={dailyLocked}
                                 style={disabledStyle({
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right',
                                   borderColor: disc > 0 ? 'color-mix(in srgb, var(--theme-red) 40%, transparent)' : 'var(--theme-border)'
-                                }, isLocked)}
+                                }, dailyLocked)}
                               />
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
@@ -1400,7 +1567,7 @@ export default function Sales() {
                   <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
                     <button
                       className="btn btn-ghost"
-                      disabled={isLocked}
+                      disabled={dailyLocked}
                       onClick={() => {
                         const cleared = {}
                         recipes.forEach(r => { cleared[r.id] = '' })
@@ -1412,7 +1579,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('daily')}
-                      disabled={dailySaving || isLocked || noMenu || !dailyReady}
+                      disabled={dailySaving || dailyLocked || noMenu || !dailyReady}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                   </>

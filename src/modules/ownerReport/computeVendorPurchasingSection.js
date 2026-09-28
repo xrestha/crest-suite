@@ -36,7 +36,12 @@ export async function computeVendorPurchasingSection(clientId, period, generated
       .select('id, vendor_id, qty, rate, purchase_entry_id, payment_method')
       .eq('period_id', period.id)
       .order('id')),
-    scopedFrom('vendors', clientId, 'id, name').eq('is_active', true),
+    // EVERY vendor, not only active ones (S792, TAX-7). This list only resolves NAMES for rows built
+    // from this month's purchase lines — it is a report's name map, not a picker (the S708 rule).
+    // Archiving forces is_active = false, so the active-only read froze an archived supplier's
+    // spend as "Unknown Vendor" and its unpaid bills as "Unassigned" — the word the product uses
+    // for bills with NO supplier. Paged with a unique tiebreaker like every other read here.
+    fetchAllRows(() => scopedFrom('vendors', clientId, 'id, name').order('id')),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing a
   // vendor ledger of zeros into the immutable snapshot (S612).

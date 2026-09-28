@@ -1,6 +1,7 @@
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, HISTORY_DAYS,
+  splitAtToday,
 } from './dailyForecast'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 
@@ -195,6 +196,70 @@ describe('projectMonth with a day factor', () => {
     const r = projectMonth({ base: null, valueMap: { 1: 1000, 2: 500, 3: 1000 }, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf, dayFactor: d => (d === 2 || d === 4 ? 0.5 : 1) })
     expect(r.projDays[4]).toBe(500)
     expect(r.projDays[5]).toBe(1000)
+  })
+})
+
+// S792 PLANNING-2/3: POS stamps today's bs_day at every bill close, so today's partial takings
+// must never be judged as a day, feed the frozen Target, or go unforecast.
+describe('the day in progress', () => {
+  const flat = { byWeekday: Array(7).fill(30000) }
+
+  test('a POS client at 10 a.m. on day 3: days 1–2 are the sample, the forecast starts today', () => {
+    expect(splitAtToday({ salesDayNums: [1, 2, 3], elapsedDay: 3, today: 3 }))
+      .toEqual({ salesDone: [1, 2], purchElapsed: 2, salesFrom: 3, purchFrom: 3 })
+  })
+
+  test('a client entering by hand a few days behind keeps its old window', () => {
+    expect(splitAtToday({ salesDayNums: [1, 2, 3, 4, 5], elapsedDay: 5, today: 9 }))
+      .toEqual({ salesDone: [1, 2, 3, 4, 5], purchElapsed: 5, salesFrom: 6, purchFrom: 6 })
+  })
+
+  test('a past month has no day in progress', () => {
+    expect(splitAtToday({ salesDayNums: [1, 2, 30], elapsedDay: 30, today: null }))
+      .toEqual({ salesDone: [1, 2, 30], purchElapsed: 30, salesFrom: 31, purchFrom: 31 })
+  })
+
+  test("the morning's 2,000 does not drag the month's pace down, and today is still forecast whole", () => {
+    const valueMap = { 1: 30000, 2: 30000, 3: 2000 }
+    const s = splitAtToday({ salesDayNums: [1, 2, 3], elapsedDay: 3, today: 3 })
+    const r = projectMonth({ base: flat, valueMap, expectDays: s.salesDone, fromDay: s.salesFrom, monthEndDay, weekdayOf })
+    expect(r.paceFactor).toBe(1)
+    expect(r.projDays[3]).toBe(30000)
+    // Today counts once, at its forecast, never 2,000 + 30,000.
+    expect(r.projectedTotal).toBe(30000 * monthEndDay)
+    // The old reading: today's 2,000 judged as a whole day.
+    const old = projectMonth({ base: flat, valueMap, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf })
+    expect(old.paceFactor).toBeCloseTo(0.844, 3)
+  })
+
+  test('a day already past its forecast counts at what it has sold', () => {
+    const r = projectMonth({ base: flat, valueMap: { 1: 30000, 2: 30000, 3: 35000 }, expectDays: [1, 2], fromDay: 3, monthEndDay, weekdayOf })
+    expect(r.projectedTotal).toBe(30000 * monthEndDay + 5000)
+  })
+
+  test('purchases: a restock not yet typed today is not a zero day in the pace', () => {
+    const base = { byWeekday: Array(7).fill(1000) }
+    const s = splitAtToday({ salesDayNums: [1, 2, 3], elapsedDay: 3, today: 3 })
+    const r = projectMonth({ base, valueMap: { 1: 1000, 2: 1000 }, expectDays: Array.from({ length: s.purchElapsed }, (_, i) => i + 1), fromDay: s.purchFrom, monthEndDay, weekdayOf })
+    expect(r.paceFactor).toBe(1)
+    expect(r.projDays[3]).toBe(1000)
+  })
+
+  test("a new client's Target never takes today's partial day as its weekday's usual", () => {
+    const valueMap = {}
+    for (let d = 1; d <= 7; d++) valueMap[d] = 10000
+    valueMap[8] = 1500
+    const dayNums = [1, 2, 3, 4, 5, 6, 7, 8]
+    const s = splitAtToday({ salesDayNums: dayNums, elapsedDay: 8, today: 8 })
+    const base = baseFromMonth({ kind: 'sales', valueMap, dayNums: s.salesDone, weekdayOf })
+    expect(base.byWeekday[weekdayOf(8)]).toBe(10000)
+    expect(base.sampleDays).toBe(7)
+    // Day 7 in the morning is six finished days: no Target yet.
+    const early = splitAtToday({ salesDayNums: [1, 2, 3, 4, 5, 6, 7], elapsedDay: 7, today: 7 })
+    expect(baseFromMonth({ kind: 'sales', valueMap, dayNums: early.salesDone, weekdayOf })).toBeNull()
+    // Purchases on day 8 before the restock bill is typed: seven finished days, today not a zero.
+    const purch = baseFromMonth({ kind: 'purch', valueMap: CASA_PURCH, elapsed: s.purchElapsed, weekdayOf })
+    expect(purch.sampleDays).toBe(7)
   })
 })
 

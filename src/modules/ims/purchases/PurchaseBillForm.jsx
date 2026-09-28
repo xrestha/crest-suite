@@ -18,6 +18,7 @@ import {
 import {
   billDraftId, billDraftSignature, readBillDraft, saveBillDraft, clearBillDraft, draftBaseMoved,
 } from './purchaseBillDraft'
+import { withLineTotal, withLineVat, withAllLinesVat } from './billLineVat'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -210,8 +211,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       // moves, the draft no longer describes the row. Qty was missing from this list (S698): type
       // qty 10 + total 1000 → rate 100, then correct qty to 20 — the rate stayed, Amount read 2,000
       // and the Total box still said 1000. Two figures on one row disagreeing, and the one the
-      // reader trusts most is the one they typed.
-      if (field === 'rate' || field === 'vat_inclusive' || field === 'qty') updated._amtDraft = ''
+      // reader trusts most is the one they typed. The VAT tick is not on this list any more: it goes
+      // through setLineVat, which keeps a typed Total and moves the Rate (S792, D34).
+      if (field === 'rate' || field === 'qty') updated._amtDraft = ''
       if (field === 'shelf_life' && val && billHeader.bs_day && period) {
         const ad = bsToAd(period.bs_year, period.bs_month, parseInt(billHeader.bs_day))
         const exp = new Date(ad); exp.setDate(exp.getDate() + parseInt(val))
@@ -221,16 +223,14 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     }))
   }
 
+  // S792 (D34): the typed Total is after VAT when the line is ticked, and a VAT tick changes the
+  // Rate, never the Total. The arithmetic is billLineVat.js (tested); these only apply it.
   function setLineTotal(key, amtStr) {
-    setBillLines(prev => prev.map(l => {
-      if (l._key !== key) return l
-      const qty = parseFloat(l.qty)
-      const amt = parseFloat(amtStr)
-      const rate = (qty > 0 && amt > 0)
-        ? String((amt / qty / (l.vat_inclusive ? 1.13 : 1)).toFixed(5))
-        : l.rate
-      return { ...l, _amtDraft: amtStr, rate }
-    }))
+    setBillLines(prev => prev.map(l => (l._key === key ? withLineTotal(l, amtStr) : l)))
+  }
+
+  function setLineVat(key, vatInclusive) {
+    setBillLines(prev => prev.map(l => (l._key === key ? withLineVat(l, vatInclusive) : l)))
   }
 
   // S765 — the keyboard path through the highest-frequency form in the product.
@@ -528,7 +528,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
             style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box' }} />
         </div>
         <div className="form-field">
-          <span className="field-label"><Tip text="Apply 13% VAT to all line items at once. You can also toggle VAT on each individual line row." width={270}>VAT</Tip></span>
+          <span className="field-label"><Tip text="Apply 13% VAT to all line items at once. You can also toggle VAT on each individual line row. A line whose Total you typed keeps that Total — its Rate changes instead." width={270}>VAT</Tip></span>
           {(() => {
             const allVat  = billLines.every(l => l.vat_inclusive)
             const someVat = billLines.some(l => l.vat_inclusive)
@@ -544,7 +544,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                 type="button"
                 aria-label="Apply 13% VAT to all line items"
                 aria-pressed={allVat ? true : someVat ? 'mixed' : false}
-                onClick={() => setBillLines(ls => ls.map(l => ({ ...l, vat_inclusive: !allVat })))}
+                onClick={() => setBillLines(withAllLinesVat)}
                 style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
               >
                 <div style={{ width: 34, height: 18, borderRadius: 'var(--radius-md)', background: knobBg, opacity: knobOpacity, position: 'relative', transition: 'background 0.2s, opacity 0.2s', flexShrink: 0 }}>
@@ -598,10 +598,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                   sits where it is read: after the figure taken off the bill, before the Amount it
                   changes, so ticking it and watching Amount move is one glance left to right. */}
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
-                <Tip text="Enter total paid for this line — Rate is back-calculated automatically." width={230}>Total (NPR)</Tip>
+                <Tip text="Enter the total paid for this line, as printed on the bill — after VAT when the VAT box is ticked. Rate is back-calculated automatically. Ticking or unticking VAT afterwards keeps this Total and changes the Rate. Example: Qty 10, Total 1,130 with VAT ticked gives Rate 100 + 13% VAT." width={280}>Total (NPR)</Tip>
               </th>
               <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 40 }}>
-                <Tip text="Check to apply 13% VAT to this line item only." width={210}>VAT</Tip>
+                <Tip text="Check to apply 13% VAT to this line item only. If you typed a Total, it stays as typed and the Rate changes; if you typed a Rate, 13% is added on top of it." width={250}>VAT</Tip>
               </th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
                 <Tip text="Amount = Qty × Rate. For VAT items: Qty × Rate × 1.13 (what you actually pay)." width={240}>Amount</Tip>
@@ -681,7 +681,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                         type="checkbox"
                         aria-label={`VAT-inclusive line for ${selItem?.name || 'new line'}`}
                         checked={line.vat_inclusive}
-                        onChange={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
+                        onChange={() => setLineVat(line._key, !line.vat_inclusive)}
                         style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-amber)' }}
                       />
                       {/* 10px, not 9: 9 is the chevron GLYPH step on the type ramp and 10 is the

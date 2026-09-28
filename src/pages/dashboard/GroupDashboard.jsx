@@ -14,6 +14,10 @@ import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../ut
 import { useSettings } from '../../context/SettingsContext'
 import { fcBand } from '../../shared/imsFormulas'
 import { lcBand, bandFigure } from '../../shared/operatingBands'
+import {
+  withGroupCogs, periodCostRatio, groupCostRatio, fcBasisOf,
+  FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, FOOD_COST_TIP, SPEND_SO_FAR_TIP,
+} from '../../modules/ims/reports/foodCostBasis'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
 //
@@ -21,6 +25,13 @@ import { lcBand, bandFigure } from '../../shared/operatingBands'
 // purchases, payroll, covers) rather than percentages. The percentages are derived here so this
 // page does not become a fourth independent definition of food cost % / labour cost % alongside
 // OwnerDashboard.jsx, computeMonthlyReport.js and ClientDashboard.jsx.
+//
+// A closed month's Food Cost % is COGS ÷ revenue (S792, owner decision D30), and a month still
+// running shows "Spend % so far" (net purchases ÷ revenue) under that name instead — the rule and
+// both names live in foodCostBasis.js. Outlets keep independent periods, so one row can be a closed
+// month and the next a running one; each row names which figure it is. COGS comes from
+// get_group_pnl(), the same rows Consolidated P&L builds its statement from, joined on client_id —
+// so the group's COGS has one SQL definition, not a second copy inside get_group_summary.
 //
 // Two things the RPC deliberately does that shape this UI:
 //   - Outlets without Crest Suite Pro come back is_included = false with NULL figures. The
@@ -105,17 +116,33 @@ export default function GroupDashboard() {
     const start = bsToAd(bsYear, bsMonth, 1)
     const end = bsToAd(bsYear, bsMonth, daysInBsMonth(bsYear, bsMonth))
     const iso = d => d instanceof Date && !isNaN(d) ? formatAd(d) : null
-    const { data, error: err } = await supabase.rpc('get_group_summary', {
-      p_bs_year: bsYear,
-      p_bs_month: bsMonth,
-      p_ad_start: iso(start),
-      p_ad_end: iso(end),
-    })
+    // Both RPCs for the same (bs_year, bs_month), side by side under the one monthReq key, so a
+    // stale month can win neither. get_group_pnl carries each outlet's period status and its COGS
+    // components (S792, D30); it checks the same Owner/admin rule get_group_summary does.
+    const [summary, pnl] = await Promise.all([
+      supabase.rpc('get_group_summary', {
+        p_bs_year: bsYear,
+        p_bs_month: bsMonth,
+        p_ad_start: iso(start),
+        p_ad_end: iso(end),
+      }),
+      supabase.rpc('get_group_pnl', { p_bs_year: bsYear, p_bs_month: bsMonth }),
+    ])
     if (!monthReq.isCurrent(key)) return
+    // A failure of EITHER read is the page's error. Without get_group_pnl a closed month has no
+    // COGS and no status, so every row would fall back to Spend % so far — a quiet relabelling of
+    // the figure the owner came to compare, which is worse than saying the read failed.
     // errorText, not err.message: this reader is the Owner, and supabase-js hands back a bare
     // `TypeError: Failed to fetch` for any dead connection.
+    const err = summary.error || pnl.error
     if (err) { setError(errorText(err, 'operator')); setRows([]) }
-    else setRows(data || [])
+    else {
+      // has_closing rides along for the "closed with no count" mark on the row — Consolidated P&L's
+      // own warning, for the same rows: such a month's COGS counts the whole shelf as used.
+      const hasClosingById = new Map((pnl.data || []).map(p => [p.client_id, p.has_closing]))
+      setRows(withGroupCogs(summary.data || [], pnl.data || [])
+        .map(r => ({ ...r, has_closing: hasClosingById.get(r.client_id) ?? null })))
+    }
     setLoading(false)
   }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -148,8 +175,53 @@ export default function GroupDashboard() {
   const groupPurchases = sum('net_purchases')
   const groupPayroll = sum('payroll')
   const groupCovers = sum('covers')
-  const groupFc = groupRevenue > 0 ? (groupPurchases / groupRevenue) * 100 : null
   const groupLabour = groupRevenue > 0 ? (groupPayroll / groupRevenue) * 100 : null
+
+  // Food Cost % or Spend % so far (S792, D30). Each outlet's own figure follows its own month: COGS
+  // once it has closed, what it has spent while it is still running. The group's is a Food Cost %
+  // only when EVERY included outlet has closed the month (groupCostRatio) — a total built from one
+  // branch's COGS and another's purchases would be neither figure. Computed on the group totals, as
+  // before, never as an average of the outlets' percentages.
+  const groupRatio = groupCostRatio(rows)
+  const groupFc = groupRatio.pct
+  const ratioOf = r => (r.is_included
+    ? periodCostRatio({ status: r.period_status, revenue: r.revenue, cogs: r.cogs, netPurchases: r.net_purchases })
+    : null)
+  // Which of the two figures the column holds. When outlets stand differently the heading names
+  // both and every cell names its own, so no cell can be read under the other's name.
+  const shownBases = new Set(included.filter(r => r.has_period !== false).map(r => fcBasisOf(r.period_status)))
+  const mixedBases = shownBases.size > 1
+  const columnBasis = mixedBases ? 'mixed' : (shownBases.has('cogs') ? 'cogs' : 'spend')
+  const columnLabel = columnBasis === 'mixed' ? `${FOOD_COST_LABEL} / ${SPEND_SO_FAR_LABEL}`
+    : columnBasis === 'cogs' ? FOOD_COST_LABEL : SPEND_SO_FAR_LABEL
+  const columnTip = columnBasis === 'mixed'
+    ? `Each outlet's own figure, for this outlet alone — the line under it says which. An outlet that has closed ${BS_MONTHS[bsMonth - 1]} shows its ${FOOD_COST_LABEL}: ${FOOD_COST_TIP} One still in the month shows its ${SPEND_SO_FAR_LABEL}: ${SPEND_SO_FAR_TIP}`
+    : `${columnBasis === 'cogs' ? FOOD_COST_TIP : SPEND_SO_FAR_TIP} For this outlet alone.`
+  const groupTip = `${groupRatio.basis === 'cogs' ? FOOD_COST_TIP : SPEND_SO_FAR_TIP} ` +
+    (groupRatio.basis === 'cogs'
+      ? 'Every included outlet has closed this month, so this is the group’s Food Cost %: all outlets’ stock used ÷ all outlets’ revenue.'
+      : mixedBases
+        ? 'Some outlets have closed this month and some have not, so the group figure is Spend % so far over all of them — a total mixing one outlet’s stock used with another’s purchases would be neither figure. Each outlet’s own figure is in the table.'
+        : 'The group figure: all outlets’ net purchases ÷ all outlets’ revenue.') +
+    ` Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one. Coloured against your own Settings food cost thresholds as a guide: watch above ${fcBandOf(groupFc).warn}%, too high above ${fcBandOf(groupFc).critical}%.`
+  // One cost-ratio cell: bandCell's figure and colour, the ratio's own name under it when the
+  // column holds both kinds, and — for a Food Cost % — the COGS it came from on hover, since the
+  // Net Purchases column beside it is not what it divides.
+  const ratioCell = (ratio, cogs) => {
+    const c = bandCell(ratio?.pct ?? null, fcBandOf)
+    const title = ratio?.basis === 'cogs' && cogs != null
+      ? [c.title, `Stock used (COGS) ${fmtNpr(cogs)}`].filter(Boolean).join(' · ')
+      : c.title
+    if (!mixedBases || !ratio) return { ...c, title }
+    return {
+      ...c,
+      title,
+      children: <>{c.children}<div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{ratio.label}</div></>,
+    }
+  }
+  const groupCogs = groupRatio.basis === 'cogs'
+    ? included.filter(r => r.has_period !== false).reduce((t, r) => t + (Number(r.cogs) || 0), 0)
+    : null
 
   const years = [today.year - 1, today.year, today.year + 1]
 
@@ -228,7 +300,10 @@ export default function GroupDashboard() {
                 <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text={`Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one. Banded against your own Settings thresholds: watch above ${fcBandOf(groupFc).warn}%, too high above ${fcBandOf(groupFc).critical}%.`}>Group Food Cost %</Tip></div>
+                {/* The label follows the figure (S792, D30): "Group Spend % so far" until every
+                    included outlet has closed the month, "Group Food Cost %" once they all have.
+                    Held at the neutral label while loading, when neither is known yet. */}
+                <div className="stat-label"><Tip text={groupTip} width={300}>{loading ? 'Group Food Cost / Spend %' : `Group ${groupRatio.label}`}</Tip></div>
                 <div className="stat-value" style={{ color: loading ? undefined : fcBandOf(groupFc).color }} title={loading ? undefined : bandFigure(groupFc, fcBandOf).title}>{loading ? <StatSkeleton /> : bandFigure(groupFc, fcBandOf).text}</div>
               </div>
               <div className="stat-card">
@@ -254,7 +329,8 @@ export default function GroupDashboard() {
                     <th>Outlet</th>
                     <th style={{ textAlign: 'right' }}>Revenue</th>
                     <th style={{ textAlign: 'right' }}>Net Purchases</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Net purchases ÷ revenue for this outlet alone.">Food Cost %</Tip></th>
+                    {/* Neutral while loading: `rows` still holds the previous month, whose outlets may stand differently. */}
+                    <th style={{ textAlign: 'right' }}><Tip text={columnTip} width={300}>{loading ? 'Food Cost / Spend %' : columnLabel}</Tip></th>
                     <th style={{ textAlign: 'right' }}>Payroll</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Finalized payroll ÷ revenue for this outlet alone.">Labour %</Tip></th>
                     <th style={{ textAlign: 'right' }}>Covers</th>
@@ -265,7 +341,7 @@ export default function GroupDashboard() {
                   {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>No outlets in this group.</td></tr>}
                   {!loading && rows.map(r => {
                     const rev = Number(r.revenue) || 0
-                    const fc = r.is_included && rev > 0 ? (Number(r.net_purchases) / rev) * 100 : null
+                    const fcRatio = ratioOf(r)
                     const lab = r.is_included && rev > 0 ? (Number(r.payroll) / rev) * 100 : null
                     // No opacity dimming on excluded rows. It read as de-emphasis but multiplies
                     // straight through the text colour — text2 at 0.55 measured under 3:1 — and the
@@ -288,10 +364,16 @@ export default function GroupDashboard() {
                           {r.client_id === clientId && <span className="badge-yellow" style={{ marginLeft: 6 }}>Viewing</span>}
                           {!r.is_included && <span className="badge-gray" style={{ marginLeft: 6 }}>No Suite Pro</span>}
                           {r.is_included && !r.has_period && <span className="badge-amber" style={{ marginLeft: 6 }}>No period</span>}
+                          {r.is_included && r.period_status === 'closed' && r.has_closing === false && (
+                            <Tip text={`This outlet closed ${BS_MONTHS[bsMonth - 1]} without a closing stock count, so its Food Cost % counts everything on the shelf as used and reads high. Enter the count in that outlet's Stock Count, then Resync Opening Stock in Periods.`} width={280}
+                              style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}>
+                              <span className="badge-amber">No count</span>
+                            </Tip>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.revenue) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.net_purchases) : '—'}</td>
-                        <td {...bandCell(fc, fcBandOf)} />
+                        <td {...ratioCell(fcRatio, r.cogs)} />
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.payroll) : '—'}</td>
                         <td {...bandCell(lab, lcBand)} />
                         <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-IN') : '—'}</td>
@@ -307,7 +389,7 @@ export default function GroupDashboard() {
                       <td>Group total ({included.length} outlet{included.length === 1 ? '' : 's'})</td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupRevenue)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupPurchases)}</td>
-                      <td {...bandCell(groupFc, fcBandOf)} />
+                      <td {...ratioCell(groupRatio, groupCogs)} />
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupPayroll)}</td>
                       <td {...bandCell(groupLabour, lcBand)} />
                       <td style={{ textAlign: 'right' }}>{groupCovers.toLocaleString('en-IN')}</td>

@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
-import { convertQty } from '../../../utils/nutrition'
 import { calcRecipeCost, calcSubRecipeCostPerUnit } from './recipeCostCalc'
+import { BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
 import { asActionError } from '../../../components/ActionError'
 import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
+import { parseImportRows } from './recipeImportParse'
+import { PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
 
 // The price column is EX-VAT, and its header says so (S756). It is written straight to
 // `recipes.selling_price`, which is stored ex-VAT, while every other place a price is typed — the
@@ -14,96 +16,23 @@ import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
 // 13% above it. The template's own example (433.63 → NPR 490 on the menu) shows ex-VAT was always
 // meant. Parsing is POSITIONAL and a header row is recognised by its first cell only, so a sheet
 // saved under the old "Selling Price" header still imports unchanged.
+//
+// On a PAN-bill outlet (S792, D31) there is no VAT to take off: the till charges `selling_price`
+// exactly, so the same column IS the menu price, the header says so, and the dish is written with
+// vat_rate 0 rather than 0.13. `vatMode` comes from the page (menuPriceVat.js); while it is unknown
+// nothing is imported, because either basis could be the wrong one.
 const IMPORT_VAT_RATE = 0.13
-const IMPORT_COLS = ['Menu Item (Recipe)', 'Category', 'Selling Price (ex-VAT)', 'Yield', 'Ingredient (name or code)', 'Qty', 'Unit']
-
-// Parse + validate an uploaded sheet against the current items/sub-recipes.
-function parseImportRows(rows, items, subRecipes, recipes) {
-  const norm = s => String(s ?? '').trim()
-  const lc = s => norm(s).toLowerCase()
-  const itemByName = new Map(items.map(i => [lc(i.name), i]))
-  const itemByCode = new Map(items.filter(i => i.item_code).map(i => [lc(i.item_code), i]))
-  const subByName = new Map(subRecipes.map(s => [lc(s.name), s]))
-  const existingRecipeNames = new Set(recipes.filter(r => r.category !== 'Sub-Recipe').map(r => lc(r.name)))
-
-  const out = []
-  let current = null
-  for (const row of rows) {
-    const name = norm(row[0])
-    const ingName = norm(row[4])
-    if (name) {
-      current = {
-        name,
-        category: norm(row[1]) || 'Food',
-        selling_price: row[2] === '' || row[2] == null ? null : parseFloat(row[2]),
-        yield_qty: row[3] === '' || row[3] == null ? 1 : (parseFloat(row[3]) || 1),
-        lines: [],
-        duplicate: existingRecipeNames.has(lc(name)),
-        isSub: lc(norm(row[1])) === 'sub-recipe',
-      }
-      out.push(current)
-    }
-    if (!ingName) continue
-    if (!current) continue
-    const qty = parseFloat(row[5])
-    const unit = norm(row[6])
-    const key = lc(ingName)
-    let match = itemByCode.get(key) || itemByName.get(key)
-    let type = match ? 'item' : null
-    let sub = null
-    if (!match) { sub = subByName.get(key); if (sub) type = 'sub_recipe' }
-    let warning = ''
-    let finalQty = qty
-    if (match && unit) {
-      const itemUom = (match.uom || '').toUpperCase()
-      if (unit.toUpperCase() !== itemUom) {
-        const conv = convertQty(qty, unit, itemUom)
-        if (conv === qty && unit.toUpperCase() !== itemUom) warning = `unit "${unit}" ≠ item unit "${itemUom}" — qty used as-is`
-        else finalQty = conv
-      }
-    }
-    current.lines.push({
-      ingName, qty: finalQty, rawQty: qty, unit,
-      matched: !!type, type,
-      item_id: type === 'item' ? match.id : null,
-      sub_recipe_id: type === 'sub_recipe' ? sub.id : null,
-      reason: !type ? 'no matching item or sub-recipe' : (!(qty > 0) ? 'qty missing/invalid' : ''),
-      warning,
-    })
-  }
-  // A line is importable only if matched AND qty > 0
-  out.forEach(r => {
-    r.matchedLines = r.lines.filter(l => l.matched && l.qty > 0)
-    r.badLines = r.lines.filter(l => !(l.matched && l.qty > 0))
-    // THE SAME GUARD save() APPLIES, WHICH THIS PATH NEVER HAD (S714).
-    //
-    // `recipe_ingredients` has UNIQUE (recipe_id, item_id), so two lines naming one item make the
-    // insert below fail outright with 21000 — after the recipe row has already been written,
-    // leaving an ingredient-less recipe that costs 0 and wears a green food-cost tick. Two lines
-    // naming one SUB-RECIPE fail at nothing at all: item_id is NULL there, so it never matches
-    // that conflict target, both rows insert, and the recipe silently costs the prep item twice.
-    // The silent half is the worse half, and neither was detectable in the preview.
-    //
-    // Refused rather than summed, exactly as save() refuses it: 200g and 50g of one item is as
-    // likely a typo in one of the two rows, and quietly writing 250g would be this importer
-    // deciding which. The whole recipe is held back so nothing lands half-right.
-    const seen = new Set()
-    r.duplicateIngredient = null
-    for (const l of r.matchedLines) {
-      const key = l.type === 'item' ? `i:${l.item_id}` : `s:${l.sub_recipe_id}`
-      if (seen.has(key)) { r.duplicateIngredient = l.ingName; break }
-      seen.add(key)
-    }
-    r.willImport = !r.duplicate && !r.isSub && !r.duplicateIngredient && r.matchedLines.length > 0
-  })
-  return out
-}
+const importCols = vatMode => ['Menu Item (Recipe)', 'Category',
+  vatMode === 'pan' ? 'Menu Price (no VAT, PAN bill)' : 'Selling Price (ex-VAT)',
+  'Yield', 'Ingredient (name or code)', 'Qty', 'Unit']
 
 // Template download + Excel upload + parse/preview/run — the whole bulk recipe import feature,
 // self-contained. Renders the two toolbar buttons and (once a file is parsed) the preview modal.
 // The parent only needs to hand over its current items/subRecipes/recipes (for ingredient
 // matching and duplicate detection) and get an onImported() callback to reload its recipe list.
-export default function RecipeImportButton({ items, subRecipes, recipes, exportRecipes, clientId, scopedInsert, scopedDelete, onImported, isAdmin }) {
+// `costedByBuild(r)` (S792, RECIPES-1) marks a build-your-own dish, whose export row gets no food
+// cost or FC % — its fixed ingredients are not its plate.
+export default function RecipeImportButton({ items, subRecipes, recipes, exportRecipes, clientId, scopedInsert, scopedDelete, onImported, isAdmin, vatMode, costedByBuild = () => false }) {
   const [importPreview, setImportPreview] = useState(null) // { recipes:[...], summary } | null
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
@@ -112,12 +41,15 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
 
   async function downloadRecipeTemplate() {
     const XLSX = await import('xlsx')
+    // The example prices follow the outlet: ex-VAT on a VAT outlet (433.63 → NPR 490 on the menu),
+    // the menu price itself on a PAN-bill one (S792, D31).
+    const pan = vatMode === 'pan'
     const example = [
-      ['Avocado Toast', 'Food', 433.63, 1, items[0]?.name || 'Sourdough Bread', 80, items[0]?.uom || 'GM'],
+      ['Avocado Toast', 'Food', pan ? 490 : 433.63, 1, items[0]?.name || 'Sourdough Bread', 80, items[0]?.uom || 'GM'],
       ['', '', '', '', items[1]?.name || 'Avocado', 100, items[1]?.uom || 'GM'],
-      ['Peri Peri Wings', 'Food', 575.22, 1, items[2]?.name || 'Chicken Wings', 250, items[2]?.uom || 'GM'],
+      ['Peri Peri Wings', 'Food', pan ? 650 : 575.22, 1, items[2]?.name || 'Chicken Wings', 250, items[2]?.uom || 'GM'],
     ]
-    const wsRecipes = XLSX.utils.aoa_to_sheet([IMPORT_COLS, ...example])
+    const wsRecipes = XLSX.utils.aoa_to_sheet([importCols(vatMode), ...example])
     wsRecipes['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }]
 
     // Reference sheet: exact item + sub-recipe names/units to copy from
@@ -149,13 +81,18 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
       // Recipe Food Cost / FC% use the dish cost — manual cost when there are no costed
       // ingredients, blank when neither exists. This sheet leaves the building and gets priced
       // against, so an unknown is a blank cell, never "0.00" and "0.0" (S756, the S724 rule).
-      const dishCost = r.category === 'Sub-Recipe' ? cost : recipeCostOf({ [r.id]: cost }, r)
+      // A build-your-own dish's fixed ingredients are not its plate (S792, RECIPES-1): its Recipe
+      // Food Cost and FC % are blank, and the Note column says why. Its ingredient lines still
+      // export, since they are what a re-import rebuilds.
+      const byBuild = costedByBuild(r)
+      const dishCost = r.category === 'Sub-Recipe' ? cost : byBuild ? null : recipeCostOf({ [r.id]: cost }, r)
       const price = parseFloat(r.selling_price) || 0
       const fcPct = menuFcPct(dishCost, price)
       const dishCostCell = dishCost != null ? dishCost.toFixed(2) : ''
+      const noteCell = byBuild ? `${BYO_STATUS}. ${BYO_TIP}` : ''
       const ings = (r.recipe_ingredients || []).filter(ri => (ri.item_id && ri.items) || (ri.sub_recipe_id && ri.sub_recipe))
       if (ings.length === 0) {
-        rows.push([r.name, r.category, r.selling_price ?? '', r.yield_qty, '', '', '', '', '', dishCostCell, fcPct != null ? fcPct.toFixed(1) : ''])
+        rows.push([r.name, r.category, r.selling_price ?? '', r.yield_qty, '', '', '', '', '', dishCostCell, fcPct != null ? fcPct.toFixed(1) : '', noteCell])
         return
       }
       ings.forEach((ri, idx) => {
@@ -183,12 +120,13 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           ingRate.toFixed(2), ingCost.toFixed(2),
           isFirst ? dishCostCell : '',
           isFirst ? (fcPct != null ? fcPct.toFixed(1) : '') : '',
+          isFirst ? noteCell : '',
         ])
       })
     })
-    const header = [...IMPORT_COLS, 'Ingredient Rate (NPR)', 'Ingredient Cost (NPR)', 'Recipe Food Cost (NPR)', 'Recipe FC%']
+    const header = [...importCols(vatMode), 'Ingredient Rate (NPR)', 'Ingredient Cost (NPR)', 'Recipe Food Cost (NPR)', 'Recipe FC%', 'Note']
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
-    ws['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 10 }]
+    ws['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 40 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Recipes')
     XLSX.writeFile(wb, 'Recipe-Export.xlsx')
@@ -217,6 +155,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           willImport: parsed.filter(r => r.willImport).length,
           duplicates: parsed.filter(r => r.duplicate).length,
           dupIngredients: parsed.filter(r => r.duplicateIngredient).length,
+          ambiguousCodes: parsed.filter(r => r.ambiguousIngredient).length,
           subs: parsed.filter(r => r.isSub).length,
           matchedLines: parsed.reduce((s, r) => s + r.matchedLines.length, 0),
           badLines: parsed.reduce((s, r) => s + r.badLines.length, 0),
@@ -234,6 +173,9 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
     if (!clientId) { setImportError('No client selected.'); return }
     const toCreate = importPreview.recipes.filter(r => r.willImport)
     if (toCreate.length === 0) { setImportError('Nothing to import — no recipe has a matched ingredient.'); return }
+    // Which basis the price column is on depends on the outlet (S792, D31); unknown, nothing is
+    // written, because either guess stores some dishes at the wrong price.
+    if (vatMode == null) { setImportError(`Nothing was imported. ${VAT_MODE_UNKNOWN_TEXT}`); return }
     setImportBusy(true)
     setImportError('')
     let created = 0
@@ -243,7 +185,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           name: r.name,
           category: r.category || 'Food',
           selling_price: r.selling_price != null && !isNaN(r.selling_price) ? r.selling_price : null,
-          vat_rate: IMPORT_VAT_RATE,
+          vat_rate: vatMode === 'pan' ? 0 : IMPORT_VAT_RATE,
           yield_qty: r.yield_qty || 1,
           yield_uom: 'portion',
           target_fc_pct: 30,
@@ -289,7 +231,9 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
 
   return (
     <>
-      <Tip text="Bulk-add recipes from a spreadsheet. Download the template, fill one row per ingredient (Menu Item on the recipe's first row, then its ingredients below), and upload. Selling Price is EX-VAT: for a NPR 500 menu price at 13% VAT, enter 442.48 — the preview shows the menu price each row will produce. Ingredients are matched to your Item Master by name or code; unmatched ones are listed so you can fix them." width={320}>
+      <Tip text={`Bulk-add recipes from a spreadsheet. Download the template, fill one row per ingredient (Menu Item on the recipe's first row, then its ingredients below), and upload. ${vatMode === 'pan'
+        ? 'This outlet gives PAN bills, so the price column is the menu price itself: type what the guest pays (NPR 500 is NPR 500).'
+        : 'Selling Price is EX-VAT: for a NPR 500 menu price at 13% VAT, enter 442.48 — the preview shows the menu price each row will produce.'} Ingredients are matched to your Item Master by name or code, and the preview shows which item each one matched; unmatched ones are listed so you can fix them.`} width={320}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={downloadRecipeTemplate}>↓ Template</button>
       </Tip>
       <label className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px', cursor: 'pointer', margin: 0 }}>
@@ -312,6 +256,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
             {importPreview.summary.badLines > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.badLines}</strong> unmatched (skipped)</>}
             {importPreview.summary.duplicates > 0 && <> · {importPreview.summary.duplicates} already exist (skipped)</>}
             {importPreview.summary.dupIngredients > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.dupIngredients}</strong> with an ingredient listed twice (skipped — combine the rows in the sheet)</>}
+            {importPreview.summary.ambiguousCodes > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.ambiguousCodes}</strong> naming an item code two items share (skipped — type the item's name instead)</>}
             {importPreview.summary.subs > 0 && <> · {importPreview.summary.subs} sub-recipes (create in app)</>}
           </div>
 
@@ -321,6 +266,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
                 : r.duplicate ? { t: 'Already exists — skipped', c: 'var(--theme-amber)' }
                 : r.isSub ? { t: 'Sub-recipe — create in app', c: 'var(--theme-text3)' }
                 : r.duplicateIngredient ? { t: `"${r.duplicateIngredient}" listed twice — skipped`, c: 'var(--theme-red)' }
+                : r.ambiguousIngredient ? { t: `Code "${r.ambiguousIngredient}" is on two items — skipped`, c: 'var(--theme-red)' }
                 : { t: 'No matched ingredients — skipped', c: 'var(--theme-red)' }
               return (
                 <div key={idx} style={{ padding: '10px 14px', borderBottom: idx < importPreview.recipes.length - 1 ? '1px solid var(--theme-border-lt)' : 'none', opacity: r.willImport ? 1 : 0.75 }}>
@@ -328,12 +274,15 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
                     <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {r.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', fontWeight: 400 }}>· {r.category} · {r.matchedLines.length}/{r.lines.length} ingredients</span>
                       {/* The column is ex-VAT; the guest price it produces is what a reader can check
-                          against the menu, so it is shown before anything is written (S756). */}
+                          against the menu, so it is shown before anything is written (S756). On a
+                          PAN-bill outlet the two are the same figure (S792, D31). */}
                       {!r.isSub && (
                         <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400, marginTop: 2 }}>
-                          {r.selling_price > 0
-                            ? `NPR ${r.selling_price.toFixed(2)} ex-VAT → menu price NPR ${(r.selling_price * (1 + IMPORT_VAT_RATE)).toFixed(0)} incl. ${(IMPORT_VAT_RATE * 100).toFixed(0)}% VAT`
-                            : 'No selling price — set one in Menu Pricing after import'}
+                          {!(r.selling_price > 0)
+                            ? 'No selling price — set one in Menu Pricing after import'
+                            : vatMode === 'pan'
+                              ? `Guests pay NPR ${r.selling_price.toFixed(0)} (${PAN_LABEL})`
+                              : `NPR ${r.selling_price.toFixed(2)} ex-VAT → menu price NPR ${(r.selling_price * (1 + IMPORT_VAT_RATE)).toFixed(0)} incl. ${(IMPORT_VAT_RATE * 100).toFixed(0)}% VAT`}
                         </div>
                       )}
                     </div>
@@ -342,6 +291,14 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
                   {r.badLines.length > 0 && (
                     <div style={{ marginTop: 6, fontSize: 11, color: 'var(--theme-red-text)' }}>
                       {r.badLines.map((l, i) => <div key={i}>✗ {l.ingName || '(blank)'} — {l.reason}</div>)}
+                    </div>
+                  )}
+                  {/* What each item CODE resolved to (S792, MASTER-5). The preview used to print only
+                      the text typed, so "ITM-010" linking the wrong one of two items was invisible
+                      until the recipe cost came out wrong. A name resolves to itself. */}
+                  {r.matchedLines.some(l => l.byCode) && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-text2)' }}>
+                      {r.matchedLines.filter(l => l.byCode).map((l, i) => <div key={i}>✓ {l.ingName} → {l.resolvedName}</div>)}
                     </div>
                   )}
                   {r.matchedLines.some(l => l.warning) && (

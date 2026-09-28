@@ -8,7 +8,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import { computeDisposalGainLoss, computeDisposalDepreciation, latestPostedByAsset } from './depreciationCompute'
+import { computeDisposalGainLoss, computeDisposalDepreciation, bookPositionsByAsset, bookValue } from './depreciationCompute'
 
 const fmt = nprInt
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -46,10 +46,11 @@ export default function AssetCard({ asset, onClose, onChanged }) {
     return true
   }
 
-  // The latest row by period_end, then created_at — an adjustment run shares the period of the
-  // run it reverses, and only the later one carries the current NBV (S756).
-  const latestSchedule = latestPostedByAsset(schedule)[asset.id] || null
-  const currentNbv = latestSchedule ? parseFloat(latestSchedule.closing_nbv) : asset.total_cost
+  // Cost less every posted charge and reversal, whatever period each covers (S792, COSTS-2). It
+  // was the closing NBV of the latest row by period_end, so reversing any run but the last-ending
+  // one — or posting the corrected figures after a reversal — never reached this card.
+  const position = bookPositionsByAsset(schedule)[asset.id] || null
+  const currentNbv = bookValue(asset, position)
   const accumulatedDepreciation = asset.total_cost - currentNbv
   const pctDepreciated = asset.total_cost > 0 ? (accumulatedDepreciation / asset.total_cost) * 100 : 0
 
@@ -59,7 +60,7 @@ export default function AssetCard({ asset, onClose, onChanged }) {
   const acquired = String(asset.acquisition_date || '').slice(0, 10)
   const dateBeforeAcquisition = !!disposalForm.disposal_date && disposalForm.disposal_date < acquired
   const disposalCalc = disposalForm.disposal_date && !dateBeforeAcquisition && !loadError && !loading
-    ? computeDisposalDepreciation({ asset, lastPosted: latestSchedule, disposalDate: disposalForm.disposal_date })
+    ? computeDisposalDepreciation({ asset, position, disposalDate: disposalForm.disposal_date })
     : null
   const proceedsNum = parseFloat(disposalForm.disposal_proceeds) || 0
   const previewGainLoss = disposalCalc ? computeDisposalGainLoss({ closingNbvAtDisposal: disposalCalc.nbvAtDisposal, disposalProceeds: proceedsNum }) : null
@@ -73,13 +74,13 @@ export default function AssetCard({ asset, onClose, onChanged }) {
     if (dateBeforeAcquisition) { setDateErr(`The disposal date is before the asset was acquired (${fmtDate(acquired)}).`); return }
     setDateErr('')
     setSaving(true); setError('')
-    const calc = computeDisposalDepreciation({ asset, lastPosted: latestSchedule, disposalDate: disposalForm.disposal_date })
+    const calc = computeDisposalDepreciation({ asset, position, disposalDate: disposalForm.disposal_date })
 
     // Depreciation up to the disposal date is posted FIRST, as its own run through the same
     // atomic RPC every run uses. It is the half that can refuse (an IMS manager or the owner,
     // S756), and while it has not landed nothing about the asset has changed. If the register
     // update below then fails, a second Confirm is safe: this card re-reads the schedule, the new
-    // run is now the latest, and there are no uncharged days left to post twice.
+    // run now charges through the disposal date, and there are no uncharged days left to post twice.
     if (calc.line) {
       const { error: postErr } = await supabase.rpc('post_asset_depreciation_run', {
         p_client_id: clientId, p_period_start: calc.periodStart, p_period_end: calc.periodEnd,
@@ -136,7 +137,7 @@ The asset is still on the register as active.`, detail })
           <div className="stat-value">NPR {fmt(asset.total_cost)}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Book value as of the latest posted depreciation run, or total cost if never posted." width={250}>Current NBV</Tip></div>
+          <div className="stat-label"><Tip text="Total cost less every depreciation charge posted for this asset, reversals included, whatever period each one covers — or total cost if nothing has been posted." width={270}>Current NBV</Tip></div>
           <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{figuresReal ? `NPR ${fmt(currentNbv)}` : '—'}</div>
         </div>
         <div className="stat-card">
@@ -246,7 +247,7 @@ The asset is still on the register as active.`, detail })
               </div>
               {disposalCalc.postedPastDisposal && (
                 <p style={{ margin: '6px 0 0', color: 'var(--theme-amber-text)' }}>
-                  △ A posted run already charges depreciation through {fmtDate(latestSchedule?.period_end)}, after this disposal date, so the book value above includes depreciation for days the asset was no longer held. To take that back out, reverse that run on the Depreciation Runs tab (Adjustment) before disposing.
+                  △ A posted run that has not been reversed already charges depreciation through {fmtDate(disposalCalc.chargedThrough)}, after this disposal date, so the book value above includes depreciation for days the asset was no longer held. To take that back out, reverse that run on the Depreciation Runs tab (Adjustment) before disposing — the disposal then charges only the days up to its own date.
                 </p>
               )}
             </div>

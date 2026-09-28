@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -6,9 +6,12 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
-import { COGS_FORMULA, varianceBand, varianceFlagPct } from '../../../shared/imsFormulas'
+import { COGS_FORMULA, computeUsed, varianceBand, varianceFlagPct } from '../../../shared/imsFormulas'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
+import {
+  linkedItemIdsOf, varianceRowBand, hasVarianceActivity, isUncountedGap, judgedRows, closingCountMap, VARIANCE_FLAG_TEXT as FLAG_TEXT,
+} from './variancePopulation'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -229,12 +232,18 @@ export default function TheoreticalVariance() {
     }
     if (!periodReq.isCurrent(periodId)) return
 
+    // Every recipe's expansion, sold or not (S792, D36): the theoretical sum below needs the sold
+    // ones, and "is this item in any recipe" needs them all. The same { recipeId: [{ item_id, qty }] }
+    // shape Variance.js gets from explodeRecipeIngredients over the whole book.
+    const breakdown = {}
+    allRecipes.forEach(recipe => { breakdown[recipe.id] = expandIngredients(recipe, allRecipes, itemList) })
+
     // Theoretical consumption: item_id → qty
     const theoretical = {}
     allRecipes.forEach(recipe => {
       const sold = salesMap[recipe.id] || 0
       if (sold <= 0) return
-      expandIngredients(recipe, allRecipes, itemList).forEach(({ item_id, qty }) => {
+      breakdown[recipe.id].forEach(({ item_id, qty }) => {
         theoretical[item_id] = (theoretical[item_id] || 0) + qty * sold
       })
     })
@@ -249,62 +258,88 @@ export default function TheoreticalVariance() {
     })
 
     // Actual consumption maps
-    const openMap = {}, closeMap = {}, purchMap = {}, retMap = {}, wastMap = {}, staffMap = {}
+    const openMap = {}, purchMap = {}, retMap = {}, wastMap = {}, staffMap = {}
     ;(opening || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty || 0) })
-    ;(closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty || 0) })
+    // Counts only (S792): a NULL physical_qty is not a count — see closingCountMap.
+    const closeMap = closingCountMap(closing)
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // Local, not the state value: setState is async, so the row builder below would otherwise read
-    // the PREVIOUS period's answer.
-    const hasClosingRows = (closing || []).length > 0
+    // the PREVIOUS period's answer. Counts, not rows: a month holding only NULL rows is uncounted.
+    const hasClosingRows = Object.keys(closeMap).length > 0
     setHasClosing(hasClosingRows)
     ;(purch   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
     ;(rets    || []).forEach(r => { retMap[r.item_id]   = (retMap[r.item_id]   || 0) + parseFloat(r.qty || 0) })
     ;(wast    || []).forEach(r => { wastMap[r.item_id]  = (wastMap[r.item_id]  || 0) + parseFloat(r.qty || 0) })
     ;(staffMeals || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
 
-    const computed = itemList
-      .filter(item => (theoretical[item.id] || 0) > 0.001)
-      .map(item => {
-        const theor  = theoretical[item.id] || 0
-        // Staff meals were previously omitted here (unlike Variance.js/Stock.js) — legitimate,
-        // logged staff-meal consumption was misclassified as unexplained "over-consumption".
-        const actual = (openMap[item.id] || 0) + (purchMap[item.id] || 0) - (retMap[item.id] || 0) - (closeMap[item.id] || 0) - (wastMap[item.id] || 0) - (staffMap[item.id] || 0)
-        const variance    = actual - theor
-        const variancePct = theor > 0 ? (variance / theor) * 100 : 0
-        const rate        = parseFloat(item.per_uom_rate || 0)
-        const varianceVal = variance * rate
-        // Measurability is PER ITEM (S719), exactly as on Variance.js, which this page must agree
-        // with. `hasClosing` only asks whether the month has ANY closing rows; an item missing from
-        // the count got closeQty 0, so actual usage read as everything on hand plus everything
-        // bought and the row wore a full Over verdict built out of an absence. A count of 0 is a
-        // real count (S695), so presence is `in closeMap`, never `> 0`.
-        const hasCount    = item.id in closeMap
-        return { item, theor, actual, variance, variancePct, varianceVal, rate, hasCount, measured: hasClosingRows && hasCount }
+    // THE SAME POPULATION AS Variance.js (S792, FIGURES-4 / owner decision D36). This used to be
+    // `itemList.filter(item => theoretical > 0.001)`, so an ingredient whose dishes sold nothing —
+    // but whose stock fell anyway — never reached this page, while Variance judged it Over and put
+    // its whole usage into its loss total: "Flagged 7, NPR 18,400" there, "Items Over Tolerance 5,
+    // NPR 11,200" here, for one month. Now every active item is a row (drawn when it has activity),
+    // an item in no recipe gets D17's grey "no recipe linked" state, and the verdict, the flagged
+    // count and the totals come from ./variancePopulation.js, which Variance.js reads too.
+    const linkedItemIds = linkedItemIdsOf(breakdown, depleting, explosion)
+    const computed = itemList.map(item => {
+      const openQty         = openMap[item.id] || 0
+      const purchQty        = (purchMap[item.id] || 0) - (retMap[item.id] || 0)   // net of returns
+      // Measurability is PER ITEM (S719), exactly as on Variance.js, which this page must agree
+      // with. `hasClosing` only asks whether the month has ANY closing rows; an item missing from
+      // the count got closeQty 0, so actual usage read as everything on hand plus everything
+      // bought and the row wore a full Over verdict built out of an absence. A count of 0 is a
+      // real count (S695), so presence is `in closeMap`, never `> 0`.
+      const hasCount        = item.id in closeMap
+      const theoreticalUsed = theoretical[item.id] || 0
+      // Staff meals are in (they were once omitted here, unlike Variance.js/Stock.js, and logged
+      // staff-meal consumption read as unexplained "over-consumption"); computeUsed is the one form.
+      const actualUsed      = computeUsed({
+        opening: openQty, purchases: purchQty, wastage: wastMap[item.id] || 0,
+        staffMeals: staffMap[item.id] || 0, closing: hasCount ? closeMap[item.id] : 0,
       })
+      const variance        = actualUsed - theoreticalUsed
+      // null, not 0, when nothing using it sold: the percentage is undefined and prints "—". The
+      // verdict still judges the row, through the shared signed surrogate.
+      const variancePct     = theoreticalUsed > 0 ? (variance / theoreticalUsed) * 100 : null
+      const rate            = parseFloat(item.per_uom_rate || 0)
+      return {
+        item, openQty, purchQty, hasCount,
+        measured: hasClosingRows && hasCount,
+        noRecipe: !linkedItemIds.has(item.id),
+        theoreticalUsed, actualUsed, variance, variancePct, value: variance * rate, rate,
+      }
+    })
 
     setRows(computed)
   }
 
+  // One verdict per row per data/settings change (S792) — varianceRowBand, the one Variance.js
+  // reads — so the cells, the filter, the tiles and the footer cannot give a row two answers.
+  const banded = useMemo(() => rows.map(r => ({ ...r, band: varianceRowBand(r, settings) })), [rows, settings])
+  // The rows drawn: the same activity test as Variance.js (something moved, was expected to, or sat
+  // on the shelf), not "its dishes sold".
+  const activeRows = useMemo(() => banded.filter(hasVarianceActivity), [banded])
+
   function filteredRows() {
-    return rows
+    return activeRows
       .filter(r => {
         if (filterCat !== 'all' && r.item.category_id !== filterCat) return false
-        // By BAND, the same `varianceBand(...).key` each row is painted with and the over/under tiles
-        // count (S756). The raw `variance > 0.01` test put nearly every item of a real month under
-        // "Over-consumed" — including rows wearing a green ✓ or a quiet ≈, and uncounted rows whose
-        // variance is an artefact of the missing count — so the filter contradicted the tile above it.
-        // `varianceBand` directly, not the render-body `band` helper: that const is declared below
-        // the `filteredRows()` call and would be in its temporal dead zone here.
-        if (filterType !== 'all') {
-          const key = varianceBand(r.variancePct, r.varianceVal, settings, { measured: r.measured }).key
-          if (filterType === 'over'  && key !== 'over')  return false
-          if (filterType === 'under' && key !== 'under') return false
-        }
+        // By VERDICT, the same `band.flag` each row is painted with and the over/under tiles count
+        // (S756, and since S792 the shared verdict). The raw `variance > 0.01` test put nearly every
+        // item of a real month under "Over-consumed" — including rows wearing a green ✓ or a quiet ≈,
+        // and uncounted rows whose variance is an artefact of the missing count — so the filter
+        // contradicted the tile above it.
+        if (filterType === 'over'  && r.band.flag !== 'over')  return false
+        if (filterType === 'under' && r.band.flag !== 'under') return false
         return true
       })
       .sort((a, b) => {
-        if (sortBy === 'variance_val')  return Math.abs(b.varianceVal)  - Math.abs(a.varianceVal)
-        if (sortBy === 'variance_pct')  return Math.abs(b.variancePct)  - Math.abs(a.variancePct)
+        if (sortBy === 'variance_val')  return Math.abs(b.value)  - Math.abs(a.value)
+        // A row with no percentage (nothing using it sold) sorts last either way — there is no
+        // figure to rank it by, and its value is on the value sort.
+        if (sortBy === 'variance_pct') {
+          if (a.variancePct == null || b.variancePct == null) return (a.variancePct == null) - (b.variancePct == null)
+          return Math.abs(b.variancePct) - Math.abs(a.variancePct)
+        }
         if (sortBy === 'name')          return a.item.name.localeCompare(b.item.name)
         return 0
       })
@@ -316,26 +351,30 @@ export default function TheoreticalVariance() {
     // Shared letterhead + the same caveats the screen shows (S756). The sheet was a bare
     // json_to_sheet with no client, no period and none of the no-closing-count warning Variance.js's
     // export carries — so the confident numbers travelled without the banner that qualifies them.
-    const uncountedN = rows.filter(r => !r.hasCount).length
     const notes = [
       hasClosing
         ? `Tolerance ±${varianceFlagPct(settings)}% · theoretical = sales × recipe qty · actual = ${COGS_FORMULA}`
         : 'NO CLOSING COUNT ENTERED — these figures treat everything still on hand as used; finish the Stock Count before acting on them',
-      hasClosing && uncountedN > 0
-        ? `${uncountedN} item(s) have no closing count and are marked "not counted" — they are excluded from the period totals`
+      hasClosing && uncountedCount > 0
+        ? `${uncountedCount} item(s) have no closing count and are marked "not counted" — they are excluded from the period totals`
         : null,
+      noRecipeCount > 0
+        ? `${noRecipeCount} item(s) are in no recipe and are marked "no recipe linked" — excluded from the over-tolerance count and the totals`
+        : null,
+      'A Variance % of "" means nothing using the item sold this period; its use is still judged, as on the Variance Report',
     ].filter(Boolean)
     const scopeLine = `Period: ${periodLabel}${selectedPeriod?.status === 'open' ? ' (open — provisional)' : ''}`
-    const data = filteredRows().map(({ item, theor, actual, variance, variancePct, varianceVal, hasCount }) => ({
+    const data = filteredRows().map(({ item, theoreticalUsed, actualUsed, variance, variancePct, value, hasCount, band: b }) => ({
       'Item':                item.name,
       'Category':            item.categories?.name || '',
       'UOM':                 item.uom,
-      'Theoretical Qty':     +theor.toFixed(3),
-      'Actual Qty':          +actual.toFixed(3),
+      'Theoretical Qty':     +theoreticalUsed.toFixed(3),
+      'Actual Qty':          +actualUsed.toFixed(3),
       'Variance Qty':        +variance.toFixed(3),
-      'Variance %':          +variancePct.toFixed(1),
-      'Variance Value (NPR)': Math.round(varianceVal),
+      'Variance %':          variancePct == null ? '' : +variancePct.toFixed(1),
+      'Variance Value (NPR)': Math.round(value),
       'Closing counted':     hasCount ? 'yes' : 'no',
+      'Flag':                b.key === 'immaterial' ? 'immaterial' : FLAG_TEXT[b.flag],
     }))
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Theoretical vs Actual', biz, scopeLine, notes, rows: data,
@@ -344,26 +383,30 @@ export default function TheoreticalVariance() {
   }
 
   const visible          = filteredRows()
-  // Measured rows only (S719). An item with no closing count has a variance manufactured out of an
-  // absence; adding it to the period total is how the page reports a loss that is really an
-  // uncounted shelf. Same rule as Variance.js, which this page must agree with.
-  const measuredRows     = rows.filter(r => r.measured)
-  const uncountedRows    = rows.filter(r => !r.hasCount)
-  const totalTheorVal    = measuredRows.reduce((s, r) => s + r.theor   * r.rate, 0)
-  const totalActualVal   = measuredRows.reduce((s, r) => s + r.actual  * r.rate, 0)
-  const totalVarianceVal = measuredRows.reduce((s, r) => s + r.varianceVal, 0)
-  // Counted by BAND, not by `variance > 0.01`. At a quantity threshold of a hundredth of a unit
+  // Measured rows linked to a recipe only — the rows Variance.js totals (S719, D17, and since S792
+  // the same helper). An item with no closing count has a variance manufactured out of an absence;
+  // adding it to the period total is how the page reports a loss that is really an uncounted shelf.
+  // An item in no recipe has nothing to be compared against, so its whole usage is not "loss".
+  const judged           = judgedRows(banded)
+  const measuredCount    = rows.filter(r => r.measured).length
+  const uncountedCount   = rows.filter(isUncountedGap).length
+  const noRecipeCount    = activeRows.filter(r => r.band.flag === 'no_recipe').length
+  const totalTheorVal    = judged.reduce((s, r) => s + r.theoreticalUsed * r.rate, 0)
+  const totalActualVal   = judged.reduce((s, r) => s + r.actualUsed * r.rate, 0)
+  const totalVarianceVal = judged.reduce((s, r) => s + r.value, 0)
+  // Counted by VERDICT, not by `variance > 0.01`. At a quantity threshold of a hundredth of a unit
   // essentially every item in a real month counts as over-used, so the tile below was permanently
   // red and its number contradicted the rows it sat above — the table flagged a handful, the KPI
-  // claimed hundreds. Both now answer the same question: how many items are outside the client's
-  // configured tolerance and material enough to act on.
-  const overCount        = measuredRows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: true }).key === 'over').length
-  const underCount       = measuredRows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: true }).key === 'under').length
+  // claimed hundreds. Both now answer the same question as Variance.js's Flagged Items: how many
+  // items are outside the client's tolerance and material enough to act on — an ingredient used
+  // while its dishes sold nothing included (D36).
+  const overCount        = judged.filter(r => r.band.flag === 'over').length
+  const underCount       = judged.filter(r => r.band.flag === 'under').length
   // The aggregate the Total Variance tile is judged on — a rupee total alone has no percentage to
   // band, and `> 0 ? red : green` gave a NPR 40 whole-period variance the same red as NPR 40,000.
   const totalVariancePct = totalTheorVal > 0 ? (totalVarianceVal / totalTheorVal) * 100 : null
   const totalBand        = varianceBand(totalVariancePct, totalVarianceVal, settings, { measured: hasClosing })
-  const noSales          = rows.length === 0 && !loading && !computing
+  const noSales          = activeRows.length === 0 && !loading && !computing
 
   const periodLabel = selectedPeriod
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
@@ -426,12 +469,12 @@ export default function TheoreticalVariance() {
       {/* The PARTIAL case, which had no voice before S719: the month is counted, but not all of
           it, and every uncounted item was carrying an Over verdict built out of a closing count of
           zero. They are excluded from the totals and marked in the table. */}
-      {!loading && !computing && hasClosing && uncountedRows.length > 0 && (
+      {!loading && !computing && hasClosing && uncountedCount > 0 && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>△ {uncountedRows.length} item{uncountedRows.length === 1 ? ' has' : 's have'} no closing count for {periodLabel}.</strong>{' '}
+          <strong style={{ color: 'var(--theme-amber-text)' }}>△ {uncountedCount} item{uncountedCount === 1 ? ' has' : 's have'} no closing count for {periodLabel}.</strong>{' '}
           Their “Actual” is everything that was on hand, which is a figure rather than a finding, so
           they are marked <em>not counted</em> in the table and left out of the totals — those cover
-          the {measuredRows.length} item{measuredRows.length === 1 ? '' : 's'} that were counted.
+          the {measuredCount} item{measuredCount === 1 ? '' : 's'} that were counted.
         </div>
       )}
 
@@ -440,7 +483,9 @@ export default function TheoreticalVariance() {
         <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
         Actual = {COGS_FORMULA}. The gap reveals over-portioning, theft, or data entry errors.
         Red rows need investigation. Green = within the ±{varianceFlagPct(settings)}% tolerance set in
-        Settings → Thresholds; ≈ marks a gap too small in rupees to be worth chasing.
+        Settings → Thresholds; ≈ marks a gap too small in rupees to be worth chasing. An ingredient
+        used while none of its dishes sold is judged too — its whole use is unexplained. The items
+        covered are the Variance Report&apos;s, so the two pages flag the same things.
       </div>
 
       {/* Stat cards.
@@ -448,7 +493,7 @@ export default function TheoreticalVariance() {
           to 200px product-wide precisely because a Nepali-grouped `NPR 12,48,650` wraps below it —
           and these three figures ARE that shape, on the page that tells an owner money went
           missing. The class also brings `tabular-nums`, so the figures line up digit for digit. */}
-      {!loading && !computing && rows.length > 0 && (
+      {!loading && !computing && activeRows.length > 0 && (
         <div className="stat-grid" style={{ marginBottom: 24 }}>
           {[
             { label: 'Theoretical Cost',  value: fmtNPR(totalTheorVal),    sub: 'Based on recipes × sales',      color: 'var(--theme-text3)' },
@@ -463,7 +508,8 @@ export default function TheoreticalVariance() {
               color: totalBand.color },
             { label: 'Items Over Tolerance',
               value: hasClosing ? overCount : '—',
-              sub:   hasClosing ? `${underCount} under tolerance` : 'Needs closing count',
+              sub:   !hasClosing ? 'Needs closing count'
+                     : [`${underCount} under tolerance`, noRecipeCount > 0 ? `${noRecipeCount} with no recipe` : null].filter(Boolean).join(' · '),
               color: !hasClosing ? 'var(--theme-text2)' : overCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
           // `.stat-card`/`.stat-label`/`.stat-value`/`.stat-sub` — the product's own tile. The
           // hand-rolled copy sat at fontSize 22 (off the 24px figure step) with letterSpacing
@@ -526,10 +572,10 @@ export default function TheoreticalVariance() {
       ) : noSales ? (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-          <div style={{ color: 'var(--theme-text1)', fontWeight: 600, marginBottom: 8 }}>No data for this period</div>
+          <div style={{ color: 'var(--theme-text1)', fontWeight: 600, marginBottom: 8 }}>No stock or sales activity for this period</div>
           <div style={{ color: 'var(--theme-text2)', fontSize: 13 }}>
-            This report requires both Sales entries and Recipes with ingredients.<br />
-            Make sure sales are recorded and recipes have ingredients set up.
+            No item had opening stock, purchases, use or sales this month.<br />
+            Make sure sales are recorded, recipes have ingredients set up, and the Stock Count is entered.
           </div>
         </div>
       ) : (
@@ -551,7 +597,7 @@ export default function TheoreticalVariance() {
                     <Tip text="Actual − Theoretical. Positive = over-consumed (waste/theft/over-portioning). Negative = under-consumed (under-portioning or missing sales data)." width={280}>Variance</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Variance as a percentage of theoretical usage — normalizes the gap so items with different volumes are comparable." width={260}>Variance %</Tip>
+                    <Tip text="Variance as a percentage of theoretical usage — normalizes the gap so items with different volumes are comparable. “—” when none of the dishes using the item sold this period: any use of it is then unexplained, and the mark after the dash still says whether that is over tolerance." width={280}>Variance %</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Variance Qty × cost per UOM. Shows the NPR impact of the gap." width={220}>Value (NPR)</Tip>
@@ -559,8 +605,7 @@ export default function TheoreticalVariance() {
                 </tr>
               </thead>
               <tbody>
-                {visible.map(({ item, theor, actual, variance, variancePct, varianceVal, hasCount, measured }) => {
-                  const b = band(variancePct, varianceVal, measured)
+                {visible.map(({ item, theoreticalUsed, actualUsed, variance, variancePct, value, hasCount, band: b }) => {
                   return (
                     <tr key={item.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
@@ -570,11 +615,16 @@ export default function TheoreticalVariance() {
                             <span className="badge badge-gray" style={{ marginLeft: 6, display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>not counted</span>
                           </Tip>
                         )}
+                        {hasCount && b.flag === 'no_recipe' && (
+                          <Tip text="This item is not an ingredient in any recipe (gas, foil, napkins…), so there is no theoretical usage to compare against. What was used is shown; it is left out of the over-tolerance count and the totals — as on the Variance Report." width={300}>
+                            <span className="badge badge-gray" style={{ marginLeft: 6, display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>no recipe linked</span>
+                          </Tip>
+                        )}
                       </td>
                       <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtQty(theor)}</td>
-                      <td style={{ textAlign: 'right' }}>{fmtQty(actual)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtQty(theoreticalUsed)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtQty(actualUsed)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }}>
                         {variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toLocaleString('en-IN', { maximumFractionDigits: 3 })}`}
                       </td>
@@ -584,25 +634,29 @@ export default function TheoreticalVariance() {
                           it. `title` carries the band's own sentence for hover and assistive tech;
                           it is not a substitute for the glyph, which is what a sighted
                           colour-blind reader actually gets. */}
+                      {/* A null percentage (nothing using it sold) prints "—", and keeps the mark: the
+                          shared verdict judges that row too (D36), so its colour is not left to say
+                          it alone. */}
                       <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }} title={b.label !== '—' ? b.label : undefined}>
-                        {b.mark ? `${fmtPct(variancePct)} ${b.mark}` : fmtPct(variancePct)}
+                        {`${variancePct == null ? '—' : fmtPct(variancePct)}${b.mark ? ` ${b.mark}` : ''}`}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: b.color }}>
-                        {varianceVal === 0 ? '—' : fmtNPR(varianceVal)}
+                        {value === 0 ? '—' : fmtNPR(value)}
                       </td>
                     </tr>
                   )
                 })}
               </tbody>
               {visible.length > 1 && (() => {
-                // Measured rows only (S756), the same population the KPI cards above use. The footer
-                // summed every visible row, so an uncounted item's "actual = everything on hand"
-                // went into a subtotal sitting directly under cards that had excluded it — two
-                // totals of one table disagreeing by exactly the shelf nobody counted.
-                const vis    = visible.filter(r => r.measured)
-                const vTheor = vis.reduce((s, r) => s + r.theor * r.rate, 0)
-                const vAct   = vis.reduce((s, r) => s + r.actual * r.rate, 0)
-                const vVal   = vis.reduce((s, r) => s + r.varianceVal, 0)
+                // Judged rows only — measured (S756) and linked to a recipe (S792, D17) — the same
+                // population the KPI cards above use. The footer summed every visible row, so an
+                // uncounted item's "actual = everything on hand" went into a subtotal sitting
+                // directly under cards that had excluded it — two totals of one table disagreeing by
+                // exactly the shelf nobody counted.
+                const vis    = judgedRows(visible)
+                const vTheor = vis.reduce((s, r) => s + r.theoreticalUsed * r.rate, 0)
+                const vAct   = vis.reduce((s, r) => s + r.actualUsed * r.rate, 0)
+                const vVal   = vis.reduce((s, r) => s + r.value, 0)
                 // Was `> 0 ? red : green` on the filtered subtotal — no threshold at all, so a NPR 3
                 // total wore the same red as NPR 30,000. Banded against the same tolerance as every
                 // row above it.
@@ -613,8 +667,8 @@ export default function TheoreticalVariance() {
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                         {excluded > 0
-                          ? <Tip text="The totals on this row cover counted items only. An item with no closing count has an 'actual' that is everything on hand — a figure, not a finding — so it is left out, exactly as in the cards above." width={280}>
-                              Total — {vis.length} counted of {visible.length} shown
+                          ? <Tip text="The totals on this row cover counted items that appear in a recipe. An item with no closing count has an 'actual' that is everything on hand — a figure, not a finding — and an item in no recipe has nothing to compare against, so both are left out, exactly as in the cards above." width={300}>
+                              Total — {vis.length} judged of {visible.length} shown
                             </Tip>
                           : `Total — ${visible.length} items shown`}
                       </td>

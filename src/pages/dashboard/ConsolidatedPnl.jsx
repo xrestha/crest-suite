@@ -10,7 +10,8 @@
 //              (unit_price) falling back to the recipe's current price, minus per-row discounts,
 //              excluding 'pos_comp' rows.
 //   COGS     — valuePeriodItems() (periodCost.js), also MonthlySummary's: stock valued at
-//              items.per_uom_rate over is_active, is_sub_recipe=false items. Stock Count includes
+//              items.per_uom_rate over every is_sub_recipe=false item, HIDDEN ONES INCLUDED (S792,
+//              D29 — hiding an item never takes it out of a past month). Stock Count includes
 //              prep, this page does not, and the on-page note names the difference like S575's
 //              disclosures do. get_group_pnl repeats both rules in SQL for the group view.
 //   Labour   — finalized HR payroll (gross + overtime + employer SSF, get_group_summary's definition) when a
@@ -196,10 +197,11 @@ export default function ConsolidatedPnl() {
   async function loadSingle(periodId) {
     setLoadError(null)
     const results = await Promise.all([
-      // MonthlySummary's exact reads, so this statement's COGS ties to that page: active items
-      // only (S436), sub-recipes excluded (prep is counted at the raw-item level), and every
-      // per-item-per-period read paged, which this page did not do before S774.
-      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      // MonthlySummary's exact reads, so this statement's COGS ties to that page: every item,
+      // hidden ones included (S792, D29 — an `is_active` filter here took a hidden item's purchases
+      // out of every past month's COGS), sub-recipes excluded (prep is counted at the raw-item
+      // level), and every per-item-per-period read paged, which this page did not do before S774.
+      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').eq('is_sub_recipe', false).order('id')),
       fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries')
@@ -239,7 +241,7 @@ export default function ConsolidatedPnl() {
     // figure repeated on every line, and this statement once ignored it, so a NPR 10,000 discount
     // made COGS NPR 10,000 too high while the Purchases register showed the discounted total.
     // allocateBillDiscounts() spreads it across the bill's own lines by line value, so a bill with
-    // a line outside the active, non-sub-recipe item set is not over-credited.
+    // a line outside the non-sub-recipe item set is not over-credited.
     const revenue = periodRevenue(salesData, recipes)
     const stock = valuePeriodItems(items, periodStockMaps({
       opening, closing, purchases, returns, wastages, staffMeals: staffMealsData,

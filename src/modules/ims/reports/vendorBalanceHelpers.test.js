@@ -169,6 +169,37 @@ describe('the letter reconciles to itself', () => {
     expect(withPair.totals.totalPaymentsFy).toBeCloseTo(1000, 2)
     expect(withPair.totals.totalCreditAppliedFy).toBeCloseTo(300, 2)
   })
+
+  // S792, owner decision D33 (PURCHASES-3). A return is credited at the price the supplier charged,
+  // not at list price with the whole discount kept. Both fail against the pre-D33 arithmetic.
+  const discountedBill = () => [
+    line('d1', 'gD', IN_FY, { qty: 1, rate: 6000, discount: 1000, ref: 'D' }),
+    line('d2', 'gD', IN_FY, { qty: 1, rate: 4000, discount: 1000, ref: 'D' }),
+  ]
+
+  test('a discounted bill returned whole closes at zero — never an advance of the discount', () => {
+    const result = computeVendorBalance({
+      creditEntries: discountedBill(), cashEntries: [], payments: [],
+      returns: [ret('d1', IN_FY_LATER, 1, 6000, 5), ret('d2', IN_FY_LATER, 1, 4000, 5)],
+      fyStart: FY_START, fyEnd: FY_END,
+    })
+    assertReconciles(result)
+    expect(result.totals.totalPurchasesFy).toBeCloseTo(9000, 2)
+    // Was 10,000 of returns against a 9,000 purchase, closing on "Advance / Credit Balance 1,000".
+    expect(result.totals.totalReturnsFy).toBeCloseTo(9000, 2)
+    expect(result.closingBalance).toBeCloseTo(0, 2)
+  })
+
+  test('one line of it returned: the Return line is the credit note (3,600) and 5,400 is still owed', () => {
+    const result = computeVendorBalance({
+      creditEntries: discountedBill(), cashEntries: [], payments: [],
+      returns: [ret('d2', IN_FY_LATER, 1, 4000, 5)],
+      fyStart: FY_START, fyEnd: FY_END,
+    })
+    assertReconciles(result)
+    expect(result.schedule.filter(e => e.type === 'return').map(e => e.amount)).toEqual([3600])
+    expect(result.closingBalance).toBeCloseTo(5400, 2)
+  })
 })
 
 describe('opening balance', () => {
@@ -188,6 +219,14 @@ describe('opening balance', () => {
     const returns = [{ purchase_entry_id: 'a1', monthly_periods: PRE_FY, bs_day: 25, qty: 3, rate: 100 }]
     const opening = computeOpeningBalance(creditEntries, payments, returns, FY_START)
     expect(opening).toBeCloseTo(-300, 2)
+  })
+
+  // S792 (D33): the opening balance values a pre-FY return the same way the FY schedule does.
+  test('a pre-FY return against a discounted bill comes off at the discounted price', () => {
+    const creditEntries = [line('a1', 'g1', PRE_FY, { qty: 10, rate: 100, discount: 200 })]
+    const returns = [{ purchase_entry_id: 'a1', monthly_periods: PRE_FY, bs_day: 25, qty: 5, rate: 100 }]
+    // 1,000 less 200 is 800; half the goods back at 80% is 400, so 400 is still owed (was 300).
+    expect(computeOpeningBalance(creditEntries, [], returns, FY_START)).toBeCloseTo(400, 2)
   })
 
   // S756. A bill written before purchase_group_id existed carries NULL there and is grouped by

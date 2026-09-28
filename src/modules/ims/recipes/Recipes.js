@@ -34,6 +34,9 @@ import { chipKeys } from '../../../shared/rovingFocus'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
+import { isCostedByBuild, BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
+import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
+import PanPriceBanner from './PanPriceBanner'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -66,6 +69,10 @@ class SaveRefusal extends Error {
 // identically to an unrecognised error's.
 const errorDetail = e => [e?.code, e?.message].filter(Boolean).join(' · ')
 
+// The edit form's VAT value for a stored dish: NULL reads as 13% (vatOf()'s rule), as a string for
+// the <select>. One definition, because save() compares against it to tell a touched price (S792).
+const vatFormValue = r => (r.vat_rate === null || r.vat_rate === undefined) ? '0.13' : String(r.vat_rate)
+
 export default function Recipes() {
   const { clientId, hasFeature, isAdmin, isOwner, profile, posEnabled, hasImsAccess, customizationEnabled } = useAuth()
   // Who may put a price on the menu (S754, owner decision). Mirrors caller_can_set_menu_price() in
@@ -75,7 +82,13 @@ export default function Recipes() {
   // module to be enabled, which the database does not.
   const canSetMenuPrice = isAdmin || isOwner || profile?.pos_role === 'manager' || profile?.ims_role === 'manager'
   const showNutrition = hasFeature('nutrition_facts')
-  const { settings, recipeCategories } = useSettings()
+  const settingsCtx = useSettings()
+  const { settings, recipeCategories } = settingsCtx
+  // What a typed menu price means on this outlet (S792, RECIPES-2 / D31): 'vat' — it includes the
+  // dish's VAT, which is taken off before it is stored; 'pan' — a PAN-bill outlet, where the till
+  // adds no VAT, so it is stored whole with vat_rate 0; null — not known yet (settings loading, a
+  // failed read, another client's row), and then no price is saved. menuPriceVat.js has the rule.
+  const vatMode = vatModeOf(settingsCtx, clientId)
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   // Seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this page shows
@@ -357,7 +370,7 @@ export default function Recipes() {
       category: recipe.category || 'Food',
       recipe_code: recipe.recipe_code || '',
       selling_price: recipe.selling_price || '',
-      vat_rate: (recipe.vat_rate === null || recipe.vat_rate === undefined) ? '0.13' : String(recipe.vat_rate),
+      vat_rate: vatFormValue(recipe),
       yield_qty: recipe.yield_qty || '1',
       yield_uom: recipe.yield_uom || 'portion',
       target_fc_pct: fcVal,
@@ -824,6 +837,26 @@ export default function Recipes() {
         delete payload.vat_rate
       }
 
+      // S792 (RECIPES-2 / D31): the price's basis follows the OUTLET. On a PAN-bill outlet the till
+      // adds no VAT whatever the dish says, so the price box held the guest price and it is stored
+      // with vat_rate 0 — which is also what takes the dish off the "charged less than you set"
+      // banner once a manager has saved it from a form showing its real till price. With the
+      // outlet's basis unknown, a price the form changed is refused rather than stored on a guess
+      // (the box is disabled then, so this is the belt to that brace), and an untouched one is
+      // left out of the update, as for a supervisor above.
+      if (!isSubRecipe && 'selling_price' in payload) {
+        if (vatMode === 'pan') {
+          payload.vat_rate = 0
+        } else if (vatMode == null) {
+          const touched = selectedRecipe
+            ? String(recipeForm.selling_price || '') !== String(selectedRecipe.selling_price || '') || recipeForm.vat_rate !== vatFormValue(selectedRecipe)
+            : !!recipeForm.selling_price
+          if (touched) throw new SaveRefusal(`Nothing was saved. ${VAT_MODE_UNKNOWN_TEXT}`)
+          delete payload.selling_price
+          delete payload.vat_rate
+        }
+      }
+
       // A 23505 on this table is the per-client recipe_code unique index — the only unique
       // constraint a menu item's payload can violate. Name it so the operator fixes the code,
       // rather than surfacing a raw Postgres constraint string.
@@ -1230,11 +1263,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
   const liveCost = useMemo(() => calcLiveCost(ingredients, items, recipes), [ingredients, items, recipes])
   const livePrice = parseFloat(recipeForm.selling_price) || 0
   const liveVat = (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate)
+  // The VAT the guest actually pays on this dish (S792, D31): none on a PAN-bill outlet, whatever
+  // the dish's own rate says. The Menu Price box, the live panel and the suggestion all read this.
+  const formVat = guestVatRate(liveVat, vatMode)
+  // The form is a build-your-own dish (S792, RECIPES-1): its ingredients are only the fixed part, so
+  // the live panel does not rate or price it off them.
+  const formByBuild = isCostedByBuild(recipeForm, customizationEnabled)
   // null, never 0, when either side is missing (S756 — the S713 rule).
   const liveFcPct = menuFcPct(liveCost, livePrice)
-  const livePriceWithVat = livePrice * (1 + liveVat)
+  const livePriceWithVat = livePrice * (1 + formVat)
   const liveFcTarget = (parseFloat(recipeForm.target_fc_pct) || 30) / 100
-  const suggestedPrice = liveCost > 0 && !isSubRecipeForm ? getSuggestedPrice(liveCost, liveVat, liveFcTarget) : null
+  const suggestedPrice = liveCost > 0 && !isSubRecipeForm && !formByBuild ? getSuggestedPrice(liveCost, formVat, liveFcTarget) : null
   const liveYieldQty = parseFloat(recipeForm.yield_qty) || 1
   const liveCostPerUnit = isSubRecipeForm && liveYieldQty > 0 ? liveCost / liveYieldQty : null
   const liveNutri = useMemo(
@@ -1305,14 +1344,23 @@ Check the recipe list before saving again — if it timed out after the recipe w
   const [expandedByo, setExpandedByo] = useState(() => new Set())
   const [byoNotice, setByoNotice] = useState('')
 
-  const { filtered, regularRecipes, subRecipeList, tabs } = useMemo(() => {
+  const { filtered, regularRecipes, subRecipeList, tabs, byoOutOfBand } = useMemo(() => {
     const q = search.toLowerCase()
+    // Build-your-own dishes a band pill left out, counted so the pill row can say so (S792).
+    let byoOutOfBand = 0
     const filtered = recipes.filter(r => {
       const matchSearch = r.name.toLowerCase().includes(q)
       const matchCat = filterCat === 'all' || r.category === filterCat
       const matchIngredient = !ingQ || recipeHasIngredient(r, ingQ, recipes)
       const matchFC = (() => {
         if (fcFilter === 'all') return true
+        // A build-your-own dish is in no band either (S792, RECIPES-1): its fixed ingredients read
+        // 2.7% and "✓ ≤30%" returned it while its own row showed "38–52% ▲". Not rated — costed by
+        // build — so no band pill returns it; the pill row counts it instead.
+        if (isCostedByBuild(r, customizationEnabled)) {
+          if (matchSearch && matchCat && matchIngredient) byoOutOfBand++
+          return false
+        }
         // An uncosted dish is in no band, so it matches no band pill (S756) — it used to be a `0`
         // here and was returned by "✓ ≤30%".
         const fcPct = menuFcPct(recipeCostOf(recipeCostById, r), parseFloat(r.selling_price) || 0)
@@ -1349,8 +1397,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
       ...(byoCount > 0 ? [{ key: 'byo', label: 'Build-your-own', count: byoCount }] : []),
       { key: 'sub-recipes', label: '⚙ Sub-Recipes', count: subRecipeList.length },
     ]
-    return { filtered, regularRecipes, subRecipeList, tabs }
-  }, [recipes, search, filterCat, ingQ, fcFilter, fcWarn, fcCrit, recipeCategories, recipeCostById])
+    return { filtered, regularRecipes, subRecipeList, tabs, byoOutOfBand }
+  }, [recipes, search, filterCat, ingQ, fcFilter, fcWarn, fcCrit, recipeCategories, recipeCostById, customizationEnabled])
+
+  // S792 (RECIPES-2 / D31): on a PAN-bill outlet, the dishes whose stored price was de-VATed by the
+  // old pricing screens, so the till charges less than the menu price the owner last saw. Listed,
+  // never rewritten — the owner re-enters each one. Above the role guard, like every hook here.
+  const panMismatches = useMemo(() => vatMode === 'pan' ? panPriceMismatches(recipes) : [], [vatMode, recipes])
 
   // Role guard AFTER every hook (S601 pattern) — the memos above must run on every render.
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
@@ -1386,9 +1439,18 @@ Check the recipe list before saving again — if it timed out after the recipe w
       })
     } else {
       printShareRows.forEach(recipe => {
+        const price = parseFloat(recipe.selling_price) || 0
+        // A build-your-own dish is not rated (S792, RECIPES-1): the message used to say
+        // "FC 2.7% (NPR 8.00 / NPR 300.00)" for a bowl whose plate costs half its price. It carries
+        // the cost range when the page has worked it out.
+        if (isCostedByBuild(recipe, customizationEnabled)) {
+          const range = byoCost.byRecipe[recipe.id]
+          const costText = range && !range.empty ? `${costRangeText(range)} by build` : 'cost depends on the build'
+          lines.push(`${recipe.name} — ${BYO_STATUS} (${costText}${price ? ` / NPR ${price.toFixed(2)}` : ''})`)
+          return
+        }
         // A message that leaves the building says "not costed", never "NPR 0.00" (S756).
         const cost = dishCostOf(recipe)
-        const price = parseFloat(recipe.selling_price) || 0
         const fcPct = menuFcPct(cost, price)
         lines.push(`${recipe.name} — FC ${fcPct != null ? fcPct.toFixed(1) + '%' : '—'} (${cost != null ? `NPR ${cost.toFixed(2)}` : 'not costed'}${price ? ` / NPR ${price.toFixed(2)}` : ''})`)
       })
@@ -1439,6 +1501,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
           {customizationEnabled && byoCost.error && (
             <ReportLoadError error={`The build-your-own cost ranges could not be worked out (${byoCost.error}). Those dishes show “not checked” until the page is reloaded.`} />
           )}
+          <PanPriceBanner mismatches={panMismatches} fixHint={canSetMenuPrice
+            ? 'Open each dish with Edit and type the price guests should pay (or type it once on Menu Pricing), then save — it is stored as typed.'
+            : 'A manager or the Owner re-enters each price once, on Menu Pricing.'} />
           <ActionError error={error} className="action-error--top" />
           {/* Search bar */}
           <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
@@ -1446,7 +1511,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin} />
+              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin}
+                vatMode={vatMode} costedByBuild={r => isCostedByBuild(r, customizationEnabled)} />
               <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
                 <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
               </Tip>
@@ -1503,6 +1569,15 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 {pill.label}
               </button>
             ))}
+            {/* S792 (RECIPES-1): a band pill never returns a build-your-own dish, so the row says
+                how many it left out rather than letting them vanish from the filtered list. */}
+            {fcFilter !== 'all' && byoOutOfBand > 0 && (
+              <Tip text={BYO_TIP} width={300}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 6 }}>
+                  + {byoOutOfBand} build-your-own: {BYO_STATUS.toLowerCase()}
+                </span>
+              </Tip>
+            )}
           </div>
 
           {/* Tab bar */}
@@ -1661,7 +1736,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       {activeTab === 'all' && <th>Category</th>}
                       <th>Ingredients</th>
                       <th style={{ textAlign: 'right' }}>Food Cost</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Menu price ex-VAT (stored without VAT). VAT-inclusive price = selling price × (1 + VAT rate)." width={240}>Selling Price</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text={vatMode === 'pan'
+                        ? 'What the guest pays. This outlet gives PAN bills, so the till adds no VAT to it.'
+                        : 'Menu price ex-VAT (stored without VAT). VAT-inclusive price = selling price × (1 + VAT rate).'} width={240}>Selling Price</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text={`Food Cost % = food cost ÷ selling price (ex-VAT). ✓ up to ${fcWarn}%, △ ${fcWarn}–${fcCrit}%, ▲ above ${fcCrit}% — your thresholds from Settings. A dash means it can't be worked out yet: no selling price, or no costed ingredients and no manual cost.`} width={290}>FC %</Tip></th>
                       <th><Tip text="Inactive hides this recipe from Sales Entry, POS ordering, the Guest Menu, and the menu-analysis tools — past sales history and revenue are unaffected." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
@@ -1762,7 +1839,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           <tr id={`byo-cost-${recipe.id}`} className={rowHidden ? 'print-hide-row' : ''}>
                             <td className="no-print" />
                             <td colSpan={activeTab === 'all' ? 8 : 7}>
-                              <BuildCostDetail range={byo} settings={settings} />
+                              <BuildCostDetail range={byo} settings={settings} vatNote={vatMode !== 'pan'} />
                             </td>
                           </tr>
                         )}
@@ -1826,28 +1903,47 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     <input id="recipe-fcode" value={recipeForm.recipe_code} onChange={e => setRecipeForm(f => ({ ...f, recipe_code: e.target.value }))} placeholder="e.g. MOM-03" style={{ fontFamily: 'monospace' }} />
                   </div>
                   <div className="form-field">
-                    <label htmlFor="recipe-f9"><Tip text={priceLocked ? 'The menu price is set by a manager or the Owner, in Menu Pricing. It is shown here so the food cost below is worked out against it.' : 'Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation.'} width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
+                    <label htmlFor="recipe-f9"><Tip text={priceLocked ? 'The menu price is set by a manager or the Owner, in Menu Pricing. It is shown here so the food cost below is worked out against it.'
+                      : vatMode === 'pan' ? 'This outlet gives PAN bills (it is not VAT-registered), so the till adds no VAT: the price you type is exactly what the guest pays, and it is stored as typed.'
+                      : 'Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation.'} width={280}>Menu Price (NPR{vatMode === 'pan' ? `, ${PAN_LABEL}` : liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
                     <div style={{ position: 'relative' }}>
                       <input
                         id="recipe-f9"
                         type="number"
-                        disabled={priceLocked}
-                        aria-describedby={priceLocked ? 'recipe-price-locked' : undefined}
-                        key={`${recipeForm.selling_price ? 'has-price' : 'no-price'}-vat${recipeForm.vat_rate}`}
-                        defaultValue={recipeForm.selling_price ? (parseFloat(recipeForm.selling_price) * (1 + liveVat)).toFixed(2) : ''}
+                        // S792: also disabled while the outlet's VAT basis is unknown — a price typed
+                        // then could only be stored on a guess (menuPriceVat.js).
+                        disabled={priceLocked || vatMode == null}
+                        aria-describedby={priceLocked ? 'recipe-price-locked' : vatMode == null ? 'recipe-price-basis' : undefined}
+                        key={`${recipeForm.selling_price ? 'has-price' : 'no-price'}-vat${recipeForm.vat_rate}-${vatMode}`}
+                        defaultValue={recipeForm.selling_price ? (parseFloat(recipeForm.selling_price) * (1 + formVat)).toFixed(2) : ''}
                         onBlur={e => {
                           const rawPrice = parseFloat(e.target.value) || 0
                           const menuPrice = rawPrice > 0 ? Math.round(rawPrice) : 0
                           if (menuPrice !== rawPrice && e.target) e.target.value = menuPrice || ''
-                          const vatRate = (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate)
-                          const exVat = menuPrice > 0 ? (menuPrice / (1 + vatRate)).toFixed(4) : ''
-                          setRecipeForm(f => ({ ...f, selling_price: exVat }))
+                          if (!menuPrice) { setRecipeForm(f => ({ ...f, selling_price: '' })); return }
+                          // S792 (D31): stored on the outlet's basis — VAT taken off at the dish's
+                          // rate on a VAT outlet, whole with no VAT on a PAN-bill one.
+                          const stored = storedFromMenuPrice(menuPrice, liveVat, vatMode)
+                          if (!stored) return
+                          setRecipeForm(f => ({ ...f, selling_price: stored.selling_price.toFixed(4), vat_rate: String(stored.vat_rate) }))
                         }}
                         placeholder="e.g. 500"
                       />
-                      {recipeForm.selling_price && (
+                      {recipeForm.selling_price && vatMode !== 'pan' && (
                         <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>
                           {liveVat > 0 ? 'Ex-VAT stored' : 'Stored'}: NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
+                        </div>
+                      )}
+                      {vatMode == null && !priceLocked && (
+                        <div id="recipe-price-basis" role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
+                          △ {VAT_MODE_UNKNOWN_TEXT}
+                        </div>
+                      )}
+                      {/* S792 (D31): a dish priced before Crest took a PAN-bill price as typed. The
+                          box shows what the till charges; the note says what the menu showed. */}
+                      {vatMode === 'pan' && selectedRecipe && recipeForm.vat_rate !== '0' && parseFloat(selectedRecipe.selling_price) > 0 && vatOf(selectedRecipe) > 0 && (
+                        <div role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
+                          △ Priced with VAT taken off: the menu showed NPR {Math.round(parseFloat(selectedRecipe.selling_price) * (1 + vatOf(selectedRecipe)))}, the till charges NPR {Math.round(parseFloat(selectedRecipe.selling_price))}. {priceLocked ? 'A manager or the Owner re-enters it on Menu Pricing.' : 'Type the price guests should pay, then save.'}
                         </div>
                       )}
                       {priceLocked && (
@@ -1867,9 +1963,20 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       )}
                     </div>
                   </div>
+                  {vatMode === 'pan' ? (
+                    // S792 (D31): a PAN-bill outlet has no VAT to choose. The till adds none whatever
+                    // a dish's rate says, so offering 13% here would only re-create the price the
+                    // guest is not charged.
+                    <div className="form-field">
+                      <label htmlFor="recipe-f5"><Tip text="This outlet is set up as not VAT-registered, so it gives PAN bills and the till adds no VAT to any dish. If that is wrong, ask Crest support to change the outlet's VAT registration." width={280}>VAT Rate</Tip></label>
+                      <select id="recipe-f5" value="0" disabled>
+                        <option value="0">None — PAN bill</option>
+                      </select>
+                    </div>
+                  ) : (
                   <div className="form-field">
                     <label htmlFor="recipe-f5"><Tip text="Standard Nepal VAT is 13%. Set to 0% for VAT-exempt dishes (some raw food items). Changing it keeps the menu price the guest pays and recalculates the ex-VAT price stored for food cost." width={280}>VAT Rate</Tip></label>
-                    <select id="recipe-f5" value={recipeForm.vat_rate} disabled={priceLocked}
+                    <select id="recipe-f5" value={recipeForm.vat_rate} disabled={priceLocked || vatMode == null}
                       aria-describedby={recipeForm.selling_price ? 'recipe-vat-exvat' : undefined}
                       title={priceLocked ? 'The VAT rate is part of the menu price — set by a manager or the Owner in Menu Pricing.' : undefined}
                       onChange={e => {
@@ -1899,6 +2006,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       </div>
                     )}
                   </div>
+                  )}
                   <div className="form-field">
                     <label htmlFor="recipe-f10" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Tip text="Target food cost % for this recipe. Used to compute the suggested menu price. Nepal F&B average: 28–35%." width={260}>Target FC %</Tip>
@@ -1974,9 +2082,10 @@ Check the recipe list before saving again — if it timed out after the recipe w
             }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
-                  {isSubRecipeForm ? 'Total Batch Cost' : 'Food Cost'}
+                  {isSubRecipeForm ? 'Total Batch Cost' : formByBuild ? 'Fixed ingredients' : 'Food Cost'}
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {liveCost.toFixed(2)}</div>
+                {formByBuild && <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>The plate adds the guest's choices</div>}
               </div>
               {isSubRecipeForm && liveCostPerUnit != null && (
                 <div>
@@ -1991,7 +2100,12 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   {/* Banded through fcFigure(settings) like the card beside it — this used to be a
                       local 30/38 threshold, so the form and the list could disagree about the same
                       dish, and the settings target was ignored here (S682). */}
-                  {(() => { const f = fcFigure(liveFcPct, settings); return (
+                  {/* S792 (RECIPES-1): a build-your-own dish is not rated on its fixed part. */}
+                  {formByBuild ? (
+                    <Tip text={BYO_TIP} width={300}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text2)' }}>{BYO_STATUS}</span>
+                    </Tip>
+                  ) : (() => { const f = fcFigure(liveFcPct, settings); return (
                     <>
                       <div style={{ fontSize: 18, fontWeight: 700, ...f.style }} title={f.title}>{f.text}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{f.band.label || 'No target set'}</div>
@@ -2001,15 +2115,15 @@ Check the recipe list before saving again — if it timed out after the recipe w
               )}
               {!isSubRecipeForm && livePrice > 0 && (
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Menu Price (incl. VAT)</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Menu Price ({vatMode === 'pan' ? PAN_LABEL : 'incl. VAT'})</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {livePriceWithVat.toFixed(0)}</div>
                 </div>
               )}
               {suggestedPrice && (
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Suggested @ {recipeForm.target_fc_pct || 30}% FC (incl. VAT)</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Suggested @ {recipeForm.target_fc_pct || 30}% FC ({vatMode === 'pan' ? PAN_LABEL : 'incl. VAT'})</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {suggestedPrice}</div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{liveVat > 0 ? `incl. ${(liveVat*100).toFixed(0)}% VAT, ` : ''}rounded</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{formVat > 0 ? `incl. ${(formVat*100).toFixed(0)}% VAT, ` : ''}rounded</div>
                 </div>
               )}
             </div>
@@ -2200,10 +2314,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
         // costs for pricing — the manual cost when it has no costed ingredients, null when neither
         // exists — and every tile that divides by or subtracts it reads that (S756).
         const cost = calcRecipeCost(selectedRecipe, recipes)
-        const dishCost = recipeCostOf({ [selectedRecipe.id]: cost }, selectedRecipe)
+        // S792 (RECIPES-1): a build-your-own dish's recipe is only its fixed part (the bowl, the
+        // spoon), so it has no single food cost here — every tile that divides by or subtracts one
+        // reads "Not rated — costed by build", and its cost range by size sits under the tiles.
+        const byBuild = isCostedByBuild(selectedRecipe, customizationEnabled)
+        const byoRange = byBuild ? byoCost.byRecipe[selectedRecipe.id] : null
+        const dishCost = byBuild ? null : recipeCostOf({ [selectedRecipe.id]: cost }, selectedRecipe)
         const manualCost = dishCost != null && !(cost > 0)
         const price = parseFloat(selectedRecipe.selling_price) || 0
-        const vat = vatOf(selectedRecipe)
+        // The VAT on top of the stored price the guest pays — none on a PAN-bill outlet (S792, D31).
+        const storedVat = vatOf(selectedRecipe)
+        const vat = guestVatRate(storedVat, vatMode)
         const fcPct = menuFcPct(dishCost, price)
         const yieldQty = parseFloat(selectedRecipe.yield_qty) || 1
         const costPerUnit = cost / yieldQty
@@ -2257,24 +2378,46 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 { label: `Cost per ${selectedRecipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}`, color: 'var(--theme-green-text)' },
                 { label: 'Yield', value: `${selectedRecipe.yield_qty} ${selectedRecipe.yield_uom}`, color: 'var(--theme-text1)' },
               ] : [
-                { label: manualCost ? 'Food Cost (manual)' : 'Food Cost', value: dishCost != null ? `NPR ${dishCost.toFixed(2)}` : '— not costed', color: dishCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' },
-                { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}% ${fcB2.mark}` : '—', color: fcColor },
-                { label: 'Selling Price (ex. VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—', color: 'var(--theme-text1)' },
-                { label: `Menu Price (incl. ${(vat*100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price*(1+vat)).toFixed(0)}` : '—', color: 'var(--theme-text1)' },
+                byBuild
+                  ? { label: 'Food Cost (by build)', value: byoCost.error ? 'not checked' : byoRange && !byoRange.empty ? costRangeText(byoRange) : byoCost.loading ? '…' : 'no choices yet', color: byoRange && !byoRange.empty ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', text: true, title: 'From the cheapest build of the smallest size to the typical build of the biggest — each size is below.' }
+                  : { label: manualCost ? 'Food Cost (manual)' : 'Food Cost', value: dishCost != null ? `NPR ${dishCost.toFixed(2)}` : '— not costed', color: dishCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' },
+                byBuild
+                  ? { label: 'Food Cost %', value: BYO_STATUS, color: 'var(--theme-text2)', text: true, title: BYO_TIP }
+                  : { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}% ${fcB2.mark}` : '—', color: fcColor },
+                // S792 (D31): on a PAN-bill outlet the stored price IS what the guest pays, so there
+                // is one price tile, and a dish still carrying a VAT rate from before says what the
+                // menu showed against what the till charges.
+                ...(vatMode === 'pan' ? [
+                  { label: `Menu Price (${PAN_LABEL})`, value: price ? `NPR ${price.toFixed(0)}` : '—', color: 'var(--theme-text1)',
+                    sub: price && storedVat > 0 ? `△ the menu showed NPR ${Math.round(price * (1 + storedVat))}` : null },
+                ] : [
+                  { label: 'Selling Price (ex. VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—', color: 'var(--theme-text1)' },
+                  { label: `Menu Price (incl. ${(vat*100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price*(1+vat)).toFixed(0)}` : '—', color: 'var(--theme-text1)' },
+                ]),
                 // The VAT basis is IN the label because this tile sits two tiles along from
                 // "Selling Price (ex. VAT)" and getSuggestedPrice() returns a VAT-INCLUSIVE figure
                 // rounded up to NPR 5 (S711). Unlabelled, the two read as directly comparable and
                 // the suggestion looks ~13% higher than it is — it is the counterpart of "Menu
-                // Price (incl. VAT)" beside it, not of the ex-VAT price.
-                // A suggestion from an unknown cost is NPR 0 — "charge nothing" (S756).
-                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (incl. VAT)`, value: dishCost != null ? `NPR ${getSuggestedPrice(dishCost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}` : '—', color: dishCost != null ? 'var(--theme-green-text)' : 'var(--theme-text3)' },
+                // Price (incl. VAT)" beside it, not of the ex-VAT price. On a PAN-bill outlet it
+                // carries no VAT, and says so (S792).
+                // A suggestion from an unknown cost is NPR 0 — "charge nothing" (S756); from a
+                // build-your-own dish's fixed part it was NPR 35 for a NPR 300 bowl (S792).
+                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (${vatMode === 'pan' ? PAN_LABEL : 'incl. VAT'})`, value: dishCost != null ? `NPR ${getSuggestedPrice(dishCost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}` : '—', color: dishCost != null ? 'var(--theme-green-text)' : 'var(--theme-text3)', title: byBuild ? BYO_TIP : undefined },
               ]).map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-label">{s.label}</div>
-                  <div className="stat-value" style={{ fontSize: 18, color: s.color }}>{s.value}</div>
+                  {/* A text value in a tile never wraps: nowrap + ellipsis + title (page-layout.md). */}
+                  <div className="stat-value" title={s.title || (s.text ? s.value : undefined)}
+                    style={{ fontSize: s.text ? 14 : 18, color: s.color, ...(s.text ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : {}) }}>{s.value}</div>
+                  {s.sub && <div className="stat-sub" style={{ color: 'var(--theme-amber-text)' }}>{s.sub}</div>}
                 </div>
               ))}
             </div>
+            {byBuild && byoRange && !byoRange.empty && (
+              <div style={{ marginBottom: 20 }}>
+                <BuildCostDetail range={byoRange} settings={settings} vatNote={vatMode !== 'pan'} />
+              </div>
+            )}
 
             {/* The panel's absence is normally a fact ("no overheads recorded this period"), so a
                 failed read has to say it could not check rather than borrowing that meaning. */}
@@ -2292,7 +2435,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
               // flattering one S724 took off Recipe Margin — so both read as unknown (S756).
               const trueCost = dishCost != null ? dishCost + ohPerPortion : null
               const trueNetMargin = trueCost != null && price > 0 ? ((price - trueCost) / price) * 100 : null
-              const vat = vatOf(selectedRecipe)
+              // `vat` is the detail view's own: the VAT the guest pays, none on a PAN bill (S792).
               // Targets a 30% true margin (true cost = 70% of price), matching the health-check
               // threshold below — not a 20%-food-cost-style ratio.
               const suggestedVat = trueCost != null ? Math.ceil(((trueCost / 0.70) * (1 + vat)) / 5) * 5 : null
@@ -2315,7 +2458,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Cost / Portion</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: trueCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{trueCost != null ? `NPR ${trueCost.toFixed(2)}` : '—'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueCost != null ? 'Food + Overhead' : 'Food cost not known yet'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueCost != null ? 'Food + Overhead' : byBuild ? BYO_STATUS : 'Food cost not known yet'}</div>
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Net Margin %</div>
@@ -2331,7 +2474,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Suggested Price @ 30% margin</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: suggestedVat != null ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>{suggestedVat != null ? `NPR ${suggestedVat}` : '—'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>incl. {(vat*100).toFixed(0)}% VAT, rounded to ÷5</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{vatMode === 'pan' ? `${PAN_LABEL}, ` : `incl. ${(vat*100).toFixed(0)}% VAT, `}rounded to ÷5</div>
                     </div>
                   </div>
                 </div>
@@ -2473,7 +2616,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
 
           {/* ── PRINT-ONLY COST CARD ── */}
           <div className="print-only">
-            <RecipeCostCardPrint recipe={selectedRecipe} recipes={recipes} settings={settings} overheadData={overheadData} showNutrition={showNutrition} />
+            <RecipeCostCardPrint recipe={selectedRecipe} recipes={recipes} settings={settings} overheadData={overheadData} showNutrition={showNutrition}
+            buildYourOwn={isCostedByBuild(selectedRecipe, customizationEnabled)} byoRange={byoCost.byRecipe[selectedRecipe.id] || null} vatMode={vatMode} />
           </div>
           </>
         )
@@ -2482,7 +2626,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
       {/* ── LIST-VIEW PRINT CARD (fires when 🖶 clicked from list) ── */}
       {printRecipe && (
         <div className="print-only">
-          <RecipeCostCardPrint recipe={printRecipe} recipes={recipes} settings={settings} overheadData={overheadData} showNutrition={showNutrition} />
+          <RecipeCostCardPrint recipe={printRecipe} recipes={recipes} settings={settings} overheadData={overheadData} showNutrition={showNutrition}
+            buildYourOwn={isCostedByBuild(printRecipe, customizationEnabled)} byoRange={byoCost.byRecipe[printRecipe.id] || null} vatMode={vatMode} />
         </div>
       )}
 

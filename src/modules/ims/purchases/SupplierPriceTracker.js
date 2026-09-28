@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { firstError } from '../../../shared/queryError'
@@ -73,6 +74,7 @@ export default function SupplierPriceTracker() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const biz = useBizInfo()
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   const [vendors, setVendors]           = useState([])
   const [items, setItems]               = useState([])
@@ -252,12 +254,21 @@ export default function SupplierPriceTracker() {
   // `vendor__item`, so one item bought from two vendors has two rows — and an editor keyed by
   // item id opened BOTH of them on one Edit click, with `autoFocus` landing the caret in the
   // second. The write still targets `item.id`; only the editor state is per row.
+  //
+  // S792 (PURCHASES-6 = MASTER-6, owner decision D5). The price used to be written on Enter, with
+  // the affected recipes listed only AFTER the save. D5 says a price change warns first, and this
+  // was the third writer of `items.rate` that did not: Item Master and the purchase bill's rate
+  // sync both do. So the recipe read now runs before anything is written, and the confirm names
+  // what the new price re-values — the recipes costed from this item, and every stock count,
+  // wastage entry and staff meal of it, closed months included — before a single row moves.
   async function savePrice(item, rowKey) {
     const newPerUomRate = parseFloat(editingPrice[rowKey])
-    if (isNaN(newPerUomRate) || newPerUomRate <= 0) {
-      setEditingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
-      return
-    }
+    const closeEditor = () => setEditingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
+    if (savingPrice[rowKey]) return   // a second Enter while the recipe list is still being read
+    if (isNaN(newPerUomRate) || newPerUomRate <= 0) { closeEditor(); return }
+    const oldRate = parseFloat(item.per_uom_rate ?? item.rate) || 0
+    // Nothing changes, so there is nothing to warn about and nothing to write.
+    if (Math.abs(oldRate - newPerUomRate) <= 1e-9) { closeEditor(); return }
     setSaveError(null)
     // The affected-recipe list is advisory, but a FAILED read must not read as "no recipes use
     // this item" — that is the sentence the banner prints, and it is the one thing telling the
@@ -269,17 +280,55 @@ export default function SupplierPriceTracker() {
     // affected-recipes banner had never once fired in the product's life. S725 started reporting
     // the failure honestly, which made "could not read the recipe list" the permanent state.
     // `Recipes.js` has always spelled the hint (two sites); this was the copy that did not.
+    setSavingPrice(p => ({ ...p, [rowKey]: true }))
     const { data: recipeIngs, error: ingErr } = await supabase
       .from('recipe_ingredients')
       .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
       .eq('item_id', item.id)
-    const affected = (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
+    setSavingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
+    // null = the list could not be read, which the confirm and the banner both say in words.
+    const affected = ingErr
+      ? null
+      : (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
 
+    const per = item.uom ? ` per ${item.uom}` : ''
+    askConfirm({
+      title: `Change ${item.name}'s Item Master price?`,
+      confirmLabel: 'Change the price',
+      busyLabel: 'Saving…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Price{per} goes from <strong>NPR {oldRate > 0 ? oldRate.toFixed(4) : '—'}</strong> to <strong>NPR {newPerUomRate.toFixed(4)}</strong>.
+          </p>
+          <p style={{ margin: '0 0 8px' }}>
+            {affected === null
+              ? <>Crest could not read which recipes use {item.name}, so it cannot name the dishes whose cost changes — check Recipes after saving.</>
+              : affected.length === 0
+                ? <>No recipe uses {item.name}, so no dish cost changes.</>
+                : <>{affected.length === 1 ? '1 recipe is' : `${affected.length} recipes are`} costed from this price and change at once: {affected.slice(0, 8).join(', ')}{affected.length > 8 ? ` and ${affected.length - 8} more` : ''}.</>}
+          </p>
+          <p style={{ margin: 0 }}>
+            Every stock count, wastage entry and staff meal of {item.name} is valued at this price wherever a report reads it — including months already closed — so those past figures change the moment you save. Purchase bills keep the price typed on them, and a closed month&apos;s Monthly Owner Report was frozen when the month closed.
+          </p>
+        </>
+      ),
+      run: () => writePrice(item, rowKey, newPerUomRate, affected),
+    })
+  }
+
+  async function writePrice(item, rowKey, newPerUomRate, affected) {
     setSavingPrice(p => ({ ...p, [rowKey]: true }))
     // Items are stored in their smallest unit — purchase_qty is always 1, so `rate` IS the per-UOM
     // price and needs no scaling. Multiplying by purchase_qty here was correct only while that
     // column could hold a pack size; keeping it would silently re-introduce a pack price.
-    const { error } = await scopedUpdate('items', { rate: newPerUomRate }).eq('id', item.id)
+    //
+    // `.select('id')` (S792, PURCHASES-6): an update that matches no row — the item deleted on
+    // another device, or a policy filtering it out — returns `error: null`, and the screen then
+    // showed the new price as saved. PostgREST returns the rows it actually changed, so an empty
+    // answer is proof the price did not change and may be said so. A refusal the database raises
+    // (the S792 items rank guard, HINT `ims_rank`) arrives as `error` and is worded by errorText.
+    const { data: written, error } = await scopedUpdate('items', { rate: newPerUomRate }).eq('id', item.id).select('id')
     setSavingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
     if (error) {
       // A dropped write error is silent data loss. This branch was `if (!error) { … }` with no
@@ -290,10 +339,17 @@ export default function SupplierPriceTracker() {
       setSaveError(asActionError(error, 'operator'))
       return   // keep the typed value in the box so it can be retried without re-typing
     }
+    if (!written?.length) {
+      setSaveError({
+        text: `${item.name}'s price was not changed — the item could not be found. It may have been deleted, or hidden from this login, since the page loaded. Reload the page to see the Item Master as it is now.`,
+        detail: 'items rate update matched 0 rows',
+      })
+      return
+    }
     setSaveError(null)
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, rate: newPerUomRate, per_uom_rate: newPerUomRate } : i))
-    if (affected.length > 0) setAffectedRecipes({ itemName: item.name, recipes: affected, newRate: newPerUomRate, uom: item.uom })
-    else if (ingErr) setAffectedRecipes({ itemName: item.name, recipes: null, newRate: newPerUomRate, uom: item.uom })
+    if (affected === null) setAffectedRecipes({ itemName: item.name, recipes: null, newRate: newPerUomRate, uom: item.uom })
+    else if (affected.length > 0) setAffectedRecipes({ itemName: item.name, recipes: affected, newRate: newPerUomRate, uom: item.uom })
     setEditingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
   }
 
@@ -750,6 +806,7 @@ export default function SupplierPriceTracker() {
       <p className="no-print" style={{ marginTop: 10, fontSize: 12, color: 'var(--theme-text3)' }}>
         Click any row to expand full purchase history. Rates are per UOM. "Update Rate" sets the item master cost used in recipe costing.
       </p>
+      {confirmEl}
     </div>
   )
 }

@@ -1,7 +1,8 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom, scopedInsert, scopedDelete } from '../shared/scopedDb'
-import { fetchAllRowsChunked } from '../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../shared/fetchAllRows'
 import { computeOrderAmounts } from './posBillingMath'
+import { randomUUID } from './uuid'
 import {
   LOOKBACK_DAYS, buildDailyHistory, buildManualDailyHistory, periodsInLookback, forecastByWeekday,
 } from './demandForecastMath'
@@ -15,9 +16,19 @@ export const FORECAST_METHOD = 'weekday_weighted_average'
 // PostgREST reports an unknown column as PGRST204 ("Could not find the 'x' column …") from its
 // schema cache; Postgres itself would say 42703. Either way, only the two evidence columns are
 // new enough to be missing.
-function isMissingSampleColumns(err) {
+function isMissingColumn(err, pattern) {
   const text = `${err?.message || ''} ${err?.details || ''}`
-  return (err?.code === 'PGRST204' || err?.code === '42703') && /sample_count/.test(text)
+  return (err?.code === 'PGRST204' || err?.code === '42703') && pattern.test(text)
+}
+
+// Insert one run's rows. A database behind on migration 20260908120000 has no evidence columns;
+// the forecast is still correct without them, so it is written without them rather than refused —
+// the page simply omits the "from the last N Wednesdays" line until the migration lands.
+async function insertForecastRows(clientId, rows) {
+  const res = await scopedInsert('demand_forecast_daily', clientId, rows)
+  if (!res.error || !isMissingColumn(res.error, /sample_count/)) return res
+  console.warn('demand_forecast_daily has no sample_count columns yet — apply migration 20260908120000. Writing the forecast without them.')
+  return scopedInsert('demand_forecast_daily', clientId, rows.map(({ sample_count, pos_sample_count, ...rest }) => rest))
 }
 
 export async function runForecast(clientId, horizonDays = 7) {
@@ -31,10 +42,15 @@ export async function runForecast(clientId, horizonDays = 7) {
     const [ordersRes, periodsRes, holidaysRes] = await Promise.all([
       // Bounded at both ends: today's bills are a partial day and must not stand in for a whole
       // one (forecastByWeekday drops them too — this just avoids fetching them).
-      scopedFrom('pos_orders', clientId, 'id, covers, closed_at, credit_note_id')
+      // Paged (S792 PLANNING-1): one row per bill over LOOKBACK_DAYS, so any till doing more than
+      // ~12 bills a day passed 1,000 — and with no ORDER BY the rows kept were roughly the OLDEST,
+      // so the forecast averaged a few weeks from two months ago, fell short of history, and said
+      // nothing. pos_order_items below was already paged; this, its parent, was not.
+      fetchAllRows(() => scopedFrom('pos_orders', clientId, 'id, covers, closed_at, credit_note_id')
         .eq('status', 'billed').eq('close_type', 'paid')
         .gte('closed_at', lookbackStart.toISOString())
-        .lt('closed_at', todayStart.toISOString()),
+        .lt('closed_at', todayStart.toISOString())
+        .order('id')),
       scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month'),
       // A removed holiday (removed_at, S748) is remembered for Seed, not observed — no multiplier.
       scopedFrom('hr_holiday_calendar', clientId, 'bs_year, bs_month, bs_day, name, holiday_type, demand_multiplier').is('removed_at', null),
@@ -149,25 +165,36 @@ export async function runForecast(clientId, horizonDays = 7) {
     // insert fails partway (network drop, RLS hiccup), the prior run's rows stay intact instead of
     // being wiped with nothing to replace them (the UI would otherwise fall back to "No forecast
     // yet" instead of the last good run). demand_forecast_daily has no natural upsert key
-    // (recipe-level rows share a date), so old rows are still cleared by id exclusion afterward —
-    // every recompute click would otherwise stack duplicate day-rows and loadStored's read-back
-    // would non-deterministically pick between old and new values. Which is exactly why the
-    // delete's error is checked: a refused delete used to leave both runs in place while the run
-    // log recorded a success.
+    // (recipe-level rows share a date), so every row carries this run's id and the old rows are
+    // cleared as "this horizon, any other run" afterward — every recompute click would otherwise
+    // stack duplicate day-rows. The delete's error is checked: a refused delete used to leave both
+    // runs in place while the run log recorded a success.
+    //
+    // S792 PLANNING-1: the clear used to be `id NOT IN (<every new id>)` — ~1,230 uuids (~45 KB)
+    // in the URL on a 30-day, 40-dish run, which the gateway refuses, so the old run stayed and
+    // each Recompute added another. `run_id IS NULL` is part of the filter on purpose: rows from
+    // before the column (and from an older cached bundle) have none, and `<>` alone drops NULLs.
     if (rows.length > 0) {
-      let { data: inserted, error: insErr } = await scopedInsert('demand_forecast_daily', clientId, rows)
-      if (insErr && isMissingSampleColumns(insErr)) {
-        // Migration 20260908120000 not applied yet on this database. The forecast is still
-        // correct without its evidence columns, so write it without them rather than refuse —
-        // the page simply omits the "from the last N Wednesdays" line until the migration lands.
-        console.warn('demand_forecast_daily has no sample_count columns yet — apply migration 20260908120000. Writing the forecast without them.')
-        const stripped = rows.map(({ sample_count, pos_sample_count, ...rest }) => rest)
-        ;({ data: inserted, error: insErr } = await scopedInsert('demand_forecast_daily', clientId, stripped))
-      }
-      if (insErr) throw insErr
-      const newIds = (inserted || []).map(r => r.id)
-      if (newIds.length > 0) {
-        const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays).not('id', 'in', `(${newIds.join(',')})`)
+      const runId = randomUUID()
+      let { error: insErr } = await insertForecastRows(clientId, rows.map(r => ({ ...r, run_id: runId })))
+      if (insErr && isMissingColumn(insErr, /run_id/)) {
+        // Migration 20260928160100 not applied yet on this database. Write the run without its id
+        // and clear the previous one by ITS ids — read before the insert lands, deleted in chunks
+        // so no request carries more than a URL's worth of them. Once the column exists this
+        // branch never runs.
+        console.warn('demand_forecast_daily has no run_id column yet — apply migration 20260928160100. Clearing the previous run by id.')
+        const { data: oldRows, error: oldErr } = await fetchAllRows(() => scopedFrom('demand_forecast_daily', clientId, 'id')
+          .eq('horizon_days', horizonDays).order('id'))
+        if (oldErr) throw oldErr
+        ;({ error: insErr } = await insertForecastRows(clientId, rows))
+        if (insErr) throw insErr
+        const { error: delErr } = await runChunkedByIds((oldRows || []).map(r => r.id), ids =>
+          scopedDelete('demand_forecast_daily', clientId).in('id', ids))
+        if (delErr) throw delErr
+      } else {
+        if (insErr) throw insErr
+        const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId)
+          .eq('horizon_days', horizonDays).or(`run_id.is.null,run_id.neq.${runId}`)
         if (delErr) throw delErr
       }
     } else {

@@ -19,6 +19,11 @@
 // The S717 three states survive into the snapshot as counts: assessed, not counted (no closing row
 // for the report's month — a count of 0 IS a count), and inconsistent (counted higher than was
 // available). Only assessed items can be Dead or Slow.
+//
+// S792 (PLANNING-4, schema v9): staff meals are MOVEMENT. The rule changed in deadStockCalc.js, so
+// this section follows it without a line of its own; it only records that it did (`movement`) and
+// carries each item's staff meals beside `used`, which stays the COGS residual. A v7/v8 section
+// judged staff rice as still and could call it Dead.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
@@ -124,6 +129,8 @@ export function buildDeadStockSection({ history, items, openings, purchases, ret
     flagged.push({
       itemId: item.id, name: item.name,
       opening: f.opening, purchased: f.purchased, returned: f.returned, wasted: f.wasted,
+      // New in schema v9: absent on an older snapshot, whose renderers must not print it as 0.
+      staffMeals: f.staffUsed,
       used: latest.used, closing: f.closing, valueAtRisk, status: verdict.status,
       // New in schema v7 — an older snapshot has none of these, and its renderers must say so
       // rather than print 0 or blank as if it were a finding.
@@ -138,6 +145,9 @@ export function buildDeadStockSection({ history, items, openings, purchases, ret
   return {
     // `rule` is how a renderer tells a v7 section from a v1–v6 one without reading schemaVersion.
     rule: 'streak',
+    // v9 (S792): staff meals count as use, wastage does not. Absent on a v7/v8 section, which
+    // judged movement on the COGS residual alone.
+    movement: 'staff_meals_count',
     deadAfterMonths: DEAD_AFTER_MONTHS,
     historyMonths: (history || []).length,
     assessedCount, uncountedCount, inconsistentCount,

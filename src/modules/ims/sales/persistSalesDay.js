@@ -5,6 +5,30 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildPosIndex, posSupersedesManual } from './salesDepletion'
 
+// One writer at a time per (client, period, day) of manual stock_movements (S792, SALES-4).
+//
+// replaceManualMovements is four round trips — guard read, delete the day, explode the recipes,
+// insert — with nothing making two runs for the same day take turns. Save Day comes back within a
+// second of the RPC, so "save, spot a typo, save again" started a second run while the first was
+// still exploding recipes, and the interleaving A-delete, B-delete, A-insert, B-insert left the
+// day depleted twice: Stock Movements, Book Stock and Reorder then read low. The sales rows were
+// never at risk (save_sales_day is one transaction); the ledger beside them was.
+//
+// A promise chain per key, the Stock.js persistLocks shape: a run waits for every key it touches
+// to be free and then becomes each key's new tail. The tail swallows the run's outcome so one
+// failure never wedges the chain. Module scope, because both the save and the cross-mode re-post
+// write through here and a page remount must not start a second, unaware chain.
+const movementLocks = new Map()
+function withDayLocks(keys, fn) {
+  const priors = keys.map(k => movementLocks.get(k) || Promise.resolve())
+  const run = Promise.all(priors).then(fn)
+  const tail = run.then(() => {}, () => {})
+  keys.forEach(k => movementLocks.set(k, tail))
+  // Drop a key once its chain is idle, so the map does not grow with every day ever saved.
+  tail.then(() => keys.forEach(k => { if (movementLocks.get(k) === tail) movementLocks.delete(k) }))
+  return run
+}
+
 // How long any single save request may hang before we give up and re-enable the button (S453/S454).
 export const SAVE_TIMEOUT_MS = 20000
 
@@ -179,10 +203,14 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
 // a failure here must never undo or retry the sales_entries save that already committed.
 //
 // Product decision (confirmed with Aashish, 2026-07-30): only applies going forward from today, no
-// backfill of prior saves. Where POS already sold a recipe on the same day (Bulk: anywhere in the
-// period, since POS never posts a bs_day=0 row), POS supersedes and the manual row deposits no
-// movement for that recipe — two different facts about the same recipe/day should not both deplete
-// stock for it.
+// backfill of prior saves. Where POS already sold a recipe on the same day, POS supersedes and the
+// manual row deposits no movement for that recipe — two different facts about the same recipe/day
+// should not both deplete stock for it. A Bulk row follows D35 (S792, salesDepletion.js): it keeps
+// depleting beside the till until the days before the till are entered as daily figures.
+//
+// Resolves once the movements are written (or the attempt has been abandoned and logged) — never
+// rejects. Sales.js awaits it inside the save since S792 (SALES-4), so Save Day stays disabled
+// until the ledger for the day is settled.
 export async function depleteManualSales(supabase, { clientId, periodId, bsDay, rows }) {
   try {
     await replaceManualMovements(supabase, { clientId, periodId, rowsByDay: new Map([[bsDay, rows || []]]) })
@@ -217,34 +245,70 @@ export async function repostSupersededMovements(supabase, { clientId, periodId, 
     const uniqueDays = [...new Set((days || []).map(Number))].filter(d => Number.isInteger(d) && d >= 0)
     if (uniqueDays.length === 0) return
 
-    // Bounded (≤ 33 distinct days, so the .in() is short), paged, uniquely ordered. manualOnly so a
-    // POS row on the same day is never re-posted as a manual movement.
-    const { data, error } = await fetchAllRows(() =>
-      manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, source').eq('period_id', periodId))
-        .in('bs_day', uniqueDays).order('id'))
-    if (error) {
-      console.error('manual stock_movements: could not read the superseded days, so their movements were left as they were (they still count the replaced entries):', error)
-      return
-    }
+    // The read happens INSIDE the days' locks (S792 stage 2 review, P3). Read outside them, a read
+    // that stalled could resolve after a newer save of one of these days had written its movements,
+    // and the rebuild — waiting its turn on the lock with pre-save rows in hand — then deleted that
+    // save's movements and re-posted the old figures. Under the lock, read → delete → insert for a
+    // day is one turn, so a later save of the day waits for it and an earlier one has finished.
+    await withDayLocks(uniqueDays.map(d => `${clientId}:${periodId}:${d}`), async () => {
+      // Bounded (≤ 33 distinct days, so the .in() is short), paged, uniquely ordered. manualOnly so
+      // a POS row on the same day is never re-posted as a manual movement.
+      const { data, error } = await fetchAllRows(() =>
+        manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, source').eq('period_id', periodId))
+          .in('bs_day', uniqueDays).order('id'))
+      if (error) {
+        console.error('manual stock_movements: could not read the superseded days, so their movements were left as they were (they still count the replaced entries):', error)
+        return
+      }
 
-    const rowsByDay = new Map(uniqueDays.map(d => [d, []]))
-    for (const r of data || []) {
-      const day = Number(r.bs_day) || 0
-      if (rowsByDay.has(day)) rowsByDay.get(day).push(r)
-    }
-    await replaceManualMovements(supabase, { clientId, periodId, rowsByDay })
+      const rowsByDay = new Map(uniqueDays.map(d => [d, []]))
+      for (const r of data || []) {
+        const day = Number(r.bs_day) || 0
+        if (rowsByDay.has(day)) rowsByDay.get(day).push(r)
+      }
+      // Now, not replaceManualMovements: that takes these same locks, and this turn already holds them.
+      await replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days: uniqueDays })
+    })
   } catch (err) {
     console.error('manual stock_movements: re-posting the superseded days failed:', err)
   }
+}
+
+// The two facts the Bulk test needs (D35, S792) that the recipe-scoped guard read below cannot
+// give: the day the till started this period across EVERY dish, and which of these dishes already
+// has a manual dated row before that day (the pre-till days re-entered). Returns `{ error }` when
+// either read fails — the check could not run, and the caller must not write as if it had passed.
+async function readTillHandover(supabase, { periodId, recipeIds }) {
+  // One row: the earliest dated till sale of the period. POS never writes day 0.
+  const { data: first, error: firstErr } = await supabase.from('sales_entries').select('bs_day, source')
+    .eq('period_id', periodId).in('source', ['pos', 'pos_comp']).gt('bs_day', 0)
+    .order('bs_day').order('id').limit(1)
+  if (firstErr) return { error: firstErr }
+  const tillStart = first?.[0]?.bs_day ?? null
+  if (tillStart == null || tillStart <= 1) return { tillStart, manualRows: [] }
+  // Chunked and paged like the guard read: the Bulk payload is the whole menu.
+  const { data: manualRows, error } = await fetchAllRowsChunked(recipeIds, ids =>
+    manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, source').eq('period_id', periodId))
+      .in('recipe_id', ids).gt('bs_day', 0).lt('bs_day', tillStart).order('id'))
+  if (error) return { error }
+  return { tillStart, manualRows: manualRows || [] }
 }
 
 // Replace the manual movements for one or more days of a period with what `rowsByDay` says those
 // days sold. One guard read, one delete, one ingredient explosion and one insert however many days
 // are involved — a Bulk supersede can touch every day of the month, and a round trip per day is
 // the loop-with-an-await shape frontend-performance.md warns about.
+//
+// Serialised per day through withDayLocks (S792, SALES-4): a second save of the same day waits for
+// the first to finish its delete and insert before it starts its own read.
 async function replaceManualMovements(supabase, { clientId, periodId, rowsByDay }) {
   const days = [...rowsByDay.keys()]
   if (days.length === 0) return
+  return withDayLocks(days.map(d => `${clientId}:${periodId}:${d}`),
+    () => replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days }))
+}
+
+async function replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days }) {
   const candidatesByDay = new Map(days.map(d => [d, (rowsByDay.get(d) || []).filter(r => Number(r.qty_sold) > 0)]))
   const allCandidates = [...candidatesByDay.values()].flat()
 
@@ -277,7 +341,22 @@ async function replaceManualMovements(supabase, { clientId, periodId, rowsByDay 
     }
     // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
     // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
-    posIndex = buildPosIndex((posRows || []).map(r => ({ ...r, source: 'pos' })))
+    const scopedPos = (posRows || []).map(r => ({ ...r, source: 'pos' }))
+    posIndex = buildPosIndex(scopedPos)
+
+    // D35 (S792): a Bulk row the till has also sold keeps depleting until the pre-till days are
+    // entered as daily figures, and deciding that takes two more reads. Only made when it matters
+    // — a Bulk candidate the till sold — so a client without POS pays nothing for it.
+    const bulkTillSold = [...new Set((candidatesByDay.get(0) || []).map(r => r.recipe_id))]
+      .filter(id => posIndex.anyDay.has(id))
+    if (bulkTillSold.length > 0) {
+      const handover = await readTillHandover(supabase, { periodId, recipeIds: bulkTillSold })
+      if (handover.error) {
+        console.error("manual stock_movements: the Bulk-total check (D35) could not run, so this day's movements were left as they were:", handover.error)
+        return
+      }
+      posIndex = buildPosIndex(scopedPos, { tillStart: handover.tillStart, manualRows: handover.manualRows })
+    }
   }
 
   // Replace the days' manual movements wholesale, matching save_sales_day's own delete+reinsert

@@ -49,8 +49,8 @@ paths:
 
 `src/shared/imsFormulas.js` exists because two figures had drifted into several disagreeing copies, and both are figures the product is sold on.
 
-- **COGS / "used".** Nine pages printed the formula nine ways, four of them contradicting the code directly beneath them, and two pages genuinely computed it differently: `AnnualSummary` left Staff Meals out while `MonthlySummary` included them — same month, same column label, two numbers. The decision (2026-08-13) is that **staff meals are in COGS** — the food came out of the same stock. Import `COGS_FORMULA` wherever the formula is *printed* and `computeUsed()` wherever it is *computed*, so the sentence can never drift from the arithmetic again. Any figure that values stock must still carry `.eq('is_active', true)` (S436) — that rule is unaffected.
-- **Monthly Summary and Consolidated P&L share one revenue and COGS arithmetic (S774).** `src/modules/ims/reports/periodCost.js`: `periodRevenue()`, `periodStockMaps()` and `valuePeriodItems()`. Change a convention there, never in either page. Each page keeps its own reads, and those must match (same filters, same paging), which `summaryReads.test.js` checks for both. `get_group_pnl` repeats the same rules in SQL and must be changed by hand alongside.
+- **COGS / "used".** Nine pages printed the formula nine ways, four of them contradicting the code directly beneath them, and two pages genuinely computed it differently: `AnnualSummary` left Staff Meals out while `MonthlySummary` included them — same month, same column label, two numbers. The decision (2026-08-13) is that **staff meals are in COGS** — the food came out of the same stock. Import `COGS_FORMULA` wherever the formula is *printed* and `computeUsed()` wherever it is *computed*, so the sentence can never drift from the arithmetic again. **A PERIOD figure values every non-sub-recipe item with a row in the period, hidden ones included (S792, owner decision D29, FIGURES-1)** — `periodValuationItems()` in `periodCost.js`. `is_active` is for pickers and "on the shelf now" views; the S436 `.eq('is_active', true)` on a period read took a hidden item's purchases out of every past month.
+- **Monthly Summary and Consolidated P&L share one revenue and COGS arithmetic (S774).** `src/modules/ims/reports/periodCost.js`: `periodRevenue()`, `periodStockMaps()` and `valuePeriodItems()` (and since S792 `valuePeriods()` for a multi-month batch, each period's discounts allocated on their own). Change a convention there, never in either page. Each page keeps its own reads, and those must match (same filters, same paging), which `summaryReads.test.js` checks for both. `get_group_pnl` repeats the same rules in SQL and must be changed by hand alongside.
 - **Variance banding.** `varianceBand(pct, value, settings)` / `varianceFigure(...)` (added
   2026-08-31/S659, `imsVarianceBand.test.js`). **Three thresholds for one concept were live on two
   adjacent nav items.** `Variance.js` flagged rows at the client's `variance_flag_pct` but
@@ -66,6 +66,12 @@ paths:
   exists to separate, were one colour for roughly 1 in 12 men. Per S634 the marks state DIRECTION
   literally and the colour carries the verdict. `measured: false` is how a caller says "no closing
   count yet"; every figure is then an artefact of the gap, not a finding.
+- **"Food Cost %" is COGS ÷ sales, and only a closed month has one (S792, owner decision D30).**
+  FIGURES-3: the dashboards and the frozen Owner Report called purchases ÷ sales by the same name,
+  so one month read 50% ▲ on one page and 35% ✓ on the next. A running month shows **Spend % so
+  far** (net purchases ÷ sales); Monthly Summary shows a closed month's purchases ÷ sales as
+  **Spend %**. Labels, tips and `periodCostRatio()` live in `src/modules/ims/reports/foodCostBasis.js`
+  — never put the Food Cost label on a purchases ratio. Owner Reports before schema 9 say "(on purchases)".
 - **Food cost % banding.** `fcBand(pct, settings)` reads the client's `fc_warning_pct`/`fc_critical_pct` and returns the `*-text` contrast variants. Five files each carried their own hardcoded `≤30 : ≤38 : else` copy, which disagreed with the very filter pills the user had just clicked. **`MenuEngineering.js`'s `FC_CUTOFF = 35` classification is deliberately NOT routed through this** — `computeMenuEngineeringSection.js` mirrors `classify()` verbatim for the frozen Monthly Owner Report, so changing it would silently desync a snapshot from the live page it must agree with. Its colours use `fcBand`; its maths does not.
 - **The other three operating ratios band in `src/shared/operatingBands.js`, not here (S660).**
   `lcBand` (labour, 30/37), `pcBand` (prime, 60/65), `nmBand` (net margin, **inverted**, ≥20/≥10)
@@ -228,6 +234,11 @@ to any future per-dish figure: the kitchen makes plates.
 'manual')` silently drops them. And a day present in both POS and manual history is ONE sample —
 pass the POS day-key set to `buildManualDailyHistory`.
 
+**A recompute clears the old run by `run_id` (S792, PLANNING-1, migration `20260928160100`)**:
+`horizon_days = h` and `run_id IS NULL OR run_id <> <this run>`, never `id NOT IN (<every new id>)`
+— ~45 KB of uuids in the URL, refused, so each Recompute stacked another run. The `pos_orders`
+read is paged too: unpaged and unordered, it kept roughly the OLDEST 1,000 bills of the window.
+
 ### On-hand and "below par" have ONE calculation, on six surfaces (S696)
 
 `buildStockRows()` in `src/modules/ims/stockcount/stockReportCalc.js` (tested) is the only place
@@ -386,7 +397,8 @@ found: a sweep reaches the page it was named after.
   is built from active items, so its opening/closing/wastage/staff-meals came out at 0 — while
   `grossPurch`/`retVal` read the purchase row's OWN rate and kept counting its spend in full. COGS
   was overstated by exactly the closing value the same row had just discarded. Monthly Summary
-  drops such an item from every column; this page now does too. **An `is_active` filter applied to
+  dropped such an item from every column and this page followed; since S792 (D29) both keep it in
+  every column instead. **An `is_active` filter applied to
   a rate lookup and not to the rows it values is not a filter, it is a zero.**
 - **Period Comparison's `fmt` dashed a real zero** (`if (!n) return '—'`), so a period with no
   wastage read identically to a period whose figures had not been computed. `nprOrDash` dashes only
@@ -437,13 +449,11 @@ one tab of the page and gone from the other three. `salesReads.test.js` reads th
 on either half of the defect — a `.neq` on the column, or a `select()` that omits it — because
 neither has a runtime symptom.
 
-**Still open, deliberately.** Derive the list rather than trusting a count written here — it has
-gone stale the moment code changed twice now. The grep is
-`grep -rn "\.neq(\s*['\"]source['\"]" src/`, skipping comment lines and `salesReads.test.js`:
-
-```text
-computeMonthlyReport  computeMenuEngineeringSection
-```
+**Still open: none, since S792 (FIGURES-8)** — `computeMonthlyReport` reads sales once with
+`source` and filters in JS through `periodRevenue()`, and `computeMenuEngineeringSection` drops
+comps in JS. Derive the list rather than trusting this line — it has gone stale the moment code
+changed before. The grep is `grep -rn "\.neq(\s*['\"]source['\"]" src/`, skipping comment lines
+and `salesReads.test.js`; every hit today is a comment quoting the old form.
 
 Re-derived S756: `Recipes` (True Cost revenue), `AnnualSummary`, `MonthlySummary` and
 `PeriodComparison` (all three the FC% denominator) now select `source` and filter in JS, and
@@ -468,16 +478,10 @@ Each needs its own answer to what its figure is supposed to mean before it is ch
 `OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was
 "comps consume ingredients", which is not the answer a revenue read gives.
 
-**`computeMenuEngineeringSection` is on that list and its LIVE twin is not, which is a defect
-waiting rather than a decision.** S715 took `MenuEngineering.js` off for a stated reason — its qty
-map sets the period's median, so a dropped row re-quadrants dishes — and every word of that
-reasoning applies at least as hard to the frozen owner-report copy, where a wrong quadrant is
-**immutable**. The two are supposed to be kept in lockstep; `menuEngineering.js` exists precisely
-to keep them there, and this is the one axis it does not cover, because the read lives in each
-file rather than in the shared module. Found during the S724 markdown sweep, recorded rather than
-fixed because it was outside that session's scope. **`useSalesPivotData` is the other one worth
-looking at first**: it chains `.neq('source','pos_comp').neq('source','pos')`, so it drops the
-NULL rows twice over.
+**`computeMenuEngineeringSection` sat on that list from S724 to S792 while its LIVE twin did
+not.** S715's reason for fixing `MenuEngineering.js` — its qty map sets the median, so a dropped
+row re-quadrants dishes — applies harder to the frozen copy, where a wrong quadrant is
+**immutable**; `menuEngineering.js` shares the rule but not the read, which lives in each file.
 
 **`MenuEngineering` came off that list in S715, and why is the useful part.** "Display-only" was
 doing too much work: its qty map sets the period's **median**, which is the popularity cutoff, so
@@ -710,9 +714,15 @@ property of its callers rather than anything the signature said.
 that session widened FIFO's window from one period to the fiscal year to date and kept the
 single-period call. On a client running POS **and** manual entry — the exact population the rule
 exists for — a POS sale of a dish on 5 Shrawan suppressed the MANUAL sale of that dish on 5 Bhadra,
-four months later; and because a Bulk row carries `bs_day 0` and is superseded by a POS sale
+four months later; and because a Bulk row carries `bs_day 0` and was then superseded by a POS sale
 *anywhere in the period*, one POS sale in month one silenced every Bulk row for that dish for the
 rest of the year.
+
+**That Bulk rule itself changed in S792 (owner decision D35).** Within one period too it read the
+pre-till days as "stock used, nothing sold". A Bulk row the till also sold now keeps depleting until
+a daily figure exists for a day before the till's first sale (any dish), or the till ran from day 1
+— `bulkSupersededByTill` / `bulkTillHandover` in `salesDepletion.js`, which also drives Sales
+Entry's notice and its pre-till Daily Entry for POS clients.
 
 **The rule only ever DROPS manual rows, so the error is one-directional**: consumption comes out
 short, stock that was actually eaten reads as still on the shelf, and both reports move in the
@@ -796,6 +806,13 @@ mostly-counted month — which is what an ordinary month close actually looks li
 
 `hasClosingRows` is a LOCAL, not the state value: `setHasClosing` is async, so a row builder reading
 the state variable gets the *previous* period's answer.
+
+**One population since S792 (owner decision D36, FIGURES-4): `src/modules/ims/variance/variancePopulation.js`.**
+Variance's population and verdict moved there unchanged (a 336-combination replay test), and
+Theoretical Variance, Shrinkage and the Owner Report's variance and shrinkage sections judge the
+same items — including stock that fell while none of its dishes sold, which Theoretical Variance
+used to drop. An item in no recipe is "no recipe linked", out of the totals. `closingCountMap` /
+`isClosingCount` read a NULL `physical_qty` as not counted (defensive: the column is NOT NULL).
 
 ### The 1000-row sweep had reached `wastages` and `purchase_entries` and stopped there
 
@@ -1132,7 +1149,9 @@ applied once, at order time. **Usage of a sales row is recipe × qty_sold + delt
   sub-recipes through the one `explodeRecipeIngredients` walk; throws on a failed read like the recipe
   walk), `deltaItems`, `usageOfSalesRow`. `buildUsageMap`/`buildStockRows` take its `explosion`.
 - **A reader that turns sales into consumption selects `ingredient_deltas`** and loads the explosion
-  beside the recipe walk under the same error handling. Revenue readers do not need it.
+  beside the recipe walk under the same error handling. Revenue readers do not need it; MARGIN
+  readers do (S792, RECIPES-3), because the upcharges are in `unit_price` — Recipe Margin and Best
+  Sellers cost each row's extras through `extrasCost.js` at today's rates, credit rows reversing theirs.
 - **Nothing is clamped.** "No onion" on a dish whose recipe has no onion still takes onion off; a
   negative total is a data-entry problem to show, not to hide.
 - **Stock Movements' Sub-Recipes tab and its reconciliation note are recipe-only in release 1**, and

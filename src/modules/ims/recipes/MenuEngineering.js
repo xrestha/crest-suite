@@ -26,6 +26,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import {
   FC_CUTOFF, QUADRANT_KEYS, classify, median, menuFcPct, unratedReason,
 } from '../../../shared/menuEngineering'
+import { BYO_REASON, BYO_TIP, isCostedByBuild } from './buildYourOwnRating'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-green) 30%, transparent)', icon: '★', desc: 'High profit · High popularity' },
@@ -90,7 +91,7 @@ function BarTooltipContent({ active, payload, label }) {
 }
 
 export default function MenuEngineering() {
-  const { profile, clientId: authClientId, loading: authLoading, hasImsAccess } = useAuth()
+  const { profile, clientId: authClientId, loading: authLoading, hasImsAccess, customizationEnabled } = useAuth()
   // Colours come from the client's configured thresholds; the Star/Puzzle/Dog CLASSIFICATION
   // deliberately stays on FC_CUTOFF, and both now live in `shared/menuEngineering.js` so the
   // frozen Monthly Owner Report reads the same function rather than a copy of it (S715).
@@ -167,7 +168,8 @@ export default function MenuEngineering() {
     // BCG-style revenue/margin quadrant below is about what actually sold at menu price, not what
     // was given away.
     const [{ data: recipes, error: recErr }, { data: sales, error: salesErr }] = await Promise.all([
-      scopedFrom('recipes', 'id, name, category, selling_price, cost_price')
+      // `is_build_your_own` (S792 RECIPES-1): such a dish is Not rated — buildYourOwnRating.js.
+      scopedFrom('recipes', 'id, name, category, selling_price, cost_price, is_build_your_own')
         // Both filters are NULL-safe (S714). `.neq` on a NULLABLE column also drops every NULL
         // row, server-side and silently — and BOTH of these columns are nullable, so an
         // uncategorised dish, or one whose is_active was never set, dropped out of the matrix
@@ -249,14 +251,20 @@ export default function MenuEngineering() {
       // recomputes, with nothing in the artifact to say which definition produced it.
       const ingredientCost = recipeCostOf(ingMap, r) || 0
       const sellingPrice   = parseFloat(r.selling_price) || 0
+      // S792 RECIPES-1: a build-your-own dish's recipe is its bowl and spoon — NPR 8 against NPR
+      // 300 read 2.7%, a Star to "feature prominently", and that Star was written to me_class for
+      // the till's suggestions. It goes to Not rated with its own reason, so classify() returns
+      // null and writeMeClass() below writes NULL for it, as for any dish it cannot rate. Its
+      // sales still count toward the median, which spans every dish, rated or not.
+      const byo            = isCostedByBuild(r, customizationEnabled)
       // null, never 0, when either half is missing — see shared/menuEngineering.js.
-      const fcPct          = menuFcPct(ingredientCost, sellingPrice)
-      const unrated        = unratedReason(ingredientCost, sellingPrice)
+      const fcPct          = byo ? null : menuFcPct(ingredientCost, sellingPrice)
+      const unrated        = byo ? BYO_REASON : unratedReason(ingredientCost, sellingPrice)
       const qtySold        = qtyMap[r.id] || 0
       const revenue        = (pricedRev[r.id] || 0)
         + (unpricedQty[r.id] || 0) * sellingPrice
         - (discMap[r.id] || 0)
-      return { ...r, ingredientCost, sellingPrice, fcPct, unrated, qtySold, revenue }
+      return { ...r, ingredientCost, sellingPrice, fcPct, unrated, byo, qtySold, revenue }
     })
 
     // Median qty sold across every recipe on the menu — unsold and unrated ones included, exactly
@@ -290,7 +298,10 @@ export default function MenuEngineering() {
   //
   // One request per distinct class instead of one per recipe (a 300-dish menu was 300), chunked
   // because the id list rides in the URL, and unrated dishes are written back as NULL so a dish
-  // that loses its price stops carrying a stale verdict into the till.
+  // that loses its price stops carrying a stale verdict into the till. A build-your-own dish is one
+  // of them since S792 (RECIPES-1) — its bowl-and-spoon "Star" had been ranked up on the till. NULL
+  // passes `recipes_me_class_check` and the till scores it neutrally, below a Star or a Puzzle and
+  // never filtered out like a Dog.
   async function writeMeClass(rows, forPeriodId) {
     setClassWriteError(null)
     if (!forPeriodId || forPeriodId !== livePeriodId) return
@@ -333,6 +344,16 @@ export default function MenuEngineering() {
     return s
   }, [items])
   const unratedCount = summary[UNRATED.key]
+  // S792 RECIPES-1: Not rated holds the build-your-own dishes too, and the bucket must not describe
+  // them as "no price or no costed ingredients" — nothing is missing from them; their plate is the
+  // guest's picks. The description follows what is actually in the bucket.
+  const byoCount = useMemo(() => items.filter(r => r.byo).length, [items])
+  const unratedMeta = useMemo(() => ({
+    ...UNRATED,
+    desc: byoCount === 0 ? UNRATED.desc
+      : byoCount === unratedCount ? 'Build-your-own — costed by build'
+      : 'No price, no cost, or costed by build',
+  }), [byoCount, unratedCount])
 
   const medianQty = items[0]?.medianQty ?? 0
 
@@ -395,7 +416,7 @@ export default function MenuEngineering() {
     () => (unratedCount > 0 ? [...QUADRANT_KEYS, UNRATED.key] : QUADRANT_KEYS),
     [unratedCount]
   )
-  const colStyle = key => (key === UNRATED.key ? UNRATED : QUADRANTS[key])
+  const colStyle = key => (key === UNRATED.key ? unratedMeta : QUADRANTS[key])
   const colHex   = key => (key === UNRATED.key ? null : Q_HEX[key])
 
   const selectedPeriod = periods.find(p => p.id === periodId)
@@ -445,7 +466,7 @@ export default function MenuEngineering() {
       {!loading && !loadError && items.length > 0 && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
-            {[...Object.entries(QUADRANTS), ...(unratedCount > 0 ? [[UNRATED.key, UNRATED]] : [])].map(([name, q]) => (
+            {[...Object.entries(QUADRANTS), ...(unratedCount > 0 ? [[UNRATED.key, unratedMeta]] : [])].map(([name, q]) => (
               <button
                 key={name}
                 type="button"
@@ -551,9 +572,16 @@ export default function MenuEngineering() {
                 </div>
                 {/* A dot that is not on the chart has to be accounted for on the chart, or the
                     reader counts what they can see and believes it is the whole menu. */}
-                {unratedCount > 0 && (
+                {unratedCount - byoCount > 0 && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
-                    {unratedCount} dish{unratedCount !== 1 ? 'es' : ''} not plotted — {UNRATED.desc.toLowerCase()}, so there is no food cost to place them against.
+                    {unratedCount - byoCount} dish{unratedCount - byoCount !== 1 ? 'es' : ''} not plotted — {UNRATED.desc.toLowerCase()}, so there is no food cost to place them against.
+                  </div>
+                )}
+                {/* S792 RECIPES-1: counted apart, because nothing is missing from these — each
+                    plate costs what its guest picked, so there is no ONE food cost to plot. */}
+                {byoCount > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
+                    {byoCount} build-your-own dish{byoCount !== 1 ? 'es' : ''} not plotted — costed by build, so there is no one food cost to place {byoCount !== 1 ? 'them' : 'it'} at. Recipe Costing shows the range.
                   </div>
                 )}
               </>
@@ -614,7 +642,7 @@ export default function MenuEngineering() {
             <div className="card" style={{ padding: '16px' }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 12 }}>
                 Category Breakdown
-                <Tip text="How each menu category distributes across the four quadrants. A category heavy in Dogs or Puzzles may need a pricing or cost review. A Not rated column appears when some dishes have no selling price or no costed ingredients." width={240}>
+                <Tip text="How each menu category distributes across the four quadrants. A category heavy in Dogs or Puzzles may need a pricing or cost review. A Not rated column appears when some dishes have no selling price or no costed ingredients, or are build-your-own (costed by build)." width={240}>
                   <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)', cursor: 'default' }}>?</span>
                 </Tip>
               </div>
@@ -690,7 +718,12 @@ export default function MenuEngineering() {
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{r.category || '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.sellingPrice > 0 ? r.sellingPrice.toLocaleString('en-IN') : '—'}</td>
-                      <td style={{ textAlign: 'right' }}>{r.ingredientCost > 0 ? r.ingredientCost.toFixed(2) : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {/* S792 RECIPES-1: not the bowl-and-spoon figure — the row state, named. */}
+                        {r.byo
+                          ? <Tip text={BYO_TIP} width={320}><span style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>By build</span></Tip>
+                          : r.ingredientCost > 0 ? r.ingredientCost.toFixed(2) : '—'}
+                      </td>
                       <td style={{ textAlign: 'right' }}>
                         <span title={fc.key === 'none' ? undefined : fc.label} style={{ color: fc.color, fontWeight: 600 }}>
                           {r.fcPct != null ? `${r.fcPct.toFixed(1)}% ${fc.mark}` : '—'}
@@ -730,7 +763,7 @@ export default function MenuEngineering() {
            They belong to no quadrant, and leaving them out of all four made them vanish from the
            view entirely — the four panel counts would not add up to the menu and nothing said why. */
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          {[...Object.entries(QUADRANTS), ...(byQuadrant[UNRATED.key].length > 0 ? [[UNRATED.key, UNRATED]] : [])].map(([name, q]) => (
+          {[...Object.entries(QUADRANTS), ...(byQuadrant[UNRATED.key].length > 0 ? [[UNRATED.key, unratedMeta]] : [])].map(([name, q]) => (
             <div key={name} style={{
               background: 'var(--theme-card)',
               border: `1px solid ${q.border}`,
@@ -792,7 +825,7 @@ export default function MenuEngineering() {
       {!loading && !loadError && items.length > 0 && (
         <div className="card" style={{ marginTop: 16, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '12px 20px' }}>
           <span style={{ fontSize: 11, color: 'var(--theme-text2)', alignSelf: 'center' }}>Thresholds:</span>
-          <Tip text={`Dishes with food cost ≤ ${FC_CUTOFF}% of selling price are 'high profit'. Above ${FC_CUTOFF}% = low profit. A dish with no selling price or no costed ingredients has no food cost to judge, so it is listed as Not rated rather than being placed in a quadrant.`}>
+          <Tip text={`Dishes with food cost ≤ ${FC_CUTOFF}% of selling price are 'high profit'. Above ${FC_CUTOFF}% = low profit. A dish with no selling price or no costed ingredients has no food cost to judge, so it is listed as Not rated rather than being placed in a quadrant. So is a build-your-own dish: each plate costs what its guest picked, so it has a cost range (on Recipe Costing) rather than one food cost.`}>
             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>FC% cutoff <span style={{ color: 'var(--theme-accent-ink)' }}>{FC_CUTOFF}%</span></span>
           </Tip>
           <Tip text={`Median portions sold this period, across every dish on the menu. Dishes at or above ${medianQty.toFixed(0)} are 'high popularity'; below that, and anything that sold nothing at all, is low popularity.`}>

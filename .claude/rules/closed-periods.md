@@ -241,7 +241,9 @@ The same `!isAdmin` that unlocks the page also suppresses the red "this period i
 before S651 an admin editing history saw a screen identical to the open month. Both Purchases
 screens and Purchase Orders now render an **amber** banner whenever
 `canEditClosedPeriods && period.status === 'closed'` (the Owner sees it since S756), and Sales does
-since S756 stage 2. Stock Count, Overheads and Requisitions still do not. Any page
+since S756 stage 2. Stock Count does since S792 (STOCK-5: `ClosedPeriodBanner canEdit`, plus a
+"Carry into <next>'s opening stock" button once a corrected closing count is saved, through
+`carryClosingIntoNext`). Overheads and Requisitions still do not. Any page
 that adopts the `isLocked` line owes its admin the same notice — the lock and the notice are the
 same fact, and only one of them was being shown.
 

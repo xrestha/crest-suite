@@ -12,10 +12,11 @@ import { useSettings } from '../../../context/SettingsContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
-import { periodRevenue, periodStockMaps, valuePeriodItems } from './periodCost'
+import { periodRevenue, periodStockMaps, valuePeriodItems, periodRowIds, periodValuationItems, periodGap } from './periodCost'
+import { FOOD_COST_TIP, SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
-import { findUncountedItems, unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
+import { unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -74,7 +75,10 @@ export default function MonthlySummary() {
       // within reach of PostgREST's silent 1000-row cap on a large item master, and staff_meals
       // is per-item-per-DAY. A truncated opening/closing read is indistinguishable from an
       // uncounted shelf and produces a believable wrong COGS (S719's rule, applied here).
-      fetchAllRows(() => scopedFrom('items', '*, categories(id, name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      // Hidden items are read too (S792, D29): a month keeps every purchase and count it had, so
+      // hiding an item never rewrites a past month's COGS. periodValuationItems() below keeps the
+      // hidden ones that had a row this period. Consolidated P&L makes the same read.
+      fetchAllRows(() => scopedFrom('items', '*, categories(id, name)').eq('is_sub_recipe', false).order('id')),
       fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries')
@@ -97,7 +101,7 @@ export default function MonthlySummary() {
     if (failed) { setLoadError(failed); setReport(null); return }
     const [
       { data: categories },
-      { data: items },
+      { data: allItems },
       { data: opening },
       { data: closing },
       { data: purchases },
@@ -107,10 +111,6 @@ export default function MonthlySummary() {
       { data: allSales },
       { data: recipes }
     ] = results
-    // Which items were COUNTED (S756 D6): a row whose physical_qty is not null, so a count of 0 is a
-    // count and a blank row is not — closePeriod.js's `physical_qty IS NOT NULL` rule. The stock
-    // maps below cannot answer this: they turn both into 0.
-    const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
 
     // Revenue and every stock value come from periodCost.js, the arithmetic Consolidated P&L calls
     // on the same rows, so the two pages tie by construction (S774). Purchases there are net of
@@ -119,6 +119,10 @@ export default function MonthlySummary() {
     // "returns" and Net Purchases printed a dash on every discounted bill with no return.
     const totalRevenue = periodRevenue(allSales, recipes)
     const maps = periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData })
+    // Every active item, plus each hidden one that had a row this month (D29). The totals would be
+    // the same over the whole read; this is what keeps a category's "N items" and the uncounted
+    // list from filling up with items hidden long ago that nothing happened to.
+    const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData }))
 
     // Per-category summary — COGS uses net purchases (after bill discounts and returns)
     // items.category_id is nullable — an uncategorized item used to match no category's
@@ -163,13 +167,13 @@ export default function MonthlySummary() {
     const fcPct            = totalRevenue > 0 ? (totalCOGS / totalRevenue) * 100 : null
     const purchaseFcPct    = totalRevenue > 0 ? (totalNetPurchase / totalRevenue) * 100 : null
 
-    // Uncounted items (S756 D6): active, non-sub-recipe items (the `items` read is already exactly
-    // that set) with opening stock or purchases this period and no closing count. Totals are NOT
-    // changed — they must keep tying to the close and the frozen report — the gap is named and, while
-    // material, the FC% verdict is withheld. Built from the reads above; no extra round trip.
-    const purchaseQty = {}; const purchaseValue = {}
-    Object.entries(maps.purchases).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
-    const gap = findUncountedItems({ items, openingQty: maps.opening, purchaseQty, purchaseValue, countedIds, cogs: totalCOGS })
+    // Uncounted items (S756 D6): active, non-sub-recipe items with opening stock or purchases this
+    // period and no closing count (findUncountedItems skips a hidden one — Stock Count does not offer
+    // it to count). A closing row whose physical_qty is null is not a count; one holding 0 is —
+    // closePeriod.js's `physical_qty IS NOT NULL` rule, applied inside periodGap(). Totals are NOT
+    // changed — they must keep tying to the close and the frozen report — the gap is named and,
+    // while material, the FC% verdict is withheld. Built from the reads above; no extra round trip.
+    const gap = periodGap({ items, maps, closing, cogs: totalCOGS })
     const uncountedIds = new Set(gap.uncounted.map(u => u.id))
     const catKeyOf = i => i.categories?.id ? i.categories.name : 'Uncategorized'
     const uncountedByCat = {}
@@ -305,7 +309,7 @@ export default function MonthlySummary() {
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
-                <Tip text={`COGS ÷ Net Sales Revenue × 100. Tells you how much of every rupee earned went to ingredients. Healthy up to ${box.warn}%, watch to ${box.critical}%, above that needs review — set in Settings → Thresholds.`} width={240}>Food Cost %</Tip>
+                <Tip text={`${FOOD_COST_TIP} Healthy up to ${box.warn}%, watch to ${box.critical}%, above that needs review — set in Settings → Thresholds.`} width={240}>Food Cost %</Tip>
               </div>
               {/* Banded through fcFigure(settings) — this was a local 35/45 ternary with no mark, a
                   third definition beside fcBand and Recipes' own, so the same month read green here
@@ -322,8 +326,11 @@ export default function MonthlySummary() {
               </div>
             </div>
             <div>
+              {/* Not a second "FC%" (S792, D30): purchases ÷ sales was labelled "Purchase-Based FC%"
+                  here and "Food Cost %" on the dashboards, so one name carried two formulas. Food
+                  Cost % is what was USED; this is what was SPENT, and says so. */}
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
-                <Tip text="Net Purchases ÷ Revenue. A simpler estimate that ignores opening/closing stock. Useful when stock counts are unavailable." width={250}>Purchase-Based FC%</Tip>
+                <Tip text={isOpenPeriod ? SPEND_SO_FAR_TIP : SPEND_TIP} width={250}>{isOpenPeriod ? SPEND_SO_FAR_LABEL : SPEND_LABEL}</Tip>
               </div>
               <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text2)' }}>
                 {report.purchaseFcPct != null ? `${report.purchaseFcPct.toFixed(1)}%` : '—'}

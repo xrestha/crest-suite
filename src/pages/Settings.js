@@ -452,6 +452,11 @@ export default function Settings() {
       out.push(patch.is_vat_registered
         ? 'Past bills printed as plain PAN bills will reprint as Tax Invoices (PB→TI) with a VAT breakdown added, since the bill type is decided when a bill is printed.'
         : 'Past Tax Invoices will reprint as plain PAN bills (TI→PB) with the VAT breakdown removed, since the bill type is decided when a bill is printed.')
+      // S792 (D31): a PAN outlet stores the typed menu price whole with no VAT rate, so the switch
+      // changes what the till charges for dishes priced under the other setting.
+      out.push(patch.is_vat_registered
+        ? 'Menu prices entered while this outlet gave PAN bills carry no VAT, so the till adds no VAT to those dishes until each price is entered again on Menu Pricing.'
+        : 'Dishes priced with VAT will be charged at their price before VAT (13% less than the menu shows) until each price is entered again. Menu Pricing lists them.')
     }
     return out
   }
@@ -492,7 +497,9 @@ export default function Settings() {
     const warnings = retroWarnings(patch)
     if (warnings.length) {
       askConfirm({
-        title: warnings.length > 1 ? 'Change the bill type and the invoice code?' : ('is_vat_registered' in patch ? 'Change the bill type?' : 'Change the invoice code?'),
+        // Named by the FIELDS that moved, not the warning count: a bill-type change alone carries
+        // two sentences since S792 (the reprint and the menu-price consequence).
+        title: 'is_vat_registered' in patch && 'invoice_prefix' in patch ? 'Change the bill type and the invoice code?' : ('is_vat_registered' in patch ? 'Change the bill type?' : 'Change the invoice code?'),
         confirmLabel: 'Save anyway', danger: true, busyLabel: 'Saving…',
         body: (
           <>

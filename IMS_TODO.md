@@ -27,14 +27,14 @@ Code added since S756 had never been reviewed, and most new findings sit in it:
 
 | # | Decision | Status |
 |---|---|---|
-| D29 | Hiding an item or dish **never changes history**: past months keep every purchase, count and sale. Sales Entry shows hidden dishes that sold this month in a separate block, still editable. | 🟡 Sales Entry half S792 stage 1; hidden items keep past months = stage 2 (FIGURES-1) |
-| D30 | **Food Cost % = used (COGS) ÷ sales for closed months, everywhere.** The running month shows "Spend % so far" (purchases ÷ sales). Owner Reports already generated stay as they were. | 🔴 |
-| D31 | **PAN-bill (not VAT-registered) outlet: the typed menu price is the price the guest pays**, stored whole. Existing dishes show their real till price so the owner can re-enter them. | 🔴 |
+| D29 | Hiding an item or dish **never changes history**: past months keep every purchase, count and sale. Sales Entry shows hidden dishes that sold this month in a separate block, still editable. | ✅ S792 (Sales Entry stage 1; every period figure + `get_group_pnl` stage 2) |
+| D30 | **Food Cost % = used (COGS) ÷ sales for closed months, everywhere.** The running month shows "Spend % so far" (purchases ÷ sales). Owner Reports already generated stay as they were. | ✅ S792 stage 2 (`foodCostBasis.js`; Owner Report schema 9) |
+| D31 | **PAN-bill (not VAT-registered) outlet: the typed menu price is the price the guest pays**, stored whole. Existing dishes show their real till price so the owner can re-enter them. | ✅ S792 stage 2 (`menuPriceVat.js`, `PanPriceBanner`) |
 | D32 | **PAN-bill outlet: supplier VAT counts as food cost**, and is not called "claimable". Needs a short design first (stage 4). | 🔴 |
-| D33 | A return against a discounted bill **credits the discounted price**, on payables and the balance letter too. | 🔴 |
-| D34 | The bill line's typed **Total is after VAT when VAT is ticked**. Ticking or unticking changes the Rate, never the Total. | 🔴 |
-| D35 | A dish typed as a Bulk total, later sold on the till: **Sales Entry asks for the pre-till days as daily figures**. The Bulk total is ignored for stock only after that. | 🔴 |
-| D36 | Variance and Theoretical vs Actual **both judge an ingredient whose stock fell while its dishes sold nothing**. | 🔴 |
+| D33 | A return against a discounted bill **credits the discounted price**, on payables and the balance letter too. | ✅ S792 stage 2 (`billOwedAfterReturns`) |
+| D34 | The bill line's typed **Total is after VAT when VAT is ticked**. Ticking or unticking changes the Rate, never the Total. | ✅ S792 stage 2 (`billLineVat.js`; a typed Rate stays ex-VAT and gains 13% on the tick) |
+| D35 | A dish typed as a Bulk total, later sold on the till: **Sales Entry asks for the pre-till days as daily figures**. The Bulk total is ignored for stock only after that. | ✅ S792 stage 2 (`bulkTillHandover`; POS clients may enter the pre-till days on Daily Entry) |
+| D36 | Variance and Theoretical vs Actual **both judge an ingredient whose stock fell while its dishes sold nothing**. | ✅ S792 stage 2 (`variancePopulation.js`, Shrinkage and the Owner Report too) |
 | D37 | A second count of an already-counted item **asks: replace, or add yours?** (stage 4) | 🔴 |
 | D38 | Offline counts arriving in a closed month under the Owner's login are **listed, with one button "Add to Bhadra and carry into Ashwin's opening stock"**. Nothing lands silently. | ✅ S792 |
 | D39 | **Counting tablets lock after 10 idle minutes** and return to the PIN screen, like POS tills. Sign out also goes back to the PIN screen. | ✅ S792 |
@@ -105,41 +105,43 @@ Migration `20260928140000_ims_integrity_s792.sql` applied live 2026-09-28 after 
 - ✅ S792 — PURCHASES-2 **[P1]** An S779 draft is restored over a newer saved version of the bill. Store the base signature, and let the owner choose which to keep.
 - ✅ S792 — D39 Count-PIN idle lock and sign-out to `/ims/count`. Also MASTER-8: hide Clear All for `imsCountOnly`, and correct the Stock Count Settings dialog copy.
 
-## S792.3 Stage 2 — wrong numbers
+## S792.3 Stage 2 — wrong numbers — ✅ built S792
 
-- 🔴 RECIPES-2 **[P1]** On PAN-bill outlets the pricing screens divide the typed price by 1.13 and the till charges the divided figure (D31). Change Recipes.js, MenuPricing.js (**both** branches), MenuRepricing.js and RecipeImportButton.jsx.
-- 🔴 FIGURES-1 **[P1]** Hiding an item removes its purchases from every past month on Monthly Summary, the P&L, `get_group_pnl`, Annual Summary and Period Comparison (D29). FIGURES-9 is the matching Budget vs Actual reconciliation claim.
-- 🔴 FIGURES-3 "Food Cost %" is two formulas under one name (D30). Fix the tip, the Help FAQ and glossary, and the comments that claim they agree.
-- 🔴 FIGURES-2 **[P1]** / SALES-3 **[P1]** The Owner Report's Inventory Variance and Shrinkage Trend are pre-S719 copies:
+Built by eight agents over disjoint files, then a follow-up pass (group dashboard, Stock Count Summary, a deleted return un-settling a bill). Two migrations, both applied live 2026-09-28 after a rolled-back dry run: `20260928160000_ims_group_figures_s792` (`get_group_pnl` keeps hidden items) and `20260928160100_demand_forecast_run_id_s792`. Owner Report schema 9. Live figures change for: hidden items' past months, Food Cost % on closed months, assets with a back-dated or reversed depreciation run, and bills settled before D33 that had a discounted return (they now owe the discount share of it).
+
+- ✅ S792 stage 2 — RECIPES-2 **[P1]** On PAN-bill outlets the pricing screens divide the typed price by 1.13 and the till charges the divided figure (D31). Change Recipes.js, MenuPricing.js (**both** branches), MenuRepricing.js and RecipeImportButton.jsx.
+- ✅ S792 stage 2 — FIGURES-1 **[P1]** Hiding an item removes its purchases from every past month on Monthly Summary, the P&L, `get_group_pnl`, Annual Summary and Period Comparison (D29). FIGURES-9 is the matching Budget vs Actual reconciliation claim.
+- ✅ S792 stage 2 — FIGURES-3 "Food Cost %" is two formulas under one name (D30). Fix the tip, the Help FAQ and glossary, and the comments that claim they agree.
+- ✅ S792 stage 2 — FIGURES-2 **[P1]** / SALES-3 **[P1]** The Owner Report's Inventory Variance and Shrinkage Trend are pre-S719 copies:
   - they read unpaged;
   - an uncounted item counts as 0;
   - there is no tolerance;
   - they skip the depletion rule, so credit notes and choice lines subtract usage;
   - Variance leaves out staff meals.
   Rebuild them on the live helpers and bump the schema version. FIGURES-8 (the `.neq` on revenue) and TAX-7 (active-only vendor name map) go in the same rebuild.
-- 🔴 FIGURES-4 Variance and Theoretical vs Actual judge different populations (D36).
-- 🔴 D35 Bulk + till notice on Sales Entry. `salesDepletion.js` ignores the Bulk total only after re-entry.
-- 🔴 PURCHASES-3 **[P1]** Outstanding Payables and the balance letter credit returns at list price with the whole discount kept (D33). A fully returned bill tells the supplier they owe us. Related: PURCHASES-8, where a fully returned credit bill never leaves Outstanding.
-- 🔴 TAX-1 **[P1]** Vendor Report drilldown "Total paid" = ex-VAT total − VAT-basis remaining. It should be Σ payments.
-- 🔴 TAX-2 **[P1]** Vendor Report's payable/status ignores a return entered in a later month (D10).
-- 🔴 TAX-3 The 1L report values a cross-year return at list price, because `readPriorBillLines` is missing.
-- 🔴 PURCHASES-4 The line Total flips meaning with the VAT tick order, and the header toggle leaves Total and Amount disagreeing (D34).
+- ✅ S792 stage 2 — FIGURES-4 Variance and Theoretical vs Actual judge different populations (D36).
+- ✅ S792 stage 2 — D35 Bulk + till notice on Sales Entry. `salesDepletion.js` ignores the Bulk total only after re-entry.
+- ✅ S792 stage 2 — PURCHASES-3 **[P1]** Outstanding Payables and the balance letter credit returns at list price with the whole discount kept (D33). A fully returned bill tells the supplier they owe us. Related: PURCHASES-8, where a fully returned credit bill never leaves Outstanding.
+- ✅ S792 stage 2 — TAX-1 **[P1]** Vendor Report drilldown "Total paid" = ex-VAT total − VAT-basis remaining. It should be Σ payments.
+- ✅ S792 stage 2 — TAX-2 **[P1]** Vendor Report's payable/status ignores a return entered in a later month (D10).
+- ✅ S792 stage 2 — TAX-3 The 1L report values a cross-year return at list price, because `readPriorBillLines` is missing.
+- ✅ S792 stage 2 — PURCHASES-4 The line Total flips meaning with the VAT tick order, and the header toggle leaves Total and Amount disagreeing (D34).
 - ✅ S792 stage 1 — PURCHASES-5 Editing an old or closed-month bill offers, pre-ticked, to roll Item Master back (D41 and precedent).
-- 🔴 PURCHASES-6 = MASTER-6 Price Tracker changes the master price with no D5 warning and no zero-row check.
-- 🔴 RECIPES-1 **[P1]** Build-your-own dishes are still judged at their bowl-and-spoon cost:
+- ✅ S792 stage 2 — PURCHASES-6 = MASTER-6 Price Tracker changes the master price with no D5 warning and no zero-row check.
+- ✅ S792 stage 2 — RECIPES-1 **[P1]** Build-your-own dishes are still judged at their bowl-and-spoon cost:
   - the detail view, printed card, WhatsApp share, pills and export;
   - Menu Engineering and its `me_class` write-back;
   - Recipe Margin, Repricing and Best Sellers;
   - the Owner Report ME section.
-- 🔴 RECIPES-3 **[P1]** Extras are counted as revenue but their stock is not counted as cost on Recipe Margin and Best Sellers.
-- 🔴 COSTS-2 **[P1]** Fixed assets choose "current NBV" by period end, not by posting order, which breaks D24's reversal and disposal flow. Also COSTS-4, where valuation drops assets disposed after the as-of date; COSTS-5, where a missing prior-year pool run opens every pool at 0 (warning part only); COSTS-6, where Pool E runs past its useful life; and COSTS-8, where an asset edit after posting gives no warning (D5).
-- 🔴 PLANNING-1 Demand Forecast reads at most 1,000 bills, and its stored read is unpaged. The old-run delete puts every new id in the URL. Needs a `run_id` column.
-- 🔴 PLANNING-2 / PLANNING-3 The dashboard forecast and the frozen Target count today's partial day as a whole day (S780–S783 code).
-- 🔴 PLANNING-4 Dead Stock ignores staff meals as movement, so staff rice reads "write it off". The Owner Report copy has the same flaw.
-- 🔴 SALES-4 Two quick Save Day presses can deplete stock twice. SALES-5 An import with a negative net quantity is dropped silently.
-- 🔴 MASTER-5 Two items added in one visit share a code, and Recipe Import resolves by code first.
-- 🔴 STOCK-5 (KNOWN+ of the banner item) A closed-month correction never reaches next month's opening. STOCK-6 A month switch shows old figures, with Export live.
-- 🔴 COSTS-3 Overheads gives a verdict on the open month (D7 precedent). COSTS-9 The labour tooltip leaves out overtime. COSTS-10 Break-even shows red with no figure entered.
+- ✅ S792 stage 2 — RECIPES-3 **[P1]** Extras are counted as revenue but their stock is not counted as cost on Recipe Margin and Best Sellers.
+- ✅ S792 stage 2 — COSTS-2 **[P1]** Fixed assets choose "current NBV" by period end, not by posting order, which breaks D24's reversal and disposal flow. Also COSTS-4, where valuation drops assets disposed after the as-of date; COSTS-5, where a missing prior-year pool run opens every pool at 0 (warning part only); COSTS-6, where Pool E runs past its useful life; and COSTS-8, where an asset edit after posting gives no warning (D5).
+- ✅ S792 stage 2 — PLANNING-1 Demand Forecast reads at most 1,000 bills, and its stored read is unpaged. The old-run delete puts every new id in the URL. Needs a `run_id` column.
+- ✅ S792 stage 2 — PLANNING-2 / PLANNING-3 The dashboard forecast and the frozen Target count today's partial day as a whole day (S780–S783 code).
+- ✅ S792 stage 2 — PLANNING-4 Dead Stock ignores staff meals as movement, so staff rice reads "write it off". The Owner Report copy has the same flaw.
+- ✅ S792 stage 2 — SALES-4 Two quick Save Day presses can deplete stock twice. SALES-5 An import with a negative net quantity is dropped silently.
+- ✅ S792 stage 2 — MASTER-5 Two items added in one visit share a code, and Recipe Import resolves by code first.
+- ✅ S792 stage 2 — STOCK-5 (KNOWN+ of the banner item) A closed-month correction never reaches next month's opening. STOCK-6 A month switch shows old figures, with Export live.
+- ✅ S792 stage 2 — COSTS-3 Overheads gives a verdict on the open month (D7 precedent). COSTS-9 The labour tooltip leaves out overtime. COSTS-10 Break-even shows red with no figure entered.
 
 ## S792.4 Stage 3 — hygiene (one sweep)
 
@@ -154,6 +156,22 @@ Migration `20260928140000_ims_integrity_s792.sql` applied live 2026-09-28 after 
 - 🔴 MASTER-8 (the rest)
 - 🔴 DATABASE-9 / DATABASE-10 / DATABASE-11
 - 🔴 D42 wording on the close screen and the report header
+- 🔴 Found while building stage 2:
+  - `ShrinkageReport.js` keeps its observation loop, `bandItem` and `shrinkageStatus` private, so the Owner Report carries pinned twins. Export them and delete the twins.
+  - The Owner Report's `trend.*.snapshot` embeds the whole prior snapshot, including that one's own trend, so snapshots grow month on month.
+  - Recipe Margin's Export is gated on `display.length` only (the S728 rule wants `loading`/`loadError` too) and has no letterhead.
+  - Price Tracker's confirm names the recipes but not the past records it re-values; move `priceImpactPhrase` and a per-item count read out of `Items.js` into `itemRefTables.js`.
+  - `push_master_data` copies `selling_price`/`vat_rate` to a branch whose VAT status may differ (D31).
+  - Overheads and Requisitions still show no amber closed-month banner to the Owner or admin.
+  - Fixed assets: a partly reversed period counts as charged through its end; disposed Pool E assets are left out.
+  - A month Target captured from a part-day before PLANNING-3 stays until the month ends (clients with under 14 history days only). `SNAPSHOT_MODEL` deliberately not bumped.
+  - `Items.test.js` has no test for `rememberInBook` (MASTER-5).
+  - From the stage-2 write-path review (the P1 and three P2s were fixed before commit):
+    - `persistSalesDay.js`'s per-day lock is held by a hung request until reload (deliberate: releasing it risks a double depletion). Save still says saved after 20s, and that day's stock update waits.
+    - D35's first till day comes from `sales_entries` only, so till bills not yet posted to IMS (an unsynced till, or a hand-off awaiting the Periods backfill) make their days look pre-till.
+    - A bill stamped paid before `payable_payments` existed, whose returns bring it to 0, is indistinguishable from a "Close this bill" close; deleting its return reopens it. Needs a marker written on Close, or an owner decision to accept it.
+    - Two Demand Forecast Recomputes running at once can empty the horizon (each clears the other's run).
+  - `Overheads.js` still labels purchases "Food Cost" (D30 wording).
 
 ## S792.5 Stage 4 — design first, shown before building
 

@@ -10,7 +10,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import QtyInput from '../../../components/QtyInput'
 import {
-  computeDepreciationPreview, latestPostedByAsset, effectiveDepreciation,
+  computeDepreciationPreview, bookPositionsByAsset, bookValue, effectiveDepreciation,
   regularOverrideError, adjustmentOverrideError,
 } from './depreciationCompute'
 import { chipKeys } from '../../../shared/rovingFocus'
@@ -30,9 +30,9 @@ const runLabel = r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}`
 
 // The posted schedule, paged: one row per asset per run, so a client with 100 assets and monthly
 // runs crosses the silent 1000-row cap inside a year — and a truncated read here would open every
-// asset past the cut at its full cost, in a preview that can be POSTED (S756). The created_at and
-// id tiebreakers are what latestPostedByAsset() needs to pick an adjustment over the run it
-// reverses when the two share a period_end.
+// asset past the cut at its full cost, in a preview that can be POSTED (S756). The id tiebreaker
+// is what paging needs. Book values come from bookPositionsByAsset(), which sums every row, so
+// the order no longer picks anything (S792, COSTS-2).
 function readPostedSchedule(scopedFrom) {
   return fetchAllRows(() => scopedFrom('assets_depreciation_schedule')
     .eq('is_posted', true)
@@ -103,11 +103,13 @@ export default function DepreciationRunTab({ assets, onReload }) {
       setLoading(false)
       return
     }
-    const priorScheduleByAssetId = latestPostedByAsset(postedRows)
+    // Each asset opens at cost less everything posted against it, in whatever order it was posted
+    // (S792, COSTS-2) — a back-dated run or a reversal for an earlier period included.
+    const positions = bookPositionsByAsset(postedRows)
 
     const activeAssets = assets.filter(a => a.status === 'active')
     const preview = computeDepreciationPreview({
-      assets: activeAssets, priorScheduleByAssetId, periodStart, periodEnd,
+      assets: activeAssets, positions, periodStart, periodEnd,
     })
     setLines(preview.map(l => ({ ...l, override_amount: '', override_reason: '' })))
     setLoading(false)
@@ -129,7 +131,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
       setLoading(false)
       return
     }
-    const latest = latestPostedByAsset(postedRes.data)
+    const positions = bookPositionsByAsset(postedRes.data)
     const skipped = []
     const next = []
     for (const row of runRes.data || []) {
@@ -139,7 +141,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
       // A disposed asset's gain or loss was struck against the NBV it had then. Writing its
       // depreciation back afterwards would move a book value the disposal already froze.
       if (!asset || asset.status !== 'active') { skipped.push(asset ? `${asset.asset_code} — ${asset.name}` : row.asset_id); continue }
-      const opening = parseFloat(latest[row.asset_id]?.closing_nbv ?? asset.total_cost) || 0
+      const opening = bookValue(asset, positions[row.asset_id])
       next.push({
         asset_id: row.asset_id,
         opening_nbv: opening,
