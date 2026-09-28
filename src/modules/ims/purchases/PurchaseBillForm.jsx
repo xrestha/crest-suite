@@ -16,7 +16,7 @@ import {
   parseInvoiceAmount, invoiceAmountError, invoiceMismatch, invoiceMismatchText,
 } from './purchasesHelpers'
 import {
-  billDraftId, billDraftSignature, readBillDraft, saveBillDraft, clearBillDraft,
+  billDraftId, billDraftSignature, readBillDraft, saveBillDraft, clearBillDraft, draftBaseMoved,
 } from './purchaseBillDraft'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
@@ -83,14 +83,20 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // it in an effect would mount the blank form, then replace it, and a keystroke landing in that
   // gap would be typed into state that is about to be thrown away.
   const draftId = billDraftId({ groupId: editingGroupId, periodId: period?.id, profileId })
-  const [restoredDraft] = useState(() => readBillDraft(draftId))
+  const [keptDraft] = useState(() => readBillDraft(draftId))
+  // A draft of a bill someone saved AFTER it was typed is not restored on its own (S792,
+  // PURCHASES-2): the form opens on the bill as it is now and asks which version to keep. Restoring
+  // it silently put the older lines on screen as "what you were typing", and Save then wrote them
+  // over the newer bill with nothing to say it had changed.
+  const [staleDraft, setStaleDraft] = useState(() =>
+    draftBaseMoved(keptDraft, pristineRef.current.signature, !!editingGroupId) ? keptDraft : null)
+  const [restoredDraft] = useState(() => (staleDraft ? null : keptDraft))
+  // Merged over a fresh line so a draft written by an older build, before a field existed, comes
+  // back with that field defined rather than undefined in a controlled input. The stored `_key`
+  // wins where there is one.
+  const draftLines = d => d.lines.map(l => ({ ...newLine(), ...l }))
   const [billHeader, setBillHeader] = useState(() => ({ ...initial.header, ...(restoredDraft?.header || {}) }))
-  const [billLines, setBillLines]   = useState(() => (
-    // Merged over a fresh line so a draft written by an older build, before a field existed, comes
-    // back with that field defined rather than undefined in a controlled input. The stored `_key`
-    // wins where there is one.
-    restoredDraft ? restoredDraft.lines.map(l => ({ ...newLine(), ...l })) : initial.lines
-  ))
+  const [billLines, setBillLines]   = useState(() => (restoredDraft ? draftLines(restoredDraft) : initial.lines))
   const [draftRestoredAt, setDraftRestoredAt] = useState(() => restoredDraft?.savedAt || null)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
@@ -121,7 +127,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // `saved` stops it dead: once the bill is committed the draft is cleared, and a straggling write
   // would put it straight back for the next reader of this period to be offered.
   useEffect(() => {
-    if (!draftId || saved) return undefined
+    // Not while a stale draft waits for an answer: the form holds the saved bill, which matches the
+    // baseline, and saveBillDraft would take that as "nothing typed" and delete the very draft the
+    // reader is being asked about.
+    if (!draftId || saved || staleDraft) return undefined
     const flush = () => saveBillDraft(draftId, {
       header: billHeader, lines: billLines, baseSignature: pristineRef.current.signature,
     })
@@ -134,7 +143,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', flush)
     }
-  }, [draftId, billHeader, billLines, saved])
+  }, [draftId, billHeader, billLines, saved, staleDraft])
 
   // Throw the restored draft away and go back to the bill as it was opened — blank for a new bill,
   // the saved lines for an edit.
@@ -143,6 +152,21 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     setBillLines(pristineRef.current.lines)
     setDraftRestoredAt(null)
     clearBillDraft(draftId)
+  }
+
+  // The two answers to a stale draft (S792). Using it is a deliberate choice to replace the bill as
+  // saved now with the older unsaved version: the form still supersedes the rows it opened with,
+  // so Save writes exactly what the reader has chosen and checked. Keeping the saved bill forgets
+  // the draft.
+  function applyStaleDraft() {
+    setBillHeader({ ...pristineRef.current.header, ...(staleDraft.header || {}) })
+    setBillLines(draftLines(staleDraft))
+    setDraftRestoredAt(staleDraft.savedAt || null)
+    setStaleDraft(null)
+  }
+  function keepSavedBill() {
+    clearBillDraft(draftId)
+    setStaleDraft(null)
   }
 
   // Cancel has always thrown the typing away — that is what it means. It must therefore also throw
@@ -455,6 +479,17 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           bill, so an unannounced set of lines on screen is a bill they did not knowingly type. It
           states plainly that nothing is recorded yet, and offers the other answer — start clean —
           rather than making them empty the rows by hand. */}
+      {staleDraft && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+          <span style={{ flex: '1 1 340px' }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>This bill was saved again after your unsaved changes.</strong>{' '}
+            You had changes to it that were never saved{staleDraft.savedAt ? ` (${nepalBsLong(staleDraft.savedAt)}, ${nepalTime(staleDraft.savedAt)})` : ''}, and the bill has been saved since, by someone else or on another screen.
+            The form below shows the bill as it is saved now. Using your version would replace it.
+          </span>
+          <button className="btn btn-ghost" onClick={applyStaleDraft} style={{ flex: '0 0 auto' }}>Use my unsaved version</button>
+          <button className="btn btn-primary" onClick={keepSavedBill} style={{ flex: '0 0 auto' }}>Keep the saved bill</button>
+        </div>
+      )}
       {draftRestoredAt && (
         <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
           <span style={{ flex: '1 1 340px' }}>

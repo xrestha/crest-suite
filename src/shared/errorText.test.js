@@ -258,3 +258,39 @@ describe('salary payment refusals', () => {
     expect(errorText(raised('salary_payment_ledger_locked'), 'operator')).toMatch(/Mark paid/)
   })
 })
+
+// S792 (STOCK-2). Every IMS database guard raises ERRCODE 42501 with a hint. S756 appended their
+// rules AFTER the generic 42501 rule, and the first-match lookup meant each read "You're not allowed
+// to do that" — the closed-month, month-rank and rank refusals never reached their own sentence.
+// Each case below is the real shape PostgREST returns: the code, the hint and the trigger's message.
+describe('IMS database guard refusals (S756/S792)', () => {
+  const GENERIC = /You're not allowed to do that/
+  const raised = (hint, message, code = '42501') => ({ code, hint, message })
+
+  it.each([
+    ['period_closed', 'closing_stock: this month is closed, so its figures cannot be changed except by the account owner', /month is closed/i],
+    ['period_rank', 'monthly_periods: closing the month needs the account owner or an IMS supervisor or manager', /start or close a month/i],
+    ['recipe_delete_rank', 'recipes: deleting a dish needs an IMS manager', /Deleting a dish/],
+    ['recipe_hide_rank', 'recipes: hiding a dish needs an IMS supervisor', /Hiding or showing a dish/],
+    ['ims_settings_rank', 'ims_settings_rank: only the Owner or an IMS manager can change the inventory thresholds', /thresholds/],
+    ['ims_rank', 'items: changing an item needs an IMS supervisor, a manager or the account owner', /inventory rank/],
+    ['item_unit_locked', 'items: MILK already has purchases, counts or recipe lines recorded in ML, so its unit cannot change', /unit cannot change/],
+    ['ims_count_settings_rank', 'ims_count_settings_rank: only the Owner or an IMS manager can change how stock counts are fenced', /recount protection/],
+    ['po_receipt_only', 'purchase_order_items: a received quantity is recorded only by receiving the delivery', /Receive on the order/],
+    ['snapshot_frozen', "monthly_periods: this month's target is already set, and only a newer forecast can replace it", /target is already set/],
+  ])('%s reaches its own sentence, not the generic one', (hint, message, expected) => {
+    const text = errorText(raised(hint, message), 'operator')
+    expect(text).toMatch(expected)
+    expect(text).not.toMatch(GENERIC)
+    expect(errorText(raised(hint, message), 'staff')).not.toMatch(GENERIC)
+  })
+
+  it('a double-posted depreciation run says it was not charged twice', () => {
+    const e = raised('dep_run_duplicate', 'dep_run_duplicate: this run was posted moments ago, from this page or another', 'P0001')
+    expect(errorText(e, 'operator')).toMatch(/not charged a second time/)
+  })
+
+  it('a plain RLS refusal with no hint still gets the generic sentence', () => {
+    expect(errorText({ code: '42501', message: 'new row violates row-level security policy for table "x"' }, 'operator')).toMatch(GENERIC)
+  })
+})

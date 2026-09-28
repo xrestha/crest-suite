@@ -23,11 +23,15 @@ export const POS_IDLE_WARN_MS = 20 * 1000
  * Deliberately does nothing unless `enabled` — the caller decides, so the Kitchen Display (a
  * screen meant to stay awake and untouched on a wall) and the PIN screen itself never lock.
  *
+ * Also drives the counting tablet's lock (S792, D39), which passes its own, longer `lockMs`; the
+ * mechanics — real input only, idle measured from the last touch across a sleep — are the same.
+ *
  * @param {boolean}  enabled
  * @param {Function} onWarn  called with seconds remaining, then null when the user returns
  * @param {Function} onLock  called once when the idle period elapses
+ * @param {number}   [lockMs] idle period; the till's POS_IDLE_LOCK_MS by default
  */
-export function usePosIdleLock(enabled, onWarn, onLock) {
+export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_MS) {
   const warnRef = useRef(null)
   const lockRef = useRef(null)
   const onWarnRef = useRef(onWarn)
@@ -74,7 +78,7 @@ export function usePosIdleLock(enabled, onWarn, onLock) {
 
     const onActivity = () => {
       lastActivityRef.current = Date.now()
-      arm(POS_IDLE_LOCK_MS)
+      arm(lockMs)
     }
 
     // pointerdown/keydown/touchstart rather than mousemove: a mouse nudged by a passing tray, or
@@ -90,19 +94,19 @@ export function usePosIdleLock(enabled, onWarn, onLock) {
     // was already spent while nobody was there; otherwise only what is left of it is re-armed.
     const onVisible = () => {
       if (document.visibilityState !== 'visible' || locked) return
-      const remaining = POS_IDLE_LOCK_MS - (Date.now() - lastActivityRef.current)
+      const remaining = lockMs - (Date.now() - lastActivityRef.current)
       if (remaining <= 0) lock()
       else arm(remaining)
     }
     document.addEventListener('visibilitychange', onVisible)
 
     lastActivityRef.current = Date.now()
-    arm(POS_IDLE_LOCK_MS)
+    arm(lockMs)
     return () => {
       clearAll()
       EVENTS.forEach(e => window.removeEventListener(e, onActivity))
       document.removeEventListener('visibilitychange', onVisible)
       onWarnRef.current?.(null)
     }
-  }, [enabled])
+  }, [enabled, lockMs])
 }

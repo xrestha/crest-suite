@@ -21,6 +21,13 @@ own rate). A pack-size / purchase-unit change only warns, because purchases are 
 (`conversion_factor` is display-only). `PurchaseBillPage`'s post-save rate sync carries the same
 warning wording since S756 stage 3.
 
+**Since S792 the unit lock is in the database** (`ims_items_guard`, `item_unit_locked`), for every
+login but admin, Owner included; sub-recipe mirrors are exempt. Every `items` write needs IMS
+supervisor+ or the Owner (D41), so the bill page offers the rate sync only to those logins, only
+after a NEW bill in the open month, only for items with no later priced bill that month, and with
+nothing ticked. `push_master_data` plans a branch item whose unit differs and has history as a
+`conflict` (`item_has_references`), and never copies `is_active` onto an existing branch row.
+
 ### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597, supersedes S566)
 
 `items.per_uom_rate` is a **generated column** — `rate / NULLIF(purchase_qty, 0)` — and `purchase_qty`

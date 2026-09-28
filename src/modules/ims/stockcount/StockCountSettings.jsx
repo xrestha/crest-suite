@@ -165,14 +165,21 @@ export default function StockCountSettings({ clientId, categories, uncategorised
   // Every counting tablet shares one key per outlet (S737), so a lost tablet can only be cut off by
   // changing that key for all of them (S756, the owner's choice over per-tablet keys). Each tablet
   // then shows "signed out by your manager" and needs the QR once.
+  //
+  // Until S792 the key change stopped only the NEXT sign-in: a tablet already signed in kept an
+  // ordinary session that nothing re-checked, which is exactly the lost-tablet case (MASTER-3).
+  // rotate_ims_device_secret now also ends every counting login's session. A sign-in token already
+  // handed out still works until it expires (at most an hour), and the copy says so rather than
+  // promising "straight away".
   function signOutAllTablets() {
     askConfirm({
       title: 'Sign out every counting tablet?',
       confirmLabel: 'Sign Out All Tablets', busyLabel: 'Signing out…', danger: true,
       body: (
         <p style={{ margin: 0 }}>
-          Every tablet and phone set up for counting stops working straight away, including ones
-          that are lost or stolen. To keep using a device, show the setup QR and scan it again.
+          Every tablet and phone set up for counting is signed out, including ones that are lost or
+          stolen. A device open on the count screen right now can keep saving for up to an hour,
+          then it is locked out. To keep using a device, show the setup QR and scan it again.
           Counts already saved are not affected.
         </p>
       ),

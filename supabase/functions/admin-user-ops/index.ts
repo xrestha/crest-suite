@@ -60,6 +60,11 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     .eq('client_id', clientId)
     .select('client_id')
   if (imsKeyErr) throw new Error(`Failed to sign out this client's stock-count tablets: ${imsKeyErr.message}`)
+  // S792 (MASTER-3): the key change stops the NEXT sign-in only. A tablet already signed in held an
+  // ordinary session that nothing re-checked, so its counting login's sessions are ended too
+  // (ims_revoke_count_sessions, migration 20260928140000, service role only).
+  const { error: imsSessErr } = await admin.rpc('ims_revoke_count_sessions', { p_client_id: clientId })
+  if (imsSessErr) throw new Error(`Failed to end this client's stock-count tablet sessions: ${imsSessErr.message}`)
   const imsTabletsSignedOut = (imsRotated || []).length > 0
 
   const devices = (revoked || []) as Array<Record<string, unknown>>
@@ -98,6 +103,35 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
   return { tablets_revoked: devices.length, legacy_key_retired: legacyRetired, ims_tablets_signed_out: imsTabletsSignedOut }
 }
 
+// S792 (DATABASE-5). An id list travels in the URL, and the gateway refuses one past a few hundred
+// uuids (414, measured at ~254 in S706). The wipes below used to pass a client's whole list at once
+// — every recipe, order or bill line — so on a mature client they threw part-way, after
+// recipe_ingredients was already gone: Archive left an active client whose dishes had no
+// ingredients, restore refused a non-empty client, and every retry failed identically. Ids are now
+// read in full (a bare select stops at 1000 rows, and dropped its read error) and deleted 100 at a
+// time; a child table that carries client_id is deleted by that instead, with no list at all.
+const ID_CHUNK = 100
+
+type IdPage = PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>
+
+async function readAllIds(label: string, page: (from: number, to: number) => IdPage): Promise<string[]> {
+  const ids: string[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await page(from, from + 999)
+    if (error) throw new Error(`Failed to read ${label}: ${error.message ?? String(error)}`)
+    const rows = (data || []) as Array<{ id: string }>
+    ids.push(...rows.map(r => r.id))
+    if (rows.length < 1000) return ids
+  }
+}
+
+async function deleteByIdChunks(admin: ReturnType<typeof createClient>, table: string, column: string, ids: string[], label: string) {
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { error } = await admin.from(table).delete().in(column, ids.slice(i, i + ID_CHUNK))
+    if (error) throw new Error(`Failed to delete ${label}: ${(error as { message?: string }).message ?? String(error)}`)
+  }
+}
+
 /**
  * Deletes every business row belonging to one client, in FK-safe order.
  *
@@ -131,36 +165,26 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
     if (error) throw new Error(`Failed to delete ${label}: ${(error as { message?: string }).message ?? String(error)}`)
   }
 
-  const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
-  const periodIds = (periods || []).map((p: { id: string }) => p.id)
+  // A month's worth of ids per year of trading: this list stays short enough for one URL.
+  const periodIds = await readAllIds('monthly_periods', (f, t) =>
+    admin.from('monthly_periods').select('id').eq('client_id', clientId).order('id').range(f, t))
+  const recipeIds = await readAllIds('recipes', (f, t) =>
+    admin.from('recipes').select('id').eq('client_id', clientId).order('id').range(f, t))
+  const poIds = await readAllIds('purchase_orders', (f, t) =>
+    admin.from('purchase_orders').select('id').eq('client_id', clientId).order('id').range(f, t))
+  const reqIds = await readAllIds('requisitions', (f, t) =>
+    admin.from('requisitions').select('id').eq('client_id', clientId).order('id').range(f, t))
 
-  const { data: recipeRows } = await admin.from('recipes').select('id').eq('client_id', clientId)
-  const recipeIds = (recipeRows || []).map((r: { id: string }) => r.id)
+  await deleteByIdChunks(admin, 'recipe_ingredients', 'recipe_id', recipeIds, 'recipe_ingredients')
+  // recipe_suggestions carries client_id, and both of its recipe columns point at this client's own
+  // recipes, so one delete by client covers both directions.
+  await del(admin.from('recipe_suggestions').delete().eq('client_id', clientId), 'recipe_suggestions')
+  await deleteByIdChunks(admin, 'purchase_order_items', 'po_id', poIds, 'purchase_order_items')
+  await deleteByIdChunks(admin, 'requisition_lines', 'requisition_id', reqIds, 'requisition_lines')
 
-  const { data: poRows } = await admin.from('purchase_orders').select('id').eq('client_id', clientId)
-  const poIds = (poRows || []).map((p: { id: string }) => p.id)
-
-  const { data: reqRows } = await admin.from('requisitions').select('id').eq('client_id', clientId)
-  const reqIds = (reqRows || []).map((r: { id: string }) => r.id)
-
-  if (recipeIds.length > 0) {
-    await del(admin.from('recipe_ingredients').delete().in('recipe_id', recipeIds), 'recipe_ingredients')
-    await del(admin.from('recipe_suggestions').delete().in('recipe_id', recipeIds), 'recipe_suggestions')
-    await del(admin.from('recipe_suggestions').delete().in('suggest_recipe_id', recipeIds), 'recipe_suggestions (reverse)')
-  }
-  if (poIds.length > 0) {
-    await del(admin.from('purchase_order_items').delete().in('po_id', poIds), 'purchase_order_items')
-  }
-  if (reqIds.length > 0) {
-    await del(admin.from('requisition_lines').delete().in('requisition_id', reqIds), 'requisition_lines')
-  }
-
+  // By client_id, not by a list of every bill line's id — that list was the likeliest 414 of all.
+  await del(admin.from('payable_payments').delete().eq('client_id', clientId), 'payable_payments')
   if (periodIds.length > 0) {
-    const { data: peRows } = await admin.from('purchase_entries').select('id').in('period_id', periodIds)
-    const peIds = (peRows || []).map((r: { id: string }) => r.id)
-    if (peIds.length > 0) {
-      await del(admin.from('payable_payments').delete().in('purchase_entry_id', peIds), 'payable_payments')
-    }
     await del(admin.from('purchase_entries').delete().in('period_id', periodIds), 'purchase_entries')
     await del(admin.from('vendor_returns').delete().in('period_id', periodIds), 'vendor_returns')
     await del(admin.from('opening_stock').delete().in('period_id', periodIds), 'opening_stock')
@@ -179,11 +203,8 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('pos_credit_notes').delete().eq('client_id', clientId), 'pos_credit_notes')
   await del(admin.from('pos_payment_confirmations').delete().eq('client_id', clientId), 'pos_payment_confirmations')
   await del(admin.from('pos_guest_order_requests').delete().eq('client_id', clientId), 'pos_guest_order_requests')
-  const { data: orderRows } = await admin.from('pos_orders').select('id').eq('client_id', clientId)
-  const orderIds = (orderRows || []).map((o: { id: string }) => o.id)
-  if (orderIds.length > 0) {
-    await del(admin.from('pos_order_items').delete().in('order_id', orderIds), 'pos_order_items')
-  }
+  // By client_id (S792, DATABASE-5): every order id of a busy till was thousands of uuids in one URL.
+  await del(admin.from('pos_order_items').delete().eq('client_id', clientId), 'pos_order_items')
   await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
   // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
   await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
@@ -1551,6 +1572,9 @@ Deno.serve(async (req) => {
       const validRoles = ['staff', 'supervisor', 'manager']
       if (!ims_role) return json({ error: NO_RANK_MSG }, 400)
       if (!validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
+      // S792 (MASTER-4): the S752 rule HR and POS already follow. An IMS manager minting a peer is a
+      // manager nobody below the Owner can undo (requireManageableTarget refuses them).
+      if (ims_role === 'manager' && !(isCallerAdmin || isCallerOwner)) return json({ error: MANAGER_GRANT_MSG }, 403)
 
       if (employee_id) {
         const { data: employee } = await admin
@@ -1558,9 +1582,12 @@ Deno.serve(async (req) => {
           .eq('id', employee_id).eq('client_id', targetClientId).single()
         if (!employee) return json({ error: 'Employee not found' }, 400)
 
-        const { data: existingLink } = await admin
-          .from('profiles').select('id').eq('hr_employee_id', employee_id).not('ims_role', 'is', null).maybeSingle()
-        if (existingLink) return json({ error: 'This employee already has an IMS staff account' }, 400)
+        // `error` read (S792, MASTER-8): a failed read, or two matching logins (which .maybeSingle()
+        // reports as an error), read as "no existing IMS login" and a second one was created.
+        const { data: existingLink, error: linkErr } = await admin
+          .from('profiles').select('id').eq('hr_employee_id', employee_id).not('ims_role', 'is', null).limit(1)
+        if (linkErr) return json({ error: `Could not check for an existing IMS login for this employee, so none was created: ${linkErr.message}` }, 503)
+        if ((existingLink || []).length > 0) return json({ error: 'This employee already has an IMS staff account' }, 400)
 
         full_name = employee.full_name
       }
@@ -1618,9 +1645,12 @@ Deno.serve(async (req) => {
           .eq('id', employee_id).eq('client_id', targetClientId).single()
         if (!employee) return json({ error: 'Employee not found' }, 400)
 
-        const { data: existingLink } = await admin
-          .from('profiles').select('id').eq('hr_employee_id', employee_id).not('ims_role', 'is', null).maybeSingle()
-        if (existingLink) return json({ error: 'This employee already has an IMS staff account' }, 400)
+        // `error` read (S792, MASTER-8): a failed read, or two matching logins (which .maybeSingle()
+        // reports as an error), read as "no existing IMS login" and a second one was created.
+        const { data: existingLink, error: linkErr } = await admin
+          .from('profiles').select('id').eq('hr_employee_id', employee_id).not('ims_role', 'is', null).limit(1)
+        if (linkErr) return json({ error: `Could not check for an existing IMS login for this employee, so none was created: ${linkErr.message}` }, 503)
+        if ((existingLink || []).length > 0) return json({ error: 'This employee already has an IMS staff account' }, 400)
 
         full_name = employee.full_name
       }
@@ -1722,6 +1752,10 @@ Deno.serve(async (req) => {
       }
       if (ims_role && !targetProfile.ims_role && await isLastOwnerLogin(targetProfile)) {
         return json({ error: LAST_OWNER_MSG }, 400)
+      }
+      // S792 (MASTER-4): only the Owner (or the operator) makes someone an IMS Manager.
+      if (ims_role === 'manager' && targetProfile.ims_role !== 'manager' && !(isCallerAdmin || isCallerOwner)) {
+        return json({ error: MANAGER_GRANT_MSG }, 403)
       }
       // Already IMS staff: a manager may move staff and supervisors, not a peer manager or
       // themselves (see requireManageableTarget).
@@ -2004,15 +2038,12 @@ Deno.serve(async (req) => {
       }
 
       if (module === 'ims') {
-        const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
-        const periodIds = (periods || []).map((p: { id: string }) => p.id)
+        const periodIds = await readAllIds('monthly_periods', (f, t) =>
+          admin.from('monthly_periods').select('id').eq('client_id', clientId).order('id').range(f, t))
 
+        // By client_id (S792, DATABASE-5), not a URL holding every bill line's id.
+        await del(admin.from('payable_payments').delete().eq('client_id', clientId), 'payable_payments')
         if (periodIds.length > 0) {
-          const { data: peRows } = await admin.from('purchase_entries').select('id').in('period_id', periodIds)
-          const peIds = (peRows || []).map((r: { id: string }) => r.id)
-          if (peIds.length > 0) {
-            await del(admin.from('payable_payments').delete().in('purchase_entry_id', peIds), 'payable_payments')
-          }
           await del(admin.from('purchase_entries').delete().in('period_id', periodIds), 'purchase_entries')
           await del(admin.from('vendor_returns').delete().in('period_id', periodIds), 'vendor_returns')
           await del(admin.from('opening_stock').delete().in('period_id', periodIds), 'opening_stock')
@@ -2025,18 +2056,14 @@ Deno.serve(async (req) => {
 
         await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
 
-        const { data: poRows } = await admin.from('purchase_orders').select('id').eq('client_id', clientId)
-        const poIds = (poRows || []).map((p: { id: string }) => p.id)
-        if (poIds.length > 0) {
-          await del(admin.from('purchase_order_items').delete().in('po_id', poIds), 'purchase_order_items')
-        }
+        const poIds = await readAllIds('purchase_orders', (f, t) =>
+          admin.from('purchase_orders').select('id').eq('client_id', clientId).order('id').range(f, t))
+        await deleteByIdChunks(admin, 'purchase_order_items', 'po_id', poIds, 'purchase_order_items')
         await del(admin.from('purchase_orders').delete().eq('client_id', clientId), 'purchase_orders')
 
-        const { data: reqRows } = await admin.from('requisitions').select('id').eq('client_id', clientId)
-        const reqIds = (reqRows || []).map((r: { id: string }) => r.id)
-        if (reqIds.length > 0) {
-          await del(admin.from('requisition_lines').delete().in('requisition_id', reqIds), 'requisition_lines')
-        }
+        const reqIds = await readAllIds('requisitions', (f, t) =>
+          admin.from('requisitions').select('id').eq('client_id', clientId).order('id').range(f, t))
+        await deleteByIdChunks(admin, 'requisition_lines', 'requisition_id', reqIds, 'requisition_lines')
         await del(admin.from('requisitions').delete().eq('client_id', clientId), 'requisitions')
 
         await del(admin.from('overheads').delete().eq('client_id', clientId), 'overheads')
@@ -2093,11 +2120,8 @@ Deno.serve(async (req) => {
         await del(admin.from('pos_credit_notes').delete().eq('client_id', clientId), 'pos_credit_notes')
         await del(admin.from('pos_payment_confirmations').delete().eq('client_id', clientId), 'pos_payment_confirmations')
         await del(admin.from('pos_guest_order_requests').delete().eq('client_id', clientId), 'pos_guest_order_requests')
-        const { data: orderRows } = await admin.from('pos_orders').select('id').eq('client_id', clientId)
-        const orderIds = (orderRows || []).map((o: { id: string }) => o.id)
-        if (orderIds.length > 0) {
-          await del(admin.from('pos_order_items').delete().in('order_id', orderIds), 'pos_order_items')
-        }
+        // By client_id (S792, DATABASE-5), not a URL holding every order id of the till.
+        await del(admin.from('pos_order_items').delete().eq('client_id', clientId), 'pos_order_items')
         // POS-generated depletion ledger + POS-sourced sales entries go with the orders
         await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
         const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)

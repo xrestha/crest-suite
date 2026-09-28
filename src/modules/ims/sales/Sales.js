@@ -90,6 +90,18 @@ function storedPriceMap(rows) {
   return out
 }
 
+
+// A hidden dish shown because it already sold this month (S792, D29). It is off the menu and the
+// till, not off the record, so its figures stay editable here; the tag says why it is on the list.
+function HiddenTag({ recipe }) {
+  if (!recipe._hidden) return null
+  return (
+    <Tip text="Hidden from the menu and the till, but it already sold this month, so its sales stay here to check or correct. Saving never removes them.">
+      <span className="badge badge-gray" style={{ marginLeft: 8, fontWeight: 500 }}>Hidden</span>
+    </Tip>
+  )
+}
+
 export default function Sales() {
   const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, clientModules, hasImsAccess } = useAuth()
   const { ask: askConfirm, confirmEl } = useConfirm()   // S765: Clear All was a window.confirm
@@ -122,7 +134,8 @@ export default function Sales() {
   // On a report an overlapping load is a flicker; on a write surface it is a wrong figure saved.
   const dayReq = useLatestRequest()
   const [selectedPeriod, setSelectedPeriod] = useState(null)
-  const [recipes, setRecipes]       = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
+  // EVERY dish, hidden ones included (S792) — `recipes` below is what the page shows and saves.
+  const [menuRecipes, setMenuRecipes] = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
   const [sales, setSales]           = useState({}) // { recipe_id: qty } — bulk only, bs_day=0
   const [salesPrices, setSalesPrices] = useState({}) // recipe_id -> stored { unit_price, vat_rate } of the Bulk rows (D8)
   const [loading, setLoading]       = useState(true)
@@ -190,6 +203,25 @@ export default function Sales() {
   // requestSave's note on `target` (S756).
   const [pendingSave, setPendingSave] = useState(null)
 
+  // The dishes this page shows, enters and SAVES (S792, D29 — SALES-1). A hidden dish that already
+  // sold this month stays on the page, listed after the menu and marked Hidden: save_sales_day
+  // replaces a day's (or the period's Bulk) manual rows WHOLESALE with the payload, and the payload
+  // is built from this list. When it held active dishes only, re-saving any day deleted a hidden
+  // dish's sales for that day — and a Bulk save its whole month — with nothing on screen, since no
+  // grid ever drew the row. Hiding a dish takes it off the menu and the till; it never takes it off
+  // the record (owner decision D29). `is_active` NULL is a legacy active dish, as everywhere else.
+  const recipes = useMemo(() => {
+    const active = menuRecipes.filter(r => r.is_active !== false)
+    const soldThisPeriod = id => (allDaySums[id] || 0) > 0 || (sales[id] || 0) > 0
+      || (dailySales[id] || 0) > 0 || (posDaySales[id] || 0) > 0
+    const hidden = menuRecipes
+      .filter(r => r.is_active === false && soldThisPeriod(r.id))
+      .map(r => ({ ...r, _hidden: true }))
+    return [...active, ...hidden]
+  }, [menuRecipes, allDaySums, sales, dailySales, posDaySales])
+  const activeRecipeCount = recipes.filter(r => !r._hidden).length
+  const hiddenWithSales = recipes.length - activeRecipeCount
+
   // Only wraps setPeriods/setRecipes below — deliberately not used for anything a save merges
   // against (see comment above the periods/recipes useState calls).
   function setAndCache(setter, section, value) {
@@ -233,7 +265,9 @@ export default function Sales() {
       // the same fix and the same comment; three sibling reads never got it.
       // Here that meant a dish with no category could not be entered against a period at all — it
       // was absent from Sales Entry's recipe list, with nothing saying so.
-      scopedFrom('recipes').eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe').order('name')
+      // Hidden dishes too (S792): see `recipes` above — a dish missing from this read is a dish
+      // whose saved sales the next save deletes.
+      scopedFrom('recipes').or('category.is.null,category.neq.Sub-Recipe').order('name')
     ])
     // Both reads dropped their `error` until S699, and on this page that is not merely a wrong
     // report. A failed PERIODS read rendered NoPeriodState — "no period set up" for a read that
@@ -247,7 +281,7 @@ export default function Sales() {
     noteLoad('init', null)
     const [{ data: p }, { data: r }] = results
     setAndCache(setPeriods, 'periods', p || [])
-    setAndCache(setRecipes, 'recipes', r || [])
+    setAndCache(setMenuRecipes, 'recipes', r || [])
     const open = (p || []).find(x => x.status === 'open')
     if (open) {
       periodReq.begin(open.id)   // claim the page, as useLatestRequest's own docs require of init()
@@ -425,12 +459,31 @@ export default function Sales() {
     //
     // S756 (D8): a recipe that already has a row for this day keeps that row's stored price — see
     // storedPriceMap. Only a recipe new to the day takes today's menu price.
-    return recipes
+    const typedRows = recipes
       .filter(r => (merged[r.id] || 0) > 0)
       .map(r => ({
         recipe_id: r.id, qty_sold: merged[r.id],
         ...priceSnapshot(r, dailyPrices),
         discount: mergedDiscount[r.id] || 0,
+      }))
+    return [...typedRows, ...carriedRows(dailySales, dailyPrices, dailyDiscounts)]
+  }
+
+  // Every stored manual row whose dish is NOT on this page, sent back exactly as stored (S792,
+  // SALES-1). `recipes` covers hidden dishes with sales, so this should find nothing — it is the
+  // net under the rule rather than the rule: a dish recategorised as a Sub-Recipe, or anything the
+  // next change to the menu read leaves out, keeps its figure instead of being deleted by a save
+  // that never showed it. The stored price and discount travel unchanged (a NULL legacy price stays
+  // NULL, priced at the menu price by every report, as before).
+  function carriedRows(qtyMap, priceMap, discountMap = {}) {
+    const shown = new Set(recipes.map(r => r.id))
+    return Object.keys(qtyMap)
+      .filter(id => !shown.has(id) && (qtyMap[id] || 0) > 0)
+      .map(id => ({
+        recipe_id: id, qty_sold: qtyMap[id],
+        unit_price: priceMap[id]?.unit_price ?? null,
+        vat_rate: priceMap[id]?.vat_rate ?? null,
+        discount: discountMap[id] || 0,
       }))
   }
 
@@ -461,12 +514,13 @@ export default function Sales() {
     })
     // Bulk rows carry no discount of their own (Daily Entry owns that field), so the RPC's
     // COALESCE leaves it at the column default of 0 — same as the old insert did.
-    return recipes
+    const typedRows = recipes
       .filter(r => (merged[r.id] || 0) > 0)
       .map(r => ({
         recipe_id: r.id, qty_sold: merged[r.id],
         ...priceSnapshot(r, salesPrices),   // S756 (D8): a stored Bulk row keeps its price
       }))
+    return [...typedRows, ...carriedRows(sales, salesPrices)]
   }
 
   function saveErrorMessage(err) {
@@ -769,7 +823,10 @@ export default function Sales() {
   const sortedRecipes = useMemo(() => {
     const savedQty = id => parseFloat(sales[id]) || 0
     const savedRev = r => savedQty(r.id) * (parseFloat(r.selling_price) || 0)
+    // Hidden dishes stay together at the end whatever the sort (S792, D29): they are a block of
+    // their own, not menu items competing for a place in it.
     return [...recipes].sort((a, b) => {
+      if (!!a._hidden !== !!b._hidden) return a._hidden ? 1 : -1
       switch (sortBy) {
         case 'rev_desc':   return savedRev(b) - savedRev(a)
         case 'rev_asc':    return savedRev(a) - savedRev(b)
@@ -952,7 +1009,7 @@ export default function Sales() {
         <div className="stat-card">
           <div className="stat-label">Items with Sales</div>
           <div className="stat-value">{itemsWithSales}</div>
-          <div className="stat-sub">of {recipes.length} active recipes</div>
+          <div className="stat-sub">of {activeRecipeCount} active recipes{hiddenWithSales > 0 ? ` + ${hiddenWithSales} hidden` : ''}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total ex-VAT revenue for the period, across every entry — bulk, daily and POS. Each sale is priced at the selling price recorded when it was entered, less any discount on it. Used as the denominator for Food Cost %." width={300}>Period Revenue</Tip></div>
@@ -1116,7 +1173,7 @@ export default function Sales() {
                         const rev = (parseFloat(qty) || 0) * effectivePrice(recipe, salesPrices)
                         return (
                           <tr key={recipe.id}>
-                            <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
+                            <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
@@ -1288,7 +1345,7 @@ export default function Sales() {
                         const rev = qty * effectivePrice(recipe, dailyPrices) - disc
                         return (
                           <tr key={recipe.id}>
-                            <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
+                            <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
@@ -1413,7 +1470,7 @@ export default function Sales() {
                         const total = rowTotal(recipe.id)
                         return (
                           <tr key={recipe.id}>
-                            <td style={{ position: 'sticky', left: 0, background: 'var(--theme-bg)', fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
+                            <td style={{ position: 'sticky', left: 0, background: 'var(--theme-bg)', fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td style={{ position: 'sticky', left: 160, background: 'var(--theme-bg)' }}>
                               <span className="badge badge-yellow">{recipe.category}</span>
                             </td>
@@ -1518,7 +1575,7 @@ export default function Sales() {
                         // opacity: at 0.4 the name measured 2.5:1 and the figure 1.9:1 (S682).
                         return (
                           <tr key={recipe.id}>
-                            <td style={{ fontWeight: 600, color: sold === 0 ? 'var(--theme-text3)' : 'var(--theme-text1)' }}>{recipe.name}</td>
+                            <td style={{ fontWeight: 600, color: sold === 0 ? 'var(--theme-text3)' : 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: sold > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                               {sold > 0 ? sold.toLocaleString('en-IN') : '—'}
@@ -1569,7 +1626,9 @@ export default function Sales() {
 
       {pendingSave && (
         <SupersedeConfirmModal
-          mode={pendingSave.mode}
+          // .target.mode (S792, SALES-2): S756 moved mode into `target`, and `pendingSave.mode` was
+          // undefined from then on, so a Bulk save's warning named the opposite deletion.
+          mode={pendingSave.target.mode}
           superseded={pendingSave.superseded}
           recipeNames={recipeNames}
           onCancel={() => setPendingSave(null)}

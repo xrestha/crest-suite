@@ -603,6 +603,10 @@ what makes the `vendor_returns` loss unrecoverable rather than merely awkward: t
 logged as an UPDATE carrying the old `vendor_id`, but that id resolves to a row that is gone, and
 `vendors` was the only copy of the name.
 
+**S792 fenced the other writes too** (`ims_vendors_guard`, `20260928140000`): adding or changing a
+supplier needs IMS supervisor+ or the Owner, and archiving, restoring or deleting one needs the Owner
+or admin (D25), so a staff login or count PIN can no longer rename a supplier or change its PAN.
+
 **There is no `force_delete_vendor()`, and that is the decision, not an omission.**
 `force_delete_item` exists because an item can be a genuine mis-entry. A vendor with history is a
 supplier the client really did buy from, and the only thing a force-delete could do is destroy the

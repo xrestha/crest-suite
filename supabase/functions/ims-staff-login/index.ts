@@ -75,15 +75,24 @@ Deno.serve(async (req) => {
     // Device gate first — an unenrolled or forged device gets nothing, not even a lock-state
     // oracle. The secret lives in the admin-only client_secrets table, never on the clients row
     // where every staff account of the client could read it.
-    const { data: deviceRow } = await admin
+    //
+    // The read's `error` is checked (S792, MASTER-7). Dropped, a database blip returned 401 "not set
+    // up", and ImsCountLogin answers exactly that by erasing the tablet's own setup — so a storekeeper
+    // mid-count needed a manager to show the QR again. A read that did not happen is a 503, which the
+    // tablet treats as "couldn't reach the server" and keeps its key (pos-staff-login's shape).
+    const { data: deviceRow, error: deviceErr } = await admin
       .from('client_secrets').select('client_id')
       .eq('client_id', client_id).eq('ims_device_secret', device_secret).maybeSingle()
+    if (deviceErr) {
+      console.error('[ims-staff-login] device check FAILED — refusing the sign-in:', deviceErr.code, deviceErr.message)
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
     if (!deviceRow) return json({ error: 'This device is not set up' }, 401)
 
     // Same filter as get_ims_count_staff — a real PIN account (ims_role AND ims_email both set)
     // belonging to THIS device's client, so a valid device secret for one client cannot be pointed
     // at another client's staff_id.
-    const { data: staff } = await admin
+    const { data: staff, error: staffErr } = await admin
       .from('profiles').select('ims_email')
       .eq('id', staff_id).eq('client_id', client_id)
       .not('ims_role', 'is', null).not('ims_email', 'is', null)
@@ -95,6 +104,12 @@ Deno.serve(async (req) => {
     // Generic message shared with the wrong-PIN path below, and deliberately no counted attempt (this
     // returns before the reservation): there is no account to lock, and counting one would let
     // anyone drive an arbitrary uuid's counter.
+    // A failed read is not a wrong PIN (S792): saying "Invalid credentials" sent the counter
+    // re-typing a correct PIN into a server that could not answer.
+    if (staffErr) {
+      console.error('[ims-staff-login] staff lookup FAILED — refusing the sign-in:', staffErr.code, staffErr.message)
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
     if (!staff?.ims_email) return json({ error: 'Invalid credentials' }, 401)
 
     // Reserve the attempt BEFORE signing in (S791, header point 1). A locked account is refused here

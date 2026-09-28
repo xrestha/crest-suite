@@ -177,17 +177,27 @@ export default function PurchaseBillPage() {
   // re-fired this prompt on rates that had not moved.
   // One .in() read for every line's item, not one .single() per line — a 20-line bill was paying
   // 20 serial round trips here, after the save had already visibly completed.
-  async function detectRateChanges(validLines) {
-    const { data: freshItems, error: freshErr } = await supabase.from('items')
-      .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor')
-      .in('id', [...new Set(validLines.map(l => l.item_id))])
+  async function detectRateChanges(validLines, header) {
+    const itemIds = [...new Set(validLines.map(l => l.item_id))]
+    const [{ data: freshItems, error: freshErr }, { data: laterRows, error: laterErr }] = await Promise.all([
+      supabase.from('items')
+        .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor')
+        .in('id', itemIds),
+      // A bill typed late, for a day before one already entered this month, is not the item's
+      // latest price: that later bill's is (S792, PURCHASES-5). One row per item is enough to know.
+      // purchase_entries is scoped through its period (no client_id), like every read on this page.
+      supabase.from('purchase_entries').select('item_id').eq('period_id', period?.id)
+        .gt('bs_day', parseInt(header?.bs_day, 10) || 0).gt('rate', 0).in('item_id', itemIds),
+    ])
     // The prompt is an optional follow-up to a bill that has already saved, and there is nothing
     // for the reader to do about a failed read here, so it is genuinely swallowed — but not
     // silently to whoever diagnoses it (S756). No read, no prompt: never offer a sync off nothing.
-    if (freshErr) { console.error('Purchase bill: Item Master rate check could not read items', freshErr); return [] }
+    if (freshErr || laterErr) { console.error('Purchase bill: Item Master rate check could not read', freshErr || laterErr); return [] }
     const freshById = new Map((freshItems || []).map(i => [i.id, i]))
+    const pricedLater = new Set((laterRows || []).map(r => r.item_id))
     const changed = []
     for (const l of validLines) {
+      if (pricedLater.has(l.item_id)) continue
       const capturedRate = parseFloat(l.rate) || 0
       // A free line (rate 0, S698) is a gift, not a price — it must never offer to zero the
       // Item Master rate every valuation reads.
@@ -224,13 +234,21 @@ export default function PurchaseBillPage() {
       if (!printDone || changed === null) return
       if (changed.length > 0) {
         setRateUpdateItems(changed)
-        setRateUpdateSelected(new Set(changed.map(i => i.itemId)))
+        // Nothing ticked (S792, PURCHASES-5): the price change re-values every past count,
+        // wastage and recipe cost, so it is chosen item by item rather than accepted wholesale.
+        setRateUpdateSelected(new Set())
       } else {
         navigate(listUrl)
       }
     }
     if (wasNew) printPurchaseBill(header, validLines, () => { printDone = true; exitWhenReady() }, savedCreatedAt)
-    changed = await detectRateChanges(validLines)
+    // The prompt says "this bill is the new price", which is true only of a NEW bill in the open
+    // month (S792, PURCHASES-5). An edited bill, or one filed into a closed month, carries that
+    // month's old prices, and offering them rolled Item Master back. And it is Supervisor+ (D41,
+    // enforced by the database since 20260928140000), so a staff login is not offered a button
+    // the database will refuse.
+    const offerSync = wasNew && period?.status !== 'closed' && hasImsAccess('supervisor')
+    changed = offerSync ? await detectRateChanges(validLines, header) : []
     exitWhenReady()
   }
 

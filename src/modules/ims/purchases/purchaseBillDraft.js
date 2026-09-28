@@ -112,8 +112,28 @@ export function saveBillDraft(id, { header, lines, baseSignature }, now = Date.n
     writeAll(all)
     return false
   }
-  all[id] = { header, lines, savedAt: now }
+  // The baseline goes WITH the draft (S792, PURCHASES-2), so a later visit can tell whether the
+  // bill it was typed against is still the bill in the database. See draftBaseMoved().
+  all[id] = { header, lines, savedAt: now, baseSignature }
   return writeAll(all)
+}
+
+/**
+ * Whether the bill a draft was typed against has changed since (S792, PURCHASES-2).
+ *
+ * A draft of an EDIT is a set of corrections to one version of a bill. If someone saved the bill
+ * after that draft was kept — another device, another login, or the same person in another tab —
+ * restoring it replaced their version on screen under "brought back what you were typing", and
+ * Save then wrote the old lines over the newer ones: save_purchase_bill supersedes the rows the
+ * form OPENED with, whose count still matched, so nothing refused it. A new bill's baseline is the
+ * blank form, which cannot move, so only an edit can be stale. An edit draft kept before this
+ * existed carries no baseline and cannot be proven current, so it is treated as moved: the owner
+ * is asked rather than having it applied.
+ */
+export function draftBaseMoved(draft, currentSignature, isEdit) {
+  if (!draft || !isEdit) return false
+  if (typeof draft.baseSignature !== 'string') return true
+  return draft.baseSignature !== currentSignature
 }
 
 /** The draft kept for `id`, or null. A read never writes, so an expired one is simply not returned. */

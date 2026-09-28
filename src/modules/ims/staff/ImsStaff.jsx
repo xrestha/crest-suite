@@ -50,7 +50,12 @@ async function invokeDetail(data, error, fallback) {
 }
 
 export default function ImsStaff() {
-  const { clientId, hasImsAccess, hrEnabled, session, profile, adminViewClientName } = useAuth()
+  const { clientId, hasImsAccess, hrEnabled, session, profile, adminViewClientName, isAdmin, isOwner } = useAuth()
+  // Manager rank is granted by the Owner or the operator only (S752 for HR and POS; IMS in S792,
+  // MASTER-4, enforced by admin-user-ops). The pickers below grey it out rather than offering a
+  // choice the server will refuse — the HrStaff.jsx pattern.
+  const privileged = !!(isAdmin || isOwner)
+  const managerOptionNote = privileged ? '' : ' — owner only'
   const { scopedFrom } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const [staff,         setStaff]         = useState([])
@@ -325,6 +330,7 @@ export default function ImsStaff() {
     // the role select is not rendered in that mode. Every other mode still requires one.
     const role = effectiveRoles.find(r => r.label === addForm.job_title)
     if (!role && addMode !== 'pin') { setAddMsg('Pick a role — it decides which IMS pages this person can open.'); return }
+    if (addMode !== 'pin' && role.level === 'manager' && !privileged) { setAddMsg('Only the account owner can give a login Manager access.'); return }
 
     // 'existing' assigns an ims_role to an account that already exists for this client (e.g.
     // created via Admin → Clients → Manage → Users) — no new login is created, so it skips the
@@ -465,6 +471,10 @@ export default function ImsStaff() {
     // Never send "no role": a login with no marker reads as the Owner (S752). Removing someone's
     // IMS access means deleting the login.
     if (!role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
+    const current = staff.find(p => p.id === profileId)
+    if (role.level === 'manager' && current?.ims_role !== 'manager' && !privileged) {
+      setMsg('Only the account owner can give a login Manager access.'); return
+    }
     setSaving(s => ({ ...s, [profileId]: true })); setMsg(''); setNotice('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
@@ -609,9 +619,14 @@ export default function ImsStaff() {
                         >
                           {!currentTitle && <option value="" disabled>— pick a role —</option>}
                           {orphan && <option value={currentTitle} disabled>{currentTitle} — not in the role list</option>}
-                          {effectiveRoles.map(r => (
-                            <option key={r.label} value={r.label}>{r.label}</option>
-                          ))}
+                          {effectiveRoles.map(r => {
+                            const blocked = r.level === 'manager' && p.ims_role !== 'manager' && !privileged
+                            return (
+                              <option key={r.label} value={r.label} disabled={blocked}>
+                                {r.label}{blocked ? managerOptionNote : ''}
+                              </option>
+                            )
+                          })}
                         </select>
                         {saving[p.id] && <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Saving…</span>}
                         {orphan && !saving[p.id] && (
@@ -693,11 +708,15 @@ export default function ImsStaff() {
                         style={{ width: 120, fontSize: 12 }}
                         value={r.level}
                         onChange={e => updateCustomRoleLevel(i, e.target.value)}
-                        disabled={rolesSaving}
+                        disabled={rolesSaving || (!privileged && held > 0 && r.level === 'manager')}
+                        title={!privileged && held > 0 && r.level === 'manager' ? 'Only the account owner can change the level of a Manager role people hold' : undefined}
                       >
-                        {PERMISSION_LEVELS.map(l => (
-                          <option key={l.value} value={l.value}>{l.label}</option>
-                        ))}
+                        {PERMISSION_LEVELS.map(l => {
+                          // Moving a held role TO Manager promotes every holder, which the server
+                          // refuses for a non-owner — leaving the list and the logins disagreeing.
+                          const blocked = l.value === 'manager' && r.level !== 'manager' && held > 0 && !privileged
+                          return <option key={l.value} value={l.value} disabled={blocked}>{l.label}{blocked ? managerOptionNote : ''}</option>
+                        })}
                       </select>
                       <button
                         className="btn btn-ghost"
@@ -915,11 +934,14 @@ export default function ImsStaff() {
                 value={addForm.job_title}
                 onChange={e => setAddForm(f => ({ ...f, job_title: e.target.value }))}
               >
-                {effectiveRoles.map(r => (
-                  <option key={r.label} value={r.label}>
-                    {r.label} ({cap(r.level)})
-                  </option>
-                ))}
+                {effectiveRoles.map(r => {
+                  const blocked = r.level === 'manager' && !privileged
+                  return (
+                    <option key={r.label} value={r.label} disabled={blocked}>
+                      {r.label} ({cap(r.level)}){blocked ? managerOptionNote : ''}
+                    </option>
+                  )
+                })}
               </select>
             </div>
 

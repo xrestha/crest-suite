@@ -144,6 +144,19 @@ not a coincidence. Both files exist because this product's entry screens are lon
 the offline queue and saves per row, so it is already covered by a different mechanism; **Sales
 Entry's bulk grid is not, and has the same shape.**
 
+## A replay is a writer like any other, so it takes the same lock and the newest figure (S792)
+
+`Stock.js`' `flushQueue()` used to replay the whole queue outside the per-cell `persistLocks`, in
+order, carrying on past failures, with no guard against a second run. So an older offline figure
+overwrote a correction saved directly once the connection came back, a failed op replayed later over
+a newer one, and two overlapping replays doubled a wastage or staff-meal row (no unique key there).
+The rules now: one replay at a time (`flushingRef`); only the newest queued op per
+period/item/field is written; an op a direct save has overtaken (`directWriteAt` vs the op's
+`timestamp`) is skipped; each write goes through `withKeyLock`; the loop STOPS at the first dropped
+connection; and every non-network refusal leaves the queue named, since no retry passes it and a
+kept one later lands under whichever login outranks the counter. **A store-and-forward path must
+obey the same write rules as the live path, or it is the way around them.**
+
 ## `navigator.onLine` is a claim about a network interface, not about the server (S731)
 
 It is true on a restaurant wifi with no upstream, and it stays true when the signal dies between

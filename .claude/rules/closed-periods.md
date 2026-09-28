@@ -32,8 +32,8 @@ Until S756 every half of this lock except `receive_purchase_order` was browser-o
 that synced late, or any login over REST, wrote straight into a closed month. Migration
 `20260918100000` put **`ims_closed_period_guard`** (BEFORE INSERT/UPDATE/DELETE) on
 `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, `sales_entries`, `purchase_entries`,
-`vendor_returns`, `requisitions` and `requisition_lines` (through its requisition). Four things
-about it:
+`vendor_returns`, `requisitions` and `requisition_lines` (through its requisition), and since S792
+(`20260928140000`) `overheads`, which D1's list had missed. Four things about it:
 
 - **The Owner joined admin, by the owner's decision.** "Let the Owner reopen" was asked for first;
   it cannot work, because the next month is already open when a mistake turns up and only one
@@ -48,10 +48,16 @@ about it:
 - **An offline count refused here leaves the queue and is NAMED.** `Stock.js`' `flushQueue()` drops
   a `period_closed` refusal (retrying it for ever is the S731 defect) and lists each figure — item,
   field, quantity, month, carried on the queued op — so the counter can hand it to the Owner.
+  **Under the Owner's or admin's login the trigger lets it through, so the replay no longer tries
+  (S792, D38):** it reads month status fresh, holds figures for a closed month, and lists them with
+  one button that writes them AND carries the closing counts among them into the next existing
+  month's opening stock (those items only). Nothing lands in a closed month on its own.
 
 **Who may change the month row itself is enforced too** (`ims_monthly_periods_guard`): create or
 close — Owner, IMS supervisor/manager, admin; reopen or relabel — Owner or admin. The Dashboard's
-projection snapshots stay writable by any viewer (best-effort captures), and the Dashboard's
+projection snapshots stay writable by any viewer (best-effort captures), but since S792 only
+FORWARD: a well-formed snapshot of a strictly newer model, or into an empty column
+(`snapshot_frozen`). And the Dashboard's
 "End month" button renders only for `isOwner || hasImsAccess('supervisor')` — it had no role check.
 
 ## The page that writes a locked table is not always the page that looks locked (S709)

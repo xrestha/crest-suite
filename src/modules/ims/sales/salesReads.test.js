@@ -108,3 +108,30 @@ describe.each(DEPLETION_FILES)('%s runs sales through the shared depletion rule'
     expect(IMPORTS_RULE.test(code)).toBe(true)
   })
 })
+
+// S792 (SALES-1, D29). save_sales_day replaces a day's (or the Bulk period's) MANUAL rows wholesale
+// with the payload, and the payload is built from the dishes this page loads. The menu read used to
+// be `.eq('is_active', true)`, so re-saving any day deleted a hidden dish's recorded sales for it —
+// and a Bulk save its whole month — with nothing on screen. The read must include hidden dishes, and
+// both payload builders must carry any stored row whose dish is not on the page.
+// And SALES-2: the supersede warning reads `pendingSave.target.mode` (S756 moved it there).
+describe('Sales Entry keeps hidden dishes in the save (S792)', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'Sales.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+
+  it('reads every dish, hidden ones included', () => {
+    const read = src.match(/scopedFrom\('recipes'\)[^\n]*/)
+    expect(read).not.toBeNull()
+    expect(read[0]).not.toMatch(/is_active/)
+  })
+
+  it('carries stored rows for dishes not on the page through both payloads', () => {
+    expect(src).toMatch(/carriedRows\(dailySales, dailyPrices, dailyDiscounts\)/)
+    expect(src).toMatch(/carriedRows\(sales, salesPrices\)/)
+  })
+
+  it('the supersede warning is told which mode is saving', () => {
+    expect(src).toMatch(/mode=\{pendingSave\.target\.mode\}/)
+    expect(src).not.toMatch(/mode=\{pendingSave\.mode\}/)
+  })
+})

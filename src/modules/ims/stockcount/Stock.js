@@ -25,7 +25,7 @@ import { firstError } from '../../../shared/queryError'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../../../utils/offlineQueue'
 import { BS_MONTHS, getBsToday, formatBsDay, daysInBsMonth } from '../../../utils/bsCalendar'
-import { previousExistingPeriod } from '../../../pages/periods/closePeriod'
+import { previousExistingPeriod, nextExistingPeriod } from '../../../pages/periods/closePeriod'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -676,6 +676,26 @@ export default function Stock() {
     keys.forEach(k => { inflight.current[k] = (inflight.current[k] || 0) + 1 })
     promise.finally(() => keys.forEach(k => { inflight.current[k] -= 1; if (inflight.current[k] <= 0) delete inflight.current[k] }))
   }
+  // When a DIRECT write for a cell last landed, keyed `${periodId}:${itemId}:${fieldKey}` (S792,
+  // STOCK-1). A figure queued offline carries the moment it was queued, and the replay skips one
+  // that a later save has already overtaken — the counter corrects Rice from 5 to 6 while the
+  // replay of the old 5 is still working through the queue, and the 6 must be what stays.
+  const directWriteAt = useRef({})
+  const noteDirectWrite = (periodId, fieldKey, entries) => {
+    const at = Date.now()
+    entries.forEach(e => { directWriteAt.current[`${periodId}:${e.itemId}:${fieldKey}`] = at })
+  }
+  // Runs one write in the per-(item, field) chain every other save of that cell uses, so a replay
+  // and an on-blur save can never interleave their delete/insert pairs (S792: the replay used to
+  // bypass the lock, which is how two replays doubled a wastage or staff-meal row).
+  function withKeyLock(key, fn) {
+    const prior = persistLocks.current[key] || Promise.resolve()
+    const run = prior.then(fn)
+    const tail = run.catch(() => {})   // recorded by the caller; never wedges the chain
+    persistLocks.current[key] = tail
+    trackInflight([key], tail)
+    return run
+  }
   async function persistValue(itemId, fieldKey, qty) {
     const key = `${itemId}:${fieldKey}`
     const prior = persistLocks.current[key] || Promise.resolve()
@@ -691,6 +711,7 @@ export default function Stock() {
       }
       await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
       markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
+      noteDirectWrite(selectedPeriod.id, fieldKey, [{ itemId }])
       return true
     }).catch(async err => {
       // A dropped connection is held, not lost — see queueOnNetworkFailure. Anything else is a
@@ -728,7 +749,31 @@ export default function Stock() {
     }
   }
 
-  async function flushQueue() {
+  // One replay at a time (S792, STOCK-1). The `online` event can fire more than once on a flapping
+  // connection, and init() replays too; two runs over the same queue replayed every op twice, which
+  // on the delete-then-insert tables (wastage, staff meals — no unique key) left two rows each. A
+  // second trigger while a replay runs joins it rather than starting another.
+  const flushingRef = useRef(null)
+  function flushQueue() {
+    if (flushingRef.current) return flushingRef.current
+    const run = flushQueueOnce().finally(() => { flushingRef.current = null })
+    flushingRef.current = run
+    return run
+  }
+
+  const opLine = op => `${op.itemName || 'an item'} — ${FIELD_LABEL[op.fieldKey] || op.fieldKey} ${op.qty ?? 'blank'}`
+  const monthOf = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : null)
+
+  // Figures counted offline for a month that has closed since, held for the Owner or admin to
+  // decide about (S792, D38). Their login may still write a closed month, so the replay used to
+  // land them there silently — after that month's closing count had already been carried into the
+  // next month's opening stock, so the next month opened on the old figure. Now nothing lands on
+  // its own: the list is shown with one button that adds them AND carries the closing counts on.
+  const [heldClosed, setHeldClosed] = useState(null)   // { ops, periods } or null
+  const [heldBusy, setHeldBusy] = useState(false)
+  const [heldError, setHeldError] = useState(null)
+
+  async function flushQueueOnce() {
     let queue
     try {
       queue = await getQueue()
@@ -739,56 +784,157 @@ export default function Stock() {
       return
     }
     const mine = (queue || []).filter(op => !op.clientId || op.clientId === effectiveClientId)
-    if (mine.length === 0) { setPendingSync(0); setSyncFailed(null); return }
+    if (mine.length === 0) { setPendingSync(0); setSyncFailed(null); setHeldClosed(null); return }
     setSyncing(true)
     setSyncFailed(null)
     let remaining = mine.length
-    let failures = 0
-    let lastErr = null
-    // A count for a month that was closed while this device was offline can never land: the
-    // database refuses it (period_closed, S756) for everyone but the account owner. Retrying it on
-    // every page load would hold it here for ever, so it leaves the queue — and the page names each
-    // figure, so the counter can hand it to the owner rather than lose it.
-    const refusedClosed = []
-    for (const item of mine) {
+    const settle = op => {
+      remaining--
+      setPendingSync(remaining)
+      setPendingItems(prev => { const next = new Set(prev); next.delete(op.itemId); return next })
+    }
+    const forget = async op => {
+      try { await dequeue(op.id) } catch (_) { /* stays queued; the next replay decides it again */ }
+      settle(op)
+    }
+
+    // Only the NEWEST figure for a cell is written (S792, STOCK-1): the queue is replayed in the
+    // order it was typed, but an older figure written after a newer one — because the newer one
+    // landed in an earlier replay, or directly once the connection came back — overwrote the
+    // correction while the card showed "✓ Saved". Older figures for the same cell leave unwritten.
+    const byKey = new Map()
+    ;[...mine].sort((a, b) => a.id - b.id).forEach(op => byKey.set(`${op.periodId}:${op.itemId}:${op.fieldKey}`, op))
+    const latest = new Set([...byKey.values()].map(op => op.id))
+    for (const op of mine) if (!latest.has(op.id)) await forget(op)
+
+    // Which months are closed NOW, read fresh — a counting tablet can sit open for days, so the
+    // page's own period list is not evidence. An unreadable list stops the replay: the queue is
+    // kept, which is the safe answer to a question that could not be asked.
+    const { data: freshPeriods, error: perErr } = await scopedFrom('monthly_periods', 'id, status, bs_year, bs_month')
+    if (perErr) {
+      setSyncing(false)
+      const { text, detail } = asActionError(perErr)
+      setSyncFailed({ text: `${remaining} figure${remaining === 1 ? '' : 's'} counted on this device ${remaining === 1 ? 'is' : 'are'} still waiting: the months could not be checked, so nothing was sent. Press Sync Now to try again. ${text}`, detail })
+      return
+    }
+    const periodById = new Map((freshPeriods || []).map(p => [p.id, p]))
+
+    const refusedClosed = []   // a staff login: the database refuses a closed month (D1)
+    const refusedOther = []    // any other refusal: another section, recount protection, rank
+    const heldForOwner = []    // the Owner or admin: held for their decision (D38)
+    let stoppedOn = null       // the connection dropped: the rest stays queued, in order
+
+    for (const op of [...byKey.values()].sort((a, b) => a.id - b.id)) {
+      const key = `${op.periodId}:${op.itemId}:${op.fieldKey}`
+      if ((directWriteAt.current[key] || 0) > (op.timestamp || 0)) { await forget(op); continue }
+      if (periodById.get(op.periodId)?.status === 'closed') {
+        if (canEditClosedPeriods) { heldForOwner.push(op); continue }
+        refusedClosed.push(op); await forget(op); continue
+      }
       try {
-        await persistValueDirect(item.periodId, item.itemId, item.fieldKey, item.qty, item.countedBy)
-        await dequeue(item.id)
-        remaining--
-        setPendingSync(remaining)
-        setPendingItems(prev => { const next = new Set(prev); next.delete(item.itemId); return next })
+        await withKeyLock(`${op.itemId}:${op.fieldKey}`, () =>
+          persistValueDirect(op.periodId, op.itemId, op.fieldKey, op.qty, op.countedBy))
+        markStored(op.periodId, op.fieldKey, [{ itemId: op.itemId, qty: op.qty }], op.countedBy)
+        await forget(op)
       } catch (err) {
         const e = err?.supabase || err
-        if (e?.hint === 'period_closed' || /period_closed/.test(e?.message || '')) {
-          refusedClosed.push(item)
-          try { await dequeue(item.id) } catch (_) { /* stays queued; the next replay refuses it again */ }
-          remaining--
-          setPendingSync(remaining)
-          setPendingItems(prev => { const next = new Set(prev); next.delete(item.itemId); return next })
-          continue
-        }
-        failures++
-        lastErr = err
+        // Only a dropped connection is worth another try, and the replay STOPS on the first one:
+        // carrying on past it wrote later figures while earlier ones stayed queued, and the next
+        // replay then wrote the earlier ones over them.
+        if (isNetworkError(e)) { stoppedOn = err; break }
+        // Anything else is a decision the server made, and no retry passes it. Kept, it was
+        // retried for ever under a "connection" message and later landed under whichever login
+        // outranked the counter (S792, STOCK-9). It leaves the queue and is named.
+        if (e?.hint === 'period_closed' || /period_closed/.test(e?.message || '')) refusedClosed.push(op)
+        else refusedOther.push({ op, err: e })
+        await forget(op)
       }
     }
     setSyncing(false)
-    if (refusedClosed.length > 0) {
-      const list = refusedClosed
-        .map(op => `${op.itemName || 'an item'} — ${FIELD_LABEL[op.fieldKey] || op.fieldKey} ${op.qty ?? 'blank'}`)
-        .join('; ')
-      const month = refusedClosed.find(op => op.periodLabel)?.periodLabel || 'that month'
-      setSyncFailed({
-        text: `${refusedClosed.length} figure${refusedClosed.length === 1 ? ' was' : 's were'} entered offline for ${month}, which was closed before ${refusedClosed.length === 1 ? 'it' : 'they'} reached the server, so ${refusedClosed.length === 1 ? 'it was' : 'they were'} not added. Write ${refusedClosed.length === 1 ? 'it' : 'these'} down and give ${refusedClosed.length === 1 ? 'it' : 'them'} to the account owner, who can still enter a closed month: ${list}.`,
-      })
-      return
+    setHeldClosed(heldForOwner.length ? { ops: heldForOwner, periods: freshPeriods || [] } : null)
+    setHeldError(null)
+
+    // ONE message covering every outcome (S792, STOCK-3): a replay that hit a closed month and a
+    // dropped connection at once used to name only the closed-month figures and return, and the
+    // others dropped out of sight.
+    const parts = []
+    let detail
+    if (refusedClosed.length) {
+      const month = monthOf(periodById.get(refusedClosed[0].periodId)) || refusedClosed[0].periodLabel || 'that month'
+      parts.push(`${refusedClosed.length} figure${refusedClosed.length === 1 ? ' was' : 's were'} entered offline for ${month}, which was closed before ${refusedClosed.length === 1 ? 'it' : 'they'} reached the server, so ${refusedClosed.length === 1 ? 'it was' : 'they were'} not added. Write ${refusedClosed.length === 1 ? 'it' : 'these'} down and give ${refusedClosed.length === 1 ? 'it' : 'them'} to the account owner, who can still enter a closed month: ${refusedClosed.map(opLine).join('; ')}.`)
     }
-    if (failures > 0) {
-      const { text, detail } = asActionError(lastErr?.supabase || lastErr)
-      setSyncFailed({
-        text: `${failures} count${failures === 1 ? '' : 's'} entered offline could not be saved and ${failures === 1 ? 'is' : 'are'} still waiting on this device. Press Sync Now to try again once the connection is steady. ${text}`,
-        detail,
-      })
+    if (refusedOther.length) {
+      const reason = asActionError(refusedOther[0].err, 'staff')
+      detail = reason.detail
+      parts.push(`${refusedOther.length} figure${refusedOther.length === 1 ? ' was' : 's were'} refused by the server and ${refusedOther.length === 1 ? 'has' : 'have'} been taken off this device — trying again would be refused the same way: ${refusedOther.map(r => opLine(r.op)).join('; ')}. ${reason.text}`)
     }
+    if (stoppedOn) {
+      const reason = asActionError(stoppedOn?.supabase || stoppedOn)
+      detail = detail || reason.detail
+      parts.push(`The connection dropped part-way, so ${remaining - heldForOwner.length} figure${remaining - heldForOwner.length === 1 ? ' is' : 's are'} still waiting on this device, in the order they were counted. Press Sync Now once the connection is steady.`)
+    }
+    if (parts.length) setSyncFailed({ text: parts.join(' '), detail })
+  }
+
+  // D38's one button: add the held figures to their closed month, then carry the closing counts
+  // among them into the next month's opening stock — only those items, never a re-carry of the
+  // whole month, so an opening figure someone has since corrected on the next month is left alone.
+  async function addHeldToClosedMonth() {
+    if (!heldClosed) return
+    setHeldBusy(true)
+    setHeldError(null)
+    const added = []
+    for (const op of heldClosed.ops) {
+      try {
+        await withKeyLock(`${op.itemId}:${op.fieldKey}`, () =>
+          persistValueDirect(op.periodId, op.itemId, op.fieldKey, op.qty, op.countedBy))
+        try { await dequeue(op.id) } catch (_) { /* written; a replay would only write it again */ }
+        added.push(op)
+      } catch (err) {
+        setHeldError(asActionError(err?.supabase || err))
+        break
+      }
+    }
+    // Carry each closed month's added closing counts into the month after it (the next one that
+    // EXISTS — closePeriod.js' rule). A blank count carries nothing, as the month-end carry does.
+    const carryFailures = []
+    const byPeriod = new Map()
+    added.filter(op => op.fieldKey === 'closing' && op.qty != null).forEach(op => {
+      if (!byPeriod.has(op.periodId)) byPeriod.set(op.periodId, [])
+      byPeriod.get(op.periodId).push(op)
+    })
+    for (const [periodId, ops] of byPeriod) {
+      const period = heldClosed.periods.find(p => p.id === periodId)
+      const next = period ? nextExistingPeriod(heldClosed.periods, period) : null
+      if (!next) continue
+      const { error } = await supabase.from('opening_stock').upsert(
+        ops.map(op => ({ period_id: next.id, item_id: op.itemId, qty: op.qty })), { onConflict: 'period_id,item_id' })
+      if (error) carryFailures.push({ next, error })
+    }
+    const left = heldClosed.ops.filter(op => !added.includes(op))
+    setPendingSync(prev => Math.max(0, prev - added.length))
+    setHeldClosed(left.length ? { ...heldClosed, ops: left } : null)
+    if (carryFailures.length) {
+      const { text, detail } = asActionError(carryFailures[0].error)
+      setHeldError({ text: `The figures were added to the closed month, but ${monthOf(carryFailures[0].next)}'s opening stock could not be updated from them. Use Resync Opening Stock on the Periods page to carry them on. ${text}`, detail })
+    } else if (added.length) {
+      setPageNotice(`${added.length} figure${added.length === 1 ? ' was' : 's were'} added to the closed month${byPeriod.size ? ', and the closing counts carried into the next month’s opening stock' : ''}. Regenerate Snapshot on that month’s Monthly Report to bring the frozen report up to date.`)
+    }
+    setHeldBusy(false)
+    // The month on screen may be one of those just written; show what the server now holds.
+    if (added.some(op => op.periodId === selectedPeriod?.id)
+        || [...byPeriod.keys()].some(pid => nextExistingPeriod(heldClosed.periods, heldClosed.periods.find(p => p.id === pid))?.id === selectedPeriod?.id)) {
+      await loadStockData(selectedPeriod.id, items)
+    }
+  }
+
+  // The Owner's other answer: these figures should not be added at all. They leave the device.
+  async function discardHeld() {
+    if (!heldClosed) return
+    for (const op of heldClosed.ops) { try { await dequeue(op.id) } catch (_) { /* next replay holds it again */ } }
+    setPendingSync(prev => Math.max(0, prev - heldClosed.ops.length))
+    setHeldClosed(null)
+    setHeldError(null)
   }
 
   flushRef.current = flushQueue
@@ -923,6 +1069,7 @@ export default function Stock() {
       return true
     }).then(ok => {
       markStored(periodId, fieldKey, entries, countedByFields())
+      noteDirectWrite(periodId, fieldKey, entries)
       return ok
     }).catch(async err => {
       // Worth most here: this is the click at the end of a 300-item count.
@@ -1407,15 +1554,53 @@ export default function Stock() {
           request landing. Either way the amber banner above never renders, and before S731 the
           "N pending" badge lived inside it — so held counts were invisible from every screen and
           nothing would send them until the next page load. Sync Now is the action. */}
-      {isOnline && !syncing && !syncFailed && pendingSync > 0 && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span>⏳ <strong>{pendingSync} {pendingSync === 1 ? 'entry' : 'entries'}</strong> counted on this device {pendingSync === 1 ? 'has' : 'have'} not reached the server yet.</span>
-          <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => flushQueue()}>Sync Now</button>
-        </div>
-      )}
+      {/* S792 (STOCK-3): this used to hide whenever a sync had FAILED — the one moment its button
+          is the action — while the failure message below said "Press Sync Now". Figures held for
+          the Owner's decision (below) are not counted here: Sync Now will not send them. */}
+      {isOnline && !syncing && pendingSync - (heldClosed?.ops.length || 0) > 0 && (() => {
+        const waiting = pendingSync - (heldClosed?.ops.length || 0)
+        return (
+          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span>⏳ <strong>{waiting} {waiting === 1 ? 'entry' : 'entries'}</strong> counted on this device {waiting === 1 ? 'has' : 'have'} not reached the server yet.</span>
+            <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => flushQueue()}>Sync Now</button>
+          </div>
+        )
+      })()}
       {/* A sync that could not finish. This renders while ONLINE — which is the whole point: an
           entry the server permanently refuses was retried on every load and never mentioned. */}
       {syncFailed && !syncing && <ActionError error={syncFailed} />}
+      {/* S792 (D38): figures counted offline for a month that has closed since, held for the Owner
+          or admin. Nothing is added to a closed month without this choice being made. */}
+      {heldClosed && !syncing && (() => {
+        const months = [...new Set(heldClosed.ops.map(op => op.periodId))]
+          .map(pid => heldClosed.periods.find(p => p.id === pid)).filter(Boolean)
+        const monthNames = months.map(monthOf).join(', ') || 'a closed month'
+        const nexts = months.map(p => nextExistingPeriod(heldClosed.periods, p)).filter(Boolean)
+        const hasClosing = heldClosed.ops.some(op => op.fieldKey === 'closing' && op.qty != null)
+        const carryLabel = hasClosing && nexts.length ? ` and carry into ${nexts.map(monthOf).join(', ')}'s opening stock` : ''
+        return (
+          <div role="alert" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-text2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>{heldClosed.ops.length} figure{heldClosed.ops.length === 1 ? ' was' : 's were'} counted offline for {monthNames}, which has closed since.</strong>{' '}
+              They have not been added. {hasClosing ? 'The month-end carry-forward ran without them, so the next month opened on the old closing count.' : ''}
+            </span>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {heldClosed.ops.map(op => <li key={op.id}>{opLine(op)}</li>)}
+            </ul>
+            <ActionError error={heldError} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-primary btn-sm" disabled={heldBusy} aria-busy={heldBusy || undefined} onClick={addHeldToClosedMonth}>
+                {heldBusy ? 'Adding…' : `Add to ${monthNames}${carryLabel}`}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={heldBusy} onClick={() => setPendingConfirm({
+                title: 'Discard these offline figures?',
+                body: <p style={{ margin: 0 }}>The {heldClosed.ops.length} figure{heldClosed.ops.length === 1 ? '' : 's'} listed will be taken off this device and never added to {monthNames}. The month keeps the figures it has now. This cannot be undone.</p>,
+                confirmLabel: 'Discard', danger: true, run: discardHeld,
+              })}>Discard these figures</button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Nothing below the error card while a read has failed: every tab either shows figures the
           page does not have or saves on-screen state back to the server. */}
@@ -1975,7 +2160,12 @@ export default function Stock() {
                         ↩ Pull from last month
                       </button>
                     )}
-                    <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
+                    {/* Not for a counting tablet (S792, MASTER-8): S761 dropped Clear All from the
+                        touch layout only, so a count PIN on a mouse or trackpad could still blank
+                        every visible item's closing count for the month in one click. */}
+                    {!imsCountOnly && (
+                      <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
+                    )}
                   </div>
                   <button className="btn btn-primary" onClick={saveAll} disabled={saveAllLoading || isLocked}>
                     {saveAllLoading ? 'Saving…' : saved ? '✓ Saved' : 'Save All'}

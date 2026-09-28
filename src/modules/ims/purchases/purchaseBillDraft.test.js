@@ -1,5 +1,5 @@
 import {
-  billDraftId, billDraftSignature, saveBillDraft, readBillDraft, clearBillDraft, DRAFT_MAX_AGE_MS,
+  billDraftId, billDraftSignature, saveBillDraft, readBillDraft, clearBillDraft, draftBaseMoved, DRAFT_MAX_AGE_MS,
 } from './purchaseBillDraft'
 
 const header = { vendor_id: 'v1', bs_day: '15', invoice_ref: 'B-9', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
@@ -124,5 +124,39 @@ describe('a store that cannot be trusted', () => {
   test('a stored entry with no header is not restored', () => {
     localStorage.setItem('crest_purchase_bill_drafts', JSON.stringify({ 'new:p1': { lines: [line()], savedAt: Date.now() } }))
     expect(readBillDraft('new:p1')).toBeNull()
+  })
+})
+
+// S792 (PURCHASES-2). An edit draft remembers the bill it was typed against, so a later visit can
+// tell that someone saved the bill since — and ask, rather than put the older lines back on screen
+// for Save to write over the newer ones.
+describe('draftBaseMoved', () => {
+  const savedBill = billDraftSignature(header, [line()])
+  const savedSince = billDraftSignature(header, [line({ rate: '120' })])
+
+  test('the draft keeps the baseline it was measured against', () => {
+    saveBillDraft('edit:g1:u1', { header, lines: [line({ qty: '5' })], baseSignature: savedBill })
+    expect(readBillDraft('edit:g1:u1').baseSignature).toBe(savedBill)
+  })
+
+  test('an edit draft whose bill is unchanged is current', () => {
+    saveBillDraft('edit:g1:u1', { header, lines: [line({ qty: '5' })], baseSignature: savedBill })
+    expect(draftBaseMoved(readBillDraft('edit:g1:u1'), savedBill, true)).toBe(false)
+  })
+
+  test('an edit draft whose bill was saved since has moved', () => {
+    saveBillDraft('edit:g1:u1', { header, lines: [line({ qty: '5' })], baseSignature: savedBill })
+    expect(draftBaseMoved(readBillDraft('edit:g1:u1'), savedSince, true)).toBe(true)
+  })
+
+  test('an edit draft kept before S792 has no baseline and cannot be proven current', () => {
+    const legacy = { header, lines: [line()], savedAt: Date.now() }
+    expect(draftBaseMoved(legacy, savedBill, true)).toBe(true)
+  })
+
+  test('a new-bill draft never moves: its baseline is the blank form', () => {
+    const legacy = { header, lines: [line()], savedAt: Date.now() }
+    expect(draftBaseMoved(legacy, blankBase(), false)).toBe(false)
+    expect(draftBaseMoved(null, blankBase(), true)).toBe(false)
   })
 })

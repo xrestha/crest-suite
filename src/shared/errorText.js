@@ -391,6 +391,66 @@ const rules = [
     operator: 'Finalizing or reopening a Final Settlement needs the Owner or an HR manager, so nothing was changed.',
   },
 
+  // ── The IMS guards (S756, migration 20260918100000) ───────────────────────────────────────────
+  // Each is raised by a BEFORE trigger on the row it names, so the statement that carried it did
+  // not change that row — but a page that writes several tables in a row (a bill, then its
+  // payment) may have landed the earlier ones, so none of these claims the whole action is undone.
+  // They are raised with ERRCODE 42501, so they must sit ABOVE the generic 42501 rule below: S756
+  // appended them after it, and every one of them read "You're not allowed to do that" until S792
+  // moved them (STOCK-2). errorText.test.js pins each hint with its real code.
+  {
+    test: e => hasCode(e, 'period_closed'),
+    staff: 'That month is closed, so it cannot be changed from your login. Ask the account owner if something in it needs fixing.',
+    operator: 'That month is closed, so this change was refused. Only the account owner (or a Crest operator) can change a closed month — open it from the owner\'s login, fix it there, then Regenerate Snapshot on that month\'s Monthly Report.',
+  },
+  {
+    test: e => hasCode(e, 'period_rank'),
+    staff: 'Starting or closing a month needs the account owner or an inventory supervisor. Nothing about the month was changed.',
+    operator: 'Only the account owner or an inventory supervisor or manager can start or close a month, and only the owner can reopen or rename one — so the month was not changed.',
+  },
+  {
+    test: e => hasCode(e, 'recipe_delete_rank'),
+    staff: 'Deleting a dish needs an inventory manager. Hide it instead, which takes it off the menu and keeps its history.',
+    operator: 'Deleting a dish needs an inventory manager or the account owner, so it is still there. Use Hide to take it off the menu and the till — its sales history stays intact.',
+  },
+  {
+    test: e => hasCode(e, 'recipe_hide_rank'),
+    staff: 'Hiding or showing a dish needs an inventory supervisor. The dish was not changed.',
+    operator: 'Hiding or showing a dish needs an inventory supervisor or manager, so the dish is still in the state it was.',
+  },
+  {
+    test: e => hasCode(e, 'ims_settings_rank'),
+    staff: 'The inventory thresholds can only be changed by an inventory manager or the account owner.',
+    operator: 'The food-cost and variance thresholds and the code prefixes can only be changed by an inventory manager or the account owner, so they were not changed.',
+  },
+  {
+    test: e => hasCode(e, 'ims_rank'),
+    staff: 'Your login does not have the inventory rank for this. Nothing was changed — ask your manager.',
+    operator: 'This needs a higher inventory rank than this login has, so it was refused. An inventory manager or the account owner can do it, or raise this login\'s role on IMS Staff.',
+  },
+  // S792 (migration 20260928140000), by hint. Each carries its own hint rather than 'ims_rank', so
+  // their order against the rule above does not matter; being above the generic 42501 rule does.
+  {
+    test: e => hasCode(e, 'item_unit_locked'),
+    staff: 'This item already has purchases or counts recorded in its unit, so the unit cannot change. Nothing was changed — ask your manager.',
+    operator: 'This item already has purchases, counts or recipe lines recorded in its unit, so the unit cannot change — every one of them would be re-read in the new unit. Nothing was changed. Hide this item once its stock is used up and create a new one in the new unit.',
+  },
+  {
+    test: e => hasCode(e, 'ims_count_settings_rank'),
+    staff: 'Only the owner or an inventory manager can change how stock counts are set up. Nothing was changed.',
+    operator: 'Only the account owner or an inventory manager can change section scoping, blind count or recount protection, so they were not changed. These are the switches that fence each counter, which is why they are.',
+  },
+  {
+    test: e => hasCode(e, 'po_receipt_only'),
+    staff: 'A received quantity is recorded only by receiving the delivery. Nothing was changed.',
+    operator: 'Received quantities and the received status are recorded only by Receive on the order, which books the bill at the same time — so this change was refused and the order is as it was.',
+  },
+  {
+    test: e => hasCode(e, 'snapshot_frozen'),
+    staff: 'This month\'s target is already set. Nothing was changed.',
+    operator: 'This month\'s dashboard target is already set, and only a newer forecast version can replace it, so it was left as it was.',
+  },
+
   // RLS refused, or EXECUTE was never granted on a new function signature.
   {
     test: e => e.code === '42501' || /permission denied|row-level security|violates row-level/i.test(e.message || ''),
@@ -496,40 +556,6 @@ const rules = [
   // genuinely does prove nothing landed, and saying so is what makes the delivery safe to re-enter.
   // That guarantee is the function's whole reason for existing (the old path wrote the bills first
   // and could stop before the quantities), so these messages are allowed to state it.
-  // ── The IMS guards (S756, migration 20260918100000) ───────────────────────────────────────────
-  // Each is raised by a BEFORE trigger on the row it names, so the statement that carried it did
-  // not change that row — but a page that writes several tables in a row (a bill, then its
-  // payment) may have landed the earlier ones, so none of these claims the whole action is undone.
-  {
-    test: e => hasCode(e, 'period_closed'),
-    staff: 'That month is closed, so it cannot be changed from your login. Ask the account owner if something in it needs fixing.',
-    operator: 'That month is closed, so this change was refused. Only the account owner (or a Crest operator) can change a closed month — open it from the owner\'s login, fix it there, then Regenerate Snapshot on that month\'s Monthly Report.',
-  },
-  {
-    test: e => hasCode(e, 'period_rank'),
-    staff: 'Starting or closing a month needs the account owner or an inventory supervisor. Nothing about the month was changed.',
-    operator: 'Only the account owner or an inventory supervisor or manager can start or close a month, and only the owner can reopen or rename one — so the month was not changed.',
-  },
-  {
-    test: e => hasCode(e, 'recipe_delete_rank'),
-    staff: 'Deleting a dish needs an inventory manager. Hide it instead, which takes it off the menu and keeps its history.',
-    operator: 'Deleting a dish needs an inventory manager or the account owner, so it is still there. Use Hide to take it off the menu and the till — its sales history stays intact.',
-  },
-  {
-    test: e => hasCode(e, 'recipe_hide_rank'),
-    staff: 'Hiding or showing a dish needs an inventory supervisor. The dish was not changed.',
-    operator: 'Hiding or showing a dish needs an inventory supervisor or manager, so the dish is still in the state it was.',
-  },
-  {
-    test: e => hasCode(e, 'ims_settings_rank'),
-    staff: 'The inventory thresholds can only be changed by an inventory manager or the account owner.',
-    operator: 'The food-cost and variance thresholds and the code prefixes can only be changed by an inventory manager or the account owner, so they were not changed.',
-  },
-  {
-    test: e => hasCode(e, 'ims_rank'),
-    staff: 'Your login does not have the inventory rank for this. Nothing was changed — ask your manager.',
-    operator: 'This needs a higher inventory rank than this login has, so it was refused. An inventory manager or the account owner can do it, or raise this login\'s role on IMS Staff.',
-  },
   {
     test: e => /po_period_closed/i.test(e.message || ''),
     staff: 'That month is closed, so this delivery cannot be recorded against it. Nothing was received — ask your manager.',
@@ -539,6 +565,11 @@ const rules = [
     test: e => /po_not_receivable/i.test(e.message || ''),
     staff: 'This order is already closed off, so nothing more can be received against it. Nothing was received.',
     operator: 'This purchase order is cancelled or already fully received, so nothing was received and no stock moved. Raise a new order for anything still needed from this supplier.',
+  },
+  {
+    test: e => /dep_run_duplicate/i.test(e.message || '') || e.hint === 'dep_run_duplicate',
+    staff: 'This depreciation run was posted moments ago, so it was not posted again.',
+    operator: 'This depreciation run was posted moments ago — from this page or another tab — so it was not charged a second time. Reload the Depreciation Runs tab to see it.',
   },
   {
     test: e => /po_over_receive/i.test(e.message || ''),

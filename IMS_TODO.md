@@ -1,16 +1,185 @@
-# Crest IMS — Re-analysis To-Do (S756)
+# Crest IMS — Re-analysis To-Do
+
+Two whole-module reviews live here: **S792 (2026-09-28)** first, then **S756 (2026-09-15)**. D1–D28
+are S756's decisions and D29–D42 are S792's. None is re-asked. Start from the S792 section.
+
+**When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
+
+**Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
+
+---
+
+# S792 re-analysis (2026-09-28)
+
+Ten read-only reviewers covered master data, purchases, stock, sales, recipes, figures, planning,
+tax, costs and the database. The database reviewer read the live catalog. Every P0 and P1 cited in the
+plan was spot-checked against source before any decision was asked. The full evidence for each ID
+below is in `docs/ims-review-s792/<AREA>.md`: where, what happens, evidence, fix and confidence.
+Code added since S756 had never been reviewed, and most new findings sit in it:
+- S758–S760 Customization;
+- S761 count-PIN trim;
+- S779 bill draft;
+- S780–S786 forecast and weather;
+- S790 setup guide;
+- S774 `periodCost.js`.
+
+## S792.1 Owner decisions (taken with Aashish, 2026-09-28)
+
+| # | Decision | Status |
+|---|---|---|
+| D29 | Hiding an item or dish **never changes history**: past months keep every purchase, count and sale. Sales Entry shows hidden dishes that sold this month in a separate block, still editable. | 🟡 Sales Entry half S792 stage 1; hidden items keep past months = stage 2 (FIGURES-1) |
+| D30 | **Food Cost % = used (COGS) ÷ sales for closed months, everywhere.** The running month shows "Spend % so far" (purchases ÷ sales). Owner Reports already generated stay as they were. | 🔴 |
+| D31 | **PAN-bill (not VAT-registered) outlet: the typed menu price is the price the guest pays**, stored whole. Existing dishes show their real till price so the owner can re-enter them. | 🔴 |
+| D32 | **PAN-bill outlet: supplier VAT counts as food cost**, and is not called "claimable". Needs a short design first (stage 4). | 🔴 |
+| D33 | A return against a discounted bill **credits the discounted price**, on payables and the balance letter too. | 🔴 |
+| D34 | The bill line's typed **Total is after VAT when VAT is ticked**. Ticking or unticking changes the Rate, never the Total. | 🔴 |
+| D35 | A dish typed as a Bulk total, later sold on the till: **Sales Entry asks for the pre-till days as daily figures**. The Bulk total is ignored for stock only after that. | 🔴 |
+| D36 | Variance and Theoretical vs Actual **both judge an ingredient whose stock fell while its dishes sold nothing**. | 🔴 |
+| D37 | A second count of an already-counted item **asks: replace, or add yours?** (stage 4) | 🔴 |
+| D38 | Offline counts arriving in a closed month under the Owner's login are **listed, with one button "Add to Bhadra and carry into Ashwin's opening stock"**. Nothing lands silently. | ✅ S792 |
+| D39 | **Counting tablets lock after 10 idle minutes** and return to the PIN screen, like POS tills. Sign out also goes back to the PIN screen. | ✅ S792 |
+| D40 | Existing businesses **type each tax pool's opening value once**, plus "depreciation already taken" per old asset (stage 4). | 🔴 |
+| D41 | **Moving Item Master's price from a purchase bill needs Supervisor+**, enforced in the database. | ✅ S792 (database + bill page) |
+| D42 | When an IMS Supervisor ends the month, the Owner Report is still made at the Owner's first view. **The close screen and the report header say when it was made.** | 🔴 |
+
+**Settled by precedent (shown to the owner in the approved plan, not asked separately):**
+- Overheads gives no verdict for an open month (D7).
+- Editing an asset's cost or dates after a posted run warns, naming what changes (D5).
+- A stale bill draft is not auto-restored; the owner chooses which version to keep.
+- Editing an old or closed-month bill never offers to roll Item Master's price back.
+- Only the Owner grants IMS Manager (the S752/S754 rule for HR and POS).
+- The HQ push skips, and lists, a branch item whose unit differs and has history (D5), and never copies `is_active` onto a branch row.
+- A duplicate supplier name or PAN warns but allows the save.
+- A closed-month count correction offers "carry into next month's opening" as one button.
+- The dashboard never samples today's partial day (S694).
+- Build-your-own dishes are "Not rated — costed by build" on the menu reports.
+- The stock cost of extras counts in margin.
+- Dead Stock counts staff meals as movement, but not wastage.
+- The reorder total is priced at whole packs.
+- A cross-year return sits in the year it happened on the 1L report (D10), with a Help note for the accountant.
+
+## S792.2 Stage 1 — security and silent data loss — ✅ shipped S792
+
+Migration `20260928140000_ims_integrity_s792.sql` applied live 2026-09-28 after a rolled-back dry run on CASA ACAI CAFE's real logins (21 behavioural checks, then read back from the live catalog and re-run against the live migration, all passing). `admin-user-ops` v60 and `ims-staff-login` v5 deployed. Left for later: `staff_meals` is still not audited (it has no `client_id`, so `log_audit()` cannot place it without a change to that function).
+
+**Migration `ims_integrity_s792`.** First inventory every writer of each table, as S756 did. Then do a rolled-back dry run on CASA's accounts. Apply only on the owner's "apply".
+- ✅ S792 — DATABASE-1 **[P0]** `settings_guard_staff_roles` does not fence `ims_count_scope_enforced` / `ims_count_blind` / `require_count_attribution`. Any login can switch off section scope and recount protection; gate these on `ims_can_manage_counts()`.
+- ✅ S792 — MASTER-1 / DATABASE-4 **[P0]** No rank guard on `items`, `vendors` or `categories`, and a count PIN can rewrite master data.
+  - Changes:
+    - supervisor+ for all three;
+    - `items.uom` refused while referenced (D5 in the DB);
+    - vendor archive, restore and delete limited to Owner or admin (D25);
+    - `items.rate` from a bill needs supervisor+ (D41).
+  - Also `items.category_id`, which lets a scoped counter move an item into their own section.
+- ✅ S792 — COSTS-1 / DATABASE-3 **[P0]** `overheads` (manager) and `budgets` (supervisor) have no rank guard. `overheads` is also missing from `ims_closed_period_guard`.
+- ✅ S792 — DATABASE-2 **[P1]** `sales_entries` has no rank guard, so a POS waiter or a count PIN can rewrite the open month. Guard by source:
+  - manual → IMS staff+;
+  - `pos` / `pos_comp` → POS or IMS supervisor+;
+  - `pos_credit` → POS manager.
+- ✅ S792 — DATABASE-4 `purchase_orders` / `purchase_order_items` need supervisor+. Today `qty_received` / `status` can be written directly, which makes the double-receive guard advisory. Also rank `demand_forecast_daily`, and put `recipe_suggestions` behind `no_pos_pin_staff`.
+- ✅ S792 — DATABASE-6 `settings` has no UNIQUE(client_id), so a second row breaks every `.maybeSingle()` read. Check live for duplicates first.
+- ✅ S792 — MASTER-3 **[P1]** "Sign out all counting tablets" does not end sessions that are already signed in. `rotate_ims_device_secret` and `revokeClientTablets` must delete those `auth.sessions`.
+- ✅ S792 — MASTER-2 **[P1]** `push_master_data` rewrites a branch item's unit and active flag and keeps its rate. A unit mismatch on a referenced item should become a `conflict`, and `is_active` should never be copied.
+- ✅ S792 — PURCHASES-1 **[P1]** `purchase_order_items.unit_price numeric(12,2)` plus `round(rate,2)` in `receive_purchase_order`. Per-gram prices get mispriced, and anything under 0.005 becomes a free line.
+- ✅ S792 — PLANNING-7 A snapshot column on `monthly_periods` should only be replaceable by a newer model.
+- ✅ S792 — COSTS-15 Stamp gate-pass `issued_by` / `exited_by` from `auth.uid()`.
+- ✅ S792 — COSTS-16 `post_asset_depreciation_run` needs an advisory lock and an overlap refusal.
+- ✅ S792 — DATABASE-7 Add `log_audit` on `payable_payments`, `staff_meals` and `overheads`.
+- ✅ S792 — DATABASE-8 REVOKE the stray TRUNCATE / REFERENCES / TRIGGER / MAINTAIN grants on `assets_*`, `ims_count_assignments` and `monthly_owner_reports`.
+
+**Edge Functions**
+- ✅ S792 — MASTER-4 `admin-user-ops`: only the Owner grants IMS Manager (create_ims_staff, update_ims_role). Hide Manager in the ImsStaff pickers for a non-Owner.
+- ✅ S792 — DATABASE-5 **[P1, Plausible]** The Danger Zone's unchunked `.in()` deletes can 414 partway through Archive or Delete. Drop them; the FK cascades cover the same rows.
+- ✅ S792 — MASTER-7 `ims-staff-login` drops the error on its device read, so a DB blip reads as "not set up" and the tablet erases its setup. Return 503 instead.
+- ✅ S792 — MASTER-8 (part) The `create_ims_staff` / `create_ims_pin_staff` employee-link reads drop `error`.
+
+**Frontend**
+- ✅ S792 — SALES-1 **[P0]** A hidden dish's manual rows are deleted by `save_sales_day` on any day or Bulk save. Carry them through the payload and show them (D29). Period Revenue should count all rows.
+- ✅ S792 — SALES-2 **[P1]** Regression of S457 via S756: `mode={pendingSave.mode}` is always undefined, so the Bulk save's delete warning names the opposite deletion.
+- ✅ S792 — STOCK-2 Every S756 IMS database refusal (closed month, month rank, IMS rank, recipe rank) shows the generic "not allowed" text, because the generic 42501 rule in `errorText.js` wins. Reorder the rules and add a test per hint.
+- ✅ S792 — STOCK-1 **[P1]** / STOCK-9 / STOCK-3 / STOCK-4 Offline replay in `Stock.js`:
+  - it runs outside `persistLocks`, out of order, and with no single-flush guard;
+  - non-network refusals are retried for ever, then land under a higher rank;
+  - Sync Now is hidden after a failure;
+  - a replay under the Owner's login lands silently in a month closed meanwhile (D38).
+- ✅ S792 — PURCHASES-2 **[P1]** An S779 draft is restored over a newer saved version of the bill. Store the base signature, and let the owner choose which to keep.
+- ✅ S792 — D39 Count-PIN idle lock and sign-out to `/ims/count`. Also MASTER-8: hide Clear All for `imsCountOnly`, and correct the Stock Count Settings dialog copy.
+
+## S792.3 Stage 2 — wrong numbers
+
+- 🔴 RECIPES-2 **[P1]** On PAN-bill outlets the pricing screens divide the typed price by 1.13 and the till charges the divided figure (D31). Change Recipes.js, MenuPricing.js (**both** branches), MenuRepricing.js and RecipeImportButton.jsx.
+- 🔴 FIGURES-1 **[P1]** Hiding an item removes its purchases from every past month on Monthly Summary, the P&L, `get_group_pnl`, Annual Summary and Period Comparison (D29). FIGURES-9 is the matching Budget vs Actual reconciliation claim.
+- 🔴 FIGURES-3 "Food Cost %" is two formulas under one name (D30). Fix the tip, the Help FAQ and glossary, and the comments that claim they agree.
+- 🔴 FIGURES-2 **[P1]** / SALES-3 **[P1]** The Owner Report's Inventory Variance and Shrinkage Trend are pre-S719 copies:
+  - they read unpaged;
+  - an uncounted item counts as 0;
+  - there is no tolerance;
+  - they skip the depletion rule, so credit notes and choice lines subtract usage;
+  - Variance leaves out staff meals.
+  Rebuild them on the live helpers and bump the schema version. FIGURES-8 (the `.neq` on revenue) and TAX-7 (active-only vendor name map) go in the same rebuild.
+- 🔴 FIGURES-4 Variance and Theoretical vs Actual judge different populations (D36).
+- 🔴 D35 Bulk + till notice on Sales Entry. `salesDepletion.js` ignores the Bulk total only after re-entry.
+- 🔴 PURCHASES-3 **[P1]** Outstanding Payables and the balance letter credit returns at list price with the whole discount kept (D33). A fully returned bill tells the supplier they owe us. Related: PURCHASES-8, where a fully returned credit bill never leaves Outstanding.
+- 🔴 TAX-1 **[P1]** Vendor Report drilldown "Total paid" = ex-VAT total − VAT-basis remaining. It should be Σ payments.
+- 🔴 TAX-2 **[P1]** Vendor Report's payable/status ignores a return entered in a later month (D10).
+- 🔴 TAX-3 The 1L report values a cross-year return at list price, because `readPriorBillLines` is missing.
+- 🔴 PURCHASES-4 The line Total flips meaning with the VAT tick order, and the header toggle leaves Total and Amount disagreeing (D34).
+- ✅ S792 stage 1 — PURCHASES-5 Editing an old or closed-month bill offers, pre-ticked, to roll Item Master back (D41 and precedent).
+- 🔴 PURCHASES-6 = MASTER-6 Price Tracker changes the master price with no D5 warning and no zero-row check.
+- 🔴 RECIPES-1 **[P1]** Build-your-own dishes are still judged at their bowl-and-spoon cost:
+  - the detail view, printed card, WhatsApp share, pills and export;
+  - Menu Engineering and its `me_class` write-back;
+  - Recipe Margin, Repricing and Best Sellers;
+  - the Owner Report ME section.
+- 🔴 RECIPES-3 **[P1]** Extras are counted as revenue but their stock is not counted as cost on Recipe Margin and Best Sellers.
+- 🔴 COSTS-2 **[P1]** Fixed assets choose "current NBV" by period end, not by posting order, which breaks D24's reversal and disposal flow. Also COSTS-4, where valuation drops assets disposed after the as-of date; COSTS-5, where a missing prior-year pool run opens every pool at 0 (warning part only); COSTS-6, where Pool E runs past its useful life; and COSTS-8, where an asset edit after posting gives no warning (D5).
+- 🔴 PLANNING-1 Demand Forecast reads at most 1,000 bills, and its stored read is unpaged. The old-run delete puts every new id in the URL. Needs a `run_id` column.
+- 🔴 PLANNING-2 / PLANNING-3 The dashboard forecast and the frozen Target count today's partial day as a whole day (S780–S783 code).
+- 🔴 PLANNING-4 Dead Stock ignores staff meals as movement, so staff rice reads "write it off". The Owner Report copy has the same flaw.
+- 🔴 SALES-4 Two quick Save Day presses can deplete stock twice. SALES-5 An import with a negative net quantity is dropped silently.
+- 🔴 MASTER-5 Two items added in one visit share a code, and Recipe Import resolves by code first.
+- 🔴 STOCK-5 (KNOWN+ of the banner item) A closed-month correction never reaches next month's opening. STOCK-6 A month switch shows old figures, with Export live.
+- 🔴 COSTS-3 Overheads gives a verdict on the open month (D7 precedent). COSTS-9 The labour tooltip leaves out overtime. COSTS-10 Break-even shows red with no figure entered.
+
+## S792.4 Stage 3 — hygiene (one sweep)
+
+- 🔴 TAX-4 / TAX-5 / TAX-6 / TAX-8 / TAX-9 / TAX-10 / TAX-11 / TAX-12 / TAX-13
+- 🔴 PURCHASES-7 / PURCHASES-9 / PURCHASES-10
+- 🔴 STOCK-7 / STOCK-8
+- 🔴 PLANNING-5 / PLANNING-6 / PLANNING-8 / PLANNING-9
+- 🔴 COSTS-7 / COSTS-11 / COSTS-12 / COSTS-13 / COSTS-14 / COSTS-17
+- 🔴 FIGURES-5 / FIGURES-6 / FIGURES-7 / FIGURES-10 (build the Monthly Summary Excel) / FIGURES-11
+- 🔴 RECIPES-4 / RECIPES-5 / RECIPES-6 / RECIPES-8 / RECIPES-9 / RECIPES-10; RECIPES-7 (cycle trigger, small migration)
+- 🔴 SALES-6 / SALES-7 / SALES-8
+- 🔴 MASTER-8 (the rest)
+- 🔴 DATABASE-9 / DATABASE-10 / DATABASE-11
+- 🔴 D42 wording on the close screen and the report header
+
+## S792.5 Stage 4 — design first, shown before building
+
+- 🔴 D32 PAN-bill supplier VAT as cost. The valuation basis for stock and purchases touches every COGS reader and the group SQL.
+- 🔴 D40 Opening pool WDV and per-asset "depreciation already taken" (schema and UI).
+- 🔴 D37 Two-location count prompt (a fresh server read on save).
+
+**GAPs the reviewers raised, not scheduled yet.** Each area file has its own list. The strongest:
+- no Item and Vendor Excel import;
+- item categories cannot be added or renamed;
+- no print or export on Outstanding Payables;
+- "Overdue" ignores supplier terms;
+- no small-balance write-off;
+- no dish cost history;
+- no Fixed Assets export;
+- sales_entries has no audit trail.
+
+---
+
+# S756 re-analysis (2026-09-15)
 
 Whole-module review of Crest IMS, 2026-09-15, in the shape of the S754 POS re-analysis. Nine
 read-only reviewers covered: items/vendors/gate passes/IMS staff/count PIN; purchases/returns/POs/
 payables; stock count/periods/movements; sales/requisitions; recipes/menu; variance/summaries/budget;
 reorder/dead stock/forecast/FIFO/ageing; VAT/1-lakh/vendor reports; overheads/fixed assets/IMS-wide
 access. High-severity claims were spot-checked against source before any decision was asked.
-
-**When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
-
-**Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred
-
----
 
 ## 1. Owner decisions (taken with Aashish, 2026-09-15)
 
@@ -72,7 +241,9 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   `opening_stock`, `wastages` and `staff_meals` have none, so a count PIN's JWT can still write
   them over REST even though the tabs are gone. Blind count and section scoping already carry the
   same caveat and say so on the Settings tab. Making it a real boundary is a migration and a
-  separate owner decision — not started.
+  separate owner decision — not started. **→ Taken into S792 stage 1** (DATABASE-4, owner-approved
+  plan 2026-09-28): the count PIN is refused on `opening_stock`, `wastages` and `staff_meals`, and the
+  settings that switch scope and blind count off are fenced (DATABASE-1).
 - ⚪ **S761 was not click-verified as a count account.** The PIN is hashed, so the trimmed page was
   checked by build, lint, the full suite and by hand-checking the header/body/footer column counts
   across all four `hideValues` × `blindCount` combinations — not by signing in on a phone. Worth a
@@ -248,7 +419,9 @@ tiers shipped in S765; what is listed here is only what did not.
 - ⚪ **Three report pages still have no empty branch at all** — `PaymentReport`, `Overheads`,
   `BudgetVsActual` — and seven more hand-roll one instead of `.empty-state`.
 - ⚪ **Stock Count, Overheads and Requisitions still render no closed-period banner**, which
-  `closed-periods.md` has flagged since S651. `ClosedPeriodBanner` now exists for them.
+  `closed-periods.md` has flagged since S651. `ClosedPeriodBanner` now exists for them. Stock Count's
+  half, and its real consequence, is S792 STOCK-5 (a closed-month correction never reaches next
+  month's opening stock).
 - 🔵 **The Starter tier's nav deletes locked rows rather than upselling** — raised by the critique as
   an inconsistency with the Crest Suite group, which stays visible with a PRO chip. Settled as
   deliberate (owner decision, 2026-09-16) and recorded in `.impeccable/critique/ignore.md` so a

@@ -20,6 +20,21 @@ export const IMS_COUNT_ALLOWED_PATHS = ['/stock', '/help']
 /** Where a count account is sent when it lands somewhere it cannot use. */
 export const IMS_COUNT_HOME = '/stock'
 
+/**
+ * Where a count account signs in, and where it goes back to when it signs out or locks (S792, D39).
+ * The email /login page is the wrong door: a counter holding the tablet has no email to type.
+ */
+export const IMS_COUNT_LOGIN = '/ims/count'
+
+/**
+ * Minutes of no input before a counting tablet locks back to its PIN screen (S792, owner decision
+ * D39). A shared tablet stayed signed in for ever, so the next person counted under the previous
+ * counter's name — `closing_stock.counted_by`, and the recount protection keyed on it. Ten minutes,
+ * not the till's three: a counter legitimately stands at a shelf for minutes between entries, and a
+ * lock mid-shelf would teach them to share one PIN.
+ */
+export const IMS_COUNT_IDLE_LOCK_MS = 10 * 60 * 1000
+
 /** Whether a count-only account may reach `path`. Every other account reaches everything. */
 export function imsCountPathReachable(countOnly, path) {
   if (!countOnly) return true

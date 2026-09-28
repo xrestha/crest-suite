@@ -23,7 +23,7 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
 import { APP_VERSION } from '../shared/appVersion'
-import { imsCountPathReachable } from '../shared/imsCountAccess'
+import { imsCountPathReachable, IMS_COUNT_LOGIN, IMS_COUNT_IDLE_LOCK_MS } from '../shared/imsCountAccess'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
   Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
@@ -564,7 +564,9 @@ export default function Layout() {
     // login (S776, posLockedCart.js). Before this the lock simply discarded it.
     if (isPosDevice && isPinStaff) await runBeforePosLock()
     await signOut()
-    navigate(isPosDevice && isPinStaff ? '/pos/login' : '/login')
+    // A counting tablet goes back to its PIN screen (S792, D39): the email /login page is a door
+    // the next counter has no key for, so the tablet read as broken until a manager came.
+    navigate(imsCountOnly ? IMS_COUNT_LOGIN : isPosDevice && isPinStaff ? '/pos/login' : '/login')
   }
 
   // ── POS idle lock ────────────────────────────────────────────────────────────────────────────
@@ -584,6 +586,11 @@ export default function Layout() {
   const idleLockEnabled = isPinStaff && !!localStorage.getItem('pos_device_client_id') &&
     !location.pathname.startsWith('/pos/kds')
   usePosIdleLock(idleLockEnabled, setIdleLockSecs, handleSignOut)
+  // The counting tablet's lock (S792, owner decision D39): the same mechanics, ten minutes, for a
+  // count PIN session only — `imsCountOnly` keys on the raw `ims_email` column, so an Owner or an
+  // IMS staff email login counting on a laptop is never locked. The two locks never both run: a
+  // count PIN account carries no pos_role.
+  usePosIdleLock(!!imsCountOnly, setIdleLockSecs, handleSignOut, IMS_COUNT_IDLE_LOCK_MS)
 
   // Single source of truth for "can this user see this destination" — used by the rendered nav,
   // the command palette's search index, and pinned favorites, so gating can never drift between
@@ -2063,7 +2070,8 @@ export default function Layout() {
           fontSize: 13, color: 'var(--theme-text1)', maxWidth: 'calc(100vw - 32px)',
         }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Locking in {idleLockSecs}s</strong>
-          {' '}— touch the screen or press any key to stay signed in. Items not sent yet are kept for your PIN.
+          {' '}— touch the screen or press any key to stay signed in.{' '}
+          {imsCountOnly ? 'Counts already saved stay saved.' : 'Items not sent yet are kept for your PIN.'}
         </div>
       )}
     </div>
