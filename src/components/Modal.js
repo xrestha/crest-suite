@@ -7,7 +7,19 @@ const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), in
 // handlers fired on every keypress — one Escape closed the confirm AND the drawer behind it,
 // and two competing Tab traps fought over focus. Only the modal on top of this stack responds;
 // the ones beneath ignore keys until it closes (S574).
+//
+// Each entry is { token, el }. A Modal rendered INSIDE another that mounts in the same commit runs
+// its effect first (React runs a child's effects before its parent's), so pushing in mount order
+// put the OUTER one on top: Escape then closed the outer dialog, and only its Tab trap ran. A Modal
+// whose panel contains an already-registered one is slotted beneath it instead (S791, the fix
+// hss-suite made in its Overlay.js).
 const modalStack = []
+
+function registerModal(entry) {
+  const inside = modalStack.findIndex(o => entry.el && o.el && entry.el !== o.el && entry.el.contains(o.el))
+  if (inside === -1) modalStack.push(entry)
+  else modalStack.splice(inside, 0, entry)
+}
 
 // Centered modal overlay — hosts a create/edit form so it pops up in front of the
 // user instead of rendering at the top of the page (no scrolling to reach it).
@@ -81,15 +93,15 @@ export default function Modal({
     ;(focusable || panel)?.focus()
 
     const stackToken = {}
-    modalStack.push(stackToken)
+    registerModal({ token: stackToken, el: panel })
 
     const onKeyDown = e => {
-      if (modalStack[modalStack.length - 1] !== stackToken) return
+      if (modalStack[modalStack.length - 1]?.token !== stackToken) return
       // A child that already consumed this key (QtyInput's Escape-cancels-the-expression)
       // preventDefaults it; closing the whole dialog on top of that turns "cancel this box"
       // into "discard the entire form" (S623). Belt to QtyInput's own stopPropagation.
       if (e.defaultPrevented) return
-      if (e.key === 'Escape') { onCloseRef.current(); return }
+      if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current(); return }
       // Trap Tab within the panel — without this, keyboard focus can walk out into the
       // page behind the overlay, which is only visually obscured, not actually inert.
       if (e.key === 'Tab' && panel) {
@@ -104,7 +116,7 @@ export default function Modal({
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
-      const i = modalStack.indexOf(stackToken)
+      const i = modalStack.findIndex(o => o.token === stackToken)
       if (i !== -1) modalStack.splice(i, 1)
       triggerRef.current?.focus?.()
     }

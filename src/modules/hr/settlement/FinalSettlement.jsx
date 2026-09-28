@@ -1,4 +1,4 @@
-import { nprInt, npr2 } from '../../../shared/nepalMoney'
+import { nprInt, npr2, nprPaisa } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -180,6 +180,9 @@ export default function FinalSettlement() {
   // The leaver's HR / IMS / POS staff logins Finalize will block (S753). null = still reading, and
   // { error } when the read failed — the dialog says so rather than implying there are none.
   const [linkedLogins, setLinkedLogins] = useState(null)
+  // Salary payments recorded for the last month or a later one (S791): the settlement pays that
+  // month itself, so Finalize refuses while one stands. null = checking, { error } = could not check.
+  const [paidMonths, setPaidMonths] = useState(null)
   const [reopenTarget, setReopenTarget] = useState(null)
   const [reopenReason, setReopenReason] = useState('')
 
@@ -402,6 +405,25 @@ export default function FinalSettlement() {
     })
     return () => { live = false }
   }, [confirmEmpId])
+
+  // S791: a salary payment for the last month or later is refused by finalize_final_settlement
+  // (settlement_salary_paid). Said here first, by month, so the owner undoes it before pressing.
+  useEffect(() => {
+    if (!confirmEmpId) { setPaidMonths(null); return }
+    let live = true
+    setPaidMonths(null)
+    const lastIdx = lastDate.year * 12 + lastDate.month
+    scopedFrom('hr_salary_payments', 'amount, paid_on, hr_payroll_runs!inner(monthly_periods!inner(bs_year, bs_month))')
+      .eq('employee_id', confirmEmpId).is('voided_at', null)
+      .then(({ data, error }) => {
+        if (!live) return
+        if (error) { setPaidMonths({ error }); return }
+        setPaidMonths((data || [])
+          .map(p => ({ amount: p.amount, paidOn: p.paid_on, ...p.hr_payroll_runs?.monthly_periods }))
+          .filter(p => p.bs_year * 12 + p.bs_month >= lastIdx))
+      })
+    return () => { live = false }
+  }, [confirmEmpId, lastDate.year, lastDate.month, scopedFrom])
 
   async function finalize() {
     if (!liveRow) return
@@ -736,9 +758,10 @@ export default function FinalSettlement() {
               Employer SSF (20%) for the final month, not paid to the employee: <strong>NPR {fmt(statement.employerSsf)}</strong> — deposit it with the employee's 11% (it appears on HR Reports → SSF Challan for {BS_MONTHS[(shownRow.settle_bs_month || lastDate.month) - 1]}).
             </p>
           )}
-          {!frozen && calc && calc.advanceShortfall > 0.01 && (
+          {/* > 0.005, not 0.01 (S791): one paisa still owed is owed, and the advance stays active. */}
+          {!frozen && calc && calc.advanceShortfall > 0.005 && (
             <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-              △ The payout covers NPR {fmt(calc.advanceRecovered)} of the NPR {fmt(calc.advanceDeduction)} advances owed. The other NPR {fmt(calc.advanceShortfall)} stays owed on the advance after Finalize.
+              △ The payout covers NPR {nprPaisa(calc.advanceRecovered)} of the NPR {nprPaisa(calc.advanceDeduction)} advances owed. The other NPR {nprPaisa(calc.advanceShortfall)} stays owed on the advance after Finalize.
             </p>
           )}
 
@@ -855,7 +878,7 @@ export default function FinalSettlement() {
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             <li><strong>NPR {npr2(statement.net)}</strong> net payable{statement.net < 0 ? ' — owed BY the employee' : ''}.</li>
             {calc?.advanceRecovered > 0 && (
-              <li><strong>NPR {fmt(calc.advanceRecovered)}</strong> recovered against outstanding advances{calc.advanceShortfall > 0.01 ? `; NPR ${fmt(calc.advanceShortfall)} stays owed` : ', which then close'}.</li>
+              <li><strong>NPR {nprPaisa(calc.advanceRecovered)}</strong> recovered against outstanding advances{calc.advanceShortfall > 0.005 ? `; NPR ${nprPaisa(calc.advanceShortfall)} stays owed` : ', which then close'}.</li>
             )}
             {(liveRow.tada_claim_ids || []).length > 0 && (
               <li>{liveRow.tada_claim_ids.length} approved travel claim(s), NPR {fmt(liveRow.tada_amount)}, are paid here and marked paid.</li>
@@ -874,7 +897,17 @@ export default function FinalSettlement() {
                     : <>Their staff login{linkedLogins.length === 1 ? '' : 's'} {linkedLogins.map(l => `${l.full_name} (${l.modules})`).join(', ')} {linkedLogins.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {linkedLogins.length === 1 ? 'it' : 'them'}.</>}
             </li>
             {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}
-            <li>If anything changed since this screen calculated — an advance, a claim, payroll for the month — nothing is finalized and you are told what.</li>
+            {paidMonths?.error && (
+              <li style={{ color: 'var(--theme-amber-text)' }}>△ Could not check whether their salary for {BS_MONTHS[lastDate.month - 1]} is already recorded as paid — Finalize checks again and refuses if it is.</li>
+            )}
+            {Array.isArray(paidMonths) && paidMonths.length > 0 && (
+              <li style={{ color: 'var(--theme-amber-text)' }}>
+                △ Their salary for {paidMonths.map(p => `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year} (NPR ${fmt(p.amount)}, paid ${p.paidOn})`).join(', ')} is
+                recorded as paid. This settlement pays the last month itself, so Finalize will refuse until that payment is undone on the
+                Payroll page (Undo payment) — otherwise the month is paid twice.
+              </li>
+            )}
+            <li>If anything changed since this screen calculated — an advance, a claim, overtime, a salary payment, payroll for the month — nothing is finalized and you are told what.</li>
           </ul>
         </ConfirmModal>
       )}

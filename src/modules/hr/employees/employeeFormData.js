@@ -77,6 +77,20 @@ export const PAY_HISTORY_LABELS = {
 // Settlement all filter on active/probation).
 export const OFF_PAYROLL_STATUSES = new Set(['inactive', 'resigned', 'terminated'])
 
+// A leaver whose finalized Final Settlement paid their last month cannot simply be set back on
+// payroll (S791). Payroll refuses them in that month and every later one, in the CURRENT employment
+// — so an employee made Active again with the old join date was rebuilt into every later payslip and
+// every Finalize refused it, with no way out named. Taking them back is a rehire: a join date after
+// the settled last day starts a new employment, and that is paid. Returns the settled last working
+// day (AD 'YYYY-MM-DD') when the save must be refused, or null.
+export function rehireNeedsNewJoinDate({ settledLastDay, joinDate, status }) {
+  if (status !== 'active' && status !== 'probation') return null
+  if (!settledLastDay) return null
+  const last = String(settledLastDay).slice(0, 10)
+  const join = joinDate ? String(joinDate).slice(0, 10) : null
+  return join && join > last ? null : last
+}
+
 // Is a stored end date already behind us while the employee is still on payroll? Payroll pays a
 // monthly employee NOTHING for days after end_date, so this state zeroes their pay — and before
 // S748 the field was hidden unless the type was Contract or Part-time, so it could not be seen.

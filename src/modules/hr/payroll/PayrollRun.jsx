@@ -1,4 +1,4 @@
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -15,6 +15,7 @@ import { nepalBs, nepalCivilDate, nepalBsLong, nepalDateLong } from '../../../sh
 import {
   fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds, dueAdvances,
   fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments, payrollCashCost,
+  writtenOffAdvancesForRun,
 } from './payrollData'
 import PayslipBody from './PayslipBody'
 import PayrollApprovalSheet from './PayrollApprovalSheet'
@@ -613,6 +614,21 @@ export default function PayrollRun() {
     setBusy(false)
   }
 
+  // Reopen refuses while an advance this run recovered from has since been written off (S791): deleting
+  // the run's repayment grows the write-off by what the run took, and nobody decided that. The database
+  // refuses too (reopen_payroll_run); this says so first, by name, before the confirm.
+  function requestReopen() {
+    const wo = writtenOffAdvancesForRun(advances, repayments, run?.id)
+    if (wo.length > 0) {
+      const { advance: a, recoveredHere } = wo[0]
+      const more = wo.length > 1 ? ` (and ${wo.length - 1} more)` : ''
+      setMsg(`error:This payroll cannot be reopened yet. ${nameOf(a.employee_id)}'s ${a.type === 'loan' ? 'loan' : 'advance'} of NPR ${fmt(a.amount)}${more} was written off after this payroll recovered NPR ${nprPaisa(recoveredHere)} from it, and reopening would take that back and change what was written off. Put it back into recovery first (Advances & Loans → Reactivate), then reopen.`)
+      return
+    }
+    setMsg('')
+    setConfirmAction('reopen')
+  }
+
   async function reopen() {
     if (!run || !period) return
     const p = period
@@ -628,9 +644,6 @@ export default function PayrollRun() {
     await loadAll(p)
     if (reErr) { setMsg('error:Nothing was changed — the run was not reopened. ' + errorText(reErr, 'operator')); setBusy(false); return }
     const notes = []
-    if (result?.written_off) {
-      notes.push(`${result.written_off} ${result.written_off.includes(',') ? 'have advances' : 'has an advance'} that ${result.written_off.includes(',') ? 'are' : 'is'} written off — the write-off does not change, so check Advances & Loans.`)
-    }
     if ((result?.tada_claims || 0) > (result?.tada_reverted || 0)) {
       const left = result.tada_claims - result.tada_reverted
       notes.push(`Only ${result.tada_reverted} of the ${result.tada_claims} TADA claims this run paid went back to Approved — the other ${left} ${left === 1 ? 'is' : 'are'} no longer marked paid by payroll (changed in TADA Claims). Check TADA Claims before regenerating, or a claim may be paid twice or not at all.`)
@@ -824,8 +837,10 @@ export default function PayrollRun() {
   // uses and the − sign carries the direction (S768). Red here spent the product's "something is
   // wrong" colour up to five times per row, and the one real warning on the page — ⚠ SSF no.
   // missing, in the name cell — was lost among them. Colour on this register is for flags only.
-  const moneyCell = (v, sign) => <td style={{ textAlign: 'right', color: v > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{v > 0 ? `${sign}${fmt(v)}` : '—'}</td>
+  const moneyCell = (v, sign, f = fmt) => <td style={{ textAlign: 'right', color: v > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{v > 0 ? `${sign}${f(v)}` : '—'}</td>
   const negCell = v => moneyCell(v, '−')
+  // The advance cut and the take-home it leaves are exact to the paisa (S791), so they print it.
+  const negPaisaCell = v => moneyCell(v, '−', nprPaisa)
 
   return (
     <div>
@@ -856,7 +871,7 @@ export default function PayrollRun() {
                 {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy}>Finalize</button>}
                 {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform OPERATOR, while
                     the tenant's own Owner is `isOwner`; both resolve hrRole to 'manager' (S620). */}
-                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy}>Reopen</button>}
+                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={requestReopen} disabled={busy}>Reopen</button>}
               </div>
             )}
             {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
@@ -950,7 +965,7 @@ export default function PayrollRun() {
             Neutral, not a warning — nothing is wrong — but named, so a missing waiter reads as a decision. */}
         {!loading && !loadError && period && !finalized && settled.length > 0 && (
           <div className="card" role="note" style={{ marginBottom: 12, padding: '10px 16px', fontSize: 12, color: 'var(--theme-text2)' }}>
-            <Tip text="A finalized Final Settlement pays the last month's salary itself, so a payslip here as well would pay those days twice. Reopening the settlement brings them back onto this payroll." width={290}>
+            <Tip text="A finalized Final Settlement pays the last month's salary itself, so a payslip in that month or any later one would pay them twice, or pay them after they left. Reopening the settlement brings them back onto this payroll; if they have rejoined, record their new join date on their employee record." width={290}>
               <strong style={{ color: 'var(--theme-text1)' }}>Left out — already paid by Final Settlement:</strong>
             </Tip>{' '}
             {settled.map(e => e.full_name).join(', ')}
@@ -1087,7 +1102,7 @@ export default function PayrollRun() {
                           {negCell(num(s.absence_deduction))}
                           {negCell(num(s.ssf_employee))}
                           {negCell(num(s.other_deductions))}
-                          {negCell(advDed)}
+                          {negPaisaCell(advDed)}
                           <td style={{ textAlign: 'right' }}>
                             {finalized ? (
                               <span style={{ color: s.tds > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
@@ -1129,7 +1144,7 @@ export default function PayrollRun() {
                               <span style={{ color: tada > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{tada > 0 ? `+${fmt(tada)}` : '—'}</span>
                             </div>
                           </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14 }}>{nprPaisa(s.net_pay)}</td>
                           {showPaid && <td style={{ textAlign: 'right' }}>{renderPaidCell(s, emp)}</td>}
                           <td style={{ textAlign: 'right' }}>
                             <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip({ slip: s, emp })} aria-label={`Payslip for ${emp.full_name}`}>Payslip</button>
@@ -1184,10 +1199,10 @@ export default function PayrollRun() {
                       {negCell(totals.absence)}
                       {negCell(totals.ssfEmp)}
                       {negCell(totals.other)}
-                      {negCell(totals.advDed)}
+                      {negPaisaCell(totals.advDed)}
                       {negCell(totals.tds)}
                       {moneyCell(totals.tada, '+')}
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{nprPaisa(totals.net)}</td>
                       {showPaid && (
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap' }}>
                           {paymentsError ? '' : `${paySummary.paid} of ${paySummary.owed} paid`}
@@ -1346,10 +1361,8 @@ export default function PayrollRun() {
         )
       })()}
       {confirmAction === 'reopen' && (() => {
-        // Advances this run recovered that have since been written off: the reopen removes the recovery
-        // but cannot reopen the loan, so they are named before anyone presses it (S751 review).
-        const ownAdvanceIds = new Set(repayments.filter(r => r.payroll_run_id === run?.id).map(r => r.advance_id))
-        const writtenOff = advances.filter(a => ownAdvanceIds.has(a.id) && a.status === 'written_off')
+        // A run that recovered from an advance since written off never reaches this dialog (S791):
+        // requestReopen refuses first, and reopen_payroll_run refuses in the database.
         return (
           <ConfirmModal
             title="Reopen this payroll for editing?"
@@ -1363,13 +1376,6 @@ export default function PayrollRun() {
               and TADA claims it auto-marked Paid revert to Approved. Payslips already handed to
               staff will no longer match until you finalize again.
             </p>
-            {writtenOff.length > 0 && (
-              <p style={{ margin: '10px 0 0', color: 'var(--theme-amber-text)' }}>
-                {writtenOff.map(a => `${nameOf(a.employee_id)}'s advance of NPR ${fmt(a.amount)}`).join(', ')}{' '}
-                {writtenOff.length === 1 ? 'has' : 'have'} since been written off — {writtenOff.length === 1 ? 'its write-off does' : 'their write-offs do'} not
-                change when this run's recovery is removed, so check {writtenOff.length === 1 ? 'it' : 'them'} in Advances &amp; Loans afterwards.
-              </p>
-            )}
             {/* Reopen stays allowed after payment (decided 2026-09-23), with this warning. The payment
                 records survive the reopen and any Regenerate; the Paid column then names a difference. */}
             {activePayments.length > 0 && (() => {

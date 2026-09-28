@@ -1,4 +1,4 @@
-import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, normaliseEmployeeField } from './employeeFormData'
+import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, normaliseEmployeeField, rehireNeedsNewJoinDate } from './employeeFormData'
 
 const KEYS = [
   'employee_code', 'full_name', 'phone', 'status', 'end_date', 'supervisor_id', 'children_count',
@@ -70,5 +70,22 @@ describe('endDateHasPassed — the state that zeroes a monthly employee’s pay'
     expect(endDateHasPassed('2026-05-13', 'resigned', '2026-09-14')).toBe(false)
     expect(endDateHasPassed('2026-12-01', 'active', '2026-09-14')).toBe(false)
     expect(endDateHasPassed(null, 'active', '2026-09-14')).toBe(false)
+  })
+})
+
+// S791: payroll refuses a settled leaver in their last month and every later one, in the current
+// employment — so putting them back on payroll with the old join date was a dead end.
+describe('rehireNeedsNewJoinDate', () => {
+  const settledLastDay = '2026-08-15'
+  test('Active again with the old join date is refused, naming the settled last day', () => {
+    expect(rehireNeedsNewJoinDate({ settledLastDay, joinDate: '2026-06-15', status: 'active' })).toBe('2026-08-15')
+    expect(rehireNeedsNewJoinDate({ settledLastDay, joinDate: '2026-08-15', status: 'probation' })).toBe('2026-08-15')
+  })
+  test('a join date after the settled last day is a rehire, and is allowed', () => {
+    expect(rehireNeedsNewJoinDate({ settledLastDay, joinDate: '2026-09-01', status: 'active' })).toBe(null)
+  })
+  test('off payroll, or never settled, there is nothing to refuse', () => {
+    expect(rehireNeedsNewJoinDate({ settledLastDay, joinDate: '2026-06-15', status: 'resigned' })).toBe(null)
+    expect(rehireNeedsNewJoinDate({ settledLastDay: null, joinDate: '2026-06-15', status: 'active' })).toBe(null)
   })
 })

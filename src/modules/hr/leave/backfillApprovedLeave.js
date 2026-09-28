@@ -40,7 +40,7 @@ import { workingDaysInRange } from './leaveConstants'
  * @returns {Promise<{filled: number, skipped: number, employees: number, error: any}>}
  */
 export async function backfillApprovedLeave({ clientId, period }) {
-  const empty = { filled: 0, skipped: 0, employees: 0, error: null }
+  const empty = { filled: 0, skipped: 0, settled: 0, employees: 0, error: null }
   if (!clientId || !period?.id || !period.bs_year || !period.bs_month) return empty
 
   // The AD window this BS month occupies, as plain date strings — `start_date`/`end_date` are
@@ -54,7 +54,7 @@ export async function backfillApprovedLeave({ clientId, period }) {
 
   // Overlap, not containment: a leave running Ashwin 29 → Kartik 3 belongs partly to this month,
   // and the day filter below keeps only the days that are actually in it.
-  const [reqRes, typeRes, attRes, holRes] = await Promise.all([
+  const [reqRes, typeRes, attRes, holRes, setRes] = await Promise.all([
     scopedFrom('hr_leave_requests', clientId, 'id, employee_id, leave_type_id, start_date, end_date, day_type')
       .eq('status', 'approved').lte('start_date', monthEnd).gte('end_date', monthStart),
     scopedFrom('hr_leave_types', clientId, 'id, paid'),
@@ -68,14 +68,33 @@ export async function backfillApprovedLeave({ clientId, period }) {
     scopedFrom('hr_holiday_calendar', clientId, 'bs_day')
       .eq('holiday_type', 'public').is('removed_at', null)
       .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
+    // S791: a finalized Final Settlement locks its leaver's last month and every later one in the
+    // database (hr_pay_month_guard), so their rows here would fail the WHOLE upsert — one leaver's
+    // approved leave would cost every other employee's back-fill. They are left out and counted.
+    scopedFrom('hr_final_settlements', clientId, 'employee_id, last_working_date')
+      .eq('status', 'finalized').lte('last_working_date', monthEnd),
   ])
   // A failed read is not "no approved leave" — returning `filled: 0` on an error would report the
   // month as fully synced and hide exactly the days this exists to rescue.
-  const readErr = reqRes.error || typeRes.error || attRes.error || holRes.error
+  const readErr = reqRes.error || typeRes.error || attRes.error || holRes.error || setRes.error
   if (readErr) return { ...empty, error: readErr }
 
   const requests = reqRes.data || []
   if (requests.length === 0) return empty
+
+  // Settled in the CURRENT employment only: a rehire (a join date after the settled last day) is a
+  // new employment and gets their leave marked like anyone else.
+  let settledIds = new Set()
+  const settlements = setRes.data || []
+  if (settlements.length > 0) {
+    const empRes = await scopedFrom('hr_employees', clientId, 'id, join_date')
+      .in('id', [...new Set(settlements.map(s => s.employee_id))])
+    if (empRes.error) return { ...empty, error: empRes.error }
+    const joinOf = new Map((empRes.data || []).map(e => [e.id, e.join_date ? String(e.join_date).slice(0, 10) : null]))
+    settledIds = new Set(settlements
+      .filter(s => { const j = joinOf.get(s.employee_id); return !j || String(s.last_working_date).slice(0, 10) >= j })
+      .map(s => s.employee_id))
+  }
   const paidById = Object.fromEntries((typeRes.data || []).map(t => [t.id, t.paid !== false]))
   // Days already carrying a mark — keyed employee:day, so a pre-existing row is never overwritten.
   const taken = new Set((attRes.data || []).map(a => `${a.employee_id}:${a.bs_day}`))
@@ -83,6 +102,7 @@ export async function backfillApprovedLeave({ clientId, period }) {
 
   const rows = []
   let skipped = 0
+  let settled = 0
   for (const req of requests) {
     const isHalf = req.day_type && req.day_type !== 'full'
     const status = paidById[req.leave_type_id]
@@ -90,6 +110,7 @@ export async function backfillApprovedLeave({ clientId, period }) {
       : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
     for (const d of workingDaysInRange(req.start_date, req.end_date)) {
       if (d.bsYear !== period.bs_year || d.bsMonth !== period.bs_month) continue
+      if (settledIds.has(req.employee_id)) { settled += 1; continue }
       const key = `${req.employee_id}:${d.bsDay}`
       if (taken.has(key)) { skipped += 1; continue }
       // Two approved requests overlapping one day would otherwise send the same key twice in one
@@ -99,26 +120,28 @@ export async function backfillApprovedLeave({ clientId, period }) {
       rows.push({ employee_id: req.employee_id, period_id: period.id, bs_day: d.bsDay, status: holidayDays.has(d.bsDay) ? 'holiday' : status })
     }
   }
-  if (rows.length === 0) return { ...empty, skipped }
+  if (rows.length === 0) return { ...empty, skipped, settled }
 
   const { error } = await scopedUpsert('hr_attendance', clientId, rows, { onConflict: 'employee_id,period_id,bs_day' })
-  if (error) return { filled: 0, skipped, employees: 0, error }
-  return { filled: rows.length, skipped, employees: new Set(rows.map(r => r.employee_id)).size, error: null }
+  if (error) return { filled: 0, skipped, settled, employees: 0, error }
+  return { filled: rows.length, skipped, settled, employees: new Set(rows.map(r => r.employee_id)).size, error: null }
 }
 
 /**
  * The sentence for a back-fill result — what the new month now contains, not what ran.
  * Returns '' when there is nothing worth saying (the overwhelmingly common case).
  */
-export function backfillLeaveText({ filled, skipped, employees, error }, monthLabel) {
+export function backfillLeaveText({ filled, skipped, settled, employees, error }, monthLabel) {
   if (error) {
     return `${monthLabel} was created, but leave already approved for it could not be marked on the attendance sheet. ` +
       `Open HR → Leave and use "Mark approved leave" there, or those days will not be deducted in payroll.`
   }
-  if (!filled) return ''
+  // S791: nothing to do about these — the leaver's Final Settlement already paid this month.
+  const left = settled ? ` ${settled} day${settled === 1 ? '' : 's'} of leave belonging to staff whose Final Settlement already paid ${monthLabel} were left out.` : ''
+  if (!filled) return left.trim()
   const who = employees === 1 ? '1 employee' : `${employees} employees`
   const skip = skipped ? ` ${skipped} day${skipped === 1 ? '' : 's'} already had an attendance mark and were left alone.` : ''
-  return `${filled} day${filled === 1 ? '' : 's'} of leave approved earlier for ${monthLabel} (${who}) were marked on its attendance sheet.${skip}`
+  return `${filled} day${filled === 1 ? '' : 's'} of leave approved earlier for ${monthLabel} (${who}) were marked on its attendance sheet.${skip}${left}`
 }
 
 /**

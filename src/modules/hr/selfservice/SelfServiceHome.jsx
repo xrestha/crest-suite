@@ -19,7 +19,7 @@ import { todayView, nextShift, pendingSwapsForMe } from './todayView'
 import { employeeErrorText } from './employeeError'
 import { useStaffAppManifest } from './useStaffApp'
 import { rememberedStaffClient } from './staffClient'
-import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS } from '../payrollConstants'
+import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS, isOffDay } from '../payrollConstants'
 import { methodLabel } from '../payroll/salaryPayments'
 import './selfService.css'
 
@@ -373,7 +373,10 @@ export default function SelfServiceHome() {
 
   const coworkerNames = [...new Map(coworkerRoster.map(r => [r.employee_id, r.full_name])).entries()]
   // Not a day already gone — request_shift_swap refuses one (S749), so the picker does not offer it.
+  // Nor a coworker's Day Off or leave (S791): there is no shift on it to take, and the request is
+  // refused for one. The same name test the week view uses for the requester's own days.
   const coworkerDays = coworkerRoster.filter(r => r.employee_id === swapTargetEmpId
+    && !isOffDay(r.shift_type_name)
     && (swapDay.bsYear * 10000 + swapDay.bsMonth * 100 + r.bs_day) >= (today.year * 10000 + today.month * 100 + today.day))
 
   async function submitSwapRequest() {

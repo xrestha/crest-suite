@@ -1,5 +1,5 @@
-import { nprInt } from '../../../shared/nepalMoney'
-import { calcAmount, isSsfContributor } from './payrollCompute'
+import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
+import { calcAmount, isSsfContributor, toPaisa } from './payrollCompute'
 import { slabsFor } from './tds'
 import { FRESHNESS_INPUT_FIELDS } from './payrollData'
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER, SSF_CAP } from '../payrollConstants'
@@ -73,11 +73,14 @@ const DRIFT_LABELS = {
 }
 const idKey = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
 const differ = (a, b) => Math.round(num(a)) !== Math.round(num(b))
+// The advance is exact to the paisa (S791), like payslipDrift's own comparison of it.
+const differField = (f, a, b) => (f === 'advance_deduction' ? toPaisa(a) !== toPaisa(b) : differ(a, b))
+const fmtField = f => (f === 'advance_deduction' ? nprPaisa : fmt)
 
 export function driftParts(stored, live) {
   const parts = FRESHNESS_INPUT_FIELDS
-    .filter(f => differ(stored[f], live[f]))
-    .map(f => `${DRIFT_LABELS[f] || f} NPR ${fmt(num(stored[f]))} → NPR ${fmt(num(live[f]))}`)
+    .filter(f => differField(f, stored[f], live[f]))
+    .map(f => `${DRIFT_LABELS[f] || f} NPR ${fmtField(f)(num(stored[f]))} → NPR ${fmtField(f)(num(live[f]))}`)
   const idsMoved = idKey(stored.tada_claim_ids) !== idKey(live.tada_claim_ids)
   if (idsMoved || differ(stored.tada_amount, live.tada_amount)) {
     parts.push(`Travel claims (TADA) NPR ${fmt(num(stored.tada_amount))} → NPR ${fmt(num(live.tada_amount))}${idsMoved ? ' (a different set of approved claims)' : ''}`)
@@ -164,8 +167,8 @@ export function CalcDetail({ row, monthDays, advances, ytd }) {
             <Line label="Unpaid Leave Days" op="+" value={t.unpaid_leave || 0} />
             <Line label="Half-day × 0.5" op="+" value={((t.half_day || 0) * 0.5).toFixed(2)} />
             <Line label="Half-day Unpaid Leave × 0.5" op="+" value={((t.half_unpaid_leave || 0) * 0.5).toFixed(2)} />
-            {b.preJoinDays > 0 && <Line label="Not Yet Joined Days" op="+" value={b.preJoinDays} hint="Days this month before the employee's join date" />}
-            {b.postExitDays > 0 && <Line label="Days after last working day" op="+" value={b.postExitDays} hint="Days this month after the employee's last working day (their end date)" />}
+            {b.preJoinDays > 0 && <Line label="Not Yet Joined Days" op="+" value={b.preJoinDays} hint="Days this month before the employee's join date. Any attendance marked on these days is left out of the tally, so it is not docked a second time" />}
+            {b.postExitDays > 0 && <Line label="Days after last working day" op="+" value={b.postExitDays} hint="Days this month after the employee's last working day (their end date). Any attendance marked on these days is left out of the tally, so it is not docked a second time" />}
             <Line label="Unpaid Days" op="=" value={`${b.unpaidDays.toFixed(2)} days`} strong />
             <Line label="Gross" value={`NPR ${fmt(b.gross)}`} />
             <Line label="Days in Month" op="÷" value={monthDays} />
@@ -268,10 +271,10 @@ export function CalcDetail({ row, monthDays, advances, ytd }) {
 
         <Section title="Advance & TADA">
           <Line label="Advances in recovery this month" value={empAdvances.length} hint="Recovery starts the month after an advance is issued" />
-          <Line label="Advance cut due" value={`NPR ${fmt(advanceDue)}`} hint="Each advance's instalment, or what is left of it if less." />
+          <Line label="Advance cut due" value={`NPR ${nprPaisa(advanceDue)}`} hint="Each advance's instalment, or what is left of it if less — exact to the paisa." />
           <Line
-            label="Advance cut taken" value={`− NPR ${fmt(slip.advance_deduction)}`}
-            hint={advanceOwed > 0 ? `NPR ${fmt(advanceOwed)} of the advance cut is still owed — taken by later cuts. Pay left after tax was not enough for the whole instalment.` : undefined}
+            label="Advance cut taken" value={`− NPR ${nprPaisa(slip.advance_deduction)}`}
+            hint={advanceOwed > 0.005 ? `NPR ${nprPaisa(advanceOwed)} of the advance cut is still owed — taken by later cuts. Pay left after tax was not enough for the whole instalment.` : undefined}
           />
           <Line label="Travel claims paid by this payroll" value={tada.ids.length} hint="Approved claims whose trip ended by the end of this month." />
           <Line label="TADA Reimbursement" value={`+ NPR ${fmt(slip.tada_amount)}`} />
@@ -290,9 +293,9 @@ export function CalcDetail({ row, monthDays, advances, ytd }) {
             ].filter(Boolean).join('. ') || undefined}
           />
           <Line label="Income tax (TDS)" op="−" value={`NPR ${fmt(slip.tds)}`} />
-          <Line label="Advance" op="−" value={`NPR ${fmt(slip.advance_deduction)}`} />
+          <Line label="Advance" op="−" value={`NPR ${nprPaisa(slip.advance_deduction)}`} />
           <Line label="TADA" op="+" value={`NPR ${fmt(slip.tada_amount)}`} />
-          <Line label="Net Pay" op="=" value={`NPR ${fmt(slip.net_pay)}`} strong />
+          <Line label="Net Pay" op="=" value={`NPR ${nprPaisa(slip.net_pay)}`} strong />
         </Section>
       </div>
     </div>
@@ -350,9 +353,9 @@ export function StoredDetail({ slip, intro }) {
                 ? 'Typed by hand on the Payroll page before the month was finalized.'
                 : 'Withheld from this month\'s pay, based on the employee\'s expected income for the year.'}
             />
-            <Line label="Advance cut" op="−" value={`NPR ${fmt(num(slip.advance_deduction))}`} hint="Recovered towards an advance or loan." />
+            <Line label="Advance cut" op="−" value={`NPR ${nprPaisa(num(slip.advance_deduction))}`} hint="Recovered towards an advance or loan." />
             <Line label="TADA" op="+" value={`NPR ${fmt(num(slip.tada_amount))}`} hint={claims > 0 ? `${claims} travel claim${claims === 1 ? '' : 's'} reimbursed — not taxed.` : 'No travel claims on this payslip.'} />
-            <Line label="Net pay" op="=" value={`NPR ${fmt(num(slip.net_pay))}`} strong />
+            <Line label="Net pay" op="=" value={`NPR ${nprPaisa(num(slip.net_pay))}`} strong />
           </Section>
         </div>
       </div>

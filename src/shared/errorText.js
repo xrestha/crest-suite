@@ -573,6 +573,13 @@ const rules = [
     staff: "Payroll for that month has already been finalized, so it can't be changed. Nothing was changed — ask your manager.",
     operator: 'Payroll for that month is finalized and its payslips were built from these records, so nothing was changed. Reopen the payroll run for that month first if it really needs correcting, then finalize it again.',
   },
+  // S791 (20260928110000): a finalized Final Settlement paid the leaver's last month, so nothing
+  // recorded for that month or a later one would be paid by anything.
+  {
+    test: e => /hr_month_settled/i.test(e.message || ''),
+    staff: "That person's Final Settlement has already paid that month, so it can't be changed. Nothing was changed — ask your manager.",
+    operator: "Nothing was changed: this employee's Final Settlement is finalized and already paid their last month (named in the detail below), so overtime or attendance recorded for that month or a later one would never be paid. If they have rejoined, record their new join date on their employee record first; if the settlement was a mistake, reopen it.",
+  },
   // ── Payroll money pages (S751, migration 20260914210000) ──────────────────────────────────
   {
     test: e => /hr_run_finalized/i.test(e.message || ''),
@@ -700,6 +707,18 @@ const rules = [
     staff: 'This payroll was changed in another tab. Reload the page.',
     operator: 'Nothing was changed by this click — the run was finalized or reopened in another tab a moment ago. Reload the page to see where it stands.',
   },
+  // S791 (20260928100000): Reopen refuses over an advance written off since this run recovered from
+  // it, and a run's status never changes except through Finalize or Reopen.
+  {
+    test: e => /payroll_reopen_written_off/i.test(e.message || ''),
+    staff: 'An advance this payroll recovered was written off since. Nothing was reopened.',
+    operator: 'Nothing was reopened: an advance this payroll recovered money from has since been written off (named in the detail below). Reopening would take that recovery back and quietly grow the write-off. Put the advance back into recovery with Advances & Loans → Reactivate, then reopen.',
+  },
+  {
+    test: e => /payroll_status_direct/i.test(e.message || ''),
+    staff: 'A payroll can only be finalized or reopened from the Payroll page. Nothing was changed.',
+    operator: 'A payroll run is finalized with Finalize and reopened with Reopen on the Payroll page, never by changing its status directly — those two also record the advance recoveries and travel claims. Nothing was changed.',
+  },
   {
     test: e => /payroll_run_empty|payroll_run_not_found/i.test(e.message || ''),
     staff: 'That payroll run has no payslips any more. Reload the page.',
@@ -732,7 +751,7 @@ const rules = [
   {
     test: e => /run_has_settled_employee/i.test(e.message || ''),
     staff: 'Someone on that payroll has already been paid through a Final Settlement. Nothing was finalized.',
-    operator: 'The run was not finalized: someone on it already has a finalized Final Settlement that pays this month (named in the detail below). Regenerate the run — it leaves settled leavers out — and finalize again.',
+    operator: 'The run was not finalized: someone on it left in a finalized Final Settlement that paid their last month itself (named in the detail below), so a payslip in this month or a later one would pay them twice. If they have rejoined, record their new join date on their employee record; if the settlement was a mistake, reopen it; otherwise Regenerate the run, which leaves settled leavers out, and finalize again.',
   },
   {
     test: e => /settlement_stale_advances/i.test(e.message || ''),
@@ -743,6 +762,17 @@ const rules = [
     test: e => /settlement_stale_tada/i.test(e.message || ''),
     staff: 'That employee\'s travel claims changed since the settlement was worked out. Nothing was finalized.',
     operator: 'Nothing was finalized: the employee\'s approved travel claims changed since this settlement was calculated (one was approved, paid or rejected meanwhile). Reload the page and finalize again.',
+  },
+  // S791: both sit ahead of the generic settlement_stale rule below, which would otherwise catch them.
+  {
+    test: e => /settlement_stale_ot/i.test(e.message || ''),
+    staff: "That employee's overtime changed since the settlement was worked out. Nothing was finalized.",
+    operator: "Nothing was finalized: overtime for the last month changed since this settlement was calculated (an entry was approved, edited or re-typed, or attendance overtime changed — the detail below compares the two). Payroll leaves a settled leaver out, so that overtime would be paid by nothing. Reload the page so the settlement includes it, then finalize again.",
+  },
+  {
+    test: e => /settlement_salary_paid/i.test(e.message || ''),
+    staff: "That employee's salary for the last month is already recorded as paid. Nothing was finalized.",
+    operator: "Nothing was finalized: this employee's salary for the last month (or a later one) is recorded as paid, and the settlement pays that month itself, so it would be paid twice. Undo that payment on the Payroll page first (Undo payment, with a reason), then finalize — the settlement then pays the month.",
   },
   {
     test: e => /settlement_stale/i.test(e.message || ''),
@@ -846,8 +876,8 @@ const rules = [
   },
   {
     test: e => /swap_day_taken/i.test(e.message || ''),
-    staff: 'One of you already works the other day.',
-    operator: 'One of the two employees is already rostered on the day they would be moving onto, so the swap would give them two shifts on one day. The roster was not changed. Adjust the roster first, or reject the swap.',
+    staff: 'One of you already works, or is on leave, on the other day. Pick a day you are both free.',
+    operator: 'One of the two employees already works, or is on leave, on the day they would be moving onto, so the swap would give them two shifts on one day or overwrite their leave. A Day Off there is fine — it changes hands the other way. The roster was not changed. Adjust the roster first, or reject the swap.',
   },
   {
     test: e => /swap_not_permitted/i.test(e.message || ''),

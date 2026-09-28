@@ -32,9 +32,11 @@ const fmtD = iso => {
   return `${bs.year}-${String(bs.month).padStart(2,'0')}-${String(bs.day).padStart(2,'0')}`
 }
 const round2 = n => Math.round(n * 100) / 100
-// A paisa of tolerance on every "is anything still owed" test — the same 0.01 the database's
-// hr_advance_repayments_guard and sync trigger use, so the page and the refusal cannot disagree.
-const OWED_EPS = 0.01
+// Half a paisa of float noise on every "is anything still owed" test, so ONE paisa owed is owed.
+// It was 0.01, the slack the database's hr_advance_repayments_guard and sync trigger allowed, which
+// marked an advance with one paisa outstanding as repaid; since S791 both sides are exact to the
+// paisa, so the page and the refusal still agree.
+const OWED_EPS = 0.005
 
 const monthKey = m => `${m.bs_year}-${m.bs_month}`
 const monthLabel = m => `${BS_MONTHS[m.bs_month - 1]} ${m.bs_year}`

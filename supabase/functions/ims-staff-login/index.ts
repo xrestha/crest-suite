@@ -11,9 +11,25 @@ const CORS = {
 // reasons that function was rewritten for apply here identically:
 //
 // 1. THE LOCKOUT MUST BE ON THE AUTH PATH. If the browser called check_ims_pin_lock before and
-//    record_ims_pin_attempt after, both are simply skippable — and the PIN is four digits. Both
-//    run here, on the same request that signs in, and neither RPC is granted to anon or
-//    authenticated at all (migration 20260910120000 grants service_role only).
+//    record_ims_pin_attempt after, both are simply skippable — and the PIN is four digits. The
+//    lockout runs here, on the same request that signs in, and none of its RPCs is granted to
+//    anon or authenticated at all (service_role only).
+//
+//    And it counts the attempt BEFORE the sign-in (S791). Check-then-record let every request of a
+//    parallel burst pass the check before the 5th failure was recorded, so a burst got as many
+//    guesses as it had requests in flight (found in hss-suite, batch 4 re-analysis #37,
+//    docs/CROSS-REPO.md there). The order is now
+//
+//      device gate → look up the account → reserve_ims_pin_attempt → signInWithPassword
+//                                                                  → record_ims_pin_attempt(true)
+//
+//    reserve_ims_pin_attempt (migration 20260928120000) counts the attempt as a FAILURE up front,
+//    in one UPDATE that refuses while the account is locked; the row lock makes concurrent
+//    reservations queue, so the 6th request of a burst finds the lock the 5th set and never signs
+//    in. A correct PIN resets through record_ims_pin_attempt(true); a wrong one needs no second
+//    write. The reservation FAILS CLOSED with a 503, except on PGRST202 (deployed ahead of the
+//    migration), which falls back to the old check-then-record path so counting tablets keep
+//    working.
 //
 // 2. ims_email NEVER REACHES THE BROWSER. get_ims_count_staff returns id, name and job title —
 //    enough to draw a tile, nothing that logs anyone in. The synthetic email is resolved here with
@@ -29,6 +45,8 @@ const CORS = {
 // secret, verified below against client_secrets.ims_device_secret exactly as get_ims_count_staff
 // does. That secret reaches a tablet only by redeeming a short-lived enrolment token off the QR a
 // manager displays in Stock Count -> Settings.
+const ERR_UNAVAILABLE = 'Sign-in is unavailable right now. Try again in a minute.'
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -62,20 +80,6 @@ Deno.serve(async (req) => {
       .eq('client_id', client_id).eq('ims_device_secret', device_secret).maybeSingle()
     if (!deviceRow) return json({ error: 'This device is not set up' }, 401)
 
-    // Checked before the sign-in attempt so an already-locked account doesn't burn a real auth
-    // attempt. Same ordering as pos-staff-login.
-    //
-    // Both lockout RPCs FAIL OPEN, deliberately: a null result reads as "not locked" and the login
-    // proceeds. Locking every counter out on the night of a stock take because of a transient DB
-    // error would be worse than the brute-force risk of one unguarded request. But fail-open must
-    // be LOUD, or the lockout can silently stop working while every symptom still looks like a
-    // healthy sign-in. These console.error lines are the only thing that would surface it.
-    const { data: lockData, error: lockErr } = await admin.rpc('check_ims_pin_lock', { p_staff_id: staff_id })
-    if (lockErr) console.error('[ims-staff-login] check_ims_pin_lock FAILED — lockout not enforced on this request:', lockErr.message)
-    if (lockData?.[0]?.locked) {
-      return json({ error: 'Too many incorrect attempts', locked: true, locked_until: lockData[0].locked_until }, 423)
-    }
-
     // Same filter as get_ims_count_staff — a real PIN account (ims_role AND ims_email both set)
     // belonging to THIS device's client, so a valid device secret for one client cannot be pointed
     // at another client's staff_id.
@@ -88,10 +92,42 @@ Deno.serve(async (req) => {
       .is('settlement_blocked_by', null)
       .maybeSingle()
 
-    // Generic message shared with the wrong-PIN path below, and deliberately no recorded attempt:
-    // there is no account to lock, and recording one would let anyone drive an arbitrary uuid's
-    // counter.
+    // Generic message shared with the wrong-PIN path below, and deliberately no counted attempt (this
+    // returns before the reservation): there is no account to lock, and counting one would let
+    // anyone drive an arbitrary uuid's counter.
     if (!staff?.ims_email) return json({ error: 'Invalid credentials' }, 401)
+
+    // Reserve the attempt BEFORE signing in (S791, header point 1). A locked account is refused here
+    // without burning a real auth attempt, as the old check did.
+    const lockedResponse = (lockedUntil: string | null) =>
+      json({ error: 'Too many incorrect attempts', locked: true, locked_until: lockedUntil }, 423)
+    let reserved = true              // false only on the PGRST202 fallback (check-then-record)
+    let reservationLockedUntil: string | null = null
+    const { data: resData, error: resErr } = await admin.rpc('reserve_ims_pin_attempt', { p_staff_id: staff_id })
+    if (resErr) {
+      if (resErr.code !== 'PGRST202') {
+        console.error('[ims-staff-login] reserve_ims_pin_attempt FAILED — refusing the sign-in:', resErr.code, resErr.message)
+        return json({ error: ERR_UNAVAILABLE }, 503)
+      }
+      // The pre-S791 path, kept only for a deploy that ran ahead of 20260928120000. Its check fails
+      // OPEN, as it always did, and loudly: this line is the only thing that would surface it.
+      console.error('[ims-staff-login] reserve_ims_pin_attempt missing — migration 20260928120000 not applied; using the pre-S791 check-then-record lockout')
+      reserved = false
+      const { data: lockData, error: lockErr } = await admin.rpc('check_ims_pin_lock', { p_staff_id: staff_id })
+      if (lockErr) console.error('[ims-staff-login] check_ims_pin_lock FAILED — lockout not enforced on this request:', lockErr.message)
+      if (lockData?.[0]?.locked) return lockedResponse(lockData[0].locked_until)
+    } else {
+      const r = Array.isArray(resData) ? resData[0] : resData
+      if (r?.outcome === 'locked') return lockedResponse(r.locked_until ?? null)
+      // The account stopped being a count PIN login between the lookup and here.
+      if (r?.outcome === 'reject') return json({ error: 'Invalid credentials' }, 401)
+      if (r?.outcome !== 'reserved') {
+        console.error('[ims-staff-login] reserve_ims_pin_attempt returned no outcome — refusing the sign-in:', JSON.stringify(resData))
+        return json({ error: ERR_UNAVAILABLE }, 503)
+      }
+      // Set only when THIS attempt locked the account (it was the 5th).
+      reservationLockedUntil = r.locked_until ?? null
+    }
 
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
 
@@ -102,21 +138,32 @@ Deno.serve(async (req) => {
     })
 
     const succeeded = !!signInData?.session
-    const { data: attemptData, error: attemptErr } = await admin.rpc('record_ims_pin_attempt', {
-      p_staff_id: staff_id, p_success: succeeded,
-    })
-    // The more dangerous of the two to lose silently: if this stops recording, the counter never
-    // advances and NO account can ever lock, however many wrong PINs are tried.
-    if (attemptErr) console.error('[ims-staff-login] record_ims_pin_attempt FAILED — this attempt was NOT counted toward lockout:', attemptErr.message)
 
     if (!succeeded) {
-      const after = attemptData?.[0]
+      let after: { locked?: boolean, locked_until?: string | null } | undefined
+      if (reserved) {
+        // Counted by the reservation already, so no second write here.
+        after = { locked: !!reservationLockedUntil, locked_until: reservationLockedUntil }
+      } else {
+        const { data: attemptData, error: attemptErr } = await admin.rpc('record_ims_pin_attempt', {
+          p_staff_id: staff_id, p_success: false,
+        })
+        // The more dangerous of the two to lose silently: if this stops recording, the counter never
+        // advances and NO account can ever lock, however many wrong PINs are tried.
+        if (attemptErr) console.error('[ims-staff-login] record_ims_pin_attempt FAILED — this attempt was NOT counted toward lockout:', attemptErr.message)
+        after = attemptData?.[0]
+      }
       return json({
         error: after?.locked ? 'Too many incorrect attempts' : 'Invalid credentials',
         locked: !!after?.locked,
         locked_until: after?.locked_until ?? null,
       }, after?.locked ? 423 : 401)
     }
+
+    // A correct PIN resets the counter (and any lock this very attempt's reservation set). Fails
+    // open: the counter is signed in either way, and the log line is what would surface it.
+    const { error: resetErr } = await admin.rpc('record_ims_pin_attempt', { p_staff_id: staff_id, p_success: true })
+    if (resetErr) console.error(`[ims-staff-login] record_ims_pin_attempt(success) FAILED — the failed-attempt counter was not reset${reserved ? ' and this sign-in still counts as a failure' : ''}:`, resetErr.message)
 
     return json({
       access_token: signInData.session.access_token,

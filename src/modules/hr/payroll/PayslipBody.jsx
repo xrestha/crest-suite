@@ -1,4 +1,4 @@
-import { npr } from '../../../shared/nepalMoney'
+import { npr, nprPaisa } from '../../../shared/nepalMoney'
 // The payslip document itself — letterhead, earnings, deductions, reimbursement, net pay.
 // Shared deliberately: it backs the owner's Payroll → Payslip modal, that modal's print view,
 // AND the employee's own copy in HR Self-Service. Those last two used to be different renderers,
@@ -24,12 +24,15 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
   const fmtn = npr
   const small = phone ? 13 : 11
   const head = phone ? 12 : 10
-  const Row = ({ label, value, strong, neg }) => (
+  // `paisa` rows print the exact figure (S791): the advance is recovered to the paisa, so rounding
+  // a 500.50 cut to NPR 501 made the payslip disagree with the money actually deducted. Whole-rupee
+  // amounts still print as before.
+  const Row = ({ label, value, strong, neg, paisa }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: phone ? '7px 0' : '5px 0', fontSize: phone ? 15 : 13, fontWeight: strong ? 700 : 400 }}>
       <span style={{ color: strong ? c2 : c1 }}>{label}</span>
       {/* One ink for every figure (S768): SSF and income tax are required by law, and a red line on
           the employee's own payslip reads as a penalty. The − sign says it is taken off. */}
-      <span style={{ color: c2 }}>{neg ? '− ' : ''}{fmtn(value)}</span>
+      <span style={{ color: c2 }}>{neg ? '− ' : ''}{paisa ? `NPR ${nprPaisa(value)}` : fmtn(value)}</span>
     </div>
   )
   const isMonthly = slip.pay_basis === 'monthly'
@@ -121,7 +124,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
       {slip.other_deductions > 0 && (
         <Row label={retirement > 0 ? `Other Deductions (incl. CIT ${fmtn(retirement)})` : 'Other Deductions'} value={slip.other_deductions} neg />
       )}
-      {(slip.advance_deduction || 0) > 0 && <Row label="Advance / Loan Recovery" value={slip.advance_deduction} neg />}
+      {(slip.advance_deduction || 0) > 0 && <Row label="Advance / Loan Recovery" value={slip.advance_deduction} neg paisa />}
       {slip.tds > 0 && <Row label="TDS (income tax)" value={slip.tds} neg />}
       {(slip.absence_deduction + slip.ssf_employee + slip.other_deductions + (slip.advance_deduction || 0) + slip.tds) === 0 && (
         <div style={{ fontSize: 12, color: c1, padding: '5px 0' }}>None</div>
@@ -142,7 +145,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
         borderRadius: 0, padding: forPrint ? '12px 0 0' : '10px 10px 6px',
         marginLeft: forPrint ? 0 : -10, marginRight: forPrint ? 0 : -10,
       }}>
-        <Row label="Net Pay" value={slip.net_pay} strong />
+        <Row label="Net Pay" value={slip.net_pay} strong paisa />
       </div>
       {slip.ssf_employer > 0 && (
         <div style={{ marginTop: 8, fontSize: small, color: c1 }}>

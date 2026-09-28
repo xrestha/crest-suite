@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { npr, nprInt, npr2, nprExact, nprOrDash, nprWords, NPR_LOCALE } from './nepalMoney'
+import { npr, nprInt, npr2, nprExact, nprOrDash, nprPaisa, nprWords, NPR_LOCALE } from './nepalMoney'
 
 describe('nepalMoney groups in lakh and crore', () => {
   test('the shapes the 52 local formatters had, now grouped the Nepali way', () => {
@@ -18,6 +18,14 @@ describe('nepalMoney groups in lakh and crore', () => {
     expect(npr(null)).toBe('NPR 0')            // `Math.round(n || 0)`
     expect(nprInt(undefined)).toBe('0')
     expect(npr2(undefined)).toBe('0.00')
+  })
+
+  test('nprPaisa shows paisa only when the amount has any (S791)', () => {
+    expect(nprPaisa(500.5)).toBe('500.50')
+    expect(nprPaisa(2499.25)).toBe('2,499.25')
+    expect(nprPaisa(1248650)).toBe('12,48,650')
+    expect(nprPaisa(1000.1 - 500.05)).toBe('500.05')   // float noise is not paisa
+    expect(nprPaisa(null)).toBe('0')
   })
 
   test('a missing figure is a dash, not a zero', () => {

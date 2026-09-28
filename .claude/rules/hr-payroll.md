@@ -816,3 +816,38 @@ Decided with Aashish (2026-09-23). Migration `20260923100000`; helpers `salaryPa
   summed gross + OT, so an unpaid day or a part month overstated the year and TDS was over-withheld
   (found in hss-suite). A query feeding either must select `absence_deduction`; `earnedPay` throws
   without it. History: `docs/CROSS-REPO.md`, Closed, 2026-09-17.
+
+## The hss-suite ports: paisa, write-offs, leavers, swaps (S791)
+
+Decided with Aashish (2026-09-28). Migrations `20260928100000` (advances), `20260928110000` (leavers),
+`20260928130000` (swaps). History: `docs/CROSS-REPO.md`.
+
+- **A day outside the employment is docked once.** `computePayslip` drops a MONTHLY employee's attendance
+  rows on the days `daysNotYetJoined` / `daysAfterExit` return (both return day numbers now), because
+  those days are already unpaid as not employed. Daily and hourly staff keep every row.
+- **Advances are whole paisa end to end** (`toPaisa` / `roundPaisa` in `payrollCompute.js`;
+  `buildAdvanceMap`, `recoverableAdvance`, `allocateAdvanceRepayments` in `payrollData.js`). An advance
+  settles only at EXACT coverage, in JS and in the status trigger; the 0.01 slack is gone from every
+  guard. The cut, the take-home and the register print paisa through `nprPaisa()`. Never compare an
+  advance figure with `Math.round`.
+- **Reopen refuses over a write-off.** An advance this run recovered from that is now `written_off`
+  blocks `reopen_payroll_run` (`payroll_reopen_written_off`) until Advances & Loans → Reactivate; the
+  page refuses first (`writtenOffAdvancesForRun`). A run's status never crosses `finalized` except
+  through Finalize/Reopen (`payroll_status_direct` in `hr_payroll_runs_guard_settled`).
+- **A settled leaver is settled in the CURRENT employment, from the month of `last_working_date`.**
+  Payroll (`fetchPayrollEmployees`, `hr_run_settled_employee_names`) leaves them out of that month and
+  every later one; a join date after the settled last day is a rehire and is paid. Never key this on
+  `settle_bs_*` — pre-S752 settlements have none. Employees refuses Active/Probation for a settled
+  leaver until the join date moves past it (`rehireNeedsNewJoinDate`).
+- **Settlement Finalize refuses a live salary payment for the last month or later**
+  (`settlement_salary_paid` — refused, never netted off) **and overtime not on file**
+  (`settlement_stale_ot`, `hr_ot_on_file`: approved entries supersede the sheet per day, hours exact,
+  rupees within 2).
+- **`hr_pay_month_guard()` is the one refusal for attendance and overtime writes**, called by both row
+  guards under `hr_pay_lock`: a finalized payroll month (except a leaver with no payslip there whose
+  settlement is still a draft) and a finalized settlement's last month or later (`hr_month_settled`,
+  the whole row). **A bulk writer must leave settled leavers out** or one row fails the statement —
+  `backfillApprovedLeave` does, and reports them as `settled`.
+- **A two-day swap trades a Day Off the other way** (`hr_shift_kind`: off / leave / work). Only a
+  working shift or leave on the other day refuses (`swap_day_taken`, raised at request time too), and
+  the traded rows must both be working shifts.

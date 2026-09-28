@@ -1365,7 +1365,7 @@ export default function Roster() {
                   {nonePublished ? (
                     <span className="badge-gray" style={{ fontSize: 10 }}>Draft</span>
                   ) : allPublished ? (
-                    <Tip text="Every visible day has been published. Further edits aren't auto-notified — use Re-Publish to push an update.">
+                    <Tip text="Every visible day has been published. Staff see further edits to these days in Crest Staff straight away, but nobody is notified — use Re-Publish + Notify to tell them.">
                       <span className="badge-green" style={{ fontSize: 10 }}>✓ Published</span>
                     </Tip>
                   ) : (
@@ -1778,7 +1778,7 @@ export default function Roster() {
                 {copyPlan.publishedCount > 0 && (
                   <li style={{ color: 'var(--theme-amber-text)' }}>
                     {copyPlan.publishedCount} of next week's days {copyPlan.publishedCount === 1 ? 'is' : 'are'} already
-                    published — staff have seen the old version, so press Re-Publish + Notify once you're done editing.
+                    published — staff see these edits in Crest Staff straight away, but nobody is told, so press Re-Publish + Notify once you're done editing.
                   </li>
                 )}
               </ul>

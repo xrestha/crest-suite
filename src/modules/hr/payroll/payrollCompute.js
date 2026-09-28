@@ -8,6 +8,14 @@ import {
 
 const r = n => Math.round((n + Number.EPSILON))
 
+// Money in whole paisa (S791). An advance is recovered to the paisa: summing and comparing rupee
+// floats cut a Rs. 2,499.50 balance as 2,500 (0.50 taken that repaid nothing), and a remainder under
+// half a paisa of slack was marked settled and never recovered. Every advance figure is worked as an
+// integer number of paisa and turned back into rupees only at the edge (hss-suite MD decision D3,
+// 2026-09-26; docs/CROSS-REPO.md).
+export const toPaisa = v => Math.round((parseFloat(v) || 0) * 100)
+export const roundPaisa = v => toPaisa(v) / 100
+
 // Value of a salary component given the basic salary.
 export function calcAmount(comp, basic) {
   const v = parseFloat(comp.value) || 0
@@ -55,23 +63,26 @@ export function hourlyRateOf(basis, basic, monthDays) {
   return monthDays > 0 ? basic / (monthDays * STANDARD_HOURS_PER_DAY) : 0
 }
 
-// Days within this BS period that fall before the employee's join date — folded into unpaidDays
-// below so a newly hired employee (or one who joins mid-period) is paid only for days they've
-// actually been employed, not a full contractual month. Attendance rows can't exist for days
-// before an employee's record was even created, so without this a monthly employee joining after
-// (or partway through) a period would otherwise draw full basic + allowances for days they never
-// worked — daily/hourly staff don't have this gap since their pay is derived from attendance rows
-// directly, which are naturally absent for pre-join days.
+// The bs_days within this BS period that fall before the employee's join date — folded into
+// unpaidDays below so a newly hired employee (or one who joins mid-period) is paid only for days
+// they've actually been employed, not a full contractual month. Without this a monthly employee
+// joining after (or partway through) a period would draw full basic + allowances for days they
+// never worked. Daily/hourly staff are paid per attendance row, so they have no such gap.
+//
+// Returns the DAY NUMBERS, not a count (S791): computePayslip also drops a monthly employee's
+// attendance rows on these days, because an Absent marked on a day before the join was docked
+// twice — once here as not employed, and again as an absence (found in hss-suite, re-analysis
+// #46; docs/CROSS-REPO.md).
 function daysNotYetJoined(joinDateStr, period, monthDays) {
-  if (!joinDateStr) return 0
-  const [jy, jm, jd] = joinDateStr.split('-').map(Number)
-  if (!jy || !jm || !jd) return 0
+  const out = []
+  if (!joinDateStr) return out
+  const [jy, jm, jd] = String(joinDateStr).slice(0, 10).split('-').map(Number)
+  if (!jy || !jm || !jd) return out
   const join = new Date(jy, jm - 1, jd)
-  let count = 0
   for (let d = 1; d <= monthDays; d++) {
-    if (bsToAd(period.bs_year, period.bs_month, d) < join) count++
+    if (bsToAd(period.bs_year, period.bs_month, d) < join) out.push(d)
   }
-  return count
+  return out
 }
 
 // The mirror of daysNotYetJoined, for the other end of the employment. Days within this BS period
@@ -86,18 +97,18 @@ function daysNotYetJoined(joinDateStr, period, monthDays) {
 //
 // Deliberately NOT implemented by writing 'absent' attendance rows for the post-exit days:
 // `absent_days` is a reported figure (Payroll Run's Excel column, HR Reports) and that would
-// misreport a departure as absenteeism.
+// misreport a departure as absenteeism. Returns the day numbers, like daysNotYetJoined (S791).
 function daysAfterExit(endDateStr, period, monthDays) {
-  if (!endDateStr) return 0
-  const [ey, em, ed] = endDateStr.split('-').map(Number)
-  if (!ey || !em || !ed) return 0
+  const out = []
+  if (!endDateStr) return out
+  const [ey, em, ed] = String(endDateStr).slice(0, 10).split('-').map(Number)
+  if (!ey || !em || !ed) return out
   const end = new Date(ey, em - 1, ed)
-  let count = 0
   for (let d = 1; d <= monthDays; d++) {
     // Strictly after: the last working day itself is worked and paid.
-    if (bsToAd(period.bs_year, period.bs_month, d) > end) count++
+    if (bsToAd(period.bs_year, period.bs_month, d) > end) out.push(d)
   }
-  return count
+  return out
 }
 
 // Is this employee an SSF contributor? BOTH the enrolment flag AND a non-blank registration number
@@ -159,10 +170,18 @@ export function computePayslip(employee, components, attendanceRows, period, tds
   const supersededOtDays = new Set(
     approvedOtEntries.map(e => e.bs_day).filter(d => d != null)
   )
-  const t        = tallyAttendance(attendanceRows, supersededOtDays)
-  const tdsVal   = parseFloat(tds) || 0
-  const advDed   = Math.round(parseFloat(advanceDeduction) || 0)
   const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
+  // Monthly pay docks the days outside the employment as not employed (below), so an attendance row
+  // on one of those days must not ALSO count — an Absent before the join was docked twice (S791).
+  // Daily and hourly staff are paid per row recorded, so they keep every row.
+  const preJoin  = basis === 'monthly' ? daysNotYetJoined(employee.join_date, period, monthDays) : []
+  const postExit = basis === 'monthly' ? daysAfterExit(employee.end_date, period, monthDays) : []
+  const outside  = new Set([...preJoin, ...postExit])
+  const inEmployment = outside.size === 0 ? attendanceRows
+    : attendanceRows.filter(a => a.bs_day == null || !outside.has(Number(a.bs_day)))
+  const t        = tallyAttendance(inEmployment, supersededOtDays)
+  const tdsVal   = parseFloat(tds) || 0
+  const advDed   = roundPaisa(advanceDeduction)
   const hr        = hourlyRateOf(basis, basic, monthDays)
 
   const base = {
@@ -231,8 +250,8 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     const allowances  = earnings.reduce((s, c)   => s + calcAmount(c, basic), 0)
     const otherDed    = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
     const gross       = basic + allowances
-    const preJoinDays  = daysNotYetJoined(employee.join_date, period, monthDays)
-    const postExitDays = daysAfterExit(employee.end_date, period, monthDays)
+    const preJoinDays  = preJoin.length
+    const postExitDays = postExit.length
     // A month can contain both a join and an exit (a short spell). The two windows are disjoint by
     // construction — before the join, after the exit — so they add; the clamp only guards the
     // nonsense case of an end_date earlier than the join_date, where they would overlap and
@@ -307,6 +326,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     }
   }
 
+  result.net_pay = roundPaisa(result.net_pay)
   return result
 }
 

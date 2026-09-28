@@ -439,3 +439,46 @@ describe('computePayslip — monthly basis, end_date', () => {
     expect(slip.ssf_employee).toBeGreaterThan(0)
   })
 })
+
+// ── A day outside the employment is not ALSO an absence (S791) ──────────────
+// Found in hss-suite (re-analysis #46): the not-employed days were docked, and an Absent marked on
+// one of them was docked again as an absence.
+describe('computePayslip — attendance outside the employment', () => {
+  const period = { bs_year: 2082, bs_month: 1 }   // 31 days; 31000 basic = 1000/day
+
+  test('an Absent before the join date is not docked twice', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, join_date: formatAd(bsToAd(2082, 1, 11)) }
+    const without = computePayslip(employee, [], [], period)
+    const withRow = computePayslip(employee, [], [{ bs_day: 3, status: 'absent' }], period)
+    expect(without.absence_deduction).toBe(10000)
+    expect(withRow.absence_deduction).toBe(10000)
+    expect(withRow.absent_days).toBe(0)
+    expect(withRow.net_pay).toBe(21000)
+  })
+
+  test('an Absent after the exit is not docked twice; one inside the employment still is', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, end_date: formatAd(bsToAd(2082, 1, 20)) }
+    const slip = computePayslip(employee, [], [
+      { bs_day: 25, status: 'absent' },   // after the exit: already docked as not employed
+      { bs_day: 5, status: 'absent' },    // a real absence
+    ], period)
+    expect(slip.breakdown.postExitDays).toBe(11)
+    expect(slip.absence_deduction).toBe(12000)
+    expect(slip.absent_days).toBe(1)
+  })
+
+  test('overtime typed on a day outside the employment is not paid to a monthly employee', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, join_date: formatAd(bsToAd(2082, 1, 11)) }
+    const slip = computePayslip(employee, [], [{ bs_day: 2, status: 'present', ot_hours: 2 }], period)
+    expect(slip.ot_hours).toBe(0)
+    expect(slip.ot_amount).toBe(0)
+  })
+
+  test('daily staff keep every row — they are paid per row recorded', () => {
+    const employee = { pay_basis: 'daily', basic_salary: 1000, ssf_enrolled: false, join_date: formatAd(bsToAd(2082, 1, 11)) }
+    const slip = computePayslip(employee, [], [
+      { bs_day: 3, status: 'present' }, { bs_day: 12, status: 'present' },
+    ], period)
+    expect(slip.gross).toBe(2000)
+  })
+})

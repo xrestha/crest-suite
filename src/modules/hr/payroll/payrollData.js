@@ -6,7 +6,7 @@ import { adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCa
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { computeMonthlyTdsBreakdown, fiscalYearOf } from './tds'
 import { bonusFiscalYear, fetchFinalizedBonuses } from './bonusTax'
-import { computePayslip, earnedPay, employedInPeriod, isSsfContributor } from './payrollCompute'
+import { computePayslip, earnedPay, employedInPeriod, isSsfContributor, roundPaisa, toPaisa } from './payrollCompute'
 
 // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR finalized payslips
 // in the same fiscal year (months before the current one) — PLUS every finalized Festival Allowance
@@ -147,6 +147,9 @@ export const FRESHNESS_INPUT_FIELDS = [
 const claimKey = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
 
 const near = (a, b) => Math.round(a || 0) === Math.round(b || 0)
+// The advance is recovered to the paisa (S791), so a whole-rupee comparison would call a draft that
+// cuts 2,499.50 where 2,500 is now due "unchanged" and let Finalize book the wrong split.
+const nearField = (f, a, b) => (f === 'advance_deduction' ? toPaisa(a) === toPaisa(b) : near(a, b))
 
 // → 'moved'      the underlying data changed since Generate; the draft is genuinely out of date
 //   'overridden' inputs agree, so the only difference is a TDS a person typed in
@@ -159,7 +162,7 @@ const near = (a, b) => Math.round(a || 0) === Math.round(b || 0)
 // payslip (it always equals its approved claims), so any TADA difference is movement.
 export function payslipDrift(stored, live) {
   if (!stored) return null
-  if (FRESHNESS_INPUT_FIELDS.some(f => !near(stored[f], live[f]))) return 'moved'
+  if (FRESHNESS_INPUT_FIELDS.some(f => !nearField(f, stored[f], live[f]))) return 'moved'
   if (claimKey(stored.tada_claim_ids) !== claimKey(live.tada_claim_ids)) return 'moved'
   if (!near(stored.tada_amount, live.tada_amount)) return 'moved'
   if (!near(stored.tds, live.tds)) return stored.tds_overridden ? 'overridden' : 'moved'
@@ -246,22 +249,34 @@ export function dueAdvances(advances, period) {
 // `period` is REQUIRED and the function throws without it: a caller that forgot it would otherwise
 // get an empty map, and an empty map is "nobody owes anything this month" — the quietest possible
 // way to stop recovering the company's money (or, before this rule, to recover it early).
+//
+// Summed in whole paisa (S791): a balance of Rs. 500.50 asks for exactly 500.50, never a float that
+// rounds to 501 on one page and 500.49 on another.
 export function buildAdvanceMap(advances, repayments, period) {
   if (!period || !period.bs_year || !period.bs_month) throw new Error('buildAdvanceMap needs the payroll period (bs_year, bs_month)')
-  const repaidMap = {}
+  const repaid = {}
   ;(repayments || []).forEach(r => {
-    repaidMap[r.advance_id] = (repaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
+    repaid[r.advance_id] = (repaid[r.advance_id] || 0) + toPaisa(r.amount)
+  })
+  const duePaisa = {}
+  dueAdvances(advances, period).forEach(adv => {
+    const outstanding = Math.max(0, toPaisa(adv.amount) - (repaid[adv.id] || 0))
+    if (outstanding <= 0) return
+    const deduction = Math.min(toPaisa(adv.installment_amount) || outstanding, outstanding)
+    duePaisa[adv.employee_id] = (duePaisa[adv.employee_id] || 0) + deduction
   })
   const advMap = {}
-  dueAdvances(advances, period).forEach(adv => {
-    const repaid = repaidMap[adv.id] || 0
-    const outstanding = Math.max(0, parseFloat(adv.amount) - repaid)
-    if (outstanding <= 0) return
-    const installment = parseFloat(adv.installment_amount) || outstanding
-    const deduction = Math.min(installment, outstanding)
-    advMap[adv.employee_id] = (advMap[adv.employee_id] || 0) + deduction
-  })
+  Object.keys(duePaisa).forEach(id => { advMap[id] = duePaisa[id] / 100 })
   return advMap
+}
+
+// The advance a payslip can actually cut: what is due, capped at what is left of the take-home
+// after TDS, floored to the paisa and never rounded up, so the cut can never exceed the pay it
+// comes out of by a fraction (S791, from hss-suite). The rest stays owed and later cuts take it.
+export function recoverableAdvance(requested, netBeforeAdvance) {
+  const want = Math.max(0, toPaisa(requested))
+  const available = Math.max(0, Math.floor((parseFloat(netBeforeAdvance) || 0) * 100 + 1e-6))
+  return Math.min(want, available) / 100
 }
 
 // Finalize's half of the advance ledger: turn each payslip's advance_deduction back into repayment
@@ -269,36 +284,51 @@ export function buildAdvanceMap(advances, repayments, period) {
 // deduction came from. Repayments this run already wrote (a re-finalize after Reopen) are left out
 // of "already repaid", because the caller deletes and re-inserts them. Pure, so Payroll Run can run
 // it over data it has just re-read rather than over what was on screen when the page opened.
+//
+// Worked in whole paisa (S791). An advance settles only at EXACT coverage: the old test settled
+// anything within Rs. 0.01, so a one-paisa remainder was marked repaid and never recovered.
+// `settleIds` is informational; the status itself is set by the database trigger on the rows.
 export function allocateAdvanceRepayments({ payslips, advances, repayments, period, runId, repaidDate, note }) {
-  const repaidMap = {}
+  const repaid = {}
   ;(repayments || []).filter(r => r.payroll_run_id !== runId).forEach(r => {
-    repaidMap[r.advance_id] = (repaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
+    repaid[r.advance_id] = (repaid[r.advance_id] || 0) + toPaisa(r.amount)
   })
   const dueNow = dueAdvances(advances, period)
   const repayRows = []
   const settleIds = []
   for (const slip of payslips || []) {
-    let remaining = parseFloat(slip.advance_deduction) || 0
-    if (remaining <= 0.005) continue
+    let remaining = Math.max(0, toPaisa(slip.advance_deduction))
     for (const adv of dueNow.filter(a => a.employee_id === slip.employee_id)) {
-      if (remaining <= 0.005) break
-      const repaid = repaidMap[adv.id] || 0
-      const outstanding = Math.max(0, parseFloat(adv.amount) - repaid)
+      if (remaining <= 0) break
+      const outstanding = Math.max(0, toPaisa(adv.amount) - (repaid[adv.id] || 0))
       if (outstanding <= 0) continue
-      const installment = parseFloat(adv.installment_amount) || outstanding
-      // Paisa-rounded, so float residue never books a 2e-13 repayment row.
-      const thisPayment = Math.round(Math.min(installment, outstanding, remaining) * 100) / 100
-      if (thisPayment <= 0) continue
+      const take = Math.min(toPaisa(adv.installment_amount) || outstanding, outstanding, remaining)
+      if (take <= 0) continue
       repayRows.push({
         advance_id: adv.id, employee_id: slip.employee_id, repaid_date: repaidDate,
-        amount: thisPayment, notes: note, payroll_run_id: runId,
+        amount: take / 100, notes: note, payroll_run_id: runId,
       })
-      repaidMap[adv.id] = repaid + thisPayment
-      if (repaid + thisPayment >= parseFloat(adv.amount) - 0.01) settleIds.push(adv.id)
-      remaining -= thisPayment
+      repaid[adv.id] = (repaid[adv.id] || 0) + take
+      if (take >= outstanding) settleIds.push(adv.id)
+      remaining -= take
     }
   }
   return { repayRows, settleIds }
+}
+
+// Advances this run recovered money from that have since been WRITTEN OFF (S791). Reopen deletes the
+// run's repayment rows, and on a written-off advance that silently grows the write-off by what the run
+// recovered: nobody decided to forgive that money. So Reopen refuses while one stands, in the
+// database (reopen_payroll_run) and first here, naming each advance and what the run took from it.
+// The way out is Advances & Loans → Reactivate, which puts the advance back into recovery.
+export function writtenOffAdvancesForRun(advances, repayments, runId) {
+  const recovered = {}
+  ;(repayments || []).forEach(r => {
+    if (r.payroll_run_id === runId) recovered[r.advance_id] = (recovered[r.advance_id] || 0) + toPaisa(r.amount)
+  })
+  return (advances || [])
+    .filter(a => recovered[a.id] > 0 && a.status === 'written_off')
+    .map(a => ({ advance: a, recoveredHere: recovered[a.id] / 100 }))
 }
 
 // What a month's payroll costs the business (S753, from hss-suite's Cost to Company tile): pay
@@ -332,6 +362,12 @@ export const PAYROLL_EMPLOYEE_COLUMNS = 'id, full_name, employee_code, pay_basis
 //
 // Returns { data: { employees, settled }, error } — `settled` lists who was left out for a
 // settlement, so the page can say so by name.
+//
+// S791: a settlement leaves someone out of their last month AND every later month, in the CURRENT
+// employment only — the same rule as the database's refusal (hr_run_settled_employee_names). It
+// used to match only a last working day inside this month, so a leaver set back to Active with the
+// end date cleared was rebuilt into every later payslip and Finalize refused it with no way out. A
+// rehire (a join date after the settled last day) is a new employment and is paid.
 export async function fetchPayrollEmployees(scopedFrom, period) {
   const { start, end } = periodAdBounds(period)
   const [emps, settlements] = await Promise.all([
@@ -340,11 +376,14 @@ export async function fetchPayrollEmployees(scopedFrom, period) {
       .order('full_name'),
     scopedFrom('hr_final_settlements', 'employee_id, last_working_date')
       .eq('status', 'finalized')
-      .gte('last_working_date', start).lte('last_working_date', end),
+      .lte('last_working_date', end),
   ])
   if (emps.error) return { data: null, error: emps.error }
   if (settlements.error) return { data: null, error: settlements.error }
-  const settledIds = new Set((settlements.data || []).map(s => s.employee_id))
+  const joinOf = new Map((emps.data || []).map(e => [e.id, e.join_date ? String(e.join_date).slice(0, 10) : null]))
+  const settledIds = new Set((settlements.data || [])
+    .filter(s => { const j = joinOf.get(s.employee_id); return !j || String(s.last_working_date).slice(0, 10) >= j })
+    .map(s => s.employee_id))
   const inMonth = (emps.data || []).filter(e => employedInPeriod(e, start, end))
   return {
     data: {
@@ -414,8 +453,9 @@ export function buildPayrollRows({ runId = null, period, employees, components, 
     const tds = Math.min(tdsBreakdown.tds, available)
     // Paisa, not rupees (S751 review): rounding to the rupee docked a 0.5 the allocation never booked,
     // and rounded an outstanding balance under 0.5 to a due of 0 — an advance stuck Active for ever.
-    const advanceDue = Math.round((advMap[emp.id] || 0) * 100) / 100
-    const advance = Math.min(advanceDue, Math.max(0, available - tds))
+    // S791: buildAdvanceMap already sums in paisa, and the cut is floored to the paisa of what is left.
+    const advanceDue = advMap[emp.id] || 0
+    const advance = recoverableAdvance(advanceDue, available - tds)
     const tada = tadaMap[emp.id] || { total: 0, ids: [] }
     const tadaAmount = Math.round(tada.total * 100) / 100   // paisa: the claims are marked paid in full
     const payslip = {
@@ -427,7 +467,7 @@ export function buildPayrollRows({ runId = null, period, employees, components, 
       life_insurance_premium:   parseFloat(emp.life_insurance_premium) || 0,
       health_insurance_premium: parseFloat(emp.health_insurance_premium) || 0,
       tada_amount: tadaAmount, tada_claim_ids: tada.ids,
-      net_pay: slip.net_pay - tds - advance + tadaAmount,
+      net_pay: roundPaisa(slip.net_pay - tds - advance + tadaAmount),
     }
     return {
       payslip,

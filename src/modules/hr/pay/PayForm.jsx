@@ -14,7 +14,11 @@ import { isSsfContributor } from '../payroll/payrollCompute'
 
 const CIT_CHIP = 'CIT / Provident Fund'
 const QUICK_EARNINGS   = ['Housing Allowance', 'Transport', 'Medical Allowance', 'Food Allowance', 'Grade Pay']
-const QUICK_DEDUCTIONS = [CIT_CHIP, 'Advance Recovery', 'Other Deduction']
+// "Advance Recovery" was a chip here until S791: a deduction by that name cut pay every month
+// without touching the advance, while payroll recovers every advance itself from its own
+// instalment (dueAdvances) — so the money was taken twice, and kept being taken after the advance
+// was repaid (found in hss-suite, re-analysis #25). Advances are recovered only by payroll.
+const QUICK_DEDUCTIONS = [CIT_CHIP, 'Other Deduction']
 
 // Plain-language notes for the quick-add deduction chips. CIT in particular is an acronym a
 // restaurant owner has no reason to know, so it gets the full "what it is + a real example".
@@ -402,7 +406,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                             names these rows and a guess would move real tax. */}
                         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, cursor: 'pointer' }}>
                           <input type="checkbox" checked={!!comp.retirement_fund} onChange={e => updateComponent(globalIdx, 'retirement_fund', e.target.checked)} />
-                          <Tip text="Tick for CIT, provident fund or another approved retirement fund. Payroll then takes this deduction off the employee's taxable income, together with SSF, up to NPR 5,00,000 a year or a third of their income, whichever is lower. Leave unticked for anything else, such as an advance recovery." width={300}>
+                          <Tip text="Tick for CIT, provident fund or another approved retirement fund. Payroll then takes this deduction off the employee's taxable income, together with SSF, up to NPR 5,00,000 a year or a third of their income, whichever is lower. Leave unticked for anything else. Advances are never a deduction here: payroll recovers them itself from Advances & Loans." width={300}>
                             Retirement fund — reduces taxable income
                           </Tip>
                         </label>

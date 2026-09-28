@@ -42,6 +42,35 @@ beforeEach(() => {
 })
 
 describe('backfillApprovedLeave', () => {
+  // S791: a finalized Final Settlement locks its leaver's last month and every later one in the
+  // database, so their rows would fail the whole upsert. They are left out; a rehire is not.
+  test("a settled leaver's leave is left out and counted; everyone else's is still marked", async () => {
+    mockTables({
+      hr_leave_requests: { data: [REQ, { ...REQ, id: 'r2', employee_id: 'e2' }], error: null },
+      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
+      hr_attendance: { data: [], error: null },
+      hr_final_settlements: { data: [{ employee_id: 'e2', last_working_date: '2026-09-20' }], error: null },
+      hr_employees: { data: [{ id: 'e2', join_date: '2024-01-01' }], error: null },
+    })
+    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
+    expect(r).toEqual({ filled: 2, skipped: 0, settled: 2, employees: 1, error: null })
+    expect(scopedUpsert.mock.calls[0][2].every(row => row.employee_id === 'e1')).toBe(true)
+    expect(backfillLeaveText(r, 'Ashwin 2083')).toMatch(/2 days of leave belonging to staff whose Final Settlement already paid Ashwin 2083 were left out/)
+  })
+
+  test('a rehire (join date after the settled last day) is marked like anyone else', async () => {
+    mockTables({
+      hr_leave_requests: { data: [REQ], error: null },
+      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
+      hr_attendance: { data: [], error: null },
+      hr_final_settlements: { data: [{ employee_id: 'e1', last_working_date: '2026-03-01' }], error: null },
+      hr_employees: { data: [{ id: 'e1', join_date: '2026-06-01' }], error: null },
+    })
+    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
+    expect(r).toMatchObject({ filled: 2, settled: 0 })
+  })
+
+
   test('writes one attendance row per day of an approved leave that falls in the period', async () => {
     mockTables({
       hr_leave_requests: { data: [REQ], error: null },
@@ -49,7 +78,7 @@ describe('backfillApprovedLeave', () => {
       hr_attendance: { data: [], error: null },
     })
     const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 2, skipped: 0, employees: 1, error: null })
+    expect(r).toEqual({ filled: 2, skipped: 0, settled: 0, employees: 1, error: null })
     const [, , rows] = scopedUpsert.mock.calls[0]
     expect(rows).toEqual([
       { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 7, status: 'unpaid_leave' },
@@ -103,7 +132,7 @@ describe('backfillApprovedLeave', () => {
       hr_attendance: { data: [{ employee_id: 'e1', bs_day: 7 }], error: null },
     })
     const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 1, skipped: 1, employees: 1, error: null })
+    expect(r).toEqual({ filled: 1, skipped: 1, settled: 0, employees: 1, error: null })
     expect(scopedUpsert.mock.calls[0][2]).toEqual([
       { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 8, status: 'unpaid_leave' },
     ])
@@ -157,12 +186,12 @@ describe('backfillApprovedLeave', () => {
     })
     scopedUpsert.mockResolvedValue({ data: null, error: { code: '23503', message: 'fk' } })
     const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 0, skipped: 0, employees: 0, error: { code: '23503', message: 'fk' } })
+    expect(r).toEqual({ filled: 0, skipped: 0, settled: 0, employees: 0, error: { code: '23503', message: 'fk' } })
   })
 
   test('a period with no id or no BS month writes nothing rather than guessing', async () => {
     expect(await backfillApprovedLeave({ clientId: 'c1', period: null }))
-      .toEqual({ filled: 0, skipped: 0, employees: 0, error: null })
+      .toEqual({ filled: 0, skipped: 0, settled: 0, employees: 0, error: null })
     expect(scopedFrom).not.toHaveBeenCalled()
   })
 })

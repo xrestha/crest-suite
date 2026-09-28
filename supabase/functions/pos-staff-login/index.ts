@@ -42,7 +42,24 @@ const CORS = {
 //     tablet still depends on it. Delete the legacy branch once every client has retired it.
 // Both refusals return the SAME 401 string: which half failed is not something to tell a caller
 // holding a key that does not work.
+//
+// THE LOCKOUT COUNTS THE ATTEMPT BEFORE THE SIGN-IN (S791). Point 1 above moved check_pos_pin_lock
+// and record_pos_pin_attempt here, but as check-then-record: every request of a parallel burst
+// passed the check before the 5th failure was recorded, so a burst got as many guesses as it had
+// requests in flight (found in hss-suite, batch 4 re-analysis #37, docs/CROSS-REPO.md there). The
+// order is now
+//
+//   device gate → look up the account → reserve_pos_pin_attempt → signInWithPassword
+//                                                               → record_pos_pin_attempt(true)
+//
+// reserve_pos_pin_attempt (migration 20260928120000) counts the attempt as a FAILURE up front, in
+// one UPDATE that refuses while the account is locked; the row lock makes concurrent reservations
+// queue, so the 6th request of a burst finds the lock the 5th set and never signs in. A correct PIN
+// resets through record_pos_pin_attempt(true); a wrong one needs no second write. The reservation
+// FAILS CLOSED with a 503, like the device gate, except on PGRST202 (deployed ahead of the
+// migration), which falls back to the old check-then-record path so tills keep working.
 const ERR_DEVICE = 'This device is not activated'
+const ERR_UNAVAILABLE = 'Sign-in is unavailable right now. Try again in a minute.'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
@@ -73,8 +90,8 @@ Deno.serve(async (req) => {
     // lock-state oracle. Both checks are one UPDATE inside the database (match + stamp last use),
     // service_role-only, so the definition of "a live key" exists once, beside get_pos_device_staff.
     //
-    // FAILS CLOSED, unlike the lockout RPCs below: a read error here is a refusal, because the
-    // alternative is signing a PIN in on a device nobody has verified. But it is a 503, not the
+    // FAILS CLOSED, as the lockout reservation below does: a read error here is a refusal, because
+    // the alternative is signing a PIN in on a device nobody has verified. But it is a 503, not the
     // 401: PosLogin reads a 5xx as "couldn't reach the server" and keeps the PIN, where the 401
     // would tell the floor the till needs re-activating over what may be a transient blip.
     if (device_id) {
@@ -108,21 +125,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Checked before the sign-in attempt so an already-locked account doesn't burn a real auth
-    // attempt. Same ordering as hr-selfservice-login.
-    //
-    // Both lockout RPCs FAIL OPEN, deliberately: a null result reads as "not locked" and the login
-    // proceeds. Locking every staff member out of a live restaurant floor because of a transient DB
-    // error would be worse than the brute-force risk of one unguarded request. But fail-open must be
-    // LOUD, or the lockout can silently stop working and every symptom still looks like a normal,
-    // healthy sign-in — which is the exact failure the whole server-side move was meant to end.
-    // These console.error lines are the only thing that would surface it, in the function logs.
-    const { data: lockData, error: lockErr } = await admin.rpc('check_pos_pin_lock', { p_staff_id: staff_id })
-    if (lockErr) console.error('[pos-staff-login] check_pos_pin_lock FAILED — lockout not enforced on this request:', lockErr.message)
-    if (lockData?.[0]?.locked) {
-      return json({ error: 'Too many incorrect attempts', locked: true, locked_until: lockData[0].locked_until }, 423)
-    }
-
     // Same filter as get_pos_staff — a real PIN account (pos_role AND pos_email both set) that
     // belongs to THIS device's client, so a valid device secret for one client can't be pointed at
     // another client's staff_id.
@@ -132,10 +134,42 @@ Deno.serve(async (req) => {
       .not('pos_role', 'is', null).not('pos_email', 'is', null)
       .maybeSingle()
 
-    // Generic message shared with the wrong-PIN path below, and deliberately no recorded attempt:
-    // there is no account to lock, and recording one would let anyone drive an arbitrary uuid's
-    // counter.
+    // Generic message shared with the wrong-PIN path below, and deliberately no counted attempt (this
+    // returns before the reservation): there is no account to lock, and counting one would let
+    // anyone drive an arbitrary uuid's counter.
     if (!staff?.pos_email) return json({ error: 'Invalid credentials' }, 401)
+
+    // Reserve the attempt BEFORE signing in (S791, header). A locked account is refused here without
+    // burning a real auth attempt, as the old check did.
+    const lockedResponse = (lockedUntil: string | null) =>
+      json({ error: 'Too many incorrect attempts', locked: true, locked_until: lockedUntil }, 423)
+    let reserved = true              // false only on the PGRST202 fallback (check-then-record)
+    let reservationLockedUntil: string | null = null
+    const { data: resData, error: resErr } = await admin.rpc('reserve_pos_pin_attempt', { p_staff_id: staff_id })
+    if (resErr) {
+      if (resErr.code !== 'PGRST202') {
+        console.error('[pos-staff-login] reserve_pos_pin_attempt FAILED — refusing the sign-in:', resErr.code, resErr.message)
+        return json({ error: ERR_UNAVAILABLE }, 503)
+      }
+      // The pre-S791 path, kept only for a deploy that ran ahead of 20260928120000. Its check fails
+      // OPEN, as it always did, and loudly: this line is the only thing that would surface it.
+      console.error('[pos-staff-login] reserve_pos_pin_attempt missing — migration 20260928120000 not applied; using the pre-S791 check-then-record lockout')
+      reserved = false
+      const { data: lockData, error: lockErr } = await admin.rpc('check_pos_pin_lock', { p_staff_id: staff_id })
+      if (lockErr) console.error('[pos-staff-login] check_pos_pin_lock FAILED — lockout not enforced on this request:', lockErr.message)
+      if (lockData?.[0]?.locked) return lockedResponse(lockData[0].locked_until)
+    } else {
+      const r = Array.isArray(resData) ? resData[0] : resData
+      if (r?.outcome === 'locked') return lockedResponse(r.locked_until ?? null)
+      // The account stopped being a POS PIN login between the lookup and here.
+      if (r?.outcome === 'reject') return json({ error: 'Invalid credentials' }, 401)
+      if (r?.outcome !== 'reserved') {
+        console.error('[pos-staff-login] reserve_pos_pin_attempt returned no outcome — refusing the sign-in:', JSON.stringify(resData))
+        return json({ error: ERR_UNAVAILABLE }, 503)
+      }
+      // Set only when THIS attempt locked the account (it was the 5th).
+      reservationLockedUntil = r.locked_until ?? null
+    }
 
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
 
@@ -155,21 +189,32 @@ Deno.serve(async (req) => {
     // direct-brute-force window that fallback documented is now fully closed.
 
     const succeeded = !!signInData?.session
-    const { data: attemptData, error: attemptErr } = await admin.rpc('record_pos_pin_attempt', {
-      p_staff_id: staff_id, p_success: succeeded,
-    })
-    // The more dangerous of the two to lose silently: if this stops recording, the counter never
-    // advances and NO account can ever lock, however many wrong PINs are tried.
-    if (attemptErr) console.error('[pos-staff-login] record_pos_pin_attempt FAILED — this attempt was NOT counted toward lockout:', attemptErr.message)
 
     if (!succeeded) {
-      const after = attemptData?.[0]
+      let after: { locked?: boolean, locked_until?: string | null } | undefined
+      if (reserved) {
+        // Counted by the reservation already, so no second write here.
+        after = { locked: !!reservationLockedUntil, locked_until: reservationLockedUntil }
+      } else {
+        const { data: attemptData, error: attemptErr } = await admin.rpc('record_pos_pin_attempt', {
+          p_staff_id: staff_id, p_success: false,
+        })
+        // The more dangerous of the two to lose silently: if this stops recording, the counter never
+        // advances and NO account can ever lock, however many wrong PINs are tried.
+        if (attemptErr) console.error('[pos-staff-login] record_pos_pin_attempt FAILED — this attempt was NOT counted toward lockout:', attemptErr.message)
+        after = attemptData?.[0]
+      }
       return json({
         error: after?.locked ? 'Too many incorrect attempts' : 'Invalid credentials',
         locked: !!after?.locked,
         locked_until: after?.locked_until ?? null,
       }, after?.locked ? 423 : 401)
     }
+
+    // A correct PIN resets the counter (and any lock this very attempt's reservation set). Fails
+    // open: the waiter is signed in either way, and the log line is what would surface it.
+    const { error: resetErr } = await admin.rpc('record_pos_pin_attempt', { p_staff_id: staff_id, p_success: true })
+    if (resetErr) console.error(`[pos-staff-login] record_pos_pin_attempt(success) FAILED — the failed-attempt counter was not reset${reserved ? ' and this sign-in still counts as a failure' : ''}:`, resetErr.message)
 
     return json({
       access_token: signInData.session.access_token,

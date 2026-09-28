@@ -39,6 +39,17 @@ export function npr2(n) {
   return dec2.format(Number(n) || 0)
 }
 
+/**
+ * `2,499.50` when the amount has paisa, `12,48,650` when it does not. For a figure that is exact to
+ * the paisa by design (an advance cut, the take-home it comes out of, S791): rounding it to the
+ * rupee printed a 500.50 cut as 501, so the payslip disagreed with the money actually deducted,
+ * while `npr2` everywhere would put ".00" on every whole-rupee payslip line.
+ */
+export function nprPaisa(n) {
+  const paisa = Math.round((Number(n) || 0) * 100)
+  return paisa % 100 === 0 ? nprInt(paisa / 100) : npr2(paisa / 100)
+}
+
 /** `NPR 12,48,650` — the product's default money figure. */
 export function npr(n) {
   return `NPR ${nprInt(n)}`

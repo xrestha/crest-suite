@@ -14,6 +14,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Past this many names the picker gets a search box — a waiter should not scroll a wall of tiles.
 const SEARCH_FROM = 9
 const KEY_LABEL = { C: 'Clear PIN', '⌫': 'Delete last digit' }
+// A connection or server failure is not a wrong PIN, and the PIN stays in the dots so the employee
+// can press Login again once the signal is back. PosLogin.jsx's UNREACHABLE_MSG, in this app's words.
+const UNREACHABLE_MSG = "Couldn't reach the server — check your signal and try again."
 
 const KEYS = [
   ['1', '2', '3'],
@@ -116,19 +119,32 @@ export default function SelfServiceLogin() {
         supabase.functions.invoke('hr-selfservice-login', { body: { staff_id: selected.id, pin } }), 15000, 'Signing in'
       )
 
-      if (err || !loginData?.access_token) {
+      if (err) {
+        // Only a 4xx from the function itself is an answer about the PIN. supabase-js resolves a
+        // non-2xx as a FunctionsHttpError whose `context` is the Response; a dropped connection is a
+        // FunctionsFetchError and a gateway failure a FunctionsRelayError, neither with a body worth
+        // reading. hr-selfservice-login also answers 503 when it cannot count the attempt (S791).
+        // All of those used to read "Incorrect PIN" and clear the pad; now they keep the PIN, the
+        // PosLogin.jsx split (S754).
+        const status = err.name === 'FunctionsHttpError' ? err.context?.status : null
+        if (!status || status >= 500) { setError(UNREACHABLE_MSG); return }
         // A locked/incorrect PIN comes back as a non-2xx, so supabase-js puts the body on
         // error.context rather than in `data` — same unwrap the shared invokeEdge() helper does.
-        let lockedUntil = null
-        try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* keep the generic message */ }
+        let body = null
+        try { body = await err.context.json() } catch (_) { /* no JSON body — handled below */ }
         // Same wording as PosLogin.jsx on purpose — one lockout message across the product. The
         // employee doesn't need to know the mechanism differs (there is no reset_hr_pin action;
         // Self-Service is re-enrolled rather than reset), only who to ask.
-        setError(lockedUntil
-          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}, or ask your manager to reset your PIN.`
-          : 'Incorrect PIN. Try again.')
+        if (status === 423 || body?.locked) {
+          const when = body?.locked_until ? formatLockRemaining(body.locked_until) : 'later'
+          setError(`Too many incorrect attempts. Try again ${when}, or ask your manager to reset your PIN.`)
+        } else {
+          setError('Incorrect PIN. Try again.')
+        }
         setPin(''); return
       }
+      // A 2xx without tokens says nothing about the PIN either.
+      if (!loginData?.access_token) { setError(UNREACHABLE_MSG); return }
 
       await withTimeout(
         supabase.auth.setSession({
@@ -138,8 +154,9 @@ export default function SelfServiceLogin() {
       )
       navigate('/hr/self-service', { replace: true })
     } catch (e) {
+      // withTimeout's rejection, or anything else thrown on the way: the connection, not the PIN,
+      // so the PIN is kept (as PosLogin.jsx does).
       setError(employeeErrorText(e))
-      setPin('')
     } finally {
       setSigningIn(false)
     }

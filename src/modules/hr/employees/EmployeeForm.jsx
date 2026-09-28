@@ -9,7 +9,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { formatAd } from '../../../utils/bsCalendar'
-import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES } from './employeeFormData'
+import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, rehireNeedsNewJoinDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES } from './employeeFormData'
 
 // The fields THIS form owns. Pay basis, basic salary, bank and SSF are not here on purpose: Pay
 // Setup owns them, and until S748 this form carried them anyway (spread in from the loaded row) and
@@ -96,6 +96,10 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const [supervisorErr, setSupervisorErr] = useState('')
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
+  // The last working day of a FINALIZED Final Settlement for this employee (S791), so taking a
+  // settled leaver back onto payroll asks for a new join date. undefined = not read yet; an
+  // { error } refuses that one move rather than letting it through unchecked.
+  const [settledLastDay, setSettledLastDay] = useState(undefined)
   // Keyed by field, not one string for the whole form. This form already KNEW which field had
   // failed — it switched tab to reveal it — and then reported the fact as prose the box itself
   // never carried, so a screen-reader user was told a save failed and never told by what (S603).
@@ -120,6 +124,35 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       })
     return () => { live = false }
   }, [clientId, employee?.id, employee?.supervisor_id, scopedFrom])
+
+  useEffect(() => {
+    if (!isEdit || !employee?.id) return
+    let live = true
+    scopedFrom('hr_final_settlements', 'last_working_date')
+      .eq('employee_id', employee.id).eq('status', 'finalized')
+      .order('last_working_date', { ascending: false }).limit(1)
+      .then(({ data, error: readErr }) => {
+        if (!live) return
+        setSettledLastDay(readErr ? { error: readErr } : (data?.[0]?.last_working_date || null))
+      })
+    return () => { live = false }
+  }, [isEdit, employee?.id, scopedFrom])
+
+  // Taking a settled leaver back onto payroll is a rehire (S791). Returns the message to show, or ''.
+  // Checked only when the move is being made — status becoming Active/Probation, or the join date
+  // changing — so an unrelated edit of anyone is never held up by it.
+  function rehireProblem(nextStatus, nextJoin) {
+    const onPayroll = nextStatus === 'active' || nextStatus === 'probation'
+    const moving = !isEdit || nextStatus !== employee.status || String(nextJoin || '') !== String(employee.join_date || '')
+    if (!isEdit || !onPayroll || !moving) return ''
+    if (settledLastDay === undefined) return 'Still checking whether this employee has a finalized Final Settlement — try again in a moment.'
+    if (settledLastDay?.error) return 'Could not check whether this employee has a finalized Final Settlement, so they were not put back on payroll. Try again. ' + errorLine(settledLastDay.error)
+    const last = rehireNeedsNewJoinDate({ settledLastDay, joinDate: nextJoin, status: nextStatus })
+    if (!last) return ''
+    return `${employee.full_name} left in a finalized Final Settlement (last working day ${last}), which already paid their last month. ` +
+      'To take them back, set a Join Date after that day — the rehire is a new employment and is paid from then. ' +
+      'If the settlement was a mistake, reopen it in Final Settlement instead.'
+  }
 
   // Editing a field clears its own error. Leaving a red border under a box the user has just
   // corrected teaches them the message is stale and worth ignoring, which is how a real one gets
@@ -146,6 +179,12 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       // Switch to the tab holding the FIRST failure, so the field carrying the message is the one
       // on screen — the message is useless on a tab the user cannot see.
       setTab(fe.full_name ? 'personal' : 'employment')
+      return
+    }
+    const rehire = rehireProblem(form.status, form.join_date)
+    if (rehire) {
+      setFieldErr({ join_date: rehire })
+      setTab('employment')
       return
     }
     setError('')
@@ -196,6 +235,8 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   }
 
   async function handleActivate() {
+    const rehire = rehireProblem('active', employee.join_date)
+    if (rehire) { setError(rehire); return }
     if (!window.confirm(`Reactivate ${employee.full_name}? They return to payroll, the Roster and Attendance.`)) return
     const { error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id)
     if (err) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + errorLine(err)); return }
