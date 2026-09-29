@@ -568,7 +568,7 @@ const rules = [
   // The count itself is safe either way: this is a BEFORE trigger, so nothing was overwritten.
   {
     test: e => /closing_count_locked/i.test(e.message || ''),
-    staff: 'Someone else has already counted this item, so your figure was not saved. A supervisor can change it.',
+    staff: 'Someone else has already counted this item, so your figure did not replace theirs. Choose Add yours if you counted a different place; only a supervisor can replace their count.',
     operator: 'This item was already counted by another staff member and recount protection is on, so nothing was overwritten. A supervisor, manager or Owner can enter the corrected figure — or switch the protection off in Stock Count → Settings.',
   },
 

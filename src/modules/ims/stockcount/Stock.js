@@ -22,6 +22,8 @@ import QtyInput from '../../../components/QtyInput'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { isNetworkError } from '../../../shared/errorText'
 import { countSaveFailureText } from './countSaveFailure'
+import CountConflictModal from './CountConflictModal'
+import { CountConflictError, closingRpcRows, countedByLine, fmtQty, rpcMissing } from './countConflict'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import './Stock.css'
@@ -274,7 +276,7 @@ export default function Stock() {
     if (fieldKey === 'closing') {
       setCountedBy(prev => {
         const next = { ...prev }
-        entries.forEach(e => { if (e.qty == null) delete next[e.itemId]; else next[e.itemId] = by?.counted_by_name || null })
+        entries.forEach(e => { if (e.qty == null) delete next[e.itemId]; else next[e.itemId] = e.line !== undefined ? e.line : (by?.counted_by_name || null) })
         return next
       })
     }
@@ -523,7 +525,7 @@ export default function Stock() {
     const countedMap = {}
     ;(closing || []).forEach(r => {
       cellOf(r.item_id).closing = r.physical_qty
-      if (r.physical_qty != null) countedMap[r.item_id] = r.counted_by_name || null
+      if (r.physical_qty != null) countedMap[r.item_id] = countedByLine(r)
     })
     setCountedBy(countedMap)
 
@@ -667,7 +669,11 @@ export default function Stock() {
   // `countedBy` is passed in rather than read live because of the offline queue: the person who
   // counted is not necessarily the session that syncs, and a shared tablet is exactly where those
   // differ. Stamped at enqueue time, replayed as stamped.
-  async function persistValueDirect(periodId, itemId, fieldKey, qty, countedBy = countedByFields()) {
+  //
+  // `mode` is D37's (S792 stage 4) and applies to a counted closing figure only: 'check' (the
+  // default) saves nothing over another person's count and throws CountConflictError instead;
+  // 'replace' and 'add' are the counter's answer. Returns the row the server saved, for closing.
+  async function persistValueDirect(periodId, itemId, fieldKey, qty, countedBy = countedByFields(), mode = 'check') {
     const noRow = isNoRow(fieldKey, qty)
     if (fieldKey === 'opening') {
       if (noRow) {
@@ -680,7 +686,9 @@ export default function Stock() {
       if (noRow) {
         fail((await supabase.from('closing_stock').delete().eq('period_id', periodId).eq('item_id', itemId)).error)
       } else {
-        fail((await supabase.from('closing_stock').upsert({ period_id: periodId, item_id: itemId, physical_qty: qty, counted_at: new Date().toISOString(), ...countedBy }, { onConflict: 'period_id,item_id' })).error)
+        const { saved, conflicts } = await saveClosingCounts(periodId, [{ itemId, qty }], countedBy, mode)
+        if (conflicts.length) throw new CountConflictError(conflicts)
+        return saved[0] || null
       }
     }
     if (fieldKey === 'wastage') {
@@ -692,6 +700,89 @@ export default function Stock() {
       fail((await supabase.from('staff_meals').delete().eq('period_id', periodId).eq('item_id', itemId).eq('type', 'staff')).error)
       if (!noRow) fail((await supabase.from('staff_meals').insert({ period_id: periodId, item_id: itemId, qty, type: 'staff' })).error, true)
     }
+  }
+
+  // Counted closing figures go through save_closing_counts (D37, migration 20260929100000): the
+  // check against another person's count and the write are one statement per item, so a
+  // read-then-upsert race cannot slip a second tablet's figure through, and an add is atomic.
+  // Until that migration is applied the RPC does not exist, and the old plain upsert runs instead
+  // (the persistSalesDay precedent) — every other error is thrown as it came.
+  async function saveClosingCounts(periodId, entries, by, mode = 'check') {
+    const { data, error } = await supabase.rpc('save_closing_counts', { p_period_id: periodId, p_rows: closingRpcRows(entries, by, mode) })
+    if (error && rpcMissing(error)) {
+      fail((await supabase.from('closing_stock').upsert(
+        entries.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: new Date().toISOString(), ...by })),
+        { onConflict: 'period_id,item_id' })).error)
+      return { saved: entries.map(e => ({ item_id: e.itemId, physical_qty: e.qty, counted_by_name: by?.counted_by_name || null })), conflicts: [] }
+    }
+    fail(error)
+    return { saved: data?.saved || [], conflicts: data?.conflicts || [] }
+  }
+  // Records closing rows the server saved. `onScreen` also puts the stored figure in the cell: an
+  // add stores more than was typed, and "keep theirs" stores what someone else typed. A plain save
+  // leaves the cell alone — the counter may already be typing the next figure into it.
+  function applySavedClosing(periodId, rows, onScreen = false) {
+    if (!rows?.length) return
+    markStored(periodId, 'closing', rows.map(r => ({ itemId: r.item_id, qty: Number(r.physical_qty), line: countedByLine(r) })))
+    if (!onScreen || storedRef.current.periodId !== periodId) return
+    setStockData(prev => {
+      const next = { ...prev }
+      rows.forEach(r => { next[r.item_id] = { ...next[r.item_id], closing: fmtQty(r.physical_qty) } })
+      return next
+    })
+  }
+
+  // D37: counts another person already holds, waiting for "add, replace or keep theirs". Each row
+  // carries its own period, and `op` when it came from the offline queue.
+  const [countConflicts, setCountConflicts] = useState(null)   // { rows } or null
+  const [conflictBusy, setConflictBusy] = useState(false)
+  const [conflictError, setConflictError] = useState(null)
+  function openCountConflicts(periodId, conflicts, mine) {
+    const rows = conflicts.map(c => {
+      const m = mine.find(x => x.itemId === c.item_id) || {}
+      const item = allItems.find(i => i.id === c.item_id)
+      return { periodId, itemId: c.item_id, name: item?.name || m.op?.itemName || 'An item', uom: item?.uom || '', mine: m.qty, other: c, op: m.op || null }
+    })
+    setConflictError(null)
+    setCountConflicts(prev => {
+      const keep = (prev?.rows || []).filter(r => !rows.some(n => n.periodId === r.periodId && n.itemId === r.itemId))
+      return { rows: [...keep, ...rows] }
+    })
+  }
+  async function resolveCountConflicts(chosen) {
+    setConflictBusy(true)
+    setConflictError(null)
+    const done = []
+    for (const row of chosen) {
+      try {
+        if (row.choice === 'keep') {
+          applySavedClosing(row.periodId, [{ ...row.other, item_id: row.itemId }], true)
+        } else {
+          const by = row.op ? row.op.countedBy : countedByFields()
+          const saved = await withKeyLock(`${row.itemId}:closing`, () =>
+            persistValueDirect(row.periodId, row.itemId, 'closing', row.mine, by, row.choice))
+          applySavedClosing(row.periodId, [saved], true)
+          noteDirectWrite(row.periodId, 'closing', [{ itemId: row.itemId }])
+          noteClosedCorrection(row.periodId, 'closing', [{ itemId: row.itemId, qty: Number(saved?.physical_qty) }])
+        }
+        if (row.op) {
+          try { await dequeue(row.op.id) } catch (_) { /* decided; a replay would only ask again */ }
+          setPendingSync(prev => Math.max(0, prev - 1))
+          setPendingItems(prev => { const next = new Set(prev); next.delete(row.itemId); return next })
+        }
+        done.push(row)
+      } catch (err) {
+        // Recount protection refuses a staff counter's Replace (only Add is theirs to choose); a
+        // closed month or another section refuses anything. The row stays in the dialog.
+        setConflictError(asActionError(err?.supabase || err, canManageCounts ? 'operator' : 'staff'))
+        break
+      }
+    }
+    setCountConflicts(prev => {
+      const left = (prev?.rows || []).filter(r => !done.some(d => d.periodId === r.periodId && d.itemId === r.itemId))
+      return left.length ? { rows: left } : null
+    })
+    setConflictBusy(false)
   }
 
   const FIELD_LABEL = { opening: 'opening stock', closing: 'closing count', wastage: 'wastage', staff_meal: 'staff meal' }
@@ -737,7 +828,7 @@ export default function Stock() {
     if (!isNetworkError(err?.supabase || err)) return false
     try {
       for (const e of entries) {
-        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty, countedBy: countedByFields(), ...queueLabels(e.itemId) })
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty, countedBy: countedByFields(), checkCount: true, ...queueLabels(e.itemId) })
       }
     } catch (_) {
       return false   // no local store either; fall through to the ordinary failure message
@@ -783,18 +874,24 @@ export default function Stock() {
       if (!navigator.onLine) {
         // `clientId` is what lets flushQueue() tell this outlet's counts from those of whoever
         // used the device before — see the note there.
-        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty, countedBy: countedByFields(), ...queueLabels(itemId) })
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty, countedBy: countedByFields(), checkCount: true, ...queueLabels(itemId) })
         setPendingSync(prev => prev + 1)
         setPendingItems(prev => new Set([...prev, itemId]))
         markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
         return true
       }
-      await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
-      markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
+      const saved = await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
+      if (saved) applySavedClosing(selectedPeriod.id, [saved])
+      else markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
       noteDirectWrite(selectedPeriod.id, fieldKey, [{ itemId }])
       noteClosedCorrection(selectedPeriod.id, fieldKey, [{ itemId, qty }])
       return true
     }).catch(async err => {
+      // Someone else counted it first (D37): nothing was written, and the counter decides.
+      if (err instanceof CountConflictError) {
+        openCountConflicts(selectedPeriod.id, err.conflicts, [{ itemId, qty }])
+        return 'conflict'
+      }
       // A dropped connection is held, not lost — see queueOnNetworkFailure. Anything else is a
       // decision the server made and is recorded on the page as one.
       if (await queueOnNetworkFailure(err, fieldKey, [{ itemId, qty }])) return 'queued'
@@ -903,6 +1000,7 @@ export default function Stock() {
     const refusedClosed = []   // a staff login: the database refuses a closed month (D1)
     const refusedOther = []    // any other refusal: another section, recount protection, rank
     const heldForOwner = []    // the Owner or admin: held for their decision (D38)
+    const heldConflict = []    // someone else counted it first: the counter decides (D37)
     let stoppedOn = null       // the connection dropped: the rest stays queued, in order
 
     for (const op of [...byKey.values()].sort((a, b) => a.id - b.id)) {
@@ -913,11 +1011,17 @@ export default function Stock() {
         refusedClosed.push(op); await forget(op); continue
       }
       try {
-        await withKeyLock(`${op.itemId}:${op.fieldKey}`, () =>
-          persistValueDirect(op.periodId, op.itemId, op.fieldKey, op.qty, op.countedBy))
-        markStored(op.periodId, op.fieldKey, [{ itemId: op.itemId, qty: op.qty }], op.countedBy)
+        // A figure queued before D37 shipped carries no checkCount, and is replayed as it always
+        // was (replace) rather than raising a question about a count made days ago.
+        const mode = op.checkCount ? 'check' : 'replace'
+        const saved = await withKeyLock(`${op.itemId}:${op.fieldKey}`, () =>
+          persistValueDirect(op.periodId, op.itemId, op.fieldKey, op.qty, op.countedBy, mode))
+        if (saved) applySavedClosing(op.periodId, [saved])
+        else markStored(op.periodId, op.fieldKey, [{ itemId: op.itemId, qty: op.qty }], op.countedBy)
         await forget(op)
       } catch (err) {
+        // Stays queued until someone answers — see resolveCountConflicts.
+        if (err instanceof CountConflictError) { heldConflict.push({ op, conflicts: err.conflicts }); continue }
         const e = err?.supabase || err
         // Only a dropped connection is worth another try, and the replay STOPS on the first one:
         // carrying on past it wrote later figures while earlier ones stayed queued, and the next
@@ -934,6 +1038,7 @@ export default function Stock() {
     setSyncing(false)
     setHeldClosed(heldForOwner.length ? { ops: heldForOwner, periods: freshPeriods || [] } : null)
     setHeldError(null)
+    heldConflict.forEach(h => openCountConflicts(h.op.periodId, h.conflicts, [{ itemId: h.op.itemId, qty: h.op.qty, op: h.op }]))
 
     // ONE message covering every outcome (S792, STOCK-3): a replay that hit a closed month and a
     // dropped connection at once used to name only the closed-month figures and return, and the
@@ -952,7 +1057,7 @@ export default function Stock() {
     if (stoppedOn) {
       const reason = asActionError(stoppedOn?.supabase || stoppedOn)
       detail = detail || reason.detail
-      parts.push(`The connection dropped part-way, so ${remaining - heldForOwner.length} figure${remaining - heldForOwner.length === 1 ? ' is' : 's are'} still waiting on this device, in the order they were counted. Press Sync Now once the connection is steady.`)
+      parts.push(`The connection dropped part-way, so ${remaining - heldForOwner.length - heldConflict.length} figure${remaining - heldForOwner.length - heldConflict.length === 1 ? ' is' : 's are'} still waiting on this device, in the order they were counted. Press Sync Now once the connection is steady.`)
     }
     if (parts.length) setSyncFailed({ text: parts.join(' '), detail })
   }
@@ -967,8 +1072,9 @@ export default function Stock() {
     const added = []
     for (const op of heldClosed.ops) {
       try {
+        // 'replace': the Owner's one button is the decision for these figures (D38).
         await withKeyLock(`${op.itemId}:${op.fieldKey}`, () =>
-          persistValueDirect(op.periodId, op.itemId, op.fieldKey, op.qty, op.countedBy))
+          persistValueDirect(op.periodId, op.itemId, op.fieldKey, op.qty, op.countedBy, 'replace'))
         try { await dequeue(op.id) } catch (_) { /* written; a replay would only write it again */ }
         added.push(op)
       } catch (err) {
@@ -1175,6 +1281,9 @@ export default function Stock() {
     }
     const periodId = selectedPeriod.id
     const priors = entries.map(e => persistLocks.current[`${e.itemId}:${fieldKey}`] || Promise.resolve())
+    // Counted closing figures the server saved, and those it kept back for the counter (D37).
+    let savedClosing = []
+    let closingConflicts = []
     const run = Promise.all(priors).then(async () => {
       const allIds = entries.map(e => e.itemId)
       // "zeros" is the delete set: blank cells, plus 0 on every field but closing (isNoRow).
@@ -1193,10 +1302,9 @@ export default function Stock() {
       } else if (fieldKey === 'closing') {
         if (zeros.length) fail((await runChunkedByIds(zeros, ids => supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', ids))).error)
         if (positives.length) {
-          const countedAt = new Date().toISOString()
-          const by = countedByFields()
-          fail((await supabase.from('closing_stock').upsert(
-            positives.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: countedAt, ...by })), { onConflict: 'period_id,item_id' })).error)
+          const res = await saveClosingCounts(periodId, positives, countedByFields())
+          savedClosing = res.saved
+          closingConflicts = res.conflicts
         }
       } else if (fieldKey === 'wastage') {
         // Same shape as persistValueDirect: only the undated catch-all rows are this tab's to replace.
@@ -1210,9 +1318,20 @@ export default function Stock() {
       }
       return true
     }).then(ok => {
-      markStored(periodId, fieldKey, entries, countedByFields())
-      noteDirectWrite(periodId, fieldKey, entries)
-      noteClosedCorrection(periodId, fieldKey, entries)
+      const keptBack = new Set(closingConflicts.map(c => c.item_id))
+      const landed = entries.filter(e => !keptBack.has(e.itemId))
+      if (fieldKey === 'closing') {
+        markStored(periodId, fieldKey, landed.filter(e => isNoRow(fieldKey, e.qty)), countedByFields())
+        applySavedClosing(periodId, savedClosing)
+      } else {
+        markStored(periodId, fieldKey, entries, countedByFields())
+      }
+      noteDirectWrite(periodId, fieldKey, landed)
+      noteClosedCorrection(periodId, fieldKey, landed)
+      if (closingConflicts.length) {
+        openCountConflicts(periodId, closingConflicts, entries)
+        return 'conflict'
+      }
       return ok
     }).catch(async err => {
       // Worth most here: this is the click at the end of a 300-item count.
@@ -1247,7 +1366,7 @@ export default function Stock() {
     // is the third answer (S731): the connection dropped and the figures are held on this device,
     // which the page notice explains — flashing "✓ Saved" over that sentence is the same
     // contradiction one state along.
-    if (ok && ok !== 'queued') flashSaved()
+    if (ok && ok !== 'queued' && ok !== 'conflict') flashSaved()
   }
 
   // ── Daily wastage (dated, reason-tagged) ───────────────────────────────────
@@ -2592,6 +2711,15 @@ export default function Stock() {
         >
           {pendingConfirm.body}
         </ConfirmModal>
+      )}
+      {countConflicts && (
+        <CountConflictModal
+          rows={countConflicts.rows}
+          busy={conflictBusy}
+          error={conflictError}
+          onResolve={resolveCountConflicts}
+          onClose={() => { setCountConflicts(null); setConflictError(null) }}
+        />
       )}
     </div>
   )

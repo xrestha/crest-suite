@@ -2,7 +2,7 @@
 
 Stage 4 is "design first, shown before building" (`IMS_TODO.md` §S792.5). Each section has the
 problem, the design, what it touches, and the questions the owner still has to answer. Nothing here is
-built yet. Line numbers are as of commit `81d6619`.
+built yet. **Owner answers (2026-09-29): all seven recommendations accepted** — Q1 (a), Q2 yes, Q3 yes, Q4 (a), Q5 yes, Q6 (a), Q7 yes. Line numbers are as of commit `81d6619`.
 
 ---
 

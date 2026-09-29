@@ -1206,6 +1206,12 @@ is ~1,750 lines and none of this is counting).
 - **Blind count is a DISPLAY rule and the UI says so.** It takes Purchased/Returned/Value off the
   Closing tab for a staff-rank counter. The figures still reach the browser; calling it a lock in
   the copy would be the claim `fcBand`-on-a-zero teaches against.
+- **A counted closing figure saves through `save_closing_counts` (S792 stage 4, D37), never a raw upsert.**
+  In 'check' mode it writes nothing over another person's count and returns it as a conflict, which
+  `CountConflictModal` turns into Add / Replace / Keep theirs; 'add' is one atomic UPDATE, and the
+  recount guard lets a staff counter add (never replace) under a transaction-local `crest.count_add`.
+  `count_parts` and `counted_at` belong to the `closing_stock_tally_parts` trigger. A new count-writing
+  path goes through the RPC or it silently replaces a second counter's figure again.
 - **`counted_by` is written at last.** It had existed since the baseline and nothing had ever
   written it. It is `uuid` now with a `counted_by_name` snapshot beside it — the FK is
   `ON DELETE SET NULL`, so deleting the account would otherwise erase the attribution and not just
