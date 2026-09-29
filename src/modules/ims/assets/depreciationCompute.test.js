@@ -5,6 +5,7 @@ import {
   addDaysIso, effectiveDepreciation, bookPositionsByAsset, bookValue, computeDisposalDepreciation,
   regularOverrideError, adjustmentOverrideError, depreciationInWindow,
   assetHeldOn, computeValuationAsOf, depreciationInputChanges,
+  openingAccumulated, chargeStartDate,
 } from './depreciationCompute'
 
 describe('annualStraightLineAmount', () => {
@@ -480,5 +481,83 @@ describe('depreciationInWindow (D23 memo)', () => {
       { period_start: '2026-10-01', period_end: '2026-10-31', depreciation_amount: 900 },
     ]
     expect(depreciationInWindow(rows, '2026-08-01', '2026-08-31')).toEqual({ amount: 0, count: 2, prorated: false })
+  })
+})
+
+// D40 (S792 stage 4): depreciation already taken before Crest.
+describe('depreciation already taken before Crest (D40)', () => {
+  // Bought 2020 for 120,000, 10 years, no salvage: 12,000 a year. 60,000 taken to 2025-07-16.
+  const asset = {
+    id: 'x', status: 'active', total_cost: 120000, salvage_value: 0, useful_life_years: 10,
+    acquisition_date: '2020-07-17', opening_accumulated_depreciation: 60000, opening_as_of: '2025-07-16',
+  }
+
+  test('book value is cost less the opening amount less posted charges', () => {
+    expect(bookValue(asset, null)).toBe(60000)
+    expect(bookValue(asset, { charged: 12000 })).toBe(48000)
+  })
+
+  test('first run opens at cost less the opening amount and charges only from the day after its date', () => {
+    const line = computeAssetDepreciationLine({ asset, periodStart: '2025-01-01', periodEnd: '2025-12-31' })
+    expect(line.opening_nbv).toBe(60000)
+    // 2025-07-17 .. 2025-12-31 = 168 days of 12,000 / 365
+    expect(line.depreciation_amount).toBeCloseTo(12000 * 168 / 365, 1)
+    expect(chargeStartDate(asset)).toBe('2025-07-17')
+  })
+
+  test('a period wholly before its date charges nothing', () => {
+    expect(computeAssetDepreciationLine({ asset, periodStart: '2024-07-17', periodEnd: '2025-07-16' }).depreciation_amount).toBe(0)
+  })
+
+  test('an asset with no opening amount is unchanged: charges from acquisition, opens at cost', () => {
+    const plain = { ...asset, opening_accumulated_depreciation: 0, opening_as_of: null }
+    expect(chargeStartDate(plain)).toBe('2020-07-17')
+    expect(bookValue(plain, null)).toBe(120000)
+  })
+
+  test('a disposal with nothing posted charges from the day after the opening date', () => {
+    const r = computeDisposalDepreciation({ asset, position: null, disposalDate: '2025-08-15' })
+    expect(r.periodStart).toBe('2025-07-17')
+    expect(r.chargedThrough).toBe('2025-07-16')
+    expect(r.postedPastDisposal).toBe(false)
+    expect(r.extraDepreciation).toBeCloseTo(12000 * 30 / 365, 1)
+    expect(r.nbvAtDisposal).toBeCloseTo(60000 - 12000 * 30 / 365, 1)
+  })
+
+  test('a posted run later than the opening date still decides where a disposal starts', () => {
+    const position = { charged: 12000, rows: 1, chargedThrough: '2026-07-16' }
+    const r = computeDisposalDepreciation({ asset, position, disposalDate: '2026-08-01' })
+    expect(r.periodStart).toBe('2026-07-17')
+  })
+
+  test('valuation counts the opening amount only on or after its date', () => {
+    expect(openingAccumulated(asset, '2025-07-15')).toBe(0)
+    expect(openingAccumulated(asset, '2025-07-16')).toBe(60000)
+    const before = computeValuationAsOf({ assets: [asset], postedRows: [], asOf: '2025-07-15' })
+    const after = computeValuationAsOf({ assets: [asset], postedRows: [], asOf: '2025-07-16' })
+    expect(before.nbv).toBe(120000)
+    expect(after.nbv).toBe(60000)
+    expect(after.accumulatedDepreciation).toBe(60000)
+  })
+
+  test('the Overheads memo does not count it — only posted rows are an expense', () => {
+    const rows = [{ period_start: '2025-07-17', period_end: '2026-07-16', depreciation_amount: 12000 }]
+    expect(depreciationInWindow(rows, '2025-01-01', '2026-12-31').amount).toBe(12000)
+  })
+
+  test('the preview opens each asset at cost less the opening amount less what is posted', () => {
+    const rows = [{ asset_id: 'x', period_start: '2025-07-17', period_end: '2026-07-16', depreciation_amount: 12000 }]
+    const [line] = computeDepreciationPreview({ assets: [asset], positions: bookPositionsByAsset(rows), periodStart: '2026-07-17', periodEnd: '2027-07-16' })
+    expect(line.opening_nbv).toBe(48000)
+  })
+
+  test('an edit to either field is a depreciation-input change (D5/COSTS-8)', () => {
+    const next = { quantity: 1, unit_cost: 120000, acquisition_date: '2020-07-17', useful_life_years: 10, salvage_value: 0 }
+    expect(depreciationInputChanges(asset, { ...next, opening_accumulated_depreciation: 60000, opening_as_of: '2025-07-16' })).toBeNull()
+    const c = depreciationInputChanges(asset, { ...next, opening_accumulated_depreciation: 50000, opening_as_of: '2024-07-16' })
+    expect(c.opening).toEqual({ from: 60000, to: 50000 })
+    expect(c.openingAsOf).toEqual({ from: '2025-07-16', to: '2024-07-16' })
+    // A payload that does not carry the fields changes neither.
+    expect(depreciationInputChanges(asset, next)).toBeNull()
   })
 })

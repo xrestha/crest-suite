@@ -60,6 +60,7 @@ const TABLE_LABELS = {
   assets_register:          'Fixed Asset',
   assets_depreciation_runs: 'Depreciation Run',
   assets_tax_pool_runs:     'Tax Pool Run',
+  assets_tax_pool_openings: 'Tax Pool Opening',
   // User & client management
   profiles:               'User',
   staff_pin_vault:        'Staff PIN',

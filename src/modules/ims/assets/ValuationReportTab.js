@@ -118,7 +118,7 @@ export default function ValuationReportTab({ assets }) {
                   <th>Category</th>
                   <th style={{ textAlign: 'right' }}>Total Cost</th>
                   <th style={{ textAlign: 'right' }}>Accumulated Depreciation</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Net Book Value — Total Cost minus Accumulated Depreciation — what these assets were worth on the books on the As Of date." width={260}>NBV</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net Book Value — Total Cost minus Accumulated Depreciation — what these assets were worth on the books on the As Of date. Depreciation taken before Crest counts from its own date onwards." width={260}>NBV</Tip></th>
                 </tr>
               </thead>
               <tbody>

@@ -33,6 +33,8 @@ const RESTORE_ORDER = [
   'monthly_periods', 'monthly_owner_reports',
   // Fixed assets
   'assets_categories', 'assets_register', 'assets_repair_expenses',
+  // D40: before the runs, so its lock trigger (a posted run for its year or later) never sees one.
+  'assets_tax_pool_openings',
   'assets_tax_pool_runs', 'assets_tax_pool_lines',
   'assets_depreciation_runs', 'assets_depreciation_schedule',
   // IMS operational

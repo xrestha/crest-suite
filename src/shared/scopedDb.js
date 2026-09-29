@@ -27,6 +27,8 @@ export const CLIENT_SCOPED_TABLES = [
   // lines) — a direct column keeps scopedDb usage uniform across all three.
   'assets_categories', 'assets_register', 'assets_depreciation_runs', 'assets_depreciation_schedule',
   'assets_tax_pool_runs', 'assets_tax_pool_lines', 'assets_repair_expenses',
+  // D40: one row per pool (A–D), typed once from last year's return; locked once a posted run uses it.
+  'assets_tax_pool_openings',
   // HR
   'hr_employees', 'hr_attendance', 'hr_advances', 'hr_advance_repayments',
   'hr_leave_requests', 'hr_leave_types', 'hr_holiday_calendar', 'hr_festival_allowances',

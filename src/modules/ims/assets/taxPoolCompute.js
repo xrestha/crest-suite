@@ -6,6 +6,8 @@ import { adToBs, getBsFiscalYear, getBsFiscalYearStart } from '../../../utils/bs
 import { POOL_RATES, REPAIR_CAP_RATE } from './taxPoolConstants'
 
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100
+// The leading BS year of a short fiscal-year label ("82/83" → 82), or null.
+const startOf = label => { const m = /^(\d{1,2})\//.exec(String(label || '')); return m ? Number(m[1]) : null }
 
 // A stored `date` column ("YYYY-MM-DD") as LOCAL midnight of that calendar day (S756).
 //
@@ -136,7 +138,14 @@ export function intangibleAmortizationForYear(args) {
 // `yearIndex` (0 = the year it was bought, negative = bought later, NaN = no readable date) and
 // `cumulativeThrough(k)`, the amount claimed by the end of year k of its life (0 for an unusable
 // cost or life, so such an asset claims nothing).
-function intangibleSchedule({ cost, usefulLifeYears, acquisitionDate, fiscalYearStartBs }) {
+//
+// D40 (Q5): Pool E takes no typed pool opening. An asset's "depreciation already taken" before
+// Crest (`openingAccumulated`, as of `openingAsOf`) is instead read as amortised through the END
+// of the fiscal year `openingAsOf` falls in: by then the cumulative is that amount (capped at
+// cost), and each year after adds the annual amount until cost is reached. A figure from last
+// year's books is normally as of the year-end, which is exactly this; a mid-year date claims the
+// rest of that year on the next one's schedule rather than splitting a year.
+function intangibleSchedule({ cost, usefulLifeYears, acquisitionDate, fiscalYearStartBs, openingAccumulated = 0, openingAsOf = null }) {
   const life = parseFloat(usefulLifeYears)
   const total = parseFloat(cost) || 0
   const bs = acquisitionDate ? adToBs(parseAdDateLocal(acquisitionDate)) : null
@@ -145,8 +154,22 @@ function intangibleSchedule({ cost, usefulLifeYears, acquisitionDate, fiscalYear
   const boughtFy = fiscalYearStartBs - yearIndex
   const annual = total / life
   const first = acquisitionProrationTier({ acquisitionDate, fiscalYearStartBs: boughtFy }) === 'full' ? annual : annual / 2
-  return { yearIndex, cumulativeThrough: k => (k < 0 ? 0 : Math.min(total, first + annual * k)) }
+  const scheduled = k => (k < 0 ? 0 : Math.min(total, first + annual * k))
+  const taken = Math.min(total, parseFloat(openingAccumulated) || 0)
+  const takenFy = taken > 0 ? fiscalYearStartOfAdDate(openingAsOf) : null
+  if (takenFy == null) return { yearIndex, cumulativeThrough: scheduled }
+  const takenIndex = Math.max(0, takenFy - boughtFy)
+  return {
+    yearIndex,
+    cumulativeThrough: k => (k < 0 ? 0 : k < takenIndex ? Math.min(taken, scheduled(k)) : Math.min(total, taken + annual * (k - takenIndex))),
+  }
 }
+
+// The intangibleSchedule() arguments for one register row.
+const intangibleArgs = (a, fiscalYearStartBs) => ({
+  cost: a.total_cost, usefulLifeYears: a.useful_life_years, acquisitionDate: a.acquisition_date, fiscalYearStartBs,
+  openingAccumulated: a.opening_accumulated_depreciation, openingAsOf: a.opening_as_of,
+})
 
 // Pool E's line for a fiscal year (S792, COSTS-6). Additions are this year's purchases at cost;
 // the charge is each Pool E asset's own amortization for the year, and never more than the pool
@@ -167,18 +190,26 @@ function intangibleSchedule({ cost, usefulLifeYears, acquisitionDate, fiscalYear
 //     half-year rule above — verify before filing;
 //   - gone in a LATER year, or still held: as if active.
 // A disposed asset with no disposal date cannot be placed in a year and stays out, as before.
+//
+// `derived_opening` (D40, Q5) is what the pool held at the start of the year by its assets' own
+// schedules: each asset bought in an earlier year and still held, at cost less what its schedule
+// (and any "already taken" figure) had claimed by then. The caller opens Pool E at it when the year
+// before has no posted run, instead of at 0 — Pool E takes no typed opening, so this is where an
+// asset bought before Crest enters the pool. Pass `openingWdv` as null for that; `opening_wdv` in
+// the result is whichever was used.
 export function computeIntangiblePool({ assets, openingWdv, fiscalYearStartBs }) {
-  let additions = 0, scheduled = 0, disposedValue = 0, proceeds = 0
+  let additions = 0, scheduled = 0, disposedValue = 0, proceeds = 0, derivedOpening = 0
   for (const a of assets || []) {
     if (a.tax_pool !== 'E') continue
     const goneFy = a.status === 'active' ? null : fiscalYearStartOfAdDate(a.disposal_date)
     if (a.status !== 'active' && goneFy == null) continue
     if (goneFy != null && goneFy < fiscalYearStartBs) continue
-    const args = { cost: a.total_cost, usefulLifeYears: a.useful_life_years, acquisitionDate: a.acquisition_date, fiscalYearStartBs }
+    const args = intangibleArgs(a, fiscalYearStartBs)
     const { yearIndex, cumulativeThrough } = intangibleSchedule(args)
     if (!Number.isFinite(yearIndex) || yearIndex < 0) continue // bought after this year
     const cost = parseFloat(a.total_cost) || 0
     if (yearIndex === 0) additions += cost
+    else derivedOpening += Math.max(0, cost - r2(cumulativeThrough(yearIndex - 1)))
     if (goneFy === fiscalYearStartBs) {
       disposedValue += Math.max(0, cost - r2(cumulativeThrough(yearIndex - 1)))
       proceeds += parseFloat(a.disposal_proceeds) || 0
@@ -186,10 +217,14 @@ export function computeIntangiblePool({ assets, openingWdv, fiscalYearStartBs })
     }
     scheduled += intangibleAmortizationForYear(args).amount
   }
-  const base = r2(Math.max(0, (parseFloat(openingWdv) || 0) + additions - disposedValue))
+  // `openingWdv` null/undefined: no posted run for the year before, so open at the derived value.
+  const opening = openingWdv == null ? derivedOpening : (parseFloat(openingWdv) || 0)
+  const base = r2(Math.max(0, opening + additions - disposedValue))
   const depreciation = r2(Math.min(scheduled, base))
   return {
+    opening_wdv: r2(opening),
     additions: r2(additions),
+    derived_opening: r2(derivedOpening),
     disposed_value: r2(disposedValue),
     disposal_proceeds: r2(proceeds),
     scheduled: r2(scheduled),
@@ -200,15 +235,19 @@ export function computeIntangiblePool({ assets, openingWdv, fiscalYearStartBs })
 }
 
 // Which posted run a fiscal year's pools open from, and whether a year is missing in between
-// (S792, COSTS-5 — the warning; typing opening values in is D40, stage 4). `runs` are the client's
-// posted assets_tax_pool_runs ({ id, fiscal_year, created_at }); `fiscal_year` is the short label,
-// "82/83". The prior year's latest run is the one the pools open from, as post() promises when a
-// year is posted twice. `earlierLabel` is the latest posted year BEFORE the prior one: set while
-// the prior year has no run, it means a year was skipped, and every pool opening at 0 is a gap,
-// not a first year.
-export function priorPoolRun({ runs, fiscalYearStartBs }) {
+// (S792, COSTS-5). `runs` are the client's posted assets_tax_pool_runs ({ id, fiscal_year,
+// created_at }); `fiscal_year` is the short label, "82/83". The prior year's latest run is the one
+// the pools open from, as post() promises when a year is posted twice. `earlierLabel` is the latest
+// posted year BEFORE the prior one: set while the prior year has no run, it means a year was
+// skipped, and every pool opening at 0 is a gap, not a first year.
+//
+// D40: `openings` are the client's assets_tax_pool_openings rows ({ pool, fiscal_year, opening_wdv,
+// repair_carry_forward }). `typedOpenings` maps pool → { openingWdv, repairCarryForward } for the
+// ones typed for THIS year, and is filled only when the prior year has no run: a real run always
+// wins. One typed for another year is not used — for a later year it has not started yet, and for
+// an earlier one the years in between are what carry it.
+export function priorPoolRun({ runs, fiscalYearStartBs, openings = [] }) {
   const priorLabel = getBsFiscalYear(fiscalYearStartBs - 1, 4)
-  const startOf = label => { const m = /^(\d{1,2})\//.exec(String(label || '')); return m ? Number(m[1]) : null }
   const priorShort = startOf(priorLabel)
   let priorRun = null, earlierShort = null, earlierLabel = null
   for (const r of runs || []) {
@@ -219,5 +258,31 @@ export function priorPoolRun({ runs, fiscalYearStartBs }) {
     const s = startOf(r.fiscal_year)
     if (s != null && s < priorShort && (earlierShort == null || s > earlierShort)) { earlierShort = s; earlierLabel = r.fiscal_year }
   }
-  return { priorLabel, priorRun, earlierLabel: priorRun ? null : earlierLabel }
+  const typedOpenings = {}
+  if (!priorRun) {
+    const thisLabel = getBsFiscalYear(fiscalYearStartBs, 4)
+    for (const o of openings || []) {
+      if (o.fiscal_year !== thisLabel || !['A', 'B', 'C', 'D'].includes(o.pool)) continue
+      typedOpenings[o.pool] = {
+        openingWdv: parseFloat(o.opening_wdv) || 0,
+        repairCarryForward: parseFloat(o.repair_carry_forward) || 0,
+      }
+    }
+  }
+  return { priorLabel, priorRun, earlierLabel: priorRun ? null : earlierLabel, typedOpenings }
+}
+
+// D40 (Q4): whether a typed opening is locked — a POSTED run exists for its fiscal year or a later
+// one, so that run (or the chain it started) already carries it. Mirrors the database's
+// assets_tax_pool_openings_lock trigger, which is what actually refuses the write; this only lets
+// the tab say so before anyone types. Returns the earliest such year's label, or null.
+export function openingLockedBy({ opening, runs }) {
+  const from = startOf(opening?.fiscal_year)
+  if (from == null) return null
+  let best = null
+  for (const r of runs || []) {
+    const s = startOf(r.fiscal_year)
+    if (s != null && s >= from && (best == null || s < best.s)) best = { s, label: r.fiscal_year }
+  }
+  return best ? best.label : null
 }

@@ -278,6 +278,7 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('assets_depreciation_runs').delete().eq('client_id', clientId), 'assets_depreciation_runs')
   await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
   await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
+  await del(admin.from('assets_tax_pool_openings').delete().eq('client_id', clientId), 'assets_tax_pool_openings')
   await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
   await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
   await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
@@ -2076,6 +2077,8 @@ Deno.serve(async (req) => {
         await del(admin.from('assets_depreciation_runs').delete().eq('client_id', clientId), 'assets_depreciation_runs')
         await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
         await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
+        // D40: the typed pool openings (A–D). After the runs, though the service role passes its lock anyway.
+        await del(admin.from('assets_tax_pool_openings').delete().eq('client_id', clientId), 'assets_tax_pool_openings')
         await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
         await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
         await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')

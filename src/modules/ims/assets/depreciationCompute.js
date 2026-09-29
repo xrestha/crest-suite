@@ -15,6 +15,7 @@ function toUtcDay(dateLike) {
 }
 
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100
+const dayOf = d => String(d || '').slice(0, 10)
 
 // Full annual straight-line charge — never negative (a mis-entered salvage_value > total_cost
 // would otherwise produce a negative "depreciation").
@@ -50,11 +51,35 @@ export function clampToSalvageFloor({ openingNbv, proposedCharge, salvageValue }
   return Math.min(Math.max(0, proposedCharge), maxCharge)
 }
 
+// D40 (S792 stage 4): depreciation an asset had already taken before Crest — from last year's books
+// — as `opening_accumulated_depreciation` "as of" `opening_as_of` (the register's two opening
+// columns). It is not a posted charge: no run carries it, so the Overheads memo
+// (depreciationInWindow) never counts it, and it is read only here, from the asset row.
+// `asOf` null counts it; with a date, only on or after `opening_as_of` (the Valuation report).
+// An amount with no date — which the database refuses — counts as taken from the start.
+export function openingAccumulated(asset, asOf = null) {
+  const amt = parseFloat(asset?.opening_accumulated_depreciation) || 0
+  if (amt <= 0) return 0
+  if (asOf && asset.opening_as_of && dayOf(asset.opening_as_of) > dayOf(asOf)) return 0
+  return amt
+}
+
+// The first day a run may charge this asset: its acquisition date, or — when depreciation was
+// already taken before Crest — the day after `opening_as_of`, whichever is later. Those earlier
+// days are inside the opening amount, so charging them again would take them twice.
+export function chargeStartDate(asset) {
+  const acq = dayOf(asset?.acquisition_date)
+  if (!(openingAccumulated(asset) > 0) || !asset.opening_as_of) return acq
+  const after = addDaysIso(dayOf(asset.opening_as_of), 1)
+  return after > acq ? after : acq
+}
+
 // One asset's full computed line for a run's period. `openingNbv` is the asset's book value going
-// into the period — bookValue() over its posted rows (S792, COSTS-2); omitted, it is the asset's own
-// total_cost, i.e. its first-ever run.
+// into the period — bookValue() over its posted rows (S792, COSTS-2); omitted, it is the asset's
+// cost less any depreciation taken before Crest (D40), i.e. its first-ever run. The charge runs
+// from chargeStartDate(), never over days the opening amount already covers.
 export function computeAssetDepreciationLine({ asset, openingNbv: openingIn, periodStart, periodEnd }) {
-  const openingNbv = openingIn != null ? (parseFloat(openingIn) || 0) : asset.total_cost
+  const openingNbv = openingIn != null ? (parseFloat(openingIn) || 0) : bookValue(asset, null)
   const annualDepreciation = annualStraightLineAmount({
     totalCost: asset.total_cost,
     salvageValue: asset.salvage_value,
@@ -64,7 +89,7 @@ export function computeAssetDepreciationLine({ asset, openingNbv: openingIn, per
     annualAmount: annualDepreciation,
     periodStart,
     periodEnd,
-    acquisitionDate: asset.acquisition_date,
+    acquisitionDate: chargeStartDate(asset),
   })
   const depreciationAmount = r2(clampToSalvageFloor({
     openingNbv,
@@ -112,7 +137,6 @@ export function effectiveDepreciation(row) {
   return parseFloat(v) || 0
 }
 
-const dayOf = d => String(d || '').slice(0, 10)
 
 // Where each asset stands on the books, from its POSTED schedule rows (S792, COSTS-2).
 //
@@ -202,17 +226,20 @@ function periodChargedThrough({ start, end, charges, reversals }) {
   return days >= span ? end : addDaysIso(start, days - 1)
 }
 
-// Book value from a bookPositionsByAsset() entry: cost less what has been charged. No position
-// (nothing posted) is the full cost.
-export function bookValue(asset, position) {
-  return r2((parseFloat(asset?.total_cost) || 0) - (position?.charged || 0))
+// Book value from a bookPositionsByAsset() entry: cost less any depreciation taken before Crest
+// (D40, openingAccumulated) less what has been charged. No position (nothing posted) is cost less
+// that opening amount. `asOf` (the Valuation report's date) counts the opening amount only on or
+// after its own date; the position passed must then be the one cut at the same date.
+export function bookValue(asset, position, asOf = null) {
+  return r2((parseFloat(asset?.total_cost) || 0) - openingAccumulated(asset, asOf) - (position?.charged || 0))
 }
 
 // Which of the figures depreciation is worked out from an asset edit changes (S792, COSTS-8, the
 // D5 precedent: warn, naming what changes, before saving). `next` is the register payload about to
-// be written. Returns null when none moves; otherwise { cost, acquired, life, salvage } for each
-// that does, each { from, to }, plus `annual` — the straight-line charge a full year gets before
-// and after, which is what the next run feels.
+// be written. Returns null when none moves; otherwise { cost, acquired, life, salvage, opening,
+// openingAsOf } for each that does, each { from, to }, plus `annual` — the straight-line charge a
+// full year gets before and after, which is what the next run feels. `opening`/`openingAsOf` are
+// D40's "already taken before Crest" pair: an edit moves the book value and where runs start from.
 export function depreciationInputChanges(asset, next) {
   const num = v => parseFloat(v) || 0
   const out = {}
@@ -222,6 +249,14 @@ export function depreciationInputChanges(asset, next) {
   if (dayOf(asset.acquisition_date) !== dayOf(next.acquisition_date)) out.acquired = { from: dayOf(asset.acquisition_date), to: dayOf(next.acquisition_date) }
   if (Math.abs(num(asset.useful_life_years) - num(next.useful_life_years)) > 1e-9) out.life = { from: num(asset.useful_life_years), to: num(next.useful_life_years) }
   if (Math.abs(num(asset.salvage_value) - num(next.salvage_value)) > 0.005) out.salvage = { from: num(asset.salvage_value), to: num(next.salvage_value) }
+  // Only when the payload carries the field: a caller that does not write it changes nothing.
+  if ('opening_accumulated_depreciation' in next
+      && Math.abs(num(asset.opening_accumulated_depreciation) - num(next.opening_accumulated_depreciation)) > 0.005) {
+    out.opening = { from: r2(num(asset.opening_accumulated_depreciation)), to: r2(num(next.opening_accumulated_depreciation)) }
+  }
+  if ('opening_as_of' in next && dayOf(asset.opening_as_of) !== dayOf(next.opening_as_of)) {
+    out.openingAsOf = { from: dayOf(asset.opening_as_of) || null, to: dayOf(next.opening_as_of) || null }
+  }
   if (Object.keys(out).length === 0) return null
   const annualOf = (cost, salvage, life) => r2(annualStraightLineAmount({ totalCost: cost, salvageValue: salvage, usefulLifeYears: life }))
   out.annual = {
@@ -239,6 +274,7 @@ export function depreciationInputChanges(asset, next) {
 // The charge is the SAME straight-line arithmetic a run uses (computeAssetDepreciationLine: annual
 // ÷ 365 per day held, salvage floor), over the days from the day after `chargedThrough` — or the
 // acquisition date, for an asset with nothing still charged — to the disposal date inclusive,
+// where depreciation taken before Crest (D40) counts as charged through its `opening_as_of`,
 // opening at the asset's book value. `position` is the asset's bookPositionsByAsset() entry: since
 // S792 (COSTS-2) a run that was reversed in full no longer counts as charging its days, and since
 // stage 3 one reversed in part counts only for the days its remaining charge covers — so the D24
@@ -251,9 +287,13 @@ export function depreciationInputChanges(asset, next) {
 // function does not unwind — reversing posted depreciation is an adjustment run's job, never a
 // silent edit — so the caller must say so, naming `chargedThrough`.
 export function computeDisposalDepreciation({ asset, position, disposalDate }) {
-  const chargedThrough = position?.chargedThrough || null
+  const postedThrough = position?.chargedThrough || null
+  // `postedPastDisposal` is about POSTED runs, the thing an adjustment can reverse; the opening
+  // amount is not a run, so it only moves where the charge starts.
+  const postedPastDisposal = !!postedThrough && toUtcDay(postedThrough) > toUtcDay(disposalDate)
+  const openingThrough = openingAccumulated(asset) > 0 && asset.opening_as_of ? dayOf(asset.opening_as_of) : null
+  const chargedThrough = postedThrough && (!openingThrough || postedThrough > openingThrough) ? postedThrough : openingThrough
   const periodStart = chargedThrough ? addDaysIso(chargedThrough, 1) : dayOf(asset.acquisition_date)
-  const postedPastDisposal = !!chargedThrough && toUtcDay(chargedThrough) > toUtcDay(disposalDate)
   const openingNbv = bookValue(asset, position)
 
   if (toUtcDay(periodStart) > toUtcDay(disposalDate)) {
@@ -302,7 +342,8 @@ export function adjustmentOverrideError({ override, charged }) {
 // line — never subtracted from anything. A posted run can span a year while the window is one BS
 // month, so a row is counted by the share of its days that fall inside the window; without that a
 // single annual run would land its whole year on whichever month overlapped it. Adjustment lines
-// are negative and net off against the run they reverse.
+// are negative and net off against the run they reverse. Depreciation taken before Crest (D40,
+// openingAccumulated) is deliberately NOT counted: it is no period's expense in these books.
 export function depreciationInWindow(rows, windowStart, windowEnd) {
   const ws = toUtcDay(windowStart), we = toUtcDay(windowEnd)
   let amount = 0, count = 0, prorated = false
@@ -355,7 +396,8 @@ export function assetHeldOn(asset, asOf) {
 }
 
 // The portfolio valuation as of a date (S792, COSTS-2/COSTS-4): every asset held on that date with
-// no personal use, each at cost less the charges posted for periods ending on or before it. Not a
+// no personal use, each at cost less the charges posted for periods ending on or before it, and less
+// any depreciation taken before Crest once the date reaches its `opening_as_of` (D40). Not a
 // chosen "latest row" — see bookPositionsByAsset() for why a row cannot carry the book value.
 export function computeValuationAsOf({ assets, postedRows, asOf }) {
   const positions = bookPositionsByAsset(postedRows, asOf)
@@ -364,7 +406,7 @@ export function computeValuationAsOf({ assets, postedRows, asOf }) {
     .map(a => ({
       categoryName: a.assets_categories?.name || 'Uncategorized',
       totalCost: parseFloat(a.total_cost) || 0,
-      nbv: bookValue(a, positions[a.id]),
+      nbv: bookValue(a, positions[a.id], asOf),
     }))
   return computePortfolioValuation(rows)
 }

@@ -142,7 +142,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                 <th style={{ textAlign: 'right' }}>Unit Cost</th>
                 <th style={{ textAlign: 'right' }}>Total Cost</th>
                 <th>Acquired</th>
-                <th style={{ textAlign: 'right' }}><Tip text="Total cost less every depreciation charge posted for the asset, reversals included, whatever period each one covers — or total cost if nothing has been posted." width={270}>Current NBV</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Total cost less any depreciation already taken before Crest, less every depreciation charge posted for the asset, reversals included, whatever period each one covers." width={270}>Current NBV</Tip></th>
                 <th style={{ textAlign: 'right' }}>% Depreciated</th>
                 <th>Status</th>
                 <th></th>

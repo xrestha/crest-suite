@@ -2,7 +2,7 @@ import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 import {
   acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangibleAmortization,
   parseAdDateLocal, intangibleAmortizationForYear, computeIntangiblePool, priorPoolRun, fiscalYearOfAdDate,
-  fiscalYearStartOfAdDate,
+  fiscalYearStartOfAdDate, openingLockedBy,
 } from './taxPoolCompute'
 
 const FY_START = 2082 // fiscal year 2082/83: Shrawan 2082 -> Ashadh 2083
@@ -297,11 +297,11 @@ describe('priorPoolRun', () => {
       { id: 'd', fiscal_year: '80/81', created_at: '2024-08-01T00:00:00Z' },
       { id: 'e', fiscal_year: '83/84', created_at: '2027-08-01T00:00:00Z' }, // a later year is not "earlier"
     ]
-    expect(priorPoolRun({ runs, fiscalYearStartBs: FY_START })).toEqual({ priorLabel: '81/82', priorRun: null, earlierLabel: '80/81' })
+    expect(priorPoolRun({ runs, fiscalYearStartBs: FY_START })).toEqual({ priorLabel: '81/82', priorRun: null, earlierLabel: '80/81', typedOpenings: {} })
   })
 
   test('nothing posted at all: a first year, not a gap', () => {
-    expect(priorPoolRun({ runs: [], fiscalYearStartBs: FY_START })).toEqual({ priorLabel: '81/82', priorRun: null, earlierLabel: null })
+    expect(priorPoolRun({ runs: [], fiscalYearStartBs: FY_START })).toEqual({ priorLabel: '81/82', priorRun: null, earlierLabel: null, typedOpenings: {} })
   })
 })
 
@@ -309,5 +309,86 @@ describe('fiscalYearOfAdDate', () => {
   test('Ashadh closes one fiscal year and Shrawan opens the next', () => {
     expect(fiscalYearOfAdDate(formatAd(bsToAd(2082, 3, 30)))).toBe('81/82')
     expect(fiscalYearOfAdDate(formatAd(bsToAd(2082, 4, 1)))).toBe('82/83')
+  })
+})
+
+// D40 (S792 stage 4): opening values typed in from last year's tax return.
+describe('priorPoolRun — typed openings (D40)', () => {
+  const openings = [
+    { pool: 'A', fiscal_year: '82/83', opening_wdv: 50000, repair_carry_forward: 1200 },
+    { pool: 'B', fiscal_year: '81/82', opening_wdv: 9999, repair_carry_forward: 0 },  // another year
+    { pool: 'E', fiscal_year: '82/83', opening_wdv: 7777, repair_carry_forward: 0 },  // Pool E takes none
+  ]
+
+  test('used for its own year when the year before has no run', () => {
+    const r = priorPoolRun({ runs: [], fiscalYearStartBs: FY_START, openings })
+    expect(r.priorRun).toBeNull()
+    expect(r.typedOpenings).toEqual({ A: { openingWdv: 50000, repairCarryForward: 1200 } })
+  })
+
+  test('a real run for the year before always wins', () => {
+    const runs = [{ id: 'p', fiscal_year: '81/82', created_at: '2025-08-01T00:00:00Z' }]
+    const r = priorPoolRun({ runs, fiscalYearStartBs: FY_START, openings })
+    expect(r.priorRun.id).toBe('p')
+    expect(r.typedOpenings).toEqual({})
+  })
+
+  test('not used for a later year: the years in between carry it', () => {
+    expect(priorPoolRun({ runs: [], fiscalYearStartBs: FY_START + 1, openings }).typedOpenings).toEqual({})
+  })
+})
+
+describe('openingLockedBy (D40, Q4)', () => {
+  const opening = { pool: 'A', fiscal_year: '82/83' }
+  test('unlocked while no posted run reaches its year', () => {
+    expect(openingLockedBy({ opening, runs: [{ fiscal_year: '81/82' }] })).toBeNull()
+  })
+  test('locked by a run for its own year, or the earliest later one', () => {
+    expect(openingLockedBy({ opening, runs: [{ fiscal_year: '84/85' }, { fiscal_year: '82/83' }] })).toBe('82/83')
+    expect(openingLockedBy({ opening, runs: [{ fiscal_year: '84/85' }, { fiscal_year: '83/84' }] })).toBe('83/84')
+  })
+  test('no readable year: nothing to lock', () => {
+    expect(openingLockedBy({ opening: { fiscal_year: '' }, runs: [{ fiscal_year: '82/83' }] })).toBeNull()
+  })
+})
+
+describe('computeIntangiblePool — depreciation already taken and the derived opening (D40, Q5)', () => {
+  const stored = (y, m, d) => formatAd(bsToAd(y, m, d))
+  // 30,000 over 3 years, bought Shrawan 2080: 10,000 a year on its own schedule.
+  const software = { tax_pool: 'E', status: 'active', total_cost: 30000, useful_life_years: 3, acquisition_date: stored(2080, 4, 10) }
+
+  test('no run for the year before: the pool opens at what its assets have not yet claimed', () => {
+    // By the start of FY 82/83 the schedule has claimed 20,000 of it.
+    const e = computeIntangiblePool({ assets: [software], openingWdv: null, fiscalYearStartBs: FY_START })
+    expect(e.derived_opening).toBe(10000)
+    expect(e.opening_wdv).toBe(10000)
+    expect(e.depreciation_amount).toBe(10000)
+    expect(e.closing_wdv).toBe(0)
+  })
+
+  test('a posted opening is used as given, the derived one only reported', () => {
+    const e = computeIntangiblePool({ assets: [software], openingWdv: 4000, fiscalYearStartBs: FY_START })
+    expect(e.opening_wdv).toBe(4000)
+    expect(e.derived_opening).toBe(10000)
+    expect(e.depreciation_amount).toBe(4000)
+  })
+
+  test('"already taken" counts as amortised through the end of its fiscal year, then the annual amount runs on', () => {
+    // Only 6,000 taken by the end of FY 81/82 (Ashadh 2082): 24,000 left, 10,000 a year from FY 82/83.
+    const taken = { ...software, opening_accumulated_depreciation: 6000, opening_as_of: stored(2082, 3, 31) }
+    const y1 = computeIntangiblePool({ assets: [taken], openingWdv: null, fiscalYearStartBs: FY_START })
+    expect(y1.opening_wdv).toBe(24000)
+    expect(y1.scheduled).toBe(10000)
+    const y3 = computeIntangiblePool({ assets: [taken], openingWdv: 4000, fiscalYearStartBs: FY_START + 2 })
+    expect(y3.scheduled).toBe(4000) // 6,000 + 10,000 + 10,000 claimed; the last 4,000 ends it
+    const y4 = computeIntangiblePool({ assets: [taken], openingWdv: 0, fiscalYearStartBs: FY_START + 3 })
+    expect(y4.scheduled).toBe(0)
+  })
+
+  test('"already taken" never claims more than cost', () => {
+    const over = { ...software, opening_accumulated_depreciation: 45000, opening_as_of: stored(2082, 3, 31) }
+    const e = computeIntangiblePool({ assets: [over], openingWdv: null, fiscalYearStartBs: FY_START })
+    expect(e.opening_wdv).toBe(0)
+    expect(e.scheduled).toBe(0)
   })
 })

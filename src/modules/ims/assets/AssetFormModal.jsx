@@ -36,6 +36,13 @@ function editConsequences({ asset, changes, posted, taxPool }) {
   if (changes.acquired) {
     p.push(`Acquisition date goes from ${formatAdAsBs(changes.acquired.from)} to ${formatAdAsBs(changes.acquired.to)}. Posted runs are not re-dated; the next run, or a disposal, counts the days held from the new date.`)
   }
+  if (changes.opening || changes.openingAsOf) {
+    const from = changes.opening ? changes.opening.from : parseFloat(asset.opening_accumulated_depreciation) || 0
+    const to = changes.opening ? changes.opening.to : from
+    const asOf = changes.openingAsOf ? changes.openingAsOf.to : asset.opening_as_of
+    p.push(`Depreciation already taken before Crest goes from ${npr(from)}${asset.opening_as_of ? ` (to ${formatAdAsBs(asset.opening_as_of)})` : ''} to ${npr(to)}${to > 0 && asOf ? ` (to ${formatAdAsBs(asOf)})` : ''}. `
+      + 'Its book value moves by the difference on the Register, the Asset Card and the Valuation report. Posted runs are not re-worked, so if they already charged days now covered by the new date, those days are charged twice — reverse that run on the Depreciation Runs tab (Adjustment) to take them back out. The next run charges from the day after the new date.')
+  }
   if (Math.abs(changes.annual.from - changes.annual.to) > 0.005) {
     p.push(`Runs from now on charge ${npr(changes.annual.to)} a year instead of ${npr(changes.annual.from)}${changes.salvage ? `, and never take it below the new salvage value of ${npr(changes.salvage.to)}` : ''}.`)
   }
@@ -54,6 +61,7 @@ function emptyForm() {
     category_id: '', name: '', description: '', location: '',
     quantity: '1', unit_cost: '', acquisition_date: '', useful_life_years: '',
     salvage_value: '0', tax_pool: '', personal_use_percent: '0', department: '', notes: '',
+    opening_accumulated_depreciation: '0', opening_as_of: '',
   }
 }
 
@@ -72,6 +80,8 @@ function formFromAsset(asset) {
     personal_use_percent: String(asset.personal_use_percent ?? 0),
     department: asset.department || '',
     notes: asset.notes || '',
+    opening_accumulated_depreciation: String(asset.opening_accumulated_depreciation ?? 0),
+    opening_as_of: asset.opening_as_of || '',
   }
 }
 
@@ -111,6 +121,16 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
     if (!form.name.trim()) fe.name = 'Name is required.'
     if (!form.acquisition_date) fe.acquisition_date = 'Acquisition date is required.'
     if (!form.useful_life_years || parseFloat(form.useful_life_years) <= 0) fe.useful_life_years = 'Useful life must be greater than 0.'
+    // D40: the same bounds the database's CHECKs hold, said against the box that breaks them.
+    const openingAmt = parseFloat(form.opening_accumulated_depreciation) || 0
+    const cost = (parseFloat(form.quantity) || 0) * (parseFloat(form.unit_cost) || 0)
+    const salvage = parseFloat(form.salvage_value) || 0
+    if (openingAmt < 0) fe.opening_accumulated_depreciation = 'Enter 0 or more.'
+    else if (openingAmt > 0 && openingAmt + salvage > cost + 0.005) {
+      fe.opening_accumulated_depreciation = `At most NPR ${nprInt(Math.max(0, cost - salvage))} — more would take the asset below its salvage value.`
+    }
+    if (openingAmt > 0 && !form.opening_as_of) fe.opening_as_of = 'Say which date that figure runs to.'
+    else if (openingAmt > 0 && form.acquisition_date && form.opening_as_of < form.acquisition_date) fe.opening_as_of = 'This date is before the acquisition date.'
     setFieldErr(fe)
     if (Object.keys(fe).length) return
 
@@ -129,6 +149,9 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
       personal_use_percent: parseFloat(form.personal_use_percent) || 0,
       department: form.department.trim() || null,
       notes: form.notes.trim() || null,
+      // D40: the date means nothing without an amount, so a 0 clears it.
+      opening_accumulated_depreciation: openingAmt > 0 ? openingAmt : 0,
+      opening_as_of: openingAmt > 0 ? form.opening_as_of : null,
     }
 
     // S792 (COSTS-8, D5): an edit to cost, dates, life or salvage on an asset with posted
@@ -242,6 +265,26 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
           <label htmlFor="assetf-f12">Department / Cost Center</label>
           <input id="assetf-f12" className="form-input" value={form.department} onChange={e => set('department', e.target.value)} placeholder="e.g. Kitchen" />
         </div>
+
+        {/* D40: an asset the business already owned before Crest has depreciation on last year's
+            books. Without this it would depreciate from full cost a second time. */}
+        <div className="form-field" style={{ gridColumn: '1 / -1', marginTop: 4 }}>
+          <h4 style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <Tip text="Only for something you owned before you started using Crest. Copy its accumulated depreciation from last year's books (your accountant's fixed-asset schedule), so Crest carries on from there instead of depreciating it from full cost again. Leave it at 0 for anything bought since." width={320}>Already in use before Crest?</Tip>
+          </h4>
+        </div>
+        <div className="form-field">
+          <label htmlFor="assetf-f15"><Tip text="Book depreciation already charged on this asset before Crest, up to the date beside it. Its book value becomes cost less this, less what Crest posts. It is not an expense of any period here, so the Overheads depreciation line does not count it." width={300}>Depreciation already taken (NPR)</Tip></label>
+          <QtyInput id="assetf-f15" value={form.opening_accumulated_depreciation} onChange={v => set('opening_accumulated_depreciation', v)} className="form-input" style={{ width: '100%' }} {...fieldAria('assetf-f15', fieldErr.opening_accumulated_depreciation)} />
+          <FieldError id="assetf-f15" message={fieldErr.opening_accumulated_depreciation} />
+        </div>
+        <div className="form-field">
+          <label htmlFor="assetf-f16"><Tip text="The date that figure runs to — usually the last day of the fiscal year your books were closed for (end of Ashadh). Crest's depreciation runs charge from the day after it." width={280}>As of</Tip></label>
+          <input id="assetf-f16" type="date" className="form-input" value={form.opening_as_of} onChange={e => set('opening_as_of', e.target.value)} {...fieldAria('assetf-f16', fieldErr.opening_as_of)} />
+          <FieldError id="assetf-f16" message={fieldErr.opening_as_of} />
+          {form.opening_as_of && <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '4px 0 0' }}>{formatAdAsBs(form.opening_as_of)}</p>}
+        </div>
+        <div className="form-field" aria-hidden="true" />
 
         <div className="form-field" style={{ gridColumn: '1 / -1' }}>
           <label htmlFor="assetf-f13">Description</label>
