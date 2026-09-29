@@ -328,7 +328,7 @@ export default function RecipeMargin() {
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
           Total Contribution reads as a confident green NPR 0 (S594). */}
       {!loading && !loadError && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Revenue less ingredient cost, across every costed recipe with sales this period — the whole period, not the category tab selected below. Revenue is valued at the prices actually charged, extras guests paid for included, and the cost includes the stock those extras used, so it will not always equal Contribution per Portion × Qty." width={320}>Total Contribution</Tip>

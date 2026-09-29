@@ -514,7 +514,7 @@ export default function PeriodComparison() {
       {/* Stat cards — gated on !loading too: a stat computed from rows that have not arrived
           is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">Latest FC%</div>
           <div className="stat-value" style={{ color: fcCell(latestStats).color }} title={fcCell(latestStats).title}>

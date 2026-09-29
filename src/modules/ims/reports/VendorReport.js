@@ -768,7 +768,7 @@ export default function VendorReport() {
           Loading state — so nothing jumps. */}
       {!loading && <>
 
-      <div className="stat-grid">
+      <div className="stat-grid stat-grid--pair">
         <div className="stat-card">
           <div className="stat-label">Gross Purchases</div>
           <div className="stat-value" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>

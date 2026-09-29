@@ -192,7 +192,7 @@ export default function WastageReport() {
       {!loadError && <>
       {/* Stat cards — gated on !loading: a figure summed from rows that have not arrived is NPR 0 in confident type (S594) */}
       {!loading && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Everything logged as waste this period, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike. The Wastage tiles on the Dashboard and the Owner Dashboard show this same total." width={260}>Total Wastage Value</Tip>

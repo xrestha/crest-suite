@@ -134,7 +134,7 @@ The asset is still on the register as active.`, detail })
 
   return (
     <Modal onClose={onClose} title={`${asset.asset_code || ''} — ${asset.name}`} maxWidth={860}>
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid stat-grid--pair" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Total Cost</div>
           <div className="stat-value">NPR {fmt(asset.total_cost)}</div>

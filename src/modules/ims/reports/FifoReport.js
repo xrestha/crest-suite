@@ -444,7 +444,7 @@ export default function FifoReport() {
       {/* The KPI strip waits for the load: an uncomputed report is four confident zeroes, three of
           them green, and "nothing is expiring" is the most reassuring thing this page can say (S594/S616). */}
       {!loading && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">
             <Tip width={300} text="Batches with an expiry date that still have stock on them after this window's consumption has been taken off oldest-first.">Batches On Hand</Tip>

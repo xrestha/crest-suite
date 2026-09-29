@@ -525,7 +525,7 @@ export default function ReorderReport() {
           the error branch with no `!loading`, so a period change painted the PREVIOUS period's
           counts and reorder value under the new period's label until the reads landed. */}
       {!loading && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">Items to Reorder</div>
           {/* A 0 is only a green all-clear when there was something to judge: with no par levels

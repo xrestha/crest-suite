@@ -427,7 +427,7 @@ export default function Variance() {
 
       {/* KPI strip waits for the load — a stale period's figures under the new period's label is the S594 trap */}
       {!loading && summary && (
-        <div className="stat-grid">
+        <div className="stat-grid stat-grid--pair">
           <div className="stat-card">
             <div className="stat-label">
               <Tip text="Rows on screen after filters. The figures in the other tiles cover only the items that have a closing count — an item without one has no measurable variance." width={280}>Items Analysed</Tip>

@@ -373,7 +373,7 @@ export default function StockMovements() {
           rule is positional: the guard has to OPEN before the stat-grid, not merely exist in the
           file. */}
       {!loading && (tab === 'subs' ? (usageLoading ? null : (
-        <div className="stat-grid">
+        <div className="stat-grid stat-grid--pair">
           <div className="stat-card">
             <div className="stat-label">Sub-Recipes Used</div>
             <div className="stat-value">{subRows.length}</div>
@@ -391,7 +391,7 @@ export default function StockMovements() {
           </div>
         </div>
       )) : (
-      <div className="stat-grid">
+      <div className="stat-grid stat-grid--pair">
         <div className="stat-card">
           <div className="stat-label">Movements</div>
           <div className="stat-value">{filtered.length}</div>

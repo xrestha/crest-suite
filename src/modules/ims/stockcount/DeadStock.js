@@ -373,7 +373,7 @@ export default function DeadStock() {
       {/* KPI strip waits for the load and never survives a failure; `assessable > 0` because with
           nothing counted "0 Dead / 0 Slow" is a finding the page has not made (S594/S717). */}
       {!loading && !loadError && assessable > 0 && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">Dead Stock Items</div>
           <div className="stat-value" style={{ color: deadCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{deadCount}</div>

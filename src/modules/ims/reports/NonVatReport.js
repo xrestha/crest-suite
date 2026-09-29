@@ -281,7 +281,7 @@ export default function NonVatReport() {
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           yet is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
-      <div className="stat-grid">
+      <div className="stat-grid stat-grid--pair">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Net value of all non-VAT purchases this period, after this half's share of any bill discount and after goods returned to the vendor. A mixed bill's discount is split between here and the VAT Report in proportion to line value, so the two never claim it twice." width={280}>Total Non-VAT Purchases</Tip>

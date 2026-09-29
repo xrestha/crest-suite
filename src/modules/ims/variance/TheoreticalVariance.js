@@ -499,7 +499,7 @@ export default function TheoreticalVariance() {
           and these three figures ARE that shape, on the page that tells an owner money went
           missing. The class also brings `tabular-nums`, so the figures line up digit for digit. */}
       {!loading && !computing && activeRows.length > 0 && (
-        <div className="stat-grid" style={{ marginBottom: 24 }}>
+        <div className="stat-grid stat-grid--pair" style={{ marginBottom: 24 }}>
           {[
             { label: 'Theoretical Cost',  value: fmtNPR(totalTheorVal),    sub: 'Based on recipes × sales',      color: 'var(--theme-text3)' },
             { label: 'Actual Cost',        value: fmtNPR(totalActualVal),   sub: 'From stock movements',          color: 'var(--theme-text1)' },

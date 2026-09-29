@@ -431,7 +431,7 @@ export default function VatReport() {
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           yet is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
-      <div className="stat-grid">
+      <div className="stat-grid stat-grid--pair">
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total net purchases this period: non-VAT plus VAT-inclusive, both after bill discounts and after goods returned. Includes VAT on the VAT-inclusive half." width={260}>Total Net Purchases</Tip></div>
           <div className="stat-value" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-IN')}</div>

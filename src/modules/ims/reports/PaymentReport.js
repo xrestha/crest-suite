@@ -291,7 +291,7 @@ export default function PaymentReport() {
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
-      <div className="stat-grid">
+      <div className="stat-grid stat-grid--pair">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Total billed by suppliers this period, before returns: bill totals net of discount and including VAT where charged. This is money owed to suppliers — not sales revenue. It ties to the Purchases register and to Outstanding Payables." width={280}>Gross Purchases</Tip>

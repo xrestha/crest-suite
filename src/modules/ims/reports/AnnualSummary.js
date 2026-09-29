@@ -394,7 +394,7 @@ export default function AnnualSummary() {
       )}
 
       {!busy && !loadError && report.rows.length > 0 && (
-        <div className="stat-grid">
+        <div className="stat-grid stat-grid--pair">
           {[
             { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-text1)',
               tip: 'Total net sales revenue across all months in this period.' },

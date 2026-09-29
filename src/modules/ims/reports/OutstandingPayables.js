@@ -948,7 +948,7 @@ export default function OutstandingPayables() {
       )}
 
       {!loadError && !loading && (
-      <div className="stat-grid">
+      <div className="stat-grid stat-grid--pair">
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: less any bill discount, less goods returned at the discounted price the supplier charged for them, plus 13% VAT on VAT-inclusive lines. A bill over-settled by a late return counts against this as a credit." width={280}>Total Remaining</Tip></div>

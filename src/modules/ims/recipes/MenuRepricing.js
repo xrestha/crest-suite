@@ -267,7 +267,7 @@ export default function MenuRepricing() {
           Underpriced Dishes / Monthly Opportunity read as confident green zeros (S594). It waits
           for the outlet's VAT basis too, since the opportunity is measured on it (S792). */}
       {figuresReady && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Number of priced dishes whose current food-cost % is above their target — i.e. priced too low to hit the margin you set." width={300}>Underpriced Dishes</Tip>

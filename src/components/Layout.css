@@ -2122,6 +2122,62 @@ tr.interactive-row:focus-visible {
   margin-bottom: 88px;
 }
 
+/* ── A phone gets the answer, not a sideways scroll (S796) ─────────────────────────────────
+   The IMS critique measured Purchases' bill table at 745px inside a 298px phone column: the Bill
+   Total — the figure an owner opens the page for — sat past the right edge, and Recipes' FC% did
+   the same. A page with such a table renders a `.phone-cards` list beside it; below 600px the list
+   shows and the table hides. A CSS switch rather than a JS width hook: nothing re-renders on
+   resize, and print (not `screen`) always gets the table. `.phone-cards` never prints. */
+.phone-only { display: none; }
+@media screen and (max-width: 600px) {
+  .phone-only { display: block; }
+  .phone-hide { display: none !important; }
+}
+
+.phone-cards { list-style: none; margin: 0 0 88px; padding: 0; }
+.phone-cards__day {
+  font-size: 12px; font-weight: 700; color: var(--theme-text2);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 14px 2px 6px;
+}
+/* A ruled row, not a boxed card: the list already sits inside the page's .card, and a box inside
+   a box is the nested-card shape. Rule weight carries the structure, as it does in the tables. */
+.phone-card {
+  border-top: 1px solid var(--theme-border);
+  padding: 12px 0;
+}
+.phone-cards__day + ul > .phone-card:first-child { border-top-width: 2px; }
+.phone-card__top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+.phone-card__title {
+  font-size: 15px; font-weight: 600; color: var(--theme-text1);
+  min-width: 0; overflow-wrap: anywhere;
+}
+/* The figure the card exists for: first line, right edge, never wrapping. */
+.phone-card__figure {
+  font-size: 15px; font-weight: 700; color: var(--theme-text1);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.phone-card__meta {
+  margin-top: 4px; font-size: 13px; line-height: 1.5; color: var(--theme-text2);
+}
+.phone-card__lines { margin-top: 8px; font-size: 13px; color: var(--theme-text2); }
+.phone-card__lines summary { cursor: pointer; color: var(--theme-text1); min-height: 32px; display: flex; align-items: center; list-style: none; }
+.phone-card__lines summary::-webkit-details-marker { display: none; }
+/* `display: flex` drops the native disclosure triangle, so the mark is drawn: ▸ closed, ▾ open. */
+.phone-card__lines summary::before { content: '▸'; width: 16px; color: var(--theme-text2); }
+.phone-card__lines[open] summary::before { content: '▾'; }
+.phone-card__lines ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.phone-card__lines li {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 6px 0; border-top: 1px solid var(--theme-border-lt);
+}
+.phone-card__lines li span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--theme-text1); }
+.phone-card__actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.phone-card__actions .btn { flex: 1 1 0; }
+@media print { .phone-cards { display: none !important; } }
+
 table.data-table {
   width: 100%;
   border-collapse: collapse;
@@ -3174,6 +3230,18 @@ textarea::placeholder {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
   margin-bottom: 0;
+}
+
+/* IMS reports on a phone (S796): the 200px floor gives one tile per row under ~430px, so Monthly
+   Summary's six KPIs filled the whole first screen before any table. Two across instead, with the
+   box and the default 24px value stepped down so a lakh-sized "NPR 12,48,650" fits a ~150px cell.
+   A tile that sets its own inline size (most IMS tiles are 14–18px) keeps it — inline wins, which
+   is the point: only the 24px default was too big. A modifier rather than a change to .stat-grid,
+   so HR and POS strips are untouched until they are reviewed. */
+@media screen and (max-width: 480px) {
+  .stat-grid--pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-grid--pair .stat-card { padding: 12px; min-width: 0; }
+  .stat-grid--pair .stat-value { font-size: 18px; }
 }
 
 /* ── Dashboard vertical rhythm ─────────────────────────────────────────────────────────────

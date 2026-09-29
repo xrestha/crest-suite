@@ -17,6 +17,7 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import { getCf, billTotalsByKey, methodOf, invoiceMismatchText, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
 import ReturnsTab from './ReturnsTab'
+import PurchaseBillCards from './PurchaseBillCards'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -581,7 +582,7 @@ export default function Purchases() {
       {/* Stats — not while loading or after a failed read: a figure the page has not computed
           is not a figure (S594), and stale totals above the error card would contradict it. */}
       {!loading && !loadError && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           <div className="stat-label">Total Entries</div>
           <div className="stat-value">{purchases.length}</div>
@@ -755,7 +756,11 @@ export default function Purchases() {
             ) : Object.keys(byDay).length === 0 ? (
               <div className="empty-state"><p className="empty-state-text">No entries match your filters.</p></div>
             ) : (
-              <div className="table-wrap table-wrap--fab-clear">
+              <>
+              {/* Below 600px the cards show and this table hides (S796, .phone-only/.phone-hide). */}
+              <PurchaseBillCards byDay={byDay} billTotals={billTotals} bsMonth={selectedPeriod?.bs_month}
+                isLocked={isLocked} onEdit={openEditGroup} onDelete={deleteGroup} goodsValue={filteredValue} payable={filteredPayable} />
+              <div className="table-wrap table-wrap--fab-clear phone-hide">
                 <table className="data-table purchases-table purchases-print-plain">
                   <thead>
                     <tr>
@@ -1021,6 +1026,7 @@ export default function Purchases() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
 

@@ -357,7 +357,7 @@ export default function StockAgeing() {
   )
 
   const stats = (
-    <div className="stat-grid">
+    <div className="stat-grid stat-grid--pair">
       <div className="stat-card">
         <div className="stat-label">
           <Tip width={340} text="Value of stock still on hand as at the date this report is aged to, valued at what you actually paid for each batch. Quantities follow your latest stock count for each item. Stock of unknown age has no purchase line, so it is valued at the current Item Master rate — see the Unknown Age card.">Stock On Hand</Tip>

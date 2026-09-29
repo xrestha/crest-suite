@@ -1111,7 +1111,7 @@ ${text}`, detail })
           {/* Stat cards — only once there is something to count (S796): over an empty month they were
               four zeros above an empty state that said the same thing in words. */}
           {filteredReqs.length > 0 && (
-          <div className="stat-grid">
+          <div className="stat-grid stat-grid--pair">
             <div className="stat-card">
               <div className="stat-label">Total Requisitions{statScope}</div>
               <div className="stat-value">{filteredReqs.length}</div>

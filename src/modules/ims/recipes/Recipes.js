@@ -1807,7 +1807,42 @@ Check the recipe list before saving again — if it timed out after the recipe w
               </div>
             ) : (
               /* ── Regular recipes tab (All / per-category) ── */
-              <div className="table-wrap table-wrap--fab-clear">
+              <>
+              {/* Below 600px (S796): one row per dish with its food cost % on the first line. The
+                  table put FC% — the reason to open this page on a phone — past the right edge. */}
+              <ul className="phone-cards phone-only" aria-label="Recipes">
+                {tabFiltered.map(recipe => {
+                  const cost = dishCostOf(recipe)
+                  const price = parseFloat(recipe.selling_price) || 0
+                  const fcPct = menuFcPct(cost, price)
+                  const fcB = fcBand(fcPct, settings)
+                  const isByo = !!customizationEnabled && !!recipe.is_build_your_own
+                  const byo = isByo ? byoCost.byRecipe[recipe.id] : null
+                  return (
+                    <li key={recipe.id} className="phone-card">
+                      <div className="phone-card__top">
+                        <button type="button" className="btn-linklike phone-card__title" onClick={() => openDetail(recipe)}>{recipe.name}</button>
+                        <span className="phone-card__figure" style={{ color: isByo ? 'var(--theme-text1)' : fcB.color }}
+                          title={fcPct != null ? fcB.label : (unratedReason(cost, price) || undefined)}>
+                          {isByo ? (byoCost.error ? '—' : fcRangeNode(byo, settings)) : fcPct != null ? `${fcPct.toFixed(1)}% ${fcB.mark}` : '—'}
+                        </span>
+                      </div>
+                      <div className="phone-card__meta">
+                        {activeTab === 'all' ? `${recipe.category || 'Uncategorised'} · ` : ''}
+                        Cost {isByo ? (byo && !byo.empty ? costRangeText(byo) : 'by build') : cost != null ? `NPR ${cost.toFixed(2)}` : '—'}
+                        {' · '}Price {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toFixed(2)}` : '—'}
+                        {!recipe.is_active && ' · Hidden'}
+                      </div>
+                      <div className="phone-card__actions">
+                        <button type="button" className="btn btn-ghost" onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
+                        <button type="button" className="btn btn-ghost" onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
+                        {canDeleteRecipe && <button type="button" className="btn btn-danger" onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Delete</button>}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+              <div className="table-wrap table-wrap--fab-clear phone-hide">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1936,6 +1971,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
         </div>

@@ -299,7 +299,7 @@ export default function MonthlySummary() {
             <UncountedItemsBanner gap={report.gap} scope={periodLabel} />
           )}
           {/* KPI row */}
-          <div className="stat-grid">
+          <div className="stat-grid stat-grid--pair">
             {[
               { label: 'Opening Stock',    value: fmt(report.totalOpening),     color: 'var(--theme-text1)' },
               { label: 'Gross Purchases',  value: fmt(report.totalPurchase),    color: 'var(--theme-text1)' },

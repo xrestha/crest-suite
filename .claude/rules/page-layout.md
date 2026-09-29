@@ -16,6 +16,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 ## Stat grids
 
 - Never pin a KPI strip's column count: no inline `gridTemplateColumns: 'repeat(N, 1fr)'`. `.stat-grid` is `auto-fit` over a `minmax` floor; if a tile needs more room, raise the floor in CSS.
+- An IMS report's strip takes `stat-grid stat-grid--pair`: two across under 480px, the default 24px value stepped to 18px (S796). HR and POS are not on it yet.
 - Build `stat-card` / `stat-label` / `stat-value` / `stat-sub` from `<div>`s, never `<p>`. For the dense tier use `stat-card--compact`; never re-type the card's box properties inline.
 - A KPI value never wraps. A text value in a tile takes `nowrap` + ellipsis + `title`. 10px is the floor for real text.
 - Dashboard spacing is `dash-section` / `dash-row`; a grid that is also a section takes `stat-grid dash-section`.
@@ -34,6 +35,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - Sorting on a figure computed from an unsaved draft: rows with no draft sort last in both directions; freeze row order when the input takes focus and do not release it on blur; a figure column opens descending.
 - When a search hides rows, show "N of M" and make the empty state tell "no match" apart from "nothing here yet".
 - Judge fit by measuring `scrollWidth` against `clientWidth` at a resized viewport, using the client's longest real values, never by eye.
+- A table whose bottom-line figure falls past a phone's edge gets a `.phone-cards` list beside it (`.phone-only`), and the table takes `.phone-hide` (S796, Purchases' bills and Recipes). One row per record, the figure it exists for on the first line at the right edge, details in a `<details>`, actions last. Feed it the table's own data so the two cannot disagree; it never prints.
 
 ## Sticky headers and scroll containers
 

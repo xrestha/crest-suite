@@ -1231,7 +1231,7 @@ export default function Sales() {
           "we sold nothing this month". DESIGN.md → Report shell: the KPI strip does not render
           while loading or after a failure. */}
       {!loading && !loadError && (
-      <div className="stat-grid no-print">
+      <div className="stat-grid stat-grid--pair no-print">
         <div className="stat-card">
           {/* Was labelled "Total Covers" — this is Σ qty_sold across recipes, i.e. dishes, not
               guests. A cover is a guest served (what CoversReport and Demand Forecast both mean by
