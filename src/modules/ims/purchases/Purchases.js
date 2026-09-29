@@ -665,7 +665,7 @@ export default function Purchases() {
                 aria-pressed={filterDay === 'all'}
                 tabIndex={filterDay === 'all' ? 0 : -1}
                 onClick={() => setFilterDay('all')}
-                style={{ padding: '2px 7px', fontSize: 11 }}
+                style={{ padding: '2px 8px', fontSize: 12 }}
               >
                 All Days
               </button>
@@ -676,11 +676,16 @@ export default function Purchases() {
                   aria-pressed={filterDay === String(d)}
                   tabIndex={filterDay === String(d) ? 0 : -1}
                   onClick={() => setFilterDay(String(d))}
-                  style={{ whiteSpace: 'nowrap', padding: '2px 7px', fontSize: 11 }}
+                  title={`${formatBsDay(d, selectedPeriod?.bs_month)}${billCountPerDay[d] > 0 ? ` — ${billCountPerDay[d]} bill${billCountPerDay[d] === 1 ? '' : 's'}` : ''}`}
+                  style={{ whiteSpace: 'nowrap', padding: '2px 8px', fontSize: 12 }}
                 >
-                  D{d}
+                  {/* A day is named the way it is said, "1st", never an index "D1" (S796; PRODUCT.md's
+                      BS principle). The month is the page's own period, and the title names it in
+                      full. The bill count shares the chip's size: a 10px run inside a control fell
+                      under the 12px interactive floor. */}
+                  {formatBsDay(d)}
                   {billCountPerDay[d] > 0 && (
-                    <span style={{ marginLeft: 4, fontSize: 10, color: 'var(--theme-text3)' }}>
+                    <span style={{ marginLeft: 4, color: 'var(--theme-text2)' }}>
                       · {billCountPerDay[d]} {billCountPerDay[d] === 1 ? 'bill' : 'bills'}
                     </span>
                   )}

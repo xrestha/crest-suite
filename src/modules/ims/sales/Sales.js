@@ -25,6 +25,7 @@ import { disabledStyle } from '../../../shared/inlineFieldState'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
+import { nprPaisa } from '../../../shared/nepalMoney'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -1420,7 +1421,7 @@ export default function Sales() {
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td><span className="badge badge-gray">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
+                              {recipe.selling_price ? `NPR ${nprPaisa(recipe.selling_price)}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               <input aria-label={`Quantity sold: ${recipe.name}`}
@@ -1602,7 +1603,7 @@ export default function Sales() {
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td><span className="badge badge-gray">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
+                              {recipe.selling_price ? `NPR ${nprPaisa(recipe.selling_price)}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               <input aria-label={`Quantity sold: ${recipe.name}`}
@@ -1835,7 +1836,7 @@ export default function Sales() {
                               {sold > 0 ? sold.toLocaleString('en-IN') : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
+                              {recipe.selling_price ? `NPR ${nprPaisa(recipe.selling_price)}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                               {disc > 0 ? `NPR ${disc.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}

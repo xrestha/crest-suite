@@ -1264,7 +1264,7 @@ export default function Items() {
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
                   <th>Status</th>
-                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. R = Recipes, P = Purchases, OS/CS = Stock counts, W = Wastage, SM = Staff Meals, RQ = Requisitions, VR = Vendor Returns, PAR = Par Levels, PO = Purchase Orders, MV = Stock Movements." width={320}>Used In</Tip></th>
+                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. The chip names the first two places; hover it for the full list." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
               </thead>
@@ -1314,7 +1314,7 @@ export default function Items() {
                       </td>
                       <td>
                         {refMap[item.id]?.length > 0 ? (
-                          <UsageChip codes={refMap[item.id]}
+                          <UsageChip names={refMap[item.id].map(code => USAGE_LABELS[code] || code)}
                             text={`Has records in: ${refMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} />
                         ) : !usageScan.ok ? (
                           // The chip must never be able to mean two things: with the scan

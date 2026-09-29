@@ -1108,7 +1108,9 @@ ${text}`, detail })
       ) : (
         /* ── Requisitions List ───────────────────────────────────────────── */
         <div>
-          {/* Stat cards */}
+          {/* Stat cards — only once there is something to count (S796): over an empty month they were
+              four zeros above an empty state that said the same thing in words. */}
+          {filteredReqs.length > 0 && (
           <div className="stat-grid">
             <div className="stat-card">
               <div className="stat-label">Total Requisitions{statScope}</div>
@@ -1129,6 +1131,7 @@ ${text}`, detail })
               </div>
             </div>
           </div>
+          )}
 
           {/* Filters */}
           {allDepts.length > 1 && (
@@ -1165,6 +1168,10 @@ ${text}`, detail })
               <div className="empty-state">
                 <div className="empty-state-icon">▤</div>
                 <p className="empty-state-text">No requisitions for {periodLabel}.</p>
+                <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '8px auto 0', maxWidth: 440, lineHeight: 1.6 }}>
+                  A requisition is the kitchen asking the store for stock: it lists what was handed over,
+                  so the store-keeper and the cook both know where it went.
+                </p>
                 {!periodClosed && (
                   <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={startNew}>+ New Requisition</button>
                 )}
@@ -1235,7 +1242,9 @@ ${text}`, detail })
         </div>
       )}
 
-      <Fab onClick={startNew} label="+ New Requisition" show={mode === 'list' && !periodClosed} />
+      {/* Hidden while the list is empty, where the empty state carries the same button (S796):
+          two identical "+ New Requisition" controls on one screen made a first-time user choose. */}
+      <Fab onClick={startNew} label="+ New Requisition" show={mode === 'list' && !periodClosed && filteredReqs.length > 0} />
 
       {rejecting && (
         <RequisitionRejectModal

@@ -419,7 +419,7 @@ export default function Vendors() {
     const used = VENDOR_REF_TABLES.filter(t => counts[t.table] > 0)
     if (used.length === 0) return null
     const detail = used.map(t => `${counts[t.table]} ${counts[t.table] === 1 ? t.one : t.many}`).join(', ')
-    return <UsageChip width={280} codes={used.map(t => t.code)}
+    return <UsageChip width={280} names={used.map(t => t.label)}
       text={`Has records: ${detail}. A vendor with records can't be deleted — ${canManageLifecycle
         ? 'deactivate it, then archive it to take it off this page while every past record keeps its supplier.'
         // S756 (D25): a supervisor or manager sees this chip but not the Archive control, so the
