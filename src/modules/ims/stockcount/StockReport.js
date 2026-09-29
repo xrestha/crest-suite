@@ -290,7 +290,7 @@ export default function StockReport() {
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label"><Tip text="On-hand quantity × unit rate, summed across all items. What your current stock is worth." width={240}>Total Stock Value</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {npr(totalValue)}</div>
+          <div className="stat-value" style={{ fontSize: 18 }}>NPR {npr(totalValue)}</div>
           <div className="stat-sub">{inStockCount} item{inStockCount !== 1 ? 's' : ''} in stock</div>
         </div>
         <div className="stat-card">

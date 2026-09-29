@@ -168,7 +168,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                     <span className={`badge ${a.status === 'active' ? 'badge-green' : 'badge-red'}`}>{a.status}</span>
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditingAsset(a)}>Edit</button>
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditingAsset(a)} aria-label={`Edit ${a.name || 'asset'}`}>Edit</button>
                     {isAdmin && (
                       <Tip text="Admin only — permanently deletes the asset and its posted depreciation history. Never available to a client login." width={260}>
                         <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)' }} onClick={() => { setDeleteError(''); setConfirmDelete(a) }} disabled={deletingId === a.id}>

@@ -32,6 +32,7 @@ import { bandFigure, nmBand } from '../../../shared/operatingBands'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { chipKeys } from '../../../shared/rovingFocus'
 import RowDisclosure from '../../../components/RowDisclosure'
+import { FilterChips } from '../../../components/Tabs'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
 import { isCostedByBuild, BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
@@ -1674,8 +1675,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
             {[
               { key: 'all',   label: 'All',                                  color: null },
               { key: 'good',  label: `✓  ≤${fcWarn}%`,                      color: 'var(--theme-green-text)' },
-              { key: 'watch', label: `⚠  ${fcWarn}–${fcCrit}%`,             color: 'var(--theme-amber-text)' },
-              { key: 'high',  label: `✗  >${fcCrit}%`,                      color: 'var(--theme-red-text)' },
+              { key: 'watch', label: `△  ${fcWarn}–${fcCrit}%`,             color: 'var(--theme-amber-text)' },
+              { key: 'high',  label: `▲  >${fcCrit}%`,                      color: 'var(--theme-red-text)' },
             ].map(pill => (
               <button
                 key={pill.key}
@@ -1699,55 +1700,21 @@ Check the recipe list before saving again — if it timed out after the recipe w
             )}
           </div>
 
-          {/* Tab bar. Wraps (S794): the same no-wrap row as the toolbar above, found by the 390px
-              re-check after that one was fixed — Dessert, Other and Sub-Recipes sat past the edge. */}
-          <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginBottom: 0, borderBottom: '1px solid var(--theme-border)' }}>
-            {tabs.map(tab => {
-              const isActive = activeTab === tab.key
-              const isSubTab = tab.key === 'sub-recipes'
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  style={{
-                    background: isActive ? 'var(--theme-border)' : 'transparent',
-                    border: 'none',
-                    borderBottom: isActive
-                      ? `2px solid ${isSubTab ? 'var(--theme-accent)' : 'var(--theme-purple)'}`
-                      : '2px solid transparent',
-                    padding: '10px 16px',
-                    fontSize: 13,
-                    fontWeight: isActive ? 600 : 400,
-                    color: isActive
-                      ? (isSubTab ? 'var(--theme-accent)' : 'var(--theme-text1)')
-                      : 'var(--theme-text2)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    transition: 'color 0.15s',
-                    borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
-                    marginBottom: -1,
-                  }}
-                >
-                  {tab.label}
-                  <span style={{
-                    background: isActive ? (isSubTab ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'color-mix(in srgb, var(--theme-purple) 10%, transparent)') : 'var(--theme-border-lt)',
-                    // text2 on the lighter border tint: text3 on --theme-border measured 3.97:1.
-                    color: isActive ? (isSubTab ? 'var(--theme-accent-ink)' : 'var(--theme-text1)') : 'var(--theme-text2)',
-                    borderRadius: 'var(--radius-md)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    padding: '1px 7px',
-                    minWidth: 20,
-                    textAlign: 'center',
-                  }}>
-                    {tab.count}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+          {/* Category filter. Wraps (S794); on FilterChips since S796 — the hand-rolled row carried
+              no pressed state, so the applied category was colour alone (a violet underline, or the
+              accent on Sub-Recipes). Every category is one kind of thing here, so every chip reads
+              the same when pressed. */}
+          <FilterChips
+            className="no-print"
+            label="Filter by category"
+            style={{ marginBottom: 12 }}
+            options={tabs.map(tab => ({
+              key: tab.key,
+              label: <>{tab.label} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{tab.count}</span></>,
+            }))}
+            active={activeTab}
+            onChange={setActiveTab}
+          />
 
           {/* Tab content */}
           <div className="card" style={{ borderRadius: '0 var(--radius-sm) var(--radius-sm) var(--radius-sm)', marginTop: 0 }}>
@@ -1825,11 +1792,11 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               {/* Deleting a dish is manager-rank (S756, decided with the owner); the
                                   database refuses it below that. Hide stays with supervisors. */}
-                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>}
+                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Del</button>}
                             </div>
                           </td>
                         </tr>
@@ -1947,11 +1914,11 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               {/* Deleting a dish is manager-rank (S756, decided with the owner); the
                                   database refuses it below that. Hide stays with supervisors. */}
-                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>}
+                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Del</button>}
                             </div>
                           </td>
                         </tr>

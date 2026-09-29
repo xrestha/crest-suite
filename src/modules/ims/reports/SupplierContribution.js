@@ -402,7 +402,7 @@ export default function SupplierContribution() {
             Attributed Cost of Sales
           </Tip>
         </div>
-        <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(totals.attributed)}</div>
+        <div className="stat-value" style={{ fontSize: 18 }}>{npr(totals.attributed)}</div>
         <div className="stat-sub">traced to a supplier</div>
       </div>
       <div className="stat-card">

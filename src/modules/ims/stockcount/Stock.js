@@ -207,8 +207,17 @@ export default function Stock() {
   // stored default would be 'opening' for a beat — and `imsCountOnly` flipping later would leave
   // a tab selected that is no longer on the bar. Falling back to the first available tab makes
   // "not on the bar" and "not reachable" the same fact, whenever the answer settles.
-  const [tabChoice, setActiveTab] = useState('opening')
-  const activeTab = TABS.some(t => t.id === tabChoice) ? tabChoice : TABS[0].id
+  // Until someone picks a tab, the page opens on the job in front of them (S796): Opening Stock
+  // while the month has none, Closing Stock once it does. Opening is normally carried in when the
+  // last month closes, so opening on it mid-month put a live entry grid over the month's starting
+  // figures in front of someone who came to count. A brand-new client still lands on Opening,
+  // which is where the setup guide's first count sends them.
+  const [tabChoice, setActiveTab] = useState(null)
+  const hasOpeningCount = useMemo(
+    () => Object.values(stockData).some(r => r && r.opening !== '' && r.opening != null),
+    [stockData])
+  const wantedTab = tabChoice ?? (hasOpeningCount ? 'closing' : 'opening')
+  const activeTab = TABS.some(t => t.id === wantedTab) ? wantedTab : TABS[0].id
   const [filterCat, setFilterCat] = useState('all')
   const [search, setSearch] = useState('')
   const [saveAllLoading, setSaveAllLoading] = useState(false)
@@ -2375,7 +2384,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{Number(r.qty).toLocaleString('en-IN')} {r.items?.uom || ''}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{valOf(r) > 0 ? fmtNpr(valOf(r)) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>
-                          {!isLocked && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteDailyWastage(r.id)} disabled={wBusy}>Del</button>}
+                          {!isLocked && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteDailyWastage(r.id)} disabled={wBusy} aria-label={`Delete wastage of ${r.items?.name || 'item'}`}>Del</button>}
                         </td>
                       </tr>
                     ))}
@@ -2431,7 +2440,9 @@ export default function Stock() {
         return (
           <>
             <div className="note-banner">
-              {TABS.find(t => t.id === activeTab)?.desc} — enter quantities in the item's UOM, then click Save All.
+              {/* Each box saves when it is left (onCommit → saveRow), so "then click Save All" taught a
+                  step that does not exist and made the ✓ Saved beside each box look doubtful (S796). */}
+              {TABS.find(t => t.id === activeTab)?.desc} — enter quantities in the item's UOM. Each box saves when you leave it; Enter or ↓ moves to the next one. Save All re-sends any box that did not save.
             </div>
 
             {isMobile ? (
@@ -2487,9 +2498,11 @@ export default function Stock() {
                       <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
                     )}
                   </div>
-                  <button className="btn btn-primary" onClick={saveAll} disabled={saveAllLoading || isLocked}>
-                    {saveAllLoading ? 'Saving…' : saved ? '✓ Saved' : 'Save All'}
-                  </button>
+                  <Tip width={260} text="Each box already saves when you leave it. Save All sends again any box that has not saved — after a dropped connection, for example. It never writes a box you have not changed.">
+                    <button className="btn btn-primary" onClick={saveAll} disabled={saveAllLoading || isLocked}>
+                      {saveAllLoading ? 'Saving…' : saved ? '✓ Saved' : 'Save All'}
+                    </button>
+                  </Tip>
                 </div>
               </div>
             )}
@@ -2553,6 +2566,7 @@ export default function Stock() {
                           onCommit={v => saveRow(item.id, v)}
                           placeholder={countPlaceholder}
                           disabled={isLocked}
+                          advanceGroup="stock-grid"
                           className="mobile-stock-input"
                           wrapperStyle={{ flex: 1, minWidth: 0 }}
                         />
@@ -2639,6 +2653,7 @@ export default function Stock() {
                                   onCommit={v => saveRow(item.id, v)}
                                   placeholder={countPlaceholder}
                                   disabled={isLocked}
+                                  advanceGroup="stock-grid"
                                   wrapperStyle={{ width: 110 }}
                                   style={{
                                     background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',

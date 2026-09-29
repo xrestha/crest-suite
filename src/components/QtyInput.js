@@ -16,6 +16,20 @@ import { evaluate, looksLikeExpression } from '../utils/evalMath'
 // Note this renders type="text", since type="number" refuses to hold "3*24" at all.
 // inputMode="decimal" keeps the numeric keypad on mobile, and the spinners it loses were
 // already hidden by CSS on the mobile stock inputs.
+// `advanceGroup` (S796, opt-in): a name shared by a column of boxes — Stock Count's count grid.
+// Enter or ↓ then moves to the next box in the group and ↑ to the previous one, so a 300-item
+// count is typed without the mouse. Moving focus blurs this box, and the blur is what commits,
+// so a move still commits exactly once. Letters, digits and dashes only: it goes into a selector.
+function moveInGroup(el, group, step) {
+  if (!group) return false
+  const boxes = Array.from(document.querySelectorAll(`input[data-qty-group="${group}"]`)).filter(n => !n.disabled)
+  const next = boxes[boxes.indexOf(el) + step]
+  if (!next) return false
+  next.focus()
+  next.select()
+  return true
+}
+
 export default function QtyInput({
   value,
   onChange,
@@ -23,6 +37,7 @@ export default function QtyInput({
   wrapperStyle,
   disabled,
   style,
+  advanceGroup,
   ...rest
 }) {
   const [draft, setDraft] = useState(null) // non-null only while focused
@@ -90,9 +105,13 @@ export default function QtyInput({
     if (e.key === 'Enter') {
       // Blur and let onBlur run commit() exactly once — calling commit() here too made every
       // Enter fire onCommit twice (the keydown's commit, then the blur's, both from the same
-      // still-rendered closure), double-running any call site whose onCommit writes.
+      // still-rendered closure), double-running any call site whose onCommit writes. Moving to
+      // the next box in the group blurs this one just the same.
       e.preventDefault()
-      e.currentTarget.blur()
+      if (!moveInGroup(e.currentTarget, advanceGroup, 1)) e.currentTarget.blur()
+    }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && advanceGroup) {
+      if (moveInGroup(e.currentTarget, advanceGroup, e.key === 'ArrowDown' ? 1 : -1)) e.preventDefault()
     }
     if (e.key === 'Escape') {
       // Only consume Escape when there is an edit to cancel — then it reverts this box and
@@ -121,6 +140,7 @@ export default function QtyInput({
         onFocus={() => setDraft(asText)}
         onBlur={commit}
         onKeyDown={handleKeyDown}
+        data-qty-group={advanceGroup}
         style={inputStyle}
         {...rest}
       />

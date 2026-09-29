@@ -133,6 +133,11 @@
 .mobile-stock-input::-webkit-inner-spin-button,
 .mobile-stock-input::-webkit-outer-spin-button { -webkit-appearance: none; }
 .mobile-stock-input:focus { border-color: var(--theme-accent); }
+/* The product's focus pair, so the box being typed into is unmistakable when Enter/↓ moves the
+   cursor down the cards (S796). A 1px border colour alone is not a focus indicator. */
+.mobile-stock-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
 .mobile-stock-unit {
   font-size: 13px;
   color: var(--theme-text2);

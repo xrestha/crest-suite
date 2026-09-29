@@ -434,7 +434,7 @@ export default function VatReport() {
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total net purchases this period: non-VAT plus VAT-inclusive, both after bill discounts and after goods returned. Includes VAT on the VAT-inclusive half." width={260}>Total Net Purchases</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-IN')}</div>
+          <div className="stat-value" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-IN')}</div>
           <div className="stat-sub">{entries.length} purchase lines</div>
         </div>
         <div className="stat-card">

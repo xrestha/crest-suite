@@ -23,6 +23,7 @@ import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { groupSavedRows, nearestPeriodWithFigures, overheadInserts } from './overheadsRows'
 import { SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
 import { COST_BREAKDOWN_COLORS } from '../../../shared/chartColors'
+import Tabs from '../../../components/Tabs'
 
 // A bucket is a CATEGORY, so its fill takes a chart slot, never a semantic token (S796): Overhead
 // was green and Tax & Fees purple on the page that says "✓ Profitable" in green. The slots are the
@@ -810,36 +811,26 @@ export default function Overheads() {
 
       {/* Entry card — tabs + table */}
       <div className="card" style={{ marginBottom: 20 }}>
-        {/* Bucket tabs */}
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}
-             role="tablist" aria-label="Fixed cost buckets">
-          {Object.entries(BUCKET_CONFIG).map(([key, c]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={activeBucket === key}
-              onClick={() => setActiveBucket(key)}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                padding: '10px 20px', fontSize: 13, fontWeight: 500,
-                color: activeBucket === key ? 'var(--theme-text1)' : 'var(--theme-text2)',
-                borderBottom: activeBucket === key ? '2px solid var(--theme-accent)' : '2px solid transparent',
-                marginBottom: -1, transition: 'color 0.12s', whiteSpace: 'nowrap'
-              }}
-            >
-              {c.label}
-              {totals[key] > 0 && (
-                <span style={{ marginLeft: 8, fontSize: 11, background: 'color-mix(in srgb, var(--theme-text1) 8%, transparent)', borderRadius: 'var(--radius-md)', padding: '2px 7px', color: 'var(--theme-text2)' }}>
-                  {fmt(totals[key])}
-                </span>
-              )}
-            </button>
-          ))}
+        {/* Bucket tabs: the shared Tabs (S796). The hand-rolled row declared tablist/tab but had no
+            roving focus, and the + Add Row button sat INSIDE the tablist, where a screen reader
+            meets a button that is not a tab. It sits beside the row now. */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+          <Tabs
+            idBase="overheads-bucket"
+            label="Fixed cost buckets"
+            variant="panel"
+            style={{ flex: '1 1 auto', marginBottom: 0 }}
+            tabs={Object.entries(BUCKET_CONFIG).map(([key, c]) => ({
+              key,
+              label: <>{c.label}{totals[key] > 0 && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text2)' }}>{fmt(totals[key])}</span>}</>,
+            }))}
+            active={activeBucket}
+            onChange={setActiveBucket}
+          />
           {!isLocked && (
             <button
               className="btn btn-ghost"
-              style={{ fontSize: 12, marginLeft: 'auto' }}
+              style={{ fontSize: 12 }}
               onClick={() => addRow(activeBucket)}
             >
               + Add Row

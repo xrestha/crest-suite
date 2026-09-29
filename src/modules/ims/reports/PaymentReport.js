@@ -296,7 +296,7 @@ export default function PaymentReport() {
           <div className="stat-label">
             <Tip text="Total billed by suppliers this period, before returns: bill totals net of discount and including VAT where charged. This is money owed to suppliers — not sales revenue. It ties to the Purchases register and to Outstanding Payables." width={280}>Gross Purchases</Tip>
           </div>
-          <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">

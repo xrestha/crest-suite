@@ -286,7 +286,7 @@ export default function NonVatReport() {
           <div className="stat-label">
             <Tip text="Net value of all non-VAT purchases this period, after this half's share of any bill discount and after goods returned to the vendor. A mixed bill's discount is split between here and the VAT Report in proportion to line value, so the two never claim it twice." width={280}>Total Non-VAT Purchases</Tip>
           </div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(total).toLocaleString('en-IN')}</div>
+          <div className="stat-value" style={{ fontSize: 16 }}>NPR {Math.round(total).toLocaleString('en-IN')}</div>
           <div className="stat-sub">{entries.length} entr{entries.length !== 1 ? 'ies' : 'y'}{totalDiscount > 0 ? ` · −NPR ${Math.round(totalDiscount).toLocaleString('en-IN')} disc.` : ''}{returnTotal > 0 ? ` · −NPR ${Math.round(returnTotal).toLocaleString('en-IN')} returns` : ''}</div>
         </div>
         <div className="stat-card">

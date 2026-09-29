@@ -362,7 +362,7 @@ export default function StockAgeing() {
         <div className="stat-label">
           <Tip width={340} text="Value of stock still on hand as at the date this report is aged to, valued at what you actually paid for each batch. Quantities follow your latest stock count for each item. Stock of unknown age has no purchase line, so it is valued at the current Item Master rate — see the Unknown Age card.">Stock On Hand</Tip>
         </div>
-        <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(totals?.value)}</div>
+        <div className="stat-value" style={{ fontSize: 18 }}>{npr(totals?.value)}</div>
         {/* rows, not filtered: the value above is the whole report's. */}
         <div className="stat-sub">{rows.length} item{rows.length === 1 ? '' : 's'}</div>
       </div>

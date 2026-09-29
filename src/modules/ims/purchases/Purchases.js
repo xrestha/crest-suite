@@ -591,7 +591,7 @@ export default function Purchases() {
               purchases at the ITEM MASTER rate, and Monthly Summary / P&L at bill rate net of
               allocated discounts. This is bill rate before discount — say what it is. */}
           <div className="stat-label"><Tip text={`Goods value at qty × the rate on each bill, before bill discounts and excluding VAT. Monthly Summary and P&L take the same bills net of their discounts${isPan ? ' and, because this outlet is not VAT-registered (PAN bill), with the VAT paid on VAT bills added — it is not claimable, so it is food cost' : ''}, and Stock Count's Summary values what arrived at the Item Master rate — so those can differ from this by design. The payable figure including VAT is in the table footer.`} width={300}>Gross Purchases (ex-VAT)</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Goods sent back to suppliers in this month, at the rate on the original bill. A return counts in the month it happened — including one against a bill from an earlier month (milk bought on the 28th of last month and returned on the 2nd of this one is this month's return)." width={300}>Returns</Tip></div>
@@ -605,7 +605,7 @@ export default function Purchases() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Net Purchases</div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {netTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 16 }}>NPR {netTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Period Status</div>
@@ -855,8 +855,12 @@ export default function Purchases() {
                                 {methodOf(first)}
                               </span>
                               {!isLocked && <>
-                                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => openEditGroup(gid)}>Edit</button>
-                                <button className="btn btn-danger" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => deleteGroup(gid)}>Del</button>
+                                {/* Named for the bill (S796): ~110 "Edit"/"Del" buttons on one list read identically to a
+                                    screen reader, with nothing to say which bill each would change. */}
+                                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => openEditGroup(gid)}
+                                  aria-label={`Edit bill from ${first.vendors?.name || 'no vendor'}${first.invoice_ref ? ` #${first.invoice_ref}` : ''}`}>Edit</button>
+                                <button className="btn btn-danger" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => deleteGroup(gid)}
+                                  aria-label={`Delete bill from ${first.vendors?.name || 'no vendor'}${first.invoice_ref ? ` #${first.invoice_ref}` : ''}`}>Del</button>
                               </>}
                             </div>
                           </td>

@@ -771,7 +771,7 @@ export default function VendorReport() {
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Gross Purchases</div>
-          <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Returns</div>
@@ -781,7 +781,7 @@ export default function VendorReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Net Spend</div>
-          <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 17 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Active Vendors</div>

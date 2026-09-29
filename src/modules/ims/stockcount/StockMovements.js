@@ -386,7 +386,7 @@ export default function StockMovements() {
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="The raw-ingredient value of everything that passed through a prep item this period. This is a slice of the raw-item value on the Raw Items tab, not an addition to it — the same ingredients, grouped by the prep item they went through. Each ingredient is counted once: where one sub-recipe is made from another, only the outer one is charged, because its cost per batch already contains the inner one." width={320}>Value</Tip></div>
-            <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+            <div className="stat-value" style={{ fontSize: 18 }}>NPR {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
             <div className="stat-sub">at ingredient cost</div>
           </div>
         </div>
@@ -399,7 +399,7 @@ export default function StockMovements() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value this period's sales consumed. Covers POS sales and comps AND manual Sales Entry, which has written depletion movements since 2026-07-30." width={300}>Value Depleted</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">POS + manual entry, at cost</div>
         </div>
         <div className="stat-card">

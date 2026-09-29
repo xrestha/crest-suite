@@ -535,7 +535,7 @@ export default function ReorderReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Reorder Value</div>
-          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalShortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 18 }}>NPR {totalShortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">estimated purchase needed</div>
         </div>
         <div className="stat-card">

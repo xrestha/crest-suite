@@ -85,6 +85,50 @@ test('Enter commits exactly once', () => {
   expect(onCommit).toHaveBeenCalledWith(48)
 })
 
+// S796: a count column typed without the mouse. Moving on is what commits the box left behind,
+// exactly once, and a box outside the group is never reached.
+test('advanceGroup: Enter and ↓ move to the next box, ↑ back, each leaving box committing once', () => {
+  const commits = [jest.fn(), jest.fn(), jest.fn()]
+  function Column() {
+    const [vals, setVals] = useState(['', '', ''])
+    return (
+      <>
+        {vals.map((v, i) => (
+          <QtyInput key={i} aria-label={`box ${i}`} advanceGroup="count" value={v}
+            onChange={x => setVals(p => p.map((y, j) => (j === i ? x : y)))} onCommit={commits[i]} />
+        ))}
+        <QtyInput aria-label="elsewhere" value="" onChange={() => {}} />
+      </>
+    )
+  }
+  const { getByLabelText } = render(<Column />)
+  const [a, b, c] = [0, 1, 2].map(i => getByLabelText(`box ${i}`))
+  focus(a)
+  type(a, '3*4')
+  act(() => { fireEvent.keyDown(a, { key: 'Enter' }) })
+  expect(document.activeElement).toBe(b)
+  expect(commits[0]).toHaveBeenCalledTimes(1)
+  expect(commits[0]).toHaveBeenCalledWith(12)
+  type(b, '5')
+  act(() => { fireEvent.keyDown(b, { key: 'ArrowDown' }) })
+  expect(document.activeElement).toBe(c)
+  expect(commits[1]).toHaveBeenCalledWith(5)
+  act(() => { fireEvent.keyDown(c, { key: 'ArrowUp' }) })
+  expect(document.activeElement).toBe(b)
+  // The last box in the group: Enter just commits and leaves, it never jumps outside the group.
+  act(() => { fireEvent.keyDown(b, { key: 'ArrowDown' }) })
+  act(() => { fireEvent.keyDown(c, { key: 'Enter' }) })
+  expect(document.activeElement).not.toBe(getByLabelText('elsewhere'))
+})
+
+test('without advanceGroup the arrow keys stay with the box', () => {
+  const { container } = render(<Harness onCommit={jest.fn()} />)
+  const input = container.querySelector('input')
+  focus(input)
+  act(() => { fireEvent.keyDown(input, { key: 'ArrowDown' }) })
+  expect(document.activeElement).toBe(input)
+})
+
 // Escape blurs the field, and the blur's commit() runs before React re-renders — without the
 // cancel ref it closed over the pre-Escape draft and committed 48, identical to Enter (S623).
 test('Escape cancels the expression instead of committing it', () => {

@@ -1124,7 +1124,7 @@ ${text}`, detail })
             </div>
             <div className="stat-card">
               <div className="stat-label">Total Issued Value{statScope}</div>
-              <div className="stat-value gold" style={{ fontSize: 16 }}>
+              <div className="stat-value" style={{ fontSize: 16 }}>
                 {totalIssuedValue > 0 ? `NPR ${Math.round(totalIssuedValue).toLocaleString('en-IN')}` : '—'}
               </div>
             </div>

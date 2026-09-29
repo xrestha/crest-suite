@@ -21,6 +21,7 @@ import {
   readItemRefCounts, refCodesFromCounts, priceImpactSentence, PRICE_CHANGE_KEEPS,
 } from './itemRefTables'
 import VatCostPriceBanner from './VatCostPriceBanner'
+import { FilterChips } from '../../../components/Tabs'
 import { vatModeOf } from '../recipes/menuPriceVat'
 
 const DEFAULT_CATEGORIES = [
@@ -1179,62 +1180,44 @@ export default function Items() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          {/* Used-In filter chips */}
-          {[
-            { key: 'all',    label: 'All' },
-            { key: 'R',      label: '🍽 Recipes' },
-            { key: 'P',      label: '📦 Purchases' },
-            { key: 'stock',  label: '📊 Stock' },
-            { key: 'unused', label: '○ Unused' },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setFilterUsage(key)}
-              className={filterUsage === key ? 'tab-btn tab-btn--active' : 'tab-btn'}
-            >
-              {label}
-            </button>
-          ))}
+          {/* Used-In filter (S796: FilterChips, so the applied filter has a pressed state). */}
+          <FilterChips
+            label="Filter by where the item is used"
+            options={[
+              { key: 'all',    label: 'All' },
+              { key: 'R',      label: '🍽 Recipes' },
+              { key: 'P',      label: '📦 Purchases' },
+              { key: 'stock',  label: '📊 Stock' },
+              { key: 'unused', label: '○ Unused' },
+            ]}
+            active={filterUsage}
+            onChange={setFilterUsage}
+          />
         </div>
-        <button
+        {/* A lone on/off toggle is a bare .tab-btn with aria-pressed (component-library.md). */}
+        <button type="button" aria-pressed={sortConvFirst}
           onClick={() => setSortConvFirst(v => !v)}
-          style={{
-            fontSize: 12, padding: '7px 14px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', whiteSpace: 'nowrap',
-            border: sortConvFirst ? '1px solid var(--theme-accent)' : '1px solid var(--theme-border)',
-            background: sortConvFirst ? 'var(--theme-table-hover)' : 'transparent',
-            color: sortConvFirst ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
-            fontWeight: sortConvFirst ? 600 : 400
-          }}
+          className={`tab-btn${sortConvFirst ? ' tab-btn--active' : ''}`}
         >
           {sortConvFirst ? '✕ ' : ''}With Conversion
         </button>
       </div>
 
-      {/* Category tabs */}
-      <div className="no-print" style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--theme-border)', marginBottom: 0, flexWrap: 'wrap' }}>
-        {[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => {
-          const count = tabCounts[tab.id] || 0
-          const active = filterCat === tab.id
-          return (
-            <button key={tab.id} onClick={() => setFilterCat(tab.id)} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: '10px 16px', fontSize: 13, fontWeight: 500,
-              color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
-              borderBottom: active ? '2px solid var(--theme-accent)' : '2px solid transparent',
-              marginBottom: -1, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap'
-            }}>
-              {tab.name.length > 13
-                ? tab.name.split(' ').slice(0,2).map((w,i) => i===0 ? w : w.slice(0,4)+'.').join(' ')
-                : tab.name}
-              <span style={{
-                fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
-                background: active ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : 'color-mix(in srgb, var(--theme-text2) 12%, transparent)',
-                color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text2)'
-              }}>{count}</span>
-            </button>
-          )
-        })}
-      </div>
+      {/* Category filter (S796). A hand-rolled row of bare buttons with no pressed state, so which
+          category was applied was carried by colour alone, and it shortened any name past 13
+          characters word by word — "Dairy & Beverages" became "Dairy &.". FilterChips gives it
+          aria-pressed, one Tab stop and arrow keys, and the row wraps instead of truncating. */}
+      <FilterChips
+        className="no-print"
+        label="Filter by category"
+        style={{ marginBottom: 12 }}
+        options={[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => ({
+          key: tab.id,
+          label: <>{tab.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{tabCounts[tab.id] || 0}</span></>,
+        }))}
+        active={filterCat}
+        onChange={setFilterCat}
+      />
 
       <div className="card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
         {loading ? (
@@ -1350,13 +1333,14 @@ export default function Items() {
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
-                          onClick={() => openEdit(item)}>Edit</button>
+                          onClick={() => openEdit(item)} aria-label={`Edit ${item.name}`}>Edit</button>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
-                          onClick={() => toggleActive(item)} disabled={togglingId != null}>
+                          onClick={() => toggleActive(item)} disabled={togglingId != null}
+                          aria-label={`${item.is_active ? 'Hide' : 'Show'} ${item.name}`}>
                           {togglingId === item.id ? '…' : item.is_active ? 'Hide' : 'Show'}
                         </button>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
-                          onClick={() => deleteItem(item)}>Del</button>
+                          onClick={() => deleteItem(item)} aria-label={`Delete ${item.name}`}>Del</button>
                         </div>
                       </td>
                     </tr>

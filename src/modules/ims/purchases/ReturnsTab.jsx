@@ -770,9 +770,9 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                     <td style={{ textAlign: 'right' }}>
                       {!isLocked && (
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEditReturn(ret)}>Edit</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEditReturn(ret)} aria-label={`Edit return of ${ret.items?.name || 'item'}`}>Edit</button>
                           {/* Reads the return's bill before asking (S792 stage 2), so it says so while it does. */}
-                          <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteReturn(ret)} disabled={!!checkingId}>
+                          <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteReturn(ret)} disabled={!!checkingId} aria-label={`Delete return of ${ret.items?.name || 'item'}`}>
                             {checkingId === ret.id ? 'Checking…' : 'Del'}
                           </button>
                         </div>

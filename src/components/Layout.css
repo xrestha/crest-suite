@@ -2496,6 +2496,14 @@ table.data-table td input:focus {
   border-color: var(--theme-accent);
   box-shadow: 0 0 0 2px var(--theme-focus-ring);
 }
+/* Keyboard focus gets the solid pair, as .form-select and .form-input do (S574). The rule above is
+   (0,2,3), so it beat the bare input:focus-visible backstop and a table box showed only the soft
+   ring — measured on Stock Count as a 12%-alpha tint, with the border change hidden by the inline
+   border every IMS grid sets. A 300-row count typed from the keyboard had no visible cursor (S796). */
+table.data-table td select:focus-visible,
+table.data-table td input:focus-visible {
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
 
 /* Remove the up/down spinner arrows on number inputs app-wide for a cleaner look.
    Still a real number input — keeps the mobile numeric keypad and min/max validation. */

@@ -284,6 +284,18 @@ export default function Sales() {
     setViewMode(READ_ONLY_TAB)
   }, [posOwnsSales, viewMode, tillHandover, preTillOpen])
 
+  // A month entered day by day has nothing on Bulk Entry, and opening there showed a column of
+  // empty boxes under "Items Sold 274" (S796). Until someone picks a tab, a period whose sales are
+  // all daily opens on Daily Entry instead. A click sets `tabPicked`, so this never moves anyone
+  // off a tab they chose.
+  const tabPicked = useRef(false)
+  useEffect(() => {
+    if (tabPicked.current || loading || posOwnsSales || viewMode !== 'bulk') return
+    const hasBulk = Object.values(sales).some(q => (parseFloat(q) || 0) !== 0)
+    const hasAny = Object.values(allDaySums).some(q => (q || 0) !== 0)
+    if (!hasBulk && hasAny) setViewMode('daily')
+  }, [loading, posOwnsSales, viewMode, sales, allDaySums])
+
   async function init() {
     setLoading(true)
     const results = await Promise.all([
@@ -1235,7 +1247,7 @@ export default function Sales() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total ex-VAT revenue for the period, across every entry — bulk, daily and POS. Each sale is priced at the selling price recorded when it was entered, less any discount on it. Used as the denominator for Food Cost %." width={300}>Period Revenue</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 18 }}>
+          <div className="stat-value" style={{ fontSize: 18 }}>
             NPR {totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </div>
           <div className="stat-sub">Excl. VAT</div>
@@ -1267,6 +1279,7 @@ export default function Sales() {
                 aria-controls="sales-panel" tabIndex={rovingTabIndex(viewMode === key)}
                 onClick={() => {
                   if (tabDisabled) return
+                  tabPicked.current = true
                   // Land a POS client on a day they can enter, not on today's till day.
                   if (key === 'daily' && posOwnsSales && preTillOpen && selectedDay >= tillStart) setSelectedDay(1)
                   setViewMode(key)
