@@ -597,7 +597,7 @@ export default function MenuEngineering() {
                   <YAxis type="number" dataKey="y" name="Profitability" domain={[profitFloor, 100]} label={{ value: 'Profitability % →', angle: -90, position: 'insideLeft', offset: 10, fill: colors.text3, fontSize: 11 }} tick={{ fill: colors.text3, fontSize: 11 }} tickFormatter={v => `${v}%`} />
                   <ReferenceLine x={medianQty} stroke={colors.borderLt} strokeDasharray="5 4" label={{ value: `median ${medianQty.toFixed(0)}`, position: 'top', fill: colors.text3, fontSize: 10 }} />
                   <ReferenceLine y={100 - FC_CUTOFF} stroke={colors.borderLt} strokeDasharray="5 4" label={{ value: `FC ${FC_CUTOFF}%`, position: 'right', fill: colors.text3, fontSize: 10 }} />
-                  <ReferenceLine x={0} stroke="none" label={{ value: '★ STARS', position: 'insideTopRight', fill: '#34d399', fontSize: 9, offset: 8 }} />
+                  <ReferenceLine x={0} stroke="none" label={{ value: '★ STARS', position: 'insideTopRight', fill: '#34d399', fontSize: 10, offset: 8 }} />
                   <RTooltip content={<ScatterTooltipContent />} cursor={{ strokeDasharray: '3 3' }} />
                   <Scatter data={scatterData} shape={<ScatterDot />} {...chartMotion()} />
                 </ScatterChart>

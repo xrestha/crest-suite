@@ -13,6 +13,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { getCf, fmtRate } from './purchasesHelpers'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import Modal from '../../../components/Modal'
 import PurchaseBillForm from './PurchaseBillForm'
 import PurchaseBillPrint from './PurchaseBillPrint'
 
@@ -314,6 +315,13 @@ export default function PurchaseBillPage() {
     navigate(listUrl)
   }
 
+  // Skip, Escape and the backdrop all land here: leave Item Master as it is and go back to the
+  // list. Inert while an update is running, so a stray Escape cannot strand a half-applied sync.
+  const skipRateUpdates = () => {
+    if (rateUpdateBusy) return
+    setRateUpdateItems([]); setRateUpdateSelected(new Set()); setRateUpdateError(null); navigate(listUrl)
+  }
+
   // ─── RENDER ──────────────────────────────────────────────
 
   if (authLoading) return null
@@ -414,11 +422,12 @@ export default function PurchaseBillPage() {
         )}
       </div>
 
-      {/* Rate update prompt */}
+      {/* Rate update prompt. On `Modal` (S794): it was the last hand-rolled overlay in IMS — no
+          role="dialog", no focus move or trap, no Escape, no focus return — on a decision that
+          rewrites Item Master prices. Escape and the backdrop mean Skip, which writes nothing, and
+          both are inert while an update is in flight. */}
       {rateUpdateItems.length > 0 && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', borderRadius: 'var(--radius-md)', padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>📦 Rate changes detected</div>
+        <Modal onClose={skipRateUpdates} title="📦 Rate changes detected" maxWidth={520}>
             <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 8 }}>This bill's rate differs from Item Master for {rateUpdateItems.length} item{rateUpdateItems.length !== 1 ? 's' : ''}. Tick the ones whose Item Master price should change to match it.</div>
             {/* S756 (D5): the same consequence Items.js states before a price edit. Item Master's
                 price is not a "going forward" figure — stock counts, wastage, staff meals, stock
@@ -439,7 +448,7 @@ export default function PurchaseBillPage() {
             </label>
 
             {/* Item rows */}
-            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
+            <div style={{ maxHeight: '45vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
               {rateUpdateItems.map(item => (
                 <label key={item.itemId} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}>
                   <input type="checkbox"
@@ -472,12 +481,11 @@ export default function PurchaseBillPage() {
                 {rateUpdateBusy ? 'Updating…' : `${rateUpdateError ? 'Retry' : 'Update'} ${rateUpdateSelected.size} item${rateUpdateSelected.size !== 1 ? 's' : ''}`}
               </button>
               <button className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 16px' }}
-                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()); setRateUpdateError(null); navigate(listUrl) }}>
+                onClick={skipRateUpdates} disabled={rateUpdateBusy}>
                 {rateUpdateError ? 'Leave as is' : 'Skip all'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
 

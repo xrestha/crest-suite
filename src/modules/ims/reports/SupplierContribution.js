@@ -86,7 +86,7 @@ export default function SupplierContribution() {
     setLoadError(null)
     const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (error) { setLoadError(error.message); setPeriods([]); setLoading(false); return }
+    if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
     setPeriods(p || [])
     // No closed-period default here, unlike Variance/Shrinkage: nothing on this page subtracts a
     // closing count, so an open period gives a truthful partial-month answer rather than a

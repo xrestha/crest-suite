@@ -143,7 +143,7 @@ export default function PurchaseOrders() {
       .eq('period_id', periodId)
       .order('created_at', { ascending: false })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    if (error) { setLoadError(error.message || String(error)); return }
+    if (error) { setLoadError(error); return }
     setLoadError(null)
     setPos(data || [])
     await loadReceipts(data || [], periodId)

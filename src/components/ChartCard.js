@@ -97,17 +97,20 @@ function ChartModal({ title, legend, footer, renderChart, onClose, modalHeight }
 
 export default function ChartCard({
   title, legend, footer, cardStyle, smallHeight = 160, modalHeight = 440,
-  renderChart, titleStyle,
+  renderChart, titleStyle, headingLevel = 3,
 }) {
   const [expanded, setExpanded] = useState(false)
   const ts = titleStyle || DEFAULT_TITLE_STYLE
+  // h3 fits a dashboard, where the chart sits under a section's h2. A report page that puts a
+  // chart straight under its h1 passes 2, or the outline skips a level there (S794).
+  const Heading = headingLevel === 2 ? 'h2' : 'h3'
 
   return (
     <div className="card card--compact" style={cardStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
         {/* A real <h3>, not a styled div, so screen-reader users can jump between charts by
             heading (dashboard critique P2, S569). margin reset since h3 otherwise adds its own. */}
-        <h3 style={{ margin: 0, ...ts }}>{title}</h3>
+        <Heading style={{ margin: 0, ...ts }}>{title}</Heading>
         <div style={{ display: 'flex', gap: 16, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {legend}
           {/* aria-label, not title alone: `title` is an unreliable accessible name and is invisible

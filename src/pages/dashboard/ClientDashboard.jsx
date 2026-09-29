@@ -51,7 +51,7 @@ import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import SetupGuideCard from '../../components/SetupGuideCard'
 import SupportContactLine from '../../components/SupportContactLine'
 import WeatherHeaderSlot from './WeatherHeaderSlot'
-const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
+import { CHART_COLORS } from '../../shared/chartColors'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 

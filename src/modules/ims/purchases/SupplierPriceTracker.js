@@ -713,6 +713,7 @@ export default function SupplierPriceTracker() {
                         table's structure and its cells stop being associated with their column headers.
                         The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
                     <tr
+                      className={trend === 'up' ? 'row-tinted' : undefined}
                       style={{ background: trend === 'up' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent', cursor: 'pointer' }}
                       onClick={() => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
                     >

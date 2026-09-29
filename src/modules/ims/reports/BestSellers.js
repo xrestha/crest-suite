@@ -79,7 +79,7 @@ export default function BestSellers() {
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
-        if (error) { setLoadError(error.message); return }
+        if (error) { setLoadError(error); return }
         setPeriods(data || [])
         if (data && data.length > 0) setSelected(data[0])
       })
@@ -329,6 +329,7 @@ export default function BestSellers() {
         <>
           {/* Bar chart — top 10 */}
           <ChartCard
+            headingLevel={2}
             title={`Top 10 — ${sortBy === 'qty' ? 'Units Sold' : sortBy === 'margin' ? 'Gross Margin %' : 'Revenue (NPR)'}`}
             titleStyle={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}
             cardStyle={{ marginBottom: 24 }}
@@ -365,10 +366,10 @@ export default function BestSellers() {
             )}
           />
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          <div className="pair-grid">
             {/* Best sellers */}
             <div className="card">
-              <h3 style={{ margin: '0 0 14px', fontSize: 14, color: GREEN }}>▲ Top 10 Performers</h3>
+              <h2 style={{ margin: '0 0 14px', fontSize: 14, color: GREEN }}>▲ Top 10 Performers</h2>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -400,7 +401,7 @@ export default function BestSellers() {
 
             {/* Worst sellers */}
             <div className="card">
-              <h3 style={{ margin: '0 0 14px', fontSize: 14, color: RED }}>▼ Bottom 10 Performers</h3>
+              <h2 style={{ margin: '0 0 14px', fontSize: 14, color: RED }}>▼ Bottom 10 Performers</h2>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>

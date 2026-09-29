@@ -528,7 +528,7 @@ export default function StockAgeing() {
                 const counted = lastCountByItem[r.item_id]
                 const windowCf = r.carriedForwardQty - r.countSurplusQty
                 return (
-                  <tr key={r.item_id} style={{ background: stale ? 'color-mix(in srgb, var(--theme-amber) 10%, transparent)' : 'transparent' }}>
+                  <tr key={r.item_id} className={stale ? 'row-tinted' : undefined} style={{ background: stale ? 'color-mix(in srgb, var(--theme-amber) 10%, transparent)' : 'transparent' }}>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {meta.name || '—'}
                       {windowCf > 1e-9 && (

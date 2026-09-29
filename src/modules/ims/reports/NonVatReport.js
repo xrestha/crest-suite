@@ -44,7 +44,7 @@ export default function NonVatReport() {
       .then(({ data, error }) => {
         // A statutory report must never mistake a failed read for "no periods yet" — the figures
         // on this page are what gets filed with the IRD (S612, the silent-NPR-0 class).
-        if (error) { setLoadError(error.message); return }
+        if (error) { setLoadError(error); return }
         setPeriods(data || [])
         if (data && data.length > 0) setSelected(data[0])
       })
@@ -328,10 +328,10 @@ export default function NonVatReport() {
       {/* ── ENTRIES TAB ── */}
       {!loadError && tab === 'entries' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Non-VAT Purchase Entries</span>
             {!loading && <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{entries.length} entries</span>}
-          </h3>
+          </h2>
           {loading ? (
             <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
           ) : entries.length === 0 ? (
@@ -432,7 +432,7 @@ export default function NonVatReport() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text1)' }}>Vendor-wise Non-VAT Summary</h3>
+              <h2 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text1)' }}>Vendor-wise Non-VAT Summary</h2>
               <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
                 Grouped by supplier — share with your CA for expense reconciliation
               </p>

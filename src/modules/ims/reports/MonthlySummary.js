@@ -51,7 +51,7 @@ export default function MonthlySummary() {
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
     if (!periodReq.isCurrent(initKey)) return   // a newer client switch owns the page
-    if (error) { setLoadError(error.message); setLoading(false); return }
+    if (error) { setLoadError(error); setLoading(false); return }
     setPeriods(p || [])
     // Falls back to the latest period when none is open (the S722 rule): between closing one month
     // and opening the next, this page selected nothing and said "No data for this period yet"
@@ -390,9 +390,9 @@ export default function MonthlySummary() {
 
           {/* Category breakdown table */}
           <div className="card">
-            <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <h2 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Category Breakdown — {clientName} · {periodLabel}
-            </h3>
+            </h2>
             <div className="table-wrap">
               <table className="data-table">
                 <thead>

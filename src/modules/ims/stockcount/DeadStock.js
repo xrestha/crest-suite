@@ -77,7 +77,7 @@ export default function DeadStock() {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
         // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-        if (error) { setLoadError(error.message); setLoading(false); return }
+        if (error) { setLoadError(error); setLoading(false); return }
         setPeriods(data || [])
         // The most recent CLOSED period, else the latest (S756) — this report cannot judge without
         // a closing count, and the open month is almost never counted yet.
@@ -492,7 +492,9 @@ export default function DeadStock() {
             </thead>
             <tbody>
               {filtered.map(r => (
-                <tr key={r.id} style={{ opacity: r.status === 'Dead' ? 1 : 0.85 }}>
+                /* No row opacity (S794): 0.85 on every Slow row took its text to 3.66:1 on Light,
+                   under AA, across the whole table. The Status chip already says Dead or Slow. */
+                <tr key={r.id}>
                   <td><strong>{r.name}</strong></td>
                   <td><span className="badge badge-yellow">{r.category}</span></td>
                   <td>{r.uom}</td>

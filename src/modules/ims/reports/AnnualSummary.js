@@ -70,7 +70,7 @@ export default function AnnualSummary() {
     const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
     if (!yearReq.isCurrent(initKey)) return   // a newer client switch owns the page
-    if (error) { setLoadError(error.message); setLoading(false); return }
+    if (error) { setLoadError(error); setLoading(false); return }
     setAllPeriods(p || [])
     // `loading` stays TRUE while there are periods (FIGURES-11): clearing it here painted a frame of
     // "No periods found for —." before a year had been chosen, let alone read. rebuildYearOptions

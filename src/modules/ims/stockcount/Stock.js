@@ -2411,6 +2411,11 @@ export default function Stock() {
 
       {fieldKeyOf(activeTab) && (() => {
         const fieldKey = fieldKeyOf(activeTab)
+        // The accessible name of each grid box — "Closing count for Tomato (KG)". The cells have no
+        // <label>, so a screen reader announced "edit text, 34" with no item, field or unit: 322
+        // times on one real count sheet, on the page a month is closed from (S794).
+        const fieldName = FIELD_LABEL[fieldKey] || fieldKey
+        const qtyBoxLabel = item => `${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)} for ${item.name}${item.uom ? ` (${item.uom})` : ''}`
         const counted = countedItems(fieldKey)
         const pct = visible.length > 0 ? Math.round(counted / visible.length * 100) : 0
         const totalQty = visible.reduce((s, item) => s + (parseFloat(stockData[item.id]?.[fieldKey]) || 0), 0)
@@ -2538,6 +2543,7 @@ export default function Stock() {
                       </div>
                       <div className="mobile-stock-card-input-row">
                         <QtyInput
+                          aria-label={qtyBoxLabel(item)}
                           value={val}
                           onChange={v => updateField(item.id, fieldKey, v)}
                           onCommit={v => saveRow(item.id, v)}
@@ -2623,6 +2629,7 @@ export default function Stock() {
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{item.uom}</td>
                               <td style={{ textAlign: 'right', width: 140 }}>
                                 <QtyInput
+                                  aria-label={qtyBoxLabel(item)}
                                   value={val}
                                   onChange={v => updateField(item.id, fieldKey, v)}
                                   onCommit={v => saveRow(item.id, v)}

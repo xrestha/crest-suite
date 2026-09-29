@@ -1295,13 +1295,19 @@ textarea,
   border: 1px solid color-mix(in srgb, var(--theme-accent) 28%, transparent);
   font-size: 12px;
   line-height: 1.4;
-  white-space: nowrap;
+  /* Wraps rather than running off the page (S794). It was `nowrap` with no width cap, and at
+     390px Stock Ageing's "12 months to Ashwin 2083 · as at …" ran 26px past the edge — the as-of
+     date, the part a reader checks, being what `overflow-x: hidden` cut. The STATE stays an atom. */
+  max-width: 100%;
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
 .period-scope-label {
   font-weight: 600;
   color: var(--theme-accent-ink);
   letter-spacing: 0.01em;
+  min-width: 0;
 }
 
 /* The state reads as a qualifier, so it takes the quieter tier — but `--theme-text3` measured
@@ -1312,6 +1318,7 @@ textarea,
   color: var(--theme-text2);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 /* Open, on a report whose figures are incomplete until the month closes.
@@ -2222,6 +2229,18 @@ table.data-table--sticky-first tr:hover td:first-child {
    (S670), so none of them had ever printed legibly; nobody had tried from a dark theme. */
 .cell-sub { display: block; font-size: 11px; color: var(--theme-text3); margin-top: 2px; }
 
+/* A row the page has tinted to flag it (reorder needed, price rising, out of stock, a bill's group
+   header). Light's `--theme-text3` clears the bare card at 4.54:1 and nothing more, so ANY tint
+   under it fails AA: measured 4.35:1 on a 3% red row and 4.29:1 on a 4% accent row, ~190 labels
+   across Reorder, Supplier Prices, Stock Report and Purchases — the rows a reader is meant to look
+   at (S794). Re-pointing the TOKEN on the row reaches every inline `color: var(--theme-text3)`
+   inside it, which no class selector could, and leaves the token alone everywhere else, where it
+   holds. On Night both tiers already pass; a flagged row just reads one step stronger there.
+   `.badge-gray` is text2 on a text2 tint, and over a row tint it measured 4.19:1 on Light, so
+   inside a flagged row it takes text1 — the pairing every other badge already uses. */
+tr.row-tinted { --theme-text3: var(--theme-text2); }
+tr.row-tinted .badge-gray { color: var(--theme-text1); }
+
 /* Sortable column header. The button carries the th's own typography so a sortable header reads
    identically to a fixed one — only the arrow and the pointer say it is interactive. The arrow is
    a separate span so the print reset can drop it: UI chrome on a printed price list is noise, and
@@ -2240,6 +2259,15 @@ table.data-table th .th-sort {
   align-items: center;
   gap: 4px;
   transition: color var(--motion-fast) var(--ease-standard);
+}
+/* Touch: the button is only as tall as its 11px label (12px measured on Menu Pricing), under the
+   24px floor of WCAG 2.5.8. Grow the hit area with padding and cancel it with the same negative
+   margin, `.row-disclosure`'s move, so the header row's height and alignment do not change (S794). */
+@media (pointer: coarse) {
+  table.data-table th .th-sort {
+    padding: 8px 6px;
+    margin: -8px -6px;
+  }
 }
 table.data-table th .th-sort:hover { color: var(--theme-text1); }
 table.data-table th .th-sort--active { color: var(--theme-text1); }
@@ -2825,6 +2853,41 @@ textarea::placeholder {
   .form-grid-3 {
     grid-template-columns: 1fr;
   }
+}
+
+/* The purchase bill's header row: Vendor, Day, Invoice Ref, VAT, Discount, Payment (S794). It was
+   an inline six-track grid, which no media query can reach, so at 390px Discount ended 33px and
+   Payment 99px past the viewport — under `.main-content`'s `overflow-x: hidden`, not scrollable,
+   simply absent. A bill entered on a phone could not be marked Credit and saved as the default
+   Cash, so it never reached Outstanding Payables. Three across on a tablet, two on a phone with
+   Vendor and Payment each taking a whole row. */
+.bill-header-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.4fr auto 90px 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+  align-items: end;
+}
+@media screen and (max-width: 900px) {
+  .bill-header-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media screen and (max-width: 600px) {
+  .bill-header-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bill-header-grid > :first-child,
+  .bill-header-grid > :last-child { grid-column: 1 / -1; }
+}
+
+/* Two report cards side by side that stack on a narrower screen (S794). Best Sellers' Top 10 and
+   Bottom 10 were an inline `1fr 1fr`: each table's min-content held its track wide, so at 390px
+   the Bottom 10 card began 290px past the edge. `minmax(0, 1fr)` lets a track give width back to
+   the table's own `.table-wrap` scroll instead of pushing its neighbour out. */
+.pair-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+@media screen and (max-width: 900px) {
+  .pair-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .form-actions {
@@ -3523,6 +3586,10 @@ textarea::placeholder {
      text instead; the arrow is chrome and goes. */
   table.data-table th .th-sort { display: inline !important; color: black !important; }
   table.data-table th .th-sort-arrow { display: none !important; }
+  /* Same reason for a cell's identity promoted to a `.btn-linklike` that must still print — a
+     sub-recipe's name in a dish's cost breakdown (S794). Opt-in: most link-like cells are
+     screen-only affordances beside a figure that prints anyway. */
+  .btn-linklike.btn-linklike--prints { display: inline !important; color: black !important; text-decoration: none !important; }
   .badge { border: 1px solid #ccc !important; color: black !important; background: white !important; border-radius: 0 !important; }
   input { background: white !important; color: black !important; border: 1px solid #ccc !important; }
   .no-print { display: none !important; }

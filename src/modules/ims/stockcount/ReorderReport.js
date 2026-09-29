@@ -640,7 +640,7 @@ export default function ReorderReport() {
                     const isEditing = row.item.id in editingPar
                     const isSaving  = savingPar[row.item.id]
                     return (
-                      <tr key={row.item.id} style={{ background: row.needsReorder ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
+                      <tr key={row.item.id} className={row.needsReorder ? 'row-tinted' : undefined} style={{ background: row.needsReorder ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                         <td>
                           <input type="checkbox" checked={selectedIds.has(row.item.id)} onChange={() => toggleSelectItem(row.item.id)}
                             aria-label={`Select ${row.item.name}`} />
@@ -679,14 +679,24 @@ export default function ReorderReport() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                           {row.hasMovements ? (
                             <Tip text="Click to see every stock-depletion entry behind this number, with the POS order that caused each one." width={260}>
-                              <span
-                                onClick={() => navigate(`/stock-movements?item=${row.item.id}&period=${selectedPeriod.id}`)}
-                                role="button" tabIndex={0} className="interactive-card"
-                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/stock-movements?item=${row.item.id}&period=${selectedPeriod.id}`) } }}
-                                style={{ cursor: 'pointer', borderBottom: '1px dashed var(--theme-border)', paddingBottom: 1 }}
+                              {/* A real link, because it goes somewhere (S794): it was a 16px-tall
+                                  span with role="button", so it could not be opened in a new tab
+                                  and announced itself as an action. A native <a> rather than
+                                  <Link> so Tip sees an interactive child and adds no second tab
+                                  stop; a plain click still routes in-app, a modified one opens a tab. */}
+                              <a
+                                href={`/stock-movements?item=${row.item.id}&period=${selectedPeriod.id}`}
+                                onClick={e => {
+                                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                                  e.preventDefault()
+                                  navigate(`/stock-movements?item=${row.item.id}&period=${selectedPeriod.id}`)
+                                }}
+                                aria-label={`Book stock ${row.bookStock.toFixed(2)} for ${row.item.name}: open its stock movements`}
+                                className="interactive-card"
+                                style={{ display: 'inline-block', minHeight: 24, boxSizing: 'border-box', padding: '3px 0 1px', color: 'inherit', textDecoration: 'none', borderBottom: '1px dashed var(--theme-border)' }}
                               >
                                 {row.bookStock.toFixed(2)}
-                              </span>
+                              </a>
                             </Tip>
                           ) : '—'}
                         </td>

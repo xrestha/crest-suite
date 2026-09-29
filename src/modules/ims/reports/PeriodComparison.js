@@ -8,6 +8,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ChartCard from '../../../components/ChartCard'
+import { CHART_COLORS } from '../../../shared/chartColors'
 import StatPill from '../../../components/StatPill'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
@@ -28,17 +29,8 @@ import { findUncountedItems, gapNote, unjudgedFcFigure } from '../../../shared/u
 import NoPeriodState from '../../../components/NoPeriodState'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
-// semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
-// category reads the same color everywhere in the app, duplicated locally since that constant
-// lives in a page file.
-//
-// It said that and DID NOT DO IT (found S689). Slots 2-8 were a different set entirely, so a
-// category drew one colour on the Dashboard and another here — the exact failure the comment
-// claims to prevent. It also introduced #818cf8, one of the two indigos DESIGN.md's One Accent
-// Rule names as a seven-time violator, and dropped three slots that had been measured. Now a
-// byte-for-byte copy of CHART_COLORS. If you change one, change both; the duplication is
-// deliberate (that constant lives in a page file) but it is only safe while they are identical.
-const FALLBACK_HEX = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
+// semantic colors): the shared CHART_COLORS, so a category reads the same colour here as on the
+// Dashboard's Sales Mix. It was a private copy until S794 — and until S689 a copy that had drifted.
 
 // `short` feeds the X axis and tooltip header of all three charts on this page. It used to be
 // `m.slice(0, 3)`, which renders Ashadh AND Ashwin as "Ash" — two different months under one tick,
@@ -130,7 +122,7 @@ export default function PeriodComparison() {
       .then(({ data, error }) => {
         if (!limitReq.isCurrent(key)) return   // a newer client switch owns the page
         // It used to set the error and leave `loading` wherever it was.
-        if (error) { setLoadError(error.message); setLoading(false); return }
+        if (error) { setLoadError(error); setLoading(false); return }
         setPeriods(data || [])
         if (!(data || []).length) setLoading(false)   // nothing will call fetchData, so nothing else will clear it
       })
@@ -392,7 +384,7 @@ export default function PeriodComparison() {
       if (assigned[cat]) return assigned[cat]
       if (cat === 'Food') return (assigned[cat] = colors.green)
       if (cat === 'Beverage') return (assigned[cat] = colors.purple)
-      return (assigned[cat] = FALLBACK_HEX[next++ % FALLBACK_HEX.length])
+      return (assigned[cat] = CHART_COLORS[next++ % CHART_COLORS.length])
     }
   })()
 
@@ -585,6 +577,7 @@ export default function PeriodComparison() {
       {!loadError && !loading && hasChartData && (
         <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, marginBottom: 14 }}>
           <ChartCard
+            headingLevel={2}
             title="Revenue vs Net Purchases — Period Trend"
             legend={<>
               {/* Swatch keeps the series colour, label carries the contrast — the whole string
@@ -649,6 +642,7 @@ export default function PeriodComparison() {
           />
 
           <ChartCard
+            headingLevel={2}
             title="Food Cost % — Period Trend"
             footer={
               <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, flexWrap: 'wrap' }}>
@@ -669,8 +663,8 @@ export default function PeriodComparison() {
                       these lines and the dots below stayed on the pre-S551 hardcoded 30/38 — so a
                       dot could sit above the line it was drawn against and still be painted green.
                       One source now, the same one fcBand() uses. */}
-                  <ReferenceLine y={fcT.warn} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcT.warn}%`, fill: colors.green, fontSize: 9, position: 'right' }} />
-                  <ReferenceLine y={fcT.critical} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcT.critical}%`, fill: colors.red, fontSize: 9, position: 'right' }} />
+                  <ReferenceLine y={fcT.warn} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcT.warn}%`, fill: colors.greenText, fontSize: 10, position: 'right' }} />
+                  <ReferenceLine y={fcT.critical} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcT.critical}%`, fill: colors.redText, fontSize: 10, position: 'right' }} />
                   <RTooltip
                     contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
                     labelStyle={{ color: 'var(--theme-text1)' }}
@@ -705,6 +699,7 @@ export default function PeriodComparison() {
       {!loadError && !loading && categories.length > 0 && (
         <div className="no-print" style={{ marginBottom: 20 }}>
           <ChartCard
+            headingLevel={2}
             title="Revenue by Category — Period Trend"
             legend={<div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {categories.map(c => <span key={c} style={{ color: 'var(--theme-text2)' }}><span style={{ color: colorOf(c) }}>●</span> {c}</span>)}

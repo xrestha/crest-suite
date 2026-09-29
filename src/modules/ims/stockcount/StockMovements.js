@@ -81,7 +81,7 @@ export default function StockMovements() {
     const { data: p, error: pErr } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
     // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    if (pErr) { setLoadError(pErr.message); setLoading(false); return }
+    if (pErr) { setLoadError(pErr); setLoading(false); return }
     setPeriods(p || [])
 
     // Arriving from Reorder Report's "Book Stock" link (?period=&item=) lands on that same
@@ -144,7 +144,7 @@ export default function StockMovements() {
         // "quiet period" over an error (S612 silent-zero rule).
         setUsage(EMPTY_USAGE)
         setUsageLoading(false)
-        setLoadError(err?.message || String(err))
+        setLoadError(err)
       })
 
     const results = await Promise.all([

@@ -365,7 +365,7 @@ export default function StockReport() {
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.item.id} style={{ background: r.status === 'out' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
+                  <tr key={r.item.id} className={r.status === 'out' ? 'row-tinted' : undefined} style={{ background: r.status === 'out' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</div>
                       {r.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{r.item.item_code}</div>}

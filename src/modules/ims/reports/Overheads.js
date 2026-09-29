@@ -153,7 +153,7 @@ export default function Overheads() {
       .order('bs_month', { ascending: false })
     if (!clientReq.isCurrent(cid)) return
     // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-    if (error) { setLoadError(error.message); setLoading(false); return }
+    if (error) { setLoadError(error); setLoading(false); return }
     const withLabel = (data || []).map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))
     setPeriods(withLabel)
     const open = withLabel.find(p => p.status === 'open') || withLabel[0]
@@ -186,7 +186,7 @@ export default function Overheads() {
     // A failed read must NOT fall into the carry-forward branch below: it would seed an editable
     // draft over a period that may have real saved rows, and Save would replace them (S612 —
     // on a data-entry page the silent-zero class is a data-loss class).
-    if (error) { setLoadError(error.message); return }
+    if (error) { setLoadError(error); return }
 
     if (data && data.length > 0) {
       // Figure rows only: an amount-0 row is the "saved with no fixed costs" marker, or a line with
@@ -316,7 +316,7 @@ export default function Overheads() {
       const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
         scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', chunk).order('id'))
       if (!periodReq.isCurrent(pid)) return
-      if (slipErr) { setLoadError(slipErr.message); setPeriodData(null); return }
+      if (slipErr) { setLoadError(slipErr); setPeriodData(null); return }
       labourPayroll = payrollLabourTotal(slips || [])
     }
 
@@ -944,7 +944,7 @@ export default function Overheads() {
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
             <div>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>P&L Summary</h3>
+              <h2 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>P&L Summary</h2>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>
                 Revenue{periodOpen ? ' so far' : ''}: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(dishes).toLocaleString('en-IN')} dishes sold &nbsp;·&nbsp; {period?.label || '—'}
               </p>
@@ -1072,7 +1072,7 @@ export default function Overheads() {
       {/* Charts — cost stack + bucket breakdown + pivot */}
       {totalFixed > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 20px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Cost Visualisation</h3>
+          <h2 style={{ margin: '0 0 20px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Cost Visualisation</h2>
 
           {/* Revenue cost stack — only when sales data available */}
           {hasSales && (() => {

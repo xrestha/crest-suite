@@ -52,7 +52,7 @@ export default function PaymentReport() {
     setLoading(true)
     setLoadError(null)
     const { data: p, error } = await scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (error) { setLoadError(error.message); setLoading(false); return }
+    if (error) { setLoadError(error); setLoading(false); return }
     const list = p || []
     setPeriods(list)
     // Prefer the open period, but FALL BACK to the most recent one. With only closed periods this

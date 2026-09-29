@@ -39,7 +39,7 @@ export default function WastageReport() {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
         // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-        if (error) { setLoadError(error.message); setLoading(false); return }
+        if (error) { setLoadError(error); setLoading(false); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
         else setLoading(false)   // nothing will call fetchData, so nothing else clears it

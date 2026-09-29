@@ -339,7 +339,7 @@ export default function ShrinkageReport() {
               </thead>
               <tbody>
                 {filtered.map(row => (
-                  <tr key={row.item.id} style={{ background: row.status.label === 'Consistent' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
+                  <tr key={row.item.id} className={row.status.label === 'Consistent' ? 'row-tinted' : undefined} style={{ background: row.status.label === 'Consistent' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
                     <td><span className="badge badge-yellow">{row.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>

@@ -51,7 +51,7 @@ export default function VatReport() {
       .then(({ data, error }) => {
         // A statutory report must never mistake a failed read for "no periods yet" — the figures
         // on this page are what gets filed with the IRD (S612, the silent-NPR-0 class).
-        if (error) { setLoadError(error.message); return }
+        if (error) { setLoadError(error); return }
         setPeriods(data || [])
         if (data && data.length > 0) setSelected(data[0])
       })
@@ -486,10 +486,10 @@ export default function VatReport() {
         <>
           {/* Purchases */}
           <div className="card" style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>VAT-Inclusive Purchases</span>
               {!loading && <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{vatLines.length} of {entries.length} entries</span>}
-            </h3>
+            </h2>
             {loading ? (
               <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
             ) : vatLines.length === 0 ? (
@@ -570,10 +570,10 @@ export default function VatReport() {
               figures — gating one card is not gating the page (S616). */}
           {!loading && vatReturns.length > 0 && (
             <div className="card" style={{ marginBottom: 16, border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-red-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-red-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>VAT-Inclusive Returns <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', marginLeft: 8 }}>Input VAT reversed on returned goods</span></span>
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{vatReturns.length} return{vatReturns.length !== 1 ? 's' : ''}</span>
-              </h3>
+              </h2>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -653,7 +653,7 @@ export default function VatReport() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text1)' }}>Vendor-wise VAT Summary</h3>
+              <h2 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text1)' }}>Vendor-wise VAT Summary</h2>
               <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
                 Grouped by supplier — share with your CA for input VAT reconciliation
               </p>

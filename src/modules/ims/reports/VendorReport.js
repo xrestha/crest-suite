@@ -5,7 +5,7 @@ import { vatModeOf } from '../recipes/menuPriceVat'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
-import { calcBillTotals, methodOf } from '../purchases/purchasesHelpers'
+import { calcBillTotals, methodOf, aging } from '../purchases/purchasesHelpers'
 import { billOwedAfterReturns } from './payablesAllocation'
 import { allocateBillDiscounts, mergeFactors, vatCostFactor, returnCostFactor } from './supplierAttribution'
 import { netFactors, returnBase, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
@@ -22,15 +22,9 @@ import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { CHART_COLORS } from '../../../shared/chartColors'
 
 const EPS = 0.001
-
-function billAging(days) {
-  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green-text)' }
-  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent-ink)' }
-  if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber-text)' }
-  return                 { label: '90+ days',   color: 'var(--theme-red-text)' }
-}
 
 // Vendor split needs up to 8 distinct hues for an arbitrary vendor count — a qualitative
 // chart-series palette, not a semantic status colour.
@@ -39,10 +33,11 @@ function billAging(days) {
 // --theme-accent and --theme-purple are the SAME hex on Dracula, Catppuccin Mocha and Latte, so
 // slots 1 and 5 painted two different vendors identically on three of the ten presets (measured
 // S551; Tokyo Night additionally put slots 1 and 3 at ΔE 6.4, and Catppuccin slots 4 and 8 at
-// ΔE 5.7 under deuteranopia, both below the floor). Now the same fixed literal set
-// ClientDashboard's CHART_COLORS uses — theme-independent on purpose, which is correct for a
-// series palette and is NOT the undocumented-accent violation that rule is about.
-const VENDOR_SPLIT_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
+// ΔE 5.7 under deuteranopia, both below the floor). Now the shared CHART_COLORS
+// (src/shared/chartColors.js) — theme-independent on purpose, which is correct for a series
+// palette and is NOT the undocumented-accent violation that rule is about. It was a private
+// byte-identical copy until S794.
+const VENDOR_SPLIT_COLORS = CHART_COLORS
 
 export default function VendorReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -466,7 +461,7 @@ export default function VendorReport() {
         else if (selectedPeriod) {
           const adDate = bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, e.bs_day || 1)
           const daysOld = Math.max(0, Math.floor((new Date() - adDate) / (1000 * 60 * 60 * 24)))
-          status = billAging(daysOld)
+          status = aging(daysOld)
         } else {
           status = { label: 'Outstanding', color: 'var(--theme-red-text)' }
         }

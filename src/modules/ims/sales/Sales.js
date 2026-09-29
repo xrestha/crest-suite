@@ -1243,15 +1243,17 @@ export default function Sales() {
       </div>
       )}
 
-      {/* Tabs */}
-      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
+      {/* Tabs. Both rows wrap (S794): with no wrap, at 390px the last tab was half cut and the
+          filter and search sat 458–780px across a 390px screen, clipped out of reach rather than
+          scrollable — the same reason `.panel-tab-bar` carries flex-wrap. */}
+      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', columnGap: 16, justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
         {/* S765: deliberately NOT migrated to <Tabs>. Every other tab row in IMS moved onto the
             shared component, but this one wraps its locked tabs in a Tip and relies on
             `aria-disabled` rather than `disabled` (see the comment below), which the shared
             component has no way to express. What it was missing — aria-controls, a roving tabIndex
             and arrow keys — is added here instead; `moveRovingFocus` skips aria-disabled members,
             so a locked tab is passed over rather than trapping the arrow. */}
-        <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Sales entry views"
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }} role="tablist" aria-label="Sales entry views"
           onKeyDown={e => { moveRovingFocus(e, '[role="tab"]')?.click() }}>
           {Object.entries(TAB_LABELS).map(([key, label]) => {
             // Daily Entry stays open for a hand-started month's pre-till days (D35, `preTillOpen`).
@@ -1280,7 +1282,7 @@ export default function Sales() {
           })}
         </div>
         {(viewMode === 'bulk' || viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             {(viewMode === 'bulk' || viewMode === 'daily') && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--theme-text2)', cursor: 'pointer', marginBottom: 6, whiteSpace: 'nowrap' }}>
                 <input type="checkbox" checked={onlyWithSales} onChange={e => setOnlyWithSales(e.target.checked)} />

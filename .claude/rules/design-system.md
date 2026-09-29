@@ -43,7 +43,7 @@ Practical rules: `.badge-*` classes already point at the variants, so anything u
 
 `--theme-purple` (added during the UI/UX audit pass) is for a genuine 4th/5th categorical color — e.g. Staff Meals in Stock.js/MonthlySummary.js, the sub-recipe tab underline in Recipes.js — that several files had previously hardcoded independently as the same violet hex with no shared source of truth. It is not a general-purpose semantic color like green/red/amber; reach for it only when a page already needs a distinct categorical hue beyond what accent/green/red/amber cover.
 
-**Never build a multi-series chart palette out of the semantic tokens.** `accent`/`green`/`red`/`amber`/`purple` are five *roles*, not five distinguishable hues — `--theme-accent` and `--theme-purple` are the same hex in three presets (Dracula `#bd93f9`, Catppuccin Mocha `#cba6f7`, Latte `#8839ef`), and accent sits next to amber in Dark and Warm. A 5-slice pie built from them (S526's Revenue vs Cost Breakdown) drew near-identical slices in 5 of the 10 themes: measured on the Dark card surface, Tax & Fees↔Food Cost was ΔE 10.6 for normal vision (floor 15) and Overheads↔Food Cost was ΔE 5.1 under deuteranopia (floor 8). Note those were *different pairs* — the collision a sighted reader reports is not necessarily the worst one. Chart series use fixed literal hex instead (`CHART_COLORS` in `ClientDashboard.jsx` for cycled/unknown-length series; a named fixed-slot map like `COST_BREAKDOWN_COLORS` when the slices are a known set), which is the same exemption that already applies because CSS `var()` doesn't resolve inside Recharts' SVG `fill`. A fixed-hex chart palette is deliberately theme-independent — that's correct, not drift, and a hex appearing in a chart palette is **not** the S521 undocumented-accent violation (that rule is about UI chrome). Verify a new palette with the `dataviz` skill's `scripts/validate_palette.js` against the real card surfaces rather than by eye; Crest's hues will always fail its lightness band (they're brighter pastels than its reference steps) and warn on contrast against white cards — those two are properties of the whole existing palette, so treat only the CVD-separation and normal-vision floors as blocking.
+**Never build a multi-series chart palette out of the semantic tokens.** `accent`/`green`/`red`/`amber`/`purple` are five *roles*, not five distinguishable hues — `--theme-accent` and `--theme-purple` are the same hex in three presets (Dracula `#bd93f9`, Catppuccin Mocha `#cba6f7`, Latte `#8839ef`), and accent sits next to amber in Dark and Warm. A 5-slice pie built from them (S526's Revenue vs Cost Breakdown) drew near-identical slices in 5 of the 10 themes: measured on the Dark card surface, Tax & Fees↔Food Cost was ΔE 10.6 for normal vision (floor 15) and Overheads↔Food Cost was ΔE 5.1 under deuteranopia (floor 8). Note those were *different pairs* — the collision a sighted reader reports is not necessarily the worst one. Chart series use fixed literal hex instead (`CHART_COLORS` in `src/shared/chartColors.js` for cycled/unknown-length series — one definition since S794, after two private byte-identical copies in Period Comparison and Vendor Report; a named fixed-slot map like `COST_BREAKDOWN_COLORS` when the slices are a known set), which is the same exemption that already applies because CSS `var()` doesn't resolve inside Recharts' SVG `fill`. A fixed-hex chart palette is deliberately theme-independent — that's correct, not drift, and a hex appearing in a chart palette is **not** the S521 undocumented-accent violation (that rule is about UI chrome). Verify a new palette with the `dataviz` skill's `scripts/validate_palette.js` against the real card surfaces rather than by eye; Crest's hues will always fail its lightness band (they're brighter pastels than its reference steps) and warn on contrast against white cards — those two are properties of the whole existing palette, so treat only the CVD-separation and normal-vision floors as blocking.
 
 **Exception:** Recharts SVG props (`fill`, `stroke`, `tick`) must stay as literal hex — CSS `var()` does not resolve inside SVG presentation attributes. The exemption is for SVG only: a Recharts tooltip is a plain HTML `<div>`, so it takes `var()` tokens directly — no `useTheme()`-resolved hex needed — and its card chrome is `TOOLTIP_CHROME` from `src/shared/tooltipChrome.js` (S624, the `chartMotion.js` precedent). Several older chart files still carry inline copies, named in that file's comment; migrate them as touched, never add a new copy.
 
@@ -394,7 +394,7 @@ Pricing's sortable column headings would have printed a price list whose Food Co
 columns had no titles — figures under nothing, on a sheet whose whole purpose is to be handed to
 someone else and priced by hand.
 
-`.th-sort` reprints as plain black text and hides only the arrow. **The rule generalises past this
+`.th-sort` reprints as plain black text and hides only the arrow. A cell's identity promoted to a `.btn-linklike` opts in the same way with `.btn-linklike--prints` (S794, the sub-recipe drill in a dish's cost breakdown). **The rule generalises past this
 one class**: whenever a label, a heading, a badge or a value becomes a button, add its print
 override in the same change, and check the printed output rather than the screen. The tell is that
 nothing looks wrong anywhere except in a print preview nobody opens.
@@ -606,6 +606,17 @@ A stale number came out of the same block: its comment cited a 190px grid floor 
 lowered it to 158, so its whole fit argument was computed against an inner width 33px wider than
 the real one. **A measurement written into a comment rots exactly like a value written into a
 rule** — re-derive it when you touch the block, or state where it came from so the next reader can.
+
+## A flagged row re-points the quiet token, because Light's text3 has no headroom (S794)
+
+Light's `--theme-text3` clears the bare card at 4.54:1 and nothing more, so any tint under it fails
+AA — measured 4.35:1 on a 3% red row and 4.29:1 on a 4% accent row, ~190 labels across four IMS
+tables, on exactly the rows a page flags for attention. The labels are inline
+`color: var(--theme-text3)`, which no class selector can beat, so `tr.row-tinted` re-points the
+TOKEN on the row (`--theme-text3: var(--theme-text2)`) and `.badge-gray` inside it takes text1.
+Any row given a background tint takes the class; the token stays as it is everywhere else. This is
+the alternative to darkening Light's text3 app-wide, which would flatten the text2/text3 step on
+every page to fix the rows that are tinted.
 
 ## An inline style is how a rule stops reaching the elements that need it (S682)
 

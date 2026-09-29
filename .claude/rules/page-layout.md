@@ -26,6 +26,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - `nowrap` goes on the atom (a date, code, invoice ref, phone, figure, unit, button), never on a whole cell and never as a fixed width. Every table needs one column that can wrap; let names wrap.
 - Give the identity column a `min-width` only if that column is also sticky.
 - Row density is a table-level class (e.g. `table.purchases-table`), never per-cell inline padding.
+- A row given a background tint to flag it takes `className="row-tinted"`, which re-points `--theme-text3` to text2 inside it: Light's text3 fails AA on any tint (S794).
 - A long header can take two lines: a `display: block` child inside the `th`.
 - A day column names the month: `formatBsDay(day, bsMonth)`, never a bare number. Excel exports keep the numeric column.
 - A sortable heading uses `th-sort`, with the `<button>` inside `Tip` and `aria-sort` on the `<th>`.
@@ -43,6 +44,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - Mute a no-activity row by weight and the anchor cells' colour, never by row opacity, which takes the row below AA (S613).
 - State a table's currency once (a `Tip` on the first header, e.g. "All figures in NPR."), never "(NPR)" in every column header.
 - Clearance on an `overflow: auto` element is margin, never padding: padding pushes its scrollbar away from the content.
+- A layout with a fixed track count, or a flex row of controls, goes in a class with a `screen and (max-width: …)` step (`.bill-header-grid`, `.pair-grid`) or wraps; an inline `gridTemplateColumns` track list, a no-wrap toolbar or `flexShrink: 0` inside a `page-header--split` is how six IMS pages clipped controls on a phone (S794).
 - A scroll container around page content prints as one screenful unless the print block resets it to `height: auto; overflow: visible`; a shell breakpoint is `screen and (max-width: …)`, because paper matches a bare width query (S778).
 - History: docs/rules-archive/dashboards.md#stock-summary-table-density
 

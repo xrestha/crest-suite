@@ -57,9 +57,9 @@ const PAYMENT_MODES = ['Cash', 'FonePay', 'Bank Transfer', 'Cheque']
 
 const INPUT = {
   background: 'var(--theme-input-bg, var(--theme-card))',
-  border: '1px solid var(--theme-border, var(--theme-border))',
+  border: '1px solid var(--theme-border)',
   borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13,
-  color: 'var(--theme-text, var(--theme-text1))', outline: 'none',
+  color: 'var(--theme-text1)', outline: 'none',
 }
 
 export default function OutstandingPayables() {

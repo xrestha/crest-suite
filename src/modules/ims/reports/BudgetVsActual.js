@@ -302,13 +302,16 @@ export default function BudgetVsActual() {
                         {pct !== null ? fmtPct(pct) : '—'}
                       </td>
                       <td style={{ textAlign: 'center' }}>
+                        {/* The badge classes, not hand-rolled chips (S794): text2 on a 15% text2 tint
+                            measured 4.41:1 on Light. `badge-sentence` keeps "Above so far" in
+                            sentence case against the badge's capitalize. */}
                         {noBudget
-                          ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>No Budget</span>
+                          ? <span className="badge badge-gray">No Budget</span>
                           : provisional
-                          ? <span title="The month is still open — judged once it is closed" style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>{isOver ? 'Above so far' : 'Within so far'}</span>
+                          ? <span className="badge badge-gray badge-sentence" title="The month is still open — judged once it is closed">{isOver ? 'Above so far' : 'Within so far'}</span>
                           : isOver
-                          ? <span style={{ fontSize: 11, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Over Budget</span>
-                          : <span style={{ fontSize: 11, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Under Budget</span>
+                          ? <span className="badge badge-red">Over Budget</span>
+                          : <span className="badge badge-green">Under Budget</span>
                         }
                       </td>
                     </tr>
@@ -329,7 +332,7 @@ export default function BudgetVsActual() {
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
                     <td style={{ textAlign: 'center' }}>
-                      <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>No Budget</span>
+                      <span className="badge badge-gray">No Budget</span>
                     </td>
                   </tr>
                 )}

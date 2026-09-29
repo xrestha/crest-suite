@@ -511,7 +511,7 @@ export default function ImsStaff() {
             Assign roles to your team. Staff log in with their email and password, same as you do.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input aria-label="Search staff"
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}

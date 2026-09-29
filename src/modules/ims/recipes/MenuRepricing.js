@@ -54,7 +54,7 @@ export default function MenuRepricing() {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
         // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-        if (error) { setLoadError(error.message); return }
+        if (error) { setLoadError(error); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
       })

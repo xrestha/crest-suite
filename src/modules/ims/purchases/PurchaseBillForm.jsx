@@ -539,8 +539,8 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         </div>
       )}
 
-      {/* Header row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.4fr auto 90px 1fr', gap: 14, marginBottom: 20, alignItems: 'end' }}>
+      {/* Header row. The tracks live in `.bill-header-grid` so they can reflow on a phone (S794). */}
+      <div className="bill-header-grid">
         <div className="form-field">
           <label htmlFor="purcha-f1">Vendor</label>
           <select id="purcha-f1" className="form-select" style={{ fontSize: 13 }} value={billHeader.vendor_id} onChange={e => setBillHeader(h => ({ ...h, vendor_id: e.target.value }))}>
@@ -692,7 +692,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                             {inputUnit}
                           </span>
                         )}
+                        {/* Named like the line's other boxes (S794) — these two were the only
+                            unnamed inputs left on the bill, read out as "edit text, 12". */}
                         <QtyInput value={line.qty} placeholder="0"
+                          aria-label={`Quantity for ${selItem?.name || 'new line'}${inputUnit ? ` (${inputUnit})` : ''}`}
                           onChange={v => updateBillLine(line._key, 'qty', v)}
                           wrapperStyle={{ width: '100%' }}
                           style={{ ...cellInput, boxSizing: 'border-box', fontFamily: 'inherit', paddingLeft: inputUnit ? 34 : cellInput.padding.split(' ')[1] }} />
@@ -701,6 +704,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <QtyInput value={line.rate} placeholder="0"
+                        aria-label={`Rate for ${selItem?.name || 'new line'}${inputUnit ? `, NPR per ${inputUnit}` : ''}`}
                         onChange={v => updateBillLine(line._key, 'rate', v)}
                         wrapperStyle={{ width: '100%' }}
                         style={{ ...cellInput, boxSizing: 'border-box', fontFamily: 'inherit' }} />

@@ -765,7 +765,8 @@ export default function Purchases() {
                           figures that need 75px. A block child breaks the line regardless of nowrap. */}
                       <th style={{ textAlign: 'right' }}>
                         <Tip text="What the bill came to in total — after any discount and including 13% VAT on the VAT-marked lines. This is the amount payable to the vendor." width={260}>Bill Total</Tip>
-                        <span style={{ display: 'block', fontWeight: 400, opacity: 0.75 }}>incl. VAT</span>
+                        {/* The quiet tier, not `opacity` — 0.75 over the header's text2 measured 3.24:1 on Light (S794). */}
+                        <span style={{ display: 'block', fontWeight: 400, color: 'var(--theme-text3)' }}>incl. VAT</span>
                       </th>
                       <th>Expiry</th><th></th>
                     </tr>
@@ -874,7 +875,7 @@ export default function Purchases() {
                           const displayUnit = cf > 1 ? entry.items.purchase_unit : entry.items?.uom
                           const displayRate = cf > 1 ? entry.rate * cf : entry.rate
                           return [
-                            <tr key={`gh-${gid}`} style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
+                            <tr key={`gh-${gid}`} className="row-tinted" style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                               {dayCell}
                               <td style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
                                 {entry.items?.name}
@@ -910,7 +911,7 @@ export default function Purchases() {
 
                         return [
                           // Group header row
-                          <tr key={`gh-${gid}`} style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
+                          <tr key={`gh-${gid}`} className="row-tinted" style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                             {dayCell}
                             <td></td>
                             {/* Invoice ref and line count on a second line under the vendor name, not trailing
@@ -943,7 +944,7 @@ export default function Purchases() {
                           // Light. The canonical neutral tint derives from the token, so it
                           // re-tones with the preset (design-system.md).
                           ...groupEntries.map(entry => (
-                            <tr key={entry.id} style={{ background: 'color-mix(in srgb, var(--theme-text2) 9%, transparent)', borderBottom: '1px solid var(--theme-card)' }}>
+                            <tr key={entry.id} className="row-tinted" style={{ background: 'color-mix(in srgb, var(--theme-text2) 9%, transparent)', borderBottom: '1px solid var(--theme-card)' }}>
                               <td></td>
                               <td style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
                                 {entry.items?.name}

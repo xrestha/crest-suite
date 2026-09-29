@@ -221,7 +221,7 @@ export default function Recipes() {
       .select('*, items(name, uom, per_uom_rate, item_code, yield_pct, nutrition)')
       .in('recipe_id', ids)
       .order('id'))
-    if (ingRes.error) { setLoadError(ingRes.error.message || ingRes.error); setLoading(false); return }
+    if (ingRes.error) { setLoadError(ingRes.error); setLoading(false); return }
     const { data: ings } = ingRes
     setLoadError(null)
 
@@ -1551,12 +1551,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
             ? 'Open each dish with Edit and type the price guests should pay (or type it once on Menu Pricing), then save — it is stored as typed.'
             : 'A manager or the Owner re-enters each price once, on Menu Pricing.'} />
           <ActionError error={error} className="action-error--top" />
-          {/* Search bar */}
-          <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
+          {/* Search bar. Wraps (S794): unwrapped, at 390px the ingredient search ended 556px past a
+              screen whose overflow is clipped, not scrolled. */}
+          <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', marginBottom: 16, alignItems: 'center' }}>
             <input aria-label="Search recipes"
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedFrom={scopedFrom} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin}
                 vatMode={vatMode} costedByBuild={r => isCostedByBuild(r, customizationEnabled)} />
               <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
@@ -1626,8 +1627,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
             )}
           </div>
 
-          {/* Tab bar */}
-          <div className="no-print" style={{ display: 'flex', gap: 2, marginBottom: 0, borderBottom: '1px solid var(--theme-border)' }}>
+          {/* Tab bar. Wraps (S794): the same no-wrap row as the toolbar above, found by the 390px
+              re-check after that one was fixed — Dessert, Other and Sub-Recipes sat past the edge. */}
+          <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginBottom: 0, borderBottom: '1px solid var(--theme-border)' }}>
             {tabs.map(tab => {
               const isActive = activeTab === tab.key
               const isSubTab = tab.key === 'sub-recipes'
@@ -2604,18 +2606,24 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     const isDrillable = !!(ri.sub_recipe_id && ri.sub_recipe)
                     return (
                       <tr key={ri.id}>
-                        <td
-                          title={isDrillable ? `View ${ri.sub_recipe.name}'s own cost breakdown` : undefined}
-                          onClick={isDrillable ? () => drillIntoSubRecipe(ri.sub_recipe) : undefined}
-                          style={{ fontWeight: 600, color: ri.sub_recipe_id ? 'var(--theme-accent-ink)' : 'var(--theme-text1)', cursor: isDrillable ? 'pointer' : 'default' }}>
+                        <td style={{ fontWeight: 600, color: ri.sub_recipe_id ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
                           {ri.items?.item_code && (
                             <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', marginRight: 7, fontWeight: 400 }}>{ri.items.item_code}</span>
                           )}
                           {ri.sub_recipe?.recipe_code && (
                             <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', marginRight: 7, fontWeight: 400 }}>{ri.sub_recipe.recipe_code}</span>
                           )}
-                          {name}
-                          {isDrillable && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text2)' }}>↳</span>}
+                          {/* A real button in the cell (S794, the S653 rule): this was a
+                              <td onClick>, so a keyboard user could not open a sub-recipe's own
+                              breakdown from the dish that uses it. `--prints` keeps the name on
+                              paper, where every other button is hidden. */}
+                          {isDrillable ? (
+                            <button type="button" className="btn-linklike btn-linklike--prints"
+                              title={`View ${ri.sub_recipe.name}'s own cost breakdown`}
+                              onClick={() => drillIntoSubRecipe(ri.sub_recipe)}>
+                              {name}<span aria-hidden="true" style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text2)' }}>↳</span>
+                            </button>
+                          ) : name}
                         </td>
                         <td><span className={`badge ${ri.sub_recipe_id ? 'badge-yellow' : 'badge-gray'}`}>{ri.sub_recipe_id ? 'Sub-Recipe' : 'Item'}</span></td>
                         <td style={{ textAlign: 'right' }}>{ri.qty_per_portion}</td>

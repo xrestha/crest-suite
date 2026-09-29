@@ -582,7 +582,7 @@ export default function MenuPricing() {
           <h1 className="page-title">Menu Pricing</h1>
           <p className="page-subtitle">Set menu prices and toggle <strong>On POS</strong> to control which items appear on the order screen.</p>
         </div>
-        <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => { setEditingId(null); setAddForm(EMPTY_FORM); setAddError(''); setAddModal(true) }}>
+        <button className="btn btn-primary" onClick={() => { setEditingId(null); setAddForm(EMPTY_FORM); setAddError(''); setAddModal(true) }}>
           + Add Item
         </button>
       </div>
@@ -940,7 +940,7 @@ export default function MenuPricing() {
             Review food cost and update menu prices. Toggle <strong>On POS</strong> to control which items appear on the POS order screen.
           </p>
         </div>
-        <div className="no-print" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div className="no-print" style={{ display: 'flex', gap: 8 }}>
           {/* Prints the table as filtered on screen — the active category tab goes into the print
               title (same convention as Stock Movements), since the tab bar itself is no-print. */}
           <Tip text="Prints the price list exactly as filtered and sorted on screen — the current category tab and search, with current prices and FC%." width={280}>
