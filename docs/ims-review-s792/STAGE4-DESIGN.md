@@ -158,7 +158,9 @@ One migration: the two columns, the new table and its policies. About 8 source f
    conflict is **held**, following D38's pattern, in a list with Add / Replace / Discard per figure,
    naming whose figure was queued. Ops queued before this ships carry no baseline and replay as today.
 6. **Who counted.** A new `count_parts jsonb` column records `[{by, name, qty, at}]`. A replace resets
-   it and an add appends to it. The page shows "Ram 12 + Sita 8". `counted_by` stays the last writer.
+   it and an add appends to it. The page shows "Ram 12 + Sita 8". `counted_by` stays the last writer,
+   but an added total belongs to everyone in its parts: the recount guard and the conflict check both
+   read them, so adding never makes the adder its sole owner (a gap found before applying, 2026-09-29).
 
 ### Scale
 One migration: the RPC, `count_parts`, the stamp trigger and the guard carve-out. Files:

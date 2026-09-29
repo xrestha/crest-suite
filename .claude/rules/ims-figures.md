@@ -1216,6 +1216,9 @@ is ~1,750 lines and none of this is counting).
   In 'check' mode it writes nothing over another person's count and returns it as a conflict, which
   `CountConflictModal` turns into Add / Replace / Keep theirs; 'add' is one atomic UPDATE, and the
   recount guard lets a staff counter add (never replace) under a transaction-local `crest.count_add`.
+  An added total belongs to every `count_parts` member, never just its last adder (`counted_by`):
+  both the guard and the 'check' conflict test read the parts, or add-0-then-replace defeats recount
+  protection (found before D37 was applied).
   `count_parts` and `counted_at` belong to the `closing_stock_tally_parts` trigger. A new count-writing
   path goes through the RPC or it silently replaces a second counter's figure again.
 - **`counted_by` is written at last.** It had existed since the baseline and nothing had ever

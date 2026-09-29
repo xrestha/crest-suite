@@ -11,7 +11,8 @@
 --      cleared on any other change of figure or counter, never writable on its own.
 --   3. closing_stock_guard_recount() gains one carve-out (Q6 (a)): with recount protection on, a
 --      staff counter may ADD to another person's count — the figure only grows and the first count
---      stays in count_parts — but may still never replace or delete it.
+--      stays in count_parts — but may still never replace or delete it. An added total counts as
+--      everyone's in its count_parts, so adding never makes the adder its sole owner.
 --   4. save_closing_counts(p_period_id, p_rows) — the one save path for a counted (non-blank)
 --      closing figure. Per row: mode 'check' writes only when nobody else holds the row, otherwise
 --      writes NOTHING for that item and returns the stored count as a conflict; 'replace' and 'add'
@@ -92,8 +93,14 @@ BEGIN
   IF current_user NOT IN ('anon', 'authenticated') THEN RETURN COALESCE(NEW, OLD); END IF;
   IF NOT public.ims_recount_guard_on() THEN RETURN COALESCE(NEW, OLD); END IF;
 
-  -- Nobody has claimed this row yet, or the claimant is the person writing now.
-  IF OLD.counted_by IS NULL OR OLD.counted_by = (select auth.uid()) THEN RETURN COALESCE(NEW, OLD); END IF;
+  -- Nobody has claimed this row yet, or every count in it is the writer's own. An added total belongs
+  -- to everyone in its count_parts (D37): the last adder is its counted_by, and without the parts
+  -- test a staff counter could add 0 to another's count and then replace it as their own.
+  IF (OLD.counted_by IS NULL OR OLD.counted_by = (select auth.uid()))
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(OLD.count_parts, '[]'::jsonb)) p
+                      WHERE p ->> 'by' IS NOT NULL AND p ->> 'by' <> (select auth.uid())::text) THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
 
   IF COALESCE((SELECT p.ims_role FROM profiles p WHERE p.id = (select auth.uid())), '') <> 'staff' THEN
     RETURN COALESCE(NEW, OLD);
@@ -106,7 +113,11 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  RAISE EXCEPTION 'closing_count_locked: counted by %', COALESCE(OLD.counted_by_name, 'another staff member');
+  -- Names someone other than the writer: after an add, counted_by is the adder themself.
+  RAISE EXCEPTION 'closing_count_locked: counted by %', COALESCE(
+    (SELECT p ->> 'name' FROM jsonb_array_elements(COALESCE(OLD.count_parts, '[]'::jsonb)) p
+      WHERE p ->> 'by' IS NOT NULL AND p ->> 'by' <> (select auth.uid())::text LIMIT 1),
+    OLD.counted_by_name, 'another staff member');
 END;
 $$;
 
@@ -116,9 +127,9 @@ $$;
 -- Returns {saved: [{item_id, physical_qty, counted_by, counted_by_name, counted_at, count_parts}],
 --          conflicts: [{item_id, physical_qty, counted_by, counted_by_name, counted_at, count_parts}]}
 --
--- "Someone else holds the row" means a stored count whose counted_by is set and is not the counter
--- of this figure (counted_by as sent, which a queued offline figure carries; else the caller). A
--- row with no counter predates S737 and is replaced as before. The rows are handled in item order,
+-- "Someone else holds the row" means a stored count whose counted_by, or any count_parts entry, is
+-- set and is not the counter of this figure (counted_by as sent, which a queued offline figure
+-- carries; else the caller). A row with no counter predates S737 and is replaced as before. The rows are handled in item order,
 -- so two Save Alls over overlapping items lock in the same order and cannot deadlock.
 CREATE OR REPLACE FUNCTION public.save_closing_counts(p_period_id uuid, p_rows jsonb)
  RETURNS jsonb
@@ -174,8 +185,11 @@ BEGIN
        FOR UPDATE;
       v_found := FOUND;
 
+      -- Someone else holds it: its counter, or anyone whose count was added into it.
       IF v_mode = 'check' AND v_found
-         AND v_cur.counted_by IS NOT NULL AND v_cur.counted_by <> v_by THEN
+         AND ((v_cur.counted_by IS NOT NULL AND v_cur.counted_by <> v_by)
+              OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(v_cur.count_parts, '[]'::jsonb)) p
+                          WHERE p ->> 'by' IS NOT NULL AND p ->> 'by' <> v_by::text)) THEN
         v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
           'item_id', v_item, 'physical_qty', v_cur.physical_qty, 'counted_by', v_cur.counted_by,
           'counted_by_name', v_cur.counted_by_name, 'counted_at', v_cur.counted_at,
