@@ -1,12 +1,14 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd } from '../../../utils/bsCalendar'
+import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
+import { nepalBsLong } from '../../../shared/nepalTime'
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
 import { printWithTitle } from '../../../utils/printTitle'
 import {
@@ -47,19 +49,53 @@ export default function TaxPoolTab({ assets }) {
   // posted (a skipped year, not a first one). And Pool E's amortization that did not fit the pool
   // (COSTS-6), so a smaller figure than the assets' schedules add up to is explained, not silent.
   const [openingGap, setOpeningGap] = useState(null)
+  const [poolEDisposed, setPoolEDisposed] = useState(null)
   const [poolECapped, setPoolECapped] = useState(null)
+  // The repair list is an input to the Section 16 cap, so a preview may only be computed from a list
+  // that loaded, for the year on screen (S792, COSTS-7). `repairsLoaded` is false while it loads and
+  // after a failed read; `repairErr` says why. The read used to keep the PREVIOUS year's list on a
+  // failure, and Preview cleared the error, so FY 83/84 could be capped against 82/83's repairs and
+  // posted that way.
+  const [repairsLoaded, setRepairsLoaded] = useState(false)
+  const [repairErr, setRepairErr] = useState(null)
+  // Keyed on the FY label: arrowing through the year <select> starts one read per year, and the
+  // slowest to land used to win the list.
+  const repairReq = useLatestRequest()
+  // Bumped whenever an input to the preview changes — the year, or the repair list (added, deleted
+  // or re-read). A preview computed from an older version is discarded rather than shown, so Post
+  // can never lock figures built from other inputs than the ones on screen (COSTS-7).
+  const inputsVersion = useRef(0)
 
   const fyLabel = getBsFiscalYear(fyStart, 4)
   const canPost = hasImsAccess('manager')
 
-  useEffect(() => { loadRepairExpenses() }, [fyStart]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadRepairExpenses(fyLabel) }, [fyLabel]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadRepairExpenses() {
-    const { data, error } = await scopedFrom('assets_repair_expenses').eq('fiscal_year', fyLabel).order('expense_date')
+  // Any change to what a preview is built from throws the preview away.
+  function inputsChanged() {
+    inputsVersion.current += 1
+    setLines(null)
+  }
+
+  function changeYear(nextStart) {
+    repairReq.begin(getBsFiscalYear(nextStart, 4))   // synchronous: the old year's read now loses
+    setRepairExpenses([]); setRepairsLoaded(false); setRepairErr(null)
+    inputsChanged()
+    setFyStart(nextStart)
+  }
+
+  async function loadRepairExpenses(label) {
+    repairReq.begin(label)
+    setRepairsLoaded(false); setRepairErr(null)
+    const { data, error } = await scopedFrom('assets_repair_expenses').eq('fiscal_year', label).order('expense_date').order('id')
+    if (!repairReq.isCurrent(label)) return
+    inputsChanged()
     // A failed read is not "no repairs this year": the Section 16 cap below is measured against
-    // this list, so an empty one on error understates the year's repair spend (S683).
-    if (error) { setErr(asActionError(error, 'operator')); return }
+    // this list, so an empty one on error understates the year's repair spend (S683). And it is not
+    // last year's list either (COSTS-7): cleared, and Preview refuses until it loads.
+    if (error) { setRepairExpenses([]); setRepairErr(asActionError(error, 'operator')); return }
     setRepairExpenses(data || [])
+    setRepairsLoaded(true)
   }
 
   const repairTotalsByPool = useMemo(() => {
@@ -84,6 +120,9 @@ export default function TaxPoolTab({ assets }) {
       setErr(`That date is outside FY ${fyLabel} (${fyFrom} to ${fyTo}), so it was not added. Pick a date inside the year, or switch the Fiscal Year above to the year the repair belongs to.`)
       return
     }
+    // The list is about to change, so a preview on screen no longer matches it (COSTS-7): the one
+    // shown before this repair was added would lock a cap that leaves it out.
+    inputsChanged()
     const { error } = await scopedInsert('assets_repair_expenses', {
       pool: newExpense.pool, fiscal_year: fyLabel, expense_date: newExpense.expense_date,
       amount: parseFloat(newExpense.amount), description: newExpense.description.trim() || null,
@@ -94,24 +133,46 @@ export default function TaxPoolTab({ assets }) {
       return
     }
     setNewExpense({ pool: 'A', expense_date: '', amount: '', description: '' })
-    loadRepairExpenses()
+    reloadRepairsFor(fyLabel)
   }
 
   async function deleteExpense(id) {
     setErr(null)
+    inputsChanged()
     const { error } = await scopedDelete('assets_repair_expenses').eq('id', id)
     if (error) { const a = asActionError(error); setErr({ text: 'The repair expense was not deleted — it is still on the list. ' + a.text, detail: a.detail }) }
-    loadRepairExpenses()
+    reloadRepairsFor(fyLabel)
+  }
+
+  // After a write: re-read the year it was made in, unless the year has changed meanwhile — a
+  // reload claiming the old year would put its list back under the new one (COSTS-7).
+  function reloadRepairsFor(label) {
+    if (repairReq.isCurrent(label)) loadRepairExpenses(label)
   }
 
   async function preview() {
-    setLoading(true); setMsg(''); setErr(null); setOpeningGap(null); setPoolECapped(null)
+    // COSTS-7: never from a repair list that did not load for this year.
+    if (!repairsLoaded) {
+      setErr(repairErr
+        ? `The repair expenses for FY ${fyLabel} could not be read, so no preview was computed — the Section 16 cap is measured against them. Press Try again under Repair & Maintenance Expenses, then preview.`
+        : `The repair expenses for FY ${fyLabel} are still loading. Preview again in a moment.`)
+      return
+    }
+    const version = inputsVersion.current
+    const stale = () => {
+      if (inputsVersion.current === version) return false
+      setErr('The fiscal year or its repair expenses changed while the preview was being worked out, so it was not shown. Press Preview again.')
+      setLoading(false)
+      return true
+    }
+    setLoading(true); setMsg(''); setErr(null); setOpeningGap(null); setPoolEDisposed(null); setPoolECapped(null)
     const priorFyLabel = getBsFiscalYear(fyStart - 1, 4)
     // Every posted year, not only the prior one (S792, COSTS-5): one row per posted schedule, so a
     // handful. Knowing whether an EARLIER year was posted is what tells a skipped year — every
     // pool silently opening at 0 — from a business's first year.
     const { data: postedRuns, error: priorRunErr } = await scopedFrom('assets_tax_pool_runs', 'id, fiscal_year, created_at')
       .eq('status', 'posted').order('created_at', { ascending: false }).order('id')
+    if (stale()) return
     // A failed read used to compute every pool's opening WDV as 0 — a preview that read as a
     // first-ever run and could be POSTED as one (S682). Refuse to compute instead.
     const refuse = error => {
@@ -124,6 +185,7 @@ export default function TaxPoolTab({ assets }) {
     let priorLinesByPool = {}
     if (priorRun) {
       const { data: priorLines, error: priorLinesErr } = await scopedFrom('assets_tax_pool_lines').eq('run_id', priorRun.id)
+      if (stale()) return
       if (priorLinesErr) { refuse(priorLinesErr); return }
       ;(priorLines || []).forEach(l => { priorLinesByPool[l.pool] = l })
     }
@@ -168,18 +230,21 @@ export default function TaxPoolTab({ assets }) {
 
     // Pool E — intangibles, straight-line per asset, not a shared-rate declining balance pool.
     // Aggregate: prior year's closing carried forward + this year's additions (at cost) minus
-    // this year's amortization across active Pool E assets — each on its own schedule, stopping
-    // at the end of its useful life, and never more than the pool holds (S792, COSTS-6).
+    // this year's amortization across the Pool E assets held in the year — each on its own
+    // schedule, stopping at the end of its useful life, and never more than the pool holds (S792,
+    // COSTS-6). One sold or written off this year leaves at its unclaimed value (stage 3), and its
+    // sale price is reported under Disposals without being netted in — see computeIntangiblePool().
     const priorE = priorLinesByPool.E
     const eOpening = priorE ? parseFloat(priorE.closing_wdv) || 0 : 0
     const e = computeIntangiblePool({ assets, openingWdv: eOpening, fiscalYearStartBs: fyStart })
     poolLines.push({
       pool: 'E', opening_wdv: eOpening, additions_full: e.additions, additions_two_third: 0, additions_one_third: 0,
-      disposal_proceeds: 0, repair_expense_total: 0, repair_expense_deductible: 0, repair_expense_capitalized: 0,
+      disposal_proceeds: e.disposal_proceeds, repair_expense_total: 0, repair_expense_deductible: 0, repair_expense_capitalized: 0,
       depreciation_base: e.depreciation_base, depreciation_amount: e.depreciation_amount, closing_wdv: e.closing_wdv,
     })
 
     setOpeningGap(priorRun ? null : { priorLabel: priorFyLabel, earlierLabel })
+    setPoolEDisposed(e.disposed_value > 0.005 || e.disposal_proceeds > 0.005 ? { value: e.disposed_value, proceeds: e.disposal_proceeds } : null)
     setPoolECapped(e.scheduled - e.depreciation_amount > 0.005 ? { scheduled: e.scheduled, held: e.depreciation_base } : null)
     setLines(poolLines)
     setLoading(false)
@@ -191,6 +256,9 @@ export default function TaxPoolTab({ assets }) {
   async function post() {
     if (!lines) return
     setMsg(''); setErr(null)
+    // The inputs these lines were built from (COSTS-7). Checked again just before the write, since
+    // the checks and confirms below leave time for a repair to be added or the year changed.
+    const version = inputsVersion.current
     if (openingGap?.earlierLabel) {
       askConfirm({
         title: `FY ${openingGap.priorLabel} has no posted schedule`,
@@ -203,17 +271,17 @@ export default function TaxPoolTab({ assets }) {
           </p>
         ),
         confirmLabel: 'Post with every pool at 0',
-        run: checkAndPost,
+        run: () => checkAndPost(version),
       })
       return
     }
-    await checkAndPost()
+    await checkAndPost(version)
   }
 
   // A fiscal year can be posted twice — there is deliberately no unique constraint, since a
   // correction is a new run — and the next year's opening WDV then reads whichever posted last.
   // Look first, and make a second schedule for the same year a decision naming the first (S756).
-  async function checkAndPost() {
+  async function checkAndPost(version) {
     setPosting(true)
     const { data: existing, error: existingErr } = await scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
       .eq('fiscal_year', fyLabel).eq('status', 'posted').order('created_at').order('id')
@@ -224,22 +292,26 @@ export default function TaxPoolTab({ assets }) {
       setErr({ text: `Could not check whether FY ${fyLabel} already has a posted schedule, so nothing was posted. Try again. ` + a.text, detail: a.detail })
       return
     }
-    if (!existing || existing.length === 0) { await submitPost(); return }
+    if (!existing || existing.length === 0) { await submitPost(version); return }
     askConfirm({
       title: `FY ${fyLabel} already has a posted schedule`,
       danger: true,
       body: (
         <p style={{ margin: 0 }}>
-          A tax pool schedule for FY {fyLabel} was posted on {existing.map(r => new Date(r.posted_at || r.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })).join(', ')}.
+          A tax pool schedule for FY {fyLabel} was posted on {existing.map(r => nepalBsLong(r.posted_at || r.created_at) || 'an unknown date').join(', ')}.
           {' '}Posting again adds a second locked schedule for the same year beside it; next year's opening values will be taken from this new one. Neither can be edited afterwards.
         </p>
       ),
       confirmLabel: 'Post a second schedule',
-      run: submitPost,
+      run: () => submitPost(version),
     })
   }
 
-  async function submitPost() {
+  async function submitPost(version) {
+    if (inputsVersion.current !== version) {
+      setErr('The fiscal year or its repair expenses changed after this preview was made, so nothing was posted. Press Preview again, then Post.')
+      return
+    }
     setPosting(true); setMsg(''); setErr(null)
     const { error } = await supabase.rpc('post_tax_pool_run', {
       p_client_id: clientId, p_fiscal_year: fyLabel, p_lines: lines, p_notes: null,
@@ -274,11 +346,12 @@ ${text}`, detail })
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="form-field">
             <label htmlFor="taxpoo-f1"><Tip text="Nepal's tax year runs mid-July to mid-July (Shrawan to Ashadh) — it doesn't line up with the Jan-Dec calendar year most people think in." width={280}>Fiscal Year</Tip></label>
-            <select id="taxpoo-f1" className="form-select" value={fyStart} onChange={e => { setFyStart(parseInt(e.target.value)); setLines(null) }}>
+            <select id="taxpoo-f1" className="form-select" value={fyStart} onChange={e => changeYear(parseInt(e.target.value))}>
               {fyOptionsAround(currentFyStart).map(y => <option key={y} value={y}>FY {getBsFiscalYear(y, 4)}</option>)}
             </select>
           </div>
-          <button className="btn btn-primary" onClick={preview} disabled={loading}>{loading ? 'Computing…' : 'Preview'}</button>
+          {/* Pressable while the repair list is not loaded, so the press can say why (COSTS-7). */}
+          <button className="btn btn-primary" onClick={preview} disabled={loading} aria-disabled={!repairsLoaded || undefined}>{loading ? 'Computing…' : 'Preview'}</button>
           {lines && (
             <Tip text={canPost ? 'Writes the pool schedule and locks it for this fiscal year — corrections need a new adjustment run.' : 'Only a Manager or Owner login can post.'} width={280}>
               <button className="btn btn-primary" onClick={post} disabled={!canPost || posting}>{posting ? 'Posting…' : 'Post'}</button>
@@ -316,6 +389,13 @@ ${text}`, detail })
         <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px', fontStyle: 'italic' }}>
           e.g. {POOL_EXAMPLES[newExpense.pool]}
         </p>
+        {/* COSTS-7: a failed read shows no list at all — never last year's — and says what it blocks. */}
+        {repairErr && (
+          <div style={{ marginBottom: 12 }}>
+            <ActionError error={{ text: `The repair expenses for FY ${fyLabel} could not be read, so none are listed and Preview is held until they are. ${repairErr.text}`, detail: repairErr.detail }} />
+            <button className="btn btn-ghost" style={{ marginTop: 8, fontSize: 12 }} onClick={() => loadRepairExpenses(fyLabel)}>Try again</button>
+          </div>
+        )}
         {repairExpenses.length > 0 && (
           <div className="table-wrap">
             <table className="data-table" style={{ fontSize: 12 }}>
@@ -323,7 +403,7 @@ ${text}`, detail })
               <tbody>
                 {repairExpenses.map(e => (
                   <tr key={e.id}>
-                    <td>{e.pool}</td><td>{e.expense_date}</td>
+                    <td>{e.pool}</td><td style={{ whiteSpace: 'nowrap' }}>{formatAdAsBs(e.expense_date)}</td>
                     <td style={{ textAlign: 'right' }}>{fmt(e.amount)}</td>
                     <td>{e.description || '—'}</td>
                     <td><button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => deleteExpense(e.id)}>Delete</button></td>
@@ -394,8 +474,18 @@ ${text}`, detail })
               {openingGap ? ' Its opening value is missing (see above), which is usually why.' : ''}
             </p>
           )}
+          {/* S792 stage 3: Pool E's Disposals figure is money received, but what leaves that pool is
+              the value not yet claimed — say so, or its row cannot be added up. */}
+          {poolEDisposed && (
+            <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)' }}>
+              Pool E: software or licences sold or written off this year leave the pool at the value not yet
+              claimed on them (NPR {fmt(poolEDisposed.value)}) and are not amortized this year. The NPR {fmt(poolEDisposed.proceeds)} received
+              for them is shown under Disposals but not taken off the pool, because each Pool E item is claimed on its own schedule;
+              ask your accountant how to treat the gain or loss.
+            </p>
+          )}
           <div className="print-only" style={{ marginTop: 32, fontSize: 10, color: '#aaa', borderTop: '1px solid #eee', paddingTop: 12, textAlign: 'center' }}>
-            {DISCLAIMER_TEXT} · Generated by Crest Suite · {new Date().toLocaleDateString('en-IN')}
+            {DISCLAIMER_TEXT} · Generated by Crest Suite · {nepalBsLong(new Date())}
           </div>
         </div>
       )}

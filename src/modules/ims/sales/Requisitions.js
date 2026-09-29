@@ -21,6 +21,8 @@ import { buildStockRows } from '../stockcount/stockReportCalc'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import RequisitionRejectModal from './RequisitionRejectModal'
 import { statusMeta, trailParts } from './requisitionTrail'
+import { findShortfalls } from './requisitionShortfall'
+import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { chipKeys } from '../../../shared/rovingFocus'
 import { FilterChips } from '../../../components/Tabs'
@@ -255,23 +257,21 @@ export default function Requisitions() {
     return onHand
   }
 
-  // Returns a confirm-worthy warning string if any line would issue more than estimated on-hand,
-  // or null if everything's within stock. Not a hard block — this app's stock model is periodic/
-  // physical-count based (see CLAUDE.md), so "on hand" here is an estimate, not a live ledger.
+  // Returns a confirm-worthy warning string if the slip would issue more of any ITEM than its
+  // estimated on-hand, or null if everything's within stock. Not a hard block — this app's stock
+  // model is periodic/physical-count based (see CLAUDE.md), so "on hand" here is an estimate, not a
+  // live ledger. Per item, not per line (S792, SALES-7): two 5 kg lines of flour against ~7 kg on
+  // the shelf each passed alone — findShortfalls sums the slip first.
   async function checkStockShortfall(periodId, lines) {
     const onHand = await getOnHandMap(periodId)
     // The check could not run — say so rather than reporting "no shortfall" (the
     // closing-count-preflight convention: inform, never silently pass).
     if (!onHand) return 'Could not check stock on hand — a read failed (check your internet). Issue anyway without the check?'
-    const shortfalls = lines
-      .map(l => {
-        const issuing = parseFloat(l.qty_issued) || 0
-        const available = onHand[l.item_id] ?? 0
-        if (issuing <= available) return null
-        const item = items.find(i => i.id === l.item_id)
-        return `${item?.name || l.item_id}: issuing ${issuing} ${item?.uom || ''}, only ~${available.toFixed(1)} estimated on hand`
-      })
-      .filter(Boolean)
+    const shortfalls = findShortfalls(lines, onHand).map(s => {
+      const item = items.find(i => i.id === s.item_id)
+      const across = s.lines > 1 ? ` across ${s.lines} lines` : ''
+      return `${item?.name || s.item_id}: issuing ${s.issuing} ${item?.uom || ''}${across}, only ~${s.available.toFixed(1)} estimated on hand`
+    })
     if (shortfalls.length === 0) return null
     return `This issues more than the estimated stock on hand for:\n\n${shortfalls.join('\n')}\n\nIssue anyway?`
   }
@@ -479,8 +479,42 @@ ${text}`, detail })
     await confirmIssueNow(correcting)
   }
 
+  // A slip that changed or vanished on another device while this one had it open (S792, SALES-8).
+  // Back to the list, reloaded so it shows what is really there, with the sentence on top of it —
+  // backToList() clears actionError, so the message is set after it.
+  async function showSlipMovedOn(text) {
+    await loadReqs(selectedPeriod.id)
+    backToList()
+    setActionError(text)
+    setSaving(false)
+  }
+
   // The write half of confirmIssue. Assumes `saving` is already true and owns clearing it.
   async function confirmIssueNow(correcting) {
+    // STILL A DRAFT? (S792, SALES-8.) Every write below is filtered by id, and an update that
+    // matches nothing returns no error — so a slip issued, rejected or deleted on another device
+    // while this screen was open used to "issue" without a word and simply vanish from the list.
+    // Worse for a supervisor: the line updates would land on a slip ANOTHER device had already
+    // issued and rewrite its issued quantities before the header check could notice. So ask first,
+    // and write nothing if the answer is no. (A staff login is refused by the database anyway —
+    // requisition_lines on an issued slip need a supervisor; this names the situation before that.)
+    if (!correcting) {
+      const { data: current, error: cErr } = await scopedFrom('requisitions', 'id, status').eq('id', selectedReq.id).maybeSingle()
+      if (cErr) {
+        const { text, detail } = asActionError(cErr)
+        setActionError({ text: `Could not check that this requisition is still a draft, so it was not issued and nothing on it has changed. Try Issue again. ${text}`, detail })
+        setSaving(false); return
+      }
+      if (current?.status !== 'draft') {
+        await showSlipMovedOn(!current
+          ? 'That requisition was deleted on another screen while you had it open, so there was nothing to issue. Nothing was changed.'
+          : current.status === 'issued'
+            ? 'That requisition was already issued on another screen while you had it open, so it was not issued again and its quantities were not changed. Open it from the list to see what was issued.'
+            : 'That requisition was rejected on another screen while you had it open, so it was not issued. Nothing was changed.')
+        return
+      }
+    }
+
     // LINES FIRST, THEN THE STATUS. The other order flipped the header to `issued` and then fired
     // per-line updates whose errors were discarded entirely — not destructured at all — so a
     // failure there left a requisition reading ISSUED with qty_issued = 0 on every line: worth
@@ -493,7 +527,9 @@ ${text}`, detail })
       // has already been signed, which is the very thing the column exists to prevent.
       const patch = { qty_issued: parseFloat(line.qty_issued || 0) }
       if (!correcting) patch.rate = parseFloat(line.items?.per_uom_rate || 0)
-      return supabase.from('requisition_lines').update(patch).eq('id', line.id)
+      // `.select('id')`: a line removed with its slip matches nothing and returns no error, so
+      // the row count is the only evidence it landed (S738, S792 SALES-8).
+      return supabase.from('requisition_lines').update(patch).eq('id', line.id).select('id')
     }))
     const lineErr = lineResults.find(r => r.error)?.error
     if (lineErr) {
@@ -503,13 +539,32 @@ ${text}`, detail })
         : `The issued quantities were not saved, so this requisition is still a draft. Nothing has changed — try Issue again. ${text}`, detail })
       setSaving(false); return
     }
+    const missing = lineResults.filter(r => !r.data?.length).length
+    if (missing > 0) {
+      // The slip went (its lines go with it) between the check above and these writes, or — on a
+      // correction, which has no check above — while the screen was open. The status is not
+      // touched. Lines only ever leave with their slip on this page, so "some gone, some not" is a
+      // write from elsewhere; what did land there landed on lines that still exist, and says so.
+      const all = missing === issueLines.length
+      await showSlipMovedOn(all
+        ? `That requisition was deleted on another screen while you had it open, so there was nothing left to ${correcting ? 'correct' : 'issue'}.`
+        : `That requisition was changed on another screen while you had it open: ${missing} of its ${issueLines.length} items were no longer on it, so ${correcting ? 'only the items still on it took the corrected quantities' : 'it was not marked issued, though the items still on it may have taken the quantities typed here'}. Open it again from the list to see what it holds now.`)
+      return
+    }
 
     if (!correcting) {
-      const { error: hErr } = await scopedUpdate('requisitions', { status: 'issued' }).eq('id', selectedReq.id)
+      // `.eq('status', 'draft')` + `.select('id')`, as rejectReq does (S738): zero rows back means
+      // the slip stopped being a draft in the moment between the check above and this write.
+      const { data: flipped, error: hErr } = await scopedUpdate('requisitions', { status: 'issued' })
+        .eq('id', selectedReq.id).eq('status', 'draft').select('id')
       if (hErr) {
         const { text, detail } = asActionError(hErr)
         setActionError({ text: `The quantities were saved but the requisition is still showing as a draft. Open it and press Issue again — the quantities are already as you left them. ${text}`, detail })
         setSaving(false); return
+      }
+      if (!flipped?.length) {
+        await showSlipMovedOn('That requisition stopped being a draft on another screen while it was being issued here, so it was not marked issued from this screen. The quantities typed here may have been saved onto it — open it from the list and check them.')
+        return
       }
     }
     await loadReqs(selectedPeriod.id)
@@ -628,6 +683,24 @@ ${text}`, detail })
           )}
         </div>
       </div>
+
+      {/* The lock and the notice are the same fact (closed-periods.md). This page locked a closed
+          month since it was built and never said so: staff simply lost the buttons, and the Owner and
+          admin, whom the lock lets through, got a screen identical to the open month's (S792.4). */}
+      {periodClosed && (
+        <ClosedPeriodBanner />
+      )}
+      {/* Same amber shape and lead as Sales.js's and Purchases.js's banner. Not ClosedPeriodBanner's
+          canEdit form: its sentence sends the reader to regenerate the frozen Monthly Report, and no
+          figure in that report reads requisitions — Stock Count's Requisitioned column is the only
+          place a slip saved here shows up. */}
+      {canEditClosedPeriods && selectedPeriod?.status === 'closed' && (
+        <div role="note" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          ✎ <strong>{periodLabel} is closed — you are editing a closed month.</strong> Requisitions raised, issued, corrected
+          or deleted here still change that month&apos;s Requisitioned column on Stock Count. The frozen Monthly Report does
+          not use requisitions, so nothing needs regenerating afterwards.
+        </div>
+      )}
 
       {/* Issue and Delete happen on the list and detail screens, neither of which had anywhere to
           put a failure. role="alert" on ActionError announces it at the moment it appears. */}

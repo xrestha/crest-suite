@@ -17,6 +17,8 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { FilterChips } from '../../../components/Tabs'
 import { extrasCostByRecipe, loadExtrasCosting } from './extrasCost'
 import { BYO_REASON, BYO_TIP, isCostedByBuild } from './buildYourOwnRating'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 
 export default function RecipeMargin() {
   const { clientId, profile, hasImsAccess, customizationEnabled } = useAuth()
@@ -30,6 +32,7 @@ export default function RecipeMargin() {
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
   const periodReq = useLatestRequest()
   const [periods, setPeriods]         = useState([])
   const [selectedPeriod, setSelected] = useState(null)
@@ -246,7 +249,14 @@ export default function RecipeMargin() {
     return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
   }
 
+  // Gated on the load, a failed read and the letterhead's outlet name, not just on having rows
+  // (S792, IMS_TODO S792.4; the S728 rule for a control that emits a FILE). On `display.length`
+  // alone it stayed live while a period change was loading, so the previous month's rows could
+  // leave in a file named for the new one; and a failed read was refused only because it happens
+  // to clear the rows, which is not a gate anyone can see.
+  const exportBlocked = loading || !!loadError || !!biz.error || !display.length
   async function exportExcel() {
+    if (exportBlocked) return
     const XLSX = await import('xlsx')
     const wb   = XLSX.utils.book_new()
     // An unknown figure exports BLANK, never 0.0% — this sheet leaves the building and gets priced
@@ -268,7 +278,15 @@ export default function RecipeMargin() {
       'FC%':                     r.fcPct != null ? r.fcPct.toFixed(1) + '%' : '',
       'Note':                    r.costReason || '',
     }))
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Recipe Margin')
+    // The scope line states what the rows are: the period (and whether it is still open), the tab
+    // and the "with sales" filter — the filter bar is not in the file, so the sheet must say it.
+    const scopeLine = [
+      `Period : ${periodLabel}${selectedPeriod?.status === 'open' ? ' (open — figures still moving)' : ''}`,
+      catFilter === 'All' ? 'all categories' : `category: ${catFilter}`,
+      onlyWithSales ? 'recipes with sales only' : 'all recipes, sold or not',
+      'revenue at the prices actually charged; food cost at today\'s item rates',
+    ].join(' · ')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, { title: 'Recipe Contribution Margin', biz, scopeLine, rows: data }), 'Recipe Margin')
     XLSX.writeFile(wb, `RecipeMargin-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
@@ -296,9 +314,16 @@ export default function RecipeMargin() {
             ))}
           </select>
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Contribution Margin - ${periodLabel}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!display.length}>Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={exportBlocked}>Export Excel</button>
         </div>
       </div>
+
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
           Total Contribution reads as a confident green NPR 0 (S594). */}

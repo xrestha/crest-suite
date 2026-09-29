@@ -90,8 +90,11 @@ export async function closingCountPreflight(periodId, clientId) {
       // 200 of 200 and was told "All 200 active items have a closing count", with 30 items
       // heading into the frozen report at zero. Both sides must mean what the count screen
       // means, or the all-clear is the one branch that can be wrong (S616).
-      supabase.from('items').select('id', { count: 'exact', head: true })
-        .eq('client_id', clientId).eq('is_active', true),
+      //
+      // Through the scoped layer (S792, DATABASE-10). The hand-written `.eq('client_id', clientId)`
+      // failed safe (a missing id reached Postgres as `eq.undefined` and was refused), but the
+      // tenancy filter lives in one place, which fails closed by design rather than by accident.
+      scopedFrom('items', clientId, 'id', { count: 'exact', head: true }).eq('is_active', true),
     ]), 10000, 'Checking closing counts')
     if (countedRes.error || itemsRes.error) return null
     return { counted: countedRes.count ?? 0, items: itemsRes.count ?? 0 }
@@ -133,6 +136,35 @@ export function payrollNote(pre, monthLabel) {
   if (!pre) return { danger: false, warn: false, text: `Couldn't check whether ${monthLabel}'s payroll is finalized. If it is not, the frozen Monthly Report carries an estimated labour cost until an admin regenerates it after Finalize.` }
   if (pre.status === 'finalized') return { danger: false, warn: false, text: `${monthLabel}'s payroll is finalized — the frozen Monthly Report carries the exact payroll figure.` }
   return { danger: false, warn: true, text: `${monthLabel}'s payroll is not finalized yet. HR pages stay open after the close and Payroll Run has its own lock — but the frozen Monthly Report will carry an ESTIMATED labour cost until an admin regenerates it after Finalize.` }
+}
+
+/**
+ * Whether THIS login's close also makes the frozen Owner Report, or leaves it for the Owner
+ * (S792, owner decision D42).
+ *
+ * `monthly_owner_reports` is owner/admin only: four RESTRICTIVE policies (no_ims_staff,
+ * no_pos_pin_staff, no_hr_role_staff, no_self_service_accounts) refuse every staff account at any
+ * rank. An IMS supervisor or manager may end the month (`ims_monthly_periods_guard`) but cannot
+ * write the report, so their close used to compute the whole snapshot, have the insert refused,
+ * and report the refusal as a failure. `isOwner` is the absence of every staff marker, so exactly
+ * admin and the Owner can write it; for anyone else MonthlyOwnerReport.jsx's lazy generate makes
+ * it (`generation_source: 'backfill'`, `generated_at` then) the first time the Owner opens it.
+ */
+export function closerMakesReport({ isAdmin, isOwner }) {
+  return !!(isAdmin || isOwner)
+}
+
+/**
+ * The close dialog's sentence for a closer who cannot make the report (D42). Quiet, not amber:
+ * this is the usual close for a supervisor and nothing is lost. What the reader needs is when the
+ * report is made and what it will show, because a correction made before the Owner opens it is in
+ * it — the opposite of a report frozen at the close.
+ */
+export function deferredReportNote(monthLabel) {
+  return {
+    danger: false, warn: false,
+    text: `${monthLabel}'s Owner Report will be made when the Owner first opens it, not now — it holds figures only the Owner's login can see. It will show ${monthLabel}'s figures as they stand on the day the Owner opens it.`,
+  }
 }
 
 // ── The commit ────────────────────────────────────────────────────────────────
@@ -203,16 +235,59 @@ export async function createPeriodWithCarryForward({ clientId, periods, bs_year,
  * Callers turn `failures[0]` into a sentence with `closeFailureText()` — the stages are ordered
  * by how much the reader has to do about them.
  *
+ * `already_closed` is the one entry that is not a failure: the month was no longer open when this
+ * press arrived and a later month already exists (S792, STOCK-8), so nothing was changed, and
+ * `closed` is true because the month IS closed. It rides in `failures` so the existing callers,
+ * which surface `failures[0]` through `closeFailureText()`, say so without a change of their own.
+ * A month found closed with NO later month is a close whose reply was lost half-way; that one is
+ * finished here (next month, carry-forward, leave, report) rather than left stranded.
+ *
+ * `makeReport: false` skips the frozen report for a closer who cannot write it (D42, see
+ * `closerMakesReport`); `reportSaved` is then false and nothing is recorded as a failure.
+ *
  * @returns {Promise<{closed: boolean, nextPeriodId: string|null, reportSaved: boolean,
- *   failures: Array<{stage: 'close'|'open_next'|'carry_forward'|'leave_backfill'|'report', error: any}>,
+ *   failures: Array<{stage: 'close'|'already_closed'|'open_next'|'carry_forward'|'leave_backfill'|'report', error: any}>,
  *   leaveFill: {filled: number, skipped: number, employees: number, error: any}|null}>}
  */
-export async function performPeriodClose({ clientId, period, openNext = true, actorId = null }) {
+export async function performPeriodClose({ clientId, period, openNext = true, actorId = null, makeReport = true }) {
   const failures = []
-  const { error: closeErr } = await scopedUpdate('monthly_periods', clientId, { status: 'closed' }).eq('id', period.id)
+  // Guarded on the status it changes (S792, STOCK-8). Unguarded, a stale "End month" pressed on a
+  // dashboard that had not reloaded since someone else closed the month matched anyway (closed →
+  // closed changes nothing the trigger checks), the next-period insert hit 23505, and the branch
+  // below carried the old closing count into the month that was already open, overwriting any
+  // opening figure corrected there since (Pull, a manual fix) and reporting success.
+  const { data: closedRows, error: closeErr } = await scopedUpdate('monthly_periods', clientId, { status: 'closed' })
+    .eq('id', period.id).eq('status', 'open').select('id')
   if (closeErr) {
     failures.push({ stage: 'close', error: closeErr })
     return { closed: false, nextPeriodId: null, reportSaved: false, failures }
+  }
+  if (!closedRows?.length) {
+    // Zero rows is proof the row was not updated (errorText.js, S738), but not of WHY: the month
+    // is closed already, or this login cannot see the row. Only the first may be called "already
+    // closed", so read which — and read the client's other periods in the same request, because
+    // "already closed" is two different states. One row per month per client, so this list stays
+    // far below the 1000-row cap for the life of any client.
+    const { data: list, error: listErr } = await scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month, status')
+    const now = (list || []).find(p => p.id === period.id)
+    if (listErr || now?.status !== 'closed') {
+      failures.push({ stage: 'close', error: listErr || { message: 'No period row was updated: it was not open, or this login cannot see it.' } })
+      return { closed: false, nextPeriodId: null, reportSaved: false, failures }
+    }
+    // A later month exists: the close finished, or someone moved on. Nothing runs, since re-carrying
+    // this month's closing would overwrite an opening figure corrected there since (the stale
+    // banner, STOCK-8). Any LATER month counts, not only bs_month + 1 — a month created across a
+    // gap means the client moved on just the same, and minting the skipped month behind it would
+    // collide with the one-open-period index. `openNext: false` (End Period) never opens one, so
+    // for it the month being closed is the whole of the close.
+    if (!openNext || nextExistingPeriod(list, period)) {
+      failures.push({ stage: 'already_closed', error: null })
+      return { closed: true, nextPeriodId: null, reportSaved: false, failures, leaveFill: null }
+    }
+    // No later month: an earlier press flipped the status and lost its reply before the next month
+    // was made, which left the client with no open period and no way back for a non-admin. There is
+    // nothing in a month that does not exist yet to overwrite, so the rest of the close runs exactly
+    // as a first close would — the only path that repairs this state.
   }
 
   let nextPeriodId = null
@@ -225,8 +300,9 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
     if (!newErr) {
       nextPeriodId = newPeriod?.id ?? null
     } else if (newErr.code === '23505' || /unique/i.test(newErr.message || '')) {
-      // The next period already exists (a retried click after a slow response) — the close
-      // above still succeeded, so carry forward into the row that is there.
+      // The next period already exists — the close above still succeeded, so carry forward into
+      // the row that is there. A retried or stale click no longer reaches this branch: the status
+      // guard above turns it into `already_closed` before anything is written (S792, STOCK-8).
       const { data: existing, error: exErr } = await scopedFrom('monthly_periods', clientId, 'id')
         .eq('bs_year', next.bs_year).eq('bs_month', next.bs_month).maybeSingle()
       if (exErr || !existing?.id) failures.push({ stage: 'open_next', error: exErr || newErr })
@@ -251,14 +327,18 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
   }
 
   let reportSaved = false
-  try {
-    const closed = { ...period, status: 'closed' }
-    const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period: closed })
-    await saveGeneratedReport({ clientId, period: closed, snapshot, modulesIncluded, actorId, source: 'period_close' })
-    reportSaved = true
-  } catch (e) {
-    console.error('Monthly owner report generation failed (non-blocking):', e)
-    failures.push({ stage: 'report', error: e })
+  // A closer the report's RLS refuses skips it rather than computing a month of reads to have the
+  // insert refused (D42); the Owner's first view makes it.
+  if (makeReport) {
+    try {
+      const closed = { ...period, status: 'closed' }
+      const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period: closed })
+      await saveGeneratedReport({ clientId, period: closed, snapshot, modulesIncluded, actorId, source: 'period_close' })
+      reportSaved = true
+    } catch (e) {
+      console.error('Monthly owner report generation failed (non-blocking):', e)
+      failures.push({ stage: 'report', error: e })
+    }
   }
 
   return { closed: true, nextPeriodId, reportSaved, failures, leaveFill }
@@ -278,6 +358,12 @@ export function closeFailureText({ stage, period, isAdmin = false }) {
       // A dead fetch does not prove the update did not land — say "may not", and send them to
       // look, rather than inviting a retry over a month that is already closed.
       return `${m} may not have closed. Reload to check its status before trying again.`
+    case 'already_closed':
+      // Not a failure of this press: the month was closed before it arrived (S792, STOCK-8), and
+      // the guarded update proves nothing was written. Usually a page left open while someone
+      // else closed it; occasionally this login's own earlier press, whose reply was lost. Either
+      // way the page is out of date, and the month that is open now is on the reloaded one.
+      return `${m} had already been closed — by someone else, or by an earlier press whose reply never came back — so this press changed nothing. Reload the page to see which month is open now.`
     case 'open_next':
       return `${m} was closed, but ${nextLabel} could not be opened. ` + (isAdmin
         ? `Use "+ Create Period" for this client — it carries ${m}'s closing count into the new month automatically.`

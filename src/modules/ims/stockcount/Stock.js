@@ -21,6 +21,7 @@ import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { isNetworkError } from '../../../shared/errorText'
+import { countSaveFailureText } from './countSaveFailure'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import './Stock.css'
@@ -697,14 +698,17 @@ export default function Stock() {
   // Called from the promise chains' catch: names the row, says what the server holds NOW, and
   // keeps the raw detail. Nothing here claims the write did not land (a dead fetch does not prove
   // that) — it says the value on screen is not known to be stored, which is the honest fact.
+  // "Re-enter it and save again" is offered only where a retry can pass (S792, STOCK-7): a closed
+  // month, recount protection or a section outside scope leads with its reason instead. And the
+  // reason is worded for who is reading it: a counter or supervisor can only escalate ('staff'),
+  // while admin, the Owner and an IMS manager are the ones who fix it ('operator').
   function noteSaveFailure(itemId, fieldKey, err, count) {
     const label = FIELD_LABEL[fieldKey] || fieldKey
     const name = itemId ? (items.find(i => i.id === itemId)?.name || 'this item') : `${count} item(s)`
-    const held = err?.cleared
-      ? `the server now holds no ${label} figure for it`
-      : 'what is on screen is not known to be stored'
-    const { text, detail } = asActionError(err?.supabase || err)
-    setSaveError({ text: `The ${label} figure for ${name} was not saved — ${held}. Re-enter it and save again. ${text}`, detail })
+    setSaveError(countSaveFailureText({
+      label, name, cleared: !!err?.cleared, err: err?.supabase || err,
+      audience: canManageCounts ? 'operator' : 'staff',
+    }))
   }
 
   // Wastage/staff-meal saves are delete()-then-insert() (two round trips, unlike opening/

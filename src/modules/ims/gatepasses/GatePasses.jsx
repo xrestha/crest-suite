@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Fab from '../../../components/Fab'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -37,6 +37,36 @@ const SIX_HOURS_MS = 6 * 60 * 60 * 1000
  */
 export function gatePassDayStartMs(nowMs = Date.now()) {
   return Date.parse(serviceDayStartIso(nowMs)) + SIX_HOURS_MS
+}
+
+/**
+ * The list once the stale-pass sweep has run (S792, COSTS-12). Exported for GatePasses.test.js.
+ *
+ * `closedIds` are the passes this device's update closed. The rest of `staleIds` did not match
+ * `.eq('status', 'open')` — normally because another device opening the page after 6 AM swept them
+ * first, or someone marked them exited or voided them — so `reread` (their rows read again, or null
+ * when that read failed) says what they are now. Before this, every unmatched pass stayed "open" on
+ * this device with a false "could not be closed automatically" warning until a reload.
+ *
+ * Returns the passes, and how many stale ones really are still open: re-read open, or not re-read.
+ * A pass missing from a successful re-read no longer exists for this login, so it leaves the list.
+ */
+export function settleSweep(passes, { staleIds, closedIds, nowIso, reread }) {
+  const stale = new Set(staleIds)
+  const closed = new Set(closedIds)
+  const fresh = reread ? new Map(reread.map(r => [r.id, r])) : null
+  let stillOpen = 0
+  const next = []
+  for (const x of passes) {
+    if (!stale.has(x.id)) { next.push(x); continue }
+    if (closed.has(x.id)) { next.push({ ...x, status: 'closed', time_out: nowIso, auto_closed: true }); continue }
+    if (!fresh) { stillOpen++; next.push(x); continue }
+    const now = fresh.get(x.id)
+    if (!now) continue
+    if (now.status === 'open') stillOpen++
+    next.push(now)
+  }
+  return { passes: next, stillOpen }
 }
 
 // "14 Bhadra" in Nepal, for a timestamp — so the All tab says which day a time belongs to.
@@ -100,7 +130,8 @@ export default function GatePasses() {
     const readErr = results.find(r => r.error)?.error
     if (readErr) { setPasses([]); setLoadError(readErr); setLoading(false); return }
     setLoadError(null)
-    const [{ data: p }, { data: v }, { data: client }, { data: settings }, { data: profs }] = results
+    const [{ data: v }, { data: client }, { data: settings }, { data: profs }] = results.slice(1)
+    let p = results[0].data || []
 
     // Sweep-close any pass still "open" from a previous gate-pass day — same reasoning/pattern as
     // PosParkingSlips.jsx's loadSlips(): no server cron in this project, so this runs the moment
@@ -108,23 +139,37 @@ export default function GatePasses() {
     // distinguishable from a real staff-confirmed Mark Exited. A voided pass is not 'open', so it
     // is never swept.
     const dayStart = gatePassDayStartMs()
-    const stale = (p || []).filter(x => x.status === 'open' && Date.parse(x.time_in) < dayStart)
+    const stale = p.filter(x => x.status === 'open' && Date.parse(x.time_in) < dayStart)
     setSweepFailed(false)
     if (stale.length > 0) {
       const nowIso = new Date().toISOString()
+      const staleIds = stale.map(x => x.id)
       // S756: only rows the update actually closed are shown closed. The error used to be dropped
       // while every stale row was flipped on screen. `.eq('status', 'open')` so a pass marked exited
       // or voided on another device in the meantime is not overwritten, and `.select('id')` so a
       // zero-row refusal (which returns no error) is visible too.
       const { data: closed, error: sweepErr } = await scopedUpdate('ims_gate_passes', { status: 'closed', time_out: nowIso, auto_closed: true })
-        .in('id', stale.map(x => x.id)).eq('status', 'open').select('id')
+        .in('id', staleIds).eq('status', 'open').select('id')
       if (loadClientRef.current !== clientId) return
-      const closedIds = new Set((sweepErr ? [] : closed || []).map(x => x.id))
-      if (closedIds.size < stale.length) setSweepFailed(true)
-      ;(p || []).forEach(x => { if (closedIds.has(x.id)) { x.status = 'closed'; x.time_out = nowIso; x.auto_closed = true } })
+      const closedIds = (sweepErr ? [] : closed || []).map(x => x.id)
+      // S792 (COSTS-12): the ones it did not close are read again rather than assumed stuck — a second
+      // device sweeping at the same moment closes them first, and matching nothing is its success,
+      // not a failure. A failed sweep is re-read too: a lost response does not prove nothing landed.
+      const closedSet = new Set(closedIds)
+      const unmatched = staleIds.filter(id => !closedSet.has(id))
+      let reread = null
+      if (unmatched.length > 0) {
+        const { data: again, error: againErr } = await fetchAllRowsChunked(unmatched, chunk =>
+          scopedFrom('ims_gate_passes').in('id', chunk).order('id'))
+        if (loadClientRef.current !== clientId) return
+        if (!againErr) reread = again || []
+      }
+      const settled = settleSweep(p, { staleIds, closedIds, nowIso, reread })
+      p = settled.passes
+      if (settled.stillOpen > 0) setSweepFailed(true)
     }
 
-    setPasses(p || [])
+    setPasses(p)
     setVendors(v || [])
     setBizInfo({ name: client?.name || '', address: settings?.property_address || '', vatNumber: settings?.vat_number || '' })
     setStaffNames(Object.fromEntries((profs || []).map(pr => [pr.id, pr.full_name])))

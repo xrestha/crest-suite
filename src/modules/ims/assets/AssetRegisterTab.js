@@ -14,9 +14,11 @@ import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { bookPositionsByAsset, bookValue } from './depreciationCompute'
+import { formatAdAsBs } from '../../../utils/bsCalendar'
 
 const fmt = nprInt
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+// A stored AD date as the BS date it was picked as, never the runtime's AD rendering (S792, COSTS-11).
+const fmtDate = d => formatAdAsBs(d)
 
 export default function AssetRegisterTab({ categories, assets, onReload }) {
   const { clientId, isAdmin } = useAuth()
@@ -159,7 +161,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                   <td style={{ textAlign: 'right' }}>{a.quantity}</td>
                   <td style={{ textAlign: 'right' }}>{fmt(a.unit_cost)}</td>
                   <td style={{ textAlign: 'right' }}>{fmt(a.total_cost)}</td>
-                  <td>{fmtDate(a.acquisition_date)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(a.acquisition_date)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(nbvOf(a))}</td>
                   <td style={{ textAlign: 'right' }}>{pctDepreciatedOf(a).toFixed(1)}%</td>
                   <td>

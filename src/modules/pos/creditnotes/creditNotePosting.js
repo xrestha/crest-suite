@@ -1,6 +1,7 @@
 import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../shared/fetchAllRows'
-import { daysInBsMonth, adToBs, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { daysInBsMonth, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { lineIngredientDeltas } from '../../../utils/orderLineIngredients'
+import { nepalDayInPeriod } from '../../../shared/nepalPeriodDay'
 
 // A credit note's revenue reversal in Inventory (S747).
 //
@@ -148,9 +149,14 @@ export async function backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpd
   for (const note of list) {
     const order = orderById.get(note.order_id)
     if (!order) { console.error('credit note backfill: bill not found for note', note.id); skipped++; continue }
+    // The day the note was issued IN NEPAL (S792, SALES-6) — the window above is Nepal's, and
+    // `adToBs(new Date(created_at))` read the viewer's clock zone instead. A note that cannot be
+    // placed in this period is left waiting rather than written under a day number not its own.
+    const bsDay = nepalDayInPeriod(note.created_at, period)
+    if (bsDay == null) { console.error('credit note backfill: note issued outside this period in Nepal time, left waiting', note.id, note.created_at); skipped++; continue }
     const rows = creditNoteReversalRows({
       order, items: order.pos_order_items, periodId: period.id,
-      bsDay: adToBs(new Date(note.created_at)).day, creditNoteId: note.id,
+      bsDay, creditNoteId: note.id,
     })
     if (rows.length > 0) {
       const { error } = await supabase.from('sales_entries').insert(rows)

@@ -12,6 +12,7 @@ import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 import { chipKeys } from '../../../shared/rovingFocus'
+import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 
 // Mirrors src/modules/pos/staff/PosStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for real email+password login instead of a
@@ -643,9 +644,14 @@ export default function ImsStaff() {
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>
                       }
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                    {/* S792 (MASTER-8): BS first, the calendar the owner reads; AD in the title. Both
+                        pinned to Nepal, so a login late at night is not dated the previous day for
+                        a viewer abroad. Was an AD `toLocaleDateString('en-GB')` in the browser's
+                        own zone. Same shape as POS Staff (S776). */}
+                    <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}
+                      title={p.last_seen_at ? nepalDateLong(p.last_seen_at) : undefined}>
                       {p.last_seen_at
-                        ? new Date(p.last_seen_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                        ? (nepalBsLong(p.last_seen_at) || nepalDateLong(p.last_seen_at))
                         : '—'}
                     </td>
                     <td>

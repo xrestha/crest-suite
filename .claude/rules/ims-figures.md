@@ -72,6 +72,11 @@ paths:
   far** (net purchases ÷ sales); Monthly Summary shows a closed month's purchases ÷ sales as
   **Spend %**. Labels, tips and `periodCostRatio()` live in `src/modules/ims/reports/foodCostBasis.js`
   — never put the Food Cost label on a purchases ratio. Owner Reports before schema 9 say "(on purchases)".
+- **Two wastage figures, on purpose (S792, FIGURES-5).** `valuePeriodItems().wastageVal` is the COGS
+  term (raw, non-sub-recipe items) on Monthly Summary, Consolidated P&L and `get_group_pnl`.
+  `periodWastageValue()` (`periodCost.js`) is "what was thrown away": every item with qty > 0, prep
+  and hidden included, on the Dashboard, Owner Dashboard, Owner Report and Wastage Report tiles.
+  Never feed the second to COGS or a P&L line: wasted prep is already in COGS through its raw items.
 - **Food cost % banding.** `fcBand(pct, settings)` reads the client's `fc_warning_pct`/`fc_critical_pct` and returns the `*-text` contrast variants. Five files each carried their own hardcoded `≤30 : ≤38 : else` copy, which disagreed with the very filter pills the user had just clicked. **`MenuEngineering.js`'s `FC_CUTOFF = 35` classification is deliberately NOT routed through this** — `computeMenuEngineeringSection.js` mirrors `classify()` verbatim for the frozen Monthly Owner Report, so changing it would silently desync a snapshot from the live page it must agree with. Its colours use `fcBand`; its maths does not.
 - **The other three operating ratios band in `src/shared/operatingBands.js`, not here (S660).**
   `lcBand` (labour, 30/37), `pcBand` (prime, 60/65), `nmBand` (net margin, **inverted**, ≥20/≥10)
@@ -236,7 +241,9 @@ pass the POS day-key set to `buildManualDailyHistory`.
 
 **A recompute clears the old run by `run_id` (S792, PLANNING-1, migration `20260928160100`)**:
 `horizon_days = h` and `run_id IS NULL OR run_id <> <this run>`, never `id NOT IN (<every new id>)`
-— ~45 KB of uuids in the URL, refused, so each Recompute stacked another run. The `pos_orders`
+— ~45 KB of uuids in the URL, refused, so each Recompute stacked another run. It also deletes only
+runs OLDER than its own (`generated_at` read back from the server), so two Recomputes at once leave
+the newer run. The `pos_orders`
 read is paged too: unpaged and unordered, it kept roughly the OLDEST 1,000 bills of the window.
 
 ### On-hand and "below par" have ONE calculation, on six surfaces (S696)

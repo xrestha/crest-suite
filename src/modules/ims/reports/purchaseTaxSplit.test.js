@@ -8,7 +8,7 @@ import { calcBillTotals } from '../purchases/purchasesHelpers'
 import {
   VAT_RATE, splitPurchaseVat, buildVendorSummary, billPayables, netFactors, returnBase,
   isVatReturn, isNonVatReturn, isUnlinkedReturn, annexure13Rows, normalisePan, billWiseVat, ONE_LAKH, summariseUnlinkedReturns,
-  returnLinesOutsidePeriod, priorBillFactors,
+  returnLinesOutsidePeriod, priorBillFactors, panWarning,
 } from './purchaseTaxSplit'
 import { allocateBillDiscounts } from './supplierAttribution'
 
@@ -253,6 +253,27 @@ describe('annexure13Rows — one row per PAN', () => {
     expect(normalisePan(null)).toBe('')
   })
 
+  // S792, TAX-11: dashes and a "PAN" prefix are three suppliers under a whitespace-only normaliser.
+  it('keeps the digits only, so a PAN typed three ways is one supplier', () => {
+    expect(normalisePan('601-234-567')).toBe('601234567')
+    expect(normalisePan('PAN 601234567')).toBe('601234567')
+    expect(normalisePan('N/A')).toBe('')
+    const rows = rowsFor([
+      bill('a', 'V1', 'Bhat Traders', '601-234-567', 40000),
+      bill('b', 'V2', 'Bhat Traders Pvt', 'PAN 601234567', 40000),
+      bill('c', 'V3', 'Bhat Trading', '601234567', 40000),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pan).toBe('601234567')
+    expect(rows[0].over).toBe(true)   // 1,20,000 together; 40,000 each apart
+  })
+
+  it('treats a PAN with no digits as missing, not as one shared PAN called "N/A"', () => {
+    const rows = rowsFor([bill('a', 'V1', 'A', 'N/A', 60000), bill('b', 'V2', 'B', 'n/a', 60000)])
+    expect(rows).toHaveLength(2)
+    expect(rows.every(r => r.panMissing)).toBe(true)
+  })
+
   it('discloses a supplier whose two cards are each under one lakh', () => {
     const rows = rowsFor([
       bill('a', 'V1', 'Himalayan Traders', '301234567', 60000),
@@ -304,6 +325,32 @@ describe('annexure13Rows — one row per PAN', () => {
   it('uses the one-lakh threshold by default, strictly above it', () => {
     expect(rowsFor([bill('a', 'V1', 'A', '1', ONE_LAKH)])[0].over).toBe(false)
     expect(rowsFor([bill('a', 'V1', 'A', '1', ONE_LAKH + 1)])[0].over).toBe(true)
+  })
+})
+
+// S792, TAX-11: the Vendors form warns (never blocks) when a PAN is not nine digits.
+describe('panWarning', () => {
+  it('says nothing for a blank PAN or a nine-digit one, however it is punctuated', () => {
+    expect(panWarning('')).toBeNull()
+    expect(panWarning('   ')).toBeNull()
+    expect(panWarning(null)).toBeNull()
+    expect(panWarning('601234567')).toBeNull()
+    expect(panWarning('601-234-567')).toBeNull()
+    expect(panWarning(' PAN 601 234 567 ')).toBeNull()
+  })
+
+  it('names the digit count when it is short or long', () => {
+    expect(panWarning('60123456')).toMatch(/has 8 digits; a Nepal PAN has 9/)
+    expect(panWarning('6012345678')).toMatch(/has 10 digits/)
+    expect(panWarning('7')).toMatch(/has 1 digit;/)
+  })
+
+  it('says so when there are no digits at all', () => {
+    expect(panWarning('N/A')).toMatch(/no digits/)
+  })
+
+  it("explains why it matters, in the one-lakh report's terms", () => {
+    expect(panWarning('123')).toMatch(/one-lakh/)
   })
 })
 
@@ -426,4 +473,30 @@ describe('the two statutory pages read whole bills', () => {
       expect(flat.slice(Math.max(0, at - 90), at)).toMatch(/fetchAllRows\(/)
       expect(flat.slice(at, at + 320)).toMatch(/\.order\(\s*'id'/)
     })
+})
+
+// S792 stage 3. Each of these shipped once already on a sibling and was fixed there; these pin the
+// page that was missed, since the arithmetic tests above cannot see a gate or a hard-coded cell.
+const PAYMENT_PAGE = path.join(__dirname, 'PaymentReport.js')
+
+describe('the tax pages gate what they print and export', () => {
+  it('Payment Summary gates Export Excel like its siblings (TAX-5)', () => {
+    expect(flatten(PAYMENT_PAGE)).toMatch(/onClick=\{exportExcel\} disabled=\{loading \|\| !!loadError \|\| !!biz\.error/)
+  })
+
+  it('Payment Summary computes its % of Net Total footer rather than asserting 100% (TAX-10)', () => {
+    expect(flatten(PAYMENT_PAGE)).not.toMatch(/>\s*100%\s*</)
+  })
+
+  it.each([['PaymentReport.js', PAYMENT_PAGE], ['VendorReport.js', path.join(__dirname, 'VendorReport.js')]])(
+    '%s only lets the load that still owns the page clear `loading` (TAX-4)', (_n, file) => {
+      const flat = flatten(file)
+      expect(flat).toMatch(/if \(periodReq\.isCurrent\(periodId\)\) setLoading\(false\)/)
+      // The superseded shape: an unconditional clear straight after the awaited load.
+      expect(flat).not.toMatch(/await loadData\([^)]*\) \}? ?setLoading\(false\)/)
+    })
+
+  it('VAT Report holds the Returns card until the month has loaded (TAX-8)', () => {
+    expect(flatten(VAT_PAGE)).toMatch(/!loading && vatReturns\.length > 0 &&/)
+  })
 })

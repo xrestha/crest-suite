@@ -216,14 +216,42 @@ describe('bookPositionsByAsset / bookValue', () => {
     expect(nbvOf(rows)).toBe(70000)
   })
 
-  test('a partly reversed period still counts as charged; a zero charge with no reversal does too', () => {
+  // S792 stage 3: a part reversal takes back the LAST days of the period, at the run's own rate.
+  test('a partly reversed period is charged only for the days its remaining charge covers', () => {
     const partly = [
       { ...fy2, id: 'r2', depreciation_amount: 10000 },
       { ...fy2, id: 'r3', depreciation_amount: 0, override_amount: -4000 },
     ]
-    expect(bookPositionsByAsset(partly).a).toEqual({ charged: 6000, rows: 2, chargedThrough: '2026-07-15' })
+    // 6,000 of 10,000 left over a 365-day period: its first 219 days.
+    expect(bookPositionsByAsset(partly).a).toEqual({ charged: 6000, rows: 2, chargedThrough: '2026-02-19' })
+  })
+
+  test('a zero charge with no reversal still counts for the whole period', () => {
     const idle = [{ ...fy2, id: 'r2', depreciation_amount: 5000, override_amount: 0 }]
     expect(bookPositionsByAsset(idle).a.chargedThrough).toBe('2026-07-15')
+  })
+
+  test('reversed in full, then the right figures posted for the same dates: the period is charged in full', () => {
+    // The Adjustment tab's own advice. The reversal must be matched to the run it undoes, not
+    // netted against both, or the corrected run would read as covering only part of the year.
+    const rows = [
+      { ...fy2, id: 'r2', annual_depreciation: 12000, depreciation_amount: 12000 },
+      { ...fy2, id: 'r3', annual_depreciation: 12000, depreciation_amount: 0, override_amount: -12000 },
+      { ...fy2, id: 'r4', annual_depreciation: 10000, depreciation_amount: 10000 },
+    ]
+    for (const order of [rows, [...rows].reverse()]) {
+      expect(bookPositionsByAsset(order).a).toEqual({ charged: 10000, rows: 3, chargedThrough: '2026-07-15' })
+    }
+  })
+
+  test('a part reversal is matched to the run with its annual figure when a period was posted twice', () => {
+    const rows = [
+      { ...fy2, id: 'r2', annual_depreciation: 10000, depreciation_amount: 10000 },
+      { ...fy2, id: 'r3', annual_depreciation: 20000, depreciation_amount: 20000 },
+      { ...fy2, id: 'r4', annual_depreciation: 20000, depreciation_amount: 0, override_amount: -20000 },
+      { ...fy2, id: 'r5', annual_depreciation: 10000, depreciation_amount: 0, override_amount: -4000 },
+    ]
+    expect(bookPositionsByAsset(rows).a.chargedThrough).toBe('2026-02-19')
   })
 
   test('as of a date: only periods ending by then, a later-posted reversal of an earlier period included', () => {
@@ -319,6 +347,32 @@ describe('computeDisposalDepreciation (D24)', () => {
       expect(r.line).toBeNull()
       expect(r.postedPastDisposal).toBe(false)
       expect(r.nbvAtDisposal).toBe(165200)
+    })
+
+    // S792 stage 3: reversing only the days after the disposal is the other way to follow the advice.
+    const partReversal = amount => ({ ...reversal, id: `rP${amount}`, override_amount: -amount })
+
+    test('reversing exactly the days after the disposal: charged through the disposal date, no warning', () => {
+      const r = dispose([runA, partReversal(18200)])
+      expect(r.chargedThrough).toBe('2026-01-15')
+      expect(r.postedPastDisposal).toBe(false)
+      expect(r.line).toBeNull()
+      expect(r.nbvAtDisposal).toBe(165200)
+    })
+
+    test('reversing more than that: the days in between are charged at disposal, to the same book value', () => {
+      const r = dispose([runA, partReversal(20000)])
+      expect(r.chargedThrough).toBe('2025-12-28')
+      expect(r.periodStart).toBe('2025-12-29')
+      expect(r.extraDepreciation).toBeCloseTo(1800, 2) // 18 days × 100
+      expect(r.nbvAtDisposal).toBeCloseTo(165200, 2)
+    })
+
+    test('reversing less than that: still charged past the disposal date, and the page must say so', () => {
+      const r = dispose([runA, partReversal(18000)])
+      expect(r.chargedThrough).toBe('2026-01-17')
+      expect(r.postedPastDisposal).toBe(true)
+      expect(r.line).toBeNull()
     })
   })
 })

@@ -7,7 +7,9 @@ import { BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
 import { asActionError } from '../../../components/ActionError'
 import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
 import { parseImportRows } from './recipeImportParse'
+import { markSheetDuplicates, sheetDuplicateNote } from './recipeImportSheetDupes'
 import { PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
+import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 
 // The price column is EX-VAT, and its header says so (S756). It is written straight to
 // `recipes.selling_price`, which is stored ex-VAT, while every other place a price is typed — the
@@ -32,7 +34,8 @@ const importCols = vatMode => ['Menu Item (Recipe)', 'Category',
 // matching and duplicate detection) and get an onImported() callback to reload its recipe list.
 // `costedByBuild(r)` (S792, RECIPES-1) marks a build-your-own dish, whose export row gets no food
 // cost or FC % — its fixed ingredients are not its plate.
-export default function RecipeImportButton({ items, subRecipes, recipes, exportRecipes, clientId, scopedInsert, scopedDelete, onImported, isAdmin, vatMode, costedByBuild = () => false }) {
+// `scopedFrom` re-reads the Product Codes in use when an issued one turns out to be taken.
+export default function RecipeImportButton({ items, subRecipes, recipes, exportRecipes, clientId, scopedFrom, scopedInsert, scopedDelete, onImported, isAdmin, vatMode, costedByBuild = () => false }) {
   const [importPreview, setImportPreview] = useState(null) // { recipes:[...], summary } | null
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
@@ -150,7 +153,12 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
         const body = aoa.length && String(aoa[0][0] || '').toLowerCase().startsWith('menu item') ? aoa.slice(1) : aoa
         const parsed = parseImportRows(body, items, subRecipes, recipes)
         if (parsed.length === 0) { setImportError('No recipes found in the sheet. Use the template format.'); return }
+        // A dish named twice in this sheet is imported once when both copies agree, and not at all
+        // when they differ (S792, RECIPES-9) — it used to import twice, as two dishes.
+        const sheetDupes = markSheetDuplicates(parsed)
         const summary = {
+          sheetMerged: parsed.filter(r => r.sheetDuplicate === 'merged').length,
+          sheetSkipped: sheetDupes.skipped.length,
           totalRecipes: parsed.length,
           willImport: parsed.filter(r => r.willImport).length,
           duplicates: parsed.filter(r => r.duplicate).length,
@@ -160,7 +168,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           matchedLines: parsed.reduce((s, r) => s + r.matchedLines.length, 0),
           badLines: parsed.reduce((s, r) => s + r.badLines.length, 0),
         }
-        setImportPreview({ recipes: parsed, summary })
+        setImportPreview({ recipes: parsed, summary, sheetDupes })
       } catch (err) {
         setImportError('Could not read the file — make sure it is a valid .xlsx. (' + err.message + ')')
       }
@@ -179,19 +187,42 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
     setImportBusy(true)
     setImportError('')
     let created = 0
+    const createdNames = new Set()
+    // Every imported dish gets a Product Code, as one made in Recipe Costing or Menu Pricing's
+    // + Add Item does (S792, RECIPES-9) — same generator, same per-prefix series. Without one it
+    // could not be found by code on the till and read blank on Item Wise. Codes issued earlier in
+    // this run count as taken, so a sheet of twelve Food dishes gets FOO-013…FOO-024, not twelve
+    // FOO-013s.
+    const codesInUse = (recipes || []).map(r => r.recipe_code)
     try {
       for (const r of toCreate) {
-        const { data: rec, error: recErr } = await scopedInsert('recipes', {
+        const category = r.category || 'Food'
+        const payload = {
           name: r.name,
-          category: r.category || 'Food',
+          category,
           selling_price: r.selling_price != null && !isNaN(r.selling_price) ? r.selling_price : null,
           vat_rate: vatMode === 'pan' ? 0 : IMPORT_VAT_RATE,
           yield_qty: r.yield_qty || 1,
           yield_uom: 'portion',
           target_fc_pct: 30,
           is_active: true,
-        }, { single: true })
+          recipe_code: nextProductCode(productCodePrefix(category), codesInUse),
+        }
+        // The code comes from the page's list, so another tab can take it first; a 23505 on this
+        // table is that code's unique index. Re-read what is stored and take the next one — the
+        // Recipes.js / Menu Pricing shape — and a failed re-read stops with the collision rather
+        // than restarting the series and colliding again.
+        let rec, recErr
+        for (let attempt = 0; attempt < 3; attempt++) {
+          ;({ data: rec, error: recErr } = await scopedInsert('recipes', payload, { single: true }))
+          if (!recErr || recErr.code !== '23505' || !scopedFrom) break
+          const { data: fresh, error: freshErr } = await scopedFrom('recipes', 'recipe_code')
+          if (freshErr) break
+          codesInUse.push(...(fresh || []).map(x => x.recipe_code))
+          payload.recipe_code = nextProductCode(productCodePrefix(category), codesInUse)
+        }
         if (recErr) { setImportError(`Failed on "${r.name}"${created > 0 ? ` — the ${created} before it were imported` : ''}. ${asActionError(recErr).text}`); break }
+        codesInUse.push(payload.recipe_code)
         const ingPayload = r.matchedLines.map(l => ({
           recipe_id: rec.id,
           item_id: l.item_id,
@@ -214,17 +245,22 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           break
         }
         created++
+        createdNames.add(r.name)
       }
     } finally {
       setImportBusy(false)
       if (created > 0) {
+        // Read before the preview is cleared: the names repeated in the sheet, and what became of
+        // them — "imported once" only for a repeated dish whose first copy actually landed.
+        const { merged = [], skipped = [] } = importPreview.sheetDupes || {}
+        const dupNote = sheetDuplicateNote({ merged: merged.filter(n => createdNames.has(n)), skipped })
         setImportPreview(null)
         await onImported()
         // S765: was alert(). You have just imported your whole recipe book and the celebration was
         // an OS dialog you have to dismiss before you can look at what landed — and on a tablet it
         // reads as "crest-suite.vercel.app says…", which is the shape of a security warning. The
         // page has a notice slot; the result belongs in it, next to the thing that changed.
-        setImportDone(`Imported ${created} recipe${created !== 1 ? 's' : ''}.`)
+        setImportDone(`Imported ${created} recipe${created !== 1 ? 's' : ''}.${dupNote ? ` ${dupNote}` : ''}`)
       }
     }
   }
@@ -255,6 +291,8 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
             <strong style={{ color: 'var(--theme-green-text)' }}>{importPreview.summary.matchedLines}</strong> ingredients matched
             {importPreview.summary.badLines > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.badLines}</strong> unmatched (skipped)</>}
             {importPreview.summary.duplicates > 0 && <> · {importPreview.summary.duplicates} already exist (skipped)</>}
+            {importPreview.summary.sheetMerged > 0 && <> · {importPreview.summary.sheetMerged} repeated in the sheet with the same details (used once)</>}
+            {importPreview.summary.sheetSkipped > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.sheetSkipped}</strong> named more than once with different details (skipped — keep one block per dish)</>}
             {importPreview.summary.dupIngredients > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.dupIngredients}</strong> with an ingredient listed twice (skipped — combine the rows in the sheet)</>}
             {importPreview.summary.ambiguousCodes > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.ambiguousCodes}</strong> naming an item code two items share (skipped — type the item's name instead)</>}
             {importPreview.summary.subs > 0 && <> · {importPreview.summary.subs} sub-recipes (create in app)</>}
@@ -264,6 +302,8 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
             {importPreview.recipes.map((r, idx) => {
               const status = r.willImport ? { t: 'Will import', c: 'var(--theme-green)' }
                 : r.duplicate ? { t: 'Already exists — skipped', c: 'var(--theme-amber)' }
+                : r.sheetDuplicate === 'merged' ? { t: 'Repeats an earlier block — only that one is used', c: 'var(--theme-text3)' }
+                : r.sheetDuplicate === 'conflict' ? { t: `In the sheet ${r.sheetCopies} times, different — skipped`, c: 'var(--theme-red)' }
                 : r.isSub ? { t: 'Sub-recipe — create in app', c: 'var(--theme-text3)' }
                 : r.duplicateIngredient ? { t: `"${r.duplicateIngredient}" listed twice — skipped`, c: 'var(--theme-red)' }
                 : r.ambiguousIngredient ? { t: `Code "${r.ambiguousIngredient}" is on two items — skipped`, c: 'var(--theme-red)' }

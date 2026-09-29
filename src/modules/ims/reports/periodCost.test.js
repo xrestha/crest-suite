@@ -5,6 +5,7 @@ import { computeUsed } from '../../../shared/imsFormulas'
 import {
   periodRevenue, periodStockMaps, valuePeriodItems,
   periodRowIds, periodValuationItems, periodGap, valuePeriods,
+  periodWastageValue, wastageRowValue, WASTAGE_VALUE_SELECT,
 } from './periodCost'
 
 describe('periodRevenue', () => {
@@ -176,7 +177,7 @@ describe('valuePeriods: several months at once, each valued on its own', () => {
   const A = { id: 'A', name: 'Oil', per_uom_rate: '10', is_active: true }
   const H = { id: 'H', name: 'Hidden flour', per_uom_rate: '2', is_active: false }
   // A legacy bill (no purchase_group_id) with the same vendor, invoice and day number in two months:
-  // the fallback bill key carries no period, so a year-wide allocation merged them into one bill
+  // before S792 the fallback bill key carried no period, so a year-wide allocation merged them into one bill
   // and credited ONE discount (max) across both (FIGURES-6). Per month, each keeps its own.
   const legacy = { purchase_group_id: null, vendor_id: 'v', invoice_ref: '', bs_day: 5, discount_amount: '10' }
   const args = {
@@ -217,5 +218,45 @@ describe('valuePeriods: several months at once, each valued on its own', () => {
 
   it('returns an empty map for no months', () => {
     expect(valuePeriods({ periodIds: [], items: [A] })).toEqual({})
+  })
+})
+
+describe('periodWastageValue: one item set for every Wastage tile (S792, FIGURES-5)', () => {
+  // Rows as WASTAGE_VALUE_SELECT reads them: the rate rides on the row's own item join.
+  const w = (item_id, qty, rate) => ({ item_id, qty, items: rate == null ? null : { per_uom_rate: rate } })
+  const rows = [
+    w('oil', '2', '10'),        // a raw item: 20
+    w('sauce', '1.5', '40'),    // prep (a sub-recipe mirror item): 60
+    w('rice', '3', '5'),        // a hidden item: 15
+    w('oil', '1', '10'),        // a second (daily) row for the same item: 10
+  ]
+
+  it('values every row at its own item rate — prep and hidden items included', () => {
+    expect(periodWastageValue(rows)).toBeCloseTo(105)
+  })
+
+  it("skips a row of zero or less, as the Wastage Report does", () => {
+    expect(wastageRowValue(w('oil', '0', '10'))).toBe(0)
+    expect(wastageRowValue(w('oil', '-2', '10'))).toBe(0)
+    expect(periodWastageValue([...rows, w('oil', '-4', '10')])).toBeCloseTo(105)
+  })
+
+  it('reads a row whose item could not be joined as zero, not NaN', () => {
+    expect(wastageRowValue(w('gone', '2', null))).toBe(0)
+    expect(periodWastageValue(null)).toBe(0)
+  })
+
+  it('reads the rate through the join, so no page item list can narrow the set', () => {
+    expect(WASTAGE_VALUE_SELECT).toMatch(/items\(per_uom_rate\)/)
+    expect(WASTAGE_VALUE_SELECT).toMatch(/\bqty\b/)
+  })
+
+  it("is not COGS's wastage term: valuePeriodItems still takes off only the items it is given", () => {
+    // COGS values raw items only, so prep wastage stays out of the arithmetic — its raw ingredients
+    // are already inside COGS. Monthly Summary's table keeps adding up.
+    const maps = periodStockMaps({ wastages: rows })
+    const raw = valuePeriodItems([{ id: 'oil', per_uom_rate: '10' }, { id: 'rice', per_uom_rate: '5' }], maps)
+    expect(raw.wastageVal).toBeCloseTo(45)
+    expect(periodWastageValue(rows) - raw.wastageVal).toBeCloseTo(60)   // exactly the prep
   })
 })

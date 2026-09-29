@@ -100,10 +100,21 @@ export function bulkSupersededByTill(recipeId, posIndex) {
 
 // One period's index over its OWN rows: POS rows for the supersedes checks, and the manual rows
 // for D35's re-entry test. The read path's single way in, so the notice on Sales Entry and every
-// stock report ask the same question of the same rows.
-function periodIndex(rows) {
+// stock report ask the same question of the same rows. `tillStart` overrides the first till day
+// the rows imply — only Sales Entry passes one (bulkTillHandover's `billTillStart`).
+function periodIndex(rows, { tillStart } = {}) {
   const all = rows || []
-  return buildPosIndex(all.filter(r => isPosSource(r.source)), { manualRows: all.filter(r => isManualSource(r.source)) })
+  return buildPosIndex(all.filter(r => isPosSource(r.source)), {
+    ...(tillStart !== undefined ? { tillStart } : {}),
+    manualRows: all.filter(r => isManualSource(r.source)),
+  })
+}
+
+// The earlier of two first-till-days, either of which may be unknown (null). Anything that is not
+// a day of the month (0, negative, NaN) counts as unknown — POS never writes day 0.
+export function earlierTillDay(a, b) {
+  const days = [a, b].map(Number).filter(d => Number.isInteger(d) && d > 0)
+  return days.length > 0 ? Math.min(...days) : null
 }
 
 /**
@@ -119,10 +130,19 @@ function periodIndex(rows) {
  * - `manualBeforeTill`: the period holds a manual figure (Bulk, or a day before the till) — i.e.
  *   this month was started by hand and the till took over. Sales Entry keeps the pre-till days
  *   enterable for a POS client in exactly that case.
+ *
+ * `billTillStart` (S792.4): the first day of the period the TILL billed a dish on, read from the
+ * till's own bills rather than from sales_entries. `rows` only hold the bills that have reached
+ * IMS, so an offline till that has not synced, or a hand-off still waiting for Periods → Post POS
+ * bills to Inventory, made the till's real first days look pre-till — and Sales Entry then took
+ * hand-typed figures for days the till had already sold, which count twice once the bills post.
+ * The earlier of the two is the till's first day. It is what the stock reports will read once those
+ * bills post; until then they still go by the rows (selectDepletingSales takes no override).
  */
-export function bulkTillHandover(rows) {
-  const posIndex = periodIndex(rows)
-  const { tillStart } = posIndex
+export function bulkTillHandover(rows, { billTillStart } = {}) {
+  const imsIndex = periodIndex(rows)
+  const tillStart = earlierTillDay(imsIndex.tillStart, billTillStart)
+  const posIndex = tillStart === imsIndex.tillStart ? imsIndex : periodIndex(rows, { tillStart })
   const bulkQty = new Map()
   let manualBeforeTill = false
   for (const r of rows || []) {

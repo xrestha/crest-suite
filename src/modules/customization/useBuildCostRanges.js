@@ -16,8 +16,8 @@ import { loadOptionCatalog } from './customizationData'
 //
 // Reads, the last three only when at least one dish is marked:
 //   the option catalog with its stock lines · the explosion of those lines (item yield %, sub-recipe
-//   per-unit items) · the per-base-unit rate of every item they reach · 30 days of order lines for
-//   the marked dishes, for the TYPICAL build.
+//   per-unit items) · the per-base-unit rate of every item they reach · the marked dishes' order
+//   lines on bills PAID in the last 30 days, for the TYPICAL build.
 //
 // A failed catalog, explosion or rate read is an ERROR the page shows in place of the range — never
 // a range computed without the choices' stock, which would be the near-zero food cost this exists to
@@ -60,8 +60,13 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
         const since = new Date(Date.now() - TYPICAL_WINDOW_DAYS * 86400000).toISOString()
         const [rateRes, lines] = await Promise.all([
           fetchAllRowsChunked([...itemIds], ids => scopedFrom('items', 'id, per_uom_rate').in('id', ids).order('id')),
-          fetchAllRowsChunked(catalog.buildYourOwn, ids => scopedFrom('pos_order_items', 'id, recipe_id, selection_key, qty')
-            .in('recipe_id', ids).gte('created_at', since).order('id')),
+          // Only builds a guest paid for (S792, RECIPES-10): the line's bill closed 'paid' — the house
+          // definition get_cooccurrence and the POS reports use — windowed by when the BILL closed.
+          // This read every line by its own created_at, so a voided bill, a table still open and a
+          // bill written off all taught "the most-picked build". A comped line on a paid bill still
+          // counts: the plate was built and served.
+          fetchAllRowsChunked(catalog.buildYourOwn, ids => scopedFrom('pos_order_items', 'id, recipe_id, selection_key, qty, pos_orders!inner(close_type, closed_at)')
+            .in('recipe_id', ids).eq('pos_orders.close_type', 'paid').gte('pos_orders.closed_at', since).order('id')),
         ])
         if (rateRes.error) throw new Error(rateRes.error.message || 'item rates could not be read')
         const rates = Object.fromEntries((rateRes.data || []).map(r => [r.id, Number(r.per_uom_rate) || 0]))

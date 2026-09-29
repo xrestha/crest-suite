@@ -15,6 +15,9 @@ function withLetterhead(title, bizInfo, periodLabel, dataRows) {
     [`ADDRESS : ${bizInfo.address}`],
     [],
     [`Period : ${periodLabel}`],
+    // When the frozen figures were made, as the report header says it (S792, D42): a workbook
+    // mailed on must still say whether it holds the month as it stood at the close or later.
+    ...(bizInfo.madeLine ? [[`Made : ${bizInfo.madeLine}`]] : []),
     [],
   ]
   const ws = XLSX.utils.aoa_to_sheet(aoa)
@@ -23,7 +26,8 @@ function withLetterhead(title, bizInfo, periodLabel, dataRows) {
 }
 
 // `report` is a monthly_owner_reports row (has bs_year/bs_month/snapshot); `bizInfo` is
-// { name, vat, address, vatReg } for the client, same shape the report page already loads.
+// { name, vat, address, vatReg } for the client, same shape the report page already loads, plus
+// the page's `madeLine` (reportMadeLine.js) when it has one.
 export function exportMonthlyReportExcel(report, bizInfo) {
   const { snapshot, bs_year, bs_month } = report
   const periodLabel = `${BS_MONTHS[bs_month - 1]} ${bs_year}`

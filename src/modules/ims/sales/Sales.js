@@ -6,14 +6,15 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay, bsDayOrdinal, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { nepalDayInPeriod } from '../../../shared/nepalPeriodDay'
 import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
-import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, SAVE_TIMEOUT_MS } from './persistSalesDay'
+import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, SAVE_TIMEOUT_MS, stockUpdateBusy, stockUpdateWaitingText } from './persistSalesDay'
 import { isManualSource, bulkTillHandover } from './salesDepletion'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -207,6 +208,10 @@ export default function Sales() {
   // buttons, but a state flag only lands on the next render — a second click, or Enter and a click
   // on the supersede modal's Delete & Save, could both get in first and write the same day twice.
   const saveInFlight = useRef(false)
+  // Saves whose sales landed but whose stock update outlasted the wall clock (S792.4): one note
+  // each, `{ id, mode, text }`, removed when that update finally settles. The update keeps its
+  // day's lock while it waits (persistSalesDay.js), so "✓ Saved" alone overstated what was done.
+  const [stockWaits, setStockWaits] = useState([])
   // What the period's rows say about a Bulk total the till also sold (owner decision D35, S792):
   // bulkTillHandover in salesDepletion.js, the same rule every stock report applies. Null until
   // loadAllDaySums has read the period.
@@ -214,11 +219,10 @@ export default function Sales() {
   // The till's first day this month, and whether the month was started by hand before it. For a
   // client whose sales POS owns, those pre-till days have no till figure at all — the Bulk total the
   // D35 notice asks them to replace, or the daily figures typed before POS went live — so Daily Entry
-  // stays open for them, and only for them. Nothing typed there duplicates a till sale AS OF LOAD:
-  // the till's first day is read from what IMS holds, so till bills not yet posted to IMS (an
-  // unsynced offline till, or a hand-off awaiting the Periods backfill) are not seen, so
-  // `tillStart` can read later than the till's real first day — and a day typed here can then
-  // turn out to be one the till also sold.
+  // stays open for them, and only for them. The till's first day is the earlier of what IMS holds
+  // and the till's own first bill (S792.4, readFirstTillBill), so a bill not yet posted to IMS (an
+  // unsynced offline till, or a hand-off awaiting the Periods backfill) no longer leaves its day
+  // looking pre-till. One gap remains: a till still offline has not sent its bills anywhere yet.
   const tillStart = tillHandover?.tillStart ?? null
   const preTillOpen = posOwnsSales && !!tillHandover?.manualBeforeTill && tillStart > 1
 
@@ -310,7 +314,8 @@ export default function Sales() {
     if (open) {
       periodReq.begin(open.id)   // claim the page, as useLatestRequest's own docs require of init()
       setSelectedPeriod(open)
-      await Promise.all([loadSales(open.id), loadAllDaySums(open.id)])
+      // `open` handed over: setPeriods has not re-rendered yet, so `periods` is still the old list.
+      await Promise.all([loadSales(open.id), loadAllDaySums(open.id, open)])
     }
     setLoading(false)
   }
@@ -394,18 +399,45 @@ export default function Sales() {
     setDailyBaselineFor(key)
   }
 
-  async function loadAllDaySums(periodId) {
+  // The till's first bill of the period, straight from pos_orders (S792.4, D35). sales_entries hold
+  // only the bills that have reached IMS; an offline till not yet synced, or bills waiting for
+  // Periods → Post POS bills to Inventory, are not there, so the till's real first days read as
+  // pre-till and Daily Entry took figures the till had already sold. One bounded read — the single
+  // earliest billed bill carrying a dish (paid or Complimentary: both post to IMS, a comp as
+  // pos_comp, and the till start counts comps) — dated by the day it closed IN NEPAL.
+  //
+  // Through ims_first_till_bill_at (migration 20260928180000), not a direct read: pos_orders
+  // carries the restrictive `no_ims_staff` policy, so an IMS supervisor or staff login — the people
+  // who use this page — read it as empty with no error, and only the Owner and admin were helped.
+  // The function returns that one timestamp and nothing else, for any IMS rank of this client.
+  async function readFirstTillBill(period) {
+    if (!clientModules?.pos || !period || !effectiveClientId) return { data: [], error: null }
+    const { bs_year: y, bs_month: m } = period
+    const { data, error } = await supabase.rpc('ims_first_till_bill_at', {
+      p_client_id: effectiveClientId,
+      p_from: bsDayBoundaryIso(y, m, 1, false),
+      p_to: bsDayBoundaryIso(y, m, daysInBsMonth(y, m), true),
+    })
+    return { data: data ? [{ closed_at: data }] : [], error }
+  }
+
+  async function loadAllDaySums(periodId, period = periods.find(p => p.id === periodId)) {
     // Paged (S613): POS writes one row per bill per recipe, so a month crosses the silent
     // 1000-row cap — and allDaySums doubles as a save-time fallback baseline, so a truncated
     // read here would not just misreport, it could be written back.
     // bs_day feeds the D35 hand-over (S792): the till's first day and the Bulk totals it overlaps.
-    const { data, error } = await fetchAllRows(() => supabase
-      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price, source, bs_day').eq('period_id', periodId).order('id'))
+    const [{ data, error }, tillBill] = await Promise.all([
+      fetchAllRows(() => supabase
+        .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price, source, bs_day').eq('period_id', periodId).order('id')),
+      readFirstTillBill(period),
+    ])
     // These maps are every PERIOD figure on the page — the three stat cards and the whole Period
     // Summary tab — so a failed read here must block the page, not fall back to "nothing sold".
     // (They are not a save baseline: buildBulkRows merges `sales` and buildDailyRows `dailySales`.
-    // The comment here said otherwise for a long time.)
-    if (error) { if (periodReq.isCurrent(periodId)) noteLoad('allDay', error); return }
+    // The comment here said otherwise for a long time.) The till-bill read blocks too: it decides
+    // which days Daily Entry opens to a POS client, and a check that could not run has not passed.
+    const failed = error || tillBill.error
+    if (failed) { if (periodReq.isCurrent(periodId)) noteLoad('allDay', failed); return }
     const agg = {}
     const discAgg = {}
     const pricedAgg = {}
@@ -428,8 +460,9 @@ export default function Sales() {
     setAllDayPricedRev(pricedAgg)
     setAllDayUnpricedQty(unpricedAgg)
     // Every row, comps included — a comp is a till sale for this purpose, exactly as it is for the
-    // depletion rule the notice describes.
-    setTillHandover(bulkTillHandover(data || []))
+    // depletion rule the notice describes. Plus the till's own first bill, whichever is earlier.
+    const billTillStart = nepalDayInPeriod(tillBill.data?.[0]?.closed_at, period)
+    setTillHandover(bulkTillHandover(data || [], { billTillStart }))
   }
 
   async function loadMonthlyEntries(periodId) {
@@ -698,6 +731,21 @@ export default function Sales() {
     return target.mode === 'bulk' ? `the ${month} period total` : `${formatBsDay(target.bsDay, p?.bs_month)} (${month})`
   }
 
+  // What a cross-mode save replaced, for the late-stock-update note (S792.4): the dated days a Bulk
+  // save wiped ("3rd, 4th and 9th Bhadra on Daily Entry"), or the Bulk total a Daily save wiped.
+  // Null when it replaced nothing.
+  function alsoRedoLabel(target, days) {
+    if (!days?.length) return null
+    if (target.mode === 'daily') return `${targetLabel({ mode: 'bulk', periodId: target.periodId })} on Bulk Entry`
+    const p = periods.find(x => x.id === target.periodId)
+    const month = p ? BS_MONTHS[p.bs_month - 1] : ''
+    const unique = [...new Set(days)].sort((a, b) => a - b)
+    if (unique.length > 6) return `${unique.length} days of ${month || 'that month'} on Daily Entry`
+    const ords = unique.map(bsDayOrdinal)
+    const list = ords.length === 1 ? ords[0] : `${ords.slice(0, -1).join(', ')} and ${ords[ords.length - 1]}`
+    return `${list}${month ? ` ${month}` : ''} on Daily Entry`
+  }
+
   // Refused BEFORE any request is sent, so this one may truthfully say nothing was written.
   function movedOnMessage(target) {
     return `This save was stopped before anything was sent: the page moved to a different ${target.mode === 'bulk' ? 'month' : 'day or month'} while it was being prepared, so nothing was written for ${targetLabel(target)}. Go back to it, re-enter anything no longer on screen, and save again.`
@@ -776,23 +824,38 @@ export default function Sales() {
     // persistSalesDay.js serialises the writes per day as well; waiting here keeps the button
     // honest. Still best-effort — both helpers catch and log their own failures, the sales save has
     // already committed — and bounded by the same wall clock as the save (the S449/S454 lesson: a
-    // hung request must never freeze the button). Past it the update finishes in the background,
-    // still ahead of any later save of the same day.
+    // hung request must never freeze the button). Past it the update carries on in the background,
+    // still ahead of any later save of the same day — and if a request of it hangs, it holds that
+    // day until the page is reloaded, so a note says so rather than "✓ Saved" alone (S792.4).
     //
     // The rows this save superseded in the OTHER mode were deleted by the RPC, but their stock
     // movements were not — rebuild those days so the ledger does not deplete them twice (S756).
     // A Bulk save wiped dated rows on the days the precheck listed; a Daily save wiped the Bulk row.
     const supersededDays = !superseded?.total ? []
       : isBulk ? superseded.byRecipe.flatMap(e => e.days) : [0]
+    // Asked BEFORE the update starts (S792.4): a day already busy on this device means this update
+    // will queue behind an earlier save of it, which is what the note has to say if it runs late.
+    const queuedBehind = stockUpdateBusy(target.clientId, periodId, [bsDay, ...supersededDays])
+    // Both helpers catch and log their own failures and never reject, so this settles exactly when
+    // the day's stock update is done — or never, if a request of it (or of the save it is queued
+    // behind) hangs, since the day lock is deliberately not released on a timeout.
+    const stockRun = Promise.all([
+      depleteManualSales(supabase, { clientId: target.clientId, periodId, bsDay, rows }),
+      supersededDays.length > 0
+        ? repostSupersededMovements(supabase, { clientId: target.clientId, periodId, days: supersededDays })
+        : null,
+    ])
     try {
-      await withTimeout(Promise.all([
-        depleteManualSales(supabase, { clientId: target.clientId, periodId, bsDay, rows }),
-        supersededDays.length > 0
-          ? repostSupersededMovements(supabase, { clientId: target.clientId, periodId, days: supersededDays })
-          : null,
-      ]), SAVE_TIMEOUT_MS, 'Stock update')
+      await withTimeout(stockRun, SAVE_TIMEOUT_MS, 'Stock update')
     } catch (err) {
-      console.error(`${mode} save: the sales are saved; the stock update for them is still running and will finish in the background:`, err)
+      console.error(`${mode} save: the sales are saved; the stock update for them has not finished and is still waiting:`, err)
+      // The sales ARE saved, so the button still says so; the note beside it says what is not
+      // done yet, why, and what finishes it (S792.4). It clears itself if the update does land.
+      const id = `${Date.now()}:${Math.random()}`
+      const text = stockUpdateWaitingText({ label: targetLabel(target), queuedBehind, alsoRedo: alsoRedoLabel(target, supersededDays) })
+      setStockWaits(ws => [...ws, { id, mode, text }])
+      const clear = () => setStockWaits(ws => ws.filter(w => w.id !== id))
+      void stockRun.then(clear, clear)
     } finally {
       setSaving(false)
       setSaved(true)
@@ -867,7 +930,7 @@ export default function Sales() {
     setTillHandover(null)
     setMonthlyEntries([])
     setBulkSaveError(''); setDailySaveError('')
-    await Promise.all([loadSales(periodId), loadAllDaySums(periodId)])
+    await Promise.all([loadSales(periodId), loadAllDaySums(periodId, p)])
     if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
@@ -1030,6 +1093,13 @@ export default function Sales() {
     ? (tillStart === 2 ? formatBsDay(1, monthNo) : `${bsDayOrdinal(1)}–${formatBsDay(tillStart - 1, monthNo)}`)
     : ''
   const dishName = id => menuRecipes.find(r => r.id === id)?.name || 'A dish no longer on the menu'
+  // The late-stock-update notes for one tab's Save (S792.4). Amber, a status and not an alert: the
+  // save itself succeeded, and the note is about a follow-up that may still finish on its own.
+  const stockWaitNotes = mode => stockWaits.filter(w => w.mode === mode).map(w => (
+    <div key={w.id} role="status" className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <strong style={{ color: 'var(--theme-amber-text)' }}>△ Stock update still waiting.</strong> {w.text}
+    </div>
+  ))
   // Both Save buttons sit ABOVE the "No active recipes" empty state, so an empty menu — whether the
   // client has none or the read failed — left a live Save over nothing. Both payload builders
   // iterate `recipes`, and save_sales_day reads an empty payload as "clear this day".
@@ -1306,6 +1376,7 @@ export default function Sales() {
                 {/* A plain string (the page's own validation copy) or { text, detail } from
                     asActionError — ActionError renders both, keeping the code as fine print (S756). */}
                 <ActionError error={bulkSaveError} className="action-error--top no-print" />
+                {stockWaitNotes('bulk')}
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>
@@ -1452,6 +1523,7 @@ export default function Sales() {
                   </div>
                 </div>
                 <ActionError error={dailySaveError} className="action-error--top no-print" />
+                {stockWaitNotes('daily')}
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>

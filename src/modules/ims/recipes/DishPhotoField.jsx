@@ -4,9 +4,12 @@ import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { withTimeout } from '../../../utils/withTimeout'
+import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import {
   DISH_PHOTO_BUCKET, PHOTO_ACCEPT, PHOTO_EXT,
   photoRefusal, photoPath, versionedUrl, objectPathFromUrl, guestCanLoad, downscalePhoto, storageRefusal,
+  photoMayBeDeleted,
 } from './dishPhoto'
 
 // A dish photo that guests can actually see (S756, owner decision D16).
@@ -60,6 +63,7 @@ export default function DishPhotoField({
   const ownPath = objectPathFromUrl(value, supabaseUrl)
   const [showLink, setShowLink] = useState(() => !!value && !ownPath)
   const { ask, confirmEl } = useConfirm()
+  const { scopedFrom } = useScopedDb()
 
   useEffect(() => { setImgFailed(false) }, [value])
 
@@ -77,6 +81,28 @@ export default function DishPhotoField({
     } catch (e) {
       console.error('Dish photo file not deleted from storage:', e?.message)
     }
+  }
+
+  // The file this dish just let go of (Replace or Remove) is deleted only when no OTHER dish still
+  // shows it (S792, RECIPES-8). "Paste a link instead" lets two dishes share one stored photo, and
+  // replacing it on one used to delete the other's picture from the guest menu without a word. The
+  // check reads every dish's link fresh rather than trusting the page's list, and anything it cannot
+  // settle — a failed read, the guest-menu logo, a file this field did not name — keeps the file:
+  // an unused file costs nothing, a missing photo costs the other dish its picture.
+  async function releaseObject(path) {
+    if (!path || !clientId || !path.startsWith(`${clientId}/`)) return
+    try {
+      const { data, error: readErr } = await withTimeout(
+        fetchAllRows(() => scopedFrom('recipes', 'id, image_url').not('image_url', 'is', null).order('id')),
+        WRITE_TIMEOUT_MS, 'Check photo'
+      )
+      if (readErr) { console.error('Dish photo kept: could not check which dishes use it:', readErr.message); return }
+      if (!photoMayBeDeleted(path, { clientId, recipeId, others: data || [], supabaseUrl })) return
+    } catch (e) {
+      console.error('Dish photo kept: could not check which dishes use it:', e?.message)
+      return
+    }
+    await removeObjectQuietly(path)
   }
 
   // A refused RLS update is 0 rows and no error, so a write that matters reads its count back.
@@ -134,9 +160,10 @@ export default function DishPhotoField({
       }
       onChange(url)
       setShowLink(false)
-      // Only once nothing points at it. For a recipe not yet saved the previous file can only be
-      // one uploaded in this form (a new recipe starts blank), so it is equally unreferenced.
-      if (previousPath && previousPath !== path) await removeObjectQuietly(previousPath)
+      // Only once this dish no longer points at it, and only if no other dish does (releaseObject).
+      // On a recipe not yet saved the previous file may be a link pasted from another dish, which
+      // is exactly the case the check exists for.
+      if (previousPath && previousPath !== path) await releaseObject(previousPath)
     } finally {
       setBusy('')
     }
@@ -150,7 +177,7 @@ export default function DishPhotoField({
       body: (
         <p style={{ margin: 0 }}>
           Guests will see the dish without a photo on the QR menu.
-          {ownPath ? ' The stored photo is deleted, so keep your own copy if you may want it again.' : ''}
+          {ownPath ? ' The stored photo is deleted unless another dish uses it too, so keep your own copy if you may want it again.' : ''}
           {persist ? ' This takes effect straight away.' : ''}
         </p>
       ),
@@ -161,7 +188,7 @@ export default function DishPhotoField({
           if (rowErr) { setError(describe(rowErr, 'The photo is still on the recipe — the change did not save. ')); return }
           const path = ownPath
           onChange('')
-          await removeObjectQuietly(path)
+          await releaseObject(path)
         } finally {
           setBusy('')
         }

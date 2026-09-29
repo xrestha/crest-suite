@@ -2,6 +2,11 @@
 // reading. The function takes supabase/scopedFrom/scopedInsert/scopedUpdate as parameters, so the
 // whole thing is exercisable by injection with no real client — which is also why the module-level
 // mock below is only needed for the recipeCost import's transitive supabaseClient.
+import { backfillPosOrdersToIms, countUnpostedForPeriod } from './backfillPosToIms'
+import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
+
+// babel-jest hoists jest.mock above the imports, so the mocks still apply first; placed after them
+// only to satisfy import/first.
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
 jest.mock('../../../utils/recipeCost', () => ({
   // One ingredient per recipe, 2 base units each — enough to assert the depletion rows exist and
@@ -13,16 +18,18 @@ jest.mock('../../../utils/recipeCost', () => ({
   explodeRecipeIngredients: async (_client, ids) => Object.fromEntries(ids.map(id => [id, [{ item_id: `i-${id}`, qty: 2 }]])),
 }))
 
-import { backfillPosOrdersToIms, countUnpostedForPeriod } from './backfillPosToIms'
+// 2026-08-20 is in Bhadra 2083. The fixture said 2082 until S792: the day number never mattered to
+// these tests, and since SALES-6 a bill is only posted into the period whose month it closed in.
+const PERIOD = { id: 'p1', bs_year: 2083, bs_month: 5 }
+// A Nepal clock time on a BS day of PERIOD's year, as a stamp with an explicit +05:45 offset.
+const npt = (month, day, hhmm) => `${formatAd(bsToAd(2083, month, day))}T${hhmm}:00+05:45`
 
-const PERIOD = { id: 'p1', bs_year: 2082, bs_month: 5 }
-
-// A bill closed inside Bhadra 2082, with `lines` recipe lines.
-function order(id, { lines = 1, comped = false, closeType = 'paid', discount = 0 } = {}) {
+// A bill closed inside Bhadra 2083, with `lines` recipe lines.
+function order(id, { lines = 1, comped = false, closeType = 'paid', discount = 0, closedAt = '2026-08-20T10:00:00+05:45' } = {}) {
   return {
     id,
     close_type: closeType,
-    closed_at: '2026-08-20T10:00:00+05:45',
+    closed_at: closedAt,
     discount_amount: discount,
     pos_order_items: Array.from({ length: lines }, (_, i) => ({
       recipe_id: `r${i}`, qty: 2, unit_price: 100, vat_rate: 0.13, comped,
@@ -185,6 +192,37 @@ describe('backfillPosOrdersToIms — what each bill contributes', () => {
     expect(res).toEqual({ posted: 0, skipped: 1 })
     expect(h.count('insert', 'sales_entries')).toBe(0)
     expect(h.count('update', 'pos_orders')).toBe(1)
+  })
+})
+
+// S792, SALES-6. Independent of the runner's zone: the old `adToBs(new Date(closed_at)).day` passes
+// these in Kathmandu and fails them under TZ=UTC (the first) or TZ=Asia/Tokyo (the second).
+describe('backfillPosOrdersToIms — a bill is dated by Nepal\'s calendar, not the viewer\'s', () => {
+  test('a bill closed ten minutes after midnight on day 1 is posted to day 1', async () => {
+    const h = harness({ orders: [order('a', { closedAt: npt(5, 1, '00:10') })] })
+    await backfillPosOrdersToIms({ ...h, period: PERIOD })
+    const sales = h.calls.find(c => c.kind === 'insert' && c.table === 'sales_entries').rows
+    const moves = h.calls.find(c => c.kind === 'insert' && c.table === 'stock_movements').rows
+    expect(sales.map(r => r.bs_day)).toEqual([1])
+    expect(moves.map(r => r.bs_day)).toEqual([1])
+  })
+
+  test('a bill closed ten minutes before midnight on the last day stays on the last day', async () => {
+    const last = daysInBsMonth(2083, 5)
+    const h = harness({ orders: [order('a', { closedAt: npt(5, last, '23:50') })] })
+    await backfillPosOrdersToIms({ ...h, period: PERIOD })
+    const sales = h.calls.find(c => c.kind === 'insert' && c.table === 'sales_entries').rows
+    expect(sales.map(r => r.bs_day)).toEqual([last])
+  })
+
+  test('a bill from another month is left unposted and unstamped, for the next run to chase', async () => {
+    const h = harness({ orders: [order('stray', { closedAt: npt(6, 1, '00:10') }), order('ok')] })
+    const res = await backfillPosOrdersToIms({ ...h, period: PERIOD })
+    expect(res).toEqual({ posted: 1, skipped: 1 })
+    const sales = h.calls.filter(c => c.kind === 'insert' && c.table === 'sales_entries').flatMap(c => c.rows)
+    expect(sales.map(r => r.pos_order_id)).toEqual(['ok'])
+    const stamped = h.calls.filter(c => c.kind === 'update' && c.table === 'pos_orders').flatMap(c => c.ids || [])
+    expect(stamped).not.toContain('stray')
   })
 })
 

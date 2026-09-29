@@ -62,8 +62,14 @@ jest.mock('../context/ThemeContext', () => ({
 }))
 
 // Category usage: one Food recipe, so removing "Food" must confirm and "Beverage" must not.
+// The renumber reads are paged too (S792, MASTER-8): they go through the recording builder below,
+// so the test still sees which filters the items read carried.
 jest.mock('../shared/fetchAllRows', () => ({
-  fetchAllRows: async () => ({ data: [{ id: 'r1', category: 'Food' }], error: null }),
+  fetchAllRows: async buildQuery => {
+    const q = buildQuery()
+    if (q && q.__table && q.__table !== 'recipes') return q
+    return { data: [{ id: 'r1', category: 'Food' }], error: null }
+  },
 }))
 
 // A recording builder for the renumber path: `.eq()`/`.order()` chain and resolve to one item.
@@ -75,6 +81,7 @@ jest.mock('../shared/hooks/useScopedDb', () => ({
       const call = { table, cols, eq: [], order: [] }
       mockScopedFromCalls.push(call)
       const b = {
+        __table: table,
         eq: (...a) => { call.eq.push(a); return b },
         order: (...a) => { call.order.push(a); return b },
         range: () => Promise.resolve({ data: [], error: null }),

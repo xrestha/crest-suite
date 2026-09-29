@@ -17,12 +17,21 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, mergeGaps, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 // Nepal fiscal year starts Shrawan (month 4)
 // bs_month >= 4 → fiscal year = bs_year; else fiscal year = bs_year - 1
 function getFiscalYear(bs_year, bs_month) {
   return bs_month >= 4 ? bs_year : bs_year - 1
 }
+
+// The load key: every input that changes the answer — the client, the mode and the year. The CLIENT
+// is in it since S792 (FIGURES-7): this page stays mounted across an admin's view-as switch and a
+// group Owner's outlet switch, and a year keyed on `mode:year` alone let a slow load for the previous
+// outlet pass isCurrent and land under the new one. The MODE since S756 (Calendar 2082 and FY 2082
+// are different years). The rendered report carries the key it was built for, so the page can tell
+// "the report for what the header says" from "a report".
+const yearKeyOf = (clientId, fiscal, year) => `${clientId}:${fiscal ? 'fy' : 'cal'}:${year}`
 
 export default function AnnualSummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -48,13 +57,25 @@ export default function AnnualSummary() {
   useEffect(() => { if (selectedYear !== null && allPeriods.length) buildReport() }, [selectedYear, allPeriods, fiscalMode]) // eslint-disable-line
 
   async function init() {
+    // A client switch starts from nothing (S792, FIGURES-7/11). Claiming the page supersedes a year
+    // load still in flight for the previous outlet, and clearing the periods keeps both effects
+    // above idle until THIS client's periods land — so no year is built from the last client's list.
+    const initKey = yearReq.begin(`${effectiveClientId}:init`)
     setLoading(true)
     setLoadError(null)
+    setReport(null)
+    setAllPeriods([])
+    setYearOptions([])
+    setSelectedYear(null)
     const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    if (!yearReq.isCurrent(initKey)) return   // a newer client switch owns the page
     if (error) { setLoadError(error.message); setLoading(false); return }
     setAllPeriods(p || [])
-    setLoading(false)
+    // `loading` stays TRUE while there are periods (FIGURES-11): clearing it here painted a frame of
+    // "No periods found for —." before a year had been chosen, let alone read. rebuildYearOptions
+    // picks the year and buildReport clears the flag. With no periods nothing will, so it goes here.
+    if (!(p || []).length) setLoading(false)
   }
 
   function rebuildYearOptions() {
@@ -76,10 +97,8 @@ export default function AnnualSummary() {
 
   async function buildReport() {
     if (selectedYear === null) return
-    // The key carries the MODE (S756). `begin(selectedYear)` made Calendar 2082 and FY 2082 the same
-    // key, so a calendar-year load still in flight when the reader switched to fiscal passed
-    // isCurrent and could land its figures under the FY label.
-    const key = yearReq.begin(`${fiscalMode ? 'fy' : 'cal'}:${selectedYear}`)   // claim the page before any await (S601)
+    // Client, mode and year (yearKeyOf, above).
+    const key = yearReq.begin(yearKeyOf(effectiveClientId, fiscalMode, selectedYear))   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
 
@@ -89,7 +108,10 @@ export default function AnnualSummary() {
         : p.bs_year === selectedYear
     ).sort((a, b) => a.bs_year - b.bs_year || a.bs_month - b.bs_month)
 
-    if (!yearPeriods.length) { setReport(null); setLoading(false); return }
+    // Reached only in passing — a mode toggle runs this once with the previous mode's year before
+    // rebuildYearOptions' pick lands — and the empty report carries its key, so it renders only if
+    // it is the year the header names.
+    if (!yearPeriods.length) { setReport({ key, rows: [] }); setLoading(false); return }
     const periodIds = yearPeriods.map(p => p.id)
 
     // EVERY read here is paged, and the multiplier is what makes it urgent: each of these tables
@@ -220,7 +242,7 @@ export default function AnnualSummary() {
     // whole — item-months against item-months, value against the year's COGS (mergeGaps).
     const totGap     = mergeGaps(rows.map(r => r.gap))
 
-    setReport({ rows, totRevenue, totCogs, totPurch, totDisc, totRet, totNetPurch, totWaste, totFcPct, totGap })
+    setReport({ key, rows, totRevenue, totCogs, totPurch, totDisc, totRet, totNetPurch, totWaste, totFcPct, totGap })
     setLoading(false)
   }
 
@@ -244,7 +266,7 @@ export default function AnnualSummary() {
   const gapShown = r => r.gap.uncountedCount > 0 && (r.period.status !== 'open' || r.gap.uncountedCount < r.gap.presentCount)
 
   async function exportExcel() {
-    if (!report) return
+    if (!current || busy || !report.rows.length) return
     const XLSX = await import('xlsx')
     // NUMBERS, not `.toFixed(0)` strings (S756): a string cell does not sum, sort or format in Excel,
     // on the one sheet in IMS whose whole purpose is a year's arithmetic.
@@ -296,8 +318,16 @@ export default function AnnualSummary() {
   }
 
   const selectedLabel = yearOptions.find(y => y.value === selectedYear)?.label ?? '—'
+  // The report on screen must be the one the header names (S792, FIGURES-11). Between a mode toggle
+  // and rebuildYearOptions' pick, or between a client's periods landing and its first year load,
+  // `report` is another selection's; until the matching one lands the page is still building.
+  const viewKey = selectedYear === null ? null : yearKeyOf(effectiveClientId, fiscalMode, selectedYear)
+  const current = !!report && report.key === viewKey
+  const busy = loading || (!loadError && !current)
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
+  if (!loading && !loadError && allPeriods.length === 0) return <NoPeriodState what="the annual summary" />
 
   return (
     <div>
@@ -330,9 +360,10 @@ export default function AnnualSummary() {
           {report && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {/* Gated on the load (S728/S756): `report` is the previous year's for the whole of a
-                  year change, while the print title, scope line and filename already name the new one. */}
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={loading || !!loadError} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={loading || !!loadError || !!biz.error} onClick={exportExcel}
+                  year change, while the print title, scope line and filename already name the new one.
+                  `busy` also covers the render before a new year's load has begun (S792). */}
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError || !!biz.error || !report.rows.length} onClick={exportExcel}
                 title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
             </div>
           )}
@@ -343,7 +374,7 @@ export default function AnnualSummary() {
 
       {/* D6 (S756): the months whose COGS counts uncounted stock as used, each with its items behind a
           disclosure. Months are marked in the table below; only their own verdicts are withheld. */}
-      {!loading && !loadError && report && report.rows.some(gapShown) && (
+      {!busy && !loadError && report.rows.some(gapShown) && (
         <div role="alert" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, lineHeight: 1.6, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>
             △ {report.rows.filter(gapShown).length} month{report.rows.filter(gapShown).length === 1 ? ' has' : 's have'} items with no closing count
@@ -361,7 +392,7 @@ export default function AnnualSummary() {
         </div>
       )}
 
-      {!loading && !loadError && report && (
+      {!busy && !loadError && report.rows.length > 0 && (
         <div className="stat-grid">
           {[
             { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-green-text)',
@@ -384,9 +415,9 @@ export default function AnnualSummary() {
 
       {!loadError && (
       <div className="card">
-        {loading ? (
+        {busy ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building annual report…</p>
-        ) : !report || report.rows.length === 0 ? (
+        ) : report.rows.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">◻</div>
             <p className="empty-state-text">No periods found for {selectedLabel}.</p>

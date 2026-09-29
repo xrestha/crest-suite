@@ -145,7 +145,9 @@ export default function Variance() {
       // would truncate theoretical usage into a believable-but-low figure (S528/S529 class).
       // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
-      scopedFrom('recipes', 'id')
+      // Paged too (S792, PLANNING-9): this seeds the recipe walk, and past 1000 recipes (sub-recipes
+      // count) the dishes beyond the cut would consume nothing.
+      fetchAllRows(() => scopedFrom('recipes', 'id').order('id'))
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).

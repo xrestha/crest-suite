@@ -26,6 +26,7 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote } from '../../modules/dashboard/labourSource'
@@ -189,14 +190,15 @@ export default function OwnerDashboard() {
       fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
       // Deliberately NOT paged: one row per named fixed cost per period, tens of rows.
       period ? supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead') : { data: [] },
-      period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
-      // Paged (S734): itemRateMap values Wastage Value, and an item past the cut is valued at
-      // RATE 0 rather than dropped — so the tile reads LOW and looks like a good month.
-      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').order('id')),
+      // Each row carries its item's rate through the join (WASTAGE_VALUE_SELECT, S792 FIGURES-5), so
+      // Wastage Value is the Wastage Report's own total — every item, prep and hidden ones included —
+      // and no longer depends on a separate items read (an item past that read's cut was valued at
+      // rate 0, S734).
+      period ? fetchAllRows(() => supabase.from('wastages').select(WASTAGE_VALUE_SELECT).eq('period_id', period.id).order('id')) : { data: [] },
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, ims: results.some(r => r.error) ? 'Revenue/food cost figures failed to load — may be incomplete or stale.' : '' }))
-    const [{ data: purchases }, { data: returns }, { data: salesData }, { data: recipes }, { data: overheadsData }, { data: wastagesData }, { data: items }] = results
+    const [{ data: purchases }, { data: returns }, { data: salesData }, { data: recipes }, { data: overheadsData }, { data: wastagesData }] = results
 
     // Net purchases = purchases NET of each bill's discount − returns, the definition Consolidated
     // P&L and Monthly Summary use (S601/S720). `discount_amount` is a bill-level figure repeated
@@ -219,8 +221,8 @@ export default function OwnerDashboard() {
 
     const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
 
-    const itemRateMap = {}; (items || []).forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
-    const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
+    // Informational, like every Wastage tile: nothing on this page adds it to a cost.
+    const wastageValueTotal = periodWastageValue(wastagesData)
 
     // Cash/Credit split of net purchases (not revenue — Sales Entry has no payment_method field).
     let cashNet = 0, creditNet = 0
@@ -263,7 +265,14 @@ export default function OwnerDashboard() {
       period ? fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
-    setLoadErrors(prev => ({ ...prev, reorder: results.some(r => r.error) ? 'Reorder figures failed to load — may be incomplete or stale.' : '' }))
+    const readFailed = results.some(r => r.error)
+    setLoadErrors(prev => ({ ...prev, reorder: readFailed ? 'Reorder figures failed to load — may be incomplete or stale.' : '' }))
+    // A count this page could not compute is NOT a count (S792, PLANNING-6). A failed read used to
+    // raise only the banner above while the tile went on to render `count ?? 0` from whatever had
+    // arrived — and with a read missing, on-hand climbs toward opening + purchases, so the figure is
+    // an under-count or 0: the zero an owner WANTS to see (S734's "a zero nobody computed"). The
+    // tile keeps `reorderStats` null and says the count is unavailable instead.
+    if (readFailed) { setReorderStats(null); return }
     const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }, { data: wastages }, { data: staffMeals }] = results
 
     const dashRecipeIds = (recipes || []).map(r => r.id)
@@ -272,23 +281,26 @@ export default function OwnerDashboard() {
     // silently dropping any ingredient that was itself a sub-recipe (sauces, batters, prepped
     // components) from theoretical usage entirely, so a raw item consumed only through one could
     // show zero usage and never surface as needing reorder even when genuinely out of stock.
-    // The recipe walk throws on a failed read (S695). This section's convention is to flag and
-    // continue with what it has, so a failed walk is reported the way a failed read in the batch
-    // above is — the reorder figures below are then computed without usage and say so.
-    // The option stock-line walk (S758 — a customized plate consumes its options' stock lines)
-    // throws the same way and is flagged the same way; allSettled keeps each failure independent.
-    let ingredientBreakdown = {}
-    let deltaExplosion = null
+    // The recipe walk throws on a failed read (S695), and so does the option stock-line walk (S758 —
+    // a customized plate consumes its options' stock lines); allSettled keeps each failure
+    // independent so both are logged. Either one missing means usage was not computed, and without
+    // usage on-hand is opening + purchases — so, like a failed read above, it withholds the count
+    // rather than computing one without usage (S792, PLANNING-6).
     const [walkRes, deltaRes] = await Promise.allSettled([
       dashRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, dashRecipeIds) : Promise.resolve({}),
       loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
     ])
-    if (walkRes.status === 'fulfilled') ingredientBreakdown = walkRes.value
-    if (deltaRes.status === 'fulfilled') deltaExplosion = deltaRes.value
+    if (loadIdRef.current !== myId) return // superseded again during the walks
+    let walkFailed = false
     for (const [res, what] of [[walkRes, 'recipe walk'], [deltaRes, 'option stock-line walk']]) {
       if (res.status !== 'rejected') continue
       console.error(`Owner Dashboard: ${what} failed`, res.reason)
+      walkFailed = true
+    }
+    if (walkFailed) {
       setLoadErrors(prev => ({ ...prev, reorder: 'Reorder figures failed to load — may be incomplete or stale.' }))
+      setReorderStats(null)
+      return
     }
 
     // The same on-hand / below-par calculation the Reorder Report uses (S696) — this tile used to
@@ -296,9 +308,8 @@ export default function OwnerDashboard() {
     // here and the count on that page were different numbers for the same client.
     const rows = buildStockRows({
       items, opening, closing, purchases, returns, wastages, staffMeals,
-      sales, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
+      sales, breakdown: walkRes.value, pars: parLevels, explosion: deltaRes.value,
     })
-    if (loadIdRef.current !== myId) return // superseded again after the recipe walk
     setReorderStats(summarizeReorder(rows))
   }
 
@@ -753,7 +764,9 @@ export default function OwnerDashboard() {
         <div className="stat-grid dash-section">
 
           <div {...kpiCard(() => navigate('/wastage-report'))}>
-            <div style={kpiLabelStyle}>Wastage Value (MTD)</div>
+            <div style={kpiLabelStyle}>
+              <Tip text="Everything logged as waste this month, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike — the same total as the Wastage Report and the main Dashboard." width={260}>Wastage Value (MTD)</Tip>
+            </div>
             <div style={{ ...kpiValueStyle(22), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(stats?.wastageValueTotal)}
             </div>
@@ -762,13 +775,19 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/reorder'))}>
             <div style={kpiLabelStyle}>
-              <Tip text="Items whose current stock is at or below par level — a live inventory position, not a monthly total." width={260}>Items Below Par</Tip>
+              {/* "below", not "at or below" (S696): an item exactly at par has what you want on hand,
+                  and the shared calculation has not flagged it since. */}
+              <Tip text="Items whose current stock is below their par level — an item exactly at par is fine. A live inventory position, not a monthly total; the same count as the Reorder Report." width={260}>Items Below Par</Tip>
             </div>
-            <div style={{ ...kpiValueStyle(22), color: reorderStats?.count > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (reorderStats?.count ?? 0)}
+            {/* Three states, never two (S792, PLANNING-6): loading, a computed count, and a count
+                that could not be computed. `reorderStats` is null only after a failed read or walk,
+                and that renders a dash — never the 0 an owner reads as "nothing to reorder". */}
+            <div style={{ ...kpiValueStyle(22), color: reorderStats?.count > 0 ? 'var(--theme-red-text)' : reorderStats ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (reorderStats ? reorderStats.count : '—')}
             </div>
             <div style={kpiSubtextStyle}>
-              {!loading && reorderStats?.estValueTotal > 0 ? `${fmt(reorderStats.estValueTotal)} to restock →` : 'Full Report →'}
+              {!loading && !reorderStats ? 'Count unavailable — open the report →'
+                : !loading && reorderStats?.estValueTotal > 0 ? `${fmt(reorderStats.estValueTotal)} to restock →` : 'Full Report →'}
             </div>
           </div>
 

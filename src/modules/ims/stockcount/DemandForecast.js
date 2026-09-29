@@ -40,7 +40,9 @@ const bsLabel = f => `${f.bs.day} ${BS_MONTHS[f.bs.month - 1]} ${f.bs.year}`
 const bsKey = bs => bs.year * 10000 + bs.month * 100 + bs.day
 
 // One stored run, the newest (S792 PLANNING-1). A Recompute whose clear-up failed leaves two runs
-// side by side, and the reshape below would keep whichever copy of each day it met last. A run is
+// side by side, and the reshape below would keep whichever copy of each day it met last. Since
+// S792.4 a Recompute also leaves any NEWER run alone (runForecast clears only older ones, so two at
+// once can no longer empty the horizon) — which makes "newest" the rule both sides share. A run is
 // its run_id; rows from before that column have none but were written by one INSERT, so they share
 // generated_at (the statement's now()), which stands in for it.
 function newestRunOnly(rows) {

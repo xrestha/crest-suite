@@ -103,13 +103,15 @@ const DEPLETION_FILES = [
   ['ReorderReport.js', path.join(__dirname, '..', 'stockcount', 'ReorderReport.js')],
   ['Variance.js', path.join(__dirname, '..', 'variance', 'Variance.js')],
   ['TheoreticalVariance.js', path.join(__dirname, '..', 'variance', 'TheoreticalVariance.js')],
-  ['ShrinkageReport.js', path.join(__dirname, '..', 'variance', 'ShrinkageReport.js')],
+  // Shrinkage's observation loop moved into shrinkageCalc.js in S792 stage 3, shared by the live
+  // report and the frozen Owner Report's shrinkage trend (they had been twins);
+  // shrinkageCalc.test.js pins that both import it.
+  ['shrinkageCalc.js', path.join(__dirname, '..', 'variance', 'shrinkageCalc.js')],
   // S792 (SALES-3): the frozen Owner Report's variance and shrinkage-trend sections summed sales
   // raw — a credit note and its choice lines SUBTRACTED usage, a till + manual day counted twice —
   // and were on no list, which is why S717's "the last page summing raw" missed them. The IMS
   // section's reorder figure goes through buildStockRows and is pinned here too.
   ['computeInventoryVariance.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeInventoryVariance.js')],
-  ['computeInventoryShrinkageTrend.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeInventoryShrinkageTrend.js')],
   ['computeMonthlyReport.js', path.join(__dirname, '..', '..', 'ownerReport', 'computeMonthlyReport.js')],
 ]
 

@@ -20,6 +20,8 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
+import { groupSavedRows, nearestPeriodWithFigures, overheadInserts } from './overheadsRows'
+import { SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
 
 // labor's blue has no dedicated theme token — accent/green/red/amber/purple are already spoken
 // for by food/overhead/profit-loss/target-warning/tax elsewhere on this page, so it stays a fixed
@@ -81,6 +83,9 @@ const LC_FILL = { good: 'var(--theme-green)', watch: 'var(--theme-accent)', high
 
 // Same banner shape PayrollRun.jsx's stale-draft card uses (design-system.md, S741).
 const amberBanner = { background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }
+// The accent note this page already used for the superseded Labor tab: a fact about the month the
+// owner should know, not a warning. Shared now that a second note wears it (S792, COSTS-14).
+const infoBanner = { background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }
 
 function seedBucket(key) {
   return BUCKET_CONFIG[key].presets.map(cat => emptyRow(cat))
@@ -115,6 +120,9 @@ export default function Overheads() {
   // The label of the month an unsaved draft was copied from, or null when the rows on screen are
   // this period's own saved rows (S756).
   const [carriedFrom, setCarriedFrom] = useState(null)
+  // True when this period was SAVED with no fixed costs — its only rows are amount 0 (the marker
+  // Save writes, overheadsRows.js). A record of zero, not "nothing saved yet" (S792, COSTS-14).
+  const [savedEmpty, setSavedEmpty] = useState(false)
   // D23 memo: { amount, count, prorated } | { error } | null (not offered / not loaded).
   const [deprMemo, setDeprMemo]     = useState(null)
 
@@ -139,7 +147,7 @@ export default function Overheads() {
     // anything else happens. Left up, Save would delete-and-insert that old period's figures under
     // the NEW client's scope while the new client's period list was still loading.
     setLoading(true); setLoadError(null); setSaveError(null)
-    setPeriodId(''); setPeriods([]); setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setDeprMemo(null)
+    setPeriodId(''); setPeriods([]); setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setSavedEmpty(false); setDeprMemo(null)
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
@@ -156,7 +164,7 @@ export default function Overheads() {
   function handlePeriodChange(id) {
     periodReq.begin(id)   // synchronous — before any await, so an in-flight load for the old month loses
     setLoading(true); setLoadError(null); setSaveError(null)
-    setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setDeprMemo(null)
+    setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setSavedEmpty(false); setDeprMemo(null)
     setPeriodId(id)
   }
 
@@ -164,7 +172,7 @@ export default function Overheads() {
     periodReq.begin(pid)
     setLoading(true)
     setLoadError(null)
-    setRows(emptyRows()); setCarriedFrom(null)
+    setRows(emptyRows()); setCarriedFrom(null); setSavedEmpty(false)
     await Promise.all([loadOverheads(pid), loadPeriodData(pid)])
     if (!periodReq.isCurrent(pid)) return
     setLoading(false)
@@ -181,17 +189,16 @@ export default function Overheads() {
     if (error) { setLoadError(error.message); return }
 
     if (data && data.length > 0) {
-      const grouped = { overhead: [], labor: [], tax_fees: [] }
-      data.forEach(r => {
-        const b = r.bucket || 'overhead'
-        if (grouped[b]) grouped[b].push({ ...r, _dirty: false })
-        else grouped.overhead.push({ ...r, _dirty: false })
-      })
+      // Figure rows only: an amount-0 row is the "saved with no fixed costs" marker, or a line with
+      // nothing in it — never an editable cost line (S792, COSTS-14). A period whose rows are ALL
+      // amount 0 was saved empty on purpose, so it does not fall into the carry-forward below.
+      const { grouped, savedEmpty: empty } = groupSavedRows(data)
       Object.keys(BUCKET_CONFIG).forEach(b => {
         if (grouped[b].length === 0) grouped[b] = seedBucket(b)
       })
       setRows(grouped)
       setCarriedFrom(null)
+      setSavedEmpty(empty)
       return
     }
 
@@ -220,12 +227,13 @@ export default function Overheads() {
       if (grouped[b].length === 0) grouped[b] = seedBucket(b)
     })
     setRows(grouped)
+    setSavedEmpty(false)
     // Named on screen (S756): these are another month's saved figures, and on a closed period that
     // cannot be saved they stay the page's statement indefinitely with nothing else saying so.
     setCarriedFrom(priorRows ? prior.period?.label || 'an earlier month' : null)
   }
 
-  // Returns the chronologically nearest prior period's saved overhead rows, or null if none of
+  // Returns the chronologically nearest prior period's saved overhead figures, or null if none of
   // them ever had any. One .in() read over all candidates, then the walk happens in memory — the
   // old shape queried one period at a time, so a client with a gap in their overhead history paid
   // one round trip per empty month on the page's primary workflow (first visit to a new month).
@@ -241,18 +249,10 @@ export default function Overheads() {
       .in('period_id', candidatePeriods.map(p => p.id))
       .order('created_at').order('id'))
     if (error) return { rows: null, period: null, error: error.message }
-    const byPeriod = new Map()
-    ;(data || []).forEach(r => {
-      const list = byPeriod.get(r.period_id)
-      if (list) list.push(r)
-      else byPeriod.set(r.period_id, [r])
-    })
-    // candidatePeriods arrives nearest-first; the first with rows wins, same as the old walk.
-    for (const p of candidatePeriods) {
-      const rows = byPeriod.get(p.id)
-      if (rows && rows.length > 0) return { rows, period: p, error: null }
-    }
-    return { rows: null, period: null, error: null }
+    // candidatePeriods arrives nearest-first; the first with a FIGURE wins. A month saved with no
+    // fixed costs is passed over, so the month after it carries from the last month with real
+    // figures, not from the empty one (S792, COSTS-14).
+    return { ...nearestPeriodWithFigures(candidatePeriods, data), error: null }
   }
 
   async function loadPeriodData(pid) {
@@ -261,11 +261,12 @@ export default function Overheads() {
     // read must never block the statement, it only changes what the memo line says.
     const deprPromise = assetsOn && periodObj ? loadDepreciationMemo(periodObj) : Promise.resolve(null)
     const results = await Promise.all([
-      // The bill discount belongs in food cost (S601/S720/S747): `discount_amount` is BILL-level and
+      // The bill discount comes off purchases (S601/S720/S747): `discount_amount` is BILL-level and
       // repeated per line, so it is spread across the bill's lines by allocateBillDiscounts(), which
       // needs the grouping key and its vendor/invoice/day fallback trio. Raw qty × rate charged
-      // the undiscounted price, so this page's Food Cost disagreed with Monthly Summary's and the
-      // dashboards' for the same month (S756).
+      // the undiscounted price, so this page's purchases disagreed with Monthly Summary's and the
+      // dashboards' for the same month (S756). `foodCost` below is that net purchases figure — the
+      // variable kept its name; on screen it is "Purchases" (S792, D30).
       fetchAllRows(() => supabase.from('purchase_entries')
         .select('qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
         .eq('period_id', pid).order('id')),
@@ -276,7 +277,7 @@ export default function Overheads() {
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
       // the server-side form silently dropped every legacy manual row from REVENUE. On a
       // dashboard that under-reports one figure; on THIS page revenue is the denominator of every
-      // percentage, and the numerator (food cost, from purchases) stayed whole — so Food Cost %
+      // percentage, and the numerator (purchases) stayed whole — so the purchases %
       // and every "% of revenue" read HIGH, break-even read HIGH, and Net Profit read LOW, which
       // is the sign of the "✓ Profitable / ✗ Operating at a loss" verdict directly below it.
       // Pinned by salesReads.test.js, which is why `source` must stay in the column list.
@@ -436,32 +437,21 @@ export default function Overheads() {
       return
     }
 
-    const inserts = []
-    Object.entries(rows).forEach(([bucket, bucketRows]) => {
-      bucketRows
-        .filter(r => r.category?.trim() && parseFloat(r.amount) > 0)
-        .forEach(r => inserts.push({
-          period_id:   pid,
-          bucket,
-          category:    r.category.trim(),
-          description: r.description?.trim() || '',
-          amount:      parseFloat(r.amount) || 0,
-        }))
-    })
-
-    if (inserts.length > 0) {
-      const { error: insErr } = await scopedInsert('overheads', inserts)
-      if (insErr) {
-        const { text, detail } = asActionError(insErr)
-        // The delete already committed. Never claim the write did not land — a dead fetch cannot
-        // prove that — and name the state the record is now in plus the way out (S619).
-        setSaveError({
-          text: `This period's fixed costs were cleared but the new figures did not save, so ${period?.label || 'this period'} currently has none stored. Everything you entered is still on screen and has NOT been lost — press Save again. Do not reload the page first. ${text}`,
-          detail,
-        })
-        setSaving(false)
-        return   // deliberately no reload: it would replace the only surviving copy with a carry-forward draft
-      }
+    // Every row with a category and an amount above zero — or, when there is none, ONE amount-0
+    // marker row, so a month saved with no fixed costs reads as exactly that on the next visit
+    // instead of as a carry-forward draft of last month (S792, COSTS-14, overheadsRows.js).
+    const inserts = overheadInserts(rows, pid)
+    const { error: insErr } = await scopedInsert('overheads', inserts)
+    if (insErr) {
+      const { text, detail } = asActionError(insErr)
+      // The delete already committed. Never claim the write did not land — a dead fetch cannot
+      // prove that — and name the state the record is now in plus the way out (S619).
+      setSaveError({
+        text: `This period's fixed costs were cleared but the new figures did not save, so ${period?.label || 'this period'} currently has none stored. Everything you entered is still on screen and has NOT been lost — press Save again. Do not reload the page first. ${text}`,
+        detail,
+      })
+      setSaving(false)
+      return   // deliberately no reload: it would replace the only surviving copy with a carry-forward draft
     }
 
     setSaving(false)
@@ -511,11 +501,14 @@ export default function Overheads() {
   // 30% target — the most flattering possible rendering of "we do not know what this costs". And
   // `seedBucket()` writes blank preset rows into every new period, so the page manufactured its
   // own examples.
+  // A month SAVED with no fixed costs has measured them at zero (S792, COSTS-14): its buckets are
+  // entered, at 0. Labour on an HR client still waits for payroll — saving no typed labour is not a
+  // wage bill of zero there.
   const entered = {
     food:  foodCost > 0,
-    labor: labourSource === 'payroll' || totals.labor > 0,
-    oh:    totals.overhead > 0,
-    tax:   totals.tax_fees > 0,
+    labor: labourSource === 'payroll' || totals.labor > 0 || (savedEmpty && !hrOn),
+    oh:    totals.overhead > 0 || savedEmpty,
+    tax:   totals.tax_fees > 0 || savedEmpty,
   }
   // BS months run 28-32 days, never 30 — a hardcoded /30 over/understates daily burn by up to
   // ~7% depending on the period.
@@ -546,7 +539,7 @@ export default function Overheads() {
   }
 
   // Fill variant of trafficLight below — same bands, base tokens, for bars and dots. Overhead and
-  // Tax & Fees only: Food Cost and Labor go through bandOf() and the shared bands.
+  // Tax & Fees only: Purchases and Labor go through bandOf() and the shared bands.
   function trafficLightFill(actual, target) {
     if (actual == null) return 'var(--theme-text2)'
     const diff = actual - target
@@ -571,8 +564,12 @@ export default function Overheads() {
   // the muted tone instead of a green 0.0% beating its target. Net Profit is the one row that is
   // genuinely computed rather than entered, so it keeps its value; the note beneath the strip
   // says which lines are missing from it.
+  // The first line is PURCHASES — net of bill discounts and returns, what was bought — and never
+  // called Food Cost (S792, D30): Food Cost % is what was USED, from the month-end count, and
+  // lives on Monthly Summary. It is still measured against the food cost target, as a guide.
   const pnlRows = hasSales ? [
-    { key: 'food',   label: 'Food Cost',  amount: entered.food  ? foodCost         : null, target: fcThresholds(settings).warn, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+    { key: 'food',   label: 'Purchases',  amount: entered.food  ? foodCost         : null, target: fcThresholds(settings).warn, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)',
+      note: 'bought, not stock used' },
     { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: LABOR_WARN, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)',
       note: labourSource === 'payroll' ? 'from finalized payroll'
           : labourSource === 'unreadable' ? (totals.labor > 0 ? 'payroll cannot be read on this login — Labor tab only' : 'payroll cannot be read on this login')
@@ -584,11 +581,10 @@ export default function Overheads() {
       textColor: noVerdict ? 'var(--theme-text1)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
   ] : null
 
-  // Food Cost and Labor band through the shared definitions (S756) — the client's own
-  // fc_warning_pct/fc_critical_pct via fcFigure(), and lcBand's 30/37 via bandFigure() — so this
-  // page and Monthly Summary, the dashboards and the Owner Report give one month one verdict, with
-  // the ✓/△/▲ mark carried beside the colour. Overhead and Tax & Fees have no shared band and keep
-  // this page's own target comparison.
+  // Purchases and Labor band through the shared definitions (S756) — the client's own
+  // fc_warning_pct/fc_critical_pct via fcFigure() (a guide for purchases, since S792 named them for
+  // what they are), and lcBand's 30/37 via bandFigure() — with the ✓/△/▲ mark carried beside the
+  // colour. Overhead and Tax & Fees have no shared band and keep this page's own target comparison.
   function bandOf(row, pctVal) {
     // An open month (D7): the percentage, no band — a whole month's rent over a week's sales is
     // not a line running over its target.
@@ -598,7 +594,8 @@ export default function Overheads() {
     }
     if (row.key === 'food') {
       const f = fcFigure(pctVal, settings)
-      return { text: f.style.color, fill: FC_FILL[f.band.key] || FC_FILL.none, label: f.text, title: f.title }
+      return { text: f.style.color, fill: FC_FILL[f.band.key] || FC_FILL.none, label: f.text,
+        title: f.title ? `Purchases ÷ revenue, against your food cost target: ${f.title}` : undefined }
     }
     if (row.key === 'labor') {
       const f = bandFigure(pctVal, lcBand)
@@ -610,7 +607,7 @@ export default function Overheads() {
   // Every cost line the statement is missing, for the caveat under Net Profit. A statement that
   // silently omits a cost overstates profit by exactly that much.
   const missingLines = [
-    !entered.food  && 'Food Cost',
+    !entered.food  && 'Purchases',
     !entered.labor && 'Labor',
     !entered.oh    && 'Overhead',
     !entered.tax   && 'Tax & Fees',
@@ -713,6 +710,23 @@ export default function Overheads() {
       {isLocked && (
         <ClosedPeriodBanner />
       )}
+      {/* The same fact, told to the people the lock lets through (S792 stage 3; closed-periods.md →
+          "Admin must be TOLD the month is closed"). Stock Count's form: the shared banner in its
+          amber `canEdit` shape. Overheads feed the frozen Monthly Report's fixed costs, so the
+          banner's "regenerate the snapshot" applies here as it does there. */}
+      {canEditClosedPeriods && period?.status === 'closed' && (
+        <ClosedPeriodBanner canEdit periodLabel={period.label} />
+      )}
+
+      {/* S792 (COSTS-14): a month saved with no fixed costs is a record of zero, not "nothing saved
+          yet" — and its figures below are this month's, not a copy of the last one's. */}
+      {!loading && savedEmpty && (
+        <div role="status" style={infoBanner}>
+          <strong style={{ color: 'var(--theme-accent-ink)' }}>{period?.label || 'This period'} is saved with no fixed costs.</strong>{' '}
+          Nothing is copied from an earlier month: the Fixed Overheads, Labor and Tax &amp; Fees tabs count as zero for it.
+          {!isLocked && ' To record some, enter them below and press Save — they replace this.'}
+        </div>
+      )}
 
       {/* The rows below are another month's saved figures copied as a starting point, and nothing
           on the page said so — on a closed period that cannot be saved, permanently (S756). */}
@@ -730,7 +744,7 @@ export default function Overheads() {
           owner who notices the two figures differ can reconcile them instead of guessing which
           one the statement used. */}
       {ignoredLabourBucket > 0 && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <div style={infoBanner}>
           <strong style={{ color: 'var(--theme-accent-ink)' }}>Labour comes from your finalized payroll run this period ({fmt(labourEffective)}).</strong>{' '}
           The {fmt(ignoredLabourBucket)} on the Labor tab is <strong>not</strong> added to the P&amp;L below — payroll and the Labor bucket are two measurements of the same cost, and summing them would double-count it. The tab stays editable for months with no payroll run.
         </div>
@@ -842,7 +856,7 @@ export default function Overheads() {
                 <th style={{ width: 200 }}>Category</th>
                 <th>Description</th>
                 <th style={{ textAlign: 'right', width: 160 }}>Amount (NPR)</th>
-                <th style={{ textAlign: 'right', width: 80 }}><Tip text="This item's share of the total overhead for its bucket (Food Cost, Labour, or Other)." width={260}>% of Bucket</Tip></th>
+                <th style={{ textAlign: 'right', width: 80 }}><Tip text="This line's share of the total on this tab (Fixed Overheads, Labor, or Tax & Fees). E.g. rent of NPR 60,000 on a Fixed Overheads tab totalling NPR 1,00,000 is 60%." width={260}>% of Bucket</Tip></th>
                 <th style={{ width: 40 }}></th>
               </tr>
             </thead>
@@ -933,8 +947,10 @@ export default function Overheads() {
                 Revenue{periodOpen ? ' so far' : ''}: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(dishes).toLocaleString('en-IN')} dishes sold &nbsp;·&nbsp; {period?.label || '—'}
               </p>
             </div>
-            <Tip text="Food cost uses net purchases ÷ revenue (purchase-based): purchases less bill discounts and vendor returns. For COGS-based food cost, see Monthly Summary." width={240}>
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)', cursor: 'help' }}>Purchase-based FC%</span>
+            {/* Not "FC%" (S792, D30): the first line is what was BOUGHT, and Food Cost % is what was
+                USED. Named with foodCostBasis.js' labels so this page and Monthly Summary agree. */}
+            <Tip text={`${periodOpen ? SPEND_SO_FAR_TIP : SPEND_TIP} Purchases here are net of bill discounts and vendor returns. Food Cost % — what was used, from the stock count — is on Monthly Summary.`} width={280}>
+              <span style={{ fontSize: 11, color: 'var(--theme-text3)', cursor: 'help' }}>Purchases line: {periodOpen ? SPEND_SO_FAR_LABEL : SPEND_LABEL}</span>
             </Tip>
           </div>
 
@@ -1058,7 +1074,7 @@ export default function Overheads() {
 
           {/* Revenue cost stack — only when sales data available */}
           {hasSales && (() => {
-            const fc  = { key: 'food',     label: 'Food Cost', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
+            const fc  = { key: 'food',     label: 'Purchases', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
             const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', textColor: 'var(--theme-text1)', amount: labourEffective, pct: pct(labourEffective, revenue) || 0 }
             const oh  = { key: 'overhead', label: 'Overhead',  color: 'var(--theme-green)', textColor: 'var(--theme-green-text)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
             const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
@@ -1072,10 +1088,10 @@ export default function Overheads() {
               <div style={{ marginBottom: 24 }}>
                 {/* The scope this chart is drawn on has to be stated HERE too, not only in the
                     P&L Summary header — a report that states a scope must state it everywhere the
-                    report goes, and this bar carries the same purchase-based Food Cost. */}
+                    report goes, and this bar carries the same Purchases line. */}
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>
                   Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Revenue{periodOpen ? ' so far' : ''} {fmt(revenue)}</span>
-                  <span style={{ color: 'var(--theme-text3)' }}> &nbsp;·&nbsp; Food Cost is purchase-based (net purchases), not COGS
+                  <span style={{ color: 'var(--theme-text3)' }}> &nbsp;·&nbsp; Purchases are what was bought (net), not food cost used
                   {missingLines.length > 0 ? ` · no ${missingLines.join(', ')} recorded, so the profit slice absorbs ${missingLines.length === 1 ? 'it' : 'them'}` : ''}</span>
                 </div>
                 {/* Stacked bar */}
@@ -1126,7 +1142,7 @@ export default function Overheads() {
                     </p>
                   )}
                   {total === 0 ? (
-                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>No entries yet.</p>
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>{savedEmpty ? 'None this month.' : 'No entries yet.'}</p>
                   ) : bucketRows.length === 0 ? (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>Nothing entered.</p>
                   ) : (
@@ -1274,15 +1290,17 @@ export default function Overheads() {
                   : contribMargin <= 0
                     ? (periodOpen
                       ? `Purchases so far (${(fcPct * 100).toFixed(1)}% of revenue) are above revenue so far, so break-even cannot be worked out yet`
-                      : `✗ Purchase cost (${(fcPct * 100).toFixed(1)}% FC) exceeds revenue — break-even is undefined`)
+                      : `✗ Purchases (${(fcPct * 100).toFixed(1)}% of revenue) exceed revenue — break-even is undefined`)
                     : totalFixed === 0
-                      ? 'Enter overhead costs above and save to calculate'
+                      ? (savedEmpty
+                        ? `${period?.label || 'This month'} is saved with no fixed costs, so there is nothing to break even on`
+                        : 'Enter overhead costs above and save to calculate')
                       : 'Unable to calculate'}
             </div>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0, lineHeight: 1.6 }}>
-              Formula: Total Fixed Costs ÷ (1 − FC%) &nbsp;·&nbsp;
+              Formula: Total Fixed Costs ÷ (1 − {periodOpen ? SPEND_SO_FAR_LABEL : SPEND_LABEL}) &nbsp;·&nbsp;
               Avg dish price: {avgDishPrice > 0 ? fmt(avgDishPrice) : '—'} &nbsp;·&nbsp;
-              FC%: {revenue > 0 ? `${(fcPct * 100).toFixed(1)}%` : '—'} (purchase-based)
+              {periodOpen ? SPEND_SO_FAR_LABEL : SPEND_LABEL}: {revenue > 0 ? `${(fcPct * 100).toFixed(1)}%` : '—'} (net purchases ÷ revenue)
               {missingLines.length > 0 && <> &nbsp;·&nbsp; excludes {missingLines.join(', ')}, so the real break-even is higher</>}
             </p>
           </div>
@@ -1332,7 +1350,7 @@ export default function Overheads() {
         </p>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '10px 0 0', lineHeight: 1.7 }}>
           📐 <strong style={{ color: 'var(--theme-accent-ink)' }}>What the figures on this page mean:</strong>{' '}
-          <strong style={{ color: 'var(--theme-text1)' }}>Food Cost</strong> is purchase-based — net purchases (purchases less bill discounts and vendor returns) for the period, not COGS. It ignores opening and closing stock, so a month where you built stock reads worse than it was and a month where you ran it down reads better; Monthly Summary has the COGS-based figure.{' '}
+          <strong style={{ color: 'var(--theme-text1)' }}>Purchases</strong> are net purchases — what you bought in the period, less bill discounts and vendor returns — not food cost. They ignore opening and closing stock, so a month where you built stock reads worse than it was and a month where you ran it down reads better; Food Cost % (what was used, from the stock count) is on Monthly Summary.{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Dishes</strong> is portions sold, not guests — Crest counts guests as <em>covers</em>, from POS bills only, which this page does not read.{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Labor</strong> is your finalized payroll run when one exists for the period, otherwise whatever is on the Labor tab — never both added together.
         </p>

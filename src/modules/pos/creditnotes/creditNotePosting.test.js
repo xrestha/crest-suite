@@ -1,4 +1,5 @@
 import { creditNoteReversalRows, backfillCreditNotesToIms, postCreditNoteToIms } from './creditNotePosting'
+import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 
 jest.mock('../../../shared/fetchAllRows', () => ({
   fetchAllRows: async make => make(),
@@ -105,6 +106,31 @@ describe('backfillCreditNotesToIms', () => {
     expect(res).toEqual({ posted: 0, skipped: 1 })
     expect(inserts).toHaveLength(0)
     expect(scopedUpdate).toHaveBeenCalled()
+  })
+
+  // S792, SALES-6: the day comes from Nepal's calendar, whatever zone the backfill runs in (the old
+  // `adToBs(new Date(created_at))` fails this under TZ=UTC).
+  it("dates each reversal by the day the note was issued in Nepal, and leaves another month's note waiting", async () => {
+    const inserts = []
+    const supabase = {
+      from: () => ({
+        select: () => builder({ data: [], error: null }),
+        insert: async rows => { inserts.push(rows); return { error: null } },
+      }),
+    }
+    const npt = (m, d, hhmm) => `${formatAd(bsToAd(2083, m, d))}T${hhmm}:00+05:45`
+    const scopedFrom = table => builder(table === 'pos_credit_notes'
+      ? { data: [
+          { id: 'cn1', order_id: 'o1', created_at: npt(5, 1, '00:10') },
+          { id: 'cn2', order_id: 'o1', created_at: npt(6, 1, '00:10') },
+        ], error: null }
+      : { data: [{ id: 'o1', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS }], error: null })
+    const scopedUpdate = jest.fn(() => builder({ error: null }))
+    const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period })
+    expect(res).toEqual({ posted: 1, skipped: 1 })
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0].every(r => r.bs_day === 1 && r.pos_credit_note_id === 'cn1')).toBe(true)
+    expect(scopedUpdate).toHaveBeenCalledTimes(1)
   })
 
   it('aborts rather than posting when it cannot check what already posted', async () => {

@@ -74,10 +74,20 @@ export default function VendorBalanceConfirmation() {
   }
 
   const load = useCallback(async () => {
-    if (!effectiveClientId || !selectedVendorId || !selectedFy || periods.length === 0) { setResult(null); return }
+    if (!effectiveClientId || !selectedVendorId || !selectedFy || periods.length === 0) {
+      // Claimed as well, so a load still in flight for the vendor just deselected cannot land after
+      // this and put its letter back.
+      scopeReq.begin('')
+      setResult(null); setComputing(false); return
+    }
     const key = scopeReq.begin(`${selectedVendorId}|${selectedFy}`)   // claim the page before any await (S601)
     setComputing(true)
     setLoadError(null)
+    // The previous vendor's letter goes BEFORE the reads (S792, PURCHASES-7). It stayed in `result`
+    // for the whole recompute, and Share via WhatsApp builds its message from the NEW vendor and
+    // year with whatever `result` holds — so the message read "Business → Vendor B … Balance
+    // Payable NPR <Vendor A's balance>". The actions are also gated on `computing` below.
+    setResult(null)
 
     const fyPeriods = periods.filter(pr => getBsFiscalYear(pr.bs_year, pr.bs_month) === selectedFy)
     const fyPeriodIds = fyPeriods.map(pr => pr.id)
@@ -206,7 +216,9 @@ export default function VendorBalanceConfirmation() {
           <h1 className="page-title">Vendor Balance Confirmation</h1>
           <p className="page-subtitle">Printable yearly balance letter for IRD Annexure 13 reconciliation with a vendor</p>
         </div>
-        {vendor && result && !isEmpty && (
+        {/* Only over a letter this page has finished computing for the vendor and year on screen
+            (S792, PURCHASES-7): the message and the print both carry that vendor's name. */}
+        {vendor && result && !isEmpty && !computing && !loading && !loadError && (
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <Tip text="Opens WhatsApp with the Opening/Purchases/Payments/Returns summary and closing balance pre-filled as a text message — pick a contact or group to send it to. The printed letter remains the document to actually sign." width={280}>
               <button className="btn btn-ghost" onClick={shareWhatsApp}>📱 Share via WhatsApp</button>

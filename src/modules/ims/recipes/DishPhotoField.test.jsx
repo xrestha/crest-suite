@@ -3,6 +3,7 @@ import { useState } from 'react'
 import DishPhotoField from './DishPhotoField'
 import { supabase } from '../../../supabaseClient'
 import { downscalePhoto } from './dishPhoto'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 
 // Nothing in this file reaches real storage: the client is a mock, and downscaling is stubbed to a
 // pass-through so the upload path is exercised without a canvas. (jest.mock is hoisted above the
@@ -10,11 +11,17 @@ import { downscalePhoto } from './dishPhoto'
 const mockUpload = jest.fn()
 const mockRemove = jest.fn()
 const mockGetPublicUrl = jest.fn()
+const mockScopedFrom = jest.fn()
 jest.mock('../../../supabaseClient', () => ({ supabase: { storage: { from: jest.fn() } } }))
 jest.mock('./dishPhoto', () => ({ ...jest.requireActual('./dishPhoto'), downscalePhoto: jest.fn() }))
+// S792 RECIPES-8: before an old file is deleted, every dish's link is read fresh — a stored photo
+// another dish still shows is kept. `dishes` below is what that read returns.
+jest.mock('../../../shared/hooks/useScopedDb', () => ({ useScopedDb: () => ({ scopedFrom: (...a) => mockScopedFrom(...a) }) }))
+jest.mock('../../../shared/fetchAllRows', () => ({ fetchAllRows: jest.fn() }))
 
 const BASE = 'https://abcd.supabase.co'
 const OLD = `${BASE}/storage/v1/object/public/dish-photos/client-1/rec-1-100.jpg?v=100`
+let dishes = []
 
 function Harness({ initial = '', persist = null, recipeId = 'rec-1', onValue }) {
   const [v, setV] = useState(initial)
@@ -42,6 +49,10 @@ beforeEach(() => {
   mockGetPublicUrl.mockImplementation(p => ({ data: { publicUrl: `${BASE}/storage/v1/object/public/dish-photos/${p}` } }))
   mockUpload.mockResolvedValue({ data: { path: 'x' }, error: null })
   mockRemove.mockResolvedValue({ data: [], error: null })
+  const chain = { not: () => chain, order: () => chain }
+  mockScopedFrom.mockImplementation(() => chain)
+  dishes = [{ id: 'rec-1', image_url: OLD }, { id: 'rec-2', image_url: null }]
+  fetchAllRows.mockImplementation(async make => { make(); return { data: dishes, error: null } })
   jest.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => { console.error.mockRestore() })
@@ -152,6 +163,48 @@ it('never deletes a pasted link, and warns that guests will not see it', async (
   confirmRemove()
   await waitFor(() => expect(onValue).toHaveBeenCalledWith(''))
   expect(persist).toHaveBeenCalledWith(null)
+  expect(mockRemove).not.toHaveBeenCalled()
+})
+
+// S792 RECIPES-8: Veg Momo and Chicken Momo sharing one stored photo through a pasted link.
+it('Replace keeps the old file when another dish still shows it', async () => {
+  dishes = [{ id: 'rec-1', image_url: OLD }, { id: 'rec-2', image_url: OLD }]
+  const persist = jest.fn(async () => ({ data: [{ id: 'rec-1' }], error: null }))
+  const onValue = jest.fn()
+  render(<Harness initial={OLD} persist={persist} onValue={onValue} />)
+
+  pick(jpg())
+
+  await waitFor(() => expect(onValue).toHaveBeenCalled())
+  await waitFor(() => expect(fetchAllRows).toHaveBeenCalled())
+  expect(mockScopedFrom).toHaveBeenCalledWith('recipes', 'id, image_url')
+  expect(mockRemove).not.toHaveBeenCalled()
+})
+
+it('Remove on the dish that pasted the link leaves the other dish its photo', async () => {
+  dishes = [{ id: 'rec-1', image_url: OLD }, { id: 'rec-2', image_url: OLD }]
+  const persist = jest.fn(async () => ({ data: [{ id: 'rec-2' }], error: null }))
+  const onValue = jest.fn()
+  render(<Harness initial={OLD} recipeId="rec-2" persist={persist} onValue={onValue} />)
+
+  confirmRemove()
+
+  await waitFor(() => expect(onValue).toHaveBeenCalledWith(''))
+  await waitFor(() => expect(fetchAllRows).toHaveBeenCalled())
+  expect(persist).toHaveBeenCalledWith(null)
+  expect(mockRemove).not.toHaveBeenCalled()
+})
+
+it('keeps the old file when it cannot check which dishes use it', async () => {
+  fetchAllRows.mockImplementation(async () => ({ data: null, error: { message: 'Failed to fetch' } }))
+  const persist = jest.fn(async () => ({ data: [{ id: 'rec-1' }], error: null }))
+  const onValue = jest.fn()
+  render(<Harness initial={OLD} persist={persist} onValue={onValue} />)
+
+  confirmRemove()
+
+  await waitFor(() => expect(onValue).toHaveBeenCalledWith(''))
+  await waitFor(() => expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/Dish photo kept/), 'Failed to fetch'))
   expect(mockRemove).not.toHaveBeenCalled()
 })
 

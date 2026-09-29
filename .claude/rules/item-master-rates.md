@@ -17,7 +17,8 @@ is a plain number read through the item's CURRENT unit, so changing ML to LTR re
 by 1000×. `Items.js` disables the unit select once the item is referenced anywhere, and the save
 re-checks all item reference tables live and refuses on any failed read. A rate change opens a
 confirm naming how many past records it re-values (closed months included; purchase bills keep their
-own rate). A pack-size / purchase-unit change only warns, because purchases are stored in base units
+own rate); Price Tracker's price confirm shows the same sentence since S792 (`priceImpactSentence`,
+`itemRefTables.js`). A pack-size / purchase-unit change only warns, because purchases are stored in base units
 (`conversion_factor` is display-only). `PurchaseBillPage`'s post-save rate sync carries the same
 warning wording since S756 stage 3.
 
@@ -130,9 +131,11 @@ So the guard fails CLOSED, and each rule below shipped as a live bug first:
   `ITEM_REF_TABLES`.
 - **A scan that could not run must not read as a scan that found nothing.** `usageScan.ok` is what
   separates "no records" from "we could not check". With it false the column says **"not checked"**
-  rather than a dash, a banner names the tables that failed, and the delete refuses outright — the
+  rather than a dash, a banner says the check failed, and the delete refuses outright — the
   `UsageChip` rule (a chip must never be able to mean two things) applied to the *absence* of the
-  chip, which is the half that is easy to miss.
+  chip, which is the half that is easy to miss. Since S792 the scan is one server-side
+  `item_reference_counts(p_ids)` call (`readItemRefCounts`), the function the delete trigger asks,
+  not per-table browser reads.
 - **The clearing loop and the badge read the same list.** They had diverged: the loop knew eight
   tables while eleven referenced `items`, so force-delete emptied the eight and Postgres then
   refused the final delete because `par_levels`, `purchase_order_items` and `stock_movements` still

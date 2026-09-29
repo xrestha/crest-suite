@@ -66,6 +66,42 @@ export function objectPathFromUrl(url, supabaseUrl) {
   return path || null
 }
 
+// A file this field uploaded: `<client>/<recipe id or "new">-<timestamp>.<ext>` (photoPath above).
+// The guest menu's logo lives in the same bucket and folder (`guest-menu-logo-…`, GuestMenuSetup),
+// so "inside this client's folder" is not "a dish photo".
+const DISH_PHOTO_NAME = /^(.+)-\d+\.(?:jpg|png|webp)$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function isDishPhotoName(name, recipeId) {
+  const m = DISH_PHOTO_NAME.exec(name || '')
+  if (!m) return false
+  const stem = m[1]
+  return stem === 'new' || (recipeId != null && stem === String(recipeId)) || UUID.test(stem)
+}
+
+/**
+ * May the stored file at `path` be deleted when THIS dish lets go of it? (S792, RECIPES-8)
+ *
+ * "Paste a link instead" lets two dishes share one stored photo — Veg Momo and Chicken Momo — and
+ * replacing or removing it on one deleted the file the other still showed, silently, on every
+ * guest's phone. So a file goes only when it is a dish photo in this client's folder AND no other
+ * dish's image_url names it. Being named for this dish is not enough on its own: its link can have
+ * been pasted onto another dish since. `others` is a FRESH read of the other dishes' image_url; a
+ * caller that could not read it must not delete (an unused file costs nothing, a deleted photo a
+ * guest menu).
+ *
+ * @param {string|null} path        object path from objectPathFromUrl
+ * @param {object} ctx
+ * @param {string} ctx.clientId     the client being edited
+ * @param {string|null} ctx.recipeId  this dish, or null for one not saved yet
+ * @param {Array<{id, image_url}>} ctx.others  every dish's image_url (this dish's own row is skipped)
+ * @param {string} ctx.supabaseUrl
+ */
+export function photoMayBeDeleted(path, { clientId, recipeId = null, others = [], supabaseUrl }) {
+  if (!path || !clientId || !path.startsWith(`${clientId}/`)) return false
+  if (!isDishPhotoName(path.slice(clientId.length + 1), recipeId)) return false
+  return !(others || []).some(r => r && r.id !== recipeId && objectPathFromUrl(r.image_url, supabaseUrl) === path)
+}
+
 /**
  * Will a guest's phone load this URL? Mirrors vercel.json's img-src for an absolute URL, which is
  * the only thing a recipe stores. Kept as a mirror rather than a guess: if the CSP changes, this

@@ -25,6 +25,7 @@ import { nprOrDash } from '../../../shared/nepalMoney'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
 // semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
@@ -101,7 +102,10 @@ export default function PeriodComparison() {
   const [periods, setPeriods] = useState([])
   const [stats, setStats]     = useState({})
   const [limit, setLimit]     = useState(12)
-  const [loading, setLoading] = useState(false)
+  // Starts TRUE (S792, FIGURES-11; DeadStock's S717 shape): it started false, so the first paint —
+  // before the periods read was even issued — drew "—" tiles and "No periods found." about a client
+  // the page had not looked at yet.
+  const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [showYoy, setShowYoy] = useState(false)
   // The one control on this page that reloads is a closed native <select>, which fires `change` on
@@ -113,13 +117,24 @@ export default function PeriodComparison() {
 
   useEffect(() => {
     if (!effectiveClientId) return
+    // A client switch starts from nothing (S792, FIGURES-7/11). Claiming the page supersedes a range
+    // load still in flight for the previous outlet; clearing `periods` keeps fetchData idle until
+    // THIS client's list lands, so no range is read from the last client's period ids.
+    const key = limitReq.begin(`${effectiveClientId}:periods`)
+    setLoading(true)
+    setLoadError(null)
+    setStats({})
+    setPeriods([])
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
-        if (error) { setLoadError(error.message); return }
+        if (!limitReq.isCurrent(key)) return   // a newer client switch owns the page
+        // It used to set the error and leave `loading` wherever it was.
+        if (error) { setLoadError(error.message); setLoading(false); return }
         setPeriods(data || [])
+        if (!(data || []).length) setLoading(false)   // nothing will call fetchData, so nothing else will clear it
       })
-  }, [effectiveClientId, scopedFrom])
+  }, [effectiveClientId, scopedFrom, limitReq])   // limitReq is one stable object; listed for the lint rule
 
   useEffect(() => {
     if (periods.length > 0) fetchData()
@@ -130,7 +145,10 @@ export default function PeriodComparison() {
   }
 
   async function fetchData() {
-    const key = limitReq.begin(limit)   // claim the page before any await (S601)
+    // Keyed on the CLIENT as well as the range (S792, FIGURES-7): the page stays mounted across an
+    // admin's view-as switch and a group Owner's outlet switch, and a key of `limit` alone let a slow
+    // load for the previous outlet pass isCurrent and land its figures under the new one.
+    const key = limitReq.begin(`${effectiveClientId}:${limit}`)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const shownList = periods.slice(0, limit)
@@ -430,6 +448,8 @@ export default function PeriodComparison() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the period comparison" />
 
   return (
     <div className="page-container">

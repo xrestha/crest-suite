@@ -81,7 +81,9 @@ adding them is what is not.** Before summing a column, ask whether its rows are 
 This was already true and needed no new feature: the ingredient picker excludes only the recipe
 being edited (`Recipes.js`'s `subRecipeOptions`), `calcSubRecipeCostPerUnit()` recurses, and
 `explodeRecipeTree()` walks the whole tree. Indirect cycles (A contains B, then B is edited to
-contain A) are refused at save time by `Recipes.js`'s `wouldCreateCycle`.
+contain A) are refused at save time: since S792 the save re-reads the referencing chain from the
+database (`recipeCycle.js`), not the page's in-memory book, and the `recipe_ingredients_guard_cycle`
+trigger (stage 3 migration 20260928180000) refuses a cycle for every writer (hint `recipe_cycle`).
 
 Two things were wrong the moment a third level existed, both fixed:
 
@@ -291,7 +293,8 @@ guard added late has to be paired with tolerance for the rows that predate it.
 `if (selectedRecipe && recipeForm.category === 'Sub-Recipe')` — so a recipe already converted away
 while still referenced could be edited into an indirect cycle with no check at all. What makes a
 cycle possible is being *referenced*, which is independent of how the row is categorised; it runs
-for any existing recipe now, and returns immediately for one nothing points at.
+for any existing recipe now (the database read of `recipeCycle.js` since S792), and returns
+immediately for one nothing points at.
 
 ## The bulk importer had none of `save()`'s guards (S714)
 

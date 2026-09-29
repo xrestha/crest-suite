@@ -44,8 +44,10 @@ export async function computeMenuEngineeringSection(clientId, period) {
     // Both NULL-safe (S714). Both columns are nullable and a server-side .neq drops NULL rows,
     // so an uncategorised dish was absent from the matrix — and this section is FROZEN into the
     // monthly snapshot, so it was absent permanently, with no way to tell from the artifact.
-    scopedFrom('recipes', clientId, 'id, name, category, selling_price, cost_price, is_build_your_own')
-      .not('is_active', 'is', false).or('category.is.null,category.neq.Sub-Recipe'),
+    // Paged (S792): the list sets the median — the popularity line — so a dish past the 1000-row
+    // cap would move other dishes' quadrants, in a frozen snapshot.
+    fetchAllRows(() => scopedFrom('recipes', clientId, 'id, name, category, selling_price, cost_price, is_build_your_own')
+      .not('is_active', 'is', false).or('category.is.null,category.neq.Sub-Recipe').order('id')),
     // `source` is selected and comps are dropped in JS (S792, FIGURES-8). A server-side
     // `.neq('source', 'pos_comp')` also dropped every legacy NULL-source row, and this qty map sets
     // the period's MEDIAN — the popularity line — so a dropped row could move any dish into another

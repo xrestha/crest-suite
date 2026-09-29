@@ -216,38 +216,146 @@ export function selectionProblems(dishGroups, optionIds) {
     .filter(x => !countAllowed(x.count, x.rule))
 }
 
+// ── The cheapest valid build (S792, RECIPES-4) ────────────────────────────────────────────────
+//
+// The pricer (optionsPriceDelta above, and both SQL twins) makes the first `included_count` picks
+// of a group free in DISPLAY order (sort, name, id), not the cheapest ones. The two "cheapest"
+// helpers each guessed a different rule. The guest menu's "From" freed the cheapest picks and
+// charged the dearest of them: Toppings, pick 3, first 2 free — Banana +30 (listed first),
+// Granola +20, Honey +10, Nutella +50 — read "From NPR 230" for a dish a guest can order at 210
+// (Banana and Granola free, Honey charged). Recipe Costing's cheapest build took the cheapest picks
+// whatever their order: pick 2, first 1 free, prices [20, 0, 20, 10, 20] — it picked 0 and 10 and
+// charged 10, where the first 20 (free) and the 0 cost nothing. In the review's brute-force check
+// the first was wrong on about one random dish in four. One search now serves both, and
+// optionPricing.test.js holds it to a brute-force enumeration of every valid selection.
+//
+// Once the size is chosen, what a group adds depends only on its own picks, so each group is
+// minimised on its own. Inside a group the search walks the options in display order, and the one
+// thing that decides a pick's charge — whether it is among the first `included_count` picked — is
+// how many were picked before it. That makes an exact search over every valid pick set a small
+// table (options × picks so far), for any group size, with no subsets listed. Only the size picks
+// are enumerated (a size scales other groups' prices, so they are not independent of it), and a
+// size group is pick-exactly-one, so that is one pass per size.
+
+// Past this many size combinations the rest are not tried. A guard, not a real menu: a dish has
+// one size group of a handful of sizes. Every combination that IS tried is a valid order, so a
+// capped search can only ever return a price a guest can actually pay — never one below it.
+const SIZE_COMBO_CAP = 256
+
+const pickCountRange = (rule, n) => {
+  // A group that asks for more picks than it has cannot be ordered (the server refuses it); take
+  // every option, the nearest thing to a price, rather than no answer at all.
+  const lo = Math.min(Math.max(Number(rule?.min) || 0, 0), n)
+  const max = rule?.max == null ? n : Math.min(Number(rule.max), n)
+  return { lo, hi: Math.max(lo, max) }
+}
+
+// [paisa, picks, removals], compared in that order: the lowest price, then the fewest picks (an
+// optional choice is left off unless it lowers the price), then the fewest "No …" removals (a
+// required group is met with a real choice where one costs the same — the plate being costed).
+const better = (a, b) => {
+  if (!b) return true
+  for (let k = 0; k < 3; k++) if (a[k] !== b[k]) return a[k] < b[k]
+  return false
+}
+
+/** The cheapest picks of one non-size group at a size factor, in display order. */
+function cheapestPicksInGroup({ group, rule, options }, factor) {
+  const opts = [...(options || [])].sort(byDisplayOrder)
+  const n = opts.length
+  const { lo, hi } = pickCountRange(rule, n)
+  const free = group?.included_count || 0
+  const paisa = opts.map(o => Math.round(scaledDelta(o, group, factor) * 100))
+  // best[i][c]: the best way to finish from option i when c are already picked (null = cannot).
+  const best = Array.from({ length: n + 1 }, () => new Array(hi + 1).fill(null))
+  for (let c = 0; c <= hi; c++) best[n][c] = c >= lo ? [0, 0, 0] : null
+  const takeFrom = (i, c) => {
+    const rest = c < hi ? best[i + 1][c + 1] : null
+    return rest && [rest[0] + (c < free ? 0 : paisa[i]), rest[1] + 1, rest[2] + (opts[i].is_removal ? 1 : 0)]
+  }
+  for (let i = n - 1; i >= 0; i--) {
+    for (let c = 0; c <= hi; c++) {
+      const skip = best[i + 1][c]
+      const take = takeFrom(i, c)
+      // A tie goes to taking: of the equally cheap sets, the one listed first is chosen.
+      best[i][c] = take && (!skip || !better(skip, take)) ? take : skip
+    }
+  }
+  const picked = []
+  for (let i = 0, c = 0; i < n; i++) {
+    const take = takeFrom(i, c)
+    if (take && best[i][c] && take.every((v, k) => v === best[i][c][k])) { picked.push(opts[i]); c++ }
+  }
+  return picked
+}
+
+/** Every valid pick set of a size group, fewest picks first, up to `cap` of them. */
+function sizeGroupChoices({ rule, options }, cap) {
+  const opts = [...(options || [])].sort(byDisplayOrder)
+  const { lo, hi } = pickCountRange(rule, opts.length)
+  const out = []
+  const walk = (start, k, acc) => {
+    if (out.length >= cap) return
+    if (acc.length === k) { out.push([...acc]); return }
+    for (let i = start; i < opts.length && out.length < cap; i++) { acc.push(opts[i]); walk(i + 1, k, acc); acc.pop() }
+  }
+  for (let k = lo; k <= hi && out.length < cap; k++) walk(0, k, [])
+  return out
+}
+
 /**
- * The lowest price a dish can be ordered at, for a "From NPR x" label. Since S760 a size can scale
- * the other groups' prices, so every combination of the REQUIRED sizes is tried and the cheapest
- * wins: a Small that is 50 cheaper can still cost more once a required topping is priced at it.
+ * The lowest-priced valid selection of a dish's choices, priced by the pricer's own rule.
+ * @param {Array<{group, rule, options}>} dishGroups   groupsForDish() output
+ * @param {{ fixed?: Record<string, string[]> }} opts  picks already decided, by group id — a costing
+ *        row that is priced "at Large" fixes the size group to Large
+ * @returns {{ ids: string[], delta: number }}  the option ids (size picks first, then the dish's
+ *          group order) and the ex-VAT price change they add, exactly as optionsPriceDelta prices it
+ */
+export function cheapestValidSelection(dishGroups, { fixed = {} } = {}) {
+  const list = (dishGroups || []).filter(d => d?.group)
+  const groupsById = Object.fromEntries(list.map(d => [d.group.id, d.group]))
+  const inGroup = (o, g) => (o.group_id ? o : { ...o, group_id: g.id })
+  const fixedPicks = d => {
+    const ids = new Set(fixed[d.group.id])
+    return (d.options || []).filter(o => ids.has(o.id))
+  }
+  const sizeGroups = list.filter(d => d.group.kind === 'size')
+  const others = list.filter(d => d.group.kind !== 'size')
+
+  let combos = [[]]
+  for (const d of sizeGroups) {
+    const choices = fixed[d.group.id] ? [fixedPicks(d)] : sizeGroupChoices(d, SIZE_COMBO_CAP)
+    const next = []
+    for (const c of combos) {
+      for (const ch of choices) {
+        if (next.length >= SIZE_COMBO_CAP) break
+        next.push([...c, ...ch.map(o => inGroup(o, d.group))])
+      }
+    }
+    combos = next.length ? next : combos
+  }
+
+  let best = null
+  for (const sizePicks of combos) {
+    const factor = sizeFactor(sizePicks, groupsById)
+    const picks = [...sizePicks]
+    for (const d of others) {
+      const chosen = fixed[d.group.id] ? fixedPicks(d) : cheapestPicksInGroup(d, factor)
+      picks.push(...chosen.map(o => inGroup(o, d.group)))
+    }
+    const delta = optionsPriceDelta(picks, groupsById)
+    if (!best || delta < best.delta || (delta === best.delta && picks.length < best.picks.length)) best = { picks, delta }
+  }
+  return best ? { ids: best.picks.map(o => o.id), delta: best.delta } : { ids: [], delta: 0 }
+}
+
+/**
+ * The lowest price a dish can be ordered at, for a "From NPR x" label: the cheapest valid
+ * selection (cheapestValidSelection above), every size tried, since a Small that is 50 cheaper can
+ * still cost more once a required topping is priced at it.
  */
 export function lowestDishPrice(basePrice, dishGroups) {
-  const groupsList = dishGroups || []
-  const sizeRequired = groupsList.filter(d => d.group?.kind === 'size' && d.rule.min > 0 && d.options.length)
-  const rest = groupsList.filter(d => !sizeRequired.includes(d))
-  let combos = [[]]
-  for (const d of sizeRequired) {
-    const next = []
-    for (const c of combos) for (const o of d.options) next.push([...c, o])
-    combos = next.length ? next : combos
-    if (combos.length > 256) break // a guard, not a real menu
-  }
-  const groupsById = Object.fromEntries(groupsList.map(d => [d.group?.id, d.group]))
-  let best = null
-  for (const sizes of combos) {
-    const factor = sizeFactor(sizes, groupsById)
-    let price = (Number(basePrice) || 0) + sizes.reduce((s, o) => s + (Number(o.price_delta) || 0), 0)
-    for (const { group, rule, options } of rest) {
-      if (!(rule.min > 0)) continue
-      const deltas = options.map(o => scaledDelta(o, group, factor)).sort((a, b) => a - b)
-      const need = deltas.slice(0, rule.min)
-      // Free picks only lower a price when the prices they waive are positive.
-      const free = need.every(d => d >= 0) ? (rule.included || 0) : 0
-      price += need.slice(free).reduce((s, d) => s + d, 0)
-    }
-    if (best == null || price < best) best = price
-  }
-  return round2(best ?? (Number(basePrice) || 0))
+  return round2((Number(basePrice) || 0) + cheapestValidSelection(dishGroups).delta)
 }
 
 /** "+NPR 50", "−NPR 100", "" for zero — what a guest reads beside an option. */

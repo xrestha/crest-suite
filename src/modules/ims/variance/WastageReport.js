@@ -15,6 +15,7 @@ import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { FilterChips } from '../../../components/Tabs'
+import { wastageRowValue } from '../reports/periodCost'
 
 export default function WastageReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
@@ -74,7 +75,9 @@ export default function WastageReport() {
       const qty = parseFloat(r.qty || 0)
       if (qty <= 0) return
       const rate  = parseFloat(r.items?.per_uom_rate || 0)
-      const value = qty * rate
+      // The row rule every Wastage tile shares (periodCost.js, S792 FIGURES-5): this report's
+      // total is the figure the Dashboard, Owner Dashboard and Owner Report tiles now show.
+      const value = wastageRowValue(r)
       if (!byItem[r.item_id]) {
         byItem[r.item_id] = {
           item_id: r.item_id, name: r.items?.name || '—',
@@ -191,7 +194,9 @@ export default function WastageReport() {
       {!loading && (
       <div className="stat-grid no-print">
         <div className="stat-card">
-          <div className="stat-label">Total Wastage Value</div>
+          <div className="stat-label">
+            <Tip text="Everything logged as waste this period, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike. The Wastage tiles on the Dashboard and the Owner Dashboard show this same total." width={260}>Total Wastage Value</Tip>
+          </div>
           <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{fmt(totalValue)}</div>
         </div>
         <div className="stat-card">

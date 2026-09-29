@@ -1,4 +1,4 @@
-import { groupsForDish } from './optionPricing'
+import { groupsForDish, cheapestValidSelection, lowestDishPrice } from './optionPricing'
 import { buildCostRange, cheapestSelection, optionsPlateCost, priceBuild, typicalSelections } from './buildCost'
 
 // The Acai Bowl example worked through with the owner (S760 plan): VAT left out, rates per g/ml.
@@ -50,6 +50,26 @@ describe('build-your-own cost (S760)', () => {
 
   it('the cheapest build is the required picks only, at their lowest price', () => {
     expect(cheapestSelection(dishGroups, ctx.optionsById.m, ctx.groupsById)).toEqual(['m', 'acai'])
+  })
+
+  // S792 RECIPES-4: the pricer frees the first pick in DISPLAY order, so the cheapest build of
+  // "pick 2, first 1 free" over [20, 0, 20, 10, 20] is the first two (free + 0), not the two
+  // cheapest (0 + 10, charged 10) — and it is the same build the guest menu's "From" price uses.
+  it('the cheapest build honours the display-order free pick, like the guest menu', () => {
+    const sides = { id: 'sides', name: 'Sides', kind: 'choice', min_select: 2, max_select: 2, included_count: 1, size_scaling: 'none', sort: 1, is_active: true }
+    const sideOpts = [20, 0, 20, 10, 20].map((p, i) => ({ id: `side${i}`, group_id: 'sides', name: `Side ${i}`, price_delta: p, sort: i, is_active: true }))
+    const dg = groupsForDish('plate', {
+      groups: [groups[0], sides],
+      options: [...options.slice(0, 3), ...sideOpts],
+      attachments: [{ recipe_id: 'plate', group_id: 'size', sort: 0 }, { recipe_id: 'plate', group_id: 'sides', sort: 1 }],
+    })
+    const ids = cheapestSelection(dg, ctx.optionsById.m)
+    expect(ids).toEqual(['m', 'side0', 'side1'])
+    expect(ids).toEqual(cheapestValidSelection(dg, { fixed: { size: ['m'] } }).ids)
+    const all = { ...ctx, optionsById: { ...ctx.optionsById, ...Object.fromEntries(sideOpts.map(o => [o.id, o])) }, groupsById: { ...ctx.groupsById, sides } }
+    expect(priceBuild(ids, { basePrice: 300, fixedCost: 0, ...all }).price).toBe(300)
+    // The whole dish, any size: Small's -100 is the floor, and "From" says the same.
+    expect(lowestDishPrice(300, dg)).toBe(200)
   })
 
   it('prices the Large order from the worked example: 600 + peanut butter 40 + chicken 180 = 820', () => {

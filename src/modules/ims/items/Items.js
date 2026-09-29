@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
@@ -16,7 +16,10 @@ import { errorInfo } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE } from './itemRefTables'
+import {
+  ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE,
+  readItemRefCounts, refCodesFromCounts, priceImpactSentence, PRICE_CHANGE_KEEPS,
+} from './itemRefTables'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -66,31 +69,21 @@ export function nextCodeAfter(rawPrefix, codes) {
   return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
 }
 
-// S756 (D5): which past records a new PRICE re-values. Stock counts, wastage, staff meals and stock
-// movements store a quantity and nothing else, so every report values them at `items.per_uom_rate`
-// as it is NOW — closed months included — and a recipe is costed live the same way. Purchase bills,
-// returns and PO lines carry their own rate and are untouched, so they are not named (requisition
-// lines have captured theirs since S710; older ones still fall back to the live rate).
-const REVALUED_BY_PRICE = [
-  { codes: ['OS', 'CS'], one: 'stock count', many: 'stock counts' },
-  { codes: ['W'], one: 'wastage entry', many: 'wastage entries' },
-  { codes: ['SM'], one: 'staff meal', many: 'staff meals' },
-  { codes: ['MV'], one: 'stock movement', many: 'stock movements' },
-  { codes: ['R'], one: 'recipe line', many: 'recipe lines' },
-]
-
 /**
- * `{ text: "3 stock counts, 12 wastage entries and 1 recipe line", total: 16 }`, or null when
- * nothing is re-valued. Exported for Items.test.js.
+ * The item book with one saved row added — its name keyed to its id, its code among the codes —
+ * and, on a rename, the old name released. Returns `book` unchanged when it is null (not read yet,
+ * or the read failed): getNextItemCode and the name check then fall back to `items`, which the
+ * save reloads, and a partial book here would read as the whole one. Exported for Items.test.js.
  */
-export function priceImpactPhrase(counts) {
-  const found = REVALUED_BY_PRICE
-    .map(g => ({ g, n: g.codes.reduce((s, c) => s + ((counts || {})[c] || 0), 0) }))
-    .filter(x => x.n > 0)
-  if (found.length === 0) return null
-  const parts = found.map(({ g, n }) => `${n} ${n === 1 ? g.one : g.many}`)
-  const text = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
-  return { text, total: found.reduce((s, x) => s + x.n, 0) }
+export function bookWith(book, row, previousName) {
+  if (!book) return book
+  const byName = new Map(book.byName)
+  const prevKey = (previousName || '').trim().toLowerCase()
+  if (prevKey && byName.get(prevKey)?.id === row.id) byName.delete(prevKey)
+  const key = (row.name || '').trim().toLowerCase()
+  if (key && row.id) byName.set(key, row)
+  const codes = row.item_code && !book.codes.includes(row.item_code) ? [...book.codes, row.item_code] : book.codes
+  return { byName, codes }
 }
 
 export default function Items() {
@@ -234,41 +227,23 @@ export default function Items() {
       setRefMap({}); setRefCounts({}); setUsageScan({ ok: true, failed: [] }); return
     }
 
-    // CHUNKED, not one big `.in()`. A `.in()` list is spelled out in the request URL and a uuid
-    // costs ~37 characters, so the reference client's 254 items already put ~9 KB of ids on every
-    // one of these requests — past what proxies accept, and the resulting 414 was then SKIPPED
-    // QUIETLY below, blanking the whole Used In column and opening the delete guard. The row cap
-    // still applies underneath: purchase_entries alone crosses 1000 on any real client.
+    // S792 (MASTER-8): counted on the server, in one call. This was twelve reads, one per
+    // referencing table, each downloading every row that names any of this client's items — the
+    // client's whole purchase and stock-movement history, on every visit — to count them here.
+    // `item_reference_counts` returns one row per item per table instead, and it is the same
+    // function the delete trigger asks, so the chip and the server's refusal count the same rows.
     //
-    // The reads are independent of each other, so they run together rather than as one round trip
-    // per table on the critical path of every page load.
-    const results = await Promise.all(ITEM_REF_TABLES.map(({ table }) =>
-      fetchAllRowsChunked(myItemIds, ids => supabase.from(table)
-        .select('item_id').in('item_id', ids).order('id'))
-        .catch(err => ({ data: null, error: err }))))
-    if (loadedClientRef.current !== forClient) return
-
     // A row counts whatever its quantity: a Closing Stock count of 0 is a count (S695), a staff meal
     // defaults to qty 0, and every one of them blocks a delete, so every one of them earns the chip.
-    const refs = {}     // any reference at all — the chip, the filters and the delete guard
-    const counts = {}   // the same rows, counted per code — the price-change warning (S756)
-    const failed = []
-    ITEM_REF_TABLES.forEach(({ label, name }, idx) => {
-      const { data, error } = results[idx]
-      // A table that could not be read is NOT a table with no rows. Name it, so the guard can say
-      // what it was unable to check rather than silently treating it as clear.
-      if (error || !data) { failed.push(name); return }
-      data.forEach(row => {
-        if (!row.item_id) return
-        if (!refs[row.item_id]) refs[row.item_id] = []
-        if (!refs[row.item_id].includes(label)) refs[row.item_id].push(label)
-        if (!counts[row.item_id]) counts[row.item_id] = {}
-        counts[row.item_id][label] = (counts[row.item_id][label] || 0) + 1
-      })
-    })
-    setRefMap(refs)
-    setRefCounts(counts)
-    setUsageScan({ ok: failed.length === 0, failed })
+    const { data: counts, error: countErr } = await readItemRefCounts(supabase, myItemIds)
+    if (loadedClientRef.current !== forClient) return
+    // A read that failed is NOT a book with no references. The map is left as it was (the same
+    // choice as the item-list failure above), and the scan is marked failed, so the column says
+    // "not checked" and the delete guard refuses rather than promising nothing references an item.
+    if (countErr) { setUsageScan({ ok: false, failed: ['the usage records'] }); return }
+    setRefMap(refCodesFromCounts(counts))  // any reference at all: the chip, the filters, the delete guard
+    setRefCounts(counts)                    // the same rows per code: the price-change warning (S756)
+    setUsageScan({ ok: true, failed: [] })
   }
 
   async function deleteItem(item) {
@@ -606,17 +581,16 @@ export default function Items() {
     const oldCf = Number(original.conversion_factor) || 1
     const packMoved = oldPu !== payload.purchase_unit || Math.abs(oldCf - payload.conversion_factor) > 1e-9
     const counts = refCounts[original.id] || {}
-    const impact = priceImpactPhrase(counts)
+    // The sentence lives in itemRefTables.js since S792, so Price Tracker's confirm says the same.
+    const pastRecords = priceImpactSentence(counts, { complete: usageScan.ok })
     const bought = (counts.P || 0) > 0 || (counts.PO || 0) > 0
     const parts = []
-    if (priceMoved && (impact || !usageScan.ok)) {
+    if (priceMoved && pastRecords) {
       parts.push(
         <p key="price" style={{ margin: '0 0 8px' }}>
           Price per {payload.uom} goes from <strong>NPR {fmtPerUom(oldRate)}</strong> to <strong>NPR {fmtPerUom(payload.rate)}</strong>.{' '}
-          {impact
-            ? <>This item's {impact.text} {impact.total === 1 ? 'is' : 'are'} valued at this price wherever a report reads them — including months already closed — so those past figures change the moment you save.</>
-            : <>Crest could not count this item's past records, so it cannot say how many figures change — but stock counts, wastage, staff meals and recipe costs all read this price live, including months already closed.</>}
-          {' '}Purchase bills keep the price typed on them, and a closed month's Monthly Owner Report was frozen when the month closed.
+          {pastRecords}
+          {' '}{PRICE_CHANGE_KEEPS}
         </p>
       )
     }
@@ -735,20 +709,10 @@ export default function Items() {
   // the duplicate-name check could not see a name added minutes earlier (the unique index caught
   // that one, with a message blaming another tab). `item_code` has no unique index, and Recipe
   // Import resolves an ingredient by code first, so a shared code linked the wrong item. A rename
-  // also moves the name, so the old one stops reading as taken.
+  // also moves the name, so the old one stops reading as taken. The arithmetic is `bookWith`, above
+  // the component, so Items.test.js can pin it.
   function rememberInBook(row, previousName) {
-    setBook(b => {
-      // Not read yet, or the read failed: getNextItemCode and the name check fall back to `items`,
-      // which the save reloads. A partial book here would read as the whole one.
-      if (!b) return b
-      const byName = new Map(b.byName)
-      const prevKey = (previousName || '').trim().toLowerCase()
-      if (prevKey && byName.get(prevKey)?.id === row.id) byName.delete(prevKey)
-      const key = (row.name || '').trim().toLowerCase()
-      if (key && row.id) byName.set(key, row)
-      const codes = row.item_code && !b.codes.includes(row.item_code) ? [...b.codes, row.item_code] : b.codes
-      return { byName, codes }
-    })
+    setBook(b => bookWith(b, row, previousName))
   }
 
   async function writeItem(editingId, payload, onSaved) {

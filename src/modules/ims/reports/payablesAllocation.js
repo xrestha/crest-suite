@@ -499,7 +499,9 @@ function billTotalAsListed(lines, returnedByEntry, discount) {
  *   - by its RECORDED figures it is settled now: payments ≥ what it owes after its returns. A bill
  *     stamped with no payment rows that still shows money owed was paid before payable_payments
  *     existed; its stamp is the only record of that payment, and flipping it would put a paid bill
- *     back on Outstanding;
+ *     back on Outstanding. Accepted miss (owner, 2026-09-28, S792.4): such a bill that a return took
+ *     to 0 looks like a "Close this bill" close, so deleting that return reopens it — rare, the
+ *     confirm names the amount, and reopening needs a manager's login;
  *   - without this return it would owe more than EPS. A bill left in credit by several returns can
  *     lose one and still be settled.
  *
@@ -570,4 +572,83 @@ export function returnEditReopensBill({ lines, returns, payments, returnId, next
   const gap = Math.round((owedAfter - now.paid) * 100) / 100
   const reopen = now.stampedIds.length > 0 && settledNow && gap > EPS
   return { reopen, stampedIds: now.stampedIds, owedNow: now.owedNow, owedAfter, paid: now.paid, owedAgain: reopen ? gap : 0 }
+}
+
+// ── Paying from a page that may be out of date (S792, PURCHASES-10) ──────────────────────────────
+
+const round2 = n => Math.round(n * 100) / 100
+
+/**
+ * The bills whose recorded payments have moved since the page read them, or that the payment about
+ * to be written would take past what they owe.
+ *
+ * Nothing on the server stops a bill being paid twice: two managers settling the same bill, or a
+ * lump sum typed on a page opened before someone else paid, both land, and the bill then reads as
+ * a Credit. So Outstanding Payables re-reads the bills' payable_payments just before it writes and
+ * stops if anything moved. Stopping on ANY movement, not only on an overpayment, is deliberate: the
+ * per-line split and the "this settles the bill" stamps were planned from the rows the page loaded,
+ * and a split planned on stale lines can pay a line twice and leave another one open.
+ *
+ * `bills` are grouped bills as the page holds them (groupIntoBills): `entries` with `id` and
+ * `value`, and `payments`, the rows it loaded. `freshPayments` is every payable_payments row on
+ * those bills' lines, read just now (`id`, `purchase_entry_id`, `amount`). `paying` is
+ * `{ [bill.key]: amount about to go on that bill }`; a bill a supplier credit is taken FROM is
+ * checked with nothing paying onto it.
+ *
+ * Rows are compared by id and amount only, so someone editing a note or a payment mode is not a
+ * reason to stop. Amounts are SIGNED, exactly as the page sums them: a supplier-credit half is
+ * negative on the bill the credit came from and positive on the bill it paid (D11). A bill that
+ * gave part of its credit away owes that part again and may be paid it — counting the negative
+ * half as money received would refuse that payment as an overpayment.
+ *
+ * Returns [{ bill, moved, paidThen, paidNow, owedNow, paying, over }], money to the paisa, one per
+ * bill that must stop the write; [] when it is safe to write. `owedNow` is negative when the
+ * supplier now owes money back on the bill; `over` is how far the payment goes past what is owed.
+ */
+export function paymentsMovedSince(bills, freshPayments, paying = {}) {
+  const signature = rows => rows.map(p => `${p.id}:${toPaisa(p.amount)}`).sort().join('|')
+  const sum = rows => round2(rows.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0))
+  const out = []
+  for (const bill of bills || []) {
+    const ids = new Set((bill.entries || []).map(e => e.id))
+    const then = (bill.payments || []).filter(p => ids.has(p.purchase_entry_id))
+    const now = (freshPayments || []).filter(p => ids.has(p.purchase_entry_id))
+    const total = (bill.entries || []).reduce((s, e) => s + (Number(e.value) || 0), 0)
+    const paidThen = sum(then)
+    const paidNow = sum(now)
+    const owedNow = round2(total - paidNow)
+    const pay = round2(Number(paying[bill.key]) || 0)
+    // Half a paisa of tolerance, as everywhere a summed balance is compared (it carries float noise).
+    const over = pay > 0 && pay > Math.max(0, owedNow) + 0.005 ? round2(pay - Math.max(0, owedNow)) : 0
+    const moved = signature(then) !== signature(now)
+    if (moved || over > 0) out.push({ bill, moved, paidThen, paidNow, owedNow, paying: pay, over })
+  }
+  return out
+}
+
+/**
+ * The refusal for paymentsMovedSince, one sentence per bill, figures to the paisa through `fmt`.
+ * It is shown before anything is written, so it may say nothing was recorded.
+ */
+export function paymentsMovedText(stops, fmt = n => `NPR ${n.toFixed(2)}`) {
+  const list = stops || []
+  const perBill = list.map(s => {
+    const ref = `Bill #${s.bill?.invoice_ref || '—'}${s.bill?.vendorName ? ` (${s.bill.vendorName})` : ''}`
+    const left = s.owedNow > EPS
+      ? `${fmt(s.owedNow)} left to pay`
+      : s.owedNow < -EPS ? `nothing left to pay — the supplier owes ${fmt(-s.owedNow)} back on it` : 'nothing left to pay'
+    const paid = !s.moved
+      ? 'has'
+      : s.paidNow !== s.paidThen
+        ? `now has ${fmt(s.paidNow)} recorded against it where this page showed ${fmt(s.paidThen)}, so it has`
+        : `has had its payments changed since this page was opened (${fmt(s.paidNow)} in all), and has`
+    const over = s.over > 0 ? `; paying ${fmt(s.paying)} would be ${fmt(s.over)} more than it owes` : ''
+    return `${ref} ${paid} ${left}${over}.`
+  })
+  const anyMoved = list.some(s => s.moved)
+  const lead = anyMoved
+    ? `Nothing was recorded. The payments on ${list.length === 1 ? 'this bill' : 'these bills'} changed after this page was opened — someone else, or another screen, recorded or removed one.`
+    : 'Nothing was recorded.'
+  const tail = anyMoved ? ' Reload the page to see what is owed now, then enter the payment again.' : ''
+  return `${lead} ${perBill.join(' ')}${tail}`
 }

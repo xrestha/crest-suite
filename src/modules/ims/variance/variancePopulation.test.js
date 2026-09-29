@@ -149,7 +149,8 @@ describe('the three pages share the population (S792)', () => {
   const read = f => fs.readFileSync(path.join(__dirname, f), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
-  test.each(['Variance.js', 'TheoreticalVariance.js', 'ShrinkageReport.js'])('%s imports from ./variancePopulation', f => {
+  // Shrinkage's loop lives in shrinkageCalc.js since S792 stage 3 (shared with the Owner Report).
+  test.each(['Variance.js', 'TheoreticalVariance.js', 'shrinkageCalc.js'])('%s imports from ./variancePopulation', f => {
     expect(read(f)).toMatch(/from '\.\/variancePopulation'/)
   })
 
@@ -158,7 +159,7 @@ describe('the three pages share the population (S792)', () => {
   })
 
   test('Shrinkage no longer skips a month before looking at its count when nothing sold', () => {
-    expect(read('ShrinkageReport.js')).not.toMatch(/if \(theor <= 0\) return/)
+    expect(read('shrinkageCalc.js')).not.toMatch(/if \(theor <= 0\) return/)
   })
 
   test('no page reads a NULL physical_qty as a count of 0', () => {
@@ -166,6 +167,6 @@ describe('the three pages share the population (S792)', () => {
       expect(read(f)).toMatch(/closingCountMap\(closing\)/)
       expect(read(f)).not.toMatch(/closeMap\[r\.item_id\]\s*=\s*parseFloat\(r\.physical_qty/)
     }
-    expect(read('ShrinkageReport.js')).toMatch(/if \(!isClosingCount\(r\)\) return/)
+    expect(read('shrinkageCalc.js')).toMatch(/if \(!isClosingCount\(r\)\) return/)
   })
 })

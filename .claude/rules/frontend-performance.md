@@ -207,7 +207,9 @@ for this client". So the loud 414 this rule promises was caught and silenced one
 blanking the whole Used In column and opening a delete guard that three `ON DELETE CASCADE` tables
 do not back up. **A 414 is only loud if the call site lets it be**: check what the caller does with
 the error before counting on the failure being visible, and never spend a table's read error on a
-"that table might not exist" assumption that no longer holds.
+"that table might not exist" assumption that no longer holds. Since S792 the scan is one paged
+server-side `item_reference_counts(p_ids)` call (`readItemRefCounts`, `itemRefTables.js`), with the
+ids in the POST body, and a failure marks the column "not checked".
 
 The POS→IMS backfill is the worked example and shows why both halves matter at once: its
 already-posted guard read `sales_entries` by `.in('pos_order_id', everyCandidate)`, so on a real
@@ -329,7 +331,7 @@ Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root
 
 Supabase sets PostgREST's `db-max-rows` to 1000. A `.select()` with no `.range()` that matches more rows than that returns the first 1000 with **no error and nothing in the data to say so** — every total summed from that array is then wrong, and wrong quietly, which is the dangerous part: it reads as a real figure until someone compares it against another source. Found live (S528) reporting 1000 movements / NPR 49,241 against a real 1753 / NPR 87,043.
 
-Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that can realistically exceed 1000 rows — transaction tables rather than master data. Two rules: it takes a **function** returning a fresh builder (a supabase-js builder is a one-shot thenable and cannot be awaited twice), and that query must carry a **unique tiebreaker in its sort** (`.order('id')` after the display order), or paging a non-uniquely-ordered query repeats a row on one page and skips it on the next.
+Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that can realistically exceed 1000 rows — transaction tables rather than master data. Two rules: it takes a **function** returning a fresh builder (a supabase-js builder is a one-shot thenable and cannot be awaited twice), and that query must carry a **unique tiebreaker in its sort** (`.order('id')` after the display order), or paging a non-uniquely-ordered query repeats a row on one page and skips it on the next. A read that runs past `maxRows` returns an **error** (code `crest_row_cap`, worded by `errorText.js`), never the rows so far (S792); a caller with a legitimately bigger read raises `maxRows` (One Lakh's `ONE_LAKH_READ_MAX_ROWS`, the data export).
 
 **Decide by rows-per-what, not by table name, and count what the QUERY returns rather than what the function is named after.** A read narrowed in JS is bigger than it reads: `fetchYtdMap` looked scoped to one month while pulling the client's entire history. Per-employee-per-day and per-anything-per-month both cross 1000 inside one real client-year. And note the guard problem — truncation returns **no error**, so every `if (error)` check written against a failed read passes happily over a short one.
 

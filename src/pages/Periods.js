@@ -12,6 +12,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import {
   closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText,
   carryForwardOpeningStock, createPeriodWithCarryForward, nextExistingPeriod, periodLabel, nextBsMonth,
+  closerMakesReport, deferredReportNote,
 } from './periods/closePeriod'
 import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
@@ -169,13 +170,19 @@ export default function Periods() {
   // All four closes — the two admin ones here, the client's below, and the Dashboard's — share
   // ONE commit, performPeriodClose(), and one pair of preflights (S683). The framing differs per
   // ask; the notes and the write do not. See .claude/rules/closed-periods.md.
-  async function closeNotes(period, cid, hrOn) {
+  //
+  // `makesReport` false (a closer who is not the Owner or admin, S792 D42) swaps the payroll note
+  // for the deferred-report one. The payroll note is about the labour figure frozen AT the close,
+  // which such a close does not freeze — and an IMS login cannot read hr_payroll_runs at all
+  // (no_ims_staff returns []), so it would say "not finalized" whatever the truth was.
+  async function closeNotes(period, cid, hrOn, makesReport = true) {
+    const payrollOn = hrOn && makesReport
     const [count, payroll] = await Promise.all([
       closingCountPreflight(period.id, cid),
-      hrOn ? payrollPreflight(period.id, cid) : Promise.resolve(undefined),
+      payrollOn ? payrollPreflight(period.id, cid) : Promise.resolve(undefined),
     ])
     const label = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
-    return [closingCountNote(count), hrOn ? payrollNote(payroll, label) : null]
+    return [closingCountNote(count), payrollOn ? payrollNote(payroll, label) : null, makesReport ? null : deferredReportNote(label)]
   }
 
   // HR pages are deliberately NOT locked by the close — payroll is finalized after the stock
@@ -192,6 +199,9 @@ export default function Periods() {
 
   function surfaceCloseFailures(result, period) {
     const first = result.failures[0]
+    // Someone else closed the month before this press arrived, and nothing was written (S792,
+    // STOCK-8) — a fact about a page that was out of date, not a failure, so it is not red.
+    if (first?.stage === 'already_closed') { ok(closeFailureText({ stage: first.stage, period, isAdmin })); return }
     if (first) { fail(closeFailureText({ stage: first.stage, period, isAdmin }), first.error); return }
     // A close that went cleanly says nothing, by design — except when opening the next month
     // wrote attendance days that had been waiting for it to exist (S741). Those are real rows on
@@ -433,19 +443,29 @@ export default function Periods() {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
     const mods = { ims: !!clientModules?.ims, hr: !!clientModules?.hr }
+    // The Owner and admin make the frozen report at the close. An IMS supervisor or manager may
+    // end the month but cannot write the report (its RLS refuses every staff login), so the
+    // Owner's first view makes it — and this dialog must not promise it "now" (S792, D42).
+    const makesReport = closerMakesReport({ isAdmin, isOwner })
     // The two preflights are each bounded at 10s by withTimeout, so on a bad connection this
     // await is ten seconds long — and it runs BEFORE the dialog appears. The admin paths show
     // "Working…" through it (setActionClientId); this one, the Owner's month-end button, showed
     // nothing at all, so pressing it looked like nothing happening.
     setNotice(null)
     setCloseBusy(true)
-    const notes = await closeNotes(period, clientId || profile?.client_id, mods.hr)
+    const notes = await closeNotes(period, clientId || profile?.client_id, mods.hr, makesReport)
     setCloseBusy(false)
+    const reportClause = makesReport
+      ? `, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`
+      : '.'
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
       danger: notes.some(n => n?.danger),
-      body: <CloseConfirmBody main={`${locksSentence(period, mods, 'client')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
+      body: <CloseConfirmBody
+        main={`${locksSentence(period, mods, 'client')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock${reportClause}`}
+        notes={notes}
+      />,
       run: () => performCloseAndAdvance(period),
     })
   }
@@ -453,7 +473,10 @@ export default function Periods() {
   async function performCloseAndAdvance(period) {
     setCloseBusy(true)
     try {
-      const result = await performPeriodClose({ clientId: clientId || profile?.client_id, period, openNext: true, actorId: profile?.id })
+      const result = await performPeriodClose({
+        clientId: clientId || profile?.client_id, period, openNext: true, actorId: profile?.id,
+        makeReport: closerMakesReport({ isAdmin, isOwner }),
+      })
       surfaceCloseFailures(result, period)
       // "Report is ready" only when it is — a failed generation used to show this banner anyway.
       if (result.reportSaved) setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })

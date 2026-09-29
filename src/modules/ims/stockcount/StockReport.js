@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -25,6 +27,7 @@ export default function StockReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
 
   const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
@@ -97,7 +100,10 @@ export default function StockReport() {
       fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('recipes', 'id'),
+      // The recipe walk's seed is the whole book, sub-recipes included, so it is paged like the
+      // rest (S792, PLANNING-9): past 1,000 recipes the dishes beyond the cut consumed nothing,
+      // and their ingredients read as still on the shelf.
+      fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup inside
       // buildStockRows — the same rule Variance, Theoretical Variance and Shrinkage apply. Read
       // raw, a day sold in both POS and manual entry consumed its ingredients twice here, and a
@@ -173,6 +179,22 @@ export default function StockReport() {
   const trackedCount = rows.length - idleCount
   const negativeCount = rows.filter(r => r.isNegative).length
 
+  const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
+  // What the sheet and the printout cover, in one line (S792, PLANNING-5; the S594 rule). The
+  // filter bar is no-print and the workbook was a bare json_to_sheet, so a filtered export or
+  // printout carried no month, no sign that an open month's figures are provisional, and no
+  // record of the filter that produced it.
+  const STATUS_SCOPE = { all: 'All statuses', low: 'Low stock only', out: 'Out of stock only', ok: 'In stock only', idle: 'No activity only', hidden: 'Hidden items only' }
+  const scopeLine = `Period : ${periodLabel}`
+    + (selectedPeriod?.status === 'open' ? ' (open — provisional until the month-end count)' : selectedPeriod ? ' (closed)' : '')
+    + ` · ${filterCat === 'all' ? 'All categories' : filterCat} · ${STATUS_SCOPE[filterStatus] || filterStatus}`
+    + (search ? ` · Search "${search}"` : '')
+  // Whether `rows` describes `selectedPeriod`. A period change sets the new label at once and keeps
+  // the old rows until the load lands, so a control that emits a FILE — whose title, scope line and
+  // filename come from the new label — waits on this, as does every count and total on screen
+  // (S792, PLANNING-5/8; the S616/S728 rule: a stale render is transient, a stale file is not).
+  const figuresReady = !loading && !loadError
+
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const data = filtered.map(r => ({
@@ -194,18 +216,25 @@ export default function StockReport() {
       'Stock Value (NPR)': parseFloat(r.stockValue.toFixed(0)),
       'Status': STATUS_LABEL[r.status],
     }))
-    const ws = XLSX.utils.json_to_sheet(data)
+    const ws = sheetWithLetterhead(XLSX, {
+      title: 'Stock Report',
+      biz,
+      scopeLine,
+      rows: data,
+      notes: [
+        'On-hand is the closing count where the item was counted (a count of 0 counts); otherwise opening + net purchases − recipe usage − wastage − staff meals.',
+        'Stock Value is on-hand × unit rate.',
+      ],
+    })
     ws['!cols'] = [22,10,18,8,11,14,10,14,10,10,12,8,14,16,11].map(w => ({ wch: w }))
     const wb = XLSX.utils.book_new()
-    const period = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'Report'
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Report')
-    XLSX.writeFile(wb, `Stock_Report_${period.replace(' ', '_')}.xlsx`)
+    XLSX.writeFile(wb, `Stock_Report_${(selectedPeriod ? periodLabel : 'Report').replace(' ', '_')}.xlsx`)
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the stock report" />
 
-  const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const statusBadge = (st) => st === 'out'
     ? <span className="badge badge-red">Out</span>
     : st === 'low' ? <span className="badge badge-amber">Low</span>
@@ -213,8 +242,20 @@ export default function StockReport() {
     : st === 'hidden' ? <span className="badge badge-gray" title={HIDDEN_TIP}>Hidden</span>
     : <span className="badge badge-green">OK</span>
 
+  // Print and Excel emit a document, so they wait for the figures and for the letterhead's name
+  // (S792, PLANNING-5): live during a load they filed the previous month's rows under the new
+  // month's title and filename, and after a failed read an empty sheet named as a report.
+  const emitDisabled = !figuresReady || !rows.length || !!biz.error
+
   return (
     <div>
+      {/* The screen header and the filter bar are no-print, so the printout says here whose stock,
+          which month and which filter it is (S792, PLANNING-5). */}
+      <div className="print-only" style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Stock Report{biz.name ? ` — ${biz.name}` : ''}</h2>
+        <div style={{ fontSize: 12 }}>{scopeLine}</div>
+      </div>
+
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Stock Report</h1>
@@ -224,13 +265,22 @@ export default function StockReport() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="btn btn-ghost" onClick={() => printWithTitle(`Stock Report - ${periodLabel}`)} style={{ fontSize: 12 }}>🖶 Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>Export Excel</button>
+          <button className="btn btn-ghost" onClick={() => printWithTitle(`Stock Report - ${periodLabel}`)} disabled={emitDisabled} style={{ fontSize: 12 }}>🖶 Print</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={emitDisabled} style={{ fontSize: 12 }}>Export Excel</button>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>
         </div>
       </div>
+
+      {/* The letterhead's client-name read failed: Print and Excel wait rather than produce a
+          document with a blank company name (the S754 useBizInfo rule). */}
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Print and Excel are switched off rather than producing
+          a sheet with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       {loadError && <ReportLoadError error={loadError} />}
 
@@ -261,7 +311,9 @@ export default function StockReport() {
       </div>
       )}
 
-      {negativeCount > 0 && (
+      {/* Waits for the load like the strip above (S792, PLANNING-8): during a period change it
+          named the PREVIOUS month's negative items under the new month's chip. */}
+      {!loading && negativeCount > 0 && (
         <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
           <strong style={{ color: 'var(--theme-red-text)' }}>⚠ {negativeCount} item{negativeCount !== 1 ? 's show' : ' shows'} negative theoretical stock</strong> — usage/wastage exceeds recorded purchases + opening. Check for missing purchase entries or over-recorded usage. Shown as 0 on hand.
         </div>
@@ -282,7 +334,8 @@ export default function StockReport() {
           <option value="idle">No activity</option>
           {rows.some(r => r.status === 'hidden') && <option value="hidden">Hidden (had stock this period)</option>}
         </select>
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''} · NPR {npr(filteredValue)}</span>
+        {/* A count and an NPR total — gated like every other figure (S792, PLANNING-8). */}
+        {!loading && <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''} · NPR {npr(filteredValue)}</span>}
       </div>
 
       <div className="card">

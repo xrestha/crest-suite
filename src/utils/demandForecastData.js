@@ -193,11 +193,39 @@ export async function runForecast(clientId, horizonDays = 7) {
         if (delErr) throw delErr
       } else {
         if (insErr) throw insErr
-        const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId)
-          .eq('horizon_days', horizonDays).or(`run_id.is.null,run_id.neq.${runId}`)
-        if (delErr) throw delErr
+        // Clear only runs OLDER than this one (S792.4). "Any run but mine" was right for one
+        // Recompute at a time and wrong for two: A inserts, B inserts, A clears everything that is
+        // not A (B's run), B clears everything that is not B (A's run), and the horizon is empty.
+        // Two tabs, or the Owner and a manager each pressing Recompute, is enough. Each run now
+        // deletes only rows stamped before its own, so whichever run is newest survives both
+        // clears — and the page already shows only the newest run (newestRunOnly in
+        // DemandForecast.js), so an older run a clear missed is never what anyone reads.
+        //
+        // "Older" is the server's clock, never this device's: generated_at is DEFAULT now(), one
+        // value for the whole INSERT (never NULL — no writer sets it, so `.lt` strands nothing),
+        // and it is what the page's reader ranks runs by too. So it is read back rather than
+        // guessed. The run_id arm stays: it keeps this run's own rows out of its own clear even if
+        // two runs ever shared a timestamp.
+        const { data: mine, error: mineErr } = await scopedFrom('demand_forecast_daily', clientId, 'generated_at')
+          .eq('run_id', runId).limit(1)
+        const stampedAt = mine?.[0]?.generated_at
+        if (mineErr) {
+          // The new run is in; the old one simply stays until the next Recompute clears it, and
+          // the page reads the newest either way. Not worth failing a forecast that was written.
+          console.error('demand forecast: could not read back this run\'s timestamp, so the previous run was left for the next Recompute to clear:', mineErr)
+        } else if (stampedAt) {
+          const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId)
+            .eq('horizon_days', horizonDays).or(`run_id.is.null,run_id.neq.${runId}`)
+            .lt('generated_at', stampedAt)
+          if (delErr) throw delErr
+        }
+        // No rows back: a newer Recompute has already cleared this one as older than itself,
+        // which leaves exactly what this clear would have left.
       }
     } else {
+      // A run with no rows at all. forecastByWeekday returns one row per horizon day even with no
+      // history, so a 7- or 30-day Recompute never lands here; it stays as the plain clear it was
+      // rather than taking the narrowed form above, which needs a row of its own to read back.
       const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays)
       if (delErr) throw delErr
     }

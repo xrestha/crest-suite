@@ -13,6 +13,9 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError from '../../../components/FieldError'
 import { getCf, returnBillPeriods, remainingReturnableQty, returnDayProblem, LATE_RETURN_MONTHS } from './purchasesHelpers'
+// Every rate on this tab goes through fmtLineRate, not a 2-decimal format, so a per-base-unit rate
+// such as 0.004/GM no longer reads "0" (S792, PURCHASES-9).
+import { fmtLineRate } from './purchaseLines'
 import { BS_MONTHS, formatBsDay, daysInBsMonth } from '../../../utils/bsCalendar'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -506,7 +509,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
       const dRate = cf > 1 ? p.rate * cf : p.rate
       return {
         value: p.id,
-        label: `${formatBsDay(p.bs_day, billPeriod?.bs_month) || 'No day'} · ${p.items?.name || 'Item'} · ${Number(dQty).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${dUnit || ''} @ NPR ${Number(dRate).toLocaleString(undefined, { maximumFractionDigits: 2 })} (${p.payment_method || 'Cash'})${p.vendors?.name ? ` — ${p.vendors.name}` : ''}${p.invoice_ref ? ` #${p.invoice_ref}` : ''}`,
+        label: `${formatBsDay(p.bs_day, billPeriod?.bs_month) || 'No day'} · ${p.items?.name || 'Item'} · ${Number(dQty).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${dUnit || ''} @ NPR ${fmtLineRate(dRate)} (${p.payment_method || 'Cash'})${p.vendors?.name ? ` — ${p.vendors.name}` : ''}${p.invoice_ref ? ` #${p.invoice_ref}` : ''}`,
       }
     }), [monthLines, returnForm.vendor_filter, billPeriod])
 
@@ -667,7 +670,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
             const retValue = baseRetQty * linked.rate
             return (
               <div style={{ marginTop: 12, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 15%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-text2)', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}/{displayRateUnit}</strong></span>
+                <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmtLineRate(displayRate)}/{displayRateUnit}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{linked.vendors?.name || '—'}</strong></span>
                 <span>Payment: <strong style={{ color: 'var(--theme-text1)' }}>{linked.payment_method || 'Cash'}</strong></span>
                 {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-red-text)' }}>−NPR {retValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>}
@@ -749,7 +752,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                             {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{Number(ret.qty).toLocaleString('en-IN')} {ret.items?.uom}</div>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
-                          <td style={{ textAlign: 'right' }}>{Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{fmtLineRate(displayRate)}</td>
                         </>
                       )
                     })()}

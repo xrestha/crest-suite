@@ -65,6 +65,15 @@ const rules = [
     operator: "The server took too long to answer, so it isn't known whether this went through. Check your connection, then check before trying again.",
   },
 
+  // fetchAllRows reached its row ceiling (S792, TAX-13). It used to return the rows so far as a
+  // success, a short total with nothing to say so. Matched on the message too, because firstError()
+  // hands a report only `error.message`. Retrying reads the same rows, so neither wording offers it.
+  {
+    test: e => hasCode(e, 'crest_row_cap') || /too long to read in full/i.test(e.message || ''),
+    staff: 'This list is too long for Crest to read in full, so it was not shown. Tell your manager.',
+    operator: 'This report has more rows than Crest reads in one go, so it was stopped rather than shown with a short total. Contact Crest support to raise the limit.',
+  },
+
   // A function or column the deployed frontend expects but the database does not have yet — i.e.
   // an unapplied migration. This project applies migrations by hand, so it is a real state.
   {
@@ -449,6 +458,19 @@ const rules = [
     test: e => hasCode(e, 'snapshot_frozen'),
     staff: 'This month\'s target is already set. Nothing was changed.',
     operator: 'This month\'s dashboard target is already set, and only a newer forecast version can replace it, so it was left as it was.',
+  },
+  // S792 stage 3 (migration 20260928180000). Not 42501, so their place against the rule below does
+  // not matter; being above the generic 23514 constraint rule at the end does. The trigger's message
+  // names the two dishes, and it rides along as the fine print.
+  {
+    test: e => hasCode(e, 'recipe_cycle'),
+    staff: 'That sub-recipe already contains this dish, so it cannot also go inside it. The ingredient list was not saved — ask your manager.',
+    operator: 'That sub-recipe already contains this dish, directly or through another sub-recipe, so adding it here would make each an ingredient of the other and its cost could never be worked out. The ingredient list was not saved. Remove the line, or take this dish out of that sub-recipe first.',
+  },
+  {
+    test: e => hasCode(e, 'item_other_client'),
+    staff: 'That item belongs to another business, so it cannot be used here. Nothing was saved.',
+    operator: 'That item belongs to another business on Crest, so this business cannot record it. Nothing was saved. Reload the page and pick the item again from this business\'s own list.',
   },
 
   // RLS refused, or EXECUTE was never granted on a new function signature.

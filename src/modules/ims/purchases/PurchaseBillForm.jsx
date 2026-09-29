@@ -19,6 +19,8 @@ import {
   billDraftId, billDraftSignature, readBillDraft, saveBillDraft, clearBillDraft, draftBaseMoved,
 } from './purchaseBillDraft'
 import { withLineTotal, withLineVat, withAllLinesVat } from './billLineVat'
+import { linesWithUnlistedItems, unlistedItemsText } from './purchaseLines'
+import { withTimeout } from '../../../utils/withTimeout'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -305,6 +307,31 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     }
     const valid = billLines.filter(l => lineState(l) === 'complete')
     if (valid.length === 0) { setError('Add at least one item with a quantity.'); return }
+
+    // A line whose item is not in this form's list (S792, PURCHASES-10). The list holds active
+    // items, so a draft typed before an item was hidden in Item Master comes back naming one it no
+    // longer has — and getCf() on a missing item is 1, so a quantity typed in cartons would save as
+    // that many single units. Refused by name rather than guessed. The names are read only for the
+    // sentence; the refusal stands whether or not that read answers.
+    const unlisted = linesWithUnlistedItems(billLines, items).filter(x => lineState(x.line) === 'complete')
+    if (unlisted.length > 0) {
+      committingRef.current = true
+      setSaving(true)
+      let nameById = {}
+      try {
+        const { data: named, error: nameErr } = await withTimeout(
+          supabase.from('items').select('id, name').in('id', [...new Set(unlisted.map(x => x.line.item_id))]),
+          10000, 'Item name lookup')
+        if (nameErr) console.error('Purchase bill: names of hidden items could not be read', nameErr)
+        nameById = Object.fromEntries((named || []).map(i => [i.id, i.name]))
+      } catch (err) {
+        console.error('Purchase bill: names of hidden items could not be read', err)   // rows stay named by number
+      }
+      committingRef.current = false
+      setSaving(false)
+      setError(unlistedItemsText(unlisted, nameById))
+      return
+    }
 
     // 0 ≤ discount ≤ the goods it comes off (S756). The box is `type="number" min="0"` outside any
     // <form>, so the browser enforced neither bound and a negative, or oversized, discount saved a
@@ -640,6 +667,13 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                         options={itemOptions}
                         placeholder="— Select item —"
                       />
+                      {/* A restored line whose item has left the list since (S792, PURCHASES-10): the
+                          picker can only show its placeholder, so the row says why Save refuses it. */}
+                      {line.item_id && !selItem && (
+                        <div style={{ fontSize: 11, marginTop: 3, color: 'var(--theme-red-text)' }}>
+                          This item was hidden or removed in Item Master after it was typed. Remove the row, or make the item active again.
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <div style={{ position: 'relative' }}>

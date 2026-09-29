@@ -123,7 +123,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'A hidden group that is still on a dish stays listed in the dialog, ticked and badged Hidden, so it can be unticked; it is offered nowhere until shown again.',
           'A group with no options in it can be ticked but offers nothing — the till and guest menu skip any group with nothing to pick, so it can never make a dish unorderable.',
           'The Dishes tab search matches name or category; the count above it is of ALL dishes, not the filtered list.',
-          'Build-your-own (S760): ⋯ on a dish → Mark as build-your-own / Make it an ordinary dish. A marked dish wears a Build-your-own badge, always opens its choices on the till, walks the guest through steps on the QR menu, and is costed as a range. A marked dish with no groups says so in amber, because guests would have nothing to build.',
+          'Build-your-own (S760): ⋯ on a dish → Mark as build-your-own / Make it an ordinary dish. A marked dish wears a Build-your-own badge, always opens its choices on the till, walks the guest through steps on the QR menu, and is costed as a range. A marked dish with no groups says so in amber, because guests would have nothing to build. Its "typical build" is the most-picked build on bills PAID in the last 30 days, dated by when the bill closed; voided, still-open and written-off bills do not count (S792 stage 3, RECIPES-10).',
         ],
         connections: 'Writes pos_recipe_option_groups (recipe_id, group_id, min_override, max_override, default_option_id, sort). Menu Pricing reads the attachments only for its row labels; the till and guest RPCs read them to decide what a dish offers.',
       },
@@ -187,7 +187,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           { label: 'Max reached', desc: 'A chip that cannot be picked because the group is at its maximum reads "Max 3" rather than only fading.' },
         ],
         formulas: [
-          '"From NPR x" = the dish price plus the cheapest valid pick of each REQUIRED group (a Half at −NPR 100 lowers it; optional extras never do).',
+          '"From NPR x" = the dish price plus the cheapest valid pick of each REQUIRED group (a Half at −NPR 100 lowers it; optional extras never do). Free picks follow the till\'s rule, the earliest-listed ones free, not the cheapest (S792 stage 3, RECIPES-4): "pick 3, first 2 free" listed Banana +30, Granola +20, Honey +10, Nutella +50 is From +10, not +30. Recipe Costing\'s "Cheapest build" comes from the same search, so the two always agree.',
         ],
         gotchas: [
           'The guest RPC (get_guest_menu_options) is public to anon; the pricer (pos_price_selection) is callable by NO client role — it runs only inside the accept path.',

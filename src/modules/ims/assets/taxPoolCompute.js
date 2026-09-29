@@ -31,6 +31,14 @@ export function fiscalYearOfAdDate(dateLike) {
   return bs && Number.isFinite(bs.year) ? getBsFiscalYear(bs.year, bs.month) : null
 }
 
+// The BS year the fiscal year of a stored AD date STARTS in (a date in Bhadra 2082 → 2082, one in
+// Baisakh 2083 → 2082), or null for no date. Parsed local, like the tier below.
+export function fiscalYearStartOfAdDate(dateLike) {
+  if (!dateLike) return null
+  const bs = adToBs(parseAdDateLocal(dateLike))
+  return bs && Number.isFinite(bs.year) ? getBsFiscalYearStart(bs.year, bs.month) : null
+}
+
 // Which proration tier an acquisition falls into within a BS fiscal year (Schedule 2's
 // "beginning of the income year to the last day of Poush" = full rate; the next quarter
 // (Magh-Chaitra) = 2/3; the last quarter (Baisakh-Ashadh) = 1/3). `fiscalYearStartBs` is the BS
@@ -117,40 +125,73 @@ export function computeIntangibleAmortization({ cost, usefulLifeYears, acquisiti
 // software 30,000 / 3 years amortized 10,000 a year into its fourth year and beyond; and an asset
 // bought after the year being previewed was amortized in it too. Cumulative amounts are compared
 // unrounded, so a cost that does not divide evenly leaves no stray paisa for a year after the last.
-export function intangibleAmortizationForYear({ cost, usefulLifeYears, acquisitionDate, fiscalYearStartBs }) {
-  const life = parseFloat(usefulLifeYears)
-  const total = parseFloat(cost) || 0
-  const bs = adToBs(parseAdDateLocal(acquisitionDate))
-  const yearIndex = bs ? fiscalYearStartBs - getBsFiscalYearStart(bs.year, bs.month) : NaN
+export function intangibleAmortizationForYear(args) {
+  const { yearIndex, cumulativeThrough } = intangibleSchedule(args)
   const acquiredThisYear = yearIndex === 0
-  if (!Number.isFinite(yearIndex) || yearIndex < 0 || !(life > 0) || !(total > 0)) return { amount: 0, acquiredThisYear }
-  const boughtFy = fiscalYearStartBs - yearIndex
-  const annual = total / life
-  const first = acquisitionProrationTier({ acquisitionDate, fiscalYearStartBs: boughtFy }) === 'full' ? annual : annual / 2
-  const cumulativeThrough = k => (k < 0 ? 0 : Math.min(total, first + annual * k))
+  if (!Number.isFinite(yearIndex) || yearIndex < 0) return { amount: 0, acquiredThisYear }
   return { amount: r2(Math.max(0, r2(cumulativeThrough(yearIndex)) - r2(cumulativeThrough(yearIndex - 1)))), acquiredThisYear }
 }
 
+// One Pool E asset's schedule as seen from the fiscal year starting in `fiscalYearStartBs`:
+// `yearIndex` (0 = the year it was bought, negative = bought later, NaN = no readable date) and
+// `cumulativeThrough(k)`, the amount claimed by the end of year k of its life (0 for an unusable
+// cost or life, so such an asset claims nothing).
+function intangibleSchedule({ cost, usefulLifeYears, acquisitionDate, fiscalYearStartBs }) {
+  const life = parseFloat(usefulLifeYears)
+  const total = parseFloat(cost) || 0
+  const bs = acquisitionDate ? adToBs(parseAdDateLocal(acquisitionDate)) : null
+  const yearIndex = bs ? fiscalYearStartBs - getBsFiscalYearStart(bs.year, bs.month) : NaN
+  if (!Number.isFinite(yearIndex) || yearIndex < 0 || !(life > 0) || !(total > 0)) return { yearIndex, cumulativeThrough: () => 0 }
+  const boughtFy = fiscalYearStartBs - yearIndex
+  const annual = total / life
+  const first = acquisitionProrationTier({ acquisitionDate, fiscalYearStartBs: boughtFy }) === 'full' ? annual : annual / 2
+  return { yearIndex, cumulativeThrough: k => (k < 0 ? 0 : Math.min(total, first + annual * k)) }
+}
+
 // Pool E's line for a fiscal year (S792, COSTS-6). Additions are this year's purchases at cost;
-// the charge is each active Pool E asset's own amortization for the year, and never more than the
-// pool holds (opening + additions). Without that clamp an opening of 0 — a missing prior-year run,
+// the charge is each Pool E asset's own amortization for the year, and never more than the pool
+// holds (opening + additions). Without that clamp an opening of 0 — a missing prior-year run,
 // COSTS-5 — still posted a year's amortization as a deduction on a pool worth nothing, with the
 // closing value clamped to 0 beside it. A `depreciation_amount` below `scheduled` is what the caller
 // names on screen.
+//
+// Which assets were in the pool is judged against THE YEAR, not today's status (S792 stage 3, the
+// COSTS-4 lesson). Only active assets used to count, so software sold in a later year vanished from
+// the schedule of every year it was held in — its purchase and its amortization both — and one sold
+// this year kept its unclaimed value in the pool for ever, with no asset left to amortize it:
+//   - gone in an EARLIER year: not in this year's pool at all;
+//   - gone THIS year: no amortization this year, and it leaves the pool at the value not yet
+//     claimed (`disposed_value`). Each Pool E asset is claimed on its own schedule, so its sale price
+//     is not netted into the pool the way Pools A–D net theirs; `disposal_proceeds` reports it for
+//     the accountant, who decides the gain or loss. This plan's own reading of Schedule 2, like the
+//     half-year rule above — verify before filing;
+//   - gone in a LATER year, or still held: as if active.
+// A disposed asset with no disposal date cannot be placed in a year and stays out, as before.
 export function computeIntangiblePool({ assets, openingWdv, fiscalYearStartBs }) {
-  let additions = 0, scheduled = 0
+  let additions = 0, scheduled = 0, disposedValue = 0, proceeds = 0
   for (const a of assets || []) {
-    if (a.tax_pool !== 'E' || a.status !== 'active') continue
-    const { amount, acquiredThisYear } = intangibleAmortizationForYear({
-      cost: a.total_cost, usefulLifeYears: a.useful_life_years, acquisitionDate: a.acquisition_date, fiscalYearStartBs,
-    })
-    if (acquiredThisYear) additions += parseFloat(a.total_cost) || 0
-    scheduled += amount
+    if (a.tax_pool !== 'E') continue
+    const goneFy = a.status === 'active' ? null : fiscalYearStartOfAdDate(a.disposal_date)
+    if (a.status !== 'active' && goneFy == null) continue
+    if (goneFy != null && goneFy < fiscalYearStartBs) continue
+    const args = { cost: a.total_cost, usefulLifeYears: a.useful_life_years, acquisitionDate: a.acquisition_date, fiscalYearStartBs }
+    const { yearIndex, cumulativeThrough } = intangibleSchedule(args)
+    if (!Number.isFinite(yearIndex) || yearIndex < 0) continue // bought after this year
+    const cost = parseFloat(a.total_cost) || 0
+    if (yearIndex === 0) additions += cost
+    if (goneFy === fiscalYearStartBs) {
+      disposedValue += Math.max(0, cost - r2(cumulativeThrough(yearIndex - 1)))
+      proceeds += parseFloat(a.disposal_proceeds) || 0
+      continue
+    }
+    scheduled += intangibleAmortizationForYear(args).amount
   }
-  const base = r2(Math.max(0, (parseFloat(openingWdv) || 0) + additions))
+  const base = r2(Math.max(0, (parseFloat(openingWdv) || 0) + additions - disposedValue))
   const depreciation = r2(Math.min(scheduled, base))
   return {
     additions: r2(additions),
+    disposed_value: r2(disposedValue),
+    disposal_proceeds: r2(proceeds),
     scheduled: r2(scheduled),
     depreciation_base: base,
     depreciation_amount: depreciation,

@@ -40,7 +40,7 @@ Code added since S756 had never been reviewed, and most new findings sit in it:
 | D39 | **Counting tablets lock after 10 idle minutes** and return to the PIN screen, like POS tills. Sign out also goes back to the PIN screen. | ✅ S792 |
 | D40 | Existing businesses **type each tax pool's opening value once**, plus "depreciation already taken" per old asset (stage 4). | 🔴 |
 | D41 | **Moving Item Master's price from a purchase bill needs Supervisor+**, enforced in the database. | ✅ S792 (database + bill page) |
-| D42 | When an IMS Supervisor ends the month, the Owner Report is still made at the Owner's first view. **The close screen and the report header say when it was made.** | 🔴 |
+| D42 | When an IMS Supervisor ends the month, the Owner Report is still made at the Owner's first view. **The close screen and the report header say when it was made.** | ✅ S792 stage 3 (`closerMakesReport`/`deferredReportNote`, `reportMadeLine.js`) |
 
 **Settled by precedent (shown to the owner in the approved plan, not asked separately):**
 - Overheads gives no verdict for an open month (D7).
@@ -143,35 +143,45 @@ Built by eight agents over disjoint files, then a follow-up pass (group dashboar
 - ✅ S792 stage 2 — STOCK-5 (KNOWN+ of the banner item) A closed-month correction never reaches next month's opening. STOCK-6 A month switch shows old figures, with Export live.
 - ✅ S792 stage 2 — COSTS-3 Overheads gives a verdict on the open month (D7 precedent). COSTS-9 The labour tooltip leaves out overtime. COSTS-10 Break-even shows red with no figure entered.
 
-## S792.4 Stage 3 — hygiene (one sweep)
+## S792.4 Stage 3 — hygiene (one sweep) — ✅ built S792 stage 3
 
-- 🔴 TAX-4 / TAX-5 / TAX-6 / TAX-8 / TAX-9 / TAX-10 / TAX-11 / TAX-12 / TAX-13
-- 🔴 PURCHASES-7 / PURCHASES-9 / PURCHASES-10
-- 🔴 STOCK-7 / STOCK-8
-- 🔴 PLANNING-5 / PLANNING-6 / PLANNING-8 / PLANNING-9
-- 🔴 COSTS-7 / COSTS-11 / COSTS-12 / COSTS-13 / COSTS-14 / COSTS-17
-- 🔴 FIGURES-5 / FIGURES-6 / FIGURES-7 / FIGURES-10 (build the Monthly Summary Excel) / FIGURES-11
-- 🔴 RECIPES-4 / RECIPES-5 / RECIPES-6 / RECIPES-8 / RECIPES-9 / RECIPES-10; RECIPES-7 (cycle trigger, small migration)
-- 🔴 SALES-6 / SALES-7 / SALES-8
-- 🔴 MASTER-8 (the rest)
-- 🔴 DATABASE-9 / DATABASE-10 / DATABASE-11
-- 🔴 D42 wording on the close screen and the report header
-- 🔴 Found while building stage 2:
-  - `ShrinkageReport.js` keeps its observation loop, `bandItem` and `shrinkageStatus` private, so the Owner Report carries pinned twins. Export them and delete the twins.
-  - The Owner Report's `trend.*.snapshot` embeds the whole prior snapshot, including that one's own trend, so snapshots grow month on month.
-  - Recipe Margin's Export is gated on `display.length` only (the S728 rule wants `loading`/`loadError` too) and has no letterhead.
-  - Price Tracker's confirm names the recipes but not the past records it re-values; move `priceImpactPhrase` and a per-item count read out of `Items.js` into `itemRefTables.js`.
-  - `push_master_data` copies `selling_price`/`vat_rate` to a branch whose VAT status may differ (D31).
-  - Overheads and Requisitions still show no amber closed-month banner to the Owner or admin.
-  - Fixed assets: a partly reversed period counts as charged through its end; disposed Pool E assets are left out.
-  - A month Target captured from a part-day before PLANNING-3 stays until the month ends (clients with under 14 history days only). `SNAPSHOT_MODEL` deliberately not bumped.
-  - `Items.test.js` has no test for `rememberInBook` (MASTER-5).
-  - From the stage-2 write-path review (the P1 and three P2s were fixed before commit):
-    - `persistSalesDay.js`'s per-day lock is held by a hung request until reload (deliberate: releasing it risks a double depletion). Save still says saved after 20s, and that day's stock update waits.
-    - D35's first till day comes from `sales_entries` only, so till bills not yet posted to IMS (an unsynced till, or a hand-off awaiting the Periods backfill) make their days look pre-till.
-    - A bill stamped paid before `payable_payments` existed, whose returns bring it to 0, is indistinguishable from a "Close this bill" close; deleting its return reopens it. Needs a marker written on Close, or an owner decision to accept it.
-    - Two Demand Forecast Recomputes running at once can empty the horizon (each clears the other's run).
-  - `Overheads.js` still labels purchases "Food Cost" (D30 wording).
+Built by nine agents over disjoint files (details in the CHANGELOG entry "IMS stage 3"). One migration,
+`20260928180000_ims_hygiene_s792`: RECIPES-7's cycle trigger, DATABASE-9, DATABASE-11, the HQ push's
+VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
+
+- ✅ TAX-4 / TAX-5 / TAX-6 / TAX-8 / TAX-9 / TAX-10 / TAX-11 / TAX-12 / TAX-13
+- ✅ PURCHASES-7 / PURCHASES-9 / PURCHASES-10 (the double-payment check is client-side; see Still open)
+- ✅ STOCK-7 / STOCK-8
+- ✅ PLANNING-5 / PLANNING-6 / PLANNING-8 / PLANNING-9
+- ✅ COSTS-7 / COSTS-11 / COSTS-12 / COSTS-13 / COSTS-14 / COSTS-17
+- ✅ FIGURES-5 (two named figures: `periodWastageValue` for "thrown away", the raw-item COGS term on Monthly Summary) / FIGURES-6 / FIGURES-7 / FIGURES-10 / FIGURES-11
+- ✅ RECIPES-4 / RECIPES-5 / RECIPES-6 / RECIPES-7 / RECIPES-8 / RECIPES-9 / RECIPES-10
+- ✅ SALES-6 / SALES-7 / SALES-8
+- ✅ MASTER-8 (the rest, plus the sub-recipe and product-code renumber reads)
+- ✅ DATABASE-9 / DATABASE-10 / DATABASE-11
+- ✅ D42 wording on the close screen and the report header
+- ✅ Found while building stage 2 — every item below built, except the two marked accepted:
+  - ✅ Shrinkage's observation loop, `bandShrinkageItem` and `shrinkageStatus` live in `variance/shrinkageCalc.js`; the Owner Report's twins are deleted.
+  - ✅ The Owner Report's trend stores `trendSnapshotOf()` only, not the whole prior snapshot (schema 10).
+  - ✅ Recipe Margin's Export is gated on loading/loadError/biz.error and letterheaded.
+  - ✅ Price Tracker's confirm names the past records it re-values (`priceImpactSentence`, `readItemRefCounts` in `itemRefTables.js`).
+  - ✅ `push_master_data`: a branch whose VAT status differs keeps its own price and VAT rate; a new dish arrives off the till with no price (migration `20260928180000`).
+  - ✅ Overheads shows `ClosedPeriodBanner canEdit`; Requisitions its own amber note (Owner/admin) and the red banner (staff).
+  - ✅ Fixed assets: a part-reversed period counts only its charged days; a Pool E asset disposed in the year leaves the pool (our reading of Schedule 2 — confirm with an accountant).
+  - ⚪ Accepted: a month Target captured from a part-day before PLANNING-3 corrects itself when the month ends; bumping `SNAPSHOT_MODEL` would replace every client's Target mid-month.
+  - ✅ `Items.test.js` pins `rememberInBook` (`bookWith`).
+  - From the stage-2 write-path review:
+    - ✅ The per-day lock stays; a stock update still waiting after 20s now says so under Save, with the way out.
+    - ✅ D35's first till day is the earlier of `sales_entries` and the till's own first paid/comp bill (`ims_first_till_bill_at`, every IMS rank).
+    - ⚪ Accepted (owner, 2026-09-28): a bill paid before `payable_payments` existed and brought to 0 by a return reopens if that return is deleted. Rare, the confirm names the amount, and it needs a manager; recorded in `returnChangeReopensBill`'s doc and Help.
+    - ✅ A Recompute deletes only runs older than its own, so two at once leave the newer.
+  - ✅ `Overheads.js` says Purchases / Spend %, not Food Cost.
+
+**Still open after stage 3** (found while building it):
+- No SERVER guard against paying a bill twice: Outstanding Payables re-reads payments just before recording one (PURCHASES-10), but two payments in the same second both land. A BEFORE INSERT trigger on `payable_payments` or a pay RPC with a row lock would close it.
+- The HR Staff page's Last Seen is still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fix here and file it in `docs/CROSS-REPO.md` there.
+- `PosOrders.jsx` (`writeSalesEntries`) and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()` (the device's clock zone) while the backfills now use the Nepal date (SALES-6). Fine on a till in Nepal; `nepalBs(new Date())` would make them agree.
+- `ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too.
 
 ## S792.5 Stage 4 — design first, shown before building
 

@@ -134,13 +134,8 @@ const dayOf = d => String(d || '').slice(0, 10)
 // "as of". A reversal posted later for an earlier period counts there; a run ending after the date
 // does not.
 //
-// `chargedThrough` is the last day depreciation still stands charged for: the latest period_end
-// among periods NOT reversed in full. An adjustment posts the same period_start/period_end as the
-// run it reverses, so a period whose rows include a negative line and net to nothing was, on the
-// books, never charged — and a disposal (D24) charges from the day after `chargedThrough`, not from
-// the day after the reversed run. A partly reversed period still counts as charged: the reversal
-// corrected its amount, not its days. A zero charge with no reversal (an asset already at salvage,
-// an override to 0) also counts: those days were deliberately charged nothing.
+// `chargedThrough` is the last day depreciation still stands charged for — the latest such day over
+// every period (periodChargedThrough below). A disposal (D24) charges from the day after it.
 export function bookPositionsByAsset(rows, asOf = null) {
   const cut = asOf ? dayOf(asOf) : null
   const acc = {}
@@ -151,21 +146,60 @@ export function bookPositionsByAsset(rows, asOf = null) {
     const amt = effectiveDepreciation(r)
     a.charged += amt
     a.rows++
-    const key = `${dayOf(r.period_start)}|${end}`
-    const g = a.periods[key] || (a.periods[key] = { end, net: 0, reversed: false })
-    g.net += amt
-    if (amt < 0) g.reversed = true
+    const start = dayOf(r.period_start)
+    const key = `${start}|${end}`
+    const g = a.periods[key] || (a.periods[key] = { start, end, charges: [], reversals: [] })
+    const annual = parseFloat(r.annual_depreciation)
+    if (amt < 0) g.reversals.push({ amount: -amt, annual })
+    else g.charges.push({ amount: amt, left: amt, annual })
   }
   const out = {}
   for (const [assetId, a] of Object.entries(acc)) {
     let through = null
     for (const g of Object.values(a.periods)) {
-      if (g.reversed && g.net <= 0.005) continue
-      if (!through || g.end > through) through = g.end
+      const last = periodChargedThrough(g)
+      if (last && (!through || last > through)) through = last
     }
     out[assetId] = { charged: r2(a.charged), rows: a.rows, chargedThrough: through }
   }
   return out
+}
+
+// The last day of ONE period that still stands charged, or null when none of it does.
+//
+// An adjustment posts the same period_start/period_end as the run it reverses, so a period's rows
+// are settled together. Each negative line is matched to the charge it reverses — the one it undoes
+// exactly, else the one with the same annual figure (previewReversal copies it onto the reversal),
+// else the largest left — and the period stands charged for as many of its days as its
+// most-charged run still covers, at that run's own daily rate. Reversed in full: none of it.
+// Reversed in part: its FIRST days only, because a part reversal is read as taking back the LAST
+// days of the period — which is what D24's advice asks for (take back what a run charged past a
+// disposal date). Until S792 stage 3 a part reversal left the whole period charged, so reversing
+// exactly the days after a disposal still read "charged past this date", and reversing more left
+// the days in between charged by nobody. Rounded to the nearest day, since posted amounts are
+// rounded to the paisa. The documented correction — reverse in full, then post the right figures
+// for the same dates — is two runs here: the reversed one covers nothing and the new one covers
+// the period. A zero charge with no reversal (an asset already at salvage, an override to 0)
+// covers the whole period: those days were deliberately charged nothing.
+function periodChargedThrough({ start, end, charges, reversals }) {
+  // Largest reversal first, so one that undoes a whole run finds that run before a smaller
+  // reversal has taken a bite out of it.
+  for (const rev of [...reversals].sort((x, y) => y.amount - x.amount)) {
+    const open = charges.filter(c => c.left > 0.005)
+    const target = open.find(c => Math.abs(c.left - rev.amount) <= 0.005)
+      || open.find(c => Number.isFinite(rev.annual) && Number.isFinite(c.annual) && Math.abs(c.annual - rev.annual) <= 0.005)
+      || open.reduce((best, c) => (!best || c.left > best.left ? c : best), null)
+    if (target) target.left = Math.max(0, target.left - rev.amount)
+  }
+  const span = toUtcDay(end) - toUtcDay(start) + 1
+  if (span <= 0) return null
+  let days = 0
+  for (const c of charges) {
+    const d = c.amount <= 0.005 ? span : Math.round(span * (c.left / c.amount))
+    if (d > days) days = d
+  }
+  if (days <= 0) return null
+  return days >= span ? end : addDaysIso(start, days - 1)
 }
 
 // Book value from a bookPositionsByAsset() entry: cost less what has been charged. No position
@@ -206,10 +240,11 @@ export function depreciationInputChanges(asset, next) {
 // ÷ 365 per day held, salvage floor), over the days from the day after `chargedThrough` — or the
 // acquisition date, for an asset with nothing still charged — to the disposal date inclusive,
 // opening at the asset's book value. `position` is the asset's bookPositionsByAsset() entry: since
-// S792 (COSTS-2) a run that was reversed in full no longer counts as charging its days, so the
-// D24 advice — reverse the run that reaches past the disposal date, then dispose — charges the days
-// the asset was actually held. Returns the schedule line to post (null when there are no uncharged
-// days) and the NBV the gain/loss must be measured against.
+// S792 (COSTS-2) a run that was reversed in full no longer counts as charging its days, and since
+// stage 3 one reversed in part counts only for the days its remaining charge covers — so the D24
+// advice (reverse the run that reaches past the disposal date, in full or just the days after it,
+// then dispose) charges the days the asset was actually held. Returns the schedule line to post
+// (null when there are no uncharged days) and the NBV the gain/loss must be measured against.
 //
 // `postedPastDisposal` is true when a posted, un-reversed run already reaches beyond the disposal
 // date. The NBV then includes depreciation charged for days after the asset left, which this

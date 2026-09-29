@@ -49,10 +49,12 @@ async function rpcHasRows(name, args, label, pick = () => true) {
  * @param clientId  the client being looked at
  * @param scopedFrom useScopedDb().scopedFrom
  * @param today     getBsToday()
+ * @param posOn     optional: whether the client has Crest POS. Left out, it is read from `clients`
+ *                  when the menu signal needs it.
  * @returns { signals, firstPeriod } — firstPeriod is the client's earliest month (for the
  *          month-end window), or null when there is none or it could not be read.
  */
-export async function loadSetupSignals({ needed, clientId, scopedFrom, today }) {
+export async function loadSetupSignals({ needed, clientId, scopedFrom, today, posOn }) {
   const signals = {}
   const head = table => scopedFrom(table, 'id', { count: 'exact', head: true })
 
@@ -73,6 +75,16 @@ export async function loadSetupSignals({ needed, clientId, scopedFrom, today }) 
   signals.periodsAny = periods ? periods.length > 0 : null
   signals.periodClosed = periods ? periods.some(p => p.status === 'closed') : null
 
+  // Whether the client has Crest POS: true / false, or null when it could not be read.
+  const clientHasPos = async () => {
+    const res = await settle(supabase.from('clients').select('pos_enabled').eq('id', clientId).maybeSingle(), 'modules')
+    if (!res || res.error || !res.data) {
+      if (res?.error) console.error('Setup guide: modules failed', res.error)
+      return null
+    }
+    return !!res.data.pos_enabled
+  }
+
   const inPeriods = async (table, label, extra = q => q) => {
     if (!periodIds) return null
     if (periodIds.length === 0) return false
@@ -86,13 +98,19 @@ export async function loadSetupSignals({ needed, clientId, scopedFrom, today }) 
     purchase: () => inPeriods('purchase_entries', 'purchases'),
     sales: () => inPeriods('sales_entries', 'sales'),
     closingStock: () => inPeriods('closing_stock', 'closing count', q => q.not('physical_qty', 'is', null)),
-    // A dish on the menu: active, priced, not a sub-recipe, not switched off the till. NULL-safe on
-    // both nullable columns — a bare .neq would drop every NULL row (the S699/S714 trap).
-    menuPriced: () => exists(
-      head('recipes').eq('is_active', true).gt('selling_price', 0)
+    // A dish on the menu: active, priced, not a sub-recipe, and — for a client with a till — not
+    // switched off it. NULL-safe on every nullable column: a bare .neq would drop every NULL row
+    // (the S699/S714 trap), and `recipes.is_active` is nullable too, so `.eq('is_active', true)`
+    // never counted a dish whose flag was never set (S792, COSTS-17; the S724 form). "On POS" means
+    // nothing without a till, yet Menu Pricing's IMS table shows that toggle to an IMS-only client,
+    // so a dish unticked there used to keep this step from ever ticking.
+    menuPriced: async () => {
+      const pos = typeof posOn === 'boolean' ? posOn : await clientHasPos()
+      if (pos == null) return null
+      const q = head('recipes').not('is_active', 'is', false).gt('selling_price', 0)
         .or('category.is.null,category.neq.Sub-Recipe')
-        .not('pos_enabled', 'is', false),
-      'menu'),
+      return exists(pos ? q.not('pos_enabled', 'is', false) : q, 'menu')
+    },
     // Costed means it has ingredients. Menu Pricing's + Add Item writes a recipes row with a price
     // and NO ingredients, so counting recipes alone would tick this the moment the menu exists.
     recipesCosted: async () => {

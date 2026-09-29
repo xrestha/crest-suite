@@ -16,10 +16,20 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalBsLong, nepalDateAd } from '../../../shared/nepalTime'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { buildStockRows } from './stockReportCalc'
 import { packsFor, packText, reorderQtyText } from './reorderPacks'
+
+// The day a slip is printed, in BS as the day is read in Nepal (S792, PLANNING-9) — the Stock
+// Count Print Sheet's rule. `new Date().toLocaleDateString('en-GB')` was the AD date on the
+// viewer's own clock, so a list printed from abroad near midnight named another day, in a calendar
+// nobody here orders by. Past the verified BS table the AD date is the honest fallback.
+function printedOn() {
+  const now = new Date()
+  return nepalBsLong(now) || `${nepalDateAd(now)} (AD)`
+}
 
 export default function ReorderReport() {
   const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
@@ -731,7 +741,7 @@ export default function ReorderReport() {
           <div className="print-sheet-header">
             <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Par Level Sheet</h2>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
-              Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')}
+              Period: {periodLabel} &nbsp;·&nbsp; Printed: {printedOn()}
             </p>
           </div>
           {printGroups.length === 0 ? (
@@ -767,7 +777,7 @@ export default function ReorderReport() {
           <div className="print-sheet-header">
             <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Reorder List</h2>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
-              Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')} &nbsp;·&nbsp; {reorderPrintRows.length} item{reorderPrintRows.length !== 1 ? 's' : ''}
+              Period: {periodLabel} &nbsp;·&nbsp; Printed: {printedOn()} &nbsp;·&nbsp; {reorderPrintRows.length} item{reorderPrintRows.length !== 1 ? 's' : ''}
             </p>
           </div>
           {reorderPrintGroups.length === 0 ? (

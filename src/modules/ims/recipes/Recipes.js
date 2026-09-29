@@ -37,6 +37,7 @@ import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization
 import { isCostedByBuild, BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
 import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
 import PanPriceBanner from './PanPriceBanner'
+import { findRecipeCycle, isRecipeCycleError, recipeCycleText } from './recipeCycle'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -667,6 +668,38 @@ export default function Recipes() {
   }
 
 
+  // S792 (RECIPES-7): the saved sub-recipe chain below `subIds`, read fresh from the database
+  // (recipeCycle.js has the walk and why it may not trust this page's book). recipe_ingredients has
+  // no client_id, so each level is scoped by the recipe ids it walks — this recipe's own picks,
+  // then what their saved rows point at.
+  function findCycleFromDb(recipeId, subIds) {
+    return findRecipeCycle({
+      recipeId,
+      subRecipeIds: subIds,
+      readSubLines: ids => withTimeout(
+        fetchAllRowsChunked(ids, chunk => supabase.from('recipe_ingredients')
+          .select('recipe_id, sub_recipe_id').in('recipe_id', chunk).not('sub_recipe_id', 'is', null).order('id')),
+        SAVE_TIMEOUT_MS, 'Save'),
+    })
+  }
+
+  // The refusal, naming the dishes in the loop: the page's book first, then a fresh read for any it
+  // does not know (a sub-recipe made in another tab since this page loaded). The names are labels
+  // only — a failed name read still refuses the save, it just calls that dish "another sub-recipe".
+  async function cycleSentence(recipeName, chain) {
+    if (!chain) return recipeCycleText(recipeName, null)
+    const known = new Map(recipes.map(r => [r.id, r.name]))
+    if (selectedRecipe) known.set(selectedRecipe.id, recipeName)
+    const missing = chain.filter(id => !known.has(id))
+    if (missing.length > 0) {
+      const res = await withTimeout(scopedFrom('recipes', 'id, name').in('id', missing), SAVE_TIMEOUT_MS, 'Save')
+        .catch(e => ({ data: null, error: e }))
+      if (res.error) console.error('Recipe loop: names not read, refusing anyway:', res.error)
+      ;(res.data || []).forEach(r => known.set(r.id, r.name))
+    }
+    return recipeCycleText(recipeName, chain.map(id => known.get(id) || 'another sub-recipe'))
+  }
+
   async function save() {
     // Guard: never persist a recipe without a client — a null client_id makes the
     // recipe invisible (the list query filters by client_id). This previously happened
@@ -712,32 +745,8 @@ export default function Recipes() {
       return
     }
 
-    // Cycle check — only possible when editing an EXISTING recipe (a brand-new one can't yet
-    // be referenced by anything else). The ingredient picker already blocks a sub-recipe from
-    // listing itself directly (see subRecipeOptions above), but nothing stopped an INDIRECT cycle
-    // (A contains B, then B is edited to contain A) — both edits individually looked fine, but
-    // together they made every cost calculation over that pair recurse forever. Caught here at
-    // save time instead of just surviving it at cost-calc time (calcSubRecipeCostPerUnit).
-    // Runs for ANY existing recipe, not just one whose form still says 'Sub-Recipe' (S714).
-    // What makes a cycle possible is being REFERENCED via sub_recipe_id, which does not care what
-    // the referenced row is categorised as — and a recipe converted away from Sub-Recipe before
-    // the check below existed is exactly the row that can still be referenced while editing under
-    // some other category. The walk is over in-memory state and returns false immediately for a
-    // recipe nothing points at, so running it always costs nothing.
-    if (selectedRecipe) {
-      const wouldCreateCycle = (targetId, subRecipeId, seen = new Set()) => {
-        if (subRecipeId === targetId) return true
-        if (seen.has(subRecipeId)) return false
-        seen.add(subRecipeId)
-        const sr = recipes.find(r => r.id === subRecipeId)
-        return (sr?.recipe_ingredients || []).some(ri => ri.sub_recipe_id && wouldCreateCycle(targetId, ri.sub_recipe_id, seen))
-      }
-      const cyclic = validIngs.some(i => i.type === 'sub_recipe' && wouldCreateCycle(selectedRecipe.id, i.sub_recipe_id))
-      if (cyclic) {
-        setError(`This would create a circular reference — "${recipeForm.name.trim() || 'this recipe'}" would end up containing itself through another sub-recipe. Remove that ingredient.`)
-        return
-      }
-    }
+    // The cycle check (A contains B, then B is edited to contain A) runs inside the try below,
+    // against the database, before anything is written (S792, RECIPES-7) — see CYCLE CHECK.
 
     setSaving(true)
     setError('')
@@ -755,6 +764,27 @@ export default function Recipes() {
     // run — one finally covers every early-exit path instead of repeating the reset at each one.
     try {
       const isSubRecipe = recipeForm.category === 'Sub-Recipe'
+
+      // CYCLE CHECK, READ FROM THE DATABASE (S792, RECIPES-7). Only an EXISTING recipe can be
+      // referenced by anything, so only it can close a loop (A contains B, then B is edited to
+      // contain A) — and it runs for any existing recipe, whatever its category (S714: what makes a
+      // loop possible is being REFERENCED via sub_recipe_id). This walked the page's in-memory
+      // book, which is as old as the page: a sub-recipe another tab had just edited to contain this
+      // one read as clean, the loop was saved, and the cost walks then under-costed it here and
+      // multiplied it in COGS. It now re-reads the chain below the new sub-recipes, level by level,
+      // before anything is written, so a refusal here changes nothing. The trigger on
+      // recipe_ingredients catches the seconds between this read and the write (see ingError below).
+      const newSubIds = validIngs.filter(i => i.type === 'sub_recipe').map(i => i.sub_recipe_id)
+      if (selectedRecipe && newSubIds.length > 0) {
+        // A timed-out read is a check that did not run, like a refused one — nothing is written yet.
+        const { chain, error: cycleReadErr } = await findCycleFromDb(selectedRecipe.id, newSubIds)
+          .catch(e => ({ chain: null, error: e }))
+        if (cycleReadErr) {
+          const a = asActionError(cycleReadErr)
+          throw new SaveRefusal(`Couldn't check whether this ingredient list would make "${recipeForm.name.trim()}" contain itself through its sub-recipes, so nothing was changed. Try again. ${a.text}`, a.detail)
+        }
+        if (chain) throw new SaveRefusal(`Nothing was changed. ${await cycleSentence(recipeForm.name.trim(), chain)}`)
+      }
 
       // CONVERTING A SUB-RECIPE AWAY IS A DELETE OF THE LINK, AND IT NEEDS DELETE'S GUARD (S714).
       //
@@ -928,6 +958,19 @@ export default function Recipes() {
         supabase.from('recipe_ingredients').upsert(ingPayload, { onConflict: 'recipe_id,item_id' }).select('id'),
         SAVE_TIMEOUT_MS, 'Save'
       )
+      // The database refused a loop the check above could not yet see — another tab saved the other
+      // half in the seconds between (S792, RECIPES-7). The upsert is one statement, so none of the
+      // new rows landed; the recipe row above did. Say which dishes form the loop, from a fresh read,
+      // rather than the generic "not allowed".
+      if (ingError && isRecipeCycleError(ingError) && selectedRecipe) {
+        const name = recipeForm.name.trim()
+        const { chain } = await findCycleFromDb(selectedRecipe.id, validIngs.filter(i => i.type === 'sub_recipe').map(i => i.sub_recipe_id))
+          .catch(() => ({ chain: null }))
+        // Without a chain, the trigger's own message still names the sub-recipe that holds this dish.
+        const named = !chain && /recipe_cycle: (.+) already contains /.exec(ingError.message || '')
+        const sentence = chain ? await cycleSentence(name, chain) : recipeCycleText(name, named ? [named[1]] : null)
+        throw new SaveRefusal(`"${name}"'s other details were saved, but its ingredient list was not changed. ${sentence}`, errorDetail(ingError))
+      }
       if (ingError) throw ingError
       if (selectedRecipe) {
         const newIds = (insertedIngs || []).map(r => r.id)
@@ -1511,7 +1554,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin}
+              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedFrom={scopedFrom} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin}
                 vatMode={vatMode} costedByBuild={r => isCostedByBuild(r, customizationEnabled)} />
               <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
                 <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>

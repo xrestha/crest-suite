@@ -193,6 +193,22 @@ export default function VatReport() {
       'Total (incl. VAT)': Number((e.lineNet * (1 + VAT_RATE)).toFixed(2)),
       'Invoice Ref':       e.invoice_ref || '',
     }))
+    // TOTAL row from the split's own totals, not a sum of the rounded cells (S792, TAX-9): each
+    // line's VAT is rounded to 2 dp while the page's Input VAT is 13% of the unrounded taxable sum, so
+    // an accountant summing the column landed a few paisa off the card with no printed figure to tie
+    // to. This row IS the card's figure. Qty is left blank — lines are in different units.
+    if (vatLines.length > 0) {
+      entryRows.push({
+        'Day': 'TOTAL', 'Item': `${vatLines.length} line${vatLines.length !== 1 ? 's' : ''}`, 'Category': '',
+        'Vendor': '', 'PAN/VAT No.': '', 'Qty': '', 'UOM': '',
+        'Gross (ex-VAT)':    Number(vatBaseList.toFixed(2)),
+        'Discount Share':    Number(totalVatDiscount.toFixed(2)),
+        'Taxable (ex-VAT)':  Number(vatBaseGross.toFixed(2)),
+        'VAT (13%)':         Number(vatAmtGross.toFixed(2)),
+        'Total (incl. VAT)': Number(vatTotalGross.toFixed(2)),
+        'Invoice Ref':       '',
+      })
+    }
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'VAT Report — Input VAT on Purchases', biz, scopeLine, rows: entryRows, notes: caveats,
     }), 'VAT Purchases')
@@ -259,6 +275,15 @@ export default function VatReport() {
         'Total Returned (incl. VAT)': Number((r.base * (1 + VAT_RATE)).toFixed(2)),
         'Notes':                      r.notes || '',
       }))
+      // TOTAL from the split's return totals, the TOTAL RETURNS row on screen (S792, TAX-9).
+      retRows.push({
+        'Day': 'TOTAL', 'Item': `${vatReturns.length} return${vatReturns.length !== 1 ? 's' : ''}`, 'Category': '',
+        'Vendor': '', 'PAN/VAT No.': '', 'Returned Qty': '', 'UOM': '',
+        'Base Returned (ex-VAT)':     Number(retBaseTotal.toFixed(2)),
+        'VAT Reversed (13%)':         Number(retVatTotal.toFixed(2)),
+        'Total Returned (incl. VAT)': Number(retTotal.toFixed(2)),
+        'Notes':                      '',
+      })
       XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
         title: 'VAT Report — Returns (input VAT reversed)', biz, scopeLine, rows: retRows,
         notes: ['Returned goods are valued at the discounted rate their original bill carried.', ...caveats],
@@ -283,6 +308,22 @@ export default function VatReport() {
         'Net Total (incl. VAT)':     Number((netBase * (1 + VAT_RATE)).toFixed(2)),
       }
     })
+    // TOTAL from the split, i.e. the PERIOD NET row on screen and the Net Input VAT card (S792,
+    // TAX-9). The vendor rows sum to these figures before rounding; this row is what gets filed.
+    if (caRows.length > 0) {
+      caRows.push({
+        'Vendor':                    'TOTAL',
+        'PAN/VAT No.':               '',
+        '# Bills':                   vendorRows.reduce((s, v) => s + v.count, 0),
+        'Gross Base (ex-VAT)':       Number(vatBaseList.toFixed(2)),
+        'Trade Discount':            totalVatDiscount > 0 ? Number((-totalVatDiscount).toFixed(2)) : 0,
+        'Taxable Base (ex-VAT)':     Number(vatBaseGross.toFixed(2)),
+        'Returned Base (ex-VAT)':    Number(retBaseTotal.toFixed(2)),
+        'Net Taxable (ex-VAT)':      Number(netVatBase.toFixed(2)),
+        'Net Input VAT (13%)':       Number(netVatAmt.toFixed(2)),
+        'Net Total (incl. VAT)':     Number(netVatTotal.toFixed(2)),
+      })
+    }
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'VAT Report — Vendor-wise Summary', biz, scopeLine, rows: caRows,
       notes: ['For reference only — verify bills with your CA before filing.', ...caveats],
@@ -516,8 +557,11 @@ export default function VatReport() {
             )}
           </div>
 
-          {/* VAT Returns */}
-          {vatReturns.length > 0 && (
+          {/* VAT Returns. Waits for `!loading` like the Purchases card above it (S792, TAX-8): the
+              load does not clear `returns`, so while the next month loaded this card and its Net
+              Base / Net Input VAT row sat under the new month's chip with the previous month's
+              figures — gating one card is not gating the page (S616). */}
+          {!loading && vatReturns.length > 0 && (
             <div className="card" style={{ marginBottom: 16, border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
               <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-red-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>VAT-Inclusive Returns <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', marginLeft: 8 }}>Input VAT reversed on returned goods</span></span>

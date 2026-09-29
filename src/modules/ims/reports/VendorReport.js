@@ -103,7 +103,11 @@ export default function VendorReport() {
       setSelectedPeriod(target)    // been made the ref stops failing open, and an admin switching
       await loadData(target.id)    // client re-runs init() with the previous client's id in the ref
     }
-    setLoading(false)
+    // Only the load that still owns the page may un-gate it (S792, TAX-4). A period picked while
+    // this first load was in flight leaves `loadData(target)` returning early; clearing `loading`
+    // here anyway re-enabled the KPI strip, the tables and the loading-gated Export over the
+    // previous month's rows under the new month's chip, scope line and filename.
+    if (!target || periodReq.isCurrent(target.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
@@ -112,7 +116,7 @@ export default function VendorReport() {
     setSelectedPeriod(p)
     setLoading(true)
     await loadData(periodId)
-    setLoading(false)
+    if (periodReq.isCurrent(periodId)) setLoading(false)   // see init(): only the owner un-gates (TAX-4)
   }
 
   async function loadData(periodId) {

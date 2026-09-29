@@ -17,17 +17,45 @@
 // (`.order('id')` after whatever the display order is). Paging an unordered — or
 // non-uniquely-ordered — query can repeat rows on one page and skip them on the next, which
 // turns a truncation bug into a subtler wrong-total bug.
+//
+// `maxRows` is a ceiling against a runaway read, and reaching it is a FAILURE, not an answer
+// (S792, TAX-13). It used to stop there and return `error: null` — the very silent short read this
+// helper exists to prevent, one level up: 100,000 rows summed into a confident total with nothing
+// to say the list went on. A read that fills the ceiling costs one more 1-row request to learn
+// whether anything lies past it; if something does, the caller gets `ROW_CAP_CODE` and a sentence,
+// never a partial array. A caller with a legitimately larger read raises `maxRows` (the client
+// data export does); none may rely on being cut off.
+export const ROW_CAP_CODE = 'crest_row_cap'
+
+export function rowCapError(maxRows) {
+  const n = Number(maxRows).toLocaleString('en-IN')
+  return {
+    code: ROW_CAP_CODE,
+    message: `This list is too long to read in full: it runs past ${n} rows, so the read was stopped rather than `
+      + 'hand back part of it as the whole — any figure built from part of it would be short. Ask support about raising the limit.',
+    details: `fetchAllRows stopped at maxRows=${maxRows}`,
+    hint: ROW_CAP_CODE,
+  }
+}
+
 export async function fetchAllRows(makeQuery, { pageSize = 1000, maxRows = 100000 } = {}) {
   const out = []
   for (let from = 0; from < maxRows; from += pageSize) {
-    const { data, error } = await makeQuery().range(from, from + pageSize - 1)
+    // Never ask past the ceiling, so the rows returned can never exceed it either.
+    const to = Math.min(from + pageSize, maxRows) - 1
+    const { data, error } = await makeQuery().range(from, to)
     if (error) return { data: null, error }
     const batch = data || []
     out.push(...batch)
     // A short page means the end of the result set. An exactly-full page is ambiguous, so it
     // costs one extra round trip that comes back empty — cheap, and the only way to be sure.
-    if (batch.length < pageSize) break
+    if (batch.length < to - from + 1) return { data: out, error: null }
   }
+  // Every page up to the ceiling came back full. Exactly `maxRows` rows is a complete answer; one
+  // more is a truncated one, and must fail rather than pass as the whole list.
+  const { data: past, error } = await makeQuery().range(maxRows, maxRows)
+  if (error) return { data: null, error }
+  if ((past || []).length > 0) return { data: null, error: rowCapError(maxRows) }
   return { data: out, error: null }
 }
 

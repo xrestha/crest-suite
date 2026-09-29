@@ -13,7 +13,7 @@ import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipe
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../ims/reports/supplierAttribution'
-import { periodRevenue, periodStockMaps, valuePeriodItems } from '../ims/reports/periodCost'
+import { periodRevenue, periodStockMaps, valuePeriodItems, periodWastageValue, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
 import { findUncountedItems, UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
@@ -32,7 +32,8 @@ import { computeInventoryDepthSection } from './computeInventoryDepthSection'
 // Returns are taken at list value, exactly as on those two pages. The Cash/Credit split is built
 // off the same line values so the two halves still add up to the total (every return comes off
 // Cash, as before).
-// Single-period input only: the fallback bill key carries no period.
+// Single-period input by use. Since S792 the fallback bill key also carries `period_id`
+// (supplierAttribution.js allocationBillKey), so a multi-period batch that selects it is safe too.
 export function netPurchaseFigures(purchases, returns) {
   const allocated = allocateBillDiscounts(purchases || [])
   const returnTotal = (returns || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
@@ -75,11 +76,16 @@ async function computeImsSection(clientId, period) {
     // S699). bs_day + source also feed the shared depletion rule in buildStockRows (S696), and
     // ingredient_deltas a customized plate's option stock lines (S758).
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
-    scopedFrom('recipes', clientId, 'id, selling_price'),
+    // Paged (S792): the price fallback for a legacy sales row with no unit_price, and the ids that
+    // seed the reorder walk. A recipe past the 1000-row cap prices its sales at 0 and consumes
+    // nothing — frozen.
+    fetchAllRows(() => scopedFrom('recipes', clientId, 'id, selling_price').order('id')),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
-    fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
+    // Each row carries its item's rate (WASTAGE_VALUE_SELECT): Wastage Value is the Wastage Report's
+    // total over every item, prep and hidden ones included, since schema v10 (S792, FIGURES-5).
+    fetchAllRows(() => supabase.from('wastages').select(WASTAGE_VALUE_SELECT).eq('period_id', period.id).order('id')),
     // EVERY item, active or not, since S792: the two uses below want different sets.
-    //   - Opening/Closing Stock and Wastage Value keep the active-only set, which matches Stock.js's
+    //   - Opening/Closing Stock keep the active-only set, which matches Stock.js's
     //     own Summary tab — without it a leftover opening_stock row on a deactivated item inflated
     //     Opening Stock Value above what Stock Count showed for the same period (found live, S436:
     //     NPR 179,232 here vs NPR 179,189.95 on Stock Count). Sub-recipes stay IN those, since Stock
@@ -119,7 +125,13 @@ async function computeImsSection(clientId, period) {
   const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
 
   const itemRateMap = {}; items.forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
-  const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
+  // The one Wastage Value every tile shows (periodCost.js, S792 FIGURES-5): every item, prep and
+  // hidden ones included. Until v10 it took this active-only map, so a hidden item's wastage was
+  // left out here while the Wastage Report and both dashboards counted it. Information only — COGS
+  // below takes off raw-item wastage through valuePeriodItems, never this figure: wasted prep was
+  // made from raw items COGS already counts as used, so taking it off COGS as well would drop that
+  // real cost from Food Cost % and Net Margin %.
+  const wastageValueTotal = periodWastageValue(wastagesData)
   // Same qty × per_uom_rate valuation MonthlySummary.js/Stock.js use for their own Opening/
   // Closing Stock figures — an owner reading this report needs to see what stock the period
   // started and ended with, same as every other IMS report already shows.
@@ -551,6 +563,30 @@ export function buildDeltas(current, prior) {
   }
 }
 
+// What a Trend entry keeps of the prior snapshot it compares against (S792 stage 3). It used to
+// store the WHOLE prior snapshot — that month's own trend included, which held ITS two priors whole,
+// and so on — so each month's row carried nested copies of every month before it and grew month on
+// month. The report page and the workbook read only these fields of `t.snapshot`;
+// the deltas are computed from the full prior before it is trimmed. A row stored before v10 keeps
+// its nested copy and renders as before, since every reader optional-chains the same fields.
+export function trendSnapshotOf(snapshot) {
+  if (!snapshot) return null
+  const c = snapshot.combined || {}
+  return {
+    schemaVersion: snapshot.schemaVersion ?? null,
+    combined: {
+      revenueTotal: c.revenueTotal ?? null,
+      foodCostPct: c.foodCostPct ?? null,
+      laborCostPct: c.laborCostPct ?? null,
+      primeCostPct: c.primeCostPct ?? null,
+      netMarginPct: c.netMarginPct ?? null,
+      // Absent before v9 on purpose: its absence is what says "on purchases" (foodCostBasisOf).
+      ...(c.foodCostBasis ? { foodCostBasis: c.foodCostBasis } : {}),
+    },
+    pos: snapshot.pos ? { totalNetSales: snapshot.pos.totalNetSales ?? null } : null,
+  }
+}
+
 async function computeTrendSection(clientId, period, currentPartial) {
   const lastMonth = period.bs_month === 1 ? { y: period.bs_year - 1, m: 12 } : { y: period.bs_year, m: period.bs_month - 1 }
   const lastYear = { y: period.bs_year - 1, m: period.bs_month }
@@ -560,9 +596,10 @@ async function computeTrendSection(clientId, period, currentPartial) {
     lookupPriorSnapshot(clientId, lastYear.y, lastYear.m),
   ])
 
+  const entry = prior => ({ ...prior, snapshot: trendSnapshotOf(prior.snapshot), deltas: buildDeltas(currentPartial, prior.snapshot) })
   return {
-    vsLastPeriod: { ...last, deltas: buildDeltas(currentPartial, last.snapshot) },
-    vsSameMonthLastYear: { ...sameMonthLastYear, deltas: buildDeltas(currentPartial, sameMonthLastYear.snapshot) },
+    vsLastPeriod: entry(last),
+    vsSameMonthLastYear: entry(sameMonthLastYear),
   }
 }
 
@@ -637,7 +674,15 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //     `menuEngineering` (`quadrant: null`, `byo: true`, `byoCount`, `byoItems`) — the live menu
 //     reports' `isCostedByBuild` rule — not quadranted on their bowl-and-spoon cost.
 //   - TAX-7: `vendorPurchasing` names a deactivated or archived supplier instead of "Unknown Vendor".
-export const CURRENT_SCHEMA_VERSION = 9
+// 10 (S792 stage 3): `ims.wastageValueTotal` changed meaning. v1–v9 valued wastage over ACTIVE
+// items only (prep included); v10 values it over every item — hidden ones too (D29) — through the
+// one definition every Wastage tile and the Wastage Report share (periodCost.js
+// `periodWastageValue`, FIGURES-5). A v10 figure can only be higher, by a hidden item's wastage.
+// The report page reads the version to say which set its Wastage tip describes. Two changes ride
+// along that no reader needs to tell apart: `trend.*.snapshot` stores only the fields the Trend
+// section reads (`trendSnapshotOf`), not the whole prior snapshot with its own nested trend; and
+// the recipes reads behind the IMS, Menu Engineering, Variance and Shrinkage sections are paged.
+export const CURRENT_SCHEMA_VERSION = 10
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

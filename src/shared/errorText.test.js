@@ -290,6 +290,21 @@ describe('IMS database guard refusals (S756/S792)', () => {
     expect(errorText(e, 'operator')).toMatch(/not charged a second time/)
   })
 
+  // S792 stage 3 (migration 20260928180000): not 42501, and the generic constraint rule at the end
+  // would otherwise swallow the 23514.
+  it.each([
+    ['recipe_cycle', 'recipe_cycle: Sauce B already contains Sauce A', '23514', /already contains this dish/],
+    ['item_other_client', 'item_other_client: that item belongs to another business', '23503', /belongs to another business/],
+  ])('%s reaches its own sentence', (hint, message, code, expected) => {
+    expect(errorText(raised(hint, message, code), 'operator')).toMatch(expected)
+    expect(errorText(raised(hint, message, code), 'staff')).toMatch(expected)
+  })
+
+  it('a read stopped at fetchAllRows\' ceiling says so, by code or by message alone (TAX-13)', () => {
+    expect(errorText({ code: 'crest_row_cap', hint: 'crest_row_cap', message: 'x' }, 'operator')).toMatch(/stopped rather than shown with a short total/)
+    expect(errorText({ message: 'This list is too long to read in full: it runs past 1,00,000 rows' }, 'staff')).toMatch(/too long for Crest to read in full/)
+  })
+
   it('a plain RLS refusal with no hint still gets the generic sentence', () => {
     expect(errorText({ code: '42501', message: 'new row violates row-level security policy for table "x"' }, 'operator')).toMatch(GENERIC)
   })

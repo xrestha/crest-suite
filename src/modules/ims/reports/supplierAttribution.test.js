@@ -1,5 +1,5 @@
 import {
-  allocateBillDiscounts, vendorNetByItem, vendorShares, attributeConsumption, vendorNetTotals,
+  allocateBillDiscounts, allocationBillKey, vendorNetByItem, vendorShares, attributeConsumption, vendorNetTotals,
   netFactors, returnBase, mergeFactors, applyPriorBillFactors, NO_VENDOR, UNATTRIBUTED,
 } from './supplierAttribution'
 import { priorBillFactors, returnLinesOutsidePeriod, splitPurchaseVat, billPayables } from './purchaseTaxSplit'
@@ -26,6 +26,40 @@ describe('allocateBillDiscounts', () => {
       { item_id: 'i2', vendor_id: 'v1', invoice_ref: 'INV-9', bs_day: 4, qty: 1, rate: 100, discount_amount: 10 },
     ])
     expect(rows.reduce((s, r) => s + r.lineNet, 0)).toBeCloseTo(190, 6) // one 10, not two
+  })
+
+  // S792, TAX-12 / FIGURES-6. The one-lakh report, Annual Summary and Period Comparison hand over
+  // several months at once, and day 4 exists in every one of them.
+  test('two months\' legacy bills with the same vendor, invoice and day stay two bills', () => {
+    const legacy = { item_id: 'i1', vendor_id: 'v1', invoice_ref: null, bs_day: 4, qty: 1, rate: 1000 }
+    const rows = allocateBillDiscounts([
+      { ...legacy, id: 'a', period_id: 'shrawan', discount_amount: 100 },
+      { ...legacy, id: 'b', period_id: 'bhadra', discount_amount: 50 },
+    ])
+    // Each bill's own discount: 100 + 50 off 2,000. Merged, it was max(100, 50) = 100, spread over both.
+    expect(rows.reduce((s, r) => s + r.lineNet, 0)).toBeCloseTo(2000 - 150, 6)
+    expect(rows.find(r => r.id === 'a').lineNet).toBeCloseTo(900, 6)
+    expect(rows.find(r => r.id === 'b').lineNet).toBeCloseTo(950, 6)
+    expect(new Set(rows.map(r => r.billId)).size).toBe(2)   // bill counts read off billId
+  })
+
+  test('the month changes nothing for a grouped bill or for a single month\'s legacy lines', () => {
+    expect(allocationBillKey({ purchase_group_id: 'g9', period_id: 'p1' })).toBe('g9')
+    const oneMonth = allocateBillDiscounts([
+      { item_id: 'i1', vendor_id: 'v1', invoice_ref: 'INV-9', bs_day: 4, qty: 1, rate: 100, discount_amount: 10, period_id: 'p1' },
+      { item_id: 'i2', vendor_id: 'v1', invoice_ref: 'INV-9', bs_day: 4, qty: 1, rate: 100, discount_amount: 10, period_id: 'p1' },
+    ])
+    expect(new Set(oneMonth.map(r => r.billId)).size).toBe(1)
+    expect(oneMonth.reduce((s, r) => s + r.lineNet, 0)).toBeCloseTo(190, 6)
+  })
+
+  test('priorBillFactors and allocateBillDiscounts now key a legacy bill identically', () => {
+    const lines = [
+      { id: 'x', item_id: 'i1', vendor_id: 'v1', invoice_ref: 'Z', bs_day: 2, qty: 1, rate: 400, discount_amount: 40, period_id: 'p1' },
+      { id: 'y', item_id: 'i1', vendor_id: 'v1', invoice_ref: 'Z', bs_day: 2, qty: 1, rate: 600, discount_amount: 0, period_id: 'p2' },
+    ]
+    expect([...priorBillFactors(lines)]).toEqual([...netFactors(allocateBillDiscounts(lines))])
+    expect(priorBillFactors(lines).get('y')).toBeCloseTo(1, 6)   // p1's discount does not reach p2's bill
   })
 })
 

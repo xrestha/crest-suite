@@ -13,6 +13,7 @@ import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { getCf, billTotalsByKey, methodOf, invoiceMismatchText, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { fmtLineRate } from './purchaseLines'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -753,7 +754,7 @@ export default function Purchases() {
                       <th><Tip text="The vendor on the bill, its invoice reference, and the time the bill was ENTERED into Crest — not when the goods were received. The Day column is the delivery day; where the two differ, the entry date is shown too." width={320}>Vendor</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Quantity in your purchase unit, with the base-unit figure in brackets where the two differ — e.g. 2 Crate (24 Bottle). Stock and costing always use the base unit." width={280}>Qty</Tip></th>
                       <th>UOM</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Cost per base unit, not per purchase unit. A NPR 1,200 crate of 24 bottles stores as NPR 50 per bottle — which is what Recipe Costing and Stock value use." width={280}>Rate</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT price of one of the unit in the UOM column. Where the item is bought by a pack, the cost per base unit is shown beneath it: a NPR 1,200 crate of 24 bottles reads 1,200.00 with NPR 50 per bottle under it, and the per-bottle figure is what Recipe Costing and Stock value use. A rate below NPR 0.01 keeps its decimals (0.004 per gram) rather than rounding to 0." width={300}>Rate</Tip></th>
                       {/* "(incl. VAT)" on its own line, not inline. `data-table th` is nowrap, so as one
                           string this was a 150px column — the single widest thing in the header — to label
                           figures that need 75px. A block child breaks the line regardless of nowrap. */}
@@ -884,7 +885,8 @@ export default function Purchases() {
                               </td>
                               <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                {/* fmtLineRate, not 2 decimals: a per-base-unit rate like 0.004/GM read "0" (S792, PURCHASES-9). */}
+                                {fmtLineRate(displayRate)}
                                 {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
@@ -955,7 +957,7 @@ export default function Purchases() {
                                     </td>
                                     <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                      {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                      {fmtLineRate(displayRate)}
                                       {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                                     </td>
                                   </>

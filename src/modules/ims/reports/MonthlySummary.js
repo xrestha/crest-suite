@@ -7,7 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { COGS_FORMULA, fcBand, fcFigure } from '../../../shared/imsFormulas'
+import { COGS_FORMULA, fcFigure } from '../../../shared/imsFormulas'
 import { useSettings } from '../../../context/SettingsContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
@@ -17,6 +17,9 @@ import { FOOD_COST_TIP, SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { buildMonthlySummaryWorkbook, cogsShareLine, foodCostSentence, foodCostVerdict, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -24,6 +27,7 @@ export default function MonthlySummary() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const periodReq = useLatestRequest()
+  const biz = useBizInfo()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [report, setReport] = useState(null)
@@ -33,11 +37,20 @@ export default function MonthlySummary() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    // Claimed for THIS client before the periods read, and the previous one's month cleared (S792):
+    // a period load still in flight for the outlet just switched away from would otherwise land,
+    // clear `loading` and leave its figures on screen — and in the Excel export — under this
+    // outlet's letterhead. Period ids never repeat across clients, so the key cannot collide.
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
+    setReport(null)
+    setPeriods([])
+    setSelectedPeriod(null)
     const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
+    if (!periodReq.isCurrent(initKey)) return   // a newer client switch owns the page
     if (error) { setLoadError(error.message); setLoading(false); return }
     setPeriods(p || [])
     // Falls back to the latest period when none is open (the S722 rule): between closing one month
@@ -69,6 +82,9 @@ export default function MonthlySummary() {
 
   async function buildReport(periodId) {
     setLoadError(null)
+    // Which client and month these figures belong to travels WITH them (S792, FIGURES-10), so the
+    // export can refuse a report that is not the one the header names.
+    const builtFor = effectiveClientId
     const results = await Promise.all([
       scopedFrom('categories').order('sort_order'),
       // Every per-item-per-period read below is paged: one row per item per period is already
@@ -182,6 +198,7 @@ export default function MonthlySummary() {
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setReport({
+      clientId: builtFor, periodId,
       catRows, totalOpening, totalPurchase, totalDiscount, totalReturn, totalNetPurchase,
       totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct, gap
     })
@@ -198,9 +215,33 @@ export default function MonthlySummary() {
   //    every shelf as used and food cost reads high — a red ▲ there is an artefact of the calendar.
   //  - D6: the month is closed but a MATERIAL share of its stock was never counted (uncountedItems.js).
   // The figure still prints; only the colour, the mark and the sentence that judges it go.
+  // Both rules live in monthlySummarySheet.js (verdictWithheld, uncountedNamed), so the Excel export
+  // withholds and names exactly what this page does.
   const isOpenPeriod = selectedPeriod?.status === 'open'
-  const gapMaterial = !!report?.gap?.material
-  const withholdVerdict = isOpenPeriod || gapMaterial
+  const withholdVerdict = verdictWithheld(selectedPeriod?.status, report?.gap)
+  const gapNamed = !!report && uncountedNamed(report.gap, selectedPeriod?.status)
+  // The export may only write the report the header names: built for this client and this month
+  // (S792, FIGURES-10; the S728 rule — a control that emits a FILE is where a stale render becomes
+  // permanent, so it gates on more than `loading`).
+  const reportIsCurrent = !!report && !!selectedPeriod
+    && report.periodId === selectedPeriod.id && report.clientId === effectiveClientId
+  const exportBlocked = loading || !!loadError || !!biz.error || !reportIsCurrent
+
+  async function exportExcel() {
+    if (exportBlocked) return
+    const { scopeLine, notes, summaryRows, categoryRows, filename } = buildMonthlySummaryWorkbook(report, {
+      periodLabel, periodStatus: selectedPeriod.status, settings,
+    })
+    const XLSX = await import('xlsx')
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Monthly Summary', biz, scopeLine, notes, rows: summaryRows,
+    }), 'Summary')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Monthly Summary — Category Breakdown', biz, scopeLine, notes, rows: categoryRows,
+    }), 'Category Breakdown')
+    XLSX.writeFile(wb, filename)
+  }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the monthly summary" />
@@ -230,6 +271,11 @@ export default function MonthlySummary() {
           {/* Gated on the load (S728/S756): mid-load the page holds the previous month's figures
               while the print title already names the new one. */}
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Monthly Summary - ${periodLabel}`)} disabled={loading || !!loadError} style={{ fontSize: 13 }}>⎙ Print</button>
+          {/* Help promised this export for your accountant and the page had none (S792, FIGURES-10).
+              The letterhead read has its own error slot (useBizInfo, S754): a failed read would
+              ship a workbook with a blank CompanyName line. */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={exportBlocked} style={{ fontSize: 13 }}
+            title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
         </div>
       </div>
 
@@ -249,7 +295,7 @@ export default function MonthlySummary() {
           )}
           {/* D6 (S756): named on a closed month always; on an open month only once counting has begun,
               since before that every item is uncounted and the line above already says so. */}
-          {(!isOpenPeriod || report.gap.uncountedCount < report.gap.presentCount) && (
+          {gapNamed && (
             <UncountedItemsBanner gap={report.gap} scope={periodLabel} />
           )}
           {/* KPI row */}
@@ -261,10 +307,15 @@ export default function MonthlySummary() {
                 sub: report.totalReturn > 0 || report.totalDiscount > 0
                   ? `Net purchases: ${fmt(report.totalNetPurchase)}${report.totalDiscount > 0 ? ` (after ${fmt(report.totalDiscount)} discount)` : ''}`
                   : 'None this period' },
-              { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-red-text)' },
+              // Raw items only, on purpose (S792, FIGURES-5): this is the Wastage term inside COGS.
+              // Wasted prep is already in COGS through the raw items it was made from, so the
+              // dashboards' and the Wastage Report's all-items figure (periodWastageValue) would
+              // count it twice here.
+              { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-red-text)',
+                tip: 'The wastage taken out of COGS: raw items only. Wasted prep (a tray of momo filling) is already counted through the flour and meat it was made from, so the Wastage Report and the Dashboard, which list everything thrown away, can show a higher figure for the same month.' },
               { label: 'Closing Stock',    value: fmt(report.totalClosing),     color: 'var(--theme-green-text)' },
               { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-accent-ink)',
-                sub: report.fcPct != null ? `${report.fcPct.toFixed(1)}% of revenue${withholdVerdict ? ' · not judged' : ''}` : 'No sales data',
+                sub: cogsShareLine(report.fcPct, withholdVerdict),
                 tip: `Cost of Goods Used: ${COGS_FORMULA}. The actual ingredient cost consumed.` }
             ].map(s => (
               <div key={s.label} className="stat-card">
@@ -281,11 +332,12 @@ export default function MonthlySummary() {
               set fc_warning_pct to 30 got a ▲ red figure sitting inside a green box captioned
               "✓ Within benchmark (28–35%)". One band now drives the tint, the number and the
               sentence, all off the client's own thresholds. */}
-          {(() => { const judged = fcBand(report.fcPct, settings)
+          {(() => {
           // A withheld verdict takes the box to the neutral 'none' tint too — a red box around an
           // unmarked figure would still be the verdict, just moved one element out (S720's rule:
-          // check what is touching a banded figure).
-          const box = withholdVerdict && judged.key !== 'none' ? { ...judged, key: 'unjudged' } : judged
+          // check what is touching a banded figure). Banded in monthlySummarySheet.js, which the
+          // export's Food Cost % note reads too.
+          const box = foodCostVerdict(report.fcPct, settings, { withhold: withholdVerdict })
           const tint = () =>
             box.key === 'none' || box.key === 'unjudged' ? 'var(--theme-text2)' : box.key === 'good' ? 'var(--theme-green)' : box.key === 'watch' ? 'var(--theme-accent)' : 'var(--theme-red)'
           return (
@@ -318,11 +370,7 @@ export default function MonthlySummary() {
                 <div style={{ fontSize: 24, fontWeight: 800, ...f.style }} title={f.title}>{f.text}</div>
               ) })()}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>
-                {box.key === 'none' ? 'Add sales entries to calculate' :
-                  box.key === 'unjudged' ? (isOpenPeriod ? 'Not judged: month still open' : 'Not judged: count incomplete') :
-                  box.key === 'good'  ? `✓ Within your target (≤${box.warn}%)` :
-                  box.key === 'watch' ? `△ Above target — review purchases (${box.warn}–${box.critical}%)` :
-                  `▲ Critical — immediate review needed (>${box.critical}%)`}
+                {foodCostSentence(box, selectedPeriod?.status)}
               </div>
             </div>
             <div>
@@ -355,7 +403,7 @@ export default function MonthlySummary() {
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value. Vendor Report and Consolidated P&amp;L net the same amount off." width={250}>Discount</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus bill discounts minus returns to vendor. The true amount spent on stock this period, and what COGS is built from." width={240}>Net Purchases</Tip></th>
-                    <th style={{ textAlign: 'right' }}>Wastage</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Wastage taken out of COGS, raw items only: wasted prep is already counted through the raw items it was made from. The Wastage Report lists everything thrown away, prep included." width={250}>Wastage</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from COGS separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing Stock</th>
                     <th style={{ textAlign: 'right' }}><Tip text={`Cost of Goods Used: ${COGS_FORMULA}. Ingredient cost actually consumed.`} width={250}>COGS</Tip></th>
@@ -373,7 +421,7 @@ export default function MonthlySummary() {
                           {/* Marked where the gap sits (S756 D6), so the reader knows which rows' COGS
                               carries uncounted stock. Hidden on an open month before counting starts —
                               every row would carry it and the provisional line already says why. */}
-                          {row.uncountedCount > 0 && (!isOpenPeriod || report.gap.uncountedCount < report.gap.presentCount) && (
+                          {row.uncountedCount > 0 && gapNamed && (
                             <span className="badge badge-amber" style={{ marginLeft: 8 }} title="Items in this category with stock but no closing count — their whole stock is counted as used">
                               {row.uncountedCount} not counted
                             </span>

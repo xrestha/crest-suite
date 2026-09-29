@@ -1,7 +1,7 @@
 import {
   exFromIncl, inclFromEx, effectiveRule, ruleText, countAllowed, optionsPriceDelta, signedPrice,
   describeSelection, groupsForDish, defaultSelection, selectionProblems, lowestDishPrice,
-  sizeFactor, scaledDelta, scaledQty,
+  sizeFactor, scaledDelta, scaledQty, cheapestValidSelection,
 } from './optionPricing'
 
 describe('VAT conversion', () => {
@@ -187,5 +187,178 @@ describe("size scaling (S760)", () => {
     })
     // Small: 250 - 50 + 75 = 275 ; Medium: 250 + 100 = 350 ; Large: 250 + 150 + 150 = 550
     expect(lowestDishPrice(250, dg)).toBe(275)
+  })
+})
+
+// S792 RECIPES-4. The pricer frees the first `included_count` picks in DISPLAY order, and the
+// cheapest build must be found under that rule — not under "the cheapest picks are the free ones"
+// (the old "From" price) nor "take the cheapest picks whatever their order" (the old costing
+// build). The reviewer's simulation lived in a scratchpad that no longer exists; it is rebuilt
+// here: the search against a brute-force enumeration of every valid selection, over seeded random
+// dishes, so a failure reproduces.
+describe('the cheapest valid build (S792, RECIPES-4)', () => {
+  const dishOf = (groups, options, attachments = null) => groupsForDish('dish', {
+    groups: groups.map((g, i) => ({ is_active: true, sort: i, included_count: 0, size_scaling: 'none', ...g })),
+    options: options.map(o => ({ is_active: true, ...o })),
+    attachments: attachments || groups.map((g, i) => ({ recipe_id: 'dish', group_id: g.id, sort: i })),
+  })
+
+  it("the review's first counter-example: toppings pick 3, first 2 free, is From 210 not 230", () => {
+    const dg = dishOf(
+      [{ id: 'top', name: 'Toppings', kind: 'addon', min_select: 3, max_select: 3, included_count: 2 }],
+      [
+        { id: 'banana', group_id: 'top', name: 'Banana', price_delta: 30, sort: 0 },
+        { id: 'granola', group_id: 'top', name: 'Granola', price_delta: 20, sort: 1 },
+        { id: 'honey', group_id: 'top', name: 'Honey', price_delta: 10, sort: 2 },
+        { id: 'nutella', group_id: 'top', name: 'Nutella', price_delta: 50, sort: 3 },
+      ],
+    )
+    expect(cheapestValidSelection(dg)).toEqual({ ids: ['banana', 'granola', 'honey'], delta: 10 })
+    expect(lowestDishPrice(200, dg)).toBe(210)
+  })
+
+  it("the review's second: prices [20, 0, 20, 10, 20], pick 2, first 1 free, costs nothing", () => {
+    const dg = dishOf(
+      [{ id: 'g', name: 'Sides', kind: 'choice', min_select: 2, max_select: 2, included_count: 1 }],
+      [20, 0, 20, 10, 20].map((p, i) => ({ id: `o${i}`, group_id: 'g', name: `Side ${i}`, price_delta: p, sort: i })),
+    )
+    // The first (20) is free and the second (0) is charged nothing; picking 0 and 10 charges 10.
+    expect(cheapestValidSelection(dg)).toEqual({ ids: ['o0', 'o1'], delta: 0 })
+  })
+
+  it('leaves an optional choice off unless it lowers the price, and takes a cheaper Half', () => {
+    const dg = dishOf(
+      [
+        { id: 'extra', name: 'Extras', kind: 'addon', min_select: 0, max_select: 3, included_count: 1 },
+        { id: 'portion', name: 'Portion', kind: 'choice', min_select: 0, max_select: 1 },
+      ],
+      [
+        { id: 'egg', group_id: 'extra', name: 'Egg', price_delta: 40, sort: 0 },
+        { id: 'half', group_id: 'portion', name: 'Half plate', price_delta: -60, sort: 0 },
+      ],
+    )
+    expect(cheapestValidSelection(dg)).toEqual({ ids: ['half'], delta: -60 })
+  })
+
+  it('meets a required group with a real choice before a free "No …" removal', () => {
+    const dg = dishOf(
+      [{ id: 'sauce', name: 'Sauce', kind: 'choice', min_select: 1, max_select: 1 }],
+      [
+        { id: 'none', group_id: 'sauce', name: 'No sauce', price_delta: 0, is_removal: true, sort: 0 },
+        { id: 'mayo', group_id: 'sauce', name: 'Mayo', price_delta: 0, sort: 1 },
+      ],
+    )
+    expect(cheapestValidSelection(dg).ids).toEqual(['mayo'])
+  })
+
+  it('prices a fixed size row at that size only', () => {
+    const dg = dishOf(
+      [
+        { id: 'size', name: 'Size', kind: 'size', min_select: 1, max_select: 1 },
+        { id: 'base', name: 'Base', kind: 'choice', min_select: 1, max_select: 1, size_scaling: 'stock_and_price' },
+      ],
+      [
+        { id: 's', group_id: 'size', name: 'Small', price_delta: -50, portion_factor: 0.5, sort: 0 },
+        { id: 'l', group_id: 'size', name: 'Large', price_delta: 100, portion_factor: 2, sort: 1 },
+        { id: 'b1', group_id: 'base', name: 'Rice', price_delta: 40, sort: 0 },
+        { id: 'b2', group_id: 'base', name: 'Noodles', price_delta: 30, sort: 1 },
+      ],
+    )
+    expect(cheapestValidSelection(dg)).toEqual({ ids: ['s', 'b2'], delta: -35 })
+    expect(cheapestValidSelection(dg, { fixed: { size: ['l'] } })).toEqual({ ids: ['l', 'b2'], delta: 160 })
+  })
+
+  // ── brute force ────────────────────────────────────────────────────────────────────────────
+  // mulberry32: a tiny seeded generator, so every run draws the same dishes.
+  const seeded = seed => () => {
+    seed = (seed + 0x6D2B79F5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const PRICES = [-50, -20, 0, 0, 5, 10, 12.5, 20, 20, 30, 50, 7.25]
+  const FACTORS = [0.5, 0.75, null, 1.25, 1.5, 2]
+  const SCALING = ['none', 'stock', 'stock_and_price']
+
+  function randomDish(rand, { maxOptions, groupCount }) {
+    const pick = arr => arr[Math.floor(rand() * arr.length)]
+    const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1))
+    const groups = [], options = [], attachments = []
+    const withSize = rand() < 0.6
+    if (withSize) {
+      groups.push({ id: 'size', name: 'Size', kind: 'size', min_select: 1, max_select: 1, included_count: rand() < 0.1 ? 1 : 0 })
+      const n = int(1, 3)
+      for (let i = 0; i < n; i++) options.push({ id: `size-${i}`, group_id: 'size', name: `Size ${i}`, price_delta: pick(PRICES) * 2, portion_factor: pick(FACTORS), sort: int(0, 2) })
+      // A dish may make its size optional (min_override 0) — the pricer allows it.
+      attachments.push({ recipe_id: 'dish', group_id: 'size', sort: 0, min_override: rand() < 0.15 ? 0 : null })
+    }
+    for (let g = 0; g < groupCount; g++) {
+      const id = `g${g}`
+      const n = int(1, maxOptions)
+      const min = int(0, Math.min(n, 3))
+      const max = rand() < 0.25 ? null : int(Math.max(min, 1), n)
+      const included = int(0, max == null ? Math.min(n, 3) : max)
+      groups.push({ id, name: `Group ${g}`, kind: pick(['addon', 'choice']), min_select: min, max_select: max, included_count: included, size_scaling: pick(SCALING) })
+      // Sort ties on purpose, so display order falls through to the name and the id.
+      for (let i = 0; i < n; i++) options.push({ id: `${id}-o${i}`, group_id: id, name: pick(['Apple', 'Banana', 'Cherry', 'Date']) + i, price_delta: pick(PRICES), sort: int(0, 2), is_removal: false })
+      attachments.push({ recipe_id: 'dish', group_id: id, sort: g + 1 })
+    }
+    return dishOf(groups, options, attachments)
+  }
+
+  function bruteForce(dg) {
+    const groupsById = Object.fromEntries(dg.map(d => [d.group.id, d.group]))
+    const perGroup = dg.map(({ rule, options }) => {
+      const out = []
+      for (let mask = 0; mask < (1 << options.length); mask++) {
+        const set = options.filter((_, i) => mask & (1 << i))
+        if (countAllowed(set.length, rule)) out.push(set)
+      }
+      return out
+    })
+    let best = null
+    const walk = (i, acc) => {
+      if (i === perGroup.length) {
+        const p = optionsPriceDelta(acc, groupsById)
+        if (best == null || p < best) best = p
+        return
+      }
+      for (const set of perGroup[i]) walk(i + 1, [...acc, ...set])
+    }
+    walk(0, [])
+    return best
+  }
+
+  function check(dg) {
+    const got = cheapestValidSelection(dg)
+    const chosen = dg.flatMap(d => d.options).filter(o => got.ids.includes(o.id))
+    const groupsById = Object.fromEntries(dg.map(d => [d.group.id, d.group]))
+    // What it returns is a real, valid order, priced exactly as the till would price it…
+    expect(selectionProblems(dg, got.ids)).toEqual([])
+    expect(optionsPriceDelta(chosen, groupsById)).toBe(got.delta)
+    // …and nothing valid is cheaper.
+    return { got: got.delta, want: bruteForce(dg) }
+  }
+
+  it('matches brute force on 1,500 random dishes of up to three groups', () => {
+    const rand = seeded(792)
+    const misses = []
+    for (let t = 0; t < 1500; t++) {
+      const dg = randomDish(rand, { maxOptions: 4, groupCount: 1 + Math.floor(rand() * 2) })
+      const { got, want } = check(dg)
+      if (got !== want) misses.push({ t, got, want })
+    }
+    expect(misses).toEqual([])
+  })
+
+  it('matches brute force on 1,500 single groups of up to eight options', () => {
+    const rand = seeded(4)
+    const misses = []
+    for (let t = 0; t < 1500; t++) {
+      const dg = randomDish(rand, { maxOptions: 8, groupCount: 1 })
+      const { got, want } = check(dg)
+      if (got !== want) misses.push({ t, got, want })
+    }
+    expect(misses).toEqual([])
   })
 })

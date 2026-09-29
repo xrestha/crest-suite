@@ -21,7 +21,10 @@
  */
 import fs from 'fs'
 import path from 'path'
-import { ITEM_REF_TABLES } from './itemRefTables'
+import {
+  ITEM_REF_TABLES, refCountsFromRows, refCodesFromCounts, readItemRefCounts,
+  priceImpactPhrase, priceImpactSentence, PRICE_CHANGE_KEEPS,
+} from './itemRefTables'
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', '..', '..', '..', 'supabase', 'migrations')
 
@@ -175,5 +178,150 @@ describe('ITEM_REF_TABLES', () => {
     it('attaches the guard as a BEFORE DELETE row trigger on items', () => {
       expect(sql).toMatch(/BEFORE DELETE ON public\.items\s+FOR EACH ROW/)
     })
+  })
+})
+
+// ── The per-item count read (S792, MASTER-8) ─────────────────────────────────────────────────────
+//
+// Item Master's usage scan and Price Tracker's price confirm both read `item_reference_counts`
+// through `readItemRefCounts`. A fake client stands in for supabase-js: `rpc()` returns a builder
+// whose `.range()` resolves one page, the way PostgREST does.
+function fakeClient(rows, { error = null, pageSize = 1000 } = {}) {
+  const calls = []
+  const client = {
+    rpc(fn, args) {
+      const call = { fn, args, order: [], range: null }
+      calls.push(call)
+      const builder = {
+        order(col) { call.order.push(col); return builder },
+        range(from, to) {
+          call.range = [from, to]
+          if (error) return Promise.resolve({ data: null, error })
+          return Promise.resolve({ data: rows.slice(from, Math.min(to + 1, from + pageSize)), error: null })
+        },
+      }
+      return builder
+    },
+  }
+  return { client, calls }
+}
+
+describe('refCountsFromRows / refCodesFromCounts', () => {
+  const rows = [
+    { ref_item_id: 'a', ref_table: 'purchase_entries', ref_count: 40 },
+    { ref_item_id: 'a', ref_table: 'closing_stock', ref_count: '3' },   // bigint may arrive as text
+    { ref_item_id: 'a', ref_table: 'vendor_returns', ref_count: 1 },
+    { ref_item_id: 'b', ref_table: 'staff_meals', ref_count: 2 },
+  ]
+
+  it('keys counts by badge code', () => {
+    expect(refCountsFromRows(rows)).toEqual({ a: { P: 40, CS: 3, VR: 1 }, b: { SM: 2 } })
+  })
+
+  it('lists codes in ITEM_REF_TABLES order, the order the chip always used', () => {
+    // vendor_returns is first in the list, purchase_entries last, whatever order the rows came in.
+    expect(refCodesFromCounts(refCountsFromRows(rows))).toEqual({ a: ['VR', 'CS', 'P'], b: ['SM'] })
+  })
+
+  it('keeps a table this list does not know, so the delete guard still sees the reference', () => {
+    const counts = refCountsFromRows([{ ref_item_id: 'a', ref_table: 'new_table', ref_count: 1 }])
+    expect(counts).toEqual({ a: { new_table: 1 } })
+    expect(refCodesFromCounts(counts)).toEqual({ a: ['new_table'] })
+  })
+
+  it('skips empty and malformed rows', () => {
+    expect(refCountsFromRows([{ ref_item_id: 'a', ref_table: 'wastages', ref_count: 0 }, { ref_table: 'wastages', ref_count: 3 }]))
+      .toEqual({})
+    expect(refCountsFromRows(null)).toEqual({})
+  })
+})
+
+describe('readItemRefCounts', () => {
+  it('asks item_reference_counts once, ordered on a unique key, and returns per-item counts', async () => {
+    const { client, calls } = fakeClient([
+      { ref_item_id: 'a', ref_table: 'wastages', ref_count: 12 },
+      { ref_item_id: 'a', ref_table: 'opening_stock', ref_count: 2 },
+    ])
+    const { data, error } = await readItemRefCounts(client, ['a', 'b', 'a', null])
+    expect(error).toBeNull()
+    expect(data).toEqual({ a: { W: 12, OS: 2 } })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].fn).toBe('item_reference_counts')
+    expect(calls[0].args).toEqual({ p_ids: ['a', 'b'] })
+    // Paging needs a total order; (item, table) is unique under the function's GROUP BY.
+    expect(calls[0].order).toEqual(['ref_item_id', 'ref_table'])
+  })
+
+  it('pages past the 1000-row cap instead of stopping at it', async () => {
+    const rows = Array.from({ length: 1500 }, (_, i) =>
+      ({ ref_item_id: `item${i}`, ref_table: 'purchase_entries', ref_count: 1 }))
+    const { client, calls } = fakeClient(rows)
+    const { data } = await readItemRefCounts(client, rows.map(r => r.ref_item_id))
+    expect(Object.keys(data)).toHaveLength(1500)
+    expect(calls.map(c => c.range)).toEqual([[0, 999], [1000, 1999]])
+  })
+
+  it('a failed read is an error with no data, never an empty map', async () => {
+    const failure = { code: '42501', message: 'permission denied' }
+    const { client } = fakeClient([], { error: failure })
+    expect(await readItemRefCounts(client, ['a'])).toEqual({ data: null, error: failure })
+  })
+
+  it('a thrown request is an error too', async () => {
+    const client = { rpc() { throw new TypeError('Failed to fetch') } }
+    const { data, error } = await readItemRefCounts(client, ['a'])
+    expect(data).toBeNull()
+    expect(error).toBeInstanceOf(TypeError)
+  })
+
+  it('no ids costs no request', async () => {
+    const { client, calls } = fakeClient([])
+    expect(await readItemRefCounts(client, [])).toEqual({ data: {}, error: null })
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe('priceImpactPhrase (S756 D5, moved from Items.js in S792)', () => {
+  test('names only the records a price re-values, merging opening and closing counts', () => {
+    expect(priceImpactPhrase({ OS: 2, CS: 1, W: 12, P: 40, VR: 3, PO: 2 }))
+      .toEqual({ text: '3 stock counts and 12 wastage entries', total: 15 })
+  })
+
+  test('purchases alone re-value nothing', () => {
+    expect(priceImpactPhrase({ P: 40, PO: 1 })).toBeNull()
+    expect(priceImpactPhrase({})).toBeNull()
+  })
+
+  test('singular forms', () => {
+    expect(priceImpactPhrase({ SM: 1 })).toEqual({ text: '1 staff meal', total: 1 })
+  })
+
+  test('three or more parts', () => {
+    expect(priceImpactPhrase({ CS: 3, W: 12, R: 1 }).text).toBe('3 stock counts, 12 wastage entries and 1 recipe line')
+  })
+})
+
+describe('priceImpactSentence (the one D5 sentence Item Master and Price Tracker both give)', () => {
+  test('counts what a new price re-values', () => {
+    expect(priceImpactSentence({ CS: 3, W: 12 })).toBe(
+      "This item's 3 stock counts and 12 wastage entries are valued at this price wherever a report reads them — including months already closed — so those past figures change the moment you save.")
+    expect(priceImpactSentence({ SM: 1 })).toMatch(/^This item's 1 staff meal is valued at this price/)
+  })
+
+  test('says nothing when the counts were read and nothing is re-valued', () => {
+    expect(priceImpactSentence({ P: 40 })).toBeNull()
+    expect(priceImpactSentence({}, { complete: true })).toBeNull()
+  })
+
+  test('an unread count is not "nothing changes"', () => {
+    expect(priceImpactSentence({}, { complete: false })).toMatch(/^Crest could not count this item's past records/)
+  })
+
+  test('a partial count still names what it found', () => {
+    expect(priceImpactSentence({ W: 2 }, { complete: false })).toMatch(/^This item's 2 wastage entries are valued/)
+  })
+
+  test('the closing note names what a price change leaves alone', () => {
+    expect(PRICE_CHANGE_KEEPS).toMatch(/Purchase bills keep the price typed on them/)
   })
 })

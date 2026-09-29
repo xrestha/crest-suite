@@ -20,6 +20,7 @@ import { withTimeout } from '../../../utils/withTimeout'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { fmtLineRate } from './purchaseLines'
 
 // Quantities are numeric(12,3) in the database, and every one of these figures has been through
 // `parseFloat` on the way here. Without this, ordering 0.3 and receiving 0.1 twice leaves
@@ -121,14 +122,18 @@ export default function PurchaseOrders() {
     setPeriods(p || [])
     setVendors(v || [])
     setItems(i || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) {
+    // The open period, else the latest one (S792, PURCHASES-10; the S722 rule). Between ending one
+    // month and opening the next there is no open period, and this selected nothing — an empty
+    // order list for a client with orders, and no way to reach last month's but the dropdown.
+    // `periods` is newest first, so [0] is the latest.
+    const start = (p || []).find(x => x.status === 'open') || (p || [])[0]
+    if (start) {
       // Claim the page for the auto-selected period — the hook's own contract, and the same miss
       // S698 fixed in Purchases.js. Without it a period change during this first load can be
       // overwritten by the load that started before it.
-      periodReq.begin(open.id)
-      setSelectedPeriod(open)
-      await loadPos(open.id)
+      periodReq.begin(start.id)
+      setSelectedPeriod(start)
+      await loadPos(start.id)
     }
     setLoading(false)
   }
@@ -743,7 +748,8 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                         )}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>
-                        NPR {l.unit_price.toFixed(2)}
+                        {/* Per BASE unit, so a gram's price keeps its decimals (the PURCHASES-9 rule, S792). */}
+                        NPR {fmtLineRate(l.unit_price)}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
                         {val > 0 ? `NPR ${val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
@@ -1009,7 +1015,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                       <td style={{ padding: '9px 10px', fontSize: 13, textAlign: 'right' }}>{x.qty_ordered}</td>
                       <td style={{ padding: '9px 10px', fontSize: 13, color: '#555' }}>{x.items?.uom || '—'}</td>
                       <td style={{ padding: '9px 10px', fontSize: 13, textAlign: 'right' }}>
-                        {x.unit_price ? `NPR ${money2(parseFloat(x.unit_price))}` : '—'}
+                        {x.unit_price ? `NPR ${fmtLineRate(x.unit_price)}` : '—'}
                       </td>
                       <td style={{ padding: '9px 10px', fontSize: 13, textAlign: 'right', fontWeight: 600 }}>
                         {subtotal > 0 ? `NPR ${money2(subtotal)}` : '—'}

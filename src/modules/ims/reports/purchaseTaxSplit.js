@@ -51,17 +51,16 @@ export function returnLinesOutsidePeriod(entries, returns) {
 }
 
 /**
- * Discount factors for bills from OTHER months. Same arithmetic as the period's own, with one
- * difference: the legacy fallback bill key (vendor + invoice + day, for a line with no
- * purchase_group_id) is scoped by `period_id`, because lines from several months are passed together
- * and day 5 exists in all of them — two months' legacy bills must not merge into one discount.
+ * Discount factors for bills from OTHER months. Lines from several months are passed together and
+ * day 5 exists in all of them, so two months' legacy bills (no purchase_group_id) must not merge into
+ * one discount. That scoping used to be done here, by rewriting the key before allocating; since S792
+ * (TAX-12) it lives in `allocationBillKey`, which every allocation goes through — so this is the same
+ * arithmetic as the period's own, with nothing of its own to keep in step. `readPriorBillLines`
+ * selects `period_id`, which the key needs.
  */
 export function priorBillFactors(lines) {
   if (!lines || lines.length === 0) return new Map()
-  const scoped = lines.map(l => (l.purchase_group_id
-    ? l
-    : { ...l, purchase_group_id: `legacy|${l.period_id || ''}|${l.vendor_id || ''}|${l.invoice_ref || ''}|${l.bs_day}` }))
-  return netFactors(allocateBillDiscounts(scoped))
+  return netFactors(allocateBillDiscounts(lines))
 }
 
 function mergeFactors(own, prior) {
@@ -226,9 +225,36 @@ export function summariseUnlinkedReturns(returns, { max = 10, dayLabel } = {}) {
 
 export const ONE_LAKH = 100000
 
-/** A PAN as typed, reduced to what identifies it: no surrounding or inner whitespace. */
+/**
+ * A PAN as typed, reduced to what identifies it: its digits, and nothing else (S792, TAX-11).
+ *
+ * The vendor form takes the PAN as free text, and this used to strip whitespace only — so
+ * "601-234-567", "PAN 601234567" and "601234567" were three suppliers on the Annexure 13 disclosure,
+ * each tested against NPR 1,00,000 on its own, which is the under-disclosure D12 exists to prevent.
+ * A Nepal PAN is nine digits, so the digits are the identity. A value with no digits at all ("N/A",
+ * "-") becomes blank and is treated as no PAN — it used to be a PAN called "N/A" that merged every
+ * card typed that way into one supplier.
+ */
 export function normalisePan(pan) {
-  return String(pan ?? '').replace(/\s+/g, '')
+  return String(pan ?? '').replace(/\D+/g, '')
+}
+
+export const PAN_DIGITS = 9
+
+/**
+ * What to tell the person typing a PAN on the Vendors form, or null when there is nothing to say
+ * (S792, TAX-11). A warning, never a refusal: the supplier's own paper is the authority, and a card
+ * saved with an odd PAN is still better than one saved with none. Blank is not flagged here — a
+ * missing PAN is its own warning on the one-lakh report.
+ */
+export function panWarning(pan) {
+  const raw = String(pan ?? '').trim()
+  if (!raw) return null
+  const digits = normalisePan(raw)
+  if (digits.length === PAN_DIGITS) return null
+  const why = 'The one-lakh (Annexure 13) report adds up a supplier\'s cards by PAN, so a wrong PAN can split one supplier in two.'
+  if (digits.length === 0) return `This has no digits in it. A Nepal PAN is ${PAN_DIGITS} digits, like 601234567. ${why}`
+  return `This PAN has ${digits.length} digit${digits.length !== 1 ? 's' : ''}; a Nepal PAN has ${PAN_DIGITS}. Check it against the supplier's bill. ${why}`
 }
 
 /**

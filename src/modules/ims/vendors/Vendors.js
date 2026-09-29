@@ -15,6 +15,7 @@ import { FileText, Pencil, Eye, EyeOff, Trash2, Archive as ArchiveIcon, ArchiveR
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { panWarning } from '../reports/purchaseTaxSplit'
 
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '', payment_terms: '' }
 
@@ -103,6 +104,10 @@ export default function Vendors() {
   // Per-field validation. `error` above stays the form-level channel (no client selected, a write
   // the server rejected); a message about one box belongs under that box (S603).
   const [fieldErr, setFieldErr] = useState('')
+  // The PAN warning waits for the box to be left (or an existing PAN to be opened), so it does not
+  // nag at "6", "60", "601" while someone is still typing (S792, TAX-11).
+  const [panTouched, setPanTouched] = useState(false)
+  const panNote = panTouched ? panWarning(form.pan_vat_no) : null
   const [search, setSearch] = useState('')
   // Which vendors have records pointing at them. Two jobs: the usage chip beside every vendor name
   // (the same 🔗 mark Item Master shows, for anyone who can open this page), and gating the admin
@@ -202,6 +207,7 @@ export default function Vendors() {
     setForm(EMPTY_FORM)
     setError('')
     setFieldErr('')
+    setPanTouched(false)
     setShowForm(true)
   }
 
@@ -217,11 +223,14 @@ export default function Vendors() {
     })
     setError('')
     setFieldErr('')
+    setPanTouched(!!vendor.pan_vat_no)   // a PAN already on file is checked as soon as it is opened
     setShowForm(true)
   }
 
   // Core save — returns true on success; does not close/reload (lets callers chain "save & next").
-  async function doSave() {
+  // `holdBusy` leaves `saving` set on success, for a caller that still has a reload to await before
+  // the form may be pressed again (save(), MASTER-8).
+  async function doSave({ holdBusy = false } = {}) {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
     if (!form.name.trim()) { setFieldErr('Vendor name is required.'); return false }
     setFieldErr('')
@@ -244,7 +253,7 @@ export default function Vendors() {
         return false
       }
     } else {
-      const { error } = await scopedInsert('vendors', {
+      const { data, error } = await scopedInsert('vendors', {
         vendor_code: getNextVendorCode(),
         name: form.name.trim(),
         contact_person: form.contact_person.trim(),
@@ -254,13 +263,22 @@ export default function Vendors() {
         payment_terms: form.payment_terms.trim() || null
       })
       if (error) { setError(asActionError(error)); setSaving(false); return false }
+      // The new row joins the list the next code is minted from straight away (MASTER-8), so even a
+      // reload that fails cannot hand the next Add this vendor's code again.
+      if (data?.length) setVendors(v => [...v, ...data])
     }
-    setSaving(false)
+    if (!holdBusy) setSaving(false)
     return true
   }
 
+  // S792 (MASTER-8): the reload is awaited, with the form open and its button busy, before the
+  // dialog closes. It used to close first and reload in the background, so a quick second Add
+  // minted its code from the list as it stood BEFORE this vendor, and issued the same VND-0NN twice.
   async function save() {
-    if (await doSave()) { setShowForm(false); loadVendors() }
+    if (!(await doSave({ holdBusy: true }))) return
+    await loadVendors()
+    setSaving(false)
+    setShowForm(false)
   }
 
   // Save current vendor, then open the adjacent one (dir = +1 next / -1 prev) in the visible order.
@@ -518,12 +536,21 @@ export default function Vendors() {
               />
             </div>
             <div className="form-field">
-              <label htmlFor="vendor-f5"><Tip text="Supplier's PAN (Permanent Account Number) or VAT registration number. Required for VAT invoice reconciliation and IRD compliance." width={280}>PAN / VAT No.</Tip></label>
+              <label htmlFor="vendor-f5"><Tip text="Supplier's PAN (Permanent Account Number) or VAT registration number — 9 digits, as printed on their bill. Required for VAT invoice reconciliation and IRD compliance. The one-lakh report adds a supplier's cards together by this number." width={280}>PAN / VAT No.</Tip></label>
               <input id="vendor-f5"
                 value={form.pan_vat_no}
                 onChange={e => setForm({ ...form, pan_vat_no: e.target.value })}
+                onBlur={() => setPanTouched(true)}
                 placeholder="e.g. 123456789"
+                inputMode="numeric"
+                aria-describedby={panNote ? 'vendor-f5-note' : undefined}
               />
+              {/* A warning, not a refusal (S792, TAX-11): no aria-invalid and Save stays live. */}
+              {panNote && (
+                <p id="vendor-f5-note" role="status" style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)' }}>
+                  △ {panNote}
+                </p>
+              )}
             </div>
           </div>
           <div className="form-grid form-grid-3" style={{ marginTop: 18 }}>

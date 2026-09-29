@@ -23,6 +23,9 @@ import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization
 import { FilterChips } from '../../../components/Tabs'
 import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
 import PanPriceBanner from './PanPriceBanner'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 
 
 function vatOf(r) {
@@ -72,6 +75,9 @@ export default function MenuPricing() {
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  // The Excel letterhead's outlet name (IMS branch only — the POS-only branch exports nothing).
+  // Called up here with every other hook, above the guard and both returns.
+  const biz = useBizInfo()
   // Which groups each dish offers, by name, so the row says "Size · Extras" the way it says
   // "2 pairings" — an 11px grey "Customize" with no count gave no way to tell from the menu which
   // dishes were customized (S759). Its own small load, so a failed read here costs only the labels.
@@ -868,24 +874,54 @@ export default function MenuPricing() {
   // Exports the table as filtered on screen — the active category tab, same convention as the
   // Print button. The New Price column is exported BLANK on purpose: this sheet's job is the
   // same as the printed one's (send it out, get prices back), just over email instead of paper.
+  //
+  // S792 (RECIPES-5): the button is gated on the load AND on a failed read. A failed ↻ Refresh
+  // Costs keeps the previous `recipes` in state behind the error card, so Excel stayed live and
+  // sent those old food costs out as current. The sheet now carries the letterhead and a scope
+  // line (what it covers, as of when, at which rates) like every other export, and waits on the
+  // outlet name that letterhead needs.
+  const exportBlocked = loading || !!loadError || !!biz.error || display.length === 0
   async function exportExcel() {
+    if (exportBlocked) return
     const XLSX = await import('xlsx')
-    const rows = display.map((r, i) => ({
-      '#': i + 1,
-      'On POS': r.pos_enabled ? 'Yes' : 'No',
-      'Item': r.name,
-      'Category': r.category || '',
-      // S792 (D31): on a PAN-bill outlet the sheet's prices are what the guest pays, with no VAT —
-      // the price sent back in New Price is stored as typed, so the header must say so.
-      'VAT': pan ? 'None — PAN bill' : vatLabel(r.vat),
-      'Food Cost (NPR)': r.cost > 0 ? Math.round(r.cost * 100) / 100 : '',
-      [pan ? 'Current Price, no VAT (NPR)' : 'Current Price incl VAT (NPR)']: r.inclVat > 0 ? Math.round(r.inclVat) : '',
-      // Blank, not "0.0%", where there is no cost to divide — the sheet is sent out and priced
-      // against, and a 0% food cost reads as a fact rather than as a missing recipe.
-      'FC %': r.fcPct !== null ? `${r.fcPct.toFixed(1)}%` : '',
-      [pan ? 'New Price (no VAT)' : 'New Price (incl VAT)']: '',
-    }))
-    const ws = XLSX.utils.json_to_sheet(rows)
+    // A build-your-own dish's own ingredients are the bowl and the spoon (S792, RECIPES-1): its
+    // cost and FC % would be the near-zero figure the screen replaces with a range, so the sheet
+    // leaves both blank and says why, with the range where the page has it.
+    const byoNote = r => {
+      if (!byoCost.buildYourOwn.has(r.id)) return ''
+      const range = byoCost.byRecipe[r.id]
+      return `Build-your-own: costed by build${range && !range.empty && !byoCost.error ? ` (${costRangeText(range)})` : ''}`
+    }
+    const anyByo = display.some(r => byoCost.buildYourOwn.has(r.id))
+    const rows = display.map((r, i) => {
+      const note = byoNote(r)
+      return {
+        '#': i + 1,
+        'On POS': r.pos_enabled ? 'Yes' : 'No',
+        'Item': r.name,
+        'Category': r.category || '',
+        // S792 (D31): on a PAN-bill outlet the sheet's prices are what the guest pays, with no VAT —
+        // the price sent back in New Price is stored as typed, so the header must say so.
+        'VAT': pan ? 'None — PAN bill' : vatLabel(r.vat),
+        'Food Cost (NPR)': !note && r.cost > 0 ? Math.round(r.cost * 100) / 100 : '',
+        [pan ? 'Current Price, no VAT (NPR)' : 'Current Price incl VAT (NPR)']: r.inclVat > 0 ? Math.round(r.inclVat) : '',
+        // Blank, not "0.0%", where there is no cost to divide — the sheet is sent out and priced
+        // against, and a 0% food cost reads as a fact rather than as a missing recipe.
+        'FC %': !note && r.fcPct !== null ? `${r.fcPct.toFixed(1)}%` : '',
+        [pan ? 'New Price (no VAT)' : 'New Price (incl VAT)']: '',
+        ...(anyByo ? { 'Note': note } : {}),
+      }
+    })
+    const asOf = nepalBsLong(new Date())
+    const scopeLine = [
+      `Menu as at ${asOf ? `${asOf} BS` : nepalDateLong(new Date())}`,
+      catTab === 'All' ? 'all categories' : `category: ${catTab}`,
+      search.trim() ? `search: "${search.trim()}"` : null,
+      `${display.length} of ${recipes.length} item${recipes.length !== 1 ? 's' : ''}`,
+      "food cost at today's item rates",
+      pan ? 'prices are what the guest pays (PAN bill, no VAT)' : "prices include each item's VAT",
+    ].filter(Boolean).join(' · ')
+    const ws = sheetWithLetterhead(XLSX, { title: 'Menu Pricing', biz, scopeLine, rows })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Menu Pricing')
     // The sheet is the on-screen filter, so the filename has to name the whole filter — a search
@@ -913,7 +949,7 @@ export default function MenuPricing() {
             </button>
           </Tip>
           <Tip text="Downloads the list as filtered and sorted on screen, with a blank New Price column to fill in and send back." width={280}>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || display.length === 0}>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={exportBlocked}>
               ⬇ Excel
             </button>
           </Tip>
@@ -941,6 +977,12 @@ export default function MenuPricing() {
       )}
 
       <ActionError error={pageError} className="no-print" />
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than sending out a
+          sheet with a blank company name. The prices below are unaffected. Reload the page to try again.
+        </p>
+      )}
       {!loading && !loadError && (
         <PanPriceBanner mismatches={panMismatches} fixHint="Type the price guests should pay in each dish's New Price box and press Save — it is then stored as typed." />
       )}

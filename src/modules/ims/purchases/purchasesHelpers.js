@@ -27,11 +27,13 @@ export function getCf(item) {
 
 // A sub-paisa unit rate is legitimate (a PCS item bought by the 1000), so a flat toFixed(2) would
 // print "0.00" for exactly the entries these hints exist to expose. Mirrors Items.js's fmtPerUom.
+// Below NPR 1 (S792, PURCHASES-9) up to four decimals: a per-gram rate of 0.115 is NPR 115 a kg,
+// and two decimals printed it as 0.12 — a 4% misstatement on every line of it.
 export function fmtRate(v) {
   const n = parseFloat(v)
   if (!isFinite(n) || n <= 0) return '—'
   if (n < 0.01) return parseFloat(n.toFixed(6)).toString()
-  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 })
 }
 
 // Bill-level totals: taxable/non-taxable base, discount, VAT, grand total. Discount is spread

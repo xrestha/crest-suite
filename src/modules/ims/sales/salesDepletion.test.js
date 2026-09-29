@@ -1,5 +1,6 @@
 import {
   selectDepletingSales, selectDepletingSalesAcrossPeriods, buildPosIndex, posSupersedesManual, bulkTillHandover,
+  earlierTillDay,
 } from './salesDepletion'
 
 // `bs_day` is a day NUMBER inside a month, so the supersedes test only means anything within one
@@ -211,5 +212,70 @@ describe('bulkTillHandover — what Sales Entry says about it (D35)', () => {
     ])
     expect(h.manualBeforeTill).toBe(true)
     expect(h.needsReentry).toEqual([])
+  })
+})
+
+// S792.4: sales_entries only hold the bills that reached IMS. An unsynced till, or bills waiting
+// for Periods → Post POS bills to Inventory, made the till's real first days look pre-till.
+describe('bulkTillHandover — the till\'s own bills can start it earlier (billTillStart)', () => {
+  const rows = [
+    { recipe_id: 'momo', qty_sold: 40, bs_day: 0, source: 'manual' },
+    { recipe_id: 'momo', qty_sold: 3, bs_day: 5, source: 'manual' },
+    { recipe_id: 'momo', qty_sold: 6, bs_day: 12, source: 'pos' },
+  ]
+
+  test('a bill not yet in IMS moves the till start back, and the pre-till range with it', () => {
+    const h = bulkTillHandover(rows, { billTillStart: 8 })
+    expect(h.tillStart).toBe(8)
+    // Day 5 is still before the till, so the month was still started by hand.
+    expect(h.manualBeforeTill).toBe(true)
+  })
+
+  test('the pre-till re-entry is judged against the earlier start', () => {
+    // Day 5 re-entered momo's pre-till days whether the till began on 8 or 12.
+    expect(bulkTillHandover(rows, { billTillStart: 8 }).ignoredForStock)
+      .toEqual([{ recipeId: 'momo', bulkQty: 40, reason: 'reentered' }])
+    // A till that really began on day 4 leaves day 5 a till day — nothing before it is re-entered.
+    expect(bulkTillHandover(rows, { billTillStart: 4 }).needsReentry)
+      .toEqual([{ recipeId: 'momo', bulkQty: 40 }])
+  })
+
+  test('bills from day 1 mean there were no pre-till days at all', () => {
+    const h = bulkTillHandover(rows, { billTillStart: 1 })
+    expect(h.tillStart).toBe(1)
+    expect(h.ignoredForStock).toEqual([{ recipeId: 'momo', bulkQty: 40, reason: 'till_from_day_one' }])
+  })
+
+  test('a later or missing bill day changes nothing — IMS already holds the earlier sale', () => {
+    const base = bulkTillHandover(rows)
+    expect(bulkTillHandover(rows, { billTillStart: 20 })).toEqual(base)
+    expect(bulkTillHandover(rows, { billTillStart: null })).toEqual(base)
+    expect(bulkTillHandover(rows, {})).toEqual(base)
+  })
+
+  test('a till whose bills have not reached IMS at all still has a start', () => {
+    const h = bulkTillHandover([{ recipe_id: 'momo', qty_sold: 3, bs_day: 2, source: 'manual' }], { billTillStart: 6 })
+    expect(h).toEqual({ tillStart: 6, needsReentry: [], ignoredForStock: [], manualBeforeTill: true })
+  })
+
+  test('the stock reports are not moved by it: selectDepletingSales still reads the rows', () => {
+    // Only Sales Entry passes billTillStart; the read path has no override to take. (The Bulk row
+    // drops out on the rows' own day-12 start, since day 5 re-entered a pre-till day.)
+    expect(selectDepletingSales(rows).map(r => r.bs_day)).toEqual([5, 12])
+  })
+})
+
+describe('earlierTillDay', () => {
+  test('the earlier of two known days, or whichever one is known', () => {
+    expect(earlierTillDay(12, 8)).toBe(8)
+    expect(earlierTillDay(3, 8)).toBe(3)
+    expect(earlierTillDay(null, 8)).toBe(8)
+    expect(earlierTillDay(8, undefined)).toBe(8)
+  })
+
+  test('nothing known is null, and a non-day is not a day', () => {
+    expect(earlierTillDay(null, null)).toBeNull()
+    expect(earlierTillDay(0, NaN)).toBeNull()
+    expect(earlierTillDay(-2, 4)).toBe(4)
   })
 })

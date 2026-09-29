@@ -14,9 +14,14 @@ import {
   regularOverrideError, adjustmentOverrideError,
 } from './depreciationCompute'
 import { chipKeys } from '../../../shared/rovingFocus'
+import { formatAdAsBs } from '../../../utils/bsCalendar'
+import { nepalBsLong } from '../../../shared/nepalTime'
 
 const fmt = nprInt
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+// Period dates are stored AD dates: shown as the BS date they fall on (S792, COSTS-11). `posted_at`
+// is a timestamp, so it is dated in Nepal whatever the viewer's zone.
+const fmtDate = d => formatAdAsBs(d)
+const fmtPosted = ts => nepalBsLong(ts) || '—'
 
 // An adjustment run is recorded through the same RPC as any other run; what marks it is its
 // `notes`, which name the run it reverses. That is what lets the run picker say a run has already
@@ -240,7 +245,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
           <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
             {earlier.map(r => (
               <li key={r.id}>
-                {runLabel(r)}, posted {fmtDate(r.posted_at)}
+                {runLabel(r)}, posted {fmtPosted(r.posted_at)}
                 {r.notes?.startsWith('Disposal:') ? ' (charged at a disposal)' : ''}
                 {reversedSet.has(r.id) ? ' — already reversed by an adjustment' : ''}
               </li>
@@ -309,7 +314,7 @@ ${text}`, detail })
                   <option value="">{runs === null ? 'Loading…' : selectableRuns.length === 0 ? 'No posted runs' : 'Choose a posted run'}</option>
                   {selectableRuns.map(r => (
                     <option key={r.id} value={r.id} disabled={reversedIds.has(r.id)}>
-                      {runLabel(r)} · posted {fmtDate(r.posted_at)}{reversedIds.has(r.id) ? ' · already reversed' : ''}
+                      {runLabel(r)} · posted {fmtPosted(r.posted_at)}{reversedIds.has(r.id) ? ' · already reversed' : ''}
                     </option>
                   ))}
                 </select>
@@ -353,7 +358,7 @@ ${text}`, detail })
                   <th style={{ textAlign: 'right' }}>{mode === 'adjust' ? 'Charged by that run' : 'Computed Depreciation'}</th>
                   <th style={{ textAlign: 'right', width: 150 }}>
                     {mode === 'adjust'
-                      ? <Tip text="Minus what that run charged, to reverse it in full. Enter a smaller negative amount to reverse part of it, or 0 to leave this asset out." width={280}>Reversal</Tip>
+                      ? <Tip text="Minus what that run charged, to reverse it in full. Enter a smaller negative amount to reverse part of it, or 0 to leave this asset out. A part reversal takes back the LAST days of the run: e.g. a fridge sold halfway through a year's run — reverse half the charge and it stays charged for the first half only." width={300}>Reversal</Tip>
                       : <Tip text="Leave blank to use the computed figure. Set an amount (e.g. for impairment) and you must also give a reason. It cannot be negative or take the asset below its salvage value." width={280}>Override</Tip>}
                   </th>
                   {mode === 'regular' && <th style={{ width: 220 }}>Reason</th>}

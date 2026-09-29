@@ -3,7 +3,7 @@
 // in any environment without REACT_APP_SUPABASE_URL set, which includes a plain checkout and CI.
 // Mocked the same way scopedDb.test.js already does it; every test below passes its own mock
 // client into the function under test, so nothing here needs the real one.
-import { persistSalesDay, isMissingFunctionError, findSupersededRows, depleteManualSales, repostSupersededMovements } from './persistSalesDay'
+import { persistSalesDay, isMissingFunctionError, findSupersededRows, depleteManualSales, repostSupersededMovements, stockUpdateBusy, stockUpdateWaitingText } from './persistSalesDay'
 import { errorInfo } from '../../../shared/errorText'
 import { supabase as moduleClient } from '../../../supabaseClient'
 
@@ -338,5 +338,65 @@ describe('the superseded-days re-post reads inside the day lock (S792 P3)', () =
     expect(last).toHaveLength(1)
     expect(last[0]).toMatchObject({ item_id: 'flour', period_id: 'p1', bs_day: 4, source: 'manual', client_id: 'c1' })
     expect(last[0].qty).toBeCloseTo(-0.6)
+  })
+})
+
+// S792.4: a hung stock update keeps its day's lock (deliberately — releasing it risks the double
+// depletion SALES-4 fixed), so Sales Entry has to be able to say what the wait is.
+describe('stockUpdateBusy — is this day already being updated on this device?', () => {
+  const settle = () => new Promise(r => setTimeout(r, 20))
+
+  test('true while a stock update of the day is running, false once it has finished', async () => {
+    let release
+    const held = new Promise(r => { release = r })
+    moduleClient.from.mockImplementation(() => ({
+      delete: () => ({ eq: function () { return this }, in: function () { return this }, then: (ok, bad) => held.then(() => ({ error: null })).then(ok, bad) }),
+      insert: () => ({ select: () => Promise.resolve({ data: [], error: null }) }),
+    }))
+    const client = { from: () => ({ select: () => ({ eq: function () { return this }, in: function () { return this }, order: function () { return this }, range: function () { return this }, then: (ok, bad) => Promise.resolve({ data: [], error: null }).then(ok, bad) }) }) }
+    expect(stockUpdateBusy('c9', 'p9', [7])).toBe(false)
+    const run = depleteManualSales(client, { clientId: 'c9', periodId: 'p9', bsDay: 7, rows: [{ recipe_id: 'r1', qty_sold: 1 }] })
+    await settle()
+    expect(stockUpdateBusy('c9', 'p9', [7])).toBe(true)
+    expect(stockUpdateBusy('c9', 'p9', [8])).toBe(false)
+    expect(stockUpdateBusy('c9', 'p9', [8, 7])).toBe(true)
+    expect(stockUpdateBusy('c9', 'p10', [7])).toBe(false)
+    release()
+    await run
+    await settle()
+    expect(stockUpdateBusy('c9', 'p9', [7])).toBe(false)
+  })
+
+  test('no days is never busy', () => {
+    expect(stockUpdateBusy('c9', 'p9', [])).toBe(false)
+    expect(stockUpdateBusy('c9', 'p9', undefined)).toBe(false)
+  })
+})
+
+describe('stockUpdateWaitingText — the note when the stock update outlasts the save', () => {
+  test('says the sales are saved, why the stock is waiting, and what finishes it', () => {
+    const t = stockUpdateWaitingText({ label: '5 Bhadra (Bhadra 2083)', queuedBehind: true })
+    expect(t).toMatch(/^The sales figures for 5 Bhadra \(Bhadra 2083\) are saved\./)
+    expect(t).toMatch(/waiting for an earlier save of the same day/)
+    expect(t).toMatch(/reload the page and save 5 Bhadra \(Bhadra 2083\) again without changing anything/)
+    expect(t).toMatch(/Stock Movements and Reorder/)
+    expect(t).not.toMatch(/replaced/)
+  })
+
+  test('a slow update of its own is not blamed on an earlier save', () => {
+    const t = stockUpdateWaitingText({ label: 'the Bhadra 2083 period total', queuedBehind: false })
+    expect(t).not.toMatch(/earlier save/)
+    expect(t).toMatch(/the server has not answered it yet/)
+  })
+
+  test('a cross-mode save names what else has to be saved again', () => {
+    const t = stockUpdateWaitingText({ label: '5 Bhadra (Bhadra 2083)', queuedBehind: false, alsoRedo: 'the Bhadra 2083 period total on Bulk Entry' })
+    expect(t).toMatch(/also replaced the entries saved for the Bhadra 2083 period total on Bulk Entry/)
+    expect(t).toMatch(/does not redo their stock update, so save those again as well/)
+  })
+
+  test('never claims the sales were lost or that nothing was saved', () => {
+    const t = stockUpdateWaitingText({ label: 'x', queuedBehind: true, alsoRedo: 'y' })
+    expect(t).not.toMatch(/not saved|nothing (was|has been) saved|lost/i)
   })
 })

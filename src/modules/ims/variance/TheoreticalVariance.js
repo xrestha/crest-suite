@@ -156,8 +156,8 @@ export default function TheoreticalVariance() {
   // scale accounts for sub-recipe yield (qty used ÷ yield_qty of sub-recipe).
   // qty is as-purchased (gross), accounting for item yield_pct trim loss.
   // `depth` mirrors the shared explodeRecipeIngredients util's own cyclic guard. Recipes.js blocks
-  // cycles at save time (wouldCreateCycle), so this is a backstop for legacy or imported data that
-  // predates that check — without it a cyclic sub-recipe reference recurses until the stack blows
+  // cycles at save time (recipeCycle.js, plus the recipe_ingredients_guard_cycle trigger since
+  // S792), so this is a backstop for legacy data that predates those checks — without it a cyclic sub-recipe reference recurses until the stack blows
   // and takes the whole page down rather than degrading to a wrong number.
   function expandIngredients(recipe, allRecipes, itemList, scale = 1, depth = 0) {
     if (depth > 10) return []

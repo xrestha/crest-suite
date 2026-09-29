@@ -243,7 +243,9 @@ screens and Purchase Orders now render an **amber** banner whenever
 `canEditClosedPeriods && period.status === 'closed'` (the Owner sees it since S756), and Sales does
 since S756 stage 2. Stock Count does since S792 (STOCK-5: `ClosedPeriodBanner canEdit`, plus a
 "Carry into <next>'s opening stock" button once a corrected closing count is saved, through
-`carryClosingIntoNext`). Overheads and Requisitions still do not. Any page
+`carryClosingIntoNext`). Overheads does since S792 stage 3 (`ClosedPeriodBanner canEdit`);
+Requisitions shows its own amber note, not the component, because the component's sentence says to
+regenerate the snapshot and no frozen-report figure reads requisitions. Any page
 that adopts the `isLocked` line owes its admin the same notice — the lock and the notice are the
 same fact, and only one of them was being shown.
 

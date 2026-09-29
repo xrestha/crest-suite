@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import {
   MAX_PHOTO_BYTES, photoRefusal, photoPath, versionedUrl, objectPathFromUrl, guestCanLoad,
-  fitWithin, downscalePhoto, storageRefusal,
+  fitWithin, downscalePhoto, storageRefusal, photoMayBeDeleted,
 } from './dishPhoto'
 
 const BASE = 'https://abcd.supabase.co'
@@ -127,6 +127,45 @@ describe('downscalePhoto', () => {
     const e = env()
     e.createImageBitmap = jest.fn(async () => { throw new Error('bad image') })
     expect(await downscalePhoto(big, e)).toBe(big)
+  })
+})
+
+// S792 RECIPES-8: "Paste a link instead" lets two dishes share one stored photo, and replacing it on
+// one deleted the picture the other still showed on the guest menu.
+describe('photoMayBeDeleted', () => {
+  const VEG = '1b0c7a2e-3d4f-4a5b-8c6d-7e8f9a0b1c2d'
+  const CHICKEN = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f'
+  const url = p => `${BASE}/storage/v1/object/public/dish-photos/${p}?v=1`
+  const vegPhoto = `client-1/${VEG}-100.jpg`
+  const ctx = (others, recipeId = VEG) => ({ clientId: 'client-1', recipeId, others, supabaseUrl: BASE })
+
+  it("deletes this dish's own photo when no other dish shows it", () => {
+    expect(photoMayBeDeleted(vegPhoto, ctx([{ id: VEG, image_url: url(vegPhoto) }, { id: CHICKEN, image_url: null }]))).toBe(true)
+  })
+
+  it('keeps a photo another dish shows — even one first uploaded for THIS dish', () => {
+    const others = [{ id: VEG, image_url: url(vegPhoto) }, { id: CHICKEN, image_url: url(vegPhoto) }]
+    expect(photoMayBeDeleted(vegPhoto, ctx(others))).toBe(false)
+    // …and the other way round: Chicken Momo letting go of the link it pasted from Veg Momo.
+    expect(photoMayBeDeleted(vegPhoto, ctx(others, CHICKEN))).toBe(false)
+  })
+
+  it('matches the other dish by the stored file, whatever version or query its link carries', () => {
+    const others = [{ id: CHICKEN, image_url: `${BASE}/storage/v1/object/public/dish-photos/${vegPhoto}?v=999&x=1` }]
+    expect(photoMayBeDeleted(vegPhoto, ctx(others))).toBe(false)
+  })
+
+  it('a dish not saved yet: its own "new-" upload goes, a pasted link from a saved dish stays', () => {
+    const fresh = 'client-1/new-555.webp'
+    expect(photoMayBeDeleted(fresh, ctx([{ id: CHICKEN, image_url: url(`client-1/${CHICKEN}-1.jpg`) }], null))).toBe(true)
+    expect(photoMayBeDeleted(vegPhoto, ctx([{ id: VEG, image_url: url(vegPhoto) }], null))).toBe(false)
+  })
+
+  it('never the guest-menu logo, another client\'s folder, or a name this field did not give', () => {
+    expect(photoMayBeDeleted('client-1/guest-menu-logo-123.png', ctx([]))).toBe(false)
+    expect(photoMayBeDeleted(`client-2/${VEG}-100.jpg`, ctx([]))).toBe(false)
+    expect(photoMayBeDeleted('client-1/menu-board.jpg', ctx([]))).toBe(false)
+    expect(photoMayBeDeleted(null, ctx([]))).toBe(false)
   })
 })
 

@@ -83,6 +83,9 @@ export function periodStockMaps({ opening, closing, purchases, returns, wastages
  *
  * `purchaseVal` is gross (before the bill discount), `netPurchaseVal` is after discount and
  * returns, and `cogsVal` is `computeUsed()` over those values.
+ *
+ * `wastageVal` is COGS's wastage term, over the same `items` (no prep), which is why it is not the
+ * figure a Wastage tile shows — that is `periodWastageValue()` below (S792, FIGURES-5).
  */
 export function valuePeriodItems(items, maps) {
   let openingVal = 0, purchaseVal = 0, purchaseNetVal = 0, returnVal = 0
@@ -104,6 +107,39 @@ export function valuePeriodItems(items, maps) {
     wastage: wastageVal, staffMeals: staffMealsVal, closing: closingVal,
   })
   return { openingVal, purchaseVal, discountVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal }
+}
+
+/**
+ * "Wastage value" for a period: the one figure every Wastage tile and the Wastage Report show
+ * (S792, FIGURES-5). Each tile had valued the same month over its own item list — Monthly Summary
+ * and the Dashboard over raw items (no prep), the Owner Dashboard over every item, the Owner Report
+ * over active items only (prep in, hidden out) — so two tiles both called "Wastage Value" could
+ * differ for the same open month with nothing saying why. This is the Wastage Report's set:
+ * every wastage row, whatever its item — hidden ones (D29: hiding never changes history) and prep
+ * (sub-recipe mirror items, which Stock Count lets you log) included — at the item's per_uom_rate.
+ *
+ * The rate comes from the row's own join (`WASTAGE_VALUE_SELECT`), not from a caller's item list,
+ * so no page's list can narrow the set again. A row of 0 or less is not counted, as on the report.
+ *
+ * INFORMATION ONLY. Never pass it to computeUsed() or show it as a cost line beside COGS: COGS
+ * values raw items only (prep is costed at the raw-item level), so a wasted tray of prep is already
+ * inside COGS through the raw ingredients it was made from. Taking it off COGS would pull real food
+ * cost out of Food Cost %; showing it as Consolidated P&L's Wastage line while COGS keeps it would
+ * count it twice. `valuePeriodItems`' `wastageVal` is the COGS term and stays over the caller's
+ * raw items.
+ */
+export const WASTAGE_VALUE_SELECT = 'item_id, qty, items(per_uom_rate)'
+
+/** One wastage row's value, the Wastage Report's rule: qty × the item's rate, 0 for qty ≤ 0. */
+export function wastageRowValue(row) {
+  const qty = parseFloat(row?.qty) || 0
+  if (qty <= 0) return 0
+  return qty * (parseFloat(row?.items?.per_uom_rate) || 0)
+}
+
+/** Σ `wastageRowValue` over a period's wastage rows, read with `WASTAGE_VALUE_SELECT`. */
+export function periodWastageValue(rows) {
+  return (rows || []).reduce((s, r) => s + wastageRowValue(r), 0)
 }
 
 /**
@@ -150,8 +186,9 @@ export function periodGap({ items, maps, closing, cogs }) {
 /**
  * Several periods valued at once — the Dashboard's Food Cost trend reads eleven closed months in one
  * batch. Every row carries `period_id`. Each period is valued on its own, so its purchases get their
- * own `allocateBillDiscounts` pass: the fallback bill key (vendor | invoice | day) carries no period,
- * and allocating a year-wide batch folds two legacy bills from different months into one (FIGURES-6).
+ * own `allocateBillDiscounts` pass. That once kept two legacy bills from different months apart
+ * (FIGURES-6); since S792 the fallback bill key carries period_id itself (supplierAttribution.js
+ * `allocationBillKey`), so the per-period pass is correct but no longer necessary for that.
  * Returns period id → `valuePeriodItems` output plus that period's `gap` and `itemCount`.
  */
 export function valuePeriods({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals }) {

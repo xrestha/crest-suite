@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { supabase } from '../../../supabaseClient'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -49,8 +50,13 @@ export default function PurchaseBillPage() {
   // because a sentence this page wrote must not be run back through the error table (S714).
   const [loadError, setLoadError] = useState('')
 
-  // Company letterhead for the auto-printed voucher — same source fields the payslip print uses.
-  const [bizInfo, setBizInfo] = useState({ name: '', address: '', vatNumber: '' })
+  // Company letterhead for the auto-printed voucher, through the one letterhead read (useBizInfo).
+  // This page read `clients` and `settings` itself and dropped both errors (S792, PURCHASES-10), so a
+  // failed read printed the voucher — the paper stapled to the supplier's bill — with no business
+  // name on it. `biz.error` now withholds the print, and the notice above the form says so before
+  // the bill is typed rather than after it is saved.
+  const biz = useBizInfo()
+  const bizInfo = { name: biz.name, address: biz.address, vatNumber: biz.vat }
   const [printBill, setPrintBill] = useState(null)
   const [rateUpdateItems, setRateUpdateItems]       = useState([])
   const [rateUpdateSelected, setRateUpdateSelected] = useState(new Set())
@@ -58,16 +64,6 @@ export default function PurchaseBillPage() {
   const [rateUpdateError, setRateUpdateError]       = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) load() }, [clientId, groupId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!effectiveClientId) return
-    Promise.all([
-      supabase.from('clients').select('name').eq('id', effectiveClientId).single(),
-      supabase.from('settings').select('property_address, vat_number').eq('client_id', effectiveClientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      setBizInfo({ name: client?.name || '', address: settings?.property_address || '', vatNumber: settings?.vat_number || '' })
-    })
-  }, [effectiveClientId])
 
   async function load() {
     const [{ data: p, error: pErr }, { data: i, error: iErr }, { data: v, error: vErr }] = await Promise.all([
@@ -228,7 +224,10 @@ export default function PurchaseBillPage() {
   // in navigate(listUrl), directly or from the rate prompt, so the form never needs Save back.
   async function handleBillSaved(header, validLines, savedCreatedAt) {
     const wasNew = !isEdit
-    let printDone = !wasNew
+    // No voucher while the letterhead read has failed (S792, PURCHASES-10): the notice above the
+    // form has already said so, and the save itself goes ahead untouched.
+    const willPrint = wasNew && !biz.error
+    let printDone = !willPrint
     let changed = null
     const exitWhenReady = () => {
       if (!printDone || changed === null) return
@@ -241,7 +240,7 @@ export default function PurchaseBillPage() {
         navigate(listUrl)
       }
     }
-    if (wasNew) printPurchaseBill(header, validLines, () => { printDone = true; exitWhenReady() }, savedCreatedAt)
+    if (willPrint) printPurchaseBill(header, validLines, () => { printDone = true; exitWhenReady() }, savedCreatedAt)
     // The prompt says "this bill is the new price", which is true only of a NEW bill in the open
     // month (S792, PURCHASES-5). An edited bill, or one filed into a closed month, carries that
     // month's old prices, and offering them rolled Item Master back. And it is Supervisor+ (D41,
@@ -342,6 +341,22 @@ export default function PurchaseBillPage() {
           missed at the time. Regenerate that month's Monthly Report afterwards so its figures include it.
         </div>
       )}
+
+      {/* The voucher's letterhead could not be read (S792, PURCHASES-10). Said here, before the bill
+          is typed, because the save navigates away the moment it lands and a sentence shown after
+          it would never be read. New bills only: an edit prints nothing. A reload re-runs the read,
+          and the S779 draft brings back whatever was typed. */}
+      {biz.error && !isEdit && !loading && !loadError && period && !isLocked && (() => {
+        const { text, detail } = asActionError(biz.error)
+        return (
+          <div role="status" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, lineHeight: 1.55, color: 'var(--theme-text2)' }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>The purchase voucher will not print when you save this bill.</strong>{' '}
+            Crest could not read your business name for the voucher's heading, and will not print a voucher without it. The bill itself saves as normal.
+            To get the voucher, reload this page before you save — anything you have typed comes back when it reopens. {text}
+            {detail && <p className="action-error-detail">{detail}</p>}
+          </div>
+        )
+      })()}
 
       <div className="card">
         {loading ? (

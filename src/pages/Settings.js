@@ -704,9 +704,14 @@ export default function Settings() {
       // (SRC-nnn, written by Recipes.js) and is hidden from Item Master — so renumbering it here
       // stamped an ITM code over the SRC one that the ingredient rows print, and left the hidden
       // gaps this button exists to close.
-      const { data: items, error: fetchErr } = await scopedFrom('items', 'id, name')
+      //
+      // Paged (S792, MASTER-8). A bare select stops at 1000 rows with no error, so a larger item book
+      // renumbered its first 1000 as ITM-001… while every item past the cap kept its old code — and
+      // the new sequence re-issued codes those items already held, under "✓ Renumbered 1000 items".
+      // Duplicate codes matter since MASTER-5: Recipe Import resolves an ingredient by code first.
+      const { data: items, error: fetchErr } = await fetchAllRows(() => scopedFrom('items', 'id, name')
         .eq('is_sub_recipe', false)
-        .order('name').order('id')
+        .order('name').order('id'))
       if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
       const rows = (items || []).map((it, i) => ({ ...it, code: `${prefix}-${pad3(i + 1)}` }))
@@ -747,8 +752,9 @@ export default function Settings() {
       // Archived vendors are included on purpose: `vendor_code` has no unique index, so leaving an
       // archived vendor on VND-003 while an active one is renumbered onto VND-003 would give two
       // suppliers one code the moment the archived one is restored.
-      const { data: vendors, error: fetchErr } = await scopedFrom('vendors', 'id, name')
-        .order('name').order('id')
+      // Paged for the same reason as the items renumber above (S792, MASTER-8).
+      const { data: vendors, error: fetchErr } = await fetchAllRows(() => scopedFrom('vendors', 'id, name')
+        .order('name').order('id'))
       if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
       const rows = (vendors || []).map((v, i) => ({ ...v, code: `${prefix}-${pad3(i + 1)}` }))
@@ -786,9 +792,11 @@ export default function Settings() {
     try {
       if (prefix !== (settings.sub_recipe_code_prefix || '')) await saveSettings({ sub_recipe_code_prefix: prefix })
 
-      const { data: subRecipes, error: fetchErr } = await scopedFrom('recipes', 'id, name, recipe_code, linked_item_id')
+      // Paged (S792, MASTER-8): past 1000 rows the rest kept their old codes while the new
+      // sequence re-issued SRC-001… over them, under a message counting only the first page.
+      const { data: subRecipes, error: fetchErr } = await fetchAllRows(() => scopedFrom('recipes', 'id, name, recipe_code, linked_item_id')
         .eq('category', SUB_RECIPE_CATEGORY)
-        .order('name').order('id')
+        .order('name').order('id'))
       if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
       const targets = (subRecipes || []).map((r, i) => ({ ...r, code: `${prefix}-${pad3(i + 1)}` }))
@@ -832,7 +840,9 @@ export default function Settings() {
     setGeneratingPrd(true)
     setGenerateMsgPrd('')
     try {
-      const { data: recipes, error: fetchErr } = await scopedFrom('recipes', 'id, name, category, recipe_code')
+      // Paged (S792, MASTER-8): assignMissingProductCodes picks the next free number from every
+      // code it is shown, so a book past 1000 rows could re-issue a code the unread page holds.
+      const { data: recipes, error: fetchErr } = await fetchAllRows(() => scopedFrom('recipes', 'id, name, category, recipe_code').order('id'))
       if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
       const pending = assignMissingProductCodes(recipes || [])

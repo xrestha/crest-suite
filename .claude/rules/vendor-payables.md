@@ -75,7 +75,7 @@ off the bill is its delete): `ReturnsTab` clears `paid_at` FIRST — the write t
 any filter (`billTotalsByKey`, the S723 rule applied to the register itself); `billDiscountOf` in
 `vendorBalanceHelpers.js` takes a legacy bill's discount once, as Outstanding Payables has since S747;
 returns split VAT / non-VAT / UNLINKED in `purchaseTaxSplit.js`, and unlinked ones are named rather
-than dropped; the One Lakh report aggregates suppliers by PAN (D12); optional `invoice_vat_amount` /
+than dropped; the One Lakh report aggregates suppliers by PAN (D12; `normalisePan` keeps digits only); optional `invoice_vat_amount` /
 `invoice_total_amount` flag a mismatch over NPR 1 with Crest's own figure (D13).
 
 ### A tolerance in ABSOLUTE currency, on a PER-UNIT rate, is a percentage that moves (S728)
@@ -798,10 +798,13 @@ needs (`discount_amount`, `purchase_group_id`, `vendor_id`, `invoice_ref`, `bs_d
 `lineGross`/`lineNet` figure rather than a raw product. **Any page that values purchases joins this
 list.**
 
-Three things not to re-derive:
+Four things not to re-derive:
 
 - **`max(discount_amount)`, never `sum`.** The value is repeated per line, so summing it multiplies
   the discount by the bill's line count.
+- **A legacy line's bill key is period-scoped (S792).** `allocationBillKey()` falls back to
+  `legacy|period_id|vendor|invoice|day`, so a multi-month caller needs no per-period grouping, but
+  it must select `period_id` or two months' same-day bills merge.
 - **Allocation is PROPORTIONAL, not a flat subtraction.** Those totals are summed only over ACTIVE,
   non-sub-recipe items (S436), and a bill can contain a line for an item outside that filter — so
   subtracting the whole bill's discount from a total that never included the whole bill's gross

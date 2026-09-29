@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { render, screen } from '@testing-library/react'
-import RecipeCostCardPrint from './RecipeCostCardPrint'
+import RecipeCostCardPrint, { printedOnLabel } from './RecipeCostCardPrint'
 
 // S756. A dish with no costed ingredients is not a free dish. The printed cost card showed
 // "Food Cost % 0.0%" and "Gross Margin % 100.0%" for one — the most flattering sheet the page can
@@ -74,6 +74,26 @@ describe('RecipeCostCardPrint on a PAN-bill outlet', () => {
     render(<RecipeCostCardPrint recipe={noIngredients} recipes={[noIngredients]} settings={{}} overheadData={null} showNutrition={false} vatMode="vat" />)
     expect(valueUnder('Menu Price (incl. 13% VAT)')).toBe('NPR 500')
     expect(valueUnder('Selling Price (ex-VAT)')).toBe('NPR 442.48')
+  })
+})
+
+// S792 RECIPES-6: the card was dated `toLocaleDateString('en-IN')` — "28/9/2026", AD, in the
+// browser's own timezone — on a BS product's printed document.
+describe('RecipeCostCardPrint date', () => {
+  test('is the BS day with the AD date beside it, read in Nepal', () => {
+    expect(printedOnLabel(new Date('2026-09-03T06:00:00+05:45'))).toBe('18 Bhadra 2083 BS · 3 September 2026')
+    // 00:15 in Kathmandu is already the next day, whatever the machine's clock says.
+    expect(printedOnLabel(new Date('2026-08-20T18:30:00Z'))).toMatch(/ BS · 21 August 2026$/)
+  })
+
+  test('outside the verified BS table it prints the AD date alone, never a wrong BS one', () => {
+    expect(printedOnLabel(new Date('1900-01-01T12:00:00Z'))).toBe('1 January 1900')
+  })
+
+  test('the header and the footer both carry it', () => {
+    render(<RecipeCostCardPrint recipe={noIngredients} recipes={[noIngredients]} settings={{}} overheadData={null} showNutrition={false} />)
+    expect(screen.getAllByText(/ BS · /)).toHaveLength(2)
+    expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).toBeNull()
   })
 })
 

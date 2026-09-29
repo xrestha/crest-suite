@@ -1,7 +1,8 @@
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { lineIngredientDeltas, loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../shared/fetchAllRows'
-import { daysInBsMonth, adToBs, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { daysInBsMonth, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { nepalDayInPeriod } from '../../../shared/nepalPeriodDay'
 
 // Posts POS bills into IMS that were closed while no matching BS period was open.
 //
@@ -116,11 +117,22 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   // it stops being chased.
   const prepared = []
   const nothingToPost = []
+  let undated = 0
   for (const o of list) {
     const items = (o.pos_order_items || []).filter(i => i.recipe_id)
     if (items.length === 0) { nothingToPost.push(o.id); continue }
 
-    const bsDay = adToBs(new Date(o.closed_at)).day
+    // The day the bill closed IN NEPAL (S792, SALES-6). `adToBs(new Date(closed_at))` read the
+    // viewer's clock zone while the window above is Nepal's, so a backfill run from abroad dated a
+    // just-after-midnight bill to the previous day — the last day of the month before, stored inside
+    // this period. A bill that cannot be placed in this period is left unposted and unstamped, so the
+    // next run chases it, rather than being written under a day number that is not its own.
+    const bsDay = nepalDayInPeriod(o.closed_at, period)
+    if (bsDay == null) {
+      console.error('backfill: bill closed outside this period in Nepal time, left unposted', o.id, o.closed_at)
+      undated++
+      continue
+    }
 
     // A bill-level discount reduces the taxable base proportionally across payable (non-comped)
     // lines — the same treatment the live path applies, or every revenue-based IMS report would
@@ -168,7 +180,7 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
     prepared.push({ id: o.id, salesRows, movementRows })
   }
 
-  let posted = 0, skipped = preStamped
+  let posted = 0, skipped = preStamped + undated
   const stampNow = () => new Date().toISOString()
 
   if (nothingToPost.length > 0) {

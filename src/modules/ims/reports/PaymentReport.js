@@ -65,7 +65,10 @@ export default function PaymentReport() {
       setSelectedPeriod(chosen)
       await loadData(chosen.id)
     }
-    setLoading(false)
+    // Only the load that still owns the page may un-gate it (S792, TAX-4). A period picked while
+    // this first load was in flight leaves `loadData(chosen)` returning early; clearing `loading`
+    // here anyway drew the previous month's figures under the new month's chip and filename.
+    if (!chosen || periodReq.isCurrent(chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
@@ -74,7 +77,7 @@ export default function PaymentReport() {
     setSelectedPeriod(p)
     setLoading(true)
     await loadData(periodId)
-    setLoading(false)
+    if (periodReq.isCurrent(periodId)) setLoading(false)   // see init(): only the owner un-gates (TAX-4)
   }
 
   async function loadData(periodId) {
@@ -142,6 +145,19 @@ export default function PaymentReport() {
   const grandReturn = summary.reduce((s, r) => s + r.returnAmt, 0)
   const grandNet    = grandGross - grandReturn
 
+  // A method's share of the period's net spend. When returns reach or exceed purchases the total is
+  // zero or below, and a share of that means nothing, so it is null and prints as a dash, never 0%.
+  const shareOf = v => (grandNet > 0 ? (v / grandNet) * 100 : null)
+  const pctText = p => (p == null ? '—' : `${p.toFixed(1)}%`)
+  // The totals row adds up the rows above it; its share is computed from them, never asserted
+  // (S792, TAX-10). It was a hard-coded "100%", so a month whose returns exceeded its purchases
+  // printed 0% on every row above a Total of 100% — the S594/S719/S725 footer, fourth instance.
+  const foot = summary.reduce((a, r) => ({
+    gross: a.gross + r.gross, returnAmt: a.returnAmt + r.returnAmt, net: a.net + r.net,
+    count: a.count + r.count, returnCount: a.returnCount + r.returnCount,
+  }), { gross: 0, returnAmt: 0, net: 0, count: 0, returnCount: 0 })
+  const footShare = shareOf(foot.net)
+
   // Daily breakdown (net per day per method). A bill has one day — its header's — so it lands
   // whole on that day rather than being spread across its lines.
   const days = [...new Set([...bills.map(b => b.bs_day), ...pricedReturns.map(r => r.bs_day)])].sort((a, b) => a - b)
@@ -167,24 +183,43 @@ export default function PaymentReport() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
+    const n2 = v => Number(v.toFixed(2))
     const summaryData = summary.map(s => ({
       'Payment Method': s.method,
-      'Gross Purchases': Number(s.gross.toFixed(2)),
-      'Returns': Number(s.returnAmt.toFixed(2)),
-      'Net Amount (NPR)': Number(s.net.toFixed(2)),
-      '% of Net Total': grandNet > 0 ? ((s.net / grandNet) * 100).toFixed(1) + '%' : '0%',
+      'Gross Purchases': n2(s.gross),
+      'Returns': n2(s.returnAmt),
+      'Net Amount (NPR)': n2(s.net),
+      '% of Net Total': pctText(shareOf(s.net)),
       'Bills': s.count,
       'Return Entries': s.returnCount
     }))
+    // A TOTAL row on each sheet an accountant reconciles (S792, TAX-9; vendor-payables.md S725),
+    // built from the same method totals the page prints, so the sheet ties to the screen.
+    summaryData.push({
+      'Payment Method': 'TOTAL',
+      'Gross Purchases': n2(foot.gross),
+      'Returns': n2(foot.returnAmt),
+      'Net Amount (NPR)': n2(foot.net),
+      '% of Net Total': pctText(footShare),
+      'Bills': foot.count,
+      'Return Entries': foot.returnCount,
+    })
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Payment Summary — Purchase spend by method', biz, scopeLine, rows: summaryData,
       notes: [BASIS_NOTE, ...(unlinkedNote ? [unlinkedNote] : [])],
     }), 'Summary')
     const dailyData = dailyByMethod.map(d => ({
       'Day': d.day,
-      ...Object.fromEntries(METHODS.map(m => [`${m} Net (NPR)`, Number(d.byMethod[m].toFixed(2))])),
-      'Day Total Net (NPR)': Number(d.dayTotal.toFixed(2))
+      ...Object.fromEntries(METHODS.map(m => [`${m} Net (NPR)`, n2(d.byMethod[m])])),
+      'Day Total Net (NPR)': n2(d.dayTotal)
     }))
+    if (dailyData.length > 0) {
+      dailyData.push({
+        'Day': 'TOTAL',
+        ...Object.fromEntries(summary.map(s => [`${s.method} Net (NPR)`, n2(s.net)])),
+        'Day Total Net (NPR)': n2(foot.net),
+      })
+    }
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Payment Summary — Daily Breakdown', biz, scopeLine, rows: dailyData,
       notes: [BASIS_NOTE, ...(unlinkedNote ? [unlinkedNote] : [])],
@@ -202,16 +237,31 @@ export default function PaymentReport() {
           <h1 className="page-title">Payment Summary</h1>
           <p className="page-subtitle">Purchase spend by payment method — bill totals, net of discount and returns, including VAT</p>
           <div className="page-scope-row">
-            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+            {/* provisionalWhenOpen (S792, TAX-10): an open month still moves with every bill and
+                return entered, and the scopeLine already says PROVISIONAL in the workbook — the chip
+                now says it on screen too, as on VAT, Non-VAT, Vendor Report and the one-lakh report. */}
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
+          {/* Gated like every sibling (S792, TAX-5; the S728 rule for a control that emits a FILE).
+              It had no gate at all: after a failed read it exported NPR 0 for every method under the
+              period's scope line, during a period change the old month's figures under the new
+              month's name, and with no outlet name a blank CompanyName line. */}
+          <button className="btn btn-ghost" onClick={exportExcel}
+            disabled={loading || !!loadError || !!biz.error || !selectedPeriod}>Export Excel</button>
         </div>
       </div>
+
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       {loadError && <ReportLoadError error={loadError} />}
 
@@ -262,7 +312,7 @@ export default function PaymentReport() {
               NPR {s.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </div>
             <div className="stat-sub">
-              {grandNet > 0 ? ((s.net / grandNet) * 100).toFixed(1) : 0}% · {s.count} entries
+              {pctText(shareOf(s.net))} · {s.count} entries
               {s.returnCount > 0 && ` · ${s.returnCount} return${s.returnCount > 1 ? 's' : ''}`}
             </div>
           </div>
@@ -326,7 +376,7 @@ export default function PaymentReport() {
                     <Tip text="Gross purchases − returns for this method." width={220}>Net Amount</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="This method's net spend as a share of total net purchases." width={230}>% of Net Total</Tip>
+                    <Tip text="This method's net spend as a share of total net purchases. Shows — in a month where returns match or exceed purchases, because a share of nothing means nothing." width={250}>% of Net Total</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Number of supplier bills settled by this method. A bill is counted once however many lines it has." width={250}>Bills</Tip>
@@ -343,7 +393,7 @@ export default function PaymentReport() {
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {s.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                      {grandNet > 0 ? ((s.net / grandNet) * 100).toFixed(1) : 0}%
+                      {pctText(shareOf(s.net))}
                     </td>
                     <td style={{ textAlign: 'right' }}>{s.count}</td>
                   </tr>
@@ -355,7 +405,7 @@ export default function PaymentReport() {
                     {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                  <td style={{ textAlign: 'right', paddingTop: 12 }}>100%</td>
+                  <td style={{ textAlign: 'right', paddingTop: 12 }}>{pctText(footShare)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{bills.length}</td>
                 </tr>
               </tbody>
@@ -384,6 +434,22 @@ export default function PaymentReport() {
                   </tr>
                 ))}
               </tbody>
+              {/* The month's total (S792, TAX-9). The daily tab had none, on screen or in the
+                  workbook, so the only way to tie it to the Method Summary was to add it up by hand.
+                  Built from the same method totals, so the two tabs cannot disagree. */}
+              {dailyByMethod.length > 0 && (
+                <tfoot>
+                  <tr>
+                    <td>TOTAL</td>
+                    {summary.map(s => (
+                      <td key={s.method} style={{ textAlign: 'right' }}>
+                        {s.net !== 0 ? `NPR ${s.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+                      </td>
+                    ))}
+                    <td style={{ textAlign: 'right' }}>NPR {foot.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
             </div>
           )}

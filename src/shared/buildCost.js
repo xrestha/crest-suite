@@ -4,8 +4,10 @@
 // from what the guest picks, so the fixed-ingredient figure Recipe Costing shows for any other dish
 // reads as a near-zero food cost. This works out two builds per size instead:
 //
-//   cheapest  the lowest-PRICED valid selection: in every required group, the cheapest picks the
-//             rule demands; nothing optional. The floor a guest can order.
+//   cheapest  the lowest-PRICED valid selection, priced by the pricer's own free-picks rule (the
+//             first `included_count` in display order) — optionPricing's cheapestValidSelection,
+//             which the guest menu's "From" price uses too. An optional choice is in it only when
+//             it lowers the price. The floor a guest can order.
 //   typical   what guests actually build — the caller passes it (the most-picked non-size
 //             selection over recent sales, or the dish's defaults, labelled as such) — priced at
 //             each size.
@@ -16,7 +18,7 @@
 // included — so a plate is costed from the same raw items the stock posting depletes. There is no
 // third copy of either.
 
-import { sizeFactor, scaledQty, optionsPriceDelta } from './optionPricing'
+import { sizeFactor, scaledQty, optionsPriceDelta, cheapestValidSelection } from './optionPricing'
 import { deltaItems } from '../utils/orderLineIngredients'
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
@@ -42,26 +44,21 @@ export function optionsPlateCost(chosen, { groupsById, ingredientsByOption, expl
 }
 
 /**
- * The cheapest valid selection (by the price the guest pays) for one size.
+ * The cheapest valid selection (by the price the guest pays) for one size. The same search as the
+ * guest menu's "From" price (optionPricing's cheapestValidSelection, S792 RECIPES-4): this used to
+ * take each group's cheapest picks whatever their display order, while the pricer frees the FIRST
+ * `included_count` in display order — so with a free pick it could choose a build that costs the
+ * guest more than the cheapest one, and cost that build instead.
  * @param {Array<{group, rule, options}>} dishGroups   groupsForDish() output
  * @param {object|null} sizeOption                      the size to build at; null when the dish has none
  * @returns {string[]} option ids
  */
-export function cheapestSelection(dishGroups, sizeOption, groupsById) {
-  const ids = sizeOption ? [sizeOption.id] : []
-  const factorChosen = sizeOption ? [sizeOption] : []
-  for (const { group, rule, options } of dishGroups || []) {
-    if (group.kind === 'size') continue
-    if (!(rule.min > 0)) continue
-    // Price each option at this size, alone — the free-picks rule never makes a dearer pick cheaper.
-    const priced = options
-      .filter(o => !o.is_removal)
-      .map(o => ({ o, p: optionsPriceDelta([...factorChosen, { ...o, group_id: group.id }], { ...groupsById, [group.id]: { ...group, included_count: 0 } })
-        - optionsPriceDelta(factorChosen, groupsById) }))
-      .sort((a, b) => a.p - b.p || (a.o.sort ?? 0) - (b.o.sort ?? 0))
-    ids.push(...priced.slice(0, rule.min).map(x => x.o.id))
-  }
-  return ids
+export function cheapestSelection(dishGroups, sizeOption) {
+  const sizeGroupId = sizeOption
+    ? sizeOption.group_id || (dishGroups || []).find(d => (d.options || []).some(o => o.id === sizeOption.id))?.group.id
+    : null
+  const fixed = sizeGroupId ? { [sizeGroupId]: [sizeOption.id] } : {}
+  return cheapestValidSelection(dishGroups, { fixed }).ids
 }
 
 /**
@@ -103,7 +100,7 @@ export function buildCostRange({ dishGroups, basePrice, fixedCost, typicalIds = 
   const rows = sizes.map(size => ({
     size: size ? size.name : null,
     portion: size ? (size.portion_factor == null ? 1 : num(size.portion_factor)) : 1,
-    cheapest: priceBuild(cheapestSelection(dishGroups, size, ctx.groupsById), shared),
+    cheapest: priceBuild(cheapestSelection(dishGroups, size), shared),
     typical: priceBuild(withSize(nonSize, size), shared),
   }))
 

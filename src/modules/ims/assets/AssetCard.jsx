@@ -9,9 +9,12 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { computeDisposalGainLoss, computeDisposalDepreciation, bookPositionsByAsset, bookValue } from './depreciationCompute'
+import { formatAdAsBs } from '../../../utils/bsCalendar'
 
 const fmt = nprInt
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+// A stored AD date as the BS date it was picked as (S792, COSTS-11). `new Date('2026-01-15')` is UTC
+// midnight, so the old toLocaleDateString showed the 14th to a viewer west of UTC, and in AD.
+const fmtDate = d => formatAdAsBs(d)
 
 // Full detail view for one asset: header stats, complete posted depreciation schedule history,
 // and a Dispose/Write Off action that freezes further depreciation and computes gain/loss.
@@ -236,7 +239,7 @@ The asset is still on the register as active.`, detail })
           {disposalCalc && (
             <div style={{ marginTop: 12, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
               <div>
-                <Tip text="Straight-line depreciation for the days since the last posted run (or since acquisition), at the same rate every run uses and never below salvage value. It is posted as its own locked run when you confirm." width={300}>Depreciation to the disposal date</Tip>:{' '}
+                <Tip text="Straight-line depreciation for the days not yet charged — since the last posted run, or since acquisition — at the same rate every run uses and never below salvage value. A run you reversed in part counts only for the days its remaining charge covers. It is posted as its own locked run when you confirm." width={300}>Depreciation to the disposal date</Tip>:{' '}
                 <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(disposalCalc.extraDepreciation)}</strong>
                 {disposalCalc.line ? ` (${fmtDate(disposalCalc.periodStart)} – ${fmtDate(disposalCalc.periodEnd)})` : ' — nothing left to charge'}
               </div>
@@ -247,7 +250,7 @@ The asset is still on the register as active.`, detail })
               </div>
               {disposalCalc.postedPastDisposal && (
                 <p style={{ margin: '6px 0 0', color: 'var(--theme-amber-text)' }}>
-                  △ A posted run that has not been reversed already charges depreciation through {fmtDate(disposalCalc.chargedThrough)}, after this disposal date, so the book value above includes depreciation for days the asset was no longer held. To take that back out, reverse that run on the Depreciation Runs tab (Adjustment) before disposing — the disposal then charges only the days up to its own date.
+                  △ Posted depreciation already charges this asset through {fmtDate(disposalCalc.chargedThrough)}, after this disposal date, so the book value above includes depreciation for days the asset was no longer held. To take that back out, reverse that run on the Depreciation Runs tab (Adjustment) before disposing — in full, or just what it charged after the disposal date — and the disposal then charges only the days up to its own date.
                 </p>
               )}
             </div>

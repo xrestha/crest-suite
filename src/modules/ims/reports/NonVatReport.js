@@ -160,6 +160,29 @@ export default function NonVatReport() {
       'Invoice Ref':    e.invoice_ref || '',
       'Notes':          e.notes || '',
     }))
+    // TOTAL rows from the split's own totals, the rows the entries table prints on screen (S792,
+    // TAX-9) — an accountant summing the rounded cells had no printed figure to tie to. Returns are not
+    // lines on this sheet, so they come off below the TOTAL, as on screen, to reach the period's net.
+    // Built in the sheet's column order: the header comes from the first row's keys, and on a
+    // returns-only month the TOTAL row IS the first row.
+    const COLS = ['Day', 'Item', 'Category', 'Vendor', 'PAN/VAT No.', 'Qty', 'UOM', 'Rate',
+      'Gross (NPR)', 'Discount Share', 'Net (NPR)', 'Invoice Ref', 'Notes']
+    const footRow = vals => Object.fromEntries(COLS.map(c => [c, vals[c] ?? '']))
+    if (entries.length > 0 || returnTotal > 0) {
+      entryRows.push(footRow({
+        'Day': 'TOTAL', 'Item': `${entries.length} line${entries.length !== 1 ? 's' : ''}`,
+        'Gross (NPR)':    Number(grossTotal.toFixed(2)),
+        'Discount Share': Number(totalDiscount.toFixed(2)),
+        'Net (NPR)':      Number(split.nonVatBase.toFixed(2)),
+      }))
+      if (returnTotal > 0) {
+        entryRows.push(footRow({
+          'Day': 'LESS RETURNS', 'Item': `${nonVatReturns.length} return${nonVatReturns.length !== 1 ? 's' : ''} of non-VAT goods`,
+          'Net (NPR)': Number((-returnTotal).toFixed(2)),
+        }))
+        entryRows.push(footRow({ 'Day': 'NET TOTAL', 'Net (NPR)': Number(total.toFixed(2)) }))
+      }
+    }
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Non-VAT Report — Purchases without VAT', biz, scopeLine, rows: entryRows,
       notes: ['No input VAT credit is claimable on these purchases.', ...caveats],
@@ -176,6 +199,19 @@ export default function NonVatReport() {
       'Net (NPR)':     Number((v.gross - v.discount - v.returned).toFixed(2)),
       'VAT Credit':    'NIL',
     }))
+    // TOTAL from the split, i.e. the PERIOD TOTAL row on screen (S792, TAX-9).
+    if (caRows.length > 0) {
+      caRows.push({
+        'Vendor':        'TOTAL',
+        'PAN/VAT No.':   '',
+        '# Bills':       vendorRows.reduce((s, v) => s + v.count, 0),
+        'Gross (NPR)':   Number(grossTotal.toFixed(2)),
+        'Discount (NPR)':Number(totalDiscount.toFixed(2)),
+        'Returns (NPR)': Number(returnTotal.toFixed(2)),
+        'Net (NPR)':     Number(total.toFixed(2)),
+        'VAT Credit':    'NIL',
+      })
+    }
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Non-VAT Report — Vendor-wise Summary', biz, scopeLine, rows: caRows,
       notes: ['For reference only — verify bills with your CA before filing.', ...caveats],

@@ -15,8 +15,9 @@ import { nepalCivilDate } from '../../../shared/nepalTime'
 import {
   EPS, SUPPLIER_CREDIT_MODE, isCreditRow, valueBillLines, groupIntoBills, allocatePayment,
   planSupplierLumpSum, supplierCreditSlots, billPaymentProblems, planBillPayment,
-  expandCreditPartners, linesToReopen, linesToCloseByReturns,
+  expandCreditPartners, linesToReopen, linesToCloseByReturns, paymentsMovedSince, paymentsMovedText,
 } from './payablesAllocation'
+import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Modal from '../../../components/Modal'
@@ -424,6 +425,29 @@ export default function OutstandingPayables() {
     return null
   }
 
+  // What is recorded against these bills, re-read just before a payment is written (S792,
+  // PURCHASES-10). There is no server-side guard against paying a bill twice, so two managers — or
+  // one lump sum typed on a page opened before someone else paid — both landed and the bill read as
+  // a Credit. Returns null when nothing moved, else the { text, detail } that stops the write; the
+  // rules are paymentsMovedSince's. A check that could not run has not passed (S613): a failed or
+  // timed-out read refuses the payment and says so rather than waving it through.
+  async function paymentsMovedCheck(bills, paying) {
+    const ids = [...new Set(bills.flatMap(b => (b.entries || []).map(e => e.id)))]
+    let res
+    try {
+      res = await withTimeout(fetchAllRowsChunked(ids, chunk => scopedFrom('payable_payments', 'id, purchase_entry_id, amount')
+        .in('purchase_entry_id', chunk).order('id')), 20000, 'Payment check')
+    } catch (err) {
+      res = { error: err }
+    }
+    if (res.error) {
+      const { text, detail } = asActionError(res.error)
+      return { text: `Nothing was recorded. Crest re-checks what is already paid on ${bills.length === 1 ? 'the bill' : 'these bills'} just before it records a payment, and that check could not run. ${text}`, detail }
+    }
+    const stops = paymentsMovedSince(bills, res.data || [], paying)
+    return stops.length > 0 ? { text: paymentsMovedText(stops, fmt2) } : null
+  }
+
   // One payment for a whole bill — distributed across its unpaid line items (oldest first) — made
   // of money, supplier credit, or both (S756 D11).
   async function payBill(bill) {
@@ -452,11 +476,17 @@ export default function OutstandingPayables() {
     const date = payForm.paid_at || todayIso()
     const note = payForm.note || null
 
-    const { rows, settleIds } = planBillPayment(bill, {
+    const { rows, settleIds, creditPairs } = planBillPayment(bill, {
       cash, credit: creditAmt, date, note, paymentMode: payForm.payment_mode,
       creditSlots: creditAmt > 0 ? (credit?.slots || []) : [],
     })
     if (rows.length === 0) { setSavingPayment(false); return }
+
+    // Fresh read first (S792, PURCHASES-10): this bill, and every bill a supplier credit is being
+    // taken from — the same credit used twice from two screens is the credit version of paying twice.
+    const sources = [...new Map(creditPairs.map(p => [p.fromBill.key, p.fromBill])).values()]
+    const moved = await paymentsMovedCheck([bill, ...sources], { [bill.key]: cash + creditAmt })
+    if (moved) { setPayError(moved); setSavingPayment(false); return }
 
     // ONE insert: every money row and both halves of every credit pair travel in one statement,
     // so they commit together or not at all — which is also what lets the database's
@@ -527,6 +557,13 @@ export default function OutstandingPayables() {
     setSettleWarn(null)
     const date = lumpForm.paid_at || todayIso()
     const paidCount = plan.split.filter(s => s.pay > 0).length
+
+    // Every bill this sum reaches, re-read before anything is written (S792, PURCHASES-10). The
+    // oldest-first split was planned from what this page loaded; if another screen has paid one of
+    // those bills since, this sum would land on it again.
+    const reached = plan.split.filter(s => s.pay > 0)
+    const moved = await paymentsMovedCheck(reached.map(s => s.bill), Object.fromEntries(reached.map(s => [s.bill.key, s.pay])))
+    if (moved) { setLumpError(moved); setLumpSaving(false); return }
 
     // One insert for every bill's rows — atomic in itself. The paid_at stamps after it are a second
     // write and are not, which the warning below names rather than hides. No RPC: the only thing an
@@ -795,6 +832,11 @@ export default function OutstandingPayables() {
       settleIds.push(...alloc.settleIds)
     })
     if (rows.length === 0) { setBulkSaving(false); return }
+
+    // The same fresh read the single-bill and lump-sum paths make (S792, PURCHASES-10): "pay in
+    // full" from a page opened before someone else paid would pay those bills a second time.
+    const moved = await paymentsMovedCheck(targets, Object.fromEntries(targets.map(b => [b.key, b.remaining])))
+    if (moved) { setBulkError(moved); setBulkSaving(false); return }
 
     const { error: insErr } = await insertPayments(rows)
     if (insErr) {

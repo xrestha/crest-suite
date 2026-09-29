@@ -14,6 +14,7 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
+import { readItemRefCounts, priceImpactSentence, PRICE_CHANGE_KEEPS } from '../items/itemRefTables'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 
@@ -280,16 +281,29 @@ export default function SupplierPriceTracker() {
     // affected-recipes banner had never once fired in the product's life. S725 started reporting
     // the failure honestly, which made "could not read the recipe list" the permanent state.
     // `Recipes.js` has always spelled the hint (two sites); this was the copy that did not.
+    //
+    // S792 (IMS_TODO S792.4): the confirm named the recipes but not the past records the price
+    // re-values; it said "every stock count, wastage entry and staff meal" whatever the item had.
+    // The per-item count read and the sentence are Item Master's own (itemRefTables.js), so the
+    // two screens that change `items.rate` give the same warning, with the same numbers. The two
+    // reads are independent and run together.
     setSavingPrice(p => ({ ...p, [rowKey]: true }))
-    const { data: recipeIngs, error: ingErr } = await supabase
-      .from('recipe_ingredients')
-      .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
-      .eq('item_id', item.id)
+    const [{ data: recipeIngs, error: ingErr }, { data: refCounts, error: countErr }] = await Promise.all([
+      supabase
+        .from('recipe_ingredients')
+        .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
+        .eq('item_id', item.id),
+      readItemRefCounts(supabase, [item.id]),
+    ])
     setSavingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
     // null = the list could not be read, which the confirm and the banner both say in words.
     const affected = ingErr
       ? null
       : (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
+    // A count that could not be read is not "nothing is re-valued": `complete: false` makes the
+    // sentence say what reads the price, without a number. Null only when the count was read and
+    // none of the item's records is valued at this price.
+    const pastRecords = priceImpactSentence(countErr ? {} : (refCounts[item.id] || {}), { complete: !countErr })
 
     const per = item.uom ? ` per ${item.uom}` : ''
     askConfirm({
@@ -309,7 +323,8 @@ export default function SupplierPriceTracker() {
                 : <>{affected.length === 1 ? '1 recipe is' : `${affected.length} recipes are`} costed from this price and change at once: {affected.slice(0, 8).join(', ')}{affected.length > 8 ? ` and ${affected.length - 8} more` : ''}.</>}
           </p>
           <p style={{ margin: 0 }}>
-            Every stock count, wastage entry and staff meal of {item.name} is valued at this price wherever a report reads it — including months already closed — so those past figures change the moment you save. Purchase bills keep the price typed on them, and a closed month&apos;s Monthly Owner Report was frozen when the month closed.
+            {pastRecords || <>{item.name} has no stock counts, wastage entries, staff meals, stock movements or recipe lines yet, so nothing already recorded is valued at this price.</>}
+            {' '}{PRICE_CHANGE_KEEPS}
           </p>
         </>
       ),

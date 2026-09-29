@@ -5,7 +5,26 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { POOL_SHORT_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
 
-const emptyRow = () => ({ id: null, name: '', default_useful_life_years: '', tax_pool_hint: '', _dirty: true })
+// `_key` is a row's identity on screen, stable while rows are added, removed and saved; `id` is its
+// database id, null until the insert lands.
+let nextKey = 0
+const emptyRow = () => ({ _key: `new-${++nextKey}`, id: null, name: '', default_useful_life_years: '', tax_pool_hint: '', _dirty: true })
+
+/**
+ * The rows once `saved` (the row as it was sent) has landed, with `newId` the id an insert returned.
+ *
+ * Keeps what the database now holds (S792, COSTS-13): Save writes row by row, and it used to throw
+ * the inserted id away — so after a LATER row failed, Save again inserted every row above it a
+ * second time. The id and a clean flag are written back as each save lands; a field edited while
+ * the save was in flight keeps the row dirty, so that edit is not lost either. Exported for the test.
+ */
+export function afterCategorySaved(rows, saved, newId) {
+  return rows.map(r => r._key !== saved._key ? r : {
+    ...r,
+    id: r.id || newId || null,
+    _dirty: r.name !== saved.name || r.default_useful_life_years !== saved.default_useful_life_years || r.tax_pool_hint !== saved.tax_pool_hint,
+  })
+}
 
 // Manage asset_categories — name + default useful life + Nepal tax pool hint (seeds
 // AssetFormModal's category picker, per CLAUDE.md's seed-then-freely-editable pattern).
@@ -13,7 +32,7 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [rows, setRows] = useState(() =>
     categories.length > 0
-      ? categories.map(c => ({ id: c.id, name: c.name, default_useful_life_years: c.default_useful_life_years ?? '', tax_pool_hint: c.tax_pool_hint || '', _dirty: false }))
+      ? categories.map(c => ({ _key: c.id, id: c.id, name: c.name, default_useful_life_years: c.default_useful_life_years ?? '', tax_pool_hint: c.tax_pool_hint || '', _dirty: false }))
       : [emptyRow()]
   )
   const [saving, setSaving] = useState(false)
@@ -35,7 +54,7 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
         return
       }
     }
-    setRows(prev => prev.filter((_, i) => i !== idx))
+    setRows(prev => prev.filter(r => r._key !== row._key))
   }
 
   async function save() {
@@ -47,9 +66,10 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
         default_useful_life_years: row.default_useful_life_years === '' ? null : parseFloat(row.default_useful_life_years),
         tax_pool_hint: row.tax_pool_hint || null,
       }
-      const { error: err } = row.id
+      const { data: inserted, error: err } = row.id
         ? await scopedUpdate('assets_categories', payload).eq('id', row.id)
-        : await scopedInsert('assets_categories', payload)
+        : await scopedInsert('assets_categories', payload, { single: true })
+      if (!err) setRows(prev => afterCategorySaved(prev, row, inserted?.id))
       if (err) {
         // The loop saves row by row, so anything before this one is already committed.
         const { text, detail } = asActionError(err)
@@ -81,7 +101,7 @@ ${text}`, detail })
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={row.id || `new-${idx}`}>
+              <tr key={row._key}>
                 <td>
                   <input aria-label="Category name"
                     value={row.name}

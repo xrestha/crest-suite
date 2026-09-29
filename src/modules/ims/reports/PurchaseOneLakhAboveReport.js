@@ -23,6 +23,8 @@ import { Navigate } from 'react-router-dom'
 
 const fmtNpr = npr
 const THRESHOLD = ONE_LAKH
+// A fiscal year's purchase lines; see the read in load() (S792, TAX-13).
+const ONE_LAKH_READ_MAX_ROWS = 200000
 
 const periodName = p => `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
 
@@ -37,6 +39,14 @@ export default function PurchaseOneLakhAboveReport() {
   // S756: "have the periods been read yet" is its own fact. Without it a client with no periods
   // left `loading` at its initial true for ever — load() returned before ever clearing it.
   const [periodsLoaded, setPeriodsLoaded] = useState(false)
+  // S792 (TAX-6): WHICH client `periods` was read for. On a client switch `load` is re-created with
+  // the new client id at once, while `periods` and `selectedFy` still hold the previous client's
+  // until the new read lands — so it read the OLD client's purchase lines (raw `.in('period_id')`,
+  // which an admin's RLS returns) under the new client's key. Both clients share the current FY
+  // label, so when the new periods landed the second run kept the SAME key, both in-flight loads
+  // passed `isCurrent`, and whichever resolved last won the page, letterhead and workbook. `load`
+  // now runs only over periods read for the client on screen.
+  const [periodsFor, setPeriodsFor] = useState(null)
   const [fyOptions, setFyOptions] = useState([])
   const [selectedFy, setSelectedFy] = useState('')
   const [vendors, setVendors] = useState([])
@@ -46,20 +56,30 @@ export default function PurchaseOneLakhAboveReport() {
 
   useEffect(() => {
     if (!effectiveClientId) return
-    setPeriodsLoaded(false)
+    let stale = false
+    // Claim the page for this client before any await, so a fiscal-year load still in flight for
+    // the client just left can no longer set anything (TAX-6) — and drop that client's periods,
+    // year and rows rather than leave them on screen under the new client's name meanwhile.
+    fyReq.begin(`${effectiveClientId}:periods`)
+    setPeriods([]); setFyOptions([]); setSelectedFy(''); setPeriodsFor(null)
+    setVendors([]); setUnlinked({ count: 0, value: 0, examples: [], more: 0 })
+    setPeriodsLoaded(false); setLoadError(null); setLoading(true)
     scopedFrom('monthly_periods')
       .then(({ data, error }) => {
-        if (error) { setLoadError(error.message); setLoading(false); return }
+        if (stale) return   // a response for a client we have already left
+        if (error) { setLoadError(error); setLoading(false); return }
         const list = data || []
         setPeriods(list)
         const fys = [...new Set(list.map(p => getBsFiscalYear(p.bs_year, p.bs_month)))]
           .sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
         setFyOptions(fys)
         setSelectedFy(fys.length > 0 ? fys[0] : '')
+        setPeriodsFor(effectiveClientId)
         setPeriodsLoaded(true)
         if (list.length === 0) setLoading(false)
       })
-  }, [effectiveClientId, scopedFrom])
+    return () => { stale = true }
+  }, [effectiveClientId, scopedFrom, fyReq])
 
   // The periods of the selected fiscal year, in calendar order — they are the report's scope, so
   // they are named on screen and in the workbook rather than implied by an FY label (S756).
@@ -69,7 +89,8 @@ export default function PurchaseOneLakhAboveReport() {
   const openPeriods = fyPeriods.filter(p => p.status === 'open')
 
   const load = useCallback(async () => {
-    if (!effectiveClientId || !selectedFy || periods.length === 0) return
+    // `periodsFor` (TAX-6): never read with another client's period ids — see its declaration.
+    if (!effectiveClientId || periodsFor !== effectiveClientId || !selectedFy || periods.length === 0) return
     // Keyed on client AND fiscal year: an admin switching client keeps the same FY label, and the
     // previous client's read must not land on the new one's page (the S721 rule).
     const key = fyReq.begin(`${effectiveClientId}:${selectedFy}`)   // claim the page before any await (S601)
@@ -86,8 +107,15 @@ export default function PurchaseOneLakhAboveReport() {
       // purchase reads in the app — and it decides which vendors cross the IRD Annexure 13
       // one-lakh disclosure threshold, so a truncated read could omit a vendor that legally
       // must be disclosed (S529).
+      //
+      // S792 (TAX-13): a ceiling above the app-wide 1,00,000 rows. The fiscal year is the
+      // disclosure's unit, so unlike a date-range report there is no narrower range to offer when
+      // the ceiling is reached, and a failed read here means no disclosure at all. 1,00,000 lines
+      // is ~275 a day for a year; this allows twice that before the read fails loudly — and it now
+      // FAILS at the ceiling rather than returning a short year as the whole one.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('*, vendors(name, pan_vat_no)').in('period_id', periodIds).order('id')),
+        .select('*, vendors(name, pan_vat_no)').in('period_id', periodIds).order('id'),
+      { maxRows: ONE_LAKH_READ_MAX_ROWS }),
       fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name, pan_vat_no), purchase_entries(vat_inclusive)').in('period_id', periodIds).order('id')),
     ])
     // S756: the staleness check comes BEFORE any setter. It sat below setLoadError, so a superseded
@@ -135,7 +163,7 @@ export default function PurchaseOneLakhAboveReport() {
       },
     }))
     setLoading(false)
-  }, [effectiveClientId, selectedFy, periods, scopedFrom, fyReq])
+  }, [effectiveClientId, periodsFor, selectedFy, periods, scopedFrom, fyReq])
 
   useEffect(() => { load() }, [load])
 

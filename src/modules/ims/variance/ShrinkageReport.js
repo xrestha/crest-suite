@@ -2,65 +2,29 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { varianceBand, varianceFlagPct, VARIANCE_MATERIALITY_NPR } from '../../../shared/imsFormulas'
+import { varianceFlagPct, VARIANCE_MATERIALITY_NPR } from '../../../shared/imsFormulas'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
-import { buildUsageMap } from '../stockcount/stockReportCalc'
-import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
-import { linkedItemIdsOf, bandPctOf, isClosingCount } from './variancePopulation'
+import { buildShrinkageObservations, bandShrinkageItem } from './shrinkageCalc'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { Navigate } from 'react-router-dom'
 
-// `badge` rather than a hand-rolled chip: the previous inline version built its border as
-// `1px solid ${color}40` by string-concatenating an alpha onto a value that is a var() — an
+// How each verdict from shrinkageCalc.js is drawn. The verdict, the observation loop and the
+// banding are shared with the frozen Owner Report since S792 (shrinkageCalc.js); only the look
+// lives here. `badge` rather than a hand-rolled chip: the previous inline version built its border
+// as `1px solid ${color}40` by string-concatenating an alpha onto a value that is a var() — an
 // invalid declaration CSS discards in silence, so the border never painted on any preset. The
 // shared classes carry the tint, radius, padding and type, and cannot drift.
-function shrinkageStatus(count, covered) {
-  const ratio = covered > 0 ? count / covered : 0
-  if (ratio >= 0.67 && count >= 2) return { label: 'Consistent', badge: 'badge-red',    color: 'var(--theme-red-text)' }
-  if (count >= 2)                  return { label: 'Occasional', badge: 'badge-amber',  color: 'var(--theme-amber-text)' }
-  if (count === 1)                 return { label: 'Once',       badge: 'badge-yellow', color: 'var(--theme-accent-ink)' }
-  return                                  { label: 'Clear',      badge: 'badge-green',  color: 'var(--theme-green-text)' }
-}
-
-// A period counts as shrinkage only when the variance is OVER the client's tolerance AND material
-// (S756). The old test was `variance > 0.001` — a hundredth of a gram over theoretical was a
-// shrinkage period — and neither `variance_flag_pct` nor VARIANCE_MATERIALITY_NPR reached this
-// page, so an item a hair over recipe every month read "Consistent" in red on the report a client
-// uses to decide whether staff are stealing, while the Variance Report called the same months OK.
-// Pure over the observations buildReport stored, so a settings change re-bands without a re-read.
-// The percentage goes through the Variance Report's own surrogate (S792, D36): a month in which the
-// item's dishes sold nothing but its stock fell has no percentage (÷ 0), and `null` banded as "no
-// verdict", so that month could never count as shrinkage here while Variance called it Over.
-function bandItem(raw, settings) {
-  let shrinkCount = 0
-  let totalShrinkQty = 0
-  raw.observations.forEach(({ variance, theor, actual, rate }) => {
-    const pct = bandPctOf({
-      theoreticalUsed: theor, actualUsed: actual,
-      variancePct: theor > 0 ? (variance / theor) * 100 : null,
-    })
-    if (varianceBand(pct, variance * rate, settings, { measured: true }).key === 'over') {
-      shrinkCount++
-      totalShrinkQty += variance
-    }
-  })
-  const coveredPeriods = raw.observations.length
-  const totalShrinkValue = totalShrinkQty * raw.rate
-  return {
-    ...raw,
-    shrinkCount,
-    coveredPeriods,
-    totalShrinkQty,
-    totalShrinkValue,
-    avgShrinkQty: shrinkCount > 0 ? totalShrinkQty / shrinkCount : 0,
-    status: shrinkageStatus(shrinkCount, coveredPeriods),
-  }
+const STATUS_STYLE = {
+  Consistent: { badge: 'badge-red',    color: 'var(--theme-red-text)' },
+  Occasional: { badge: 'badge-amber',  color: 'var(--theme-amber-text)' },
+  Once:       { badge: 'badge-yellow', color: 'var(--theme-accent-ink)' },
+  Clear:      { badge: 'badge-green',  color: 'var(--theme-green-text)' },
 }
 
 export default function ShrinkageReport() {
@@ -69,6 +33,7 @@ export default function ShrinkageReport() {
   const { scopedFrom } = useScopedDb()
   const { settings } = useSettings()
   const windowReq = useLatestRequest()
+  const initReq = useLatestRequest()
 
   const [periods, setPeriods]         = useState([])
   const [periodCount, setPeriodCount] = useState(6)
@@ -90,6 +55,13 @@ export default function ShrinkageReport() {
   useEffect(() => { if (periods.length) buildReport() }, [periodCount, periods]) // eslint-disable-line
 
   async function init() {
+    // The page stays mounted across an admin's view-as switch and a group Owner's outlet switch, so
+    // the previous client's init can land after this one's and hand its periods to the new client
+    // (S792, FIGURES-7). Claimed per client, before the await.
+    const key = initReq.begin(effectiveClientId)
+    // And retire the previous client's report load NOW, not only when this client's first one
+    // starts after the periods read: until then its key was still the current one.
+    windowReq.begin(`${effectiveClientId}:init`)
     setLoadError(null)
     const initResults = await Promise.all([
       scopedFrom('monthly_periods')
@@ -97,6 +69,7 @@ export default function ShrinkageReport() {
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order'),
     ])
+    if (!initReq.isCurrent(key)) return   // superseded by a client switch
     // A failed read is not "no closed periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
@@ -109,7 +82,11 @@ export default function ShrinkageReport() {
   }
 
   async function buildReport() {
-    const key = windowReq.begin(periodCount)   // claim the page before any await (S601)
+    // Claim the page before any await (S601). The key carries the CLIENT as well as the window
+    // (S792, FIGURES-7): keyed on `periodCount` alone, the new outlet's load began with the SAME key
+    // as a slow one still in flight for the previous outlet, which then passed isCurrent and,
+    // landing last, painted its shrinkage under the new outlet's name.
+    const key = windowReq.begin(`${effectiveClientId}:${periodCount}`)
     setLoading(true)
     setLoadError(null)
     const selected = periods.slice(0, periodCount)
@@ -136,7 +113,10 @@ export default function ShrinkageReport() {
       // multi-period sales_entries read crosses the silent 1000-row cap readily.
       // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source, ingredient_deltas').in('period_id', periodIds).order('id')),
-      scopedFrom('recipes', 'id'),
+      // Paged too (S792, the PLANNING-9 shape): these ids seed the recipe walk, and a recipe past
+      // the 1000-row cap (sub-recipes count) would consume nothing — theoretical usage LOW, which
+      // reads as shrinkage.
+      fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
     ])
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     if (!windowReq.isCurrent(key)) return   // superseded by a newer window selection
@@ -180,111 +160,17 @@ export default function ShrinkageReport() {
       setLoadError(err); setRawRows([]); setReady(false); setLoading(false); return
     }
 
-    // Build per-period-per-item lookups
-    function makeMap(rows, valKey) {
-      const m = {}
-      ;(rows || []).forEach(r => {
-        if (!m[r.period_id]) m[r.period_id] = {}
-        m[r.period_id][r.item_id] = (m[r.period_id][r.item_id] || 0) + parseFloat(r[valKey] || 0)
-      })
-      return m
-    }
-
-    const openMap  = makeMap(opening, 'qty')
-    const wasteMap = makeMap(wastages, 'qty')
-    // Previously omitted — logged staff-meal consumption was misclassified as unexplained
-    // "shrinkage", contradicting this report's own definition (shrinkage is unexplained;
-    // staff meals are logged too, just like wastage, which was already excluded).
-    const staffMap = makeMap(staffMeals, 'qty')
-
-    // Counts only (S792): a row whose physical_qty is NULL is not a count, and reading it as 0 made
-    // an uncounted month's whole shelf "shrinkage" — see isClosingCount.
-    const closeMap = {}
-    ;(closing || []).forEach(r => {
-      if (!isClosingCount(r)) return
-      if (!closeMap[r.period_id]) closeMap[r.period_id] = {}
-      closeMap[r.period_id][r.item_id] = parseFloat(r.physical_qty || 0)
+    // Per-item observations, through the loop the frozen Owner Report's Shrinkage Trend calls too
+    // (shrinkageCalc.js, S792): theoretical usage one period at a time (the depletion rule is keyed
+    // on a day number, S718), the Variance Report's population (D17/D36), a month observed only when
+    // the item was counted — a NULL is not a count, a 0 is (S695) — and a skipped month counted and
+    // named, never read as the whole shelf consumed (S756). Wastage and staff meals are logged use,
+    // so neither is shrinkage.
+    const { rows: observed, uncountedItems, uncountedItemPeriods } = buildShrinkageObservations({
+      periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales,
+      breakdown: ingredientBreakdown, explosion,
     })
-
-    const purchMap = {}
-    ;(purchases || []).forEach(r => {
-      if (!purchMap[r.period_id]) purchMap[r.period_id] = {}
-      purchMap[r.period_id][r.item_id] = (purchMap[r.period_id][r.item_id] || 0) + parseFloat(r.qty)
-    })
-    ;(returns || []).forEach(r => {
-      if (!purchMap[r.period_id]) purchMap[r.period_id] = {}
-      purchMap[r.period_id][r.item_id] = (purchMap[r.period_id][r.item_id] || 0) - parseFloat(r.qty)
-    })
-
-    // Theoretical usage: sold × qty_per_portion, per period per item. Sales are deduplicated with
-    // the shared POS-supersedes-manual rule PER PERIOD — the rule is scoped by bs_day within a
-    // period, so mixing periods would let one period's POS sale supersede another's bulk row.
-    // Without the dedup a client running POS *and* manual bulk entry double-counts a dish,
-    // inflating theoretical usage and UNDER-reporting shrinkage — backwards on the report used to
-    // judge whether staff are stealing. Kept consistent with Variance.js / TheoreticalVariance.js.
-    const salesByPeriod = {}
-    ;(sales || []).forEach(s => {
-      if (!salesByPeriod[s.period_id]) salesByPeriod[s.period_id] = []
-      salesByPeriod[s.period_id].push(s)
-    })
-    // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty.
-    // buildUsageMap runs selectDepletingSales on ONE period's rows at a time (the grouping above is
-    // what keeps the rule single-period), scales the breakdown by portions sold, and adds each
-    // surviving customized row's option deltas × qty (S758) — a Half plate uses less than a whole.
-    const theorMap = {}
-    periodIds.forEach(pid => {
-      theorMap[pid] = buildUsageMap(salesByPeriod[pid] || [], ingredientBreakdown, explosion)
-    })
-
-    // The items the Variance Report judges (S792, D36/D17): every item a recipe at any depth — or a
-    // sold option line — consumes. Not "had theoretical usage this month": that was the population
-    // this page shared with the old Theoretical vs Actual, and it never saw an ingredient whose
-    // dishes sold nothing while its stock fell. An item in no recipe is never judged here, as on
-    // Variance (gas, foil, napkins have nothing to compare against).
-    const linkedItemIds = linkedItemIdsOf(ingredientBreakdown, selectDepletingSalesAcrossPeriods(sales || []), explosion)
-
-    // Observations per item. A period is observed when the item has a closing count in it AND
-    // either its dishes sold or its stock moved with nothing sold (D36) — the months the Variance
-    // Report would judge; a month where nothing sold and nothing moved has nothing to judge.
-    // `closeMap[pid]?.[item.id] || 0` read "not counted" as "counted zero" (S756) — the S719 rule the
-    // Variance pages already follow — so an uncounted item in a closed month read as the whole shelf
-    // consumed, which is a large Over variance, and a few such months made it "Consistent" red
-    // shrinkage. Presence is `in`, never `> 0`: a count of 0 is a real count (S695). A skipped month
-    // — expected use or stock on hand, but no count — is counted and named on screen instead.
-    let uncountedItems = 0
-    let uncountedItemPeriods = 0
-    const rows = (items || []).map(item => {
-      if (!linkedItemIds.has(item.id)) return null
-      const observations = []
-      let skipped = 0
-
-      periodIds.forEach(pid => {
-        const theor  = theorMap[pid]?.[item.id] || 0
-        const open   = openMap[pid]?.[item.id]  || 0
-        const purch  = purchMap[pid]?.[item.id] || 0
-        if (!closeMap[pid] || !(item.id in closeMap[pid])) {
-          if (theor > 0 || open > 0 || purch > 0) skipped++
-          return
-        }
-        const close  = closeMap[pid][item.id]
-        const waste  = wasteMap[pid]?.[item.id] || 0
-        const staffMealQty = staffMap[pid]?.[item.id] || 0
-        const actual = open + purch - close - waste - staffMealQty
-        if (theor <= 0 && actual === 0) return
-        observations.push({ variance: actual - theor, theor, actual, rate: parseFloat(item.per_uom_rate || 0) })
-      })
-
-      if (skipped > 0) { uncountedItems++; uncountedItemPeriods += skipped }
-      if (observations.length === 0) return null
-
-      return {
-        item,
-        observations,
-        uncountedPeriods: skipped,
-        rate: parseFloat(item.per_uom_rate || 0),
-        category: item.categories?.name || 'Uncategorised',
-      }
-    }).filter(Boolean)
+    const rows = observed.map(r => ({ ...r, category: r.item.categories?.name || 'Uncategorised' }))
 
     if (!windowReq.isCurrent(key)) return   // a second await (recipe explosion) sits above this
     setUncountedInfo({ items: uncountedItems, itemPeriods: uncountedItemPeriods })
@@ -295,7 +181,11 @@ export default function ShrinkageReport() {
 
   // Verdicts are derived from the stored observations against the CURRENT settings, so a tolerance
   // that loads after the report (or is changed in another tab) re-bands without a re-read.
-  const report = useMemo(() => rawRows.map(r => bandItem(r, settings)), [rawRows, settings])
+  // The shared verdict is a label; the page adds how it is drawn.
+  const report = useMemo(() => rawRows.map(r => {
+    const banded = bandShrinkageItem(r, settings)
+    return { ...banded, status: { label: banded.status, ...STATUS_STYLE[banded.status] } }
+  }), [rawRows, settings])
   const summary = ready ? {
     consistent:   report.filter(r => r.status.label === 'Consistent').length,
     anyFlagged:   report.filter(r => r.shrinkCount > 0).length,

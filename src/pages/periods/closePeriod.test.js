@@ -24,6 +24,7 @@ import {
   closingCountPreflight,
   performPeriodClose, closeFailureText, payrollNote, nextBsMonth,
   nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
+  closerMakesReport, deferredReportNote,
 } from './closePeriod'
 /* eslint-enable import/first */
 
@@ -44,8 +45,9 @@ function builder(result) {
 beforeEach(() => {
   jest.clearAllMocks()
   jest.spyOn(console, 'error').mockImplementation(() => {})
-  // Happy path by default: close ok, insert ok, no closing rows to carry, report generates.
-  scopedUpdate.mockReturnValue(builder({ error: null }))
+  // Happy path by default: close ok (the guarded update hands back the row it closed), insert ok,
+  // no closing rows to carry, report generates.
+  scopedUpdate.mockReturnValue(builder({ data: [{ id: 'p-bhadra' }], error: null }))
   scopedInsert.mockResolvedValue({ data: { id: 'p-ashwin' }, error: null })
   backfillApprovedLeave.mockResolvedValue(NO_LEAVE)
   scopedFrom.mockReturnValue(builder({ data: null, error: null }))
@@ -110,7 +112,8 @@ describe('closingCountPreflight', () => {
     // the total excluded it, so the dialog could say "All 200 active items" with five uncounted.
     const closing = recorder({ count: 195, error: null })
     const items = recorder({ count: 200, error: null })
-    supabase.from.mockImplementation(t => (t === 'closing_stock' ? closing : items))
+    supabase.from.mockImplementation(() => closing)
+    scopedFrom.mockImplementation(() => items)
     expect(await closingCountPreflight('p1', 'c1')).toEqual({ counted: 195, items: 200 })
 
     const [, cols, opts] = closing.calls.find(c => c[0] === 'select')
@@ -121,13 +124,21 @@ describe('closingCountPreflight', () => {
     // carryForwardOpeningStock's rule: a NULL physical_qty is not a count, a 0 is.
     expect(closing.calls).toContainEqual(['not', 'physical_qty', 'is', null])
     expect(items.calls).toContainEqual(['eq', 'is_active', true])
-    expect(items.calls).toContainEqual(['eq', 'client_id', 'c1'])
+  })
+
+  test('the item total goes through the scoped layer, never a hand-written client filter (S792, DATABASE-10)', async () => {
+    const items = recorder({ count: 200, error: null })
+    supabase.from.mockImplementation(() => recorder({ count: 200, error: null }))
+    scopedFrom.mockImplementation(() => items)
+    await closingCountPreflight('p1', 'c1')
+    expect(scopedFrom).toHaveBeenCalledWith('items', 'c1', 'id', { count: 'exact', head: true })
+    expect(supabase.from).not.toHaveBeenCalledWith('items')
+    expect(items.calls).not.toContainEqual(['eq', 'client_id', 'c1'])
   })
 
   test('a failed read reports that it could not check, never a count', async () => {
-    supabase.from.mockImplementation(t => (t === 'closing_stock'
-      ? recorder({ count: null, error: { message: 'Failed to fetch' } })
-      : recorder({ count: 200, error: null })))
+    supabase.from.mockImplementation(() => recorder({ count: null, error: { message: 'Failed to fetch' } }))
+    scopedFrom.mockImplementation(() => recorder({ count: 200, error: null }))
     expect(await closingCountPreflight('p1', 'c1')).toBeNull()
   })
 })
@@ -210,7 +221,130 @@ describe('performPeriodClose', () => {
     expect(generateMonthlyReport).not.toHaveBeenCalled()
   })
 
-  test('a duplicate next period (retried click) is benign: carries forward into the existing row', async () => {
+  // S792, STOCK-8: two people see "Bhadra has ended"; one closes. The other's dashboard never
+  // reloaded, and pressed hours later the unguarded update matched (closed → closed), the Ashwin
+  // insert 23505'd, and Bhadra's closing was carried into Ashwin's opening AGAIN — over any
+  // opening figure corrected there since — under a success.
+  describe('a stale press on a month that is no longer open (S792, STOCK-8)', () => {
+    function updateRecorder(result) {
+      const calls = []
+      const b = {
+        calls,
+        eq: (...a) => { calls.push(['eq', ...a]); return b },
+        select: (...a) => { calls.push(['select', ...a]); return b },
+        then: (res, rej) => Promise.resolve(result).then(res, rej),
+      }
+      return b
+    }
+
+    test('the status update is guarded on open, and asks for the rows it changed', async () => {
+      const upd = updateRecorder({ data: [{ id: 'p-bhadra' }], error: null })
+      scopedUpdate.mockReturnValue(upd)
+      await performPeriodClose({ clientId: 'c1', period: PERIOD })
+      expect(scopedUpdate).toHaveBeenCalledWith('monthly_periods', 'c1', { status: 'closed' })
+      expect(upd.calls).toContainEqual(['eq', 'id', 'p-bhadra'])
+      expect(upd.calls).toContainEqual(['eq', 'status', 'open'])
+      expect(upd.calls).toContainEqual(['select', 'id'])
+    })
+
+    // The re-read is the client's period list: this row's status, and whether a later month exists.
+    const BHADRA_CLOSED = { id: 'p-bhadra', bs_year: 2083, bs_month: 5, status: 'closed' }
+    const SHRAWAN_CLOSED = { id: 'p-shrawan', bs_year: 2083, bs_month: 4, status: 'closed' }
+    function staleClose(list) {
+      scopedUpdate.mockReturnValue(builder({ data: [], error: null }))
+      scopedFrom.mockReturnValue(builder({ data: list, error: null }))
+      const upsert = jest.fn(() => builder({ error: null }))
+      supabase.from.mockReturnValue({ select: () => builder({ data: [{ item_id: 'i1', physical_qty: 4 }], error: null }), upsert })
+      return upsert
+    }
+
+    test('closed with the next month already there: changes NOTHING, and says so through failures[0]', async () => {
+      const upsert = staleClose([SHRAWAN_CLOSED, BHADRA_CLOSED, { id: 'p-ashwin', bs_year: 2083, bs_month: 6, status: 'open' }])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, actorId: 'u1' })
+      // `closed` is the month's state, true; the Dashboard reloads on it, which clears its stale banner.
+      expect(r).toEqual({ closed: true, nextPeriodId: null, reportSaved: false, failures: [{ stage: 'already_closed', error: null }], leaveFill: null })
+      expect(scopedInsert).not.toHaveBeenCalled()          // no next-period insert
+      expect(upsert).not.toHaveBeenCalled()                // no carry over Ashwin's (possibly corrected) opening
+      expect(backfillApprovedLeave).not.toHaveBeenCalled()
+      expect(generateMonthlyReport).not.toHaveBeenCalled()
+      expect(scopedFrom).toHaveBeenCalledWith('monthly_periods', 'c1', 'id, bs_year, bs_month, status')
+    })
+
+    test('a later month across a gap counts as moved on too — nothing is minted behind it', async () => {
+      // Kartik exists, Ashwin does not: minting Ashwin now would run into the one-open-period index.
+      const upsert = staleClose([BHADRA_CLOSED, { id: 'p-kartik', bs_year: 2083, bs_month: 7, status: 'open' }])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
+      expect(r.failures).toEqual([{ stage: 'already_closed', error: null }])
+      expect(scopedInsert).not.toHaveBeenCalled()
+      expect(upsert).not.toHaveBeenCalled()
+    })
+
+    test('closed with NO later month (a reply lost half-way) is finished exactly as a first close would', async () => {
+      // An earlier press flipped the status and lost its reply before Ashwin was made. Nothing exists
+      // to overwrite, and this is the only path that gives the client an open month back.
+      const upsert = staleClose([SHRAWAN_CLOSED, BHADRA_CLOSED])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, actorId: 'u1' })
+      expect(r).toEqual({ closed: true, nextPeriodId: 'p-ashwin', reportSaved: true, failures: [], leaveFill: NO_LEAVE })
+      expect(scopedInsert).toHaveBeenCalledWith('monthly_periods', 'c1', { bs_year: 2083, bs_month: 6, status: 'open' }, { single: true })
+      expect(upsert.mock.calls[0][0]).toEqual([{ period_id: 'p-ashwin', item_id: 'i1', qty: 4 }])
+      expect(backfillApprovedLeave).toHaveBeenCalledWith(expect.objectContaining({ period: expect.objectContaining({ id: 'p-ashwin' }) }))
+      expect(generateMonthlyReport).toHaveBeenCalledWith({ clientId: 'c1', period: { ...PERIOD, status: 'closed' } })
+    })
+
+    test('the repair still honours makeReport:false (D42)', async () => {
+      staleClose([BHADRA_CLOSED])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, makeReport: false })
+      expect(r.nextPeriodId).toBe('p-ashwin')
+      expect(r.reportSaved).toBe(false)
+      expect(generateMonthlyReport).not.toHaveBeenCalled()
+    })
+
+    test('End Period (openNext:false) finding the month closed changes nothing — it opens no month anyway', async () => {
+      const upsert = staleClose([BHADRA_CLOSED])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, openNext: false })
+      expect(r.failures).toEqual([{ stage: 'already_closed', error: null }])
+      expect(scopedInsert).not.toHaveBeenCalled()
+      expect(upsert).not.toHaveBeenCalled()
+      expect(generateMonthlyReport).not.toHaveBeenCalled()
+    })
+
+    test('zero rows on a row this login cannot see is NOT called "already closed"', async () => {
+      // RLS hides a row as silently as the guard skips one — only the re-read can tell them apart.
+      staleClose([])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
+      expect(r.closed).toBe(false)
+      expect(r.failures.map(f => f.stage)).toEqual(['close'])
+      expect(r.failures[0].error.message).toMatch(/No period row was updated/)
+      expect(scopedInsert).not.toHaveBeenCalled()
+    })
+
+    test('a failed re-read is a close failure, never a claim about the month — and repairs nothing', async () => {
+      scopedUpdate.mockReturnValue(builder({ data: [], error: null }))
+      scopedFrom.mockReturnValue(builder({ data: null, error: { message: 'Failed to fetch' } }))
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
+      expect(r.closed).toBe(false)
+      expect(r.failures).toEqual([{ stage: 'close', error: { message: 'Failed to fetch' } }])
+      expect(scopedInsert).not.toHaveBeenCalled()
+    })
+
+    test('a month still open on the re-read (a concurrent reopen) is not called closed either', async () => {
+      staleClose([{ ...BHADRA_CLOSED, status: 'open' }])
+      const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
+      expect(r.failures.map(f => f.stage)).toEqual(['close'])
+      expect(scopedInsert).not.toHaveBeenCalled()
+    })
+  })
+
+  // D42: an IMS supervisor or manager may end the month but cannot write monthly_owner_reports
+  // (no_ims_staff), so their close computed the whole snapshot and then recorded the refusal.
+  test('makeReport:false closes and opens the next month and makes no report, without a failure', async () => {
+    const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, actorId: 'u1', makeReport: false })
+    expect(r).toEqual({ closed: true, nextPeriodId: 'p-ashwin', reportSaved: false, failures: [], leaveFill: NO_LEAVE })
+    expect(generateMonthlyReport).not.toHaveBeenCalled()
+    expect(saveGeneratedReport).not.toHaveBeenCalled()
+  })
+
+  test('a duplicate next period is benign: carries forward into the existing row', async () => {
     scopedInsert.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate key' } })
     scopedFrom.mockReturnValue(builder({ data: { id: 'p-existing' }, error: null }))
     const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
@@ -298,6 +432,33 @@ describe('closeFailureText', () => {
 
   test('report says the lazy fallback will cover it', () => {
     expect(closeFailureText({ stage: 'report', period: PERIOD })).toMatch(/first time the report is opened/)
+  })
+
+  test('already_closed says nothing changed and sends them to reload, not to try again (S792, STOCK-8)', () => {
+    const t = closeFailureText({ stage: 'already_closed', period: PERIOD })
+    expect(t).toMatch(/Bhadra 2083 had already been closed/)
+    expect(t).toMatch(/changed nothing/)
+    expect(t).toMatch(/Reload the page/)
+    expect(t).not.toMatch(/try(ing)? again/i)
+    // Not the generic "may not have closed" — the guarded update PROVES this press wrote nothing.
+    expect(t).not.toMatch(/may not/)
+  })
+})
+
+describe('the Owner Report on a close by someone other than the Owner (S792, D42)', () => {
+  test('only admin and the Owner make it at the close — every staff login is refused by its RLS', () => {
+    expect(closerMakesReport({ isAdmin: true, isOwner: false })).toBe(true)
+    expect(closerMakesReport({ isAdmin: false, isOwner: true })).toBe(true)
+    expect(closerMakesReport({ isAdmin: false, isOwner: false })).toBe(false)
+    expect(closerMakesReport({})).toBe(false)
+  })
+
+  test('the note says when it is made and what it will show, and is never red or amber', () => {
+    const n = deferredReportNote('Bhadra 2083')
+    expect(n.danger).toBe(false)
+    expect(n.warn).toBe(false)
+    expect(n.text).toMatch(/^Bhadra 2083's Owner Report will be made when the Owner first opens it, not now/)
+    expect(n.text).toMatch(/as they stand on the day the Owner opens it/)
   })
 })
 

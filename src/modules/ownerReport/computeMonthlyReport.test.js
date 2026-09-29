@@ -12,7 +12,7 @@ jest.mock('../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 // eslint-disable-next-line import/first
 import {
   netPurchaseFigures, estimatePayrollAccrual, CURRENT_SCHEMA_VERSION,
-  computeCombinedMetrics, buildDeltas, foodCostBasisOf,
+  computeCombinedMetrics, buildDeltas, foodCostBasisOf, trendSnapshotOf,
 } from './computeMonthlyReport'
 // eslint-disable-next-line import/first
 import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
@@ -144,7 +144,23 @@ describe('computeMonthlyReport reads what the two helpers need', () => {
   })
 
   test('the schema version moved for the change of meaning', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(9)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(10)
+  })
+
+  // S792 (FIGURES-5, v10): Wastage Value is the one figure every Wastage tile shows — every item,
+  // prep and hidden ones included — read through the row's own item join. COGS keeps taking off
+  // raw-item wastage only, through valuePeriodItems, never this figure.
+  test('Wastage Value is periodWastageValue over the joined read, and COGS does not take it', () => {
+    const at = flat.indexOf("from('wastages')")
+    expect(at).toBeGreaterThan(-1)
+    expect(flat.slice(at, at + 120)).toMatch(/\.select\(WASTAGE_VALUE_SELECT\)/)
+    expect(flat).toMatch(/wastageValueTotal = periodWastageValue\(wastagesData\)/)
+    expect(flat).not.toMatch(/computeUsed\([^)]*wastageValueTotal/)
+    expect(flat).not.toMatch(/itemRateMap\[w\.item_id\]/)
+  })
+
+  test('the trend stores a trimmed prior snapshot and computes its deltas from the full one', () => {
+    expect(flat).toMatch(/snapshot: trendSnapshotOf\(prior\.snapshot\), deltas: buildDeltas\(currentPartial, prior\.snapshot\)/)
   })
 
   // S792 (FIGURES-8): revenue is the denominator of every ratio on the report, and `source` is
@@ -210,5 +226,51 @@ describe('Trend across the v8 → v9 line (S792)', () => {
     expect(d.foodCostBasisChanged).toBe(false)
     expect(d.foodCostPct).toBeCloseTo(2, 9)
     expect(buildDeltas(v8, { combined: { ...v8.combined, foodCostPct: 48 } }).foodCostPct).toBeCloseTo(2, 9)
+  })
+})
+
+describe('trendSnapshotOf: a Trend entry no longer embeds the whole prior snapshot (S792)', () => {
+  // A v9 prior as stored: its own trend holds ITS priors whole, which held theirs, and so on.
+  const deep = { combined: { revenueTotal: 1, foodCostPct: 30 }, ims: { big: 'x'.repeat(5000) } }
+  const prior = {
+    schemaVersion: 9,
+    combined: { revenueTotal: 110, foodCostPct: 35, laborCostPct: 25, primeCostPct: 60, netMarginPct: 30, foodCostBasis: 'cogs' },
+    ims: { revenueTotal: 110, cogsTotal: 38, wastageValueTotal: 4 },
+    hr: { payroll: { total: 27, ot: { hours: 3, amount: 900 } } },
+    pos: { totalNetSales: 125, totalCovers: 40, byCategory: [{ name: 'Food', net: 100 }] },
+    menuEngineering: { items: Array.from({ length: 50 }, (_, i) => ({ id: i })) },
+    trend: { vsLastPeriod: { available: true, snapshot: deep }, vsSameMonthLastYear: { available: true, snapshot: deep } },
+  }
+
+  test('keeps exactly what the Trend rows read, and drops the nested trend', () => {
+    const t = trendSnapshotOf(prior)
+    expect(t).toEqual({
+      schemaVersion: 9,
+      combined: { revenueTotal: 110, foodCostPct: 35, laborCostPct: 25, primeCostPct: 60, netMarginPct: 30, foodCostBasis: 'cogs' },
+      pos: { totalNetSales: 125 },
+    })
+    expect(t.trend).toBeUndefined()
+    expect(JSON.stringify(t).length).toBeLessThan(300)
+    expect(JSON.stringify(prior).length).toBeGreaterThan(10000)
+  })
+
+  test('a pre-v9 prior keeps its missing basis, so it still reads as "on purchases"', () => {
+    const t = trendSnapshotOf({ combined: { revenueTotal: 100, foodCostPct: 50 } })
+    expect(t.combined).not.toHaveProperty('foodCostBasis')
+    expect(foodCostBasisOf(t)).toBe('purchases')
+    expect(t.pos).toBeNull()
+  })
+
+  test('deltas against the trimmed prior equal those against the full one, for every field shown', () => {
+    const current = { combined: { ...prior.combined, revenueTotal: 121, foodCostPct: 33 }, pos: { totalNetSales: 150 } }
+    const full = buildDeltas(current, prior)
+    const trimmed = buildDeltas(current, trendSnapshotOf(prior))
+    for (const k of ['foodCostBasisChanged', 'foodCostPct', 'laborCostPct', 'primeCostPct', 'netMarginPct']) expect(trimmed[k]).toEqual(full[k])
+    expect(trimmed.revenueTotal).toEqual(full.revenueTotal)
+    expect(trimmed.posNetSales).toEqual(full.posNetSales)
+  })
+
+  test('an unavailable prior stays null', () => {
+    expect(trendSnapshotOf(null)).toBeNull()
   })
 })

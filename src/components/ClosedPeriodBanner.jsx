@@ -9,8 +9,9 @@
  * taken its first.
  *
  * The lock and the notice are the same fact, so any page that adopts the `isLocked` line owes its
- * reader this. Note Stock Count, Overheads and Requisitions still do not render it at all
- * (`closed-periods.md`); this component is what they should reach for when they do.
+ * reader this (`closed-periods.md`). Stock Count and Overheads render it in both forms (S792).
+ * Requisitions renders only the red form: its Owner/admin note is its own amber text, because the
+ * `canEdit` sentence below says to regenerate the snapshot and no frozen-report figure reads requisitions.
  *
  * `note` is for a page whose consequence genuinely differs — Purchase Orders' "no delivery can be
  * received into it" is real and worth keeping, so it rides as a second clause rather than as a

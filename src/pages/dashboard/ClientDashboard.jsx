@@ -31,7 +31,7 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
-import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText } from '../periods/closePeriod'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText, closerMakesReport, deferredReportNote } from '../periods/closePeriod'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd } from '../../utils/bsCalendar'
@@ -41,7 +41,7 @@ import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeC
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
-import { valuePeriods } from '../../modules/ims/reports/periodCost'
+import { valuePeriods, periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
@@ -54,6 +54,13 @@ import WeatherHeaderSlot from './WeatherHeaderSlot'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
+
+// Today's BS date as Kathmandu reads it (S792, PLANNING-9). getBsToday() reads the VIEWER's clock,
+// so an operator abroad near midnight saw this month end (or not) a day off — the "has ended"
+// banner, whether the month is the one in progress, today's day for the forecast, and the day a
+// frozen Target was captured on — while the weather code on the same page already used Nepal's
+// civil date. The viewer clock stays only as the fallback outside the verified BS table.
+const nepalBsToday = () => nepalBs(new Date()) || getBsToday()
 
 // Roving-tabindex tab row for in-card view switches — completes the tablist contract the bare
 // role="tablist"/"tab" markup used to promise without delivering (aria-controls, roving tabIndex,
@@ -344,7 +351,9 @@ export default function ClientDashboard() {
   const hrOn = !!clientModules.hr
   const payrollFenced = isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole: profile?.ims_role })
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
-  const [periodCloseError, setPeriodCloseError] = useState('')
+  // The close's outcome sentence, or null. `neutral` when nothing went wrong on this press: the
+  // month had already been ended by someone else (S792, STOCK-8) and nothing was written.
+  const [periodCloseNotice, setPeriodCloseNotice] = useState(null)   // { text, neutral } | null
   const [confirmPeriodClose, setConfirmPeriodClose] = useState(false)
   const [closeNotes, setCloseNotes] = useState([])       // the two preflights' sentences, for the dialog
   const [checkingClose, setCheckingClose] = useState(false)
@@ -374,6 +383,9 @@ export default function ClientDashboard() {
     if (clientModules.hr) loadHrStats(myId); else setHrStats(null)
     if (clientModules.pos) { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) } else setPosStats(null)
   }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, payrollFenced, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A close's outcome sentence names one outlet's month; it must not follow an outlet switch.
+  useEffect(() => { setPeriodCloseNotice(null) }, [effectiveClientId])
 
   const canSales    = hasFeature('sales_entry')
   const canVariance = hasFeature('variance_report')
@@ -410,9 +422,10 @@ export default function ClientDashboard() {
       //   `items`        → the Variance top-5 and, via buildStockRows, Items to Reorder.
       //   `par_levels`   → a par past the cut reads as "no par set", so the item can never
       //                    surface as below par.
-      //   `allItems`     → itemRateMap, which values Wastage Value and Top Items by Spend; an
+      //   `allItems`     → itemRateMap, which values Menu Health and Top Items by Spend; an
       //                    item past the cut is valued at RATE 0 rather than dropped, which is
-      //                    the quietest failure of the four.
+      //                    the quietest failure of the four. (Wastage Value reads its rate
+      //                    through its own row's join since S792 — see the wastages read.)
       //
       // Same producer-and-consumer rule S706 found on Items and S708 on Vendors: the consumer
       // was paged and the read that feeds it was not. `.order('id')` is the unique tiebreaker.
@@ -449,7 +462,7 @@ export default function ClientDashboard() {
     // The 28 days before this month began, for the Daily Purchases vs Sales forecast and Target.
     // Only the month in progress forecasts anything, so only then is it read. Its own error slot:
     // a failed history degrades one chart, it does not make the page's figures incomplete.
-    const bsNow = getBsToday()
+    const bsNow = nepalBsToday()
     const periodIsThisMonth = !!period && period.bs_year === bsNow.year && period.bs_month === bsNow.month
     const historyPromise = periodIsThisMonth
       ? loadForecastHistory(scopedFrom, period).catch(err => ({ error: err?.message || String(err) }))
@@ -488,7 +501,10 @@ export default function ClientDashboard() {
       // hundreds. Written down rather than assumed, per the S722 rule that a read is exempt
       // because someone decided its rows-per-what, not because its table is usually small.
       period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id) : { data: [] },
-      period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      // The item's rate rides on each row (WASTAGE_VALUE_SELECT) so Wastage Value counts every
+      // item — prep and hidden ones too — as the Wastage Report does (S792, FIGURES-5). The same
+      // rows feed the on-hand calculation below, which reads only item_id and qty.
+      period ? fetchAllRows(() => supabase.from('wastages').select(WASTAGE_VALUE_SELECT).eq('period_id', period.id).order('id')) : { data: [] },
       // Staff meals come off the shelf in the shared on-hand calculation (S696) — the Items to
       // Reorder panel used to deduct neither wastage nor staff meals, so it disagreed with the
       // Reorder Report it links to.
@@ -717,7 +733,9 @@ export default function ClientDashboard() {
 
     // Forecast and Target: the month in progress only. Past months show actuals only. How each
     // works, and why neither is a slope, is at the top of dailyForecast.js.
-    const bsToday = getBsToday()
+    // Nepal's today, not the viewer's (S792, PLANNING-9): it decides isCurrentMonth, today's day
+    // and the day a Target is captured on (capturedDay below).
+    const bsToday = nepalBsToday()
     const isCurrentMonth = !!period && period.bs_year === bsToday.year && period.bs_month === bsToday.month
     const monthEndDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 31
     const weekdayOf = d => (period ? bsToAd(period.bs_year, period.bs_month, d).getDay() : 0)
@@ -748,7 +766,8 @@ export default function ClientDashboard() {
           bs_year: p.bs_year,
           bs_month: p.bs_month,
           salesMap: dailySalesMap(inPeriod(forecastHistory.sales, p.id), currentPriceMap),
-          // Per period: allocateBillDiscounts' legacy bill key has no period in it.
+          // Per period. No longer required: since S792 the legacy bill key carries period_id
+          // (supplierAttribution.js allocationBillKey), so a whole-batch pass would agree.
           purchMap: dailyPurchaseMap(allocateBillDiscounts(inPeriod(forecastHistory.purchases, p.id)), inPeriod(forecastHistory.returns, p.id)),
         })))
       historyBase = baseFromHistory(historyDays)
@@ -899,8 +918,11 @@ export default function ClientDashboard() {
     })
     const overheadTotal = overheadBuckets.overhead + overheadBuckets.labor + overheadBuckets.tax_fees
 
-    // itemRateMap already built above (for recipeCostMap) — same items(id, per_uom_rate) shape.
-    const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
+    // The Wastage Report's own total: every item, prep and hidden ones included (S792, FIGURES-5).
+    // It used itemRateMap, which holds raw items only, so wasted prep was valued at 0 here while the
+    // Owner Dashboard and the report the tile links to counted it. Informational: COGS elsewhere
+    // takes off only raw-item wastage, since prep is costed through its raw ingredients.
+    const wastageValueTotal = periodWastageValue(wastagesData)
 
     // `overheadTotal` stays the raw all-bucket sum of what was TYPED; the labour actually counted is
     // resolved at render (resolveLabour) from `overheadBuckets.labor`, `labourPayroll` and the
@@ -1020,7 +1042,7 @@ export default function ClientDashboard() {
   // queue (KOT for kitchen, BOT for bar), never the other station's. Thresholds/formulas match
   // KitchenDisplay.jsx exactly (LATE_MS=15min) so a card here and the live board never disagree.
   async function loadKitchenPosStats(myId) {
-    const today = getBsToday()
+    const today = nepalBsToday()
     const fromTs = bsDayBoundaryIso(today.year, today.month, today.day, false)
     const toTs   = bsDayBoundaryIso(today.year, today.month, today.day, true)
     const kdsStation = posTeam === 'bar' ? 'BOT' : 'KOT'
@@ -1065,15 +1087,23 @@ export default function ClientDashboard() {
   async function askPeriodClose() {
     if (!activePeriod || !effectiveClientId || checkingClose || advancingPeriod) return
     setCheckingClose(true)
-    setPeriodCloseError('')
+    setPeriodCloseNotice(null)
     const hrOn = !!clientModules?.hr
+    const monthLabel = `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}`
+    // Only admin and the Owner can write the frozen report (D42, closerMakesReport). For anyone
+    // else the payroll note is about a report this close does not make — and their RLS view of
+    // hr_payroll_runs is empty, so it would say "not finalized" of a finalized month. They get the
+    // sentence saying when the report WILL be made instead.
+    const makesReport = closerMakesReport({ isAdmin, isOwner })
+    const askPayroll = hrOn && makesReport
     const [count, payroll] = await Promise.all([
       closingCountPreflight(activePeriod.id, effectiveClientId),
-      hrOn ? payrollPreflight(activePeriod.id, effectiveClientId) : Promise.resolve(undefined),
+      askPayroll ? payrollPreflight(activePeriod.id, effectiveClientId) : Promise.resolve(undefined),
     ])
     setCloseNotes([
       closingCountNote(count),
-      hrOn ? payrollNote(payroll, `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}`) : null,
+      askPayroll ? payrollNote(payroll, monthLabel) : null,
+      makesReport ? null : deferredReportNote(monthLabel),
     ])
     setCheckingClose(false)
     setConfirmPeriodClose(true)
@@ -1082,14 +1112,24 @@ export default function ClientDashboard() {
   async function closeAndAdvancePeriod() {
     if (!activePeriod || !effectiveClientId || advancingPeriod) return
     setAdvancingPeriod(true)
-    setPeriodCloseError('')
+    setPeriodCloseNotice(null)
     try {
-      const result = await performPeriodClose({ clientId: effectiveClientId, period: activePeriod, openNext: true, actorId: profile?.id })
+      const result = await performPeriodClose({
+        clientId: effectiveClientId, period: activePeriod, openNext: true, actorId: profile?.id,
+        // A supervisor's close leaves the report to the Owner's first view (D42): its insert would
+        // only be refused, and reported as a failure.
+        makeReport: closerMakesReport({ isAdmin, isOwner }),
+      })
       const first = result.failures[0]
       if (first) {
         console.error('Period close:', first.stage, first.error)
         // A consequence sentence, never err.message — what state the month is in now, and what to do.
-        setPeriodCloseError(closeFailureText({ stage: first.stage, period: activePeriod, isAdmin }))
+        // `already_closed` is not a failure of this press: someone else ended the month first and
+        // nothing was written, so it reads as information, not as an error (STOCK-8).
+        setPeriodCloseNotice({
+          text: closeFailureText({ stage: first.stage, period: activePeriod, isAdmin }),
+          neutral: first.stage === 'already_closed',
+        })
       }
       if (result.closed) loadStats(loadIdRef.current)
     } finally {
@@ -1172,9 +1212,10 @@ export default function ClientDashboard() {
     // sales arrays once per period below (O(periods × rows) → O(rows)) — bounded by the .limit(11)
     // above so it never ran away, but scales with purchase/sales volume across those 11 months.
     const grossMap = {}, retMap = {}, revMap = {}
-    // `grossMap` holds purchases NET of bill discounts. Allocated one period at a time: the
-    // fallback bill key (vendor | invoice | bs_day) carries no period, so allocating the whole
-    // 12-month batch at once could fold two legacy bills from different months into one.
+    // `grossMap` holds purchases NET of bill discounts. Allocated one period at a time, which
+    // predates S792: the fallback bill key now carries period_id (supplierAttribution.js
+    // allocationBillKey), so a whole-batch pass would no longer fold two months' legacy bills
+    // into one. The per-period grouping stays correct, just no longer necessary.
     const purchByPeriod = {}
     ;(allPurch || []).forEach(e => { (purchByPeriod[e.period_id] = purchByPeriod[e.period_id] || []).push(e) })
     Object.entries(purchByPeriod).forEach(([pid, rows]) => {
@@ -1233,7 +1274,7 @@ export default function ClientDashboard() {
     setAndCache(setFcTrend, 'fcTrend', points.filter(p => p.fc !== null))
   }
 
-  const bsToday      = getBsToday()
+  const bsToday      = nepalBsToday()
   // Who may end the month (S756, decided with the owner): the Owner, an IMS supervisor or manager,
   // or admin — the Periods page's own guard. This banner used to offer the close to ANY login that
   // reached the dashboard, so a storekeeper could freeze the month's report before counting. The
@@ -1258,7 +1299,7 @@ export default function ClientDashboard() {
   //
   // The formula is NOT changed — this is the deliberate periodic-inventory model. What changes is
   // that an unsettled figure no longer wears a verdict colour it hasn't earned.
-  const bsNow = getBsToday()
+  const bsNow = nepalBsToday()
   const isCurrentPeriod = !!activePeriod && activePeriod.bs_year === bsNow.year && activePeriod.bs_month === bsNow.month
   const periodDays = activePeriod ? daysInBsMonth(activePeriod.bs_year, activePeriod.bs_month) : 30
   const dayOfPeriod = isCurrentPeriod ? bsNow.day : periodDays
@@ -1404,7 +1445,7 @@ export default function ClientDashboard() {
   // in renderChart below) uses the full `dailyTrend` array instead.
   const dailyTrendWindowed = (() => {
     if (dailyTrendView.length <= 10) return dailyTrendView
-    const bsToday = getBsToday()
+    const bsToday = nepalBsToday()
     const todayIdx = dailyTrendView.findIndex(d => d.day === `Day ${bsToday.day}`)
     if (todayIdx === -1) return dailyTrendView.slice(-10)
     return dailyTrendView.slice(Math.max(0, todayIdx - 6), todayIdx + 4)
@@ -1890,7 +1931,7 @@ export default function ClientDashboard() {
   const wastageCard = (
     <div {...kpiCard(() => navigate('/wastage-report'))}>
       <div style={kpiLabelStyle}>
-        <Tip text="Total NPR value of wastage recorded this period — qty wasted × unit rate per item." width={220}>Wastage Value</Tip>
+        <Tip text="Everything logged as waste this period, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike — the same total as the Wastage Report." width={260}>Wastage Value</Tip>
       </div>
       <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-IN')}`}
@@ -2970,11 +3011,6 @@ export default function ClientDashboard() {
               </button>
             )}
           </div>
-          {periodCloseError && (
-            <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '8px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <TriangleAlert size={13} aria-hidden="true" /> {periodCloseError}
-            </p>
-          )}
           {confirmPeriodClose && (
             <ConfirmModal
               title={`Close ${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year} and open ${BS_MONTHS[nextAdvMonth - 1]} ${nextAdvMonth === 1 ? activePeriod.bs_year + 1 : activePeriod.bs_year}?`}
@@ -2995,7 +3031,11 @@ export default function ClientDashboard() {
                       read-only could still raise a requisition or receive a PO into it (S710). */}
                   <li>Purchases and Returns, Sales, Stock Count, Overheads, Requisitions and Purchase Orders for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).{clientModules?.hr ? ' HR pages stay open — Payroll Run locks itself once finalized.' : ''}</li>
                   <li>Closing stock carries forward as {BS_MONTHS[nextAdvMonth - 1]}&apos;s opening stock.</li>
-                  <li>The Monthly Owner Report snapshot is captured from the figures as they stand now.</li>
+                  {/* Only when this close makes it (D42). For a supervisor the report waits for the
+                      Owner's first view, and deferredReportNote above says so instead. */}
+                  {closerMakesReport({ isAdmin, isOwner }) && (
+                    <li>The Monthly Owner Report snapshot is captured from the figures as they stand now.</li>
+                  )}
                 </ul>
                 <p style={{ margin: 0 }}>
                   Make sure the month-end stock count is saved first — COGS, Variance and the frozen report all read it.
@@ -3003,6 +3043,34 @@ export default function ClientDashboard() {
               </CloseConfirmBody>
             </ConfirmModal>
           )}
+        </div>
+      )}
+
+      {/* The close's outcome sentence lives OUTSIDE the "has ended" banner (S792). A close that did
+          close — or found the month already closed by someone else (STOCK-8) — reloads the figures,
+          the next month becomes the open one, and the banner unmounts. Inside it, the sentence
+          naming what still needs doing (carry the count forward, open the next month, the report,
+          or "someone else closed it") vanished a second after it appeared. It stays until
+          dismissed or the next close attempt clears it. "Someone else closed it" is neutral: that
+          press changed nothing and nothing is wrong. */}
+      {periodCloseNotice && (
+        <div role={periodCloseNotice.neutral ? 'status' : 'alert'} className="card dash-row" style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
+          ...(periodCloseNotice.neutral ? {} : {
+            borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+            background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+          }),
+        }}>
+          <p style={{ color: periodCloseNotice.neutral ? 'var(--theme-text2)' : 'var(--theme-red-text)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {periodCloseNotice.neutral
+              ? <Clock size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+              : <TriangleAlert size={14} aria-hidden="true" style={{ flexShrink: 0 }} />}
+            {periodCloseNotice.text}
+          </p>
+          <button
+            className="btn btn-ghost" style={{ fontSize: 12, flexShrink: 0 }}
+            onClick={() => setPeriodCloseNotice(null)} aria-label="Dismiss"
+          >×</button>
         </div>
       )}
 

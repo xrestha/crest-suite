@@ -18,6 +18,7 @@ import { errorText } from '../../shared/errorText'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
+import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
 import './MonthlyOwnerReport.css'
 
 const fmt = nprOrDash
@@ -185,12 +186,18 @@ export default function MonthlyOwnerReport() {
     if (existingErr) { setGenError(`Could not load the report: ${existingErr.message}`); setReport(null); setLoading(false); return }
     if (existing) {
       setReport(existing)
+      setGeneratorName('')   // never the previous month's maker under this month's report
+      // Who made it, for the header's "when it was made" line (D42). A failed or empty names read
+      // leaves the name out of that line rather than printing a dash as if nobody made it; the
+      // report itself is already on screen, so this read never blocks it.
+      let name = ''
       if (existing.generated_by) {
-        const { data: names } = await supabase.rpc('get_client_profile_names', { p_client_id: clientId })
-        setGeneratorName((names || []).find(n => n.id === existing.generated_by)?.full_name || '—')
-      } else {
-        setGeneratorName('—')
+        const { data: names, error: namesErr } = await supabase.rpc('get_client_profile_names', { p_client_id: clientId })
+        if (!periodReq.isCurrent(key)) return   // superseded during the names read
+        if (namesErr) console.error('Owner Report: could not read who made it', namesErr)
+        else name = (names || []).find(n => n.id === existing.generated_by)?.full_name || ''
       }
+      setGeneratorName(name)
       setLoading(false)
       return
     }
@@ -207,7 +214,7 @@ export default function MonthlyOwnerReport() {
       if (freshErr) throw new Error(freshErr.message)
       if (!periodReq.isCurrent(key)) return
       setReport(fresh)
-      setGeneratorName(profile?.full_name || '—')
+      setGeneratorName(profile?.full_name || '')
     } catch (e) {
       console.error('Report generation failed:', e)
       setGenError('Could not generate the report for this period. Try again, or contact support if this keeps happening.')
@@ -242,7 +249,7 @@ export default function MonthlyOwnerReport() {
         return
       }
       setReport(fresh)
-      setGeneratorName(profile?.full_name || '—')
+      setGeneratorName(profile?.full_name || '')
       setRegenNotice({ tone: 'ok', text: `Regenerated from today's data — ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.` })
     } catch (e) {
       setRegenNotice({ tone: 'error', text: errorText(e, 'operator') })
@@ -261,6 +268,14 @@ export default function MonthlyOwnerReport() {
   const snapshot = report?.snapshot
   const periodLabel = report ? `${BS_MONTHS[report.bs_month - 1]} ${report.bs_year}` : ''
   const execSummary = snapshot ? buildExecutiveSummary(snapshot, periodLabel) : ''
+  // When and how this snapshot was made, in BS and Nepal time (S792, D42) — and, when it was made
+  // at the first view rather than at the close, a plain sentence saying what that means.
+  const made = report ? reportMadeText({
+    generatedAt: report.generated_at, source: report.generation_source, byName: generatorName, monthLabel: periodLabel,
+  }) : null
+  // The figures some rows describe changed meaning at a version (the S696 par rule at v4, the
+  // Wastage item set at v10); a frozen row keeps its own, so its tip must describe its own.
+  const schemaVersion = report?.schema_version ?? snapshot?.schemaVersion ?? 0
 
   // Color bands match Owner Dashboard's live KPI cards exactly, so the same rough magnitude
   // never reads as a different "health" color depending on which page you're looking at.
@@ -341,7 +356,7 @@ export default function MonthlyOwnerReport() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-ghost" onClick={async () => {
                 const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')
-                exportMonthlyReportExcel(report, bizInfo)
+                exportMonthlyReportExcel(report, { ...bizInfo, madeLine: made?.line })
               }}>Export Excel</button>
               <button
                 className="btn btn-ghost"
@@ -426,10 +441,17 @@ export default function MonthlyOwnerReport() {
               <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 4px' }}>
                 Monthly Owner/Manager Report
               </div>
+              {/* When it was made, as a BS date and Nepal time (S792, D42). It printed the viewer's
+                  clock and calendar and "Source: Backfill", which told nobody that a report made at
+                  the Owner's first view holds the month as it stood that day, not at the close. */}
               <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text3)' }}>
-                Period: {periodLabel} &nbsp;|&nbsp; Generated: {new Date(report.generated_at).toLocaleString()} by {generatorName || '—'}
-                &nbsp;|&nbsp; Source: <span style={{ textTransform: 'capitalize' }}>{report.generation_source.replace(/_/g, ' ')}</span>
+                Period: {periodLabel} &nbsp;|&nbsp; {made?.line}
               </p>
+              {made?.note && (
+                <p style={{ margin: '4px auto 0', maxWidth: 560, fontSize: 11, lineHeight: 1.5, color: 'var(--theme-text2)' }}>
+                  {made.note}
+                </p>
+              )}
               {/* The sections below render per the snapshot's own modules_included, so a module
                   that was off when this was generated is simply absent — which a reader takes
                   for "there was nothing to report". Name what is not here (S683). */}
@@ -523,12 +545,17 @@ export default function MonthlyOwnerReport() {
                     <Row label="Opening Stock" value={fmt(snapshot.ims.openingStockValueTotal)}
                       tip="Value of stock on hand at the start of the period (qty × per-unit rate), carried forward from last period's closing count." />
                     <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
-                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red-text)' : undefined} />
+                    {/* What the figure counts depends on when it was frozen (S792, FIGURES-5): from v10
+                        it is the Wastage Report's own total; before, active items only. */}
+                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red-text)' : undefined}
+                      tip={schemaVersion >= 10
+                        ? 'Everything logged as waste this period, valued at each item\'s rate: raw items, prep (sub-recipes) and hidden items alike — the same total as the Wastage Report.'
+                        : 'Waste logged this period on items that were active when this report was made (prep included), valued at each item\'s rate. Newer reports count hidden items too, as the Wastage Report does.'} />
                     {/* v9 (S792): the two figures Food Cost % is now built from. Absent on an older
                         snapshot, which froze no COGS — never rendered as NPR 0 there. */}
                     {snapshot.ims.staffMealsValueTotal != null && (
                       <Row label="Staff Meals" value={fmt(snapshot.ims.staffMealsValueTotal)}
-                        tip="Value of food logged as staff meals this period. It came off the same shelf, so it is part of food used." />
+                        tip="Value of food logged as staff meals this period. Like wastage, it is taken out of Food Used (COGS) below and shown on its own line." />
                     )}
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
@@ -538,8 +565,11 @@ export default function MonthlyOwnerReport() {
                     )}
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
                     <Row label="Credit Purchases" value={fmt(snapshot.ims.creditNet)} />
+                    {/* Strictly below since v4 (S696): an item exactly at par has what you want. */}
                     <Row label="Items Below Par (at close)" value={num(snapshot.ims.reorder?.count)}
-                      tip="Items whose stock at period close was at or below par level." />
+                      tip={schemaVersion >= 4
+                        ? 'Items whose stock at period close was below their par level — an item exactly at par is fine.'
+                        : 'Items whose stock at period close was at or below par level (this report predates the rule that an item exactly at par is fine).'} />
                     <Row label="Unpaid Credit (this period)" value={fmt(snapshot.ims.payables?.unpaidTotal)}
                       tip="This period's Credit purchases still unpaid as of generation — a period-bound figure, not a live 'days overdue' count." />
                   </tbody></table>

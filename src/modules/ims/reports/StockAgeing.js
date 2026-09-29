@@ -159,7 +159,10 @@ export default function StockAgeing() {
       // indistinguishable from "not counted" — the estimate would silently stand in for the count.
       fetchAllRowsChunked(closedIds, ids => supabase.from('closing_stock')
         .select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
-      scopedFrom('recipes', 'id'),
+      // The recipe walk's seed is the whole book, sub-recipes included, so it is paged like the
+      // rest (S792, PLANNING-9): past 1,000 recipes the dishes beyond the cut consumed nothing,
+      // every batch they would have eaten stayed on the shelf, and aged into the 90+ band.
+      fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
     ])
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer selection

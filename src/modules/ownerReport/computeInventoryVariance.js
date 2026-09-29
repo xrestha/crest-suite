@@ -143,7 +143,9 @@ export async function computeInventoryVariance(clientId, period) {
     // Comps INCLUDED (they consumed stock); bs_day + source feed the depletion rule; ingredient_deltas
     // because a customized plate also consumes (or spares) its options' stock lines (S758).
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
-    scopedFrom('recipes', clientId, 'id'),
+    // Paged (S792): these ids seed the recipe walk; a recipe past the 1000-row cap (sub-recipes
+    // count) would consume nothing, and a falsely low theoretical usage is a false Over — frozen.
+    fetchAllRows(() => scopedFrom('recipes', clientId, 'id').order('id')),
     // The client's own tolerance, read at generation and frozen with the section. `settings` has a
     // nullable client_id, so it stays on raw supabase.from (CLAUDE.md).
     supabase.from('settings').select('variance_flag_pct').eq('client_id', clientId).maybeSingle(),

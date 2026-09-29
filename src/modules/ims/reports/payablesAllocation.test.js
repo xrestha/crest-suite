@@ -6,7 +6,7 @@ import {
   valueBillLines, groupIntoBills, allocatePayment, planSupplierLumpSum, supplierCreditSlots,
   billPaymentProblems, planBillPayment, compareBillsOldestFirst, expandCreditPartners,
   linesToReopen, isCreditRow, SUPPLIER_CREDIT_MODE, billOwedAfterReturns, linesToCloseByReturns,
-  returnChangeReopensBill, returnEditReopensBill,
+  returnChangeReopensBill, returnEditReopensBill, paymentsMovedSince, paymentsMovedText,
 } from './payablesAllocation'
 import { billPayables } from './purchaseTaxSplit'
 
@@ -536,5 +536,103 @@ describe('editing a return asks the same question of the return as it will be wr
       expect(d.reopen).toBe(false)
       expect(d.owedAfter).toBeLessThan(d.owedNow)
     })
+  })
+})
+
+// S792, PURCHASES-10: nothing on the server stops a bill being paid twice, so the page re-reads a
+// bill's payments just before it writes and stops if they moved.
+describe('a payment written from an out-of-date page stops', () => {
+  const rows = [
+    row('p1', 'gP', P(2083, 5), { qty: 2, rate: 1000, ref: 'P1' }),
+    row('p2', 'gP', P(2083, 5), { qty: 1, rate: 500, ref: 'P1' }),
+  ]
+  const loaded = [{ id: 'x1', purchase_entry_id: 'p1', amount: 1000, note: 'cheque 11' }]
+  const bill = () => billsOf(rows, loaded)[0]
+  const fmt = n => `NPR ${n.toFixed(2)}`
+
+  test('nothing moved: safe to write', () => {
+    const b = bill()
+    expect(b.remaining).toBe(1500)
+    expect(paymentsMovedSince([b], loaded, { [b.key]: 1500 })).toEqual([])
+  })
+
+  test('a note or mode edited elsewhere is not a reason to stop', () => {
+    const b = bill()
+    const fresh = [{ ...loaded[0], note: 'cheque 11, cleared', payment_mode: 'Cheque', amount: '1000.00' }]
+    expect(paymentsMovedSince([b], fresh, { [b.key]: 1500 })).toEqual([])
+  })
+
+  test('someone else paid meanwhile: stops, with the figures and the overpayment', () => {
+    const b = bill()
+    const fresh = [...loaded, { id: 'x2', purchase_entry_id: 'p2', amount: 1200 }]
+    const [stop] = paymentsMovedSince([b], fresh, { [b.key]: 1500 })
+    expect(stop).toMatchObject({ moved: true, paidThen: 1000, paidNow: 2200, owedNow: 300, paying: 1500, over: 1200 })
+    const text = paymentsMovedText([stop], fmt)
+    expect(text).toMatch(/^Nothing was recorded\. The payments on this bill changed after this page was opened/)
+    expect(text).toMatch(/Bill #P1 \(Himalayan Traders\) now has NPR 2200\.00 recorded against it where this page showed NPR 1000\.00, so it has NPR 300\.00 left to pay; paying NPR 1500\.00 would be NPR 1200\.00 more than it owes\./)
+    expect(text).toMatch(/Reload the page/)
+  })
+
+  test('a payment removed elsewhere stops too — the split was planned on the old lines', () => {
+    const b = bill()
+    const [stop] = paymentsMovedSince([b], [], { [b.key]: 1500 })
+    expect(stop).toMatchObject({ moved: true, paidThen: 1000, paidNow: 0, owedNow: 2500, over: 0 })
+  })
+
+  test('the same total from different rows still counts as moved', () => {
+    const b = bill()
+    const fresh = [{ id: 'x9', purchase_entry_id: 'p1', amount: 1000 }]
+    const [stop] = paymentsMovedSince([b], fresh, { [b.key]: 100 })
+    expect(stop.moved).toBe(true)
+    expect(paymentsMovedText([stop], fmt)).toMatch(/has had its payments changed since this page was opened \(NPR 1000\.00 in all\), and has NPR 1500\.00 left to pay\./)
+  })
+
+  test('a bill a fresh payment has put in credit says the supplier owes it back', () => {
+    const b = bill()
+    const fresh = [...loaded, { id: 'x2', purchase_entry_id: 'p2', amount: 1800 }]
+    const [stop] = paymentsMovedSince([b], fresh, { [b.key]: 1500 })
+    expect(stop).toMatchObject({ owedNow: -300, over: 1500 })
+    expect(paymentsMovedText([stop], fmt)).toMatch(/nothing left to pay — the supplier owes NPR 300\.00 back on it; paying NPR 1500\.00 would be NPR 1500\.00 more than it owes/)
+  })
+
+  test('credit halves are signed: a bill that gave credit away may be paid what it owes again', () => {
+    // Paid 1,000 in full, then 300 of a credit on it was used on another bill (the negative half),
+    // and the return that created the credit has since been deleted — it owes 300 again.
+    const giver = [row('g1', 'gG', P(2083, 5), { rate: 1000, ref: 'G' })]
+    const pays = [
+      { id: 'm1', purchase_entry_id: 'g1', amount: 1000 },
+      { id: 'c1', purchase_entry_id: 'g1', amount: -300, credit_link_id: 'L1', payment_mode: SUPPLIER_CREDIT_MODE },
+    ]
+    const [b] = billsOf(giver, pays)
+    expect(b.remaining).toBe(300)
+    expect(paymentsMovedSince([b], pays, { [b.key]: 300 })).toEqual([])
+  })
+
+  test('a credit source bill is checked with nothing paying onto it', () => {
+    const srcRows = [row('s1', 'gS', P(2083, 3), { rate: 1000, ref: 'S', paid_at: '2026-07-01' })]
+    const srcPays = [{ id: 'k1', purchase_entry_id: 's1', amount: 1000 }]
+    const [src] = billsOf(srcRows, srcPays, [{ purchase_entry_id: 's1', qty: 1, rate: 400 }])
+    expect(paymentsMovedSince([src], srcPays, {})).toEqual([])
+    // The same credit used from another screen meanwhile: the source's rows moved, so it stops.
+    const usedElsewhere = [...srcPays, { id: 'k2', purchase_entry_id: 's1', amount: -400, credit_link_id: 'L9' }]
+    expect(paymentsMovedSince([src], usedElsewhere, {})).toEqual([expect.objectContaining({ moved: true, paidNow: 600, over: 0 })])
+  })
+
+  test('only rows on the bill\'s own lines count', () => {
+    const b = bill()
+    const fresh = [...loaded, { id: 'z1', purchase_entry_id: 'other-bill-line', amount: 999 }]
+    expect(paymentsMovedSince([b], fresh, { [b.key]: 1500 })).toEqual([])
+  })
+
+  test('an overpayment on an unmoved bill still stops, without claiming anything changed', () => {
+    const b = bill()
+    const [stop] = paymentsMovedSince([b], loaded, { [b.key]: 1600 })
+    expect(stop).toMatchObject({ moved: false, over: 100 })
+    expect(paymentsMovedText([stop], fmt)).toBe('Nothing was recorded. Bill #P1 (Himalayan Traders) has NPR 1500.00 left to pay; paying NPR 1600.00 would be NPR 100.00 more than it owes.')
+  })
+
+  test('half a paisa of float noise is not an overpayment', () => {
+    const b = bill()
+    expect(paymentsMovedSince([b], loaded, { [b.key]: 1500.004 })).toEqual([])
   })
 })

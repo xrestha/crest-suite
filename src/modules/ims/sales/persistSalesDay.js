@@ -29,6 +29,38 @@ function withDayLocks(keys, fn) {
   return run
 }
 
+// Is a stock update for any of these days already running, or waiting its turn, on this device?
+// Asked by Sales.js just before it starts one, so a save whose update then outlasts the wall clock
+// can say which of two things is true: it is queued behind an earlier save of the day that has not
+// answered, or it is simply slow itself (S792.4). A key is in the map exactly while its chain is busy.
+export function stockUpdateBusy(clientId, periodId, days) {
+  return (days || []).some(d => movementLocks.has(`${clientId}:${periodId}:${d}`))
+}
+
+// What Sales Entry says when a save's sales landed and its stock update outlasted the wall clock
+// (S792.4). The lock above is deliberately NOT released on a timeout: a hung request may still
+// land, and letting the next update of the day start beside it is the double depletion SALES-4
+// fixed. So the update waits — possibly until the page is reloaded, which drops it unrun. Hence
+// the three facts, in the order the owner needs them: the sales are safe; the stock for that day
+// is not up to date yet, and why; and the one thing that finishes it if it never comes back —
+// reloading and saving the same figures again rebuilds the day's stock from what is saved.
+//
+// `alsoRedo` names what a cross-mode save replaced (the dated days a Bulk save wiped, or the Bulk
+// total a Daily save wiped). Their re-post is part of the same wait, and saving THIS figure again
+// does not redo it — those rows are already gone, so the next save finds nothing to supersede.
+// Saving each of them again does: an ordinary save rebuilds that day's stock from what it holds.
+export function stockUpdateWaitingText({ label, queuedBehind, alsoRedo }) {
+  const why = queuedBehind
+    ? 'it is waiting for an earlier save of the same day, and the server has not answered that one yet'
+    : 'the server has not answered it yet'
+  return `The sales figures for ${label} are saved. The stock update that goes with them has not finished: ${why}. `
+    + 'It carries on by itself if the answer comes, and this note goes away when it does. '
+    + `If the note is still here after a couple of minutes, reload the page and save ${label} again without changing anything: `
+    + 'the figures are already saved, and saving them again rebuilds the stock update from them. '
+    + (alsoRedo ? `This save also replaced the entries saved for ${alsoRedo}. Saving ${label} again does not redo their stock update, so save those again as well. ` : '')
+    + 'Until then, Stock Movements and Reorder can show the stock used that day wrongly.'
+}
+
 // How long any single save request may hang before we give up and re-enable the button (S453/S454).
 export const SAVE_TIMEOUT_MS = 20000
 

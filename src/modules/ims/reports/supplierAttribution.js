@@ -26,6 +26,24 @@
 export const NO_VENDOR = '__none__'      // a purchase line with no vendor recorded
 export const UNATTRIBUTED = '__unattributed__' // consumed, but nothing bought from anyone this period
 
+/**
+ * Which bill a purchase line belongs to, for discount allocation: its `purchase_group_id`, or for a
+ * legacy line written before grouping existed, vendor + invoice + day WITHIN ITS OWN MONTH.
+ *
+ * The month is in the fallback on purpose (S792, TAX-12 / FIGURES-6). A day number exists in every
+ * month, so a caller handing over several months at once — the one-lakh report's fiscal year, Annual
+ * Summary, Period Comparison — used to merge two legacy bills from different months with the same
+ * supplier, day and (blank) invoice number into ONE: the discount taken once (max) instead of per
+ * bill, spread across both months, and the bill count one short. `priorBillFactors` had scoped this
+ * key by period for exactly that reason; the multi-month callers did not. It is now the one key,
+ * so every caller gets it. A caller must select `period_id` for the scoping to take effect; a
+ * single-month caller that does not is unaffected, since all its lines share one month anyway.
+ */
+export function allocationBillKey(p) {
+  return p.purchase_group_id
+    || `legacy|${p.period_id || ''}|${p.vendor_id || ''}|${p.invoice_ref || ''}|${p.bs_day}`
+}
+
 // `purchase_entries.discount_amount` is a BILL-level figure repeated on every line of the bill,
 // which is why VendorReport.js dedupes it by purchase_group_id before summing. Same dedupe here,
 // then the bill's discount is spread across its own lines in proportion to line value so it can
@@ -33,7 +51,7 @@ export const UNATTRIBUTED = '__unattributed__' // consumed, but nothing bought f
 export function allocateBillDiscounts(purchases) {
   const bills = new Map()
   for (const p of purchases || []) {
-    const gid = p.purchase_group_id || `${p.vendor_id}|${p.invoice_ref || ''}|${p.bs_day}`
+    const gid = allocationBillKey(p)
     let bill = bills.get(gid)
     if (!bill) bills.set(gid, bill = { discount: 0, gross: 0, lines: [] })
     // max, not sum: every line of the bill carries the same value (VendorReport.js's rule)

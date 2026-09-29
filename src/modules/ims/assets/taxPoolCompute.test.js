@@ -2,6 +2,7 @@ import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 import {
   acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangibleAmortization,
   parseAdDateLocal, intangibleAmortizationForYear, computeIntangiblePool, priorPoolRun, fiscalYearOfAdDate,
+  fiscalYearStartOfAdDate,
 } from './taxPoolCompute'
 
 const FY_START = 2082 // fiscal year 2082/83: Shrawan 2082 -> Ashadh 2083
@@ -223,6 +224,56 @@ describe('computeIntangiblePool', () => {
     expect(e.depreciation_base).toBe(22000)
     expect(e.depreciation_amount).toBe(11500)
     expect(e.closing_wdv).toBe(10500)
+  })
+
+  // S792 stage 3: which assets were in the pool is judged against the year, not today's status.
+  describe('a disposed asset', () => {
+    // 30,000 over 3 years from Shrawan 2081: 10,000 in 81/82, 82/83 and 83/84.
+    const sold = when => ({ tax_pool: 'E', status: 'disposed', total_cost: 30000, useful_life_years: 3,
+      acquisition_date: stored(2081, 4, 10), disposal_date: when, disposal_proceeds: 12000 })
+
+    test('sold in a later year still counts in every year it was held', () => {
+      const bought = computeIntangiblePool({ assets: [sold(stored(2083, 5, 1))], openingWdv: 0, fiscalYearStartBs: FY_START - 1 })
+      expect(bought.additions).toBe(30000)
+      expect(bought.depreciation_amount).toBe(10000)
+      const held = computeIntangiblePool({ assets: [sold(stored(2083, 5, 1))], openingWdv: 20000, fiscalYearStartBs: FY_START })
+      expect(held).toMatchObject({ additions: 0, disposed_value: 0, disposal_proceeds: 0, depreciation_amount: 10000, closing_wdv: 10000 })
+    })
+
+    test('sold this year: no amortization, and it leaves the pool at the value not yet claimed', () => {
+      const e = computeIntangiblePool({ assets: [sold(stored(2082, 9, 1))], openingWdv: 20000, fiscalYearStartBs: FY_START })
+      expect(e.scheduled).toBe(0)
+      expect(e.disposed_value).toBe(20000) // 30,000 less the 10,000 claimed in 81/82
+      expect(e.disposal_proceeds).toBe(12000)
+      expect(e.depreciation_base).toBe(0)
+      expect(e.closing_wdv).toBe(0)
+    })
+
+    test('sold in an earlier year: not in this year\'s pool at all', () => {
+      const e = computeIntangiblePool({ assets: [sold(stored(2082, 2, 1))], openingWdv: 0, fiscalYearStartBs: FY_START })
+      expect(e).toMatchObject({ additions: 0, disposed_value: 0, disposal_proceeds: 0, scheduled: 0 })
+    })
+
+    test('bought and sold in the same year: the purchase and its exit net to nothing', () => {
+      const flip = { ...sold(stored(2082, 11, 1)), acquisition_date: stored(2082, 5, 1) }
+      const e = computeIntangiblePool({ assets: [flip], openingWdv: 5000, fiscalYearStartBs: FY_START })
+      expect(e.additions).toBe(30000)
+      expect(e.disposed_value).toBe(30000)
+      expect(e.depreciation_base).toBe(5000)
+    })
+
+    test('a disposed asset with no disposal date cannot be placed in a year and stays out', () => {
+      const e = computeIntangiblePool({ assets: [sold(null)], openingWdv: 0, fiscalYearStartBs: FY_START })
+      expect(e).toMatchObject({ additions: 0, disposed_value: 0, scheduled: 0 })
+    })
+  })
+})
+
+describe('fiscalYearStartOfAdDate', () => {
+  test('Ashadh belongs to the year that started the Shrawan before; no date is null', () => {
+    expect(fiscalYearStartOfAdDate(formatAd(bsToAd(2083, 3, 30)))).toBe(2082)
+    expect(fiscalYearStartOfAdDate(formatAd(bsToAd(2083, 4, 1)))).toBe(2083)
+    expect(fiscalYearStartOfAdDate(null)).toBeNull()
   })
 })
 

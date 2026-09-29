@@ -9,7 +9,10 @@ jest.mock('../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jes
 jest.mock('../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 
 // eslint-disable-next-line import/first
-import { buildShrinkageTrendSection, bandShrinkageItem, shrinkageStatus } from './computeInventoryShrinkageTrend'
+import { buildShrinkageTrendSection } from './computeInventoryShrinkageTrend'
+// The verdict and status are the live page's own since S792 stage 3 (no twins left to pin).
+// eslint-disable-next-line import/first
+import { bandShrinkageItem, shrinkageStatus } from '../ims/variance/shrinkageCalc'
 
 const P = (id, m) => ({ id, bs_year: 2082, bs_month: m })
 const window = [P('p3', 3), P('p2', 2), P('p1', 1)] // newest first
@@ -170,9 +173,25 @@ describe('computeInventoryShrinkageTrend source', () => {
     expect(src).toContain('throwFirstError(results)')
   })
 
-  test('takes the population, the count test and the surrogate from the live pages\' module', () => {
-    expect(src).toMatch(/from '\.\.\/ims\/variance\/variancePopulation'/)
-    for (const fn of ['linkedItemIdsOf(', 'bandPctOf(', 'isClosingCount(']) expect(src).toContain(fn)
-    expect(src).not.toMatch(/if \(theor <= 0\) return/)
+  test("takes the loop and the verdict from the live page's module, with no twin of its own", () => {
+    expect(src).toMatch(/from '\.\.\/ims\/variance\/shrinkageCalc'/)
+    for (const fn of ['buildShrinkageObservations(', 'bandShrinkageItem(']) expect(src).toContain(fn)
+    // The deleted twins must not come back.
+    expect(src).not.toMatch(/function (shrinkageStatus|bandShrinkageItem|byPeriodItem)\b/)
+    expect(src).not.toMatch(/observations\.push\(/)
+  })
+})
+
+describe('the frozen section and the live page reach the same verdict', () => {
+  test('bandShrinkageItem over the same observations as the page gives the same row', () => {
+    // The page bands exactly these observations (shrinkageCalc.test.js pins the loop); the section
+    // only renames the item. Same counts, same value, same status label.
+    const s = build()
+    const f = s.items.find(i => i.itemId === 'F')
+    const page = bandShrinkageItem({ rate: 1000, observations: [
+      { variance: 2, theor: 10, actual: 12, rate: 1000 }, { variance: 2, theor: 10, actual: 12, rate: 1000 },
+    ] }, null)
+    expect(f).toMatchObject({ shrinkCount: page.shrinkCount, coveredPeriods: page.coveredPeriods, status: page.status })
+    expect(f.totalShrinkValue).toBeCloseTo(page.totalShrinkValue, 6)
   })
 })
