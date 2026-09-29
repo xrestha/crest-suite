@@ -35,7 +35,7 @@ Code added since S756 had never been reviewed, and most new findings sit in it:
 | D34 | The bill line's typed **Total is after VAT when VAT is ticked**. Ticking or unticking changes the Rate, never the Total. | ✅ S792 stage 2 (`billLineVat.js`; a typed Rate stays ex-VAT and gains 13% on the tick) |
 | D35 | A dish typed as a Bulk total, later sold on the till: **Sales Entry asks for the pre-till days as daily figures**. The Bulk total is ignored for stock only after that. | ✅ S792 stage 2 (`bulkTillHandover`; POS clients may enter the pre-till days on Daily Entry) |
 | D36 | Variance and Theoretical vs Actual **both judge an ingredient whose stock fell while its dishes sold nothing**. | ✅ S792 stage 2 (`variancePopulation.js`, Shrinkage and the Owner Report too) |
-| D37 | A second count of an already-counted item **asks: replace, or add yours?** (stage 4) | ✅ S792 stage 4 (`save_closing_counts`; migration 20260929100000 fixed after review, awaiting "apply") |
+| D37 | A second count of an already-counted item **asks: replace, or add yours?** (stage 4) | ✅ S792 stage 4 (`save_closing_counts`; migration 20260929100000 live 2026-09-29) |
 | D38 | Offline counts arriving in a closed month under the Owner's login are **listed, with one button "Add to Bhadra and carry into Ashwin's opening stock"**. Nothing lands silently. | ✅ S792 |
 | D39 | **Counting tablets lock after 10 idle minutes** and return to the PIN screen, like POS tills. Sign out also goes back to the PIN screen. | ✅ S792 |
 | D40 | Existing businesses **type each tax pool's opening value once**, plus "depreciation already taken" per old asset (stage 4). | ✅ S792 stage 4 (`assets_tax_pool_openings`; migration 20260929110000 live 2026-09-29) |
@@ -187,7 +187,7 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
 
 ## S792.5 Stage 4 — design first, shown before building — ✅ built S792 stage 4
 
-Designs: `docs/ims-review-s792/STAGE4-DESIGN.md`; owner took every recommendation (Q1–Q7). 20260929110000 (D40) and 20260929120000 (D32) **live 2026-09-29**; 20260929100000 (D37) **awaiting "apply"** after a pre-apply fix (an add no longer makes the adder the total's sole owner).
+Designs: `docs/ims-review-s792/STAGE4-DESIGN.md`; owner took every recommendation (Q1–Q7). All three migrations **live 2026-09-29**: 20260929110000 (D40), 20260929120000 (D32), and 20260929100000 (D37, after a pre-apply fix: an add no longer makes the adder the total's sole owner).
 
 - ✅ D32 PAN-bill supplier VAT as cost. The valuation basis for stock and purchases touches every COGS reader and the group SQL.
 - ✅ D40 Opening pool WDV and per-asset "depreciation already taken" (schema and UI).
