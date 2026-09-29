@@ -1631,18 +1631,18 @@ Check the recipe list before saving again — if it timed out after the recipe w
               <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedFrom={scopedFrom} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin}
                 vatMode={vatMode} costedByBuild={r => isCostedByBuild(r, customizationEnabled)} />
               <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
-                <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
               </Tip>
               <Tip text="Opens WhatsApp with this tab's recipe list (name, food cost, FC%) pre-filled as a text message — check specific rows first to share just those, or leave none checked to share the whole tab. Pick a contact or group to send it to." width={290}>
-                <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={printShareRows.length === 0}>📱 Share via WhatsApp</button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={shareRecipesWhatsApp} disabled={printShareRows.length === 0}>📱 Share via WhatsApp</button>
               </Tip>
               <Tip text="Tick one recipe's box, then press Duplicate to start a new recipe with the same ingredients, quantities, price and details — handy for a Large size or a version with oat milk. It opens as “… (Copy)” with its own Product Code: rename it, change what differs, then Save. Nothing is saved until you do. Its till on/off switch, HSC code and Customization choices are not copied: they start as for any new recipe." width={320}>
-                <button className="btn btn-ghost" onClick={duplicateChecked} aria-disabled={checkedRecipes.length !== 1 || undefined}>⧉ Duplicate</button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={duplicateChecked} aria-disabled={checkedRecipes.length !== 1 || undefined}>⧉ Duplicate</button>
               </Tip>
               {selectedIds.size > 0 && (
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   {selectedIds.size} selected
-                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setSelectedIds(new Set())}>Clear</button>
                 </span>
               )}
             </div>
@@ -1751,7 +1751,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       <th style={{ textAlign: 'right' }}>Total Cost</th>
                       <th style={{ textAlign: 'right' }}>Yield</th>
                       <th style={{ textAlign: 'right' }}>Cost per Unit</th>
-                      <th><Tip text="Inactive hides this sub-recipe from view, but it stays fully usable as an ingredient in other recipes — deactivating it never affects another recipe's cost calculation." width={280}>Status</Tip></th>
+                      <th><Tip text="Blank means in use. Hidden takes this sub-recipe out of view, but it stays fully usable as an ingredient in other recipes — deactivating it never affects another recipe's cost calculation." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
                     </tr>
                   </thead>
@@ -1774,7 +1774,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                               is the action. The bare `<td onClick>` was mouse-only, and this is the
                               only way into a sub-recipe's detail from this tab. */}
                           <td style={{ fontWeight: 600 }}>
-                            <button type="button" className="btn-linklike" onClick={() => openDetail(recipe)}>
+                            <button type="button" className="btn-linklike btn-linklike--quiet" onClick={() => openDetail(recipe)}>
                               ⚙ {recipe.name}
                             </button>
                           </td>
@@ -1785,18 +1785,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             NPR {costPerUnit.toFixed(2)} / {recipe.yield_uom}
                           </td>
                           <td>
-                            <span className={`badge ${recipe.is_active ? 'badge-green' : 'badge-gray'}`}>
-                              {recipe.is_active ? 'Active' : 'Inactive'}
-                            </span>
+                            {/* Only the exception is marked (S796): a green "Active" on every row was a column of the same word that hid the few hidden ones. The Hide button says "Hide", so the state says "Hidden". */}
+                            {!recipe.is_active && <span className="badge badge-gray">Hidden</span>}
                           </td>
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
+                              <button className="btn btn-ghost btn-sm" aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               {/* Deleting a dish is manager-rank (S756, decided with the owner); the
                                   database refuses it below that. Hide stays with supervisors. */}
-                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Del</button>}
+                              {canDeleteRecipe && <button className="btn btn-danger btn-sm" onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Del</button>}
                             </div>
                           </td>
                         </tr>
@@ -1821,7 +1820,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   return (
                     <li key={recipe.id} className="phone-card">
                       <div className="phone-card__top">
-                        <button type="button" className="btn-linklike phone-card__title" onClick={() => openDetail(recipe)}>{recipe.name}</button>
+                        <button type="button" className="btn-linklike btn-linklike--quiet phone-card__title" onClick={() => openDetail(recipe)}>{recipe.name}</button>
                         <span className="phone-card__figure" style={{ color: isByo ? 'var(--theme-text1)' : fcB.color }}
                           title={fcPct != null ? fcB.label : (unratedReason(cost, price) || undefined)}>
                           {isByo ? (byoCost.error ? '—' : fcRangeNode(byo, settings)) : fcPct != null ? `${fcPct.toFixed(1)}% ${fcB.mark}` : '—'}
@@ -1862,7 +1861,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         ? 'What the guest pays. This outlet gives PAN bills, so the till adds no VAT to it.'
                         : 'Menu price ex-VAT (stored without VAT). VAT-inclusive price = selling price × (1 + VAT rate).'} width={240}>Selling Price</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text={`Food Cost % = food cost ÷ selling price (ex-VAT). ✓ up to ${fcWarn}%, △ ${fcWarn}–${fcCrit}%, ▲ above ${fcCrit}% — your thresholds from Settings. A dash means it can't be worked out yet: no selling price, or no costed ingredients and no manual cost.`} width={290}>FC %</Tip></th>
-                      <th><Tip text="Inactive hides this recipe from Sales Entry, POS ordering, the Guest Menu, and the menu-analysis tools — past sales history and revenue are unaffected." width={280}>Status</Tip></th>
+                      <th><Tip text="Blank means on the menu. Hidden takes this recipe off Sales Entry, POS ordering, the Guest Menu, and the menu-analysis tools — past sales history and revenue are unaffected." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
                     </tr>
                   </thead>
@@ -1897,9 +1896,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                               <RowDisclosure expanded={byoOpen} onToggle={toggleByo} controls={`byo-cost-${recipe.id}`}
                                 label={`Cost by size for ${recipe.name}`} />
                             )}
-                            <button type="button" className="btn-linklike" onClick={() => openDetail(recipe)}>{recipe.name}</button>
-                            {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-text1)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
-                            {recipe.is_build_your_own && <span className="badge badge-gray" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
+                            <button type="button" className="btn-linklike btn-linklike--quiet" onClick={() => openDetail(recipe)}>{recipe.name}</button>
+                            {subIngCount > 0 && <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
+                            {recipe.is_build_your_own && <span className="badge badge-gray" style={{ marginLeft: 6 }}>Build-your-own</span>}
                           </td>
                           {activeTab === 'all' && <td><span className="badge badge-gray">{recipe.category}</span></td>}
                           <td style={{ color: 'var(--theme-text2)' }}>
@@ -1910,7 +1909,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                                 depletes through the recipe too, so a dish off the till still needs one. */}
                             {(recipe.recipe_ingredients || []).length === 0 && recipe.category !== 'Sub-Recipe' && !isByo && (
                               <Tip text="No ingredients linked to this recipe. Its sales — from the POS or from Sales Entry — won't deplete Item Master stock or show up in Stock Movements. Add at least one ingredient here to fix that." width={280}>
-                                <span className="badge badge-amber" style={{ marginLeft: 6, fontSize: 10 }}>No BOM</span>
+                                <span className="badge badge-amber" style={{ marginLeft: 6 }}>No BOM</span>
                               </Tip>
                             )}
                           </td>
@@ -1942,18 +1941,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           </td>
                           )}
                           <td>
-                            <span className={`badge ${recipe.is_active ? 'badge-green' : 'badge-gray'}`}>
-                              {recipe.is_active ? 'Active' : 'Inactive'}
-                            </span>
+                            {/* Only the exception is marked (S796): a green "Active" on every row was a column of the same word that hid the few hidden ones. The Hide button says "Hide", so the state says "Hidden". */}
+                            {!recipe.is_active && <span className="badge badge-gray">Hidden</span>}
                           </td>
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
+                              <button className="btn btn-ghost btn-sm" aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => openEdit(recipe)} aria-label={`Edit ${recipe.name}`}>Edit</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => toggleActive(recipe)} aria-label={`${recipe.is_active ? 'Hide' : 'Show'} ${recipe.name}`}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               {/* Deleting a dish is manager-rank (S756, decided with the owner); the
                                   database refuses it below that. Hide stays with supervisors. */}
-                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Del</button>}
+                              {canDeleteRecipe && <button className="btn btn-danger btn-sm" onClick={() => deleteRecipe(recipe)} aria-label={`Delete ${recipe.name}`}>Del</button>}
                             </div>
                           </td>
                         </tr>
@@ -2309,7 +2307,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 <span style={{ color: 'var(--theme-text2)' }}>
                   {usdaCandidates.length} ingredient{usdaCandidates.length > 1 ? 's' : ''} not in the regional library: {usdaCandidates.map(i => i.name).join(', ')}
                 </span>
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={fillFromUsda} disabled={usdaFillBusy}>
+                <button className="btn btn-ghost btn-sm" onClick={fillFromUsda} disabled={usdaFillBusy}>
                   {usdaFillBusy ? 'Fetching…' : '🔍 Try USDA FoodData Central'}
                 </button>
                 <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 8 }} onClick={dismissUsdaCandidates} title="Dismiss" aria-label="Dismiss USDA suggestion">✕</button>

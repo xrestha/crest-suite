@@ -1263,7 +1263,7 @@ export default function Items() {
                     </Tip>
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
-                  <th>Status</th>
+                  <th><Tip text="Blank means in use. Hidden takes the item out of the pickers and off the stock sheet from now on; its past purchases and counts keep their figures." width={260}>Status</Tip></th>
                   <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. The chip names the first two places; hover it for the full list." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
@@ -1308,9 +1308,8 @@ export default function Items() {
                         )}
                       </td>
                       <td>
-                        <span className={`badge ${item.is_active ? 'badge-green' : 'badge-gray'}`}>
-                          {item.is_active ? 'Active' : 'Inactive'}
-                        </span>
+                        {/* Only the exception is marked (S796): a green "Active" on every row was a column of the same word that hid the few hidden ones. The Hide button says "Hide", so the state says "Hidden". */}
+                        {!item.is_active && <span className="badge badge-gray">Hidden</span>}
                       </td>
                       <td>
                         {refMap[item.id]?.length > 0 ? (

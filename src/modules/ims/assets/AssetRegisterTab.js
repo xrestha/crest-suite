@@ -155,7 +155,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                   {/* The row click stays for the mouse; the name is the keyboard path into the
                       asset detail (S682). */}
                   <td style={{ fontWeight: 600 }}>
-                    <button type="button" className="btn-linklike" onClick={e => { e.stopPropagation(); setViewingAsset(a) }}>{a.name}</button>
+                    <button type="button" className="btn-linklike btn-linklike--quiet" onClick={e => { e.stopPropagation(); setViewingAsset(a) }}>{a.name}</button>
                   </td>
                   <td>{a.assets_categories?.name || '—'}</td>
                   <td style={{ textAlign: 'right' }}>{a.quantity}</td>

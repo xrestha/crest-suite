@@ -934,7 +934,7 @@ export default function VendorReport() {
                             is the house class for a cell that ACTS on the row's identity. */}
                         <button
                           type="button"
-                          className="btn-linklike"
+                          className="btn-linklike btn-linklike--quiet"
                           onClick={() => openVendorDrilldown(r.vendor)}
                           title="View purchase bills"
                           aria-label={`View ${r.vendor.name}'s purchase bills`}
@@ -1050,7 +1050,7 @@ export default function VendorReport() {
                           <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
                             <button
                               type="button"
-                              className="btn-linklike"
+                              className="btn-linklike btn-linklike--quiet"
                               onClick={e => { e.stopPropagation(); openVendorDrilldown(singleVendor, day) }}
                               aria-label={`View ${singleVendor.name} bills for ${formatBsDay(day, selectedPeriod?.bs_month)}`}
                             >
@@ -1099,7 +1099,7 @@ export default function VendorReport() {
                               {val !== 0 ? (
                                 <button
                                   type="button"
-                                  className="btn-linklike"
+                                  className="btn-linklike btn-linklike--quiet"
                                   onClick={() => openVendorDrilldown(v, day)}
                                   title="View bill(s) for this day"
                                   aria-label={`View ${v.name} bills for ${formatBsDay(day, selectedPeriod?.bs_month)}`}

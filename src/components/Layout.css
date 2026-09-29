@@ -1825,6 +1825,17 @@ tr.interactive-row:focus-visible {
 .btn-linklike:hover:not(:disabled) {
   text-decoration-thickness: 2px;
 }
+/* The identity column of a long list (S796): 98 dish names in accent ink were 98 spends of the
+   one colour that now means "press this" — and under Modernist Light it reads red. The name is
+   still the control and still underlined; it takes ink, with a quiet rule that firms up on hover.
+   component-library.md already prescribed this override for a control repeated down a card grid. */
+.btn-linklike--quiet {
+  color: var(--theme-text1);
+  text-decoration-color: var(--theme-border);
+}
+.btn-linklike--quiet:hover:not(:disabled) {
+  text-decoration-color: currentColor;
+}
 
 .btn-linklike:disabled {
   color: var(--theme-text3);

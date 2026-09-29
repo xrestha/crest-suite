@@ -756,18 +756,18 @@ export default function SupplierPriceTracker() {
                                 color: 'var(--theme-text1)', outline: 'none'
                               }}
                             />
-                            <button className="btn btn-primary" style={{ fontSize: 11, padding: '7px 11px' }}
+                            <button className="btn btn-primary btn-sm"
                               aria-label="Save price" onClick={() => savePrice(item, key)} disabled={isSaving}>
                               {isSaving ? '…' : '✓'}
                             </button>
-                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }}
+                            <button className="btn btn-ghost btn-sm"
                               aria-label="Cancel edit"
                               onClick={() => setEditingPrice(p => { const n = { ...p }; delete n[key]; return n })}>
                               ✕
                             </button>
                           </div>
                         ) : (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                          <button className="btn btn-ghost btn-sm"
                             onClick={() => setEditingPrice(p => ({ ...p, [key]: String(masterRate || '') }))}>
                             Edit
                           </button>

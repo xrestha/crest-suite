@@ -70,7 +70,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
       </div>
 
       {/* Letter / salutation */}
-      <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }}>
+      <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 18 }}>
         <div style={{ marginBottom: 10 }}>
           <strong>To,</strong><br />
           {vendor?.name}<br />
@@ -132,7 +132,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
                     via Siddhartha Bank on 22 July 2026") used to be concatenated inline with it
                     ("3 — Fonepay via..."), which buried the actual invoice reference. */}
                 {e.ref && <div style={{ fontWeight: 700 }}>{e.ref}</div>}
-                {e.note && <div style={{ fontSize: 9.5, marginTop: e.ref ? 2 : 0 }}>{e.note}</div>}
+                {e.note && <div style={{ fontSize: 10, marginTop: e.ref ? 2 : 0 }}>{e.note}</div>}
                 {!e.ref && !e.note && '—'}
               </td>
               <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : (e.type === 'payment' || e.type === 'settlement') ? (e.paymentMode || '—') : '—'}</td>

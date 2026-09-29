@@ -2384,7 +2384,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{Number(r.qty).toLocaleString('en-IN')} {r.items?.uom || ''}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{valOf(r) > 0 ? fmtNpr(valOf(r)) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>
-                          {!isLocked && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteDailyWastage(r.id)} disabled={wBusy} aria-label={`Delete wastage of ${r.items?.name || 'item'}`}>Del</button>}
+                          {!isLocked && <button className="btn btn-danger btn-sm" onClick={() => deleteDailyWastage(r.id)} disabled={wBusy} aria-label={`Delete wastage of ${r.items?.name || 'item'}`}>Del</button>}
                         </td>
                       </tr>
                     ))}
@@ -2408,8 +2408,9 @@ export default function Stock() {
               <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Days with wastage</span>
                 {Object.keys(perDay).map(Number).sort((a, b) => a - b).map(d => (
-                  <button key={d} onClick={() => setWDay(d)} className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', borderColor: d === wDay ? 'color-mix(in srgb, var(--theme-accent) 50%, transparent)' : 'var(--theme-border)', color: d === wDay ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
-                    Day {d} · {fmtNpr(perDay[d])}
+                  <button key={d} type="button" onClick={() => setWDay(d)} aria-pressed={d === wDay}
+                    className={`tab-btn${d === wDay ? ' tab-btn--active' : ''}`}>
+                    {formatBsDay(d)} · {fmtNpr(perDay[d])}
                   </button>
                 ))}
               </div>

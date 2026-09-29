@@ -669,7 +669,7 @@ export default function Vendors() {
                   <th><Tip text="Supplier's PAN or VAT registration number — needed for VAT invoice reconciliation." width={260}>PAN/VAT<span style={{ display: 'block' }}>No.</span></Tip></th>
                   <th><Tip text="Standard credit period or payment arrangement agreed with this supplier.">Payment<span style={{ display: 'block' }}>Terms</span></Tip></th>
                   <th>Address</th>
-                  <th><Tip text="Active vendors appear in purchase entry dropdowns. Inactive vendors are hidden but their purchase history is preserved." width={280}>Status</Tip></th>
+                  <th><Tip text="Blank means active: the vendor appears in purchase entry dropdowns. Inactive vendors are hidden but their purchase history is preserved." width={280}>Status</Tip></th>
                   <th></th>
                 </tr>
               </thead>
@@ -699,9 +699,8 @@ export default function Vendors() {
                     <td>
                       {/* gray, not red: deactivating a vendor is routine housekeeping, not an error state, and red
                           is this module's overdue/loss colour everywhere else. Matches Items. */}
-                      <span className={`badge ${v.archived_at ? 'badge-gray' : v.is_active ? 'badge-green' : 'badge-gray'}`}>
-                        {v.archived_at ? 'Archived' : v.is_active ? 'Active' : 'Inactive'}
-                      </span>
+                      {/* Only the exception is marked (S796), as on Items and Recipes. */}
+                      {(v.archived_at || !v.is_active) && <span className="badge badge-gray">{v.archived_at ? 'Archived' : 'Inactive'}</span>}
                     </td>
                     {/* Icon-only, so every control carries an aria-label (an icon has no accessible
                         name) and the same string on title for the pointer. Four text buttons were

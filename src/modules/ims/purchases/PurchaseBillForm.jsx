@@ -584,7 +584,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                 style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
               >
                 <div style={{ width: 34, height: 18, borderRadius: 'var(--radius-md)', background: knobBg, opacity: knobOpacity, position: 'relative', transition: 'background 0.2s, opacity 0.2s', flexShrink: 0 }}>
-                  <div style={{ position: 'absolute', top: 3, left: allVat ? 17 : someVat ? 11 : 3, width: 12, height: 12, borderRadius: 0, background: 'var(--theme-card)', transition: 'left 0.2s' }} />
+                  <div style={{ position: 'absolute', top: 3, left: 3, transform: `translateX(${allVat ? 14 : someVat ? 8 : 0}px)`, width: 12, height: 12, borderRadius: 0, background: 'var(--theme-card)', transition: 'transform 0.2s' }} />
                 </div>
                 <span style={{ fontSize: 13, fontWeight: someVat ? 700 : 400, color: labelColor, letterSpacing: '0.04em' }}>
                   {allVat ? 'VAT 13%' : someVat ? 'VAT Mixed' : 'No VAT'}

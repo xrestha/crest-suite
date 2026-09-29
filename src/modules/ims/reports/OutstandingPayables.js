@@ -1100,13 +1100,13 @@ export default function OutstandingPayables() {
                           {vendorTerms[vendorByName[vName].id] ? `Terms: ${vendorTerms[vendorByName[vName].id]}` : 'No payment terms set'}
                         </span>
                       )}
-                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }}
+                      <button className="btn btn-ghost btn-sm"
                         onClick={() => openEditTerms(vendorByName[vName])}>
                         Edit Terms
                       </button>
                       {activeTab === 'outstanding' && bills.some(x => x.vendorName === vName && x.remaining > EPS) && (
                         <Tip text={`Enter one amount you paid ${vName}. Crest pays their oldest unpaid bill first, then the next, and shows you exactly how it splits before anything is saved.`} width={280}>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }}
+                          <button className="btn btn-ghost btn-sm"
                             onClick={() => openLumpSum(vName)}>
                             Pay supplier…
                           </button>
@@ -1257,15 +1257,15 @@ export default function OutstandingPayables() {
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                                           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Payment History</div>
                                           {selectedHere.length > 0 && (<>
-                                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 10px' }}
+                                            <button className="btn btn-ghost btn-sm"
                                               onClick={ev => { ev.stopPropagation(); openEditMode(b) }}>
                                               Edit Payment Mode ({selectedHere.length})
                                             </button>
-                                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 10px' }}
+                                            <button className="btn btn-ghost btn-sm"
                                               onClick={ev => { ev.stopPropagation(); openEditNote(b) }}>
                                               Edit Note ({selectedHere.length})
                                             </button>
-                                            <button className="btn btn-danger" style={{ fontSize: 11, padding: '2px 10px' }}
+                                            <button className="btn btn-danger btn-sm"
                                               onClick={ev => { ev.stopPropagation(); deleteSelectedPayments(b) }}>
                                               Delete Selected ({selectedHere.length})
                                             </button>

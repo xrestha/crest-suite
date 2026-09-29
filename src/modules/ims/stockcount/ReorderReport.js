@@ -488,7 +488,7 @@ export default function ReorderReport() {
             {selectedIds.size > 0 && (
               <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {selectedIds.size} selected
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSelectedIds(new Set())}>Clear</button>
               </span>
             )}
           </div>

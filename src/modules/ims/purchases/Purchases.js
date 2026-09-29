@@ -608,12 +608,9 @@ export default function Purchases() {
           <div className="stat-label">Net Purchases</div>
           <div className="stat-value" style={{ fontSize: 16 }}>NPR {netTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">Period Status</div>
-          <div className="stat-value" style={{ fontSize: 16 }}>
-            <span className={`badge ${selectedPeriod?.status === 'open' ? 'badge-green' : 'badge-gray'}`}>{selectedPeriod?.status || '—'}</span>
-          </div>
-        </div>
+        {/* No Period Status tile (S796): the period chip under the title already says "OPEN" or
+            closed, the dropdown says it again, and a fifth tile repeating it in green was the
+            third copy of one fact on this screen. */}
       </div>
       )}
 
@@ -867,9 +864,9 @@ export default function Purchases() {
                               {!isLocked && <>
                                 {/* Named for the bill (S796): ~110 "Edit"/"Del" buttons on one list read identically to a
                                     screen reader, with nothing to say which bill each would change. */}
-                                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => openEditGroup(gid)}
+                                <button className="btn btn-ghost btn-sm" onClick={() => openEditGroup(gid)}
                                   aria-label={`Edit bill from ${first.vendors?.name || 'no vendor'}${first.invoice_ref ? ` #${first.invoice_ref}` : ''}`}>Edit</button>
-                                <button className="btn btn-danger" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => deleteGroup(gid)}
+                                <button className="btn btn-danger btn-sm" onClick={() => deleteGroup(gid)}
                                   aria-label={`Delete bill from ${first.vendors?.name || 'no vendor'}${first.invoice_ref ? ` #${first.invoice_ref}` : ''}`}>Del</button>
                               </>}
                             </div>

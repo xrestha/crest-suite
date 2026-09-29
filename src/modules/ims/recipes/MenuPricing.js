@@ -1103,7 +1103,7 @@ export default function MenuPricing() {
                         <RowDisclosure expanded={byoOpen} onToggle={toggleByo} controls={`mp-byo-${r.id}`} label={`Cost by size for ${r.name}`} />
                       )}
                       <strong>{r.name}</strong>
-                      {isByo && <span className="badge badge-gray" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
+                      {isByo && <span className="badge badge-gray" style={{ marginLeft: 6 }}>Build-your-own</span>}
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                         {r.category}
                         {pan ? panCaption : r.vat > 0
