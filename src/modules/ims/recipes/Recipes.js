@@ -187,6 +187,22 @@ export default function Recipes() {
     if (baseFailed) { setLoadError(baseFailed); setLoading(false); return }
     const [{ data: r }, { data: i }, { data: openPeriods }] = baseResults
 
+    // Overhead + sales data for the open period, to power the overhead panel. Started HERE, beside
+    // the ingredient read below, not after it (S793): it needs only the open period from the batch
+    // above, and waiting for the ingredients cost every load one more serial round trip.
+    const openPeriodId = openPeriods?.[0]?.id || null
+    const ohPromise = openPeriodId ? Promise.all([
+      scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
+      // Comps (source='pos_comp') are excluded — never paid for, so they shouldn't earn a
+      // revenue share of overhead. The exclusion runs in JS below, NOT as a server-side
+      // `.neq('source', 'pos_comp')` (S756): `sales_entries.source` is nullable, `NULL <> x` is
+      // NULL in SQL, so the `.neq` also dropped every legacy row written before the column had a
+      // default. Those rows fell out of BOTH totalRevenue (the denominator every recipe's share
+      // is taken over) and revenueByRecipe/coversByRecipe, so a dish that sold mostly before the
+      // column existed was allocated too little overhead and its True Net Margin read high.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', openPeriodId).order('id'))
+    ]) : null
+
     // Fetch ingredients separately — scoped to this client's recipe IDs.
     //
     // Chunked and paged (S711), for the same two reasons the shared walk in utils/recipeCost.js
@@ -236,21 +252,8 @@ export default function Recipes() {
     setAndCache(setItems, 'items', i || [])
     hasLoadedOnceRef.current = true
 
-    // Overhead + sales data for the open period to power the overhead panel
-    const openPeriodId = openPeriods?.[0]?.id || null
-
-    if (openPeriodId) {
-      const ohResults = await Promise.all([
-        scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
-        // Comps (source='pos_comp') are excluded — never paid for, so they shouldn't earn a
-        // revenue share of overhead. The exclusion runs in JS below, NOT as a server-side
-        // `.neq('source', 'pos_comp')` (S756): `sales_entries.source` is nullable, `NULL <> x` is
-        // NULL in SQL, so the `.neq` also dropped every legacy row written before the column had a
-        // default. Those rows fell out of BOTH totalRevenue (the denominator every recipe's share
-        // is taken over) and revenueByRecipe/coversByRecipe, so a dish that sold mostly before the
-        // column existed was allocated too little overhead and its True Net Margin read high.
-        fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', openPeriodId).order('id'))
-      ])
+    if (ohPromise) {
+      const ohResults = await ohPromise
       // These two failing does NOT blank the page — the True Cost panel is supplementary and the
       // recipe list above it is already loaded and correct. But it must not fail as an absence
       // either: a dropped error here sums to zero overheads, the `totalOverheads > 0` test below

@@ -1,4 +1,7 @@
-import { explodeRecipeIngredients, explodeRecipeTree } from './recipeCost'
+import {
+  explodeRecipeIngredients, explodeRecipeTree, computeRecipeCosts,
+  buildRecipeBook, loadRecipeBook, RECIPE_BOOK_SELECT,
+} from './recipeCost'
 
 // Minimal Supabase stub — only the two queries explodeRecipeTree actually makes:
 //   recipe_ingredients .select(...).in('recipe_id', ids).order('id').range(from, to)
@@ -13,7 +16,7 @@ import { explodeRecipeIngredients, explodeRecipeTree } from './recipeCost'
 // that agrees with whatever the code happens to do.
 const SERVER_MAX_ROWS = 1000
 
-function makeStub({ ingredients = [], recipes = [] } = {}) {
+function makeStub({ ingredients = [], recipes = [], items = [] } = {}) {
   return {
     from(table) {
       return {
@@ -21,9 +24,12 @@ function makeStub({ ingredients = [], recipes = [] } = {}) {
           return {
             in(_col, ids) {
               const set = new Set(ids)
+              // `items` serves computeRecipeCosts' rate read (S793's equivalence tests).
               const rows = table === 'recipe_ingredients'
                 ? ingredients.filter(r => set.has(r.recipe_id))
-                : recipes.filter(r => set.has(r.id))
+                : table === 'items'
+                  ? items.filter(r => set.has(r.id))
+                  : recipes.filter(r => set.has(r.id))
               return {
                 order() {
                   return {
@@ -271,5 +277,194 @@ describe('explodeRecipeTree — the 1000-row cap (S711)', () => {
     const tree = await explodeRecipeTree(db, ['dish'])
     expect(tree.dish.subRecipes).toHaveLength(N)
     expect(tree.dish.items).toHaveLength(N)
+  })
+})
+
+// ── The pre-loaded book (S793) ──────────────────────────────────────────────────────────────────
+// loadRecipeBook exists so a page can walk the tree with no network at all — one request instead
+// of one per nesting level. It must be a different way of FEEDING the one walk, never a different
+// walk: every fixture below runs through both paths and the results must be deep-equal, not merely
+// close, because both paths perform the same arithmetic in the same order.
+
+// Fixture → the rows loadRecipeBook reads: every recipe (seed dishes included, which the fetch
+// fixtures leave implicit) with its ingredient rows embedded, and each ingredient's `items` embed
+// carrying the item's name and rate beside its yield.
+function bookRowsOf({ ingredients = [], recipes = [], items = [] } = {}) {
+  const itemById = new Map(items.map(i => [i.id, i]))
+  const ids = [...new Set([...recipes.map(r => r.id), ...ingredients.map(i => i.recipe_id)])]
+  return ids.map(id => ({
+    ...(recipes.find(r => r.id === id) || { id }),
+    recipe_ingredients: ingredients
+      .filter(i => i.recipe_id === id)
+      .map(i => (i.item_id ? { ...i, items: { ...(i.items || {}), ...(itemById.get(i.item_id) || {}) } } : i)),
+  }))
+}
+const bookOf = fx => buildRecipeBook(bookRowsOf(fx))
+
+const FULL_YIELD = { yield_pct: 100 }
+const BOOK_FIXTURES = {
+  'a direct ingredient with a yield': {
+    seeds: ['dish'],
+    ingredients: [{ recipe_id: 'dish', qty_per_portion: 100, item_id: 'B', sub_recipe_id: null, items: { yield_pct: 80 } }],
+  },
+  'a missing yield_pct': {
+    seeds: ['dish'],
+    ingredients: [{ recipe_id: 'dish', qty_per_portion: 40, item_id: 'C', sub_recipe_id: null, items: null }],
+  },
+  'one level of sub-recipe': {
+    seeds: ['dish'],
+    ingredients: [
+      { recipe_id: 'dish', qty_per_portion: 50, item_id: null, sub_recipe_id: 'sauce', items: null },
+      { recipe_id: 'sauce', qty_per_portion: 1000, item_id: 'tomato', sub_recipe_id: null, items: FULL_YIELD },
+    ],
+    recipes: [{ id: 'sauce', yield_qty: 2000 }],
+  },
+  'nesting, a diamond and an item reached two ways': {
+    // dish -> sauce -> base, dish -> base directly, and tomato both direct and through sauce.
+    seeds: ['dish', 'side'],
+    ingredients: [
+      { recipe_id: 'dish', qty_per_portion: 10, item_id: 'tomato', sub_recipe_id: null, items: FULL_YIELD },
+      { recipe_id: 'dish', qty_per_portion: 50, item_id: null, sub_recipe_id: 'sauce', items: null },
+      { recipe_id: 'dish', qty_per_portion: 5, item_id: null, sub_recipe_id: 'base', items: null },
+      { recipe_id: 'sauce', qty_per_portion: 100, item_id: null, sub_recipe_id: 'base', items: null },
+      { recipe_id: 'sauce', qty_per_portion: 1000, item_id: 'tomato', sub_recipe_id: null, items: FULL_YIELD },
+      { recipe_id: 'base', qty_per_portion: 200, item_id: 'herb', sub_recipe_id: null, items: { yield_pct: 90 } },
+      { recipe_id: 'side', qty_per_portion: 30, item_id: null, sub_recipe_id: 'sauce', items: null },
+    ],
+    recipes: [{ id: 'sauce', yield_qty: 2000 }, { id: 'base', yield_qty: 500 }],
+  },
+  'a sub-recipe that is also a seed (the S477 double count)': {
+    seeds: ['dish', 'sauce'],
+    ingredients: [
+      { recipe_id: 'dish', qty_per_portion: 50, item_id: null, sub_recipe_id: 'sauce', items: null },
+      { recipe_id: 'sauce', qty_per_portion: 1000, item_id: 'tomato', sub_recipe_id: null, items: FULL_YIELD },
+    ],
+    recipes: [{ id: 'sauce', yield_qty: 2000 }],
+  },
+  'a seed with no ingredients': {
+    seeds: ['dish', 'empty'],
+    ingredients: [{ recipe_id: 'dish', qty_per_portion: 1, item_id: 'x', sub_recipe_id: null, items: FULL_YIELD }],
+    recipes: [{ id: 'empty', yield_qty: 1 }],
+  },
+  'eleven levels deep': (() => {
+    const ingredients = [{ recipe_id: 'dish', qty_per_portion: 1, sub_recipe_id: 's1', item_id: null }]
+    for (let i = 1; i < 11; i++) ingredients.push({ recipe_id: `s${i}`, qty_per_portion: 1, sub_recipe_id: `s${i + 1}`, item_id: null })
+    ingredients.push({ recipe_id: 's11', qty_per_portion: 3, item_id: 'flour', sub_recipe_id: null, items: FULL_YIELD })
+    return { seeds: ['dish'], ingredients, recipes: Array.from({ length: 11 }, (_, i) => ({ id: `s${i + 1}`, yield_qty: 1 })) }
+  })(),
+  'a book past the 1000-row cap': (() => {
+    const ids = Array.from({ length: 200 }, (_, i) => `r${i}`)
+    return {
+      seeds: ids,
+      ingredients: ids.flatMap((id, i) => Array.from({ length: 8 }, (_, k) => ({
+        recipe_id: id, qty_per_portion: 2, item_id: `item-${i}-${k}`, sub_recipe_id: null, items: FULL_YIELD,
+      }))),
+    }
+  })(),
+}
+
+describe('explodeRecipeTree — a pre-loaded book walks identically (S793)', () => {
+  test.each(Object.entries(BOOK_FIXTURES))('%s', async (_name, fx) => {
+    const viaFetch = await explodeRecipeTree(makeStub(fx), fx.seeds)
+    const viaBook = await explodeRecipeTree(null, fx.seeds, { book: bookOf(fx) })
+    expect(viaBook).toEqual(viaFetch)
+  })
+
+  test('explodeRecipeIngredients passes the book through', async () => {
+    const fx = BOOK_FIXTURES['nesting, a diamond and an item reached two ways']
+    expect(await explodeRecipeIngredients(null, fx.seeds, { book: bookOf(fx) }))
+      .toEqual(await explodeRecipeIngredients(makeStub(fx), fx.seeds))
+  })
+
+  test('a cycle is walked to the cap and reported on both paths, never looped', async () => {
+    const fx = {
+      seeds: ['dish'],
+      ingredients: [
+        { recipe_id: 'dish', qty_per_portion: 1, item_id: null, sub_recipe_id: 'a', items: null },
+        { recipe_id: 'a', qty_per_portion: 1, item_id: null, sub_recipe_id: 'b', items: null },
+        { recipe_id: 'b', qty_per_portion: 1, item_id: null, sub_recipe_id: 'a', items: null },
+      ],
+      recipes: [{ id: 'a', yield_qty: 1 }, { id: 'b', yield_qty: 1 }],
+    }
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const viaFetch = await explodeRecipeTree(makeStub(fx), fx.seeds)
+    const viaBook = await explodeRecipeTree(null, fx.seeds, { book: bookOf(fx) })
+    expect(viaBook).toEqual(viaFetch)
+    expect(spy).toHaveBeenCalledTimes(2)
+    spy.mockRestore()
+  })
+
+  test('a sub-recipe missing from the book is LOUD, never a quietly smaller tree', async () => {
+    const book = bookOf({
+      ingredients: [
+        { recipe_id: 'dish', qty_per_portion: 1, item_id: 'x', sub_recipe_id: null, items: FULL_YIELD },
+        { recipe_id: 'dish', qty_per_portion: 1, item_id: null, sub_recipe_id: 'gone', items: null },
+      ],
+    })
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const tree = await explodeRecipeTree(null, ['dish'], { book })
+    expect(byItem(tree.dish.items)).toEqual({ x: 1 })
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('gone'))
+    spy.mockRestore()
+  })
+})
+
+describe('computeRecipeCosts — a pre-loaded book prices identically (S793)', () => {
+  test('ingredient cost, sub-recipe cost and the manual cost_price fallback', async () => {
+    const fx = {
+      ingredients: [
+        { recipe_id: 'dish', qty_per_portion: 50, item_id: null, sub_recipe_id: 'sauce', items: null },
+        { recipe_id: 'dish', qty_per_portion: 10, item_id: 'cheese', sub_recipe_id: null, items: { yield_pct: 80 } },
+        { recipe_id: 'sauce', qty_per_portion: 1000, item_id: 'tomato', sub_recipe_id: null, items: FULL_YIELD },
+      ],
+      recipes: [
+        { id: 'dish', yield_qty: 1, cost_price: 999 },    // costed from ingredients: 999 must NOT win
+        { id: 'sauce', yield_qty: 2000, cost_price: null },
+        { id: 'manual', yield_qty: 1, cost_price: 55 },   // no ingredients: the manual figure
+        { id: 'nothing', yield_qty: 1, cost_price: null },
+      ],
+      items: [{ id: 'tomato', per_uom_rate: 0.5 }, { id: 'cheese', per_uom_rate: 2 }],
+    }
+    const seeds = ['dish', 'sauce', 'manual', 'nothing']
+    const viaFetch = await computeRecipeCosts(makeStub(fx), seeds)
+    const viaBook = await computeRecipeCosts(null, seeds, { book: bookOf(fx) })
+    expect(viaBook).toEqual(viaFetch)
+    expect(viaBook.dish).toBeCloseTo(25 * 0.5 + 12.5 * 2, 6)
+    expect(viaBook.manual).toBe(55)
+    expect(viaBook.nothing).toBe(0)
+  })
+})
+
+describe('loadRecipeBook', () => {
+  const fx = BOOK_FIXTURES['one level of sub-recipe']
+
+  test('one scoped read of the book, ingredient rows ordered by id, paged on the recipes', async () => {
+    const calls = []
+    const scopedFrom = (table, cols) => {
+      calls.push(['from', table, cols])
+      const q = {
+        order: (col, opts) => { calls.push(['order', col, opts]); return q },
+        range: (from, to) => { calls.push(['range', from, to]); return Promise.resolve({ data: bookRowsOf(fx), error: null }) },
+      }
+      return q
+    }
+    const book = await loadRecipeBook(scopedFrom)
+    expect(calls.filter(c => c[0] === 'from')).toEqual([['from', 'recipes', RECIPE_BOOK_SELECT]])
+    expect(calls).toContainEqual(['order', 'id', { referencedTable: 'recipe_ingredients' }])
+    expect(calls).toContainEqual(['range', 0, 999])
+    expect(book.ingredientsByRecipe.get('dish')).toHaveLength(1)
+    expect(book.recipes.get('sauce').yield_qty).toBe(2000)
+  })
+
+  test('the embed names its foreign key — recipe_ingredients points at recipes twice', () => {
+    expect(RECIPE_BOOK_SELECT).toContain('recipe_ingredients!recipe_ingredients_recipe_id_fkey(')
+  })
+
+  test('a failed read throws rather than handing back an empty book', async () => {
+    const failing = () => {
+      const q = { order: () => q, range: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }
+      return q
+    }
+    await expect(loadRecipeBook(failing)).rejects.toThrow('boom')
   })
 })

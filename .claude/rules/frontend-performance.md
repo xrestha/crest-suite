@@ -67,6 +67,14 @@ failed read must stop the copy. **Truncation returns no error, so every guard wr
 failed read passes.** Before deciding a table is safe, write down its rows-per-what: per employee
 per day and per-anything-per-month both cross 1000 inside one real client-year.
 
+**A walk that fetches one level per round trip is a waterfall in a loop's clothing (S793).**
+`explodeRecipeTree` reads each sub-recipe nesting level after the last, so every walk costs 1 + depth
+round trips, and Stock Movements ran three walks in a row: 11 serial levels, 12.5 s on Fast 3G.
+When the whole set is small (a client's recipe book is ~50 KB), read it ONCE and walk in memory:
+`loadRecipeBook()` + `{ book }` (`useRecipeBook()` on a page), started beside the period list.
+Stock Movements went to 2 levels (2.8 s), Variance 5 → 2. On a slow link the round trips are the
+cost, not the bytes. Test it by counting the reads, as `subRecipeUsage.test.js` does.
+
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique
 tiebreaker, or the fix trades a slow page for a silently truncated one.

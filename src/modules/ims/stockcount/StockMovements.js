@@ -9,7 +9,8 @@ import PeriodScope from '../../../components/PeriodScope'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { BS_MONTHS, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { useRecipeBook } from '../../../shared/hooks/useRecipeBook'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -65,11 +66,18 @@ export default function StockMovements() {
   const [subSort, setSubSort] = useState('value')
   const [sortDir, setSortDir] = useState('desc')
 
+  // The client's recipe book (S793): read ONCE per client, beside the period list, and shared by the
+  // no-BOM check and the Sub-Recipes tab for every period shown. Before it, those two walked the
+  // recipe tree over the network one nesting level per round trip, three walks in a row: ~11 serial
+  // round trips, 12.5s on a Fast-3G profile.
+  const recipeBook = useRecipeBook()
+
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
     setLoadError(null)
+    recipeBook()   // start it now, so it lands alongside the period list rather than after it
     const { data: p, error: pErr } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
     // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
@@ -127,7 +135,7 @@ export default function StockMovements() {
     // never existed, in NPR, under the new month's label. The tab badge counted the old rows too.
     setUsage(EMPTY_USAGE)
     setUsageLoading(true)
-    loadSubRecipeUsage(supabase, scopedFrom, periodId)
+    loadSubRecipeUsage(supabase, scopedFrom, periodId, { book: recipeBook() })
       .then(u => { if (periodReq.isCurrent(periodId)) { setUsage(u); setUsageLoading(false) } })
       .catch(err => {
         console.error('sub-recipe usage failed:', err)
@@ -154,44 +162,33 @@ export default function StockMovements() {
       // No source filter: manual Sales Entry saves deplete stock too (S492), same as POS, so a
       // recipe with no BOM is a gap regardless of which one sold it.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId).order('id')),
+      // Settled into the { error } shape so firstError below sees a failed book like any failed read.
+      recipeBook().then(book => ({ data: book, error: null }), error => ({ data: null, error })),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S612 silent-zero rule).
+    // That includes the book: a failed one would silently hide the no-BOM warning banner.
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setRows([]); return }
-    const [{ data: movements }, { data: profs }, { data: soldEntries }] = results
+    if (failed) { setLoadError(failed); setRows([]); setNoBomRecipes([]); return }
+    const [{ data: movements }, { data: profs }, { data: soldEntries }, { data: book }] = results
     setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
 
     // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
     // rows — explodeRecipeIngredients() (PosOrders.jsx/depleteManualSales()) produces nothing to
     // deplete for those, so they were sold but never wrote a stock_movements row and would
     // otherwise vanish silently.
+    //
+    // Read off the recipe book (S793), which carries every recipe's ingredient rows. The rule the
+    // two chunked reads it replaced were written for (S720) still decides the shape: a recipe
+    // whose rows are missing is NAMED by the amber banner as having no BOM and sends the owner to
+    // Recipes to add ingredients that are already there, so the rows must be complete. The book is
+    // paged on its recipes and its embedded ingredient lists are not cut by the row cap.
     const soldRecipeIds = [...new Set((soldEntries || []).map(s => s.recipe_id).filter(Boolean))]
-    if (soldRecipeIds.length > 0) {
-      // Chunked AND paged (S720). `recipe_ingredients` is one row per ingredient per recipe, so a
-      // 130-dish month at the project's own ~8-ingredients average is already past PostgREST's
-      // silent 1000-row cap — and the truncation lands on the WRONG SIDE of this comparison:
-      // every recipe whose ingredient rows fell past the cut is absent from `withIngredients`, so
-      // the amber banner names it as having no BOM. That banner tells the owner stock was not
-      // depleted for those dishes and sends them to Recipes to add ingredients that are already
-      // there. `firstError` below cannot see it, because truncation is not an error. The id list
-      // rides in the URL as well, which is what `fetchAllRowsChunked` splits.
-      const bomResults = await Promise.all([
-        fetchAllRowsChunked(soldRecipeIds, ids =>
-          supabase.from('recipe_ingredients').select('recipe_id').in('recipe_id', ids).order('id')),
-        fetchAllRowsChunked(soldRecipeIds, ids =>
-          scopedFrom('recipes', 'id, name').in('id', ids).order('id')),
-      ])
-      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      // S612: a failed read here would silently hide the no-BOM warning banner.
-      const bomFailed = firstError(bomResults)
-      if (bomFailed) { setLoadError(bomFailed); setRows([]); setNoBomRecipes([]); return }
-      const [{ data: ingRows }, { data: recipeRows }] = bomResults
-      const withIngredients = new Set((ingRows || []).map(r => r.recipe_id))
-      setNoBomRecipes((recipeRows || []).filter(r => !withIngredients.has(r.id)).map(r => r.name).sort())
-    } else {
-      setNoBomRecipes([])
-    }
+    setNoBomRecipes(soldRecipeIds
+      .map(id => book.recipes.get(id))
+      .filter(r => r && (book.ingredientsByRecipe.get(r.id) || []).length === 0)
+      .map(r => r.name)
+      .sort())
 
     const built = (movements || []).map(m => {
       const item = m.items || {}

@@ -10,6 +10,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { useRecipeBook } from '../../../shared/hooks/useRecipeBook'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { buildUsageMap } from '../stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
@@ -50,6 +51,9 @@ export default function Variance() {
   const flagPct = varianceFlagPct(settings)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  // The whole recipe book, loaded once beside the period list (S793): the walk below then costs
+  // no round trips, where fetching it level by level added two or three to every period's load.
+  const recipeBook = useRecipeBook()
   const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
@@ -82,6 +86,7 @@ export default function Variance() {
   async function init() {
     setLoading(true)
     setLoadError(null)
+    recipeBook()   // start it now, so it lands alongside the period list rather than after it
     const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
@@ -145,9 +150,10 @@ export default function Variance() {
       // would truncate theoretical usage into a believable-but-low figure (S528/S529 class).
       // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
-      // Paged too (S792, PLANNING-9): this seeds the recipe walk, and past 1000 recipes (sub-recipes
-      // count) the dishes beyond the cut would consume nothing.
-      fetchAllRows(() => scopedFrom('recipes', 'id').order('id'))
+      // The recipe book seeds AND feeds the walk (S793). It is paged on its recipes, so the S792
+      // rule (PLANNING-9: past 1000 recipes the dishes beyond the cut would consume nothing) holds.
+      // Settled into the { error } shape so firstError below sees a failed book like any other read.
+      recipeBook().then(book => ({ data: book, error: null }), error => ({ data: null, error })),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
@@ -162,10 +168,10 @@ export default function Variance() {
       { data: wastages },
       { data: staffMealsData },
       { data: sales },
-      { data: clientRecipes }
+      { data: book }
     ] = results
 
-    const recipeIds = (clientRecipes || []).map(r => r.id)
+    const recipeIds = [...book.recipes.keys()]
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
     // the previous direct recipe_ingredients read only picked up rows with item_id set, silently
     // dropping any ingredient that was itself a sub-recipe (sauces, batters, prepped components)
@@ -178,7 +184,7 @@ export default function Variance() {
       // The option-delta explosion (S758) fails the same way the recipe walk does: a missing one
       // would read a customized plate as its plain recipe, so it shares this catch.
       ;[breakdown, explosion] = await Promise.all([
-        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds, { book }) : {},
         loadDeltaExplosion(supabase, (sales || []).map(r => r.ingredient_deltas)),
       ])
     } catch (err) {

@@ -1,4 +1,5 @@
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
+import { loadRecipeBook } from '../../../utils/recipeCost'
 
 // Stub covering every query the loader makes, directly or via explodeRecipeTree /
 // computeRecipeCosts. Rows carry all columns any caller might select — the real code picks the
@@ -39,8 +40,30 @@ function makeStub({ sales = [], ingredients = [], recipes = [], items = [] } = {
     return c
   }
   const supabase = { from: (table) => ({ select: () => chain(table) }) }
+  // The recipe book (S793, loadRecipeBook): every recipe with its ingredient rows embedded, each
+  // ingredient's `items` embed carrying the item's name and rate beside its yield — the shape
+  // PostgREST returns for RECIPE_BOOK_SELECT. A recipe id that appears only on an ingredient row
+  // still gets a recipe row, as the FK guarantees in the real table.
+  const bookRows = () => {
+    const itemById = new Map(items.map(i => [i.id, i]))
+    const ids = [...new Set([...recipes.map(r => r.id), ...ingredients.map(i => i.recipe_id)])]
+    return ids.map(id => ({
+      ...(recipes.find(r => r.id === id) || { id }),
+      recipe_ingredients: ingredients
+        .filter(i => i.recipe_id === id)
+        .map(i => (i.item_id ? { ...i, items: { ...(i.items || {}), ...(itemById.get(i.item_id) || {}) } } : i)),
+    }))
+  }
+  const bookChain = () => {
+    const c = {
+      order: () => c,
+      range: (from, to) => Promise.resolve({ data: bookRows().slice(from, to + 1), error: null }),
+    }
+    return c
+  }
   // useScopedDb's scopedFrom(table, cols) — client scoping is irrelevant to the arithmetic.
-  const scopedFrom = (table) => chain(table)
+  const scopedFrom = (table, cols = '') =>
+    (table === 'recipes' && cols.includes('recipe_ingredients') ? bookChain() : chain(table))
   return { supabase, scopedFrom }
 }
 
@@ -306,6 +329,55 @@ describe('unused-this-period diff', () => {
     })
     const { miscategorised } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
     expect(miscategorised).toEqual(['House Sauce'])
+  })
+})
+
+// S793: the loader's whole point on a slow connection is how many round trips it waits on. It
+// used to be ~9 in a row (three recipe walks, one per nesting level each, then an items read);
+// it is now the period's sales and the recipe book, side by side.
+describe('loadSubRecipeUsage — round trips', () => {
+  const NESTED = {
+    ...BASE,
+    ingredients: [
+      ...BASE.ingredients,
+      { recipe_id: 'sauce', qty_per_portion: 10, item_id: null, sub_recipe_id: 'base', items: null },
+      { recipe_id: 'base', qty_per_portion: 100, item_id: 'tomato', sub_recipe_id: null, items: { yield_pct: 100 } },
+    ],
+    recipes: [...BASE.recipes, { id: 'base', yield_qty: 100, yield_uom: 'g', name: 'Base', category: 'Sub-Recipe', cost_price: null }],
+    sales: [{ recipe_id: 'dish', qty_sold: 2, bs_day: 1, source: 'pos' }],
+  }
+  function counted(fx) {
+    const { supabase, scopedFrom } = makeStub(fx)
+    const reads = []
+    return {
+      reads,
+      supabase: { from: table => { reads.push(table); return supabase.from(table) } },
+      scopedFrom: (table, cols) => { reads.push(cols && cols.includes('recipe_ingredients') ? 'recipe book' : table); return scopedFrom(table, cols) },
+    }
+  }
+
+  test('reads the sales and the recipe book, and nothing else, however deep the prep nests', async () => {
+    const { reads, supabase, scopedFrom } = counted(NESTED)
+    const { rows } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows.map(r => r.name).sort()).toEqual(['Base', 'House Sauce'])
+    expect(reads.sort()).toEqual(['recipe book', 'sales_entries'])
+  })
+
+  test('a book the page already loaded is used as given, and not read again', async () => {
+    const { reads, supabase, scopedFrom } = counted(NESTED)
+    const book = await loadRecipeBook(makeStub(NESTED).scopedFrom)
+    const shared = await loadSubRecipeUsage(supabase, scopedFrom, 'p1', { book: Promise.resolve(book) })
+    expect(reads).toEqual(['sales_entries'])
+    const own = await loadSubRecipeUsage(makeStub(NESTED).supabase, makeStub(NESTED).scopedFrom, 'p1')
+    expect(shared).toEqual(own)
+  })
+
+  test('a failed book read rejects — it is never an empty, quiet period', async () => {
+    const { supabase, scopedFrom } = makeStub(NESTED)
+    const failing = (table, cols) => (cols && cols.includes('recipe_ingredients')
+      ? { order() { return this }, range: () => Promise.resolve({ data: null, error: { message: 'book down' } }) }
+      : scopedFrom(table, cols))
+    await expect(loadSubRecipeUsage(supabase, failing, 'p1')).rejects.toThrow('book down')
   })
 })
 

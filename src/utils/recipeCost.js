@@ -1,6 +1,59 @@
 // Shared recipe-costing helpers (pure, no React/Supabase deps).
 import { throwFirstError } from '../shared/queryError'
-import { fetchAllRowsChunked } from '../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../shared/fetchAllRows'
+
+// How many sub-recipe levels below a dish the walk resolves. Module scope because the fetch loop
+// and the recursion guard must read ONE number (S714) whichever way the walk is fed.
+const MAX_DEPTH_ROUNDS = 12
+
+// The client's whole recipe book in ONE request — every recipe with its ingredient rows embedded.
+//
+// Why it exists (S793, measured): the fetch loop in explodeRecipeTree costs one network round trip
+// per sub-recipe nesting level, and a page that runs the walk three times in a row (Stock
+// Movements: the dishes sold, the sub-recipes' own costs, their own ingredients) paid ~11 serial
+// round trips — 12.5s on a Fast-3G profile, for a book whose every row fits in ~35 KB. On a poor
+// connection the round trips are the cost and the bytes are not, so a page that walks more than
+// once loads the book up front and hands it to the walk, which then touches the network not at all.
+//
+// Scoped by the recipe's own client_id through `scopedFrom` (recipe_ingredients has no client_id);
+// the embed names its FK because recipe_ingredients references recipes TWICE (recipe_id and
+// sub_recipe_id), and an unnamed embed is ambiguous. Ingredient rows come back in id order, which
+// is the order the fetch loop reads them in, so the walk's output is identical either way
+// (recipeCost.test.js runs both paths over the same fixtures). Paged on the recipes: the embedded
+// arrays are not subject to PostgREST's row cap, the top-level rows are.
+export const RECIPE_BOOK_SELECT =
+  'id, name, category, yield_qty, yield_uom, cost_price, ' +
+  'recipe_ingredients!recipe_ingredients_recipe_id_fkey(' +
+  'id, recipe_id, qty_per_portion, item_id, sub_recipe_id, items(name, per_uom_rate, yield_pct))'
+
+export async function loadRecipeBook(scopedFrom) {
+  const res = await fetchAllRows(() => scopedFrom('recipes', RECIPE_BOOK_SELECT)
+    .order('id')
+    .order('id', { referencedTable: 'recipe_ingredients' }))
+  // Throws like the walk does (S695): an empty book would explode every dish to nothing, and
+  // missing usage reads as over-consumption rather than as an error.
+  throwFirstError([res])
+  return buildRecipeBook(res.data)
+}
+
+// Pure: the rows loadRecipeBook reads → lookups the walk and the cost map consume.
+//   recipes             id → { id, name, category, yield_qty, yield_uom, cost_price }
+//   ingredientsByRecipe id → that recipe's ingredient rows, in id order
+//   items               item id → { name, per_uom_rate, yield_pct } (every item any recipe uses)
+export function buildRecipeBook(rows) {
+  const recipes = new Map()
+  const ingredientsByRecipe = new Map()
+  const items = new Map()
+  for (const row of rows || []) {
+    const { recipe_ingredients: ings, ...meta } = row
+    recipes.set(row.id, meta)
+    ingredientsByRecipe.set(row.id, ings || [])
+    for (const ing of ings || []) {
+      if (ing.item_id && ing.items && !items.has(ing.item_id)) items.set(ing.item_id, ing.items)
+    }
+  }
+  return { recipes, ingredientsByRecipe, items }
+}
 
 // Suggested menu price to hit a target food-cost %, VAT-inclusive and rounded up to the
 // nearest NPR 5. `cost` is the per-portion food cost (ex-VAT), `targetFcPct` is a fraction
@@ -21,8 +74,8 @@ export function getSuggestedPrice(cost, vatRate = 0.13, targetFcPct = 0.30) {
 // (Variance, ReorderReport, StockReport, ShrinkageReport, ClientDashboard, OwnerDashboard,
 // computeMonthlyReport, computeInventoryVariance/ShrinkageTrend) — every one of them drives a
 // stock or cost figure, so it must keep returning exactly the flat item array it always has.
-export async function explodeRecipeIngredients(supabase, recipeIds) {
-  const tree = await explodeRecipeTree(supabase, recipeIds)
+export async function explodeRecipeIngredients(supabase, recipeIds, opts) {
+  const tree = await explodeRecipeTree(supabase, recipeIds, opts)
   const out = {}
   for (const recipeId of Object.keys(tree)) out[recipeId] = tree[recipeId].items
   return out
@@ -52,8 +105,19 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
 //                occurrence depth and not a set of "is this ever nested" flags.
 // Nested sub-recipes are reported at their own output-unit scale, not the top parent's, so a
 // base sauce used inside another sauce shows its real consumption rather than being folded away.
-export async function explodeRecipeTree(supabase, recipeIds) {
+//
+// `opts.book` (from loadRecipeBook) walks the pre-loaded book instead of fetching level by level —
+// the same walk, fed differently, so this stays ONE engine (see recipes-and-subrecipes.md).
+export async function explodeRecipeTree(supabase, recipeIds, { book } = {}) {
   if (!recipeIds || recipeIds.length === 0) return {}
+  if (book) {
+    return walkRecipeTree(
+      recipeIds,
+      id => book.ingredientsByRecipe.get(id) || [],
+      id => book.recipes.get(id),
+      { reportMissing: true },
+    )
+  }
 
   // A failed read THROWS rather than walking an empty tree (S695). Every consumer of this walk
   // subtracts its output from stock, so a read that returned `{ data: null, error }` and was
@@ -107,11 +171,7 @@ export async function explodeRecipeTree(supabase, recipeIds) {
   // out of rounds does not error, it just stops descending, so the ingredients below the cut
   // vanish from COGS and Variance as a believable smaller number. Each round is 2 queries against
   // a frontier that shrinks fast, so the extra headroom costs nothing on a shallow tree.
-  const MAX_DEPTH_ROUNDS = 12
-  // Set by explode() below if the recursion ever hits that cap. A flag rather than a log at the
-  // call site: explode() runs once per seed recipe and would otherwise repeat the same warning
-  // hundreds of times for one deep tree.
-  let depthExceeded = false
+  // (MAX_DEPTH_ROUNDS is declared at module scope, shared with walkRecipeTree's recursion guard.)
   let round = 0
   for (; round < MAX_DEPTH_ROUNDS && frontier.length > 0; round++) {
     // yield_qty (`sr`) is still fetched for the whole frontier every round — recipeMeta must
@@ -150,6 +210,23 @@ export async function explodeRecipeTree(supabase, recipeIds) {
     )
   }
 
+  return walkRecipeTree(
+    recipeIds,
+    // The filter, not a Map: this path is unchanged from before the book existed (S793).
+    recipeId => allIng.filter(x => x.recipe_id === recipeId),
+    id => recipeMeta[id],
+  )
+}
+
+// The walk itself, shared by both ways of feeding it: `rowsOf(id)` returns a recipe's ingredient
+// rows in id order, `metaOf(id)` its { yield_qty }. Pure and synchronous.
+function walkRecipeTree(recipeIds, rowsOf, metaOf, { reportMissing = false } = {}) {
+  // Set by explode() below if the recursion ever hits the depth cap. A flag rather than a log at
+  // the call site: explode() runs once per seed recipe and would otherwise repeat the same warning
+  // hundreds of times for one deep tree.
+  let depthExceeded = false
+  const missing = new Set()
+
   // `subs` is an out-param the caller passes in — pushing into it rather than returning a second
   // array keeps the leaf-item return value (and so the recursive spread below) byte-identical to
   // what this function did before sub-recipe reporting existed.
@@ -165,13 +242,13 @@ export async function explodeRecipeTree(supabase, recipeIds) {
       return []
     }
     const result = []
-    for (const r of allIng.filter(x => x.recipe_id === recipeId)) {
+    for (const r of rowsOf(recipeId)) {
       const qty = parseFloat(r.qty_per_portion || 0) * scale
       if (r.item_id) {
         const yf = (parseFloat(r.items?.yield_pct) || 100) / 100
         result.push({ item_id: r.item_id, qty: qty / yf })
       } else if (r.sub_recipe_id) {
-        const sr = recipeMeta[r.sub_recipe_id]
+        const sr = metaOf(r.sub_recipe_id)
         if (sr) {
           // `qty` is already this sub-recipe's own output units (scaled by every yield_qty above
           // it), and the recursion scale below is the same figure expressed in batches — so both
@@ -179,6 +256,8 @@ export async function explodeRecipeTree(supabase, recipeIds) {
           const batches = qty / (parseFloat(sr.yield_qty) || 1)
           subs.push({ sub_recipe_id: r.sub_recipe_id, qty, batches, depth })
           result.push(...explode(r.sub_recipe_id, batches, depth + 1, subs))
+        } else if (reportMissing) {
+          missing.add(r.sub_recipe_id)
         }
       }
     }
@@ -212,6 +291,15 @@ export async function explodeRecipeTree(supabase, recipeIds) {
       `below that were fetched but not walked. COGS/Variance from this walk are UNDERSTATED.`
     )
   }
+  // Book path only: a sub_recipe_id the book does not contain is an ingredient this walk could not
+  // follow, so its raw items are missing from every figure built on it. The fetch path has its own
+  // frontier warning for the same case.
+  if (missing.size > 0) {
+    console.error(
+      `explodeRecipeTree: ${missing.size} sub-recipe(s) referenced but not in the recipe book — their ` +
+      `ingredients are missing, so COGS/Variance from this walk are UNDERSTATED. Ids: ${[...missing].join(', ')}`
+    )
+  }
   return out
 }
 
@@ -224,8 +312,20 @@ export async function explodeRecipeTree(supabase, recipeIds) {
 // Falls back to `recipes.cost_price` (manually entered via Menu Pricing's POS-only Add Item
 // modal) for recipes with no ingredient breakdown — POS-only clients have no Item Master to
 // link an ingredient to, so this is the only cost basis they can ever supply.
-export async function computeRecipeCosts(supabase, recipeIds) {
+//
+// `opts.book` (from loadRecipeBook) prices entirely from the book — its ingredient rows carry each
+// item's per_uom_rate and its recipes their cost_price — so it makes no request at all.
+export async function computeRecipeCosts(supabase, recipeIds, { book } = {}) {
   if (!recipeIds || recipeIds.length === 0) return {}
+
+  if (book) {
+    const breakdown = await explodeRecipeIngredients(supabase, recipeIds, { book })
+    const rateMap = {}
+    book.items.forEach((item, id) => { rateMap[id] = parseFloat(item.per_uom_rate) || 0 })
+    const manualMap = {}
+    recipeIds.forEach(id => { manualMap[id] = parseFloat(book.recipes.get(id)?.cost_price) || 0 })
+    return costMapOf(recipeIds, breakdown, rateMap, manualMap)
+  }
 
   // cost_price needs nothing from the explode walk — start it first so it runs concurrently with
   // the walk's own round trips instead of adding a serial one after them.
@@ -255,7 +355,10 @@ export async function computeRecipeCosts(supabase, recipeIds) {
   ;(rates || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate) || 0 })
   const manualMap = {}
   ;(manualCosts || []).forEach(r => { manualMap[r.id] = parseFloat(r.cost_price) || 0 })
+  return costMapOf(recipeIds, breakdown, rateMap, manualMap)
+}
 
+function costMapOf(recipeIds, breakdown, rateMap, manualMap) {
   const costMap = {}
   for (const recipeId of recipeIds) {
     const ingredientCost = (breakdown[recipeId] || []).reduce((sum, { item_id, qty }) => sum + qty * (rateMap[item_id] || 0), 0)

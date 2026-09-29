@@ -1,6 +1,6 @@
-import { explodeRecipeTree, computeRecipeCosts } from '../../../utils/recipeCost'
+import { explodeRecipeTree, computeRecipeCosts, loadRecipeBook } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { throwFirstError } from '../../../shared/queryError'
 
 // Sub-recipe consumption for one period, derived from sales_entries.
@@ -30,14 +30,17 @@ export const EMPTY_USAGE = {
 
 // `scopedFrom` is the caller's useScopedDb binding — recipes/items are client-scoped, while
 // sales_entries is period-scoped and stays on raw supabase.from() like everywhere else.
-export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
+//
+// Every recipe fact comes from ONE pre-loaded recipe book (S793, `loadRecipeBook`), so the whole
+// derivation is two parallel requests — the period's sales and the book — however deep the prep
+// nests. It used to be three walks in a row, each one round trip per nesting level, plus a names
+// read after them: ~9 serial round trips, 12.5s of Stock Movements on a Fast-3G profile.
+// `opts.book` lets a page share a book (or its promise) it already loaded; without one this loads
+// its own. The book is period-independent, so a page keeps one across period changes.
+export async function loadSubRecipeUsage(supabase, scopedFrom, periodId, { book } = {}) {
   if (!periodId) return EMPTY_USAGE
 
-  // `allSubs` is the master list — every recipe categorised as a sub-recipe, unfiltered, exactly
-  // as Recipes.js counts its own "N sub-recipes" header (Recipes.js:177). Fetched up front so the
-  // unused-this-period diff is available on every return path below, including the ones that bail
-  // out early: "nothing sold, so all of them are unused" is a legitimate answer, not a blank.
-  const baseResults = await Promise.all([
+  const [salesRes, recipeBook] = await Promise.all([
     // Paged: a period's sales_entries can exceed PostgREST's 1000-row cap, and a truncated read
     // here would understate every batch figure with no error to notice (see fetchAllRows.js).
     fetchAllRows(() => supabase
@@ -45,14 +48,19 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
       .select('recipe_id, qty_sold, bs_day, source')
       .eq('period_id', periodId)
       .order('id')),
-    scopedFrom('recipes', 'id, name').eq('category', 'Sub-Recipe'),
+    // Throws on a failed read, like the walk it feeds.
+    book || loadRecipeBook(scopedFrom),
   ])
   // A failed read must not degrade to EMPTY_USAGE — "nothing consumed" is a real answer this
   // helper legitimately returns, so it must never also be the error shape (S612 silent-zero rule).
-  throwFirstError(baseResults)
-  const [{ data: salesRows }, { data: allSubs }] = baseResults
+  throwFirstError([salesRes])
+  const { data: salesRows } = salesRes
 
-  const subMaster = allSubs || []
+  // `subMaster` is the master list — every recipe categorised as a sub-recipe, unfiltered, exactly
+  // as Recipes.js counts its own "N sub-recipes" header. Built up front so the unused-this-period
+  // diff is available on every return path below, including the ones that bail out early:
+  // "nothing sold, so all of them are unused" is a legitimate answer, not a blank.
+  const subMaster = [...recipeBook.recipes.values()].filter(r => r.category === 'Sub-Recipe')
   const noneUsed = () => ({
     ...EMPTY_USAGE,
     totalSubRecipes: subMaster.length,
@@ -66,7 +74,7 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
   if (depleting.length === 0) return noneUsed()
 
   const soldRecipeIds = [...new Set(depleting.map(r => r.recipe_id))]
-  const tree = await explodeRecipeTree(supabase, soldRecipeIds)
+  const tree = await explodeRecipeTree(supabase, soldRecipeIds, { book: recipeBook })
 
   // Roll every sold dish's per-portion sub-recipe usage up by qty sold, split by source so the
   // page's source filter can narrow it without a second query (qty, batches and value are all
@@ -91,10 +99,13 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
     })
   })
 
+  // One item map for both jobs: valuing the derived raw-item total (reconciliation) and naming each
+  // sub-recipe's ingredients (search). Every item the walk can reach is on a book row.
+  const itemMap = itemMapOf(recipeBook)
+
   const subIds = Object.keys(agg)
   if (subIds.length === 0) {
     // No sub-recipes, but the raw-item total still matters — it's the reconciliation figure.
-    const itemMap = await fetchItemMap(supabase, Object.keys(itemAgg))
     const derived = Object.keys(itemAgg).reduce((s, id) => s + itemAgg[id] * (itemMap[id]?.rate || 0), 0)
     return { ...noneUsed(), derivedItemValue: derived, salesRowsUsed: depleting.length }
   }
@@ -102,23 +113,15 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
   // subTree is each sub-recipe exploded on its own — whole-batch quantities of the raw items it
   // is made from. Needed for the "find ingredient" search on the page: a sub-recipe's own
   // ingredients are not otherwise knowable from `tree` above, which is keyed by the DISHES sold.
-  const [recipeMetaRes, batchCosts, subTree] = await Promise.all([
-    scopedFrom('recipes', 'id, name, yield_qty, yield_uom, category').in('id', subIds),
+  const [batchCosts, subTree] = await Promise.all([
     // Whole-BATCH cost — computeRecipeCosts does not divide by yield_qty (unlike
     // calcSubRecipeCostPerUnit in recipeCostCalc.js, which returns per-output-unit), so
     // multiplying by `batches` below is correct and needs no further division.
-    computeRecipeCosts(supabase, subIds),
-    explodeRecipeTree(supabase, subIds),
+    computeRecipeCosts(supabase, subIds, { book: recipeBook }),
+    explodeRecipeTree(supabase, subIds, { book: recipeBook }),
   ])
-  // Only the first element is a Supabase result; the other two are util outputs (S612).
-  throwFirstError([recipeMetaRes])
-  const { data: recipeMeta } = recipeMetaRes
+  const recipeMeta = subIds.map(id => recipeBook.recipes.get(id)).filter(Boolean)
 
-  // One items fetch covering both jobs: valuing the derived raw-item total (reconciliation) and
-  // naming each sub-recipe's ingredients (search). Two separate queries would fetch overlapping
-  // id sets twice for no benefit.
-  const subItemIds = Object.values(subTree).flatMap(n => n.items.map(i => i.item_id))
-  const itemMap = await fetchItemMap(supabase, [...new Set([...Object.keys(itemAgg), ...subItemIds])])
   const derivedItemValue = Object.keys(itemAgg)
     .reduce((s, id) => s + itemAgg[id] * (itemMap[id]?.rate || 0), 0)
 
@@ -185,25 +188,16 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
   }
 }
 
-// id → { name, rate } for valuing and naming items in one round trip.
-async function fetchItemMap(supabase, itemIds) {
-  if (itemIds.length === 0) return {}
-  // CHUNKED AND PAGED (S714) — the last raw `.in()` left on this walk after the S711 sweep. The id
-  // list is every distinct raw item under every dish sold in the period PLUS every ingredient of
-  // every sub-recipe those dishes reach, so it is a large fraction of the client's Item Master
-  // rather than a handful of ids: past a few hundred uuids the `.in()` is spelled out into a URL
-  // longer than a proxy accepts, and past 1000 rows PostgREST truncates with no error.
-  //
-  // Both failure modes are silent in the same direction. A missing id is a missing rate, and a
-  // missing rate is zero — so `derivedItemValue`, the figure this tab reconciles the ledger
-  // against, comes out LOW; and a missing name drops that ingredient out of every row's
-  // `ingredients` list, so the find-an-ingredient search stops matching a sub-recipe that does
-  // contain it and reports nothing rather than reporting a failure.
-  const res = await fetchAllRowsChunked(itemIds, ids => supabase
-    .from('items').select('id, name, per_uom_rate').in('id', ids).order('id'))
-  // A failed read here silently zeroed every valuation built from this map (S612 silent-zero rule).
-  throwFirstError([res])
-  return Object.fromEntries((res.data || []).map(i => [i.id, { name: i.name, rate: parseFloat(i.per_uom_rate) || 0 }]))
+// id → { name, rate } for valuing and naming items, off the book's ingredient rows. This replaced a
+// chunked `items` read (S714) that ran AFTER the walks, one more serial round trip. The rule it
+// carried still holds, and the book is what keeps it: a missing rate is a zero, so
+// `derivedItemValue` — the figure this tab reconciles the ledger against — comes out LOW, and a
+// missing name drops the ingredient out of the find-an-ingredient search. Every item the walk can
+// reach sits on a book row with its `items` embed, so nothing is missing that the old read had.
+function itemMapOf(book) {
+  const map = {}
+  book.items.forEach((item, id) => { map[id] = { name: item.name, rate: parseFloat(item.per_uom_rate) || 0 } })
+  return map
 }
 
 // True if any of this sub-recipe's raw ingredients matches the (already lowercased) query —

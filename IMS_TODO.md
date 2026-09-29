@@ -1,11 +1,28 @@
 # Crest IMS — Re-analysis To-Do
 
 Two whole-module reviews live here: **S792 (2026-09-28)** first, then **S756 (2026-09-15)**. D1–D28
-are S756's decisions and D29–D42 are S792's. None is re-asked. Start from the S792 section.
+are S756's decisions and D29–D42 are S792's. None is re-asked. Start from the S792 section. Above
+them sits the S793 load-time backlog (PERF-n), from measuring the module on a slow connection.
 
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
 **Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
+
+---
+
+# S793 load time on a poor connection (2026-09-29)
+
+Measured on Chrome's Fast 3G profile (0.56 s per round trip) on CASA ACAI CAFE. On a slow link the
+load time is the number of requests that wait on an earlier one, not the bytes. Detail and numbers:
+the S793 CHANGELOG entry.
+
+| # | Item | Status |
+| --- | --- | --- |
+| PERF-1 | The recipe walk fetched one sub-recipe level per round trip. The recipe book now loads in one request (`loadRecipeBook`, `useRecipeBook`). Stock Movements 12.5 s → 2.8 s, Variance 5.1 s → 2.5 s, Recipe Costing 5.0 s → 4.3 s. | ✅ S793 |
+| PERF-2 | Every period page spends its first round trip finding the open month (~0.6 s on ~35 pages). A shared period list would let their data reads start in the first level. Touches every page's `init()`, so it needs its own plan. | 🔴 |
+| PERF-3 | Item Master waits for the Used In count (a paged RPC, two levels) before showing the list. Painting first needs a "checking…" state in the delete guard, which must still refuse while the count is unknown. | 🔴 |
+| PERF-4 | The service worker deletes every cached JS chunk on every deploy, so a slow link re-downloads the whole app after each release, even chunks whose hashed name did not change. Keep hashed `/static/` files across deploys and prune to the new asset manifest. Read the production cache headers first; unmeasured. | 🔴 |
+| PERF-5 | The Dashboard's 12-month trend is the heaviest download (~180 KB, 4 levels on a first visit). It is cached on revisit, so it is lowest priority. The Dashboard, Reorder and Stock Report still walk recipes level by level and could take the book. | ⚪ |
 
 ---
 

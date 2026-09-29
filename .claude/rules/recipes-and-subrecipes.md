@@ -172,6 +172,15 @@ A sub-recipe can be a choice's stock line, so deleting one is refused by
 `recipe_ingredients.sub_recipe_id`, so that refusal arrives with a generic message (open in
 POS_TODO.md).
 
+## The walk can be FED a pre-loaded book, and that is still one engine (S793)
+
+`explodeRecipeTree` / `explodeRecipeIngredients` / `computeRecipeCosts` take `{ book }` from
+`loadRecipeBook(scopedFrom)`: the client's recipes with their ingredient rows embedded, one request
+(the embed names `recipe_ingredients_recipe_id_fkey`, since the table points at `recipes` twice).
+Both feeds run the same `walkRecipeTree`, and `recipeCost.test.js` asserts deep-equal output on
+every fixture. Stock Movements, its Sub-Recipes tab and Variance use the book; the POS write paths
+and the other readers still fetch level by level. A new multi-walk page should take the book.
+
 ## The walk is a PAGED read, and its seed list is the client's whole recipe book (S711)
 
 `explodeRecipeTree`'s two reads and `computeRecipeCosts`' two reads all go through
