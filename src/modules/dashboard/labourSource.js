@@ -69,6 +69,12 @@ export function payrollLabourTotal(slips) {
  * client entered — but withhold the verdict, because the real wage bill may be absent from it. That
  * is Overheads.js' behaviour exactly: it says "net profit before payroll — not judged on this login"
  * rather than painting a green margin that the Owner, reading the same month, sees as a loss.
+ *
+ * `none` on an HR client withholds too (S796, owner decision after the IMS critique): payroll is
+ * the wage bill there, and until a run is finalized the margin simply has no labour in it — the
+ * dashboard was painting "45.8% ✓" beside its own "Labour: none yet". An IMS-only client with an
+ * empty Labor tab is still judged: nothing else will ever supply its labour, and the page already
+ * names the missing line.
  */
 export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed = false }) {
   const bucket = Number.isFinite(labourBucket) ? labourBucket : 0
@@ -81,7 +87,23 @@ export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed 
   if (hrOn && fenced) {
     return { source: 'unreadable', amount: bucket, ignoredBucket: 0, verdictWithheld: true }
   }
-  return { source: bucket > 0 ? 'overheads' : 'none', amount: bucket, ignoredBucket: 0, verdictWithheld: false }
+  const source = bucket > 0 ? 'overheads' : 'none'
+  return { source, amount: bucket, ignoredBucket: 0, verdictWithheld: source === 'none' && !!hrOn }
+}
+
+/**
+ * Why a withheld verdict was withheld, in the words a tile or a callout prints. One definition,
+ * because the three reasons need three different next steps and "not judged on this login" is
+ * false for the two that are not about the login. Returns '' when the verdict is not withheld.
+ */
+export function labourNotJudgedText({ source, verdictWithheld }) {
+  if (!verdictWithheld) return ''
+  switch (source) {
+    case 'unreadable': return 'Not judged on this login'
+    case 'failed':     return 'Not judged — payroll could not be loaded'
+    case 'none':       return 'Not judged until payroll is finalized'
+    default:           return 'Not judged'
+  }
 }
 
 /**

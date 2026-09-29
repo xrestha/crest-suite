@@ -2416,6 +2416,10 @@ export default function Stock() {
         // times on one real count sheet, on the page a month is closed from (S794).
         const fieldName = FIELD_LABEL[fieldKey] || fieldKey
         const qtyBoxLabel = item => `${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)} for ${item.name}${item.uom ? ` (${item.uom})` : ''}`
+        // An empty closing box is "not counted" and a typed 0 is a count (S695), so the empty box
+        // must not wear a "0" placeholder that makes it look counted (S796). The other fields store
+        // nothing for 0 or blank alike, so they need no hint at all.
+        const countPlaceholder = fieldKey === 'closing' ? 'not counted' : undefined
         const counted = countedItems(fieldKey)
         const pct = visible.length > 0 ? Math.round(counted / visible.length * 100) : 0
         const totalQty = visible.reduce((s, item) => s + (parseFloat(stockData[item.id]?.[fieldKey]) || 0), 0)
@@ -2547,7 +2551,7 @@ export default function Stock() {
                           value={val}
                           onChange={v => updateField(item.id, fieldKey, v)}
                           onCommit={v => saveRow(item.id, v)}
-                          placeholder="0"
+                          placeholder={countPlaceholder}
                           disabled={isLocked}
                           className="mobile-stock-input"
                           wrapperStyle={{ flex: 1, minWidth: 0 }}
@@ -2633,7 +2637,7 @@ export default function Stock() {
                                   value={val}
                                   onChange={v => updateField(item.id, fieldKey, v)}
                                   onCommit={v => saveRow(item.id, v)}
-                                  placeholder="0"
+                                  placeholder={countPlaceholder}
                                   disabled={isLocked}
                                   wrapperStyle={{ width: 110 }}
                                   style={{

@@ -301,11 +301,16 @@ export default function Variance() {
   const flaggedCount = banded.filter(r => r.band.flag === 'over' || r.band.flag === 'under').length
   const noRecipeCount = banded.filter(r => r.band.flag === 'no_recipe' && hasActivity(r)).length
 
+  // Judged rows first (S796). A plain |value| sort put the rows the page CANNOT judge on top —
+  // straws and wooden bowls with "no recipe linked" carry their whole usage as "variance", so the
+  // owner's first look at the money report landed on noise. Flagged, then OK, then the rows with
+  // no verdict; by size inside each tier. A sorted copy, never `filtered.sort()` in render.
+  const judgeTier = r => (r.band.flag === 'over' || r.band.flag === 'under' ? 0 : r.band.flag === 'ok' ? 1 : 2)
   const filtered = banded.filter(r => {
     const matchCat  = filterCat === 'all' || r.item.categories?.name === filterCat
     const matchFlag = filterFlag === 'all' || r.band.flag === filterFlag
     return matchCat && matchFlag && hasActivity(r)
-  })
+  }).sort((a, b) => judgeTier(a) - judgeTier(b) || Math.abs(b.value) - Math.abs(a.value))
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
@@ -545,7 +550,7 @@ export default function Variance() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).map(row => {
+                {filtered.map(row => {
                   // Without a closing count every variance figure is an artefact of the missing
                   // count, so it is shown in neutral type and left unflagged rather than painted
                   // red — the banner above says why.
@@ -569,7 +574,8 @@ export default function Variance() {
                           reading as danger anywhere. Wastage keeps a quiet accent tie to the
                           Purchases column it is measured against; both are now ordinary figures. */}
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString('en-IN') : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString('en-IN') : '—'}</td>
+                      {/* A counted 0 is a count (S695) and prints as 0; only "no count" is a dash (S796). */}
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.hasCount ? row.closeQty.toLocaleString('en-IN') : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{row.actualUsed !== 0 ? Number(row.actualUsed.toFixed(3)).toLocaleString('en-IN') : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.theoreticalUsed > 0 ? Number(row.theoreticalUsed.toFixed(3)).toLocaleString('en-IN') : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: b.color }}>

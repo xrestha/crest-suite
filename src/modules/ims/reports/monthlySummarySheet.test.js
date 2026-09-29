@@ -53,7 +53,7 @@ describe('the Food Cost % verdict and the COGS line', () => {
   })
 
   it('says why a withheld verdict is withheld, and what to do with no sales', () => {
-    expect(foodCostSentence(foodCostVerdict(41, settings, { withhold: true }), 'open')).toBe('Not judged: month still open')
+    expect(foodCostSentence(foodCostVerdict(41, settings, { withhold: true }), 'open')).toBe('Shown once the month is closed with a stock count')
     expect(foodCostSentence(foodCostVerdict(41, settings, { withhold: true }), 'closed')).toBe('Not judged: count incomplete')
     // No sales stays "none" even when withheld — there is no figure to withhold a verdict on.
     expect(foodCostVerdict(null, settings, { withhold: true }).key).toBe('none')
@@ -124,8 +124,12 @@ describe('buildMonthlySummaryWorkbook', () => {
     expect(open.scopeLine).toMatch(/^Period : Ashwin 2082 — PROVISIONAL: month still open/)
     expect(open.filename).toBe('Monthly-Summary-Ashwin-2082-provisional.xlsx')
     const by = Object.fromEntries(open.summaryRows.map(r => [r.Figure, r]))
-    expect(by['Food Cost %'].Note).toBe('Not judged: month still open')
-    expect(by['COGS'].Note).toBe('30.0% of revenue · not judged')
+    // S796: an open month has no Food Cost %, so the sheet writes none — and not its twin under COGS.
+    expect(by['Food Cost %']['%']).toBe('')
+    expect(by['Food Cost %'].Note).toBe('Needs closing count — Shown once the month is closed with a stock count')
+    expect(by['COGS'].Note).toBe('Provisional until the closing count')
+    // Every item still uncounted: the zero stays for the arithmetic, the note says it is no count.
+    expect(by['Closing Stock'].Note).toBe('Not counted yet')
     expect(by['Spend % so far']).toBeDefined()
     expect(by['Spend %']).toBeUndefined()
     // Nothing counted yet on an open month: the items are not named, as on screen.

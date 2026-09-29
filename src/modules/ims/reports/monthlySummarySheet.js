@@ -45,17 +45,37 @@ export function foodCostVerdict(fcPct, settings, { withhold = false } = {}) {
   return withhold && judged.key !== 'none' ? { ...judged, key: 'unjudged' } : judged
 }
 
+/**
+ * Nothing has been counted yet: every item with stock is still uncounted. The ordinary state of an
+ * open month before month-end, and the one in which "Closing Stock NPR 0" is not a figure at all
+ * (S796) — the page says "Not counted" and the sheet notes it beside the zero its arithmetic needs.
+ */
+export function closingUncounted(gap) {
+  return !!gap && gap.presentCount > 0 && gap.uncountedCount >= gap.presentCount
+}
+
+/**
+ * An open month has no Food Cost % (S792, D30: it is COGS ÷ sales, and COGS needs the month-end
+ * count). S756 printed it anyway, neutral, and mid-month that meant "215.3%" as the largest figure
+ * on the page (S796 critique). The page and the sheet now say what it needs instead of a number.
+ */
+export const OPEN_FC_TEXT = 'Needs closing count'
+
 /** The sentence under Food Cost %, on the page and in the sheet's Note column. */
 export function foodCostSentence(verdict, periodStatus) {
   if (verdict.key === 'none') return 'Add sales entries to calculate'
-  if (verdict.key === 'unjudged') return periodStatus === 'open' ? 'Not judged: month still open' : 'Not judged: count incomplete'
+  if (verdict.key === 'unjudged') return periodStatus === 'open' ? 'Shown once the month is closed with a stock count' : 'Not judged: count incomplete'
   if (verdict.key === 'good') return `✓ Within your target (≤${verdict.warn}%)`
   if (verdict.key === 'watch') return `△ Above target — review purchases (${verdict.warn}–${verdict.critical}%)`
   return `▲ Critical — immediate review needed (>${verdict.critical}%)`
 }
 
-/** The line under the COGS tile: its share of revenue, or why there is none. */
-export function cogsShareLine(fcPct, withhold) {
+/**
+ * The line under the COGS tile: its share of revenue, or why there is none. On an OPEN month that
+ * share IS the food cost % the box beside it declines to print, so it is not printed here either.
+ */
+export function cogsShareLine(fcPct, withhold, open = false) {
+  if (open) return 'Provisional until the closing count'
   return fcPct != null ? `${fcPct.toFixed(1)}% of revenue${withhold ? ' · not judged' : ''}` : 'No sales data'
 }
 
@@ -107,10 +127,12 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
     row('Net Purchases',     money(report.totalNetPurchase), ''),
     row('Wastage',           money(report.totalWastage),     ''),
     row('Staff Meals',       money(report.totalStaffMeals),  ''),
-    row('Closing Stock',     money(report.totalClosing),     ''),
-    row('COGS',              money(report.totalCOGS),        '', cogsShareLine(report.fcPct, withhold)),
+    // The zero stays when nothing is counted — COGS is rebuilt from this column — and the note says
+    // it is not a count.
+    row('Closing Stock',     money(report.totalClosing),     '', closingUncounted(report.gap) ? 'Not counted yet' : ''),
+    row('COGS',              money(report.totalCOGS),        '', cogsShareLine(report.fcPct, withhold, open)),
     row('Net Sales Revenue', money(report.totalRevenue),     '', 'From sales entries (excl. VAT)'),
-    row('Food Cost %',       '', pct1(report.fcPct), foodCostSentence(verdict, periodStatus)),
+    row('Food Cost %',       '', open ? '' : pct1(report.fcPct), open ? `${OPEN_FC_TEXT} — ${foodCostSentence(verdict, periodStatus)}` : foodCostSentence(verdict, periodStatus)),
     row(open ? SPEND_SO_FAR_LABEL : SPEND_LABEL, '', pct1(report.purchaseFcPct), 'Net purchases ÷ revenue'),
   ]
 

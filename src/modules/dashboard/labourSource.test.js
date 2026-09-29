@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import {
-  isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel,
+  isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText,
   finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote,
 } from './labourSource'
 
@@ -102,7 +102,21 @@ describe('resolveLabour — payroll XOR the Labor bucket, never the sum', () => 
       .toEqual({ source: 'overheads', amount: 150000, ignoredBucket: 0, verdictWithheld: false })
   })
   test('nothing anywhere is "none", not a judged zero-labour month', () => {
-    expect(resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false }).source).toBe('none')
+    const r = resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false })
+    expect(r.source).toBe('none')
+    // S796: an HR client with no finalized run has no labour in the margin yet, so no ✓ on it.
+    expect(r.verdictWithheld).toBe(true)
+  })
+  test('an IMS-only client with an empty Labor tab is still judged', () => {
+    const r = resolveLabour({ labourBucket: 0, payroll: null, hrOn: false, fenced: false })
+    expect(r.source).toBe('none')
+    expect(r.verdictWithheld).toBe(false)
+  })
+  test('labourNotJudgedText names the reason, and is empty when judged', () => {
+    expect(labourNotJudgedText({ source: 'none', verdictWithheld: true })).toBe('Not judged until payroll is finalized')
+    expect(labourNotJudgedText({ source: 'unreadable', verdictWithheld: true })).toBe('Not judged on this login')
+    expect(labourNotJudgedText({ source: 'failed', verdictWithheld: true })).toMatch(/could not be loaded/)
+    expect(labourNotJudgedText({ source: 'payroll', verdictWithheld: false })).toBe('')
   })
   test('a fenced login withholds the verdict rather than trusting the bucket', () => {
     const r = resolveLabour({ labourBucket: 150000, payroll: null, hrOn: true, fenced: true })
@@ -125,7 +139,8 @@ describe('resolveLabour — payroll XOR the Labor bucket, never the sum', () => 
     const source = payroll != null ? 'payroll' : fenced ? 'unreadable' : bucket > 0 ? 'overheads' : 'none'
     const ignored = payroll != null && bucket > 0 ? bucket : 0
     const r = resolveLabour({ labourBucket: bucket, payroll, hrOn: true, fenced })
-    expect([r.source, r.amount, r.ignoredBucket, r.verdictWithheld]).toEqual([source, labourEffective, ignored, source === 'unreadable'])
+    // hrOn is true here, so 'none' withholds as well as 'unreadable' (S796).
+    expect([r.source, r.amount, r.ignoredBucket, r.verdictWithheld]).toEqual([source, labourEffective, ignored, source === 'unreadable' || source === 'none'])
   })
 })
 

@@ -19,7 +19,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
-import { buildMonthlySummaryWorkbook, cogsShareLine, foodCostSentence, foodCostVerdict, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
+import { buildMonthlySummaryWorkbook, closingUncounted, cogsShareLine, foodCostSentence, foodCostVerdict, OPEN_FC_TEXT, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -290,7 +290,7 @@ export default function MonthlySummary() {
           {/* D7 (S756): the open month is the page's default, so the caveat is the first thing on it. */}
           {isOpenPeriod && (
             <div role="status" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
-              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — closing stock not counted yet, so food cost reads high until the month is closed.
+              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — closing stock is counted at month end, so COGS counts every shelf as used and food cost % is shown once the month is closed.
             </div>
           )}
           {/* D6 (S756): named on a closed month always; on an open month only once counting has begun,
@@ -313,9 +313,15 @@ export default function MonthlySummary() {
               // count it twice here.
               { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-red-text)',
                 tip: 'The wastage taken out of COGS: raw items only. Wasted prep (a tray of momo filling) is already counted through the flour and meat it was made from, so the Wastage Report and the Dashboard, which list everything thrown away, can show a higher figure for the same month.' },
-              { label: 'Closing Stock',    value: fmt(report.totalClosing),     color: 'var(--theme-green-text)' },
+              // Nothing counted yet is not NPR 0 of stock (S796): the figure the page cannot know
+              // says so, in neutral ink, instead of printing a zero in the verdict colour.
+              closingUncounted(report.gap)
+                ? { label: 'Closing Stock', value: 'Not counted', color: 'var(--theme-text2)',
+                    sub: isOpenPeriod ? 'Counted at month end' : 'No closing count was saved' }
+                : { label: 'Closing Stock', value: fmt(report.totalClosing), color: 'var(--theme-green-text)',
+                    sub: gapNamed && report.gap?.uncountedCount > 0 ? `${report.gap.uncountedCount} item${report.gap.uncountedCount === 1 ? '' : 's'} not counted` : undefined },
               { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-accent-ink)',
-                sub: cogsShareLine(report.fcPct, withholdVerdict),
+                sub: cogsShareLine(report.fcPct, withholdVerdict, isOpenPeriod),
                 tip: `Cost of Goods Used: ${COGS_FORMULA}. The actual ingredient cost consumed.` }
             ].map(s => (
               <div key={s.label} className="stat-card">
@@ -366,7 +372,15 @@ export default function MonthlySummary() {
               {/* Banded through fcFigure(settings) — this was a local 35/45 ternary with no mark, a
                   third definition beside fcBand and Recipes' own, so the same month read green here
                   and amber on the dashboard (S682). 24px is the figure step; 28 was off the ramp. */}
-              {(() => { const f = withholdVerdict ? unjudgedFcFigure(report.fcPct, { reason: isOpenPeriod ? 'Not judged: month still open' : 'Not judged: count incomplete' }) : fcFigure(report.fcPct, settings); return (
+              {/* An open month has no Food Cost % at all (S796): printing the provisional figure,
+                  even neutral, made mid-month's "215.3%" the loudest thing on the page. It says what
+                  it needs instead, the way Variance says "Not measurable yet". */}
+              {isOpenPeriod && report.fcPct != null ? (
+                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.5, color: 'var(--theme-text2)' }}
+                  title="Food cost % is the stock USED ÷ sales, and what was used is only known once the closing stock is counted at month end. Spend % so far, beside this, is what you have bought ÷ sales.">
+                  {OPEN_FC_TEXT}
+                </div>
+              ) : (() => { const f = withholdVerdict ? unjudgedFcFigure(report.fcPct, { reason: 'Not judged: count incomplete' }) : fcFigure(report.fcPct, settings); return (
                 <div style={{ fontSize: 24, fontWeight: 800, ...f.style }} title={f.title}>{f.text}</div>
               ) })()}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>
@@ -485,7 +499,7 @@ export default function MonthlySummary() {
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totalNetPurchase)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>{fmt(report.totalWastage)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple-text)', paddingTop: 14 }}>{report.totalStaffMeals > 0 ? fmt(report.totalStaffMeals) : '—'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 14 }}>{fmt(report.totalClosing)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 14 }}>{closingUncounted(report.gap) ? <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>Not counted</span> : fmt(report.totalClosing)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totalCOGS)}</td>
                     <td style={{ textAlign: 'right', paddingTop: 14, fontWeight: 700, color: 'var(--theme-text2)' }}>100%</td>
                   </tr>

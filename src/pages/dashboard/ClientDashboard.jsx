@@ -17,7 +17,7 @@ import {
   WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
 } from '../../modules/dashboard/weatherEffect'
 import { useWeatherStrip } from '../../modules/dashboard/useWeatherStrip'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from '../../modules/dashboard/labourSource'
+import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText } from '../../modules/dashboard/labourSource'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
@@ -1592,7 +1592,7 @@ export default function ClientDashboard() {
     : labour.source === 'payroll' && labour.ignoredBucket > 0
       ? `Labor is your finalized payroll run (${npr0(labour.amount)}). The ${npr0(labour.ignoredBucket)} on the Overheads Labor tab is not added — the two measure the same cost.`
     : labour.source === 'none' && hrOn
-      ? 'Labor not included — no finalized payroll run this period, and nothing on the Overheads Labor tab.'
+      ? 'Labor not included — no finalized payroll run this period, and nothing on the Overheads Labor tab — so the margin is not judged until payroll is finalized.'
     : labour.source === 'unreadable'
       ? 'Payroll cannot be read on this login, so any finalized payroll run is not in these figures and the margin is not judged. The account owner sees the full figure.'
     : labour.source === 'failed'
@@ -1837,7 +1837,8 @@ export default function ClientDashboard() {
           saying the month was three days old. Two of the three ratios greyed out and the third
           did not, which made the two that did look like the exception. */}
       {/* Withheld (grey, no mark) when labour may be missing — a fenced IMS login or a failed
-          payroll read (S756): a low fixed-cost % that leaves out the wage bill is not "Healthy". */}
+          payroll read (S756), or an HR client with no finalized run yet (S796): a low fixed-cost %
+          that leaves out the wage bill is not "Healthy". */}
       <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).color }} title={verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).title}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).text}
       </div>
@@ -1864,7 +1865,7 @@ export default function ClientDashboard() {
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).text}
       </div>
       {/* Inherits Food Cost's lumpiness through purchaseTotal, so it carries the same caveat. */}
-      <div style={kpiSubtextStyle}>{partialNote || (labour.verdictWithheld ? 'Not judged on this login · target ≥20%' : 'After stock bought & overheads · target ≥20%')}</div>
+      <div style={kpiSubtextStyle}>{partialNote || (labour.verdictWithheld ? `${labourNotJudgedText(labour)} · target ≥20%` : 'After stock bought & overheads · target ≥20%')}</div>
       {/* The labour source is named ON the tile, not only in a hover (S756, D22) — a screenshot of
           this card loses the Tip, and which wage figure a margin contains is what makes it true. */}
       {!loading && stats && labourLabel && (

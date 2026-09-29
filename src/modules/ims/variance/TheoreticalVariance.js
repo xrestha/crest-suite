@@ -333,7 +333,12 @@ export default function TheoreticalVariance() {
         return true
       })
       .sort((a, b) => {
-        if (sortBy === 'variance_val')  return Math.abs(b.value)  - Math.abs(a.value)
+        // Judged rows first, as on Variance (S796): a row with no verdict (not counted, no recipe)
+        // must not outrank a real flagged loss just because its artefact figure is bigger.
+        if (sortBy === 'variance_val') {
+          const tier = r => (r.band?.flag === 'over' || r.band?.flag === 'under' ? 0 : r.band?.flag === 'ok' ? 1 : 2)
+          return tier(a) - tier(b) || Math.abs(b.value) - Math.abs(a.value)
+        }
         // A row with no percentage (nothing using it sold) sorts last either way — there is no
         // figure to rank it by, and its value is on the value sort.
         if (sortBy === 'variance_pct') {

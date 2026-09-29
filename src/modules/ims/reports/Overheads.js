@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour } from '../../dashboard/labourSource'
+import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourNotJudgedText } from '../../dashboard/labourSource'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -1023,9 +1023,17 @@ export default function Overheads() {
             </p>
           )}
 
-          {verdictWithheld && (
+          {verdictWithheld && labourSource === 'unreadable' && (
             <p role="alert" style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
               △ Payroll cannot be read on this login, so labour from any finalized payroll run is <strong>not</strong> in this statement{totals.labor > 0 ? ' (only the Labor tab is)' : ''}. Net Profit is shown without a verdict — the account owner sees the payroll figure.
+            </p>
+          )}
+          {/* S796: an HR client whose payroll is not finalized yet has no labour in this statement
+              at all. The Labor line already reads as not entered; this says what that does to the
+              verdict, so a profit with no wage bill in it is never called "Profitable". */}
+          {verdictWithheld && labourSource === 'none' && (
+            <p role="status" style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
+              △ No payroll run is finalized for {period?.label || 'this month'} yet, so labour is <strong>not</strong> in this statement. Net Profit is shown without a verdict until payroll is finalized in Crest HR.
             </p>
           )}
 
@@ -1051,7 +1059,7 @@ export default function Overheads() {
               display: 'flex', justifyContent: 'space-between', alignItems: 'center'
             }}>
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                {verdictWithheld ? 'Net profit before payroll — not judged on this login'
+                {verdictWithheld ? `Net profit before payroll — ${labourNotJudgedText({ source: labourSource, verdictWithheld }).replace(/^Not/, 'not')}`
                   : periodOpen ? 'Net profit so far — not judged while the month is open'
                   : netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
               </span>
@@ -1282,7 +1290,9 @@ export default function Overheads() {
               color: beTone ? `var(--theme-${beTone}-text)` : 'var(--theme-text1)'
             }}>
               {verdictWithheld
-                ? 'Not judged on this login — payroll cannot be read here, so the real fixed costs may be higher'
+                ? labourSource === 'none'
+                  ? 'Not judged until payroll is finalized — labour is not in the fixed costs yet, so the real break-even is higher'
+                  : 'Not judged on this login — payroll cannot be read here, so the real fixed costs may be higher'
                 : breakEvenRev && periodOpen
                   ? `So far: ${fmt(revenue)} of the ${fmt(breakEvenRev)} needed. Not judged while ${period?.label || 'the month'} is open.`
                 : isAboveBreakEven && breakEvenRev
