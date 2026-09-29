@@ -185,6 +185,8 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
 
 ## S792.5 Stage 4 — design first, shown before building
 
+🟡 Designs written, awaiting the owner's answers (Q1–Q7): `docs/ims-review-s792/STAGE4-DESIGN.md`.
+
 - 🔴 D32 PAN-bill supplier VAT as cost. The valuation basis for stock and purchases touches every COGS reader and the group SQL.
 - 🔴 D40 Opening pool WDV and per-asset "depreciation already taken" (schema and UI).
 - 🔴 D37 Two-location count prompt (a fresh server read on save).
