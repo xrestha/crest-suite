@@ -98,9 +98,9 @@ export default function MonthlySummary() {
       fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
         .eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See

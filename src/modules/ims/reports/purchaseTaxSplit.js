@@ -27,10 +27,12 @@
 // discounted bill therefore drove the taxable base NEGATIVE by the discount — a negative input VAT
 // claim on a statutory report. Every return here is scaled by its own line's net factor, so a full
 // return nets to exactly zero.
-import { allocateBillDiscounts, netFactors, returnBase } from './supplierAttribution'
+import { allocateBillDiscounts, netFactors, returnBase, VAT_RATE } from './supplierAttribution'
 import { calcBillTotals, billKeyOf, billInvoiceAmount, invoiceMismatch } from '../purchases/purchasesHelpers'
 
-export const VAT_RATE = 0.13
+// Defined in supplierAttribution.js since S792 (D32) — `allocateBillDiscounts`' `lineCost` needs it
+// and that file cannot import this one (the S727 cycle). This module stays its public home.
+export { VAT_RATE }
 
 // `netFactors` and `returnBase` moved to supplierAttribution.js in S727, beside the
 // `allocateBillDiscounts` they are derived from — that file needed them and could not import them

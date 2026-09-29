@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
+import { vatModeOf } from '../recipes/menuPriceVat'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { calcBillTotals, methodOf } from '../purchases/purchasesHelpers'
 import { billOwedAfterReturns } from './payablesAllocation'
-import { allocateBillDiscounts, mergeFactors } from './supplierAttribution'
+import { allocateBillDiscounts, mergeFactors, vatCostFactor, returnCostFactor } from './supplierAttribution'
 import { netFactors, returnBase, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
 import { readPriorBillLines } from './readPriorBillLines'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
@@ -44,6 +46,9 @@ const VENDOR_SPLIT_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf
 
 export default function VendorReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  // 'pan' | 'vat' | null — only the WORDING follows the live switch; the figures follow each bill's
+  // stored `vat_is_cost` (S792, D32).
+  const vatMode = vatModeOf(useSettings(), clientId)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
@@ -123,7 +128,7 @@ export default function VendorReport() {
     setLoadError(null)
     const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('*, items(name, categories(name)), vendors(name), payment_method').eq('period_id', periodId).order('bs_day').order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name), payment_method').eq('period_id', periodId).order('bs_day').order('id'))
+      fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name), payment_method, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('bs_day').order('id'))
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 vendor
@@ -219,12 +224,18 @@ export default function VendorReport() {
     // against last month's discounted bill is credited at that bill's price — the same Map Supplier
     // Contribution merges (supplierAttribution.test.js pins the tie-out) and VAT Report uses.
     const factors = mergeFactors(netFactors(allocated), priorBillFactors(priorBillLines))
-    const netById = new Map(allocated.map(r => [r.id, r.lineNet]))
+    //
+    // Purchasing figures are on the COST basis (S792, D32): `lineCost`, and a return × its line's
+    // `returnCostFactor` (read off the return's `purchase_entries` embed). On a PAN-bill outlet the
+    // 13% on a `vat_is_cost` bill is spend it cannot claim back; everywhere else both are ex-VAT as
+    // before. The name `lineNetOf` is kept — every consumer below reads it. Supplier Contribution's
+    // `vendorNetByItem` takes the same basis, which keeps the S727 tie-out.
+    const netById = new Map(allocated.map(r => [r.id, r.lineCost]))
     const lineNetOf = p => {
       const v = netById.get(p.id)
-      return v === undefined ? (parseFloat(p.qty) || 0) * (parseFloat(p.rate) || 0) : v
+      return v === undefined ? (parseFloat(p.qty) || 0) * (parseFloat(p.rate) || 0) * vatCostFactor(p) : v
     }
-    const retValueOf = r => returnBase(r, factors)
+    const retValueOf = r => returnBase(r, factors) * returnCostFactor(r)
 
     const purByVendor = new Map()     // vendor_id (or null) -> purchase entries
     const retByVendor = new Map()
@@ -272,11 +283,13 @@ export default function VendorReport() {
   // consumer now derives its discount as `gross - allocatedNet`, so the Discount column, the Net
   // Spend beside it and the Daily Breakdown behind it are one arithmetic rather than three.)
 
-  // Vendor summary — net spend (ex-VAT, after discount and returns)
+  // Vendor summary — net spend (after discount and returns; ex-VAT, or VAT-inclusive on a
+  // `vat_is_cost` bill's VAT lines — S792, D32). Gross takes the same factor, so Discount = Gross − Net
+  // stays on one basis.
   const vendorSummary = useMemo(() => vendors.map(vendor => {
     const vPurchases  = ix.purByVendor.get(vendor.id) || []
     const vReturns    = ix.retByVendor.get(vendor.id) || []
-    const gross       = vPurchases.reduce((s, p) => s + p.qty * p.rate, 0)
+    const gross       = vPurchases.reduce((s, p) => s + p.qty * p.rate * vatCostFactor(p), 0)
     const netPurch    = vPurchases.reduce((s, p) => s + ix.lineNetOf(p), 0)
     // Derived from the allocation rather than read from a parallel map, so the Discount column and
     // the Net Spend beside it can never be computed two different ways. They are equal for every
@@ -312,7 +325,7 @@ export default function VendorReport() {
   // It gets the same shape as a vendor row now, so the column can be added up on screen.
   const unassigned = ix.purByVendor.get(null) || []
   const unassignedReturns = ix.retByVendor.get(null) || []
-  const unassignedGross = unassigned.reduce((s, p) => s + p.qty * p.rate, 0)
+  const unassignedGross = unassigned.reduce((s, p) => s + p.qty * p.rate * vatCostFactor(p), 0)
   const unassignedNetPurch = unassigned.reduce((s, p) => s + ix.lineNetOf(p), 0)
   const unassignedDiscount = unassignedGross - unassignedNetPurch
   const unassignedReturned = unassignedReturns.reduce((s, r) => s + ix.retValueOf(r), 0)
@@ -329,7 +342,7 @@ export default function VendorReport() {
     fonepay: unassignedByMethod('FonePay'),
   }
 
-  const grandGross    = purchases.reduce((s, p) => s + p.qty * p.rate, 0)
+  const grandGross    = purchases.reduce((s, p) => s + p.qty * p.rate * vatCostFactor(p), 0)
   const grandNetPurch = purchases.reduce((s, p) => s + ix.lineNetOf(p), 0)
   const grandDiscount = grandGross - grandNetPurch
   const grandReturn   = returns.reduce((s, r) => s + ix.retValueOf(r), 0)
@@ -700,7 +713,9 @@ export default function VendorReport() {
   const scopeLine = `Period : ${periodLabel}${selectedPeriod?.status === 'open'
     ? ' (PROVISIONAL — period still open, figures can change)'
     : ' (period closed)'}`
-  const BASIS_NOTE = 'Figures are ex-VAT and net of bill discounts, apportioned across each bill’s own lines. Returns are credited at the price actually paid, i.e. net of that bill’s discount — including a return against a bill from an earlier month, at that bill’s own discount. Bill totals including VAT are on the Discounts Received sheet and in Outstanding Payables.'
+  const BASIS_NOTE = (vatMode === 'pan'
+    ? 'This outlet is not VAT-registered (PAN bill), so the 13% VAT paid on VAT bills cannot be claimed back and is counted in these figures as part of what you spent. Otherwise figures are'
+    : 'Figures are ex-VAT and') + ' net of bill discounts, apportioned across each bill’s own lines. Returns are credited at the price actually paid, i.e. net of that bill’s discount — including a return against a bill from an earlier month, at that bill’s own discount. Bill totals including VAT are on the Discounts Received sheet and in Outstanding Payables.'
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
@@ -904,7 +919,7 @@ export default function VendorReport() {
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Trade/promo discount received from this vendor — deducted from net spend." width={230}>Discount</Tip></th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount. A return this month against a bill from an earlier month is credited at that bill's own discount, and shows in the drill-down as its own row naming that bill." width={280}>Returns</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Net spend = Gross − Discount − Returns (ex-VAT). Your true cost obligation to this vendor." width={250}>Net Spend</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text={vatMode === 'pan' ? 'Net spend = Gross − Discount − Returns. This outlet is not VAT-registered, so the 13% VAT paid to suppliers is not claimable and is included here as part of the cost.' : 'Net spend = Gross − Discount − Returns (ex-VAT). Your true cost obligation to this vendor.'} width={250}>Net Spend</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="This vendor's share of total net purchase spend for the period." width={220}>% of Net Total</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Average daily spend (net) across days this vendor had deliveries.">Avg/Day</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Net spend on bills settled in cash. A bill has one payment method for all its lines; a bill recorded before the method was tracked counts as Cash. These three columns add up to Net Spend." width={250}>Cash (Net)</Tip></th>
@@ -1270,7 +1285,7 @@ export default function VendorReport() {
                       <th style={{ textAlign: 'right' }}>Bill Total</th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Discount</th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT, after discount and returns — the same basis as the Net Spend column on the vendor row that opened this." width={250}>Net</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text={vatMode === 'pan' ? 'After discount and returns, with the VAT paid on VAT bills included (not claimable on a PAN-bill outlet) — the same basis as the Net Spend column on the vendor row that opened this.' : 'Ex-VAT, after discount and returns — the same basis as the Net Spend column on the vendor row that opened this.'} width={250}>Net</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced: bill discount applied, goods returned taken off at the discounted price, 13% VAT on the taxable part. For a Credit bill it counts goods returned in ANY month, including after this one — the Returns and Net columns count only this month's. This is the figure payments are measured against, and it is what Outstanding Payables shows for the same bill." width={300}>Payable</Tip></th>
                       <th>Status</th>
                       <th></th>

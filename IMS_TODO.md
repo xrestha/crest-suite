@@ -30,15 +30,15 @@ Code added since S756 had never been reviewed, and most new findings sit in it:
 | D29 | Hiding an item or dish **never changes history**: past months keep every purchase, count and sale. Sales Entry shows hidden dishes that sold this month in a separate block, still editable. | ✅ S792 (Sales Entry stage 1; every period figure + `get_group_pnl` stage 2) |
 | D30 | **Food Cost % = used (COGS) ÷ sales for closed months, everywhere.** The running month shows "Spend % so far" (purchases ÷ sales). Owner Reports already generated stay as they were. | ✅ S792 stage 2 (`foodCostBasis.js`; Owner Report schema 9) |
 | D31 | **PAN-bill (not VAT-registered) outlet: the typed menu price is the price the guest pays**, stored whole. Existing dishes show their real till price so the owner can re-enter them. | ✅ S792 stage 2 (`menuPriceVat.js`, `PanPriceBanner`) |
-| D32 | **PAN-bill outlet: supplier VAT counts as food cost**, and is not called "claimable". Needs a short design first (stage 4). | 🔴 |
+| D32 | **PAN-bill outlet: supplier VAT counts as food cost**, and is not called "claimable". Needs a short design first (stage 4). | ✅ S792 stage 4 (`vat_is_cost`, `lineCost`; migration 20260929120000 to apply) |
 | D33 | A return against a discounted bill **credits the discounted price**, on payables and the balance letter too. | ✅ S792 stage 2 (`billOwedAfterReturns`) |
 | D34 | The bill line's typed **Total is after VAT when VAT is ticked**. Ticking or unticking changes the Rate, never the Total. | ✅ S792 stage 2 (`billLineVat.js`; a typed Rate stays ex-VAT and gains 13% on the tick) |
 | D35 | A dish typed as a Bulk total, later sold on the till: **Sales Entry asks for the pre-till days as daily figures**. The Bulk total is ignored for stock only after that. | ✅ S792 stage 2 (`bulkTillHandover`; POS clients may enter the pre-till days on Daily Entry) |
 | D36 | Variance and Theoretical vs Actual **both judge an ingredient whose stock fell while its dishes sold nothing**. | ✅ S792 stage 2 (`variancePopulation.js`, Shrinkage and the Owner Report too) |
-| D37 | A second count of an already-counted item **asks: replace, or add yours?** (stage 4) | 🔴 |
+| D37 | A second count of an already-counted item **asks: replace, or add yours?** (stage 4) | ✅ S792 stage 4 (`save_closing_counts`; migration 20260929100000 to apply) |
 | D38 | Offline counts arriving in a closed month under the Owner's login are **listed, with one button "Add to Bhadra and carry into Ashwin's opening stock"**. Nothing lands silently. | ✅ S792 |
 | D39 | **Counting tablets lock after 10 idle minutes** and return to the PIN screen, like POS tills. Sign out also goes back to the PIN screen. | ✅ S792 |
-| D40 | Existing businesses **type each tax pool's opening value once**, plus "depreciation already taken" per old asset (stage 4). | 🔴 |
+| D40 | Existing businesses **type each tax pool's opening value once**, plus "depreciation already taken" per old asset (stage 4). | ✅ S792 stage 4 (`assets_tax_pool_openings`; migration 20260929110000 to apply) |
 | D41 | **Moving Item Master's price from a purchase bill needs Supervisor+**, enforced in the database. | ✅ S792 (database + bill page) |
 | D42 | When an IMS Supervisor ends the month, the Owner Report is still made at the Owner's first view. **The close screen and the report header say when it was made.** | ✅ S792 stage 3 (`closerMakesReport`/`deferredReportNote`, `reportMadeLine.js`) |
 
@@ -182,14 +182,16 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
 - The HR Staff page's Last Seen is still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fix here and file it in `docs/CROSS-REPO.md` there.
 - `PosOrders.jsx` (`writeSalesEntries`) and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()` (the device's clock zone) while the backfills now use the Nepal date (SALES-6). Fine on a till in Nepal; `nepalBs(new Date())` would make them agree.
 - `ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too.
+- (stage 4) `get_group_summary` — the Group Console's Spend % — still values a PAN outlet's purchases ex-VAT (D32 covered `get_group_pnl` only).
+- (stage 4) On a bill line, ticking VAT after the rate was prefilled from Item Master does not re-divide it by 1.13; the Item Master VAT review banner looks back 3 months of bills.
 
-## S792.5 Stage 4 — design first, shown before building
+## S792.5 Stage 4 — design first, shown before building — ✅ built S792 stage 4
 
-🟡 Designs written, awaiting the owner's answers (Q1–Q7): `docs/ims-review-s792/STAGE4-DESIGN.md`.
+Designs: `docs/ims-review-s792/STAGE4-DESIGN.md`; owner took every recommendation (Q1–Q7). Three migrations written, **not yet applied** (20260929100000, 20260929110000, 20260929120000).
 
-- 🔴 D32 PAN-bill supplier VAT as cost. The valuation basis for stock and purchases touches every COGS reader and the group SQL.
-- 🔴 D40 Opening pool WDV and per-asset "depreciation already taken" (schema and UI).
-- 🔴 D37 Two-location count prompt (a fresh server read on save).
+- ✅ D32 PAN-bill supplier VAT as cost. The valuation basis for stock and purchases touches every COGS reader and the group SQL.
+- ✅ D40 Opening pool WDV and per-asset "depreciation already taken" (schema and UI).
+- ✅ D37 Two-location count prompt (a fresh server read on save).
 
 **GAPs the reviewers raised, not scheduled yet.** Each area file has its own list. The strongest:
 - no Item and Vendor Excel import;

@@ -13,7 +13,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
-import { allocateBillDiscounts } from '../reports/supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from '../reports/supplierAttribution'
 import { periodRowIds, periodValuationItems } from '../reports/periodCost'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -479,8 +479,8 @@ export default function Stock() {
       // value each line net of its bill's discount (S756) — vendor-payables.md's `a || b` rule: a
       // bill written before grouping has no purchase_group_id, and without the vendor_id/
       // invoice_ref/bs_day fallback every such line would be treated as its own bill.
-      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('id')),
       // Independent of the six reads above but previously awaited after them — one extra serial
       // round trip on every load of the heaviest page.
       fetchAllRows(() => supabase
@@ -561,7 +561,7 @@ export default function Stock() {
     // bill's discount is shared across all its lines, including lines for items outside the list.
     ;allocateBillDiscounts(purch || []).forEach(r => {
       purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty)
-      purchValMap[r.item_id] = (purchValMap[r.item_id] || 0) + r.lineNet
+      purchValMap[r.item_id] = (purchValMap[r.item_id] || 0) + r.lineCost
       freqMap[r.item_id] = (freqMap[r.item_id] || 0) + 1
     })
     setPurchases(purchMap)
@@ -574,7 +574,7 @@ export default function Stock() {
     const retValMap = {}
     ;(rets || []).forEach(r => {
       retMap[r.item_id] = (retMap[r.item_id] || 0) + parseFloat(r.qty)
-      retValMap[r.item_id] = (retValMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+      retValMap[r.item_id] = (retValMap[r.item_id] || 0) + returnCostValue(r)   // D32: a PAN outlet's VAT is cost
     })
     setReturns(retMap)
     setReturnValues(retValMap)

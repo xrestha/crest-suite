@@ -1,8 +1,9 @@
 import {
   allocateBillDiscounts, allocationBillKey, vendorNetByItem, vendorShares, attributeConsumption, vendorNetTotals,
   netFactors, returnBase, mergeFactors, applyPriorBillFactors, NO_VENDOR, UNATTRIBUTED,
+  VAT_RATE, vatCostFactor, returnCostFactor, returnCostValue, RETURN_COST_EMBED,
 } from './supplierAttribution'
-import { priorBillFactors, returnLinesOutsidePeriod, splitPurchaseVat, billPayables } from './purchaseTaxSplit'
+import { priorBillFactors, returnLinesOutsidePeriod, splitPurchaseVat, billPayables, VAT_RATE as TAX_VAT_RATE } from './purchaseTaxSplit'
 
 // A bill's discount_amount is repeated on every one of its lines, so summing it is the obvious
 // wrong answer — Vendor Report dedupes by purchase_group_id and this must agree with it.
@@ -272,5 +273,70 @@ describe('a return against an earlier month\'s bill', () => {
     const orphan = { ...late, id: 'r3', purchase_entry_id: null, value: 50 }
     const out = applyPriorBillFactors([same, orphan], THIS_MONTH, new Map([['new1', 0.1]]))
     expect(out.map(r => r.value)).toEqual([100, 50])
+  })
+})
+
+// S792 (owner decision D32): on a PAN-bill outlet the VAT on a VAT bill is food cost. The basis is
+// stored per bill (`vat_is_cost`), and `lineCost` is the one place it turns into money.
+describe('lineCost — supplier VAT as food cost on a vat_is_cost bill (D32)', () => {
+  const bill = (vatIsCost) => [
+    { purchase_group_id: 'g1', item_id: 'i1', vendor_id: 'v1', qty: 10, rate: 30, discount_amount: 100, vat_inclusive: true, vat_is_cost: vatIsCost },
+    { purchase_group_id: 'g1', item_id: 'i2', vendor_id: 'v1', qty: 10, rate: 20, discount_amount: 100, vat_inclusive: false, vat_is_cost: vatIsCost },
+  ]
+
+  test('VAT_RATE has one definition, re-exported by purchaseTaxSplit', () => {
+    expect(VAT_RATE).toBe(0.13)
+    expect(TAX_VAT_RATE).toBe(VAT_RATE)
+  })
+
+  test('a VAT line on a vat_is_cost bill costs its net × 1.13; a non-VAT line costs its net', () => {
+    const [vat, nonVat] = allocateBillDiscounts(bill(true))
+    expect(vat.lineNet).toBeCloseTo(240, 6)
+    expect(vat.lineCost).toBeCloseTo(240 * 1.13, 6)
+    expect(vat.lineGrossCost).toBeCloseTo(300 * 1.13, 6)
+    expect(nonVat.lineCost).toBeCloseTo(nonVat.lineNet, 6)
+    expect(nonVat.lineGrossCost).toBe(200)
+  })
+
+  test('a VAT-registered bill (vat_is_cost false) and a row read without the columns stay ex-VAT', () => {
+    for (const rows of [bill(false), bill(undefined)]) {
+      const out = allocateBillDiscounts(rows)
+      out.forEach(r => { expect(r.lineCost).toBeCloseTo(r.lineNet, 9); expect(r.lineGrossCost).toBe(r.lineGross) })
+    }
+  })
+
+  test('the discount allocation is unchanged by the cost basis (still over the ex-VAT gross)', () => {
+    const a = allocateBillDiscounts(bill(true)).map(r => r.lineNet)
+    const b = allocateBillDiscounts(bill(false)).map(r => r.lineNet)
+    expect(a).toEqual(b)
+  })
+
+  test('vatCostFactor needs BOTH flags to be true, strictly', () => {
+    expect(vatCostFactor({ vat_inclusive: true, vat_is_cost: true })).toBeCloseTo(1.13, 9)
+    expect(vatCostFactor({ vat_inclusive: true, vat_is_cost: false })).toBe(1)
+    expect(vatCostFactor({ vat_inclusive: false, vat_is_cost: true })).toBe(1)
+    expect(vatCostFactor({ vat_inclusive: 'true', vat_is_cost: 'true' })).toBe(1)
+    expect(vatCostFactor(null)).toBe(1)
+  })
+
+  test("a return takes the basis of the line it went back against, read off its embed", () => {
+    const onVatCost = { qty: 2, rate: 30, purchase_entries: { vat_inclusive: true, vat_is_cost: true } }
+    const onExVat = { qty: 2, rate: 30, purchase_entries: { vat_inclusive: true, vat_is_cost: false } }
+    const unlinked = { qty: 2, rate: 30, purchase_entries: null }
+    expect(returnCostFactor(onVatCost)).toBeCloseTo(1.13, 9)
+    expect(returnCostValue(onVatCost)).toBeCloseTo(60 * 1.13, 6)
+    expect(returnCostValue(onExVat)).toBe(60)
+    expect(returnCostValue(unlinked)).toBe(60)
+    expect(RETURN_COST_EMBED).toBe('purchase_entries(vat_inclusive, vat_is_cost)')
+  })
+
+  test('vendorNetByItem is on the cost basis, returns included, and a full return still nets to zero', () => {
+    const rows = bill(true).map((r, i) => ({ ...r, id: `e${i}` }))
+    const ret = { item_id: 'i1', vendor_id: 'v1', qty: 10, rate: 30, purchase_entry_id: 'e0', purchase_entries: { vat_inclusive: true, vat_is_cost: true } }
+    const byItem = vendorNetByItem(rows, [ret])
+    expect(byItem.i1.total).toBeCloseTo(0, 6)                 // 240 × 1.13 − 300 × 0.8 × 1.13
+    expect(byItem.i2.total).toBeCloseTo(160, 6)               // non-VAT line: ex-VAT
+    const noReturn = vendorNetByItem(rows, [])
+    expect(noReturn.i1.byVendor.v1).toBeCloseTo(240 * 1.13, 6)
   })
 })

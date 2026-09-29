@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
+import { vatModeOf } from '../recipes/menuPriceVat'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
@@ -28,6 +30,9 @@ import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 
 export default function Purchases() {
   const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
+  // S792 (D32): on a PAN-bill outlet the VAT on a VAT bill is food cost, so "excluding VAT" is no
+  // longer what Monthly Summary and P&L take. Wording only; this page's figures are unchanged.
+  const isPan = vatModeOf(useSettings(), clientId) === 'pan'
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -585,7 +590,7 @@ export default function Purchases() {
           {/* No claim that this "matches Stock Count and COGS" (S698): Stock Count's Summary values
               purchases at the ITEM MASTER rate, and Monthly Summary / P&L at bill rate net of
               allocated discounts. This is bill rate before discount — say what it is. */}
-          <div className="stat-label"><Tip text="Goods value at qty × the rate on each bill, before bill discounts and excluding VAT. Monthly Summary and P&L take the same bills net of their discounts, and Stock Count's Summary values what arrived at the Item Master rate — so those can differ from this by design. The payable figure including VAT is in the table footer." width={300}>Gross Purchases (ex-VAT)</Tip></div>
+          <div className="stat-label"><Tip text={`Goods value at qty × the rate on each bill, before bill discounts and excluding VAT. Monthly Summary and P&L take the same bills net of their discounts${isPan ? ' and, because this outlet is not VAT-registered (PAN bill), with the VAT paid on VAT bills added — it is not claimable, so it is food cost' : ''}, and Stock Count's Summary values what arrived at the Item Master rate — so those can differ from this by design. The payable figure including VAT is in the table footer.`} width={300}>Gross Purchases (ex-VAT)</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
@@ -977,7 +982,7 @@ export default function Purchases() {
                     })}
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>
-                        <Tip text="Sum of qty × rate for the lines shown — before any bill discount and excluding VAT. Monthly Summary and P&L take these bills net of their discounts; Stock Count's Summary values them at the Item Master rate." width={280}>Total goods value (ex-VAT)</Tip>
+                        <Tip text={`Sum of qty × rate for the lines shown — before any bill discount and excluding VAT. Monthly Summary and P&L take these bills net of their discounts${isPan ? ', with the VAT on VAT bills added as food cost (this outlet cannot claim it back)' : ''}; Stock Count's Summary values them at the Item Master rate.`} width={280}>Total goods value (ex-VAT)</Tip>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                         {filteredQty !== null ? filteredQty.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}

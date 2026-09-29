@@ -19,7 +19,7 @@ import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import { bsToAd, daysInBsMonth, BS_MONTHS } from '../../../utils/bsCalendar'
 import { FilterChips } from '../../../components/Tabs'
 import {
-  AGE_BANDS, ageAllocated, ageInDays, asOfForWindow, splitReturns,
+  AGE_BANDS, ageAllocated, ageInDays, asOfForWindow, splitReturns, batchRateOf,
   anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
 } from './stockAgeingCalc'
 
@@ -140,7 +140,7 @@ export default function StockAgeing() {
         .eq('is_active', true).eq('is_sub_recipe', false).order('id')),
       // Every read below spans up to twelve periods, so all of them are paged.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('id, period_id, item_id, qty, rate, bs_day').in('period_id', periodIds).order('id')),
+        .select('id, period_id, item_id, qty, rate, bs_day, vat_inclusive, vat_is_cost').in('period_id', periodIds).order('id')),
       // period_id: an off-batch return comes off in ITS month, before that month's count (S756).
       fetchAllRows(() => scopedFrom('vendor_returns', 'purchase_entry_id, item_id, qty, period_id')
         .in('period_id', periodIds).order('id')),
@@ -208,7 +208,7 @@ export default function StockAgeing() {
       if (qty <= 0) continue
       const date = adDateOf(p.period_id, p.bs_day)
       if (!date) continue
-      batches.push({ item_id: p.item_id, qty, rate: parseFloat(p.rate) || 0, date, period_id: p.period_id })
+      batches.push({ item_id: p.item_id, qty, rate: batchRateOf(p), date, period_id: p.period_id })
     }
 
     // The recipe walk throws on a failed read (S695).

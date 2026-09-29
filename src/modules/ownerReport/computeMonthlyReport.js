@@ -12,7 +12,7 @@ import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDA
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
-import { allocateBillDiscounts } from '../ims/reports/supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
 import { periodRevenue, periodStockMaps, valuePeriodItems, periodWastageValue, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
 import { findUncountedItems, UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
@@ -32,17 +32,19 @@ import { computeInventoryDepthSection } from './computeInventoryDepthSection'
 // Returns are taken at list value, exactly as on those two pages. The Cash/Credit split is built
 // off the same line values so the two halves still add up to the total (every return comes off
 // Cash, as before).
+// On the COST basis since schema v11 (S792, D32): `lineCost`, and each return at its line's basis —
+// the rows must carry `vat_inclusive, vat_is_cost` and returns the `purchase_entries` embed.
 // Single-period input by use. Since S792 the fallback bill key also carries `period_id`
 // (supplierAttribution.js allocationBillKey), so a multi-period batch that selects it is safe too.
 export function netPurchaseFigures(purchases, returns) {
   const allocated = allocateBillDiscounts(purchases || [])
-  const returnTotal = (returns || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+  const returnTotal = (returns || []).reduce((s, r) => s + returnCostValue(r), 0)
   let cashNet = 0, creditNet = 0
   allocated.forEach(p => {
-    if (p.payment_method === 'Credit') creditNet += p.lineNet; else cashNet += p.lineNet
+    if (p.payment_method === 'Credit') creditNet += p.lineCost; else cashNet += p.lineCost
   })
   cashNet -= returnTotal
-  const purchaseTotal = allocated.reduce((s, p) => s + p.lineNet, 0) - returnTotal
+  const purchaseTotal = allocated.reduce((s, p) => s + p.lineCost, 0) - returnTotal
   return { purchaseTotal, cashNet, creditNet }
 }
 
@@ -60,13 +62,13 @@ export function netPurchaseFigures(purchases, returns) {
 async function computeImsSection(clientId, period) {
   const results = await Promise.all([
     // discount_amount + the bill-key columns feed netPurchaseFigures() — see its comment.
-    fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', period.id).order('id')),
+    fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').eq('period_id', period.id).order('id')),
     // Paged with a unique tiebreaker, like every per-item-per-period read below (S756). Six reads
     // in this batch were bare while purchase_entries/wastages/sales_entries beside them were paged,
     // so past PostgREST's silent 1000-row cap the FROZEN snapshot lost returns, items, pars and
     // stock rows with no error for throwFirstError to see — and nothing ever recomputes it. A
     // missing items row values its stock at rate 0; a missing closing row reads as a zero count.
-    fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id).order('id')),
+    fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', period.id).order('id')),
     // ONE sales read answers both questions, because the comp filter runs in JS. REVENUE excludes
     // comps (a comped dish collected nothing; periodRevenue drops them), CONSUMPTION includes them
     // (its ingredients were still used). Until S792 revenue had its own read with a server-side
@@ -682,7 +684,15 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // along that no reader needs to tell apart: `trend.*.snapshot` stores only the fields the Trend
 // section reads (`trendSnapshotOf`), not the whole prior snapshot with its own nested trend; and
 // the recipes reads behind the IMS, Menu Engineering, Variance and Shrinkage sections are paged.
-export const CURRENT_SCHEMA_VERSION = 10
+// 11 (S792 stage 4, owner decision D32): on a PAN-bill outlet (not VAT-registered) the 13% VAT on a
+// VAT-ticked line of a bill saved with `purchase_entries.vat_is_cost` is FOOD COST — it cannot be
+// claimed back. `ims.purchaseTotal`, the Cash/Credit split, COGS (and so Food Cost %, Prime Cost %,
+// Net Margin %) and `vendorPurchasing`'s gross/discount/returned/net take lineCost (lineNet × 1.13 on
+// those lines; a return at its line's basis). A VAT-registered outlet's figures are unchanged; a
+// PAN outlet's v11 figure is higher than a v10 one by the VAT on its vat_is_cost bills. The flag is
+// per bill, set at save; only the open month was backfilled (Q1 a), so closed months and frozen
+// reports keep the ex-VAT basis they were made on.
+export const CURRENT_SCHEMA_VERSION = 11
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

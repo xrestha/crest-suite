@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
+import { vatModeOf } from '../recipes/menuPriceVat'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
@@ -25,6 +27,11 @@ function fmtNPR(n) {
 export default function VatReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
+  // S792 (D32): a PAN-bill outlet (not VAT-registered) cannot claim this VAT back, so it is counted
+  // in food cost. The FIGURES here are unchanged — what the supplier billed does not change — only
+  // the words that call it claimable.
+  const isPan = vatModeOf(useSettings(), effectiveClientId) === 'pan'
+  const PAN_VAT_NOTE = 'This outlet is not VAT-registered (PAN bill): the VAT paid to suppliers is not claimable and is counted in food cost. Confirm this treatment with your accountant.'
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
@@ -157,7 +164,7 @@ export default function VatReport() {
       + 'They are counted in this month — the month the goods went back — at the discounted rate their bill carried. '
       + 'Confirm with your accountant which month the VAT on a return like this should be claimed in.'
     : null
-  const caveats = [unlinkedNote, mismatchNote, lateReturnNote].filter(Boolean)
+  const caveats = [isPan ? PAN_VAT_NOTE : null, unlinkedNote, mismatchNote, lateReturnNote].filter(Boolean)
   // A month with returns and no new VAT purchases still has a filing figure (a negative claim), so
   // it must be printable and exportable (S756).
   const hasFigures = vatLines.length > 0 || vatReturns.length > 0
@@ -342,7 +349,7 @@ export default function VatReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">VAT Report</h1>
-          <p className="page-subtitle">Input VAT summary on purchases</p>
+          <p className="page-subtitle">{isPan ? 'VAT paid to suppliers — not claimable, counted in food cost' : 'Input VAT summary on purchases'}</p>
           <div className="page-scope-row">
             {/* provisionalWhenOpen (S756): an open month's input VAT can still change as bills and
                 returns are entered, and this is the figure that gets filed. */}
@@ -446,18 +453,18 @@ export default function VatReport() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Net input VAT claimable = (taxable VAT purchases after discount − VAT returns) × 13%. Use this for your IRD VAT return." width={270}>Net Input VAT (13%)</Tip></div>
+          <div className="stat-label"><Tip text={isPan ? 'VAT paid to suppliers = (taxable VAT purchases after discount − VAT returns) × 13%. This outlet is not VAT-registered, so it is not claimable and is counted in food cost.' : 'Net input VAT claimable = (taxable VAT purchases after discount − VAT returns) × 13%. Use this for your IRD VAT return.'} width={270}>{isPan ? 'VAT Paid (13%)' : 'Net Input VAT (13%)'}</Tip></div>
           <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-green-text)' }}>NPR {Math.round(netVatAmt).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatReturns.length > 0
               ? <span>Purchases {fmtNPR(vatAmtGross)} − returns {fmtNPR(retVatTotal)}</span>
-              : 'Claimable input tax'}
+              : (isPan ? 'Not claimable — counted in food cost' : 'Claimable input tax')}
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Net cost basis excluding VAT — actual expense recorded for accounting." width={230}>Net (ex-VAT)</Tip></div>
+          <div className="stat-label"><Tip text={isPan ? 'What suppliers billed before VAT. On this PAN-bill outlet the VAT above is a cost too, so food cost counts this plus the VAT.' : 'Net cost basis excluding VAT — actual expense recorded for accounting.'} width={230}>Net (ex-VAT)</Tip></div>
           <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(totalNetExVat).toLocaleString('en-IN')}</div>
-          <div className="stat-sub">Actual cost basis</div>
+          <div className="stat-sub">{isPan ? 'Before VAT — food cost adds the VAT' : 'Actual cost basis'}</div>
         </div>
       </div>
       )}
@@ -504,7 +511,7 @@ export default function VatReport() {
                       <th style={{ textAlign: 'right' }}><Tip text="The rate you entered × qty, ex-VAT, before this line's share of the bill discount." width={240}>Gross (ex-VAT)</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="This line's share of its bill's discount, in proportion to line value. On a bill with non-VAT lines the rest of the discount sits in the Non-VAT Report." width={260}>Discount</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Gross − discount share. VAT is levied on this amount per Nepal IRD." width={220}>Taxable</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text="Input VAT = Taxable × 13%. Claimable as input tax credit from IRD." width={220}>VAT (13%)</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text={isPan ? 'VAT = Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Input VAT = Taxable × 13%. Claimable as input tax credit from IRD.'} width={220}>VAT (13%)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Taxable + VAT — what this line actually cost including VAT.">Total (incl. VAT)</Tip></th>
                       <th>Invoice</th>
                     </tr>
@@ -676,7 +683,7 @@ export default function VatReport() {
                     <th style={{ textAlign: 'right' }}><Tip text="Taxable base = Gross − Discount. VAT is levied on this amount per Nepal IRD." width={240}>Taxable Base</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Base amount of VAT-inclusive goods returned to this vendor." width={230}>Returned</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Net taxable = Taxable Base − Returns, ex-VAT.">Net Taxable</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text="Net claimable input VAT = Net Taxable × 13%. Use for IRD VAT return." width={230}>Net Input VAT</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text={isPan ? 'VAT paid to this supplier = Net Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Net claimable input VAT = Net Taxable × 13%. Use for IRD VAT return.'} width={230}>{isPan ? 'VAT Paid' : 'Net Input VAT'}</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Net amount paid to this vendor including VAT, after discount and returns.">Net Total</Tip></th>
                   </tr>
                 </thead>

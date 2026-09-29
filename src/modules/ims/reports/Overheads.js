@@ -14,7 +14,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcFigure, fcThresholds } from '../../../shared/imsFormulas'
 import { bandFigure, lcBand, LABOR_WARN } from '../../../shared/operatingBands'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
 import { depreciationInWindow } from '../assets/depreciationCompute'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -268,10 +268,11 @@ export default function Overheads() {
       // dashboards' for the same month (S756). `foodCost` below is that net purchases figure — the
       // variable kept its name; on screen it is "Purchases" (S792, D30).
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .select('qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
         .eq('period_id', pid).order('id')),
-      // Returns stay at list rate, as on Monthly Summary and Consolidated P&L. Paged with a tiebreaker.
-      fetchAllRows(() => scopedFrom('vendor_returns', 'qty, rate').eq('period_id', pid).order('id')),
+      // Returns stay at list rate, as on Monthly Summary and Consolidated P&L, on their line's cost
+      // basis (S792, D32: the embed says whether the line's VAT was cost). Paged with a tiebreaker.
+      fetchAllRows(() => scopedFrom('vendor_returns', 'qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', pid).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
@@ -319,8 +320,9 @@ export default function Overheads() {
       labourPayroll = payrollLabourTotal(slips || [])
     }
 
-    const gross  = allocateBillDiscounts(purchases || []).reduce((s, p) => s + p.lineNet, 0)
-    const ret    = (returns  || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+    // Cost basis (S792, D32): a PAN-bill outlet's supplier VAT is part of what the food cost it.
+    const gross  = allocateBillDiscounts(purchases || []).reduce((s, p) => s + p.lineCost, 0)
+    const ret    = (returns  || []).reduce((s, r) => s + returnCostValue(r), 0)
     const foodCost = gross - ret
 
     const recipeMap = {}

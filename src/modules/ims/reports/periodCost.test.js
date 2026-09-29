@@ -260,3 +260,40 @@ describe('periodWastageValue: one item set for every Wastage tile (S792, FIGURES
     expect(periodWastageValue(rows) - raw.wastageVal).toBeCloseTo(60)   // exactly the prep
   })
 })
+
+// S792 (owner decision D32): a PAN-bill outlet's supplier VAT is food cost. periodStockMaps values a
+// VAT line of a vat_is_cost bill at lineCost (net × 1.13), and a return at its line's basis.
+describe('the cost basis: supplier VAT on a PAN-bill outlet (D32)', () => {
+  const purchases = [
+    { purchase_group_id: 'g1', item_id: 'oil', qty: 10, rate: 100, discount_amount: 100, vat_inclusive: true, vat_is_cost: true },
+    { purchase_group_id: 'g1', item_id: 'rice', qty: 10, rate: 100, discount_amount: 100, vat_inclusive: false, vat_is_cost: true },
+    { purchase_group_id: 'g2', item_id: 'rice', qty: 5, rate: 100, discount_amount: 0, vat_inclusive: true, vat_is_cost: false },
+  ]
+  const returns = [
+    { item_id: 'oil', qty: 1, rate: 100, purchase_entries: { vat_inclusive: true, vat_is_cost: true } },
+    { item_id: 'rice', qty: 1, rate: 100, purchase_entries: { vat_inclusive: true, vat_is_cost: false } },
+  ]
+  const maps = periodStockMaps({ opening: [], closing: [], purchases, returns, wastages: [], staffMeals: [] })
+
+  test('a VAT line on a vat_is_cost bill is valued × 1.13, gross and net alike', () => {
+    expect(maps.purchases.oil.gross).toBeCloseTo(1000 * 1.13, 6)
+    expect(maps.purchases.oil.value).toBeCloseTo(950 * 1.13, 6)   // half the 100 discount
+    expect(maps.purchases.oil.qty).toBe(10)                        // a basis changes money, not stock
+  })
+
+  test('a non-VAT line, and a VAT line on a VAT-registered bill, stay ex-VAT', () => {
+    expect(maps.purchases.rice.value).toBeCloseTo(950 + 500, 6)
+  })
+
+  test('a return takes the basis of its line', () => {
+    expect(maps.returns.oil.value).toBeCloseTo(113, 6)
+    expect(maps.returns.rice.value).toBeCloseTo(100, 6)
+  })
+
+  test('COGS carries it through: purchases − discount − returns, all on the cost basis', () => {
+    const v = valuePeriodItems([{ id: 'oil', per_uom_rate: 0 }, { id: 'rice', per_uom_rate: 0 }], maps)
+    expect(v.netPurchaseVal).toBeCloseTo(950 * 1.13 + 1450 - 113 - 100, 6)
+    expect(v.discountVal).toBeCloseTo(50 * 1.13 + 50, 6)
+    expect(v.cogsVal).toBeCloseTo(v.netPurchaseVal, 6)
+  })
+})

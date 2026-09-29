@@ -33,9 +33,11 @@ const BILL_KEY = ['discount_amount', 'purchase_group_id', 'vendor_id', 'invoice_
 describe.each(['ClientDashboard.jsx', 'OwnerDashboard.jsx'])('%s values purchases net of bill discounts', file => {
   const flat = flatten(file)
 
-  test('routes purchases through allocateBillDiscounts and reads lineNet', () => {
+  test('routes purchases through allocateBillDiscounts and reads lineCost (the S792 D32 cost basis)', () => {
     expect(flat).toMatch(/allocateBillDiscounts\(/)
-    expect(flat).toMatch(/\.lineNet\b/)
+    expect(flat).toMatch(/\.lineCost\b/)
+    expect(flat).not.toMatch(/\.lineNet\b/)
+    expect(flat).toMatch(/returnCostValue\(/)
   })
 
   test('every purchase_entries read that selects a rate also selects the bill-discount columns', () => {
@@ -51,8 +53,21 @@ describe.each(['ClientDashboard.jsx', 'OwnerDashboard.jsx'])('%s values purchase
       if (/\.is\('paid_at'/.test(chain)) continue
       costReads++
       for (const col of BILL_KEY) expect(`${file} @${at}: ${select}`).toContain(col)
+      // S792 (D32): without these two the line is silently valued ex-VAT on a PAN-bill outlet.
+      for (const col of ['vat_inclusive', 'vat_is_cost']) expect(`${file} @${at}: ${select}`).toContain(col)
     }
     expect(costReads).toBeGreaterThan(0)
+  })
+  test("every vendor_returns read that values a return embeds its line's VAT basis (S792, D32)", () => {
+    const sites = readSites(flat, 'vendor_returns')
+    let valued = 0
+    for (const at of sites) {
+      const select = (flat.slice(at, at + 300).match(/\.select\('([^']*)'/) || [])[1] || ''
+      if (!/\brate\b/.test(select)) continue
+      valued++
+      expect(`${file} @${at}: ${select}`).toContain('purchase_entries(vat_inclusive, vat_is_cost)')
+    }
+    expect(valued).toBeGreaterThan(0)
   })
 })
 

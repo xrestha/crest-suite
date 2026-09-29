@@ -25,7 +25,7 @@ import {
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
-import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
 import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
@@ -169,10 +169,10 @@ export default function OwnerDashboard() {
       // this page charged the undiscounted price into Food Cost %, Prime Cost % and True Net
       // Margin %, while Consolidated P&L and Monthly Summary take the same bills net of the
       // discount — the same month read two ways on the pages an owner compares.
-      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').eq('period_id', period.id).order('id')) : { data: [] },
       // Paged (S734): subtracted from net purchases, so a truncation OVERSTATES Food Cost %
       // and understates True Net Margin — the wrong direction on a banded tile.
-      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', period.id).order('id')) : { data: [] },
       // `source` is SELECTED and comps are filtered in JS below, never `.neq('source','pos_comp')`
       // (S734). `sales_entries.source` is nullable (DEFAULT 'manual', no NOT NULL), and in SQL
       // `NULL <> 'pos_comp'` evaluates to NULL rather than true — so the server-side form silently
@@ -203,10 +203,11 @@ export default function OwnerDashboard() {
     // Net purchases = purchases NET of each bill's discount − returns, the definition Consolidated
     // P&L and Monthly Summary use (S601/S720). `discount_amount` is a bill-level figure repeated
     // on every line; allocateBillDiscounts() dedupes it per bill and spreads it across that bill's
-    // lines. Returns stay at list value, as on those two pages.
+    // lines. Returns stay at list value, as on those two pages. COST basis since S792 (D32):
+    // `lineCost` and `returnCostValue`, so a PAN-bill outlet's supplier VAT is in Food Cost %.
     const allocatedPurchases = allocateBillDiscounts(purchases || [])
-    const netOfDiscount = allocatedPurchases.reduce((s, p) => s + p.lineNet, 0)
-    const returnTotal = (returns   || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+    const netOfDiscount = allocatedPurchases.reduce((s, p) => s + p.lineCost, 0)
+    const returnTotal = (returns   || []).reduce((s, r) => s + returnCostValue(r), 0)
     const purchaseTotal = netOfDiscount - returnTotal
 
     // unit_price captured on the row (price actually charged) used per-row when present, else
@@ -228,9 +229,9 @@ export default function OwnerDashboard() {
     let cashNet = 0, creditNet = 0
     // Split off the same discounted line values, so Cash + Credit still adds up to Net Purchases.
     allocatedPurchases.forEach(p => {
-      if (p.payment_method === 'Credit') creditNet += p.lineNet; else cashNet += p.lineNet
+      if (p.payment_method === 'Credit') creditNet += p.lineCost; else cashNet += p.lineCost
     })
-    ;(returns || []).forEach(r => { cashNet -= parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
+    ;(returns || []).forEach(r => { cashNet -= returnCostValue(r) })
 
     setStats({ purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal, cashNet, creditNet })
   }

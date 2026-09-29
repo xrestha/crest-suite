@@ -21,6 +21,7 @@ import {
 import { withLineTotal, withLineVat, withAllLinesVat } from './billLineVat'
 import { linesWithUnlistedItems, unlistedItemsText } from './purchaseLines'
 import { withTimeout } from '../../../utils/withTimeout'
+import { vatCostFactor } from '../reports/supplierAttribution'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -69,7 +70,13 @@ function initFromEditingEntries(entries, items) {
 // open. It is now the body of a real route (PurchaseBillPage) and renders at the full content
 // width. Kept as a separate component from the page so the page owns routing, loading and what
 // happens after a save, and this file stays what it always was: the form.
-export default function PurchaseBillForm({ period, items, itemOptions, vendors, profileId, editingGroupId, editingEntries, onClose, onSaved }) {
+export default function PurchaseBillForm({ period, items, itemOptions, vendors, profileId, editingGroupId, editingEntries, onClose, onSaved, vatMode }) {
+  // S792 (D32): does this bill count its VAT as cost? An edit keeps the basis it was saved on
+  // (save_purchase_bill carries it through); a new bill follows the outlet's switch now ('pan').
+  // On such a bill a VAT-ticked line COST rate × 1.13, and Item Master holds that paid price, so
+  // every comparison with the master price below is made on the paid basis.
+  const billVatIsCost = editingEntries?.length ? editingEntries.some(e => e.vat_is_cost === true) : vatMode === 'pan'
+  const paidFactor = line => vatCostFactor({ vat_inclusive: !!line?.vat_inclusive, vat_is_cost: billVatIsCost })
   const initial = editingEntries?.length ? initFromEditingEntries(editingEntries, items) : { header: { ...EMPTY_HEADER }, lines: [newLine()] }
   // The bill as it was OPENED. `initial` above is rebuilt on every render and only its first value
   // ever reaches useState, so the baseline a draft is measured against — and the state "discard
@@ -206,7 +213,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         // a row counting grams and billed 500 bottles. Purchase Orders has always done it this way.
         const cf = getCf(item)
         const per = parseFloat(item?.per_uom_rate)
-        if (per > 0) updated.rate = String(parseFloat((per * cf).toFixed(5)))
+        // The rate box is ex-VAT; on a VAT-cost bill the master holds the VAT-inclusive paid price
+        // (S792, D32), so a VAT-ticked line takes it back off.
+        if (per > 0) updated.rate = String(parseFloat((per * cf / paidFactor(updated)).toFixed(5)))
         updated._amtDraft = ''
       }
       // The Total box is a DRAFT that back-computes the rate; once any input to that arithmetic
@@ -651,7 +660,8 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
               // rate so a rate entered in the wrong unit is visible on the row itself rather than
               // only in the grand total, where a 500× error still reads as a plausible number.
               const masterRate = (parseFloat(selItem?.per_uom_rate) || 0) * cf
-              const rateEntered = parseFloat(line.rate) || 0
+              // On the paid basis (S792, D32): × 1.13 on a VAT line of a VAT-cost bill, as Item Master holds it.
+              const rateEntered = (parseFloat(line.rate) || 0) * paidFactor(line)
               const rateOffBy = masterRate > 0 && rateEntered > 0 ? rateEntered / masterRate : 1
               const rateSuspect = rateOffBy > 5 || rateOffBy < 0.2
               const lineBase = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0)
@@ -696,7 +706,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                         style={{ ...cellInput, boxSizing: 'border-box', fontFamily: 'inherit' }} />
                       {masterRate > 0 && (
                         <div style={{ fontSize: 10, textAlign: 'right', marginTop: 2, color: rateSuspect ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
-                          {rateSuspect ? '⚠ ' : ''}Master: {fmtRate(masterRate)}/{inputUnit || selItem?.uom}
+                          {rateSuspect ? '⚠ ' : ''}Master: {fmtRate(masterRate)}/{inputUnit || selItem?.uom}{paidFactor(line) > 1 ? ' incl. VAT' : ''}
                         </div>
                       )}
                     </td>

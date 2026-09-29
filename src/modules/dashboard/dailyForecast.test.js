@@ -39,8 +39,14 @@ describe('daily maps', () => {
   })
 
   test('net purchases take returns off at list value', () => {
-    const map = dailyPurchaseMap([{ bs_day: 2, lineNet: 1000 }], [{ bs_day: 2, qty: 2, rate: 50 }, { bs_day: 3, qty: 1, rate: 40 }])
+    const map = dailyPurchaseMap([{ bs_day: 2, lineCost: 1000 }], [{ bs_day: 2, qty: 2, rate: 50 }, { bs_day: 3, qty: 1, rate: 40 }])
     expect(map).toEqual({ 2: 900, 3: -40 })
+  })
+
+  test('on the cost basis: a return against a vat_is_cost VAT line comes off at 1.13 (S792, D32)', () => {
+    const pe = { vat_inclusive: true, vat_is_cost: true }
+    const map = dailyPurchaseMap([{ bs_day: 2, lineNet: 1000, lineCost: 1130 }], [{ bs_day: 2, qty: 2, rate: 50, purchase_entries: pe }])
+    expect(map).toEqual({ 2: 1017 })
   })
 })
 

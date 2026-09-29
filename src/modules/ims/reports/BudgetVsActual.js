@@ -82,9 +82,9 @@ export default function BudgetVsActual() {
       // their budget against was higher than the Net Purchases figure Monthly Summary shows for
       // the identical period — the page could report Over Budget on spend that was not over.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
         .eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('id')),
       supabase.from('budgets').select('*').eq('period_id', periodId).eq('client_id', effectiveClientId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection

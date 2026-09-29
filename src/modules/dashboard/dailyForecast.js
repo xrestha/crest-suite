@@ -21,6 +21,7 @@
 // and not others. So a purchase weekday is averaged over every such day in the window, never only
 // over the days a bill landed.
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
+import { returnCostValue } from '../ims/reports/supplierAttribution'
 
 // Per kind, because the purchase snapshot changed shape after the sales one (S783: flat daily
 // average → per weekday). A stored snapshot of an older model is treated as absent and replaced
@@ -51,12 +52,13 @@ export function dailySalesMap(salesRows, currentPriceMap) {
   return map
 }
 
-// Net purchases per BS day: `allocatedPurchases` is allocateBillDiscounts() output (lineNet),
-// less returns at list value, which is how the Net Purchases tile takes them.
+// Net purchases per BS day: `allocatedPurchases` is allocateBillDiscounts() output (lineCost —
+// the COST basis, S792 D32), less returns at list value on their line's basis, which is how the
+// Net Purchases tile takes them. Read returns with `purchase_entries(vat_inclusive, vat_is_cost)`.
 export function dailyPurchaseMap(allocatedPurchases, returns) {
   const net = {}, ret = {}
-  ;(allocatedPurchases || []).forEach(p => { net[p.bs_day] = (net[p.bs_day] || 0) + p.lineNet })
-  ;(returns || []).forEach(r => { ret[r.bs_day] = (ret[r.bs_day] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
+  ;(allocatedPurchases || []).forEach(p => { net[p.bs_day] = (net[p.bs_day] || 0) + p.lineCost })
+  ;(returns || []).forEach(r => { ret[r.bs_day] = (ret[r.bs_day] || 0) + returnCostValue(r) })
   const map = {}
   new Set([...Object.keys(net), ...Object.keys(ret)]).forEach(d => {
     map[d] = Math.round((net[d] || 0) - (ret[d] || 0))

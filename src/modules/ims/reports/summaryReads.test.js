@@ -152,9 +152,10 @@ describe.each(FILES)('%s values hidden items in past months', (name, file) => {
 describe('budgetActuals.js holds the arithmetic Budget vs Actual delegates to', () => {
   const flat = flatten(BUDGET_ACTUALS)
 
-  it('nets bill discounts through allocateBillDiscounts, from lineNet', () => {
+  it('nets bill discounts through allocateBillDiscounts, from lineCost (the D32 cost basis)', () => {
     expect(flat).toMatch(/allocateBillDiscounts\(/)
-    expect(flat).toMatch(/lineNet/)
+    expect(flat).toMatch(/\.lineCost\b/)
+    expect(flat).toMatch(/returnCostValue\(/)
   })
 })
 
@@ -182,13 +183,46 @@ describe.each(REVENUE_FILES)('%s keeps NULL-source sales rows', (name, file) => 
 describe('periodCost.js holds the arithmetic its two callers delegate to', () => {
   const flat = flatten(PERIOD_COST)
 
-  it('nets bill discounts through allocateBillDiscounts, from lineGross and lineNet', () => {
+  it('nets bill discounts through allocateBillDiscounts, on the cost basis (lineGrossCost / lineCost, S792 D32)', () => {
     expect(flat).toMatch(/allocateBillDiscounts\(/)
-    expect(flat).toMatch(/lineGross/)
-    expect(flat).toMatch(/lineNet/)
+    expect(flat).toMatch(/\.lineGrossCost\b/)
+    expect(flat).toMatch(/\.lineCost\b/)
+    expect(flat).toMatch(/returnCostValue\(/)
   })
 
   it('filters comps in JS', () => {
     expect(flat).toMatch(/source !== 'pos_comp'/)
+  })
+})
+
+// 6. SUPPLIER VAT AS FOOD COST (S792, owner decision D32). On a PAN-bill outlet the 13% on a VAT line
+//    of a `vat_is_cost` bill is food cost, and allocateBillDiscounts' `lineCost` carries it — but only
+//    if the read SELECTS `vat_inclusive` and `vat_is_cost`; a row without them is silently ex-VAT, as
+//    is a return read without its line's embed. Silent by construction, so pinned here per page.
+describe.each(FILES)('%s reads what the D32 cost basis needs', (name, file) => {
+  const flat = flatten(file)
+
+  it('selects vat_inclusive and vat_is_cost on every purchase_entries read', () => {
+    const sites = readSites(flat, 'purchase_entries')
+    expect(sites.length).toBeGreaterThan(0)
+    for (const at of sites) {
+      const chain = flat.slice(at, at + 320)
+      expect(`${name} @${at}: ${chain}`).toMatch(/\bvat_inclusive\b/)
+      expect(`${name} @${at}: ${chain}`).toMatch(/\bvat_is_cost\b/)
+    }
+  })
+
+  it("embeds each return's line basis", () => {
+    const sites = readSites(flat, 'vendor_returns')
+    expect(sites.length).toBeGreaterThan(0)
+    for (const at of sites) {
+      expect(flat.slice(at, at + 200)).toContain('purchase_entries(vat_inclusive, vat_is_cost)')
+    }
+  })
+
+  it('values purchases on the cost basis, never lineNet', () => {
+    if (SHARED_COST.has(name) || DELEGATES[name]) return   // periodCost.js / budgetActuals.js carry it
+    expect(flat).toMatch(/\.lineCost\b/)
+    expect(flat).not.toMatch(/\.lineNet\b/)
   })
 })

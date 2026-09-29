@@ -40,7 +40,7 @@ import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
-import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
 import { valuePeriods, periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
@@ -254,8 +254,8 @@ async function loadForecastHistory(scopedFrom, period) {
   const ids = periods.map(p => p.id)
   const results = await Promise.all([
     fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, unit_price, discount, source').in('period_id', ids).order('id')),
-    fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref').in('period_id', ids).order('id')),
-    fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate, bs_day').in('period_id', ids).order('id')),
+    fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref, vat_inclusive, vat_is_cost').in('period_id', ids).order('id')),
+    fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', ids).order('id')),
   ])
   const error = firstError(results)
   if (error) return { error }
@@ -473,12 +473,12 @@ export default function ClientDashboard() {
       // fallback for bills written before grouping existed) feed allocateBillDiscounts() below —
       // the same read ConsolidatedPnl and MonthlySummary make, so Net Purchases, Food Cost % and
       // Est. Net Margin % on this page agree with those two for the same month.
-      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref, vat_inclusive, vat_is_cost').eq('period_id', period.id).order('id')) : { data: [] },
       // Paged (S734). Returns are usually few — but "usually small" is not a decision, and this
       // one is SUBTRACTED from Net Purchases and from every daily bar on the trend chart, so a
       // truncation overstates spend and Food Cost % rather than understating a list. Same call
       // S722 made on the two statutory reports, which paged purchases and left returns bare.
-      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', period.id).order('id')) : { data: [] },
       // Fetches every source (including 'pos_comp') — revenue figures below filter comps out
       // client-side, but theoreticalMap (Reorder + Variance widgets) needs every source counted,
       // matching every other consumption-facing report (ReorderReport, Variance, ShrinkageReport
@@ -595,12 +595,14 @@ export default function ClientDashboard() {
     // Net Purchases, Food Cost % and Est. Net Margin % — while Consolidated P&L and Monthly Summary
     // took the same bills net of the discount, and the same month read two ways on two pages.
     // allocateBillDiscounts() spreads each bill's one discount across its own lines (S601/S720);
-    // every purchase figure below (per-item spend, the daily bars) reads that `lineNet` too, so
+    // every purchase figure below (per-item spend, the daily bars) reads that `lineCost` too, so
     // Spend by Category can never add up to more than the Net Purchases tile beside it. Returns
-    // stay at their list value, exactly as those two pages take them.
+    // stay at their list value, exactly as those two pages take them. Both on the COST basis since
+    // S792 (D32): `lineCost`, and each return at its line's basis, so a PAN-bill outlet's supplier
+    // VAT is spend here as on Monthly Summary.
     const allocatedPurchases = allocateBillDiscounts(purchases || [])
-    const netPurchaseValue = allocatedPurchases.reduce((s, p) => s + p.lineNet, 0)
-    const returnTotal = (returns || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+    const netPurchaseValue = allocatedPurchases.reduce((s, p) => s + p.lineCost, 0)
+    const returnTotal = (returns || []).reduce((s, r) => s + returnCostValue(r), 0)
     const purchaseTotal = netPurchaseValue - returnTotal
 
     const currentPriceMap = {}
@@ -679,11 +681,11 @@ export default function ClientDashboard() {
       purchMap[p.item_id] = (purchMap[p.item_id] || 0) + parseFloat(p.qty || 0)
       // Net of the bill discount (see purchaseTotal above); qty is untouched — a discount changes
       // what was paid, not what arrived.
-      purchValueMap[p.item_id] = (purchValueMap[p.item_id] || 0) + p.lineNet
+      purchValueMap[p.item_id] = (purchValueMap[p.item_id] || 0) + p.lineCost
     })
     ;(returns || []).forEach(r => {
       purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty || 0)
-      purchValueMap[r.item_id] = (purchValueMap[r.item_id] || 0) - parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
+      purchValueMap[r.item_id] = (purchValueMap[r.item_id] || 0) - returnCostValue(r)
     })
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) })
@@ -1160,8 +1162,8 @@ export default function ClientDashboard() {
       // chart's open-period point must equal the Spend % so far tile, and every closed month must
       // equal the Food Cost % Consolidated P&L / Monthly Summary charge for it. `item_id` because
       // a closed month is valued per item (below), over Monthly Summary's item set.
-      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').in('period_id', periodIds).order('id')) : { data: [] },
-      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', periodIds).order('id')) : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
@@ -1219,9 +1221,9 @@ export default function ClientDashboard() {
     const purchByPeriod = {}
     ;(allPurch || []).forEach(e => { (purchByPeriod[e.period_id] = purchByPeriod[e.period_id] || []).push(e) })
     Object.entries(purchByPeriod).forEach(([pid, rows]) => {
-      grossMap[pid] = allocateBillDiscounts(rows).reduce((s, e) => s + e.lineNet, 0)
+      grossMap[pid] = allocateBillDiscounts(rows).reduce((s, e) => s + e.lineCost, 0)
     })
-    ;(allRet   || []).forEach(e => { retMap[e.period_id]   = (retMap[e.period_id]   || 0) + parseFloat(e.qty) * parseFloat(e.rate) })
+    ;(allRet   || []).forEach(e => { retMap[e.period_id]   = (retMap[e.period_id]   || 0) + returnCostValue(e) })
     // unit_price captured on the row when present, else falls back to the recipe's current
     // price — this 11-month trend is exactly where always using today's price hurt most,
     // since a single menu price change would retroactively distort every past month's Food

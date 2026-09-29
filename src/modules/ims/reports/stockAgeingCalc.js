@@ -30,6 +30,17 @@
 import { bsToAd, adToBs, adToBsSafe, daysInBsMonth } from '../../../utils/bsCalendar'
 import { nepalCivilDate } from '../../../shared/nepalTime'
 import { deltaItems } from '../../../utils/orderLineIngredients'
+import { vatCostFactor } from './supplierAttribution'
+
+/**
+ * The per-unit rate a purchase batch is valued at: the line's own rate on the COST basis (S792, D32)
+ * — × 1.13 for a VAT-ticked line on a `vat_is_cost` (PAN-bill) bill, since that VAT was paid and
+ * cannot be claimed back. The row must be read with `vat_inclusive, vat_is_cost`, or it values
+ * ex-VAT. FIFO and Stock Ageing both build their batches through this.
+ */
+export function batchRateOf(entry) {
+  return (parseFloat(entry?.rate) || 0) * vatCostFactor(entry)
+}
 
 export const AGE_BANDS = [
   { key: '0-30', label: '0–30 days', min: 0, max: 30 },

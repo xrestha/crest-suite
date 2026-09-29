@@ -266,3 +266,11 @@ purchases and items modules, which this file already loads for.
 - `stored_rate = entered_rate ÷ conversion_factor`
 
 All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
+
+## On a PAN-bill outlet the master price includes the supplier's VAT (S792 stage 4, D32)
+
+A VAT line on a `vat_is_cost` bill moves `items.rate` to the price PAID (rate × 1.13), so stock,
+recipes and COGS share one basis with the purchases (`lineCost`, `ims-figures.md`). The bill form's
+rate box stays ex-VAT and compares against master ÷ 1.13. Items bought before the switch are listed
+by `VatCostPriceBanner` (`vatCostPriceReview.js`), which also reverses the 13% after the outlet
+registers for VAT. Never gross up a master price anywhere else.

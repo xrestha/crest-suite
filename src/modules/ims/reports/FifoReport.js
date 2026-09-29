@@ -15,7 +15,7 @@ import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import {
-  daysUntilExpiry, asOfForWindow, splitReturns,
+  daysUntilExpiry, asOfForWindow, splitReturns, batchRateOf,
   anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
 } from './stockAgeingCalc'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -143,7 +143,7 @@ export default function FifoReport() {
       // bought sometimes with and sometimes without a date under-reported its exposure. They are
       // allocated against, then filtered out of the table below.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('id, period_id, item_id, qty, rate, bs_day, expiry_date, items(name, uom, categories(name))')
+        .select('id, period_id, item_id, qty, rate, bs_day, expiry_date, vat_inclusive, vat_is_cost, items(name, uom, categories(name))')
         .in('period_id', periodIds)
         .order('id')),
       // period_id: an off-batch return comes off in ITS month, before that month's count (S756).
@@ -209,7 +209,7 @@ export default function FifoReport() {
       const date = adDateOf(p.period_id, p.bs_day)
       if (!date) continue
       batches.push({
-        item_id: p.item_id, qty, rate: parseFloat(p.rate) || 0, date, period_id: p.period_id,
+        item_id: p.item_id, qty, rate: batchRateOf(p), date, period_id: p.period_id,
         entry: p, returnedQty: returnedByEntry[p.id] || 0,
       })
     }
@@ -286,8 +286,9 @@ export default function FifoReport() {
           // being recorded as used.
           countedOffQty: b.countedOff || 0,
           countedIn: periodById[lastCountByItem[b.item_id]] || null,
-          rate: parseFloat(p.rate) || 0,
-          value: b.remaining * (parseFloat(p.rate) || 0),
+          // The price paid, on the cost basis (S792, D32: VAT included on a PAN outlet's VAT bill).
+          rate: batchRateOf(p),
+          value: b.remaining * batchRateOf(p),
           expiryDate: p.expiry_date,
           daysUntilExpiry: days,
           flag,

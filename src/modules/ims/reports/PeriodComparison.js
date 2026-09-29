@@ -17,7 +17,7 @@ import {
 } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useSettings } from '../../../context/SettingsContext'
 import { BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
@@ -180,9 +180,9 @@ export default function PeriodComparison() {
       // page's "Net Purchases" and COGS sat above MonthlySummary's and Consolidated P&L's for the
       // identical month by the whole discount (S601's rule, on the page it never reached).
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
         .in('period_id', ids).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate').in('period_id', ids).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', ids).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', ids).order('id')),
       // Staff meals belong in COGS (src/shared/imsFormulas.js) — omitted here until 2026-08-13,
       // which put this page's COGS and FC% below MonthlySummary's for the identical month.
@@ -233,12 +233,14 @@ export default function PeriodComparison() {
     const salesBy = byPeriod((sales || []).filter(r => r.source !== 'pos_comp'))
     const at = (m, pid) => m.get(pid) || []
 
+    // Cost basis (S792, D32): lineGrossCost / lineCost / returnCostValue, so a PAN-bill outlet's
+    // supplier VAT is in Net Purchases and COGS, as on Monthly Summary.
     const result = {}
     for (const pid of ids) {
       const purchRows= at(purchBy, pid)
-      const purchV   = purchRows.reduce((s,r)=>s+r.lineGross,0)
-      const discV    = purchV - purchRows.reduce((s,r)=>s+r.lineNet,0)
-      const retV     = at(retBy,   pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
+      const purchV   = purchRows.reduce((s,r)=>s+r.lineGrossCost,0)
+      const discV    = purchV - purchRows.reduce((s,r)=>s+r.lineCost,0)
+      const retV     = at(retBy,   pid).reduce((s,r)=>s+returnCostValue(r),0)
       const wasteV   = at(wasteBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*(rateMap[r.item_id]||0),0)
       const staffV   = at(staffBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*(rateMap[r.item_id]||0),0)
       const openV    = at(openBy,  pid).reduce((s,r)=>s+parseFloat(r.qty||0)*(rateMap[r.item_id]||0),0)
@@ -273,7 +275,7 @@ export default function PeriodComparison() {
       const purchaseQty = {}; const purchaseValue = {}
       purchRows.forEach(r => {
         purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
-        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineNet
+        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineCost
       })
       const countedIds = new Set(at(closeBy, pid).filter(r => r.physical_qty != null).map(r => r.item_id))
       const gap = findUncountedItems({ items: trackedItems, openingQty, purchaseQty, purchaseValue, countedIds, cogs })

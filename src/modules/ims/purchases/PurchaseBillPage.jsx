@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
+import { vatModeOf } from '../recipes/menuPriceVat'
+import { vatCostFactor } from '../reports/supplierAttribution'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { supabase } from '../../../supabaseClient'
@@ -30,6 +33,10 @@ export default function PurchaseBillPage() {
   const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  // S792 (D32): 'pan' | 'vat' | null. A NEW bill is saved with vat_is_cost = (the outlet is PAN-only)
+  // — save_purchase_bill reads the same switch at the same moment — so on a PAN outlet a VAT-ticked
+  // line cost rate × 1.13, and that is the price Item Master should hold. Null = not known yet.
+  const vatMode = vatModeOf(useSettings(), clientId)
   const navigate = useNavigate()
   const { groupId } = useParams()
   const [searchParams] = useSearchParams()
@@ -194,7 +201,13 @@ export default function PurchaseBillPage() {
     const changed = []
     for (const l of validLines) {
       if (pricedLater.has(l.item_id)) continue
-      const capturedRate = parseFloat(l.rate) || 0
+      // A VAT line while the outlet's VAT status is unknown: which basis the bill saved on cannot be
+      // told, so no price is offered for it rather than a guessed one (S792, D32).
+      if (l.vat_inclusive && vatMode == null) continue
+      // The price PAID: on a PAN outlet the 13% on a VAT line is part of it (S792, D32).
+      const factor = vatCostFactor({ vat_inclusive: !!l.vat_inclusive, vat_is_cost: vatMode === 'pan' })
+      const vatIncluded = factor > 1
+      const capturedRate = (parseFloat(l.rate) || 0) * factor
       // A free line (rate 0, S698) is a gift, not a price — it must never offer to zero the
       // Item Master rate every valuation reads.
       if (capturedRate <= 0) continue
@@ -207,7 +220,7 @@ export default function PurchaseBillPage() {
           itemId: fi.id, itemName: fi.name, cf,
           unit: cf > 1 ? (fi.purchase_unit || fi.uom) : fi.uom,
           baseUom: fi.uom,
-          oldRate: masterRate, newRate: capturedRate,
+          oldRate: masterRate, newRate: capturedRate, vatIncluded,
         })
       }
     }
@@ -386,6 +399,7 @@ export default function PurchaseBillPage() {
           // button, command palette, a pasted link) would otherwise leave bill A's lines on screen
           // under bill B's id, and save them into B. The key forces a remount instead.
           <PurchaseBillForm
+            vatMode={vatMode}
             key={isEdit ? groupId : `new-${period.id}`}
             period={period}
             items={items}
@@ -438,7 +452,7 @@ export default function PurchaseBillPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.itemName}</div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                      Item Master will hold NPR {fmtRate(toPerBase(item))} per {item.baseUom}
+                      Item Master will hold NPR {fmtRate(toPerBase(item))} per {item.baseUom}{item.vatIncluded ? ' — the price you paid, 13% VAT included (not claimable on a PAN bill)' : ''}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>

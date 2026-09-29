@@ -23,6 +23,44 @@
 //   consumed this period but last bought in an earlier one is a perfectly ordinary case, and the
 //   page says so instead of quietly shrinking the total.
 
+/**
+ * The VAT rate on a supplier bill. Defined HERE and re-exported by purchaseTaxSplit.js (its public
+ * home), because `lineCost` below needs it and purchaseTaxSplit imports this file — the S727 reason
+ * `netFactors` lives here too. One definition; never type 0.13 again.
+ */
+export const VAT_RATE = 0.13
+
+/**
+ * S792 (D32): the multiplier that turns a line's ex-VAT value into what it COST the outlet.
+ *
+ * A PAN-bill outlet (settings.is_vat_registered === false) cannot claim input VAT, so the 13% on a
+ * VAT-ticked line is part of the food cost. `purchase_entries.vat_is_cost` records that per bill at
+ * save time (save_purchase_bill reads the switch then; the reader never reads the live switch, so
+ * flipping it does not re-value history — D29). 1.13 only when BOTH are true; 1 otherwise, which
+ * includes a row read without those columns — a select that omits them silently values at ex-VAT,
+ * so the summary pages' reads are pinned by summaryReads.test.js.
+ */
+export function vatCostFactor(line) {
+  return line && line.vat_inclusive === true && line.vat_is_cost === true ? 1 + VAT_RATE : 1
+}
+
+/**
+ * The cost multiplier of a RETURN: the basis of the line it was returned against, read off the
+ * return's embed `purchase_entries(vat_inclusive, vat_is_cost)`. An unlinked return (no embed) has
+ * no basis to take and stays at 1 — ex-VAT, as every return was before D32.
+ */
+export function returnCostFactor(r) {
+  return vatCostFactor(r && r.purchase_entries)
+}
+
+/** A return's value on the COST basis: its list value × its line's cost multiplier. */
+export function returnCostValue(r) {
+  return (parseFloat(r?.qty) || 0) * (parseFloat(r?.rate) || 0) * returnCostFactor(r)
+}
+
+/** The embed a cost reader's `vendor_returns` select must carry for `returnCostFactor`. */
+export const RETURN_COST_EMBED = 'purchase_entries(vat_inclusive, vat_is_cost)'
+
 export const NO_VENDOR = '__none__'      // a purchase line with no vendor recorded
 export const UNATTRIBUTED = '__unattributed__' // consumed, but nothing bought from anyone this period
 
@@ -67,7 +105,15 @@ export function allocateBillDiscounts(purchases) {
       // `billId` is the grouping key itself, carried out so a caller can count BILLS without
       // re-deriving it. Every vendor rollup built on these rows used to count rows and label the
       // column "Bills" (S723) — a 6-bill vendor with 7 lines a bill read as 42.
-      out.push({ ...row, billId: gid, lineGross: line, lineNet: line - bill.discount * share })
+      //
+      // `lineNet` is what the SUPPLIER billed ex-VAT — tax reports, payables and bill totals read it.
+      // `lineCost` is what the line cost the OUTLET (S792, D32): lineNet × 1.13 on a VAT-ticked line
+      // of a `vat_is_cost` bill, lineNet otherwise. Every COGS / food-cost / purchase-value reader
+      // reads lineCost; `lineGrossCost` is the pre-discount figure on the same basis, so a
+      // Gross − Discount = Net column set still adds up.
+      const lineNet = line - bill.discount * share
+      const f = vatCostFactor(row)
+      out.push({ ...row, billId: gid, lineGross: line, lineNet, lineCost: lineNet * f, lineGrossCost: line * f })
     }
   }
   return out
@@ -147,7 +193,10 @@ export function applyPriorBillFactors(rows, periodEntries, priorFactors, field =
 // proportional SHARE is taken, since a negative share is meaningless.
 //
 // `priorFactors` (S756, D10): discount factors of earlier-month bills this period's returns point at,
-// merged under the period's own. Vendor Report merges the same Map, which is what keeps the S727
+// merged under the period's own.
+//
+// Values are on the COST basis since S792 (D32) — `lineCost`, and returns × their line's
+// `returnCostFactor` — so `returns` must be read with RETURN_COST_EMBED. Vendor Report merges the same Map, which is what keeps the S727
 // tie-out holding for a cross-month return.
 export function vendorNetByItem(purchases, returns, { priorFactors } = {}) {
   const byItem = {}
@@ -158,8 +207,9 @@ export function vendorNetByItem(purchases, returns, { priorFactors } = {}) {
     if (!p.item_id) continue
     const b = ensure(p.item_id)
     const vid = p.vendor_id || NO_VENDOR
-    b.byVendor[vid] = (b.byVendor[vid] || 0) + p.lineNet
-    b.total += p.lineNet
+    // lineCost (S792, D32): on a PAN-bill outlet the VAT it paid is part of what it spent.
+    b.byVendor[vid] = (b.byVendor[vid] || 0) + p.lineCost
+    b.total += p.lineCost
   }
   for (const r of returns || []) {
     if (!r.item_id) continue
@@ -176,7 +226,10 @@ export function vendorNetByItem(purchases, returns, { priorFactors } = {}) {
     // It is worse than a mismatched column. A negative net drops the vendor out of `vendorShares`
     // (positive parts only), so the item's whole consumed value can fall into "Not attributed" —
     // the RANKING moves, not just the Net Purchases cell.
-    const amt = returnBase(r, factors)
+    //
+    // × returnCostFactor (S792, D32): a return takes the cost basis of the line it went back
+    // against, read off the return's `purchase_entries` embed (RETURN_COST_EMBED).
+    const amt = returnBase(r, factors) * returnCostFactor(r)
     b.byVendor[vid] = (b.byVendor[vid] || 0) - amt
     b.total -= amt
   }

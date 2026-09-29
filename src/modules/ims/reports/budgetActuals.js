@@ -16,23 +16,24 @@
 //
 // Purchases are net of their share of the bill discount (`allocateBillDiscounts`, the helper
 // Monthly Summary's `periodStockMaps` uses) and returns are at their own recorded rate — Monthly
-// Summary's two conventions exactly.
-import { allocateBillDiscounts } from './supplierAttribution'
+// Summary's two conventions exactly — including its COST basis (S792, D32): `lineCost`, and each
+// return at its line's basis (`returnCostValue`), so a PAN-bill outlet's supplier VAT is spend.
+import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
 
 /**
  * @param {object}   args
  * @param {object[]} args.items       every non-sub-recipe item `{ id, category_id }`, hidden included
  * @param {object[]} args.categories  `{ id }` rows — the budgetable categories
  * @param {object[]} args.purchases   the period's purchase lines, with the bill-key columns
- * @param {object[]} args.returns     the period's vendor returns `{ item_id, qty, rate }`
+ * @param {object[]} args.returns     the period's vendor returns `{ item_id, qty, rate, purchase_entries }`
  * @returns {{ byCategory: Object<string, number>, uncategorised: number, excluded: number, total: number }}
  *   `total` = every category + `uncategorised`; `excluded` is never in it.
  */
 export function budgetActuals({ items, categories, purchases, returns }) {
   const net = {}
-  allocateBillDiscounts(purchases || []).forEach(p => { net[p.item_id] = (net[p.item_id] || 0) + p.lineNet })
+  allocateBillDiscounts(purchases || []).forEach(p => { net[p.item_id] = (net[p.item_id] || 0) + p.lineCost })
   ;(returns || []).forEach(r => {
-    net[r.item_id] = (net[r.item_id] || 0) - (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+    net[r.item_id] = (net[r.item_id] || 0) - returnCostValue(r)
   })
 
   const known = new Set((categories || []).map(c => c.id))

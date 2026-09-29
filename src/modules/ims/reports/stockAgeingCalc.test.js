@@ -2,6 +2,7 @@ import {
   AGE_BANDS, bandOf, ageInDays, allocateFifo, buildAgeing,
   daysUntilExpiry, parseDateLocal, asOfForWindow, nepalTodayRef, splitReturns,
   anchorToCounts, ageAllocated, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods,
+  batchRateOf,
 } from './stockAgeingCalc'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 
@@ -519,5 +520,17 @@ describe('anchorToCounts', () => {
     expect(totals.countSurplusValue).toBe(50)
     expect(totals.unknownAgeValue).toBe(50)      // dated at the p3 count, ~10 days old
     expect(items[0].bands['90+'].qty).toBe(1)
+  })
+})
+
+// S792 (owner decision D32): FIFO and Stock Ageing value a batch at the price PAID — on a PAN-bill
+// outlet's VAT bill that includes the 13% it cannot claim back.
+describe('batchRateOf', () => {
+  test('× 1.13 on a VAT line of a vat_is_cost bill, the bill rate otherwise', () => {
+    expect(batchRateOf({ rate: '100', vat_inclusive: true, vat_is_cost: true })).toBeCloseTo(113, 9)
+    expect(batchRateOf({ rate: '100', vat_inclusive: true, vat_is_cost: false })).toBe(100)
+    expect(batchRateOf({ rate: '100', vat_inclusive: false, vat_is_cost: true })).toBe(100)
+    expect(batchRateOf({ rate: '100' })).toBe(100)
+    expect(batchRateOf({ rate: null })).toBe(0)
   })
 })

@@ -22,7 +22,7 @@
 // item is in every column of a row or in none.
 import { computeUsed } from '../../../shared/imsFormulas'
 import { findUncountedItems } from '../../../shared/uncountedItems'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
 
 /**
  * Revenue: each row at the price charged at the time of sale (`unit_price`), falling back to the
@@ -46,6 +46,12 @@ export function periodRevenue(salesRows, recipes) {
  * the bill discount while `qty` is untouched (a discount changes what was paid, not what arrived).
  * Returns `{ opening, closing, wastage, staffMeals }` as id → qty, `purchases` as
  * id → `{ qty, gross, value }` and `returns` as id → `{ qty, value }`.
+ *
+ * Values are on the COST basis (S792, D32): `gross`/`value` are `lineGrossCost`/`lineCost`, so a
+ * VAT-ticked line on a `vat_is_cost` (PAN-bill) bill counts its 13% as food cost, and a return takes
+ * its linked line's basis through `returnCostValue` — read returns with `RETURN_COST_EMBED` and
+ * purchases with `vat_inclusive, vat_is_cost`, or both silently value at ex-VAT.
+ * `get_group_pnl` mirrors this by hand.
  */
 export function periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals }) {
   const qtyBy = (rows, col) => {
@@ -57,14 +63,14 @@ export function periodStockMaps({ opening, closing, purchases, returns, wastages
   allocateBillDiscounts(purchases).forEach(p => {
     const e = purchaseMap[p.item_id] || (purchaseMap[p.item_id] = { qty: 0, gross: 0, value: 0 })
     e.qty += parseFloat(p.qty) || 0
-    e.gross += p.lineGross
-    e.value += p.lineNet
+    e.gross += p.lineGrossCost
+    e.value += p.lineCost
   })
   const returnMap = {}
   ;(returns || []).forEach(r => {
     const e = returnMap[r.item_id] || (returnMap[r.item_id] = { qty: 0, value: 0 })
     e.qty += parseFloat(r.qty) || 0
-    e.value += (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+    e.value += returnCostValue(r)
   })
   return {
     opening: qtyBy(opening, 'qty'),

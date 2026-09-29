@@ -20,6 +20,8 @@ import {
   ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE,
   readItemRefCounts, refCodesFromCounts, priceImpactSentence, PRICE_CHANGE_KEEPS,
 } from './itemRefTables'
+import VatCostPriceBanner from './VatCostPriceBanner'
+import { vatModeOf } from '../recipes/menuPriceVat'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -88,7 +90,10 @@ export function bookWith(book, row, previousName) {
 
 export default function Items() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
-  const { settings } = useSettings()
+  const settingsCtx = useSettings()
+  const { settings } = settingsCtx
+  // S792 (D32): 'pan' | 'vat' | null, for the Item Master VAT-basis review banner.
+  const vatMode = vatModeOf(settingsCtx, clientId)
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   // Seeded from the short-lived session cache so a revisit paints the last-known list instantly
@@ -892,6 +897,15 @@ export default function Items() {
           <button className="btn btn-ghost" onClick={() => printWithTitle('Item Master')}>Print</button>
         </div>
       </div>
+
+      {/* S792 (D32): prices on the wrong VAT basis for this outlet, once, with a confirmed update. */}
+      {!loading && (
+        <VatCostPriceBanner
+          items={items} clientId={clientId} vatMode={vatMode}
+          canUpdate={hasImsAccess('supervisor')} askConfirm={askConfirm}
+          onUpdated={() => loadItems()}
+        />
+      )}
 
       {categories.length === 0 && !loading && (
         <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>

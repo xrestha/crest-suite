@@ -1,5 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
+import { vatModeOf } from '../recipes/menuPriceVat'
+import { vatCostFactor } from '../reports/supplierAttribution'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
@@ -72,6 +75,9 @@ function getPctChange(history) {
 
 export default function SupplierPriceTracker() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  // S792 (D32): on a PAN-bill outlet the price you pay includes the VAT you cannot claim back, and
+  // Item Master holds that price — so the labels say so. Figures follow each bill's stored basis.
+  const isPan = vatModeOf(useSettings(), clientId) === 'pan'
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const biz = useBizInfo()
@@ -131,7 +137,7 @@ export default function SupplierPriceTracker() {
       // history is the point of this page, so it is unbounded by construction and grows past the
       // silent 1000-row cap quickly. Truncated, it would quietly drop the oldest (or newest,
       // depending on scan order) price points the trend is drawn from (S529).
-      fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, vendor_id, period_id, rate, qty, bs_day, monthly_periods!inner(client_id)')
+      fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, vendor_id, period_id, rate, qty, bs_day, vat_inclusive, vat_is_cost, monthly_periods!inner(client_id)')
         .eq('monthly_periods.client_id', effectiveClientId)
         .order('id'))
     ])
@@ -180,7 +186,9 @@ export default function SupplierPriceTracker() {
     filterTrend !== 'all' ? `Trend filter : ${filterTrend}` : null,
     search ? `Search : “${search}”` : null,
   ].filter(Boolean).join('  ·  ')
-  const PRICE_BASIS_NOTE = 'Rates are ex-VAT and per base unit, as stored on the purchase line. "Rate (per pack)" multiplies by the item’s CURRENT conversion factor — if that factor has since changed, older rows are restated at today’s pack size. Trend and Change % compare the last two purchases inside the selected scope.'
+  const PRICE_BASIS_NOTE = (isPan
+    ? 'Rates are the price you pay per base unit — including the 13% on VAT bills, which this outlet (not VAT-registered, PAN bill) cannot claim back, so it is part of the cost.'
+    : 'Rates are ex-VAT and per base unit, as stored on the purchase line.') + ' "Rate (per pack)" multiplies by the item’s CURRENT conversion factor — if that factor has since changed, older rows are restated at today’s pack size. Trend and Change % compare the last two purchases inside the selected scope.'
 
   function getPurchasesForVendor(vendorId) {
     // Month filter applies before grouping, so within a selected month the trend/change figures
@@ -208,12 +216,15 @@ export default function SupplierPriceTracker() {
       // back by the item's CURRENT conversion factor (the true factor at time of purchase isn't
       // stored per-entry, so this is a best-effort approximation if it's since changed).
       const cf = getCf(item)
+      // The price PAID per unit (S792, D32): × 1.13 on a VAT line of a bill that counted its VAT as
+      // cost (a PAN-bill outlet), the basis Item Master holds for it; the bill's own rate otherwise.
+      const paid = parseFloat(pe.rate) * vatCostFactor(pe)
       // For "all vendors" mode, key by vendor+item so same item from different vendors shows separately
       const key = vendorId === 'all' ? `${pe.vendor_id}__${pe.item_id}` : pe.item_id
       const entry = {
         id: pe.id,
-        rate: parseFloat(pe.rate) * cf,
-        perUomRate: parseFloat(pe.rate),
+        rate: paid * cf,
+        perUomRate: paid,
         qty: parseFloat(pe.qty),
         // Keep null distinct from a real Day 1: the bill form has always required a day, so null
         // only exists on legacy rows — and coercing it to 1 forced the display to hide "Day 1",
@@ -672,7 +683,7 @@ export default function SupplierPriceTracker() {
                 <th>Category</th>
                 <th>UOM</th>
                 <th style={{ textAlign: 'right' }}><Tip text="Current rate per UOM in the Item Master — what recipe costing uses. The ⚠ mark means it differs from the last purchase by more than 5%." width={260}>Master Rate</Tip></th>
-                <th style={{ textAlign: 'right' }} className="no-print"><Tip text="Manually set a new master rate. Updates the Item Master and affects all recipe costs immediately." width={240}>Update Rate</Tip></th>
+                <th style={{ textAlign: 'right' }} className="no-print"><Tip text={isPan ? 'Manually set a new master rate — the price you pay, VAT included (this outlet cannot claim VAT back). Updates the Item Master and affects all recipe costs immediately.' : 'Manually set a new master rate. Updates the Item Master and affects all recipe costs immediately.'} width={240}>{isPan ? 'Update Rate (price you pay, VAT included)' : 'Update Rate'}</Tip></th>
                 <th style={{ textAlign: 'right' }}><Tip text={selectedPeriod ? `Rate per UOM from the most recent purchase entry in ${periodLabel}.` : 'Rate per UOM from the most recent purchase entry across all periods.'}>Last Rate</Tip></th>
                 <th>Last Period</th>
                 <th><Tip text="Price direction vs. previous purchase: ↑ Rising (red), ↓ Falling (green), → Stable.">Trend</Tip></th>

@@ -50,6 +50,12 @@ paths:
 `src/shared/imsFormulas.js` exists because two figures had drifted into several disagreeing copies, and both are figures the product is sold on.
 
 - **COGS / "used".** Nine pages printed the formula nine ways, four of them contradicting the code directly beneath them, and two pages genuinely computed it differently: `AnnualSummary` left Staff Meals out while `MonthlySummary` included them — same month, same column label, two numbers. The decision (2026-08-13) is that **staff meals are in COGS** — the food came out of the same stock. Import `COGS_FORMULA` wherever the formula is *printed* and `computeUsed()` wherever it is *computed*, so the sentence can never drift from the arithmetic again. **A PERIOD figure values every non-sub-recipe item with a row in the period, hidden ones included (S792, owner decision D29, FIGURES-1)** — `periodValuationItems()` in `periodCost.js`. `is_active` is for pickers and "on the shelf now" views; the S436 `.eq('is_active', true)` on a period read took a hidden item's purchases out of every past month.
+- **A purchase line's COST is `lineCost`, not `lineNet` (S792 stage 4, D32).** On a bill with
+  `purchase_entries.vat_is_cost` (a PAN-bill outlet, stamped at save time, never read from the live
+  switch) a VAT line's 13% is food cost: `allocateBillDiscounts` returns `lineCost`, and a return takes
+  its line's basis (`returnCostValue`, `RETURN_COST_EMBED`). Every COGS/spend reader uses it; tax
+  reports, payables and bill totals stay on `lineNet`. A new purchase reader selects `vat_inclusive,
+  vat_is_cost` or it silently values a PAN outlet ex-VAT.
 - **Monthly Summary and Consolidated P&L share one revenue and COGS arithmetic (S774).** `src/modules/ims/reports/periodCost.js`: `periodRevenue()`, `periodStockMaps()` and `valuePeriodItems()` (and since S792 `valuePeriods()` for a multi-month batch, each period's discounts allocated on their own). Change a convention there, never in either page. Each page keeps its own reads, and those must match (same filters, same paging), which `summaryReads.test.js` checks for both. `get_group_pnl` repeats the same rules in SQL and must be changed by hand alongside.
 - **Variance banding.** `varianceBand(pct, value, settings)` / `varianceFigure(...)` (added
   2026-08-31/S659, `imsVarianceBand.test.js`). **Three thresholds for one concept were live on two

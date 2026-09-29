@@ -9,7 +9,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
 import { useSettings } from '../../../context/SettingsContext'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
@@ -131,9 +131,9 @@ export default function AnnualSummary() {
       // a bill-level discount is repeated on every line, and until it is deduped and spread this
       // page's COGS sat above MonthlySummary's for the identical month by the whole discount.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
         .in('period_id', periodIds).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate').in('period_id', periodIds).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       // Staff meals were missing here entirely, so this page's COGS (and therefore its Food Cost %
       // and every trend arrow off it) sat systematically below MonthlySummary's figure for the
@@ -193,11 +193,12 @@ export default function AnnualSummary() {
       const closeVal  = at(closeBy, pid).reduce((s, r) => s + parseFloat(r.physical_qty) * (rateMap[r.item_id] || 0), 0)
       // Gross is the invoiced value; `discountVal` is the bill-level discount allocated across the
       // bill's own lines (allocateBillDiscounts, the same helper MonthlySummary and Consolidated
-      // P&L use, which is what keeps the three pages' COGS tied).
+      // P&L use, which is what keeps the three pages' COGS tied). On the COST basis since S792 (D32):
+      // a PAN-bill outlet's supplier VAT is food cost (lineGrossCost / lineCost / returnCostValue).
       const purchRows = at(purchBy, pid).filter(r => isTracked(r.item_id))
-      const grossPurch= purchRows.reduce((s, r) => s + r.lineGross, 0)
-      const discVal   = grossPurch - purchRows.reduce((s, r) => s + r.lineNet, 0)
-      const retVal    = at(retBy,   pid).filter(r => isTracked(r.item_id)).reduce((s, r) => s + parseFloat(r.qty) * parseFloat(r.rate), 0)
+      const grossPurch= purchRows.reduce((s, r) => s + r.lineGrossCost, 0)
+      const discVal   = grossPurch - purchRows.reduce((s, r) => s + r.lineCost, 0)
+      const retVal    = at(retBy,   pid).filter(r => isTracked(r.item_id)).reduce((s, r) => s + returnCostValue(r), 0)
       const netPurch  = grossPurch - discVal - retVal
       const wasteVal  = at(wasteBy, pid).reduce((s, r) => s + parseFloat(r.qty) * (rateMap[r.item_id] || 0), 0)
       const staffVal  = at(staffBy, pid).reduce((s, r) => s + parseFloat(r.qty) * (rateMap[r.item_id] || 0), 0)
@@ -219,7 +220,7 @@ export default function AnnualSummary() {
       const purchaseQty = {}; const purchaseValue = {}
       purchRows.forEach(r => {
         purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
-        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineNet
+        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineCost
       })
       const countedIds = new Set(at(closeBy, pid).filter(r => r.physical_qty != null).map(r => r.item_id))
       const gap = findUncountedItems({ items, openingQty, purchaseQty, purchaseValue, countedIds, cogs })

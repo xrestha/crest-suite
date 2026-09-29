@@ -137,9 +137,9 @@ export default function SupplierContribution() {
       // row's `id`, so without it every factor lookup misses and every return falls back to its
       // list rate — which is precisely the defect being fixed. Neither column is rendered.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('id, item_id, vendor_id, qty, rate, bs_day, invoice_ref, discount_amount, purchase_group_id')
+        .select('id, item_id, vendor_id, qty, rate, bs_day, invoice_ref, discount_amount, purchase_group_id, vat_inclusive, vat_is_cost')
         .eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, vendor_id, qty, rate, purchase_entry_id')
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, vendor_id, qty, rate, purchase_entry_id, purchase_entries(vat_inclusive, vat_is_cost)')
         .eq('period_id', periodId).order('id')),
       // is_active only: valuing stock off an inactive item is the S436 rule, and per_uom_rate is
       // what every other IMS valuation uses (it is rate ÷ purchase_qty, generated in the DB).
@@ -503,7 +503,7 @@ export default function SupplierContribution() {
               </th>
               <th style={{ textAlign: 'right' }}>% of Sales Cost</th>
               <th style={{ textAlign: 'right' }}>
-                <Tip width={280} text="Net purchases from this supplier this period — gross less bill discounts and returns, each return credited at the price its own bill was paid at (including a bill from an earlier month). The same figure Vendor Report calls Net Spend.">Net Purchases</Tip>
+                <Tip width={280} text="Net purchases from this supplier this period — gross less bill discounts and returns, each return credited at the price its own bill was paid at (including a bill from an earlier month). On a PAN-bill outlet the 13% VAT paid on VAT bills is included — it is part of what the food cost you. The same figure Vendor Report calls Net Spend.">Net Purchases</Tip>
               </th>
               <th style={{ textAlign: 'right' }}>% of Purchases</th>
               <th style={{ textAlign: 'right' }}>
