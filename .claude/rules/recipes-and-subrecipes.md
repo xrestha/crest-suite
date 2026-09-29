@@ -30,6 +30,10 @@ paths:
 - **Dish photos upload to the `dish-photos` bucket** (D16, `20260918150000`) — never with `upsert`, and
   the bucket carries a scoped SELECT policy because Storage's remove runs `DELETE … RETURNING`
   (`settings-row.md` has the rule). `image_url` stores the public URL with `?v=`.
+- **Duplicate (S795) seeds a NEW form and never writes.** `openCopy` fills it through `formFromRecipe`
+  / `ingredientRowsOf` (shared with `openEdit`) with `selectedRecipe` null, so the copy takes `save()`'s
+  insert path and every guard on it. Never make it a bulk copier that inserts rows itself: that is the
+  importer's S714 shape, which had none of `save()`'s guards.
 
 ### Sub-recipe mirror items
 

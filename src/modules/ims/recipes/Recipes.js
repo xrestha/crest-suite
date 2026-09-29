@@ -129,6 +129,9 @@ export default function Recipes() {
   const [view, setView] = useState('list') // list | edit | detail
   const canDeleteRecipe = hasImsAccess('manager')
   const [selectedRecipe, setSelectedRecipe] = useState(null)
+  // The saved recipe a NEW recipe form was seeded from by Duplicate, or null. Never the row being
+  // saved: selectedRecipe stays null, so the copy takes save()'s insert path.
+  const [copyOf, setCopyOf] = useState(null)
   // Breadcrumb trail of recipes drilled through via a sub-recipe ingredient row (detail view
   // only) — "Back" pops one level instead of always returning to the list.
   const [detailStack, setDetailStack] = useState([])
@@ -355,6 +358,7 @@ export default function Recipes() {
   // ── Form helpers ──────────────────────────────────────────────
   function openNew() {
     setSelectedRecipe(null)
+    setCopyOf(null)
     autoCodeRef.current = ''   // a fresh form re-issues its own code
     setRecipeForm(EMPTY_RECIPE)
     setIngredients([{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
@@ -365,11 +369,10 @@ export default function Recipes() {
     setView('edit')
   }
 
-  function openEdit(recipe) {
-    setSelectedRecipe(recipe)
-    autoCodeRef.current = ''   // editing never auto-issues; don't let a stale value match
-    const fcVal = recipe.target_fc_pct ? String(recipe.target_fc_pct) : '30'
-    setRecipeForm({
+  // The form fields and ingredient rows a saved recipe fills — shared by Edit and Duplicate, so a
+  // copy can never seed from a different reading of the row than the edit form does.
+  function formFromRecipe(recipe) {
+    return {
       name: recipe.name,
       category: recipe.category || 'Food',
       recipe_code: recipe.recipe_code || '',
@@ -377,21 +380,73 @@ export default function Recipes() {
       vat_rate: vatFormValue(recipe),
       yield_qty: recipe.yield_qty || '1',
       yield_uom: recipe.yield_uom || 'portion',
-      target_fc_pct: fcVal,
+      target_fc_pct: recipe.target_fc_pct ? String(recipe.target_fc_pct) : '30',
       description: recipe.description || '',
       image_url: recipe.image_url || '',
       is_veg: recipe.is_veg === true ? 'veg' : recipe.is_veg === false ? 'non_veg' : '',
       is_build_your_own: !!recipe.is_build_your_own,
-    })
-    setFcPctSaved(fcVal)
-    const ings = (recipe.recipe_ingredients || []).map(ri => ({
-      _key: ri.id,
+    }
+  }
+  function ingredientRowsOf(recipe, keyOf) {
+    const ings = (recipe.recipe_ingredients || []).map((ri, i) => ({
+      _key: keyOf(ri, i),
       item_id: ri.item_id || '',
       sub_recipe_id: ri.sub_recipe_id || '',
       qty_per_portion: ri.qty_per_portion,
       type: ri.sub_recipe_id ? 'sub_recipe' : 'item'
     }))
-    setIngredients(ings.length > 0 ? ings : [{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
+    return ings.length > 0 ? ings : [{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }]
+  }
+
+  function openEdit(recipe) {
+    setSelectedRecipe(recipe)
+    setCopyOf(null)
+    autoCodeRef.current = ''   // editing never auto-issues; don't let a stale value match
+    const form = formFromRecipe(recipe)
+    setRecipeForm(form)
+    setFcPctSaved(form.target_fc_pct)
+    setIngredients(ingredientRowsOf(recipe, ri => ri.id))
+    setUsdaCandidates([])
+    setError('')
+    setNameErr('')
+    setView('edit')
+  }
+
+  // "ACAI BOWL" → "ACAI BOWL (COPY)", then "(COPY 2)" … — the first name no recipe has yet. A
+  // sub-recipe's stock-count item is named after its recipe, so a second copy under the same name
+  // would also be refused as a split count (DUP_MIRROR_MSG); a fresh name avoids both.
+  function copyName(name) {
+    const word = name === name.toUpperCase() ? 'COPY' : 'Copy'
+    const taken = new Set(recipes.map(r => (r.name || '').trim().toLowerCase()))
+    for (let n = 1; ; n++) {
+      const candidate = `${name} (${word}${n > 1 ? ` ${n}` : ''})`
+      if (!taken.has(candidate.toLowerCase())) return candidate
+    }
+  }
+
+  // DUPLICATE: a NEW recipe form seeded from a saved one. Nothing is written until Save, and the
+  // copy then goes through save()'s insert path with every guard it carries (product code, the
+  // sub-recipe's stock-count item, the VAT basis) — never a second write path, which is how the
+  // bulk importer came to miss them all (S714).
+  function openCopy(recipe) {
+    setSelectedRecipe(null)
+    setCopyOf(recipe)
+    const form = formFromRecipe(recipe)
+    form.name = copyName(recipe.name)
+    // A fresh Product Code: codes are unique per client, so the original's would be refused. Issued
+    // the way the auto-fill effect issues one, and marked as ours so that effect may keep it
+    // current if the category is changed. A sub-recipe takes its SRC code at insert, as usual.
+    const code = form.category === SUB_RECIPE_CATEGORY
+      ? ''
+      : nextProductCode(productCodePrefix(form.category), recipes.map(r => r.recipe_code))
+    autoCodeRef.current = code
+    form.recipe_code = code
+    // With the outlet's VAT basis unknown, a new dish cannot carry a price: the box is disabled and
+    // save() refuses one (menuPriceVat.js). Left blank, exactly as + New Recipe would be.
+    if (vatMode == null) form.selling_price = ''
+    setRecipeForm(form)
+    setFcPctSaved(null)   // a new recipe: its target FC% saves with the rest of the form
+    setIngredients(ingredientRowsOf(recipe, (ri, i) => `copy-${Date.now()}-${i}`))
     setUsdaCandidates([])
     setError('')
     setNameErr('')
@@ -1470,7 +1525,21 @@ Check the recipe list before saving again — if it timed out after the recipe w
   // DOM-bound, so it keeps its existing "whole dataset" default and honors a cross-tab selection.
   const checkedInTab = tabFiltered.filter(r => selectedIds.has(r.id))
   const printShareRows = selectedIds.size > 0 ? checkedInTab : tabFiltered
-  const exportRows = selectedIds.size > 0 ? recipes.filter(r => selectedIds.has(r.id)) : recipes
+  // Every checked recipe, in any tab.
+  const checkedRecipes = recipes.filter(r => selectedIds.has(r.id))
+  const exportRows = selectedIds.size > 0 ? checkedRecipes : recipes
+
+  // Duplicate copies ONE ticked recipe. Pressed with none or several ticked, it says so rather than
+  // guessing which one was meant (aria-disabled, so the press can still explain itself).
+  function duplicateChecked() {
+    if (checkedRecipes.length !== 1) {
+      setError(checkedRecipes.length === 0
+        ? 'Tick the box beside the recipe you want to copy, then press Duplicate.'
+        : `${checkedRecipes.length} recipes are ticked. Duplicate copies one recipe at a time — untick all but the one you want to copy.`)
+      return
+    }
+    openCopy(checkedRecipes[0])
+  }
 
   // Plain text, WhatsApp's own markdown (*bold*) — no HTML, mirrors ReorderReport's share pattern.
   // Scoped to printShareRows: the Category tab bar + search by default, or just the checked rows
@@ -1518,7 +1587,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
           <h1 className="page-title">Recipe Costing</h1>
           <p className="page-subtitle">
             {view === 'list' && `${recipes.filter(r=>r.category!=='Sub-Recipe').length} recipes · ${subRecipes.length} sub-recipes`}
-            {view === 'edit' && (selectedRecipe ? `Editing: ${selectedRecipe.name}` : 'New Recipe')}
+            {view === 'edit' && (selectedRecipe ? `Editing: ${selectedRecipe.name}` : copyOf ? `New Recipe — a copy of ${copyOf.name}. Nothing is saved until you press Save.` : 'New Recipe')}
             {view === 'detail' && selectedRecipe?.name}
           </p>
           {view === 'list' && (
@@ -1565,6 +1634,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
               </Tip>
               <Tip text="Opens WhatsApp with this tab's recipe list (name, food cost, FC%) pre-filled as a text message — check specific rows first to share just those, or leave none checked to share the whole tab. Pick a contact or group to send it to." width={290}>
                 <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={printShareRows.length === 0}>📱 Share via WhatsApp</button>
+              </Tip>
+              <Tip text="Tick one recipe's box, then press Duplicate to start a new recipe with the same ingredients, quantities, price and details — handy for a Large size or a version with oat milk. It opens as “… (Copy)” with its own Product Code: rename it, change what differs, then Save. Nothing is saved until you do. Its till on/off switch, HSC code and Customization choices are not copied: they start as for any new recipe." width={320}>
+                <button className="btn btn-ghost" onClick={duplicateChecked} aria-disabled={checkedRecipes.length !== 1 || undefined}>⧉ Duplicate</button>
               </Tip>
               {selectedIds.size > 0 && (
                 <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1988,12 +2060,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         </div>
                       )}
                       {/* S792 (D31): a dish priced before Crest took a PAN-bill price as typed. The
-                          box shows what the till charges; the note says what the menu showed. */}
-                      {vatMode === 'pan' && selectedRecipe && recipeForm.vat_rate !== '0' && parseFloat(selectedRecipe.selling_price) > 0 && vatOf(selectedRecipe) > 0 && (
-                        <div role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
-                          △ Priced with VAT taken off: the menu showed NPR {Math.round(parseFloat(selectedRecipe.selling_price) * (1 + vatOf(selectedRecipe)))}, the till charges NPR {Math.round(parseFloat(selectedRecipe.selling_price))}. {priceLocked ? 'A manager or the Owner re-enters it on Menu Pricing.' : 'Type the price guests should pay, then save.'}
-                        </div>
-                      )}
+                          box shows what the till charges; the note says what the menu showed. A
+                          Duplicate of such a dish carries the same price, so it carries the note. */}
+                      {(() => {
+                        const priceSource = selectedRecipe || copyOf
+                        if (!(vatMode === 'pan' && priceSource && recipeForm.vat_rate !== '0' && parseFloat(priceSource.selling_price) > 0 && vatOf(priceSource) > 0)) return null
+                        return (
+                          <div role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
+                            △ Priced with VAT taken off: the menu showed NPR {Math.round(parseFloat(priceSource.selling_price) * (1 + vatOf(priceSource)))}, the till charges NPR {Math.round(parseFloat(priceSource.selling_price))}. {priceLocked ? 'A manager or the Owner re-enters it on Menu Pricing.' : 'Type the price guests should pay, then save.'}
+                          </div>
+                        )
+                      })()}
                       {priceLocked && (
                         <div id="recipe-price-locked" style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
                           Set by a manager or the Owner in Menu Pricing.
