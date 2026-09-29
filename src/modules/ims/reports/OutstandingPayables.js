@@ -941,7 +941,7 @@ export default function OutstandingPayables() {
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>
           <div style={{ fontWeight: 700, color: 'var(--theme-red-text)', marginBottom: 8 }}>⚠ One-time setup required</div>
           <div style={{ color: 'var(--theme-text3)', marginBottom: 10 }}>Run this SQL in Supabase → SQL Editor, then refresh:</div>
-          <code style={{ display: 'block', background: 'var(--theme-bg)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-accent-ink)', fontSize: 12, userSelect: 'all' }}>
+          <code style={{ display: 'block', background: 'var(--theme-bg)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)', fontSize: 12, userSelect: 'all' }}>
             ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
           </code>
         </div>
@@ -952,7 +952,7 @@ export default function OutstandingPayables() {
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: less any bill discount, less goods returned at the discounted price the supplier charged for them, plus 13% VAT on VAT-inclusive lines. A bill over-settled by a late return counts against this as a credit." width={280}>Total Remaining</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {Object.keys(byVendor).length} vendor{Object.keys(byVendor).length !== 1 ? 's' : ''}</div>
           </div>
           <div className="stat-card">
@@ -968,7 +968,7 @@ export default function OutstandingPayables() {
         </>) : (<>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total invoiced value of all fully settled credit bills — net of returns and discount, including VAT where applicable." width={260}>Total Paid</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-green-text)' }}>{fmt(totalRemaining)}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-text1)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} settled bill{filteredBills.length !== 1 ? 's' : ''}</div>
           </div>
           <div className="stat-card">
@@ -986,7 +986,7 @@ export default function OutstandingPayables() {
           {creditValue > EPS && (
             <div className="stat-card">
               <div className="stat-label"><Tip text="Goods returned against bills that were already settled, so the supplier owes this back. To use it, open another unpaid bill from the same supplier on the Outstanding tab and fill in Use supplier credit — or ask the supplier for a credit note. It is not a payable." width={280}>Vendor Credits</Tip></div>
-              <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-purple-text)' }}>{fmt(creditValue)}</div>
+              <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>{fmt(creditValue)}</div>
               <div className="stat-sub">Owed back to you</div>
             </div>
           )}
@@ -1034,7 +1034,7 @@ export default function OutstandingPayables() {
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
               {selectedBillObjs.length} bill{selectedBillObjs.length !== 1 ? 's' : ''} selected
             </div>
-            <div style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{fmt(selectedTotal)} total</div>
+            <div style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 700 }}>{fmt(selectedTotal)} total</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Date</div>
@@ -1114,7 +1114,7 @@ export default function OutstandingPayables() {
                       )}
                     </>)}
                   </div>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: activeTab === 'outstanding' ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{fmt(vendorTotal)}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: activeTab === 'outstanding' ? 'var(--theme-text1)' : 'var(--theme-text1)' }}>{fmt(vendorTotal)}</span>
                 </div>
                 <div className="table-wrap">
                   <table className="data-table">
@@ -1179,15 +1179,15 @@ export default function OutstandingPayables() {
                               </td>
                               <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[(b.period.bs_month || 1) - 1]} {b.period.bs_year}</td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.entries.length}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>{fmt(b.total)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(b.total)}</td>
                               {activeTab === 'outstanding' ? (<>
-                                <td style={{ textAlign: 'right', color: b.paid > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>
+                                <td style={{ textAlign: 'right', color: b.paid > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                                   {b.paid > 0 ? fmt(b.paid) : '—'}
                                   {/* Supplier credit is part of Paid, but it is not money that left the
                                       bank, so the cell says how much of it was (S756 D11). */}
-                                  {b.creditIn > EPS && <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-purple-text)', whiteSpace: 'nowrap' }}>incl. {fmt(b.creditIn)} credit</span>}
+                                  {b.creditIn > EPS && <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>incl. {fmt(b.creditIn)} credit</span>}
                                 </td>
-                                <td style={{ textAlign: 'right', fontWeight: 700, color: b.isCredit ? 'var(--theme-purple-text)' : 'var(--theme-red-text)' }}>
+                                <td style={{ textAlign: 'right', fontWeight: 700, color: b.isCredit ? 'var(--theme-text1)' : 'var(--theme-text1)' }}>
                                   {b.isCredit ? `${fmt(-b.remaining)} cr` : fmt(b.remaining)}
                                 </td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, color: b.aging.color }}>{b.daysOld}</td>
@@ -1199,13 +1199,13 @@ export default function OutstandingPayables() {
                                     : b.remaining <= EPS
                                     ? <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Nothing owed</span>
                                     : b.isPartial
-                                    ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-purple-text)', background: 'color-mix(in srgb, var(--theme-purple) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
+                                    ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
                                     : <span style={{ fontSize: 11, fontWeight: 700, color: b.aging.color, background: `color-mix(in srgb, ${b.aging.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.aging.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.aging.label}</span>
                                   }
                                 </td>
                                 <td style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : b.remaining <= EPS ? '▼ Details' : '＋ Pay Bill'}</td>
                               </>) : (<>
-                                <td style={{ color: 'var(--theme-green-text)', fontWeight: 600, fontSize: 13 }}>
+                                <td style={{ color: 'var(--theme-text2)', fontWeight: 600, fontSize: 13 }}>
                                   {fmtBsDate(b.settledOn) || '—'}
                                   {b.isCredit && <span className="badge badge-purple" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(-b.remaining)} credit</span>}
                                   {b.creditOut > EPS && <Tip text={`${fmt(b.creditOut)} of this bill's credit has been used to pay other bills from ${b.vendorName}. See the Supplier credit entries in its payment history.`} width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}><span className="badge badge-purple" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(b.creditOut)} credit used</span></Tip>}
@@ -1242,7 +1242,7 @@ export default function OutstandingPayables() {
                                             <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                                             <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString('en-IN')} {e.items?.uom}</td>
                                             <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString('en-IN')}</td>
-                                            <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(e.value)}</td>
+                                            <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(e.value)}</td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -1294,8 +1294,8 @@ export default function OutstandingPayables() {
                                                     onChange={ev => { ev.stopPropagation(); toggleSelectPayment(p.id) }}
                                                     onClick={ev => ev.stopPropagation()} aria-label={`Select payment of ${fmt(p.amount)} on ${fmtBsDate(p.paid_at) || p.paid_at}`} />
                                                 </td>
-                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green-text)' }}>{fmtBsDate(p.paid_at)}</td>
-                                                <td style={{ padding: '5px 16px', textAlign: 'right', color: parseFloat(p.amount) < 0 ? 'var(--theme-purple-text)' : 'var(--theme-text1)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)' }}>{fmtBsDate(p.paid_at)}</td>
+                                                <td style={{ padding: '5px 16px', textAlign: 'right', color: parseFloat(p.amount) < 0 ? 'var(--theme-text1)' : 'var(--theme-text1)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                                                   {parseFloat(p.amount) < 0 ? `−${fmt(-parseFloat(p.amount))}` : fmt(p.amount)}
                                                 </td>
                                                 <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>
@@ -1314,7 +1314,7 @@ export default function OutstandingPayables() {
                                             <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                               <td />
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
-                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)' }}>{fmt(b.paid)}</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{fmt(b.paid)}</td>
                                               <td />
                                               <td />
                                             </tr>
@@ -1330,7 +1330,7 @@ export default function OutstandingPayables() {
                                         does nothing silently, since allocatePayment skips every
                                         line at or under EPS. Say which of the two states it is. */}
                                     {activeTab === 'outstanding' && b.remaining <= EPS && (
-                                      <div style={{ fontSize: 12, color: b.isCredit ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>
+                                      <div style={{ fontSize: 12, color: b.isCredit ? 'var(--theme-text2)' : 'var(--theme-text2)' }}>
                                         {b.isCredit
                                           ? `Over-settled by ${fmt(-b.remaining)} — goods were returned after this bill was paid, so the supplier owes that back. There is nothing to pay here. To use the credit, open another unpaid bill from ${b.vendorName} and fill in "Use supplier credit", or ask the supplier for a credit note.`
                                           : 'Nothing left to pay on this bill — the goods on it were returned, or what was paid already covers what is owed.'}
@@ -1420,10 +1420,10 @@ export default function OutstandingPayables() {
                                         {vc?.status === 'ready' && vc.available > EPS && (
                                           <div onClick={ev => ev.stopPropagation()} style={{
                                             marginTop: 14, padding: '10px 14px', maxWidth: 720,
-                                            border: '1px solid color-mix(in srgb, var(--theme-purple) 35%, transparent)',
-                                            background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)',
+                                            border: '1px solid var(--theme-border)',
+                                            background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)',
                                           }}>
-                                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-purple-text)', marginBottom: 4 }}>
+                                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>
                                               <Tip text="When you returned goods after a bill from this supplier was already paid, they owe you that money back. Using it here takes that amount off this bill and off the credit on the older bill, in one step — both bills' payment history shows it, and so does the Vendor Balance Confirmation letter. No money changes hands." width={320}>
                                                 {b.vendorName} owes you {fmt2(vc.available)} in credit
                                               </Tip>
@@ -1471,13 +1471,13 @@ export default function OutstandingPayables() {
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                         {activeTab === 'outstanding' ? (<>
                           <td colSpan={4} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{vPaidTotal > 0 ? fmt(vPaidTotal) : '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{fmt(vRemainingTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{vPaidTotal > 0 ? fmt(vPaidTotal) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{fmt(vRemainingTotal)}</td>
                           <td colSpan={3} style={{ paddingTop: 12 }}></td>
                         </>) : (<>
                           <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
                           <td colSpan={2} style={{ paddingTop: 12 }}></td>
                         </>)}
                       </tr>

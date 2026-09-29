@@ -19,3 +19,21 @@
  * normal-vision floors as blocking (design-system.md says why the other two checks always warn).
  */
 export const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
+
+/**
+ * Where each rupee of revenue goes — a FIXED set of cost slices, so each takes a named slot and keeps
+ * it on every surface that draws the split (the Dashboard's Revenue vs Cost pie, Overheads' cost stack,
+ * P&L bars and bucket bars). Lifted out of `ClientDashboard.jsx` in S796 so Overheads could stop
+ * painting its buckets in the semantic tokens: Overhead was GREEN and Purchases the accent, a category
+ * wearing a verdict colour on the page that also says "✓ Profitable" in green (DESIGN.md's One Signal
+ * Meaning Rule). Measured S689: worst pair ΔE 56.3 normal, 12.4 deuteranopia, 30.6 protanopia.
+ * Red is deliberately absent — red means over threshold here. Net Margin is the one slot that stays
+ * semantic, because profit reads as good; a page that withholds the verdict greys it instead.
+ */
+export const COST_BREAKDOWN_COLORS = {
+  'Food Cost':  '#c9a84c', // gold — the FC% line and the Owner Dashboard use the same slot
+  'Labor':      '#60a5fa', // blue
+  'Overheads':  '#8b5cf6', // violet
+  'Tax & Fees': '#ec4899', // pink
+  'Net Margin': '#34d399', // green
+}

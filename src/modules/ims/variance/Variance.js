@@ -493,8 +493,8 @@ export default function Variance() {
       {/* Note + filters wait for the load, same as the KPI strip above — the S594 rule ReportPage
           enforces for its adopters, applied by hand here (S613). */}
       {!loading && (
-      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-        <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = {COGS_FORMULA}.
+      <div className="note-banner">
+        <strong style={{ color: 'var(--theme-text1)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = {COGS_FORMULA}.
         <span style={{ color: 'var(--theme-red-text)' }}> Over variance</span> = more used than sold (waste, theft, over-portioning).
         <span style={{ color: 'var(--theme-amber-text)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
       </div>
@@ -562,10 +562,10 @@ export default function Variance() {
                   return (
                     <tr key={row.item.id} style={{ background: b.flag === 'over' ? 'color-mix(in srgb, var(--theme-red) 5%, transparent)' : 'transparent' }}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
-                      <td><span className="badge badge-yellow">{row.category}</span></td>
+                      <td><span className="badge badge-gray">{row.category}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.openQty > 0 ? row.openQty.toLocaleString('en-IN') : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.purchQty !== 0 ? dispPurch(row.purchQty, row.item) : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.purchQty !== 0 ? dispPurch(row.purchQty, row.item) : '—'}</td>
                       {/* These two were permanently red and permanently green. Neither is a
                           verdict: a closing count is not good news and 0.05 kg of wastage is not
                           bad news — they are quantities, and every row that had any wastage at all

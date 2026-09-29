@@ -909,7 +909,7 @@ export default function Items() {
 
       {categories.length === 0 && !loading && (
         <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
-          <p style={{ color: 'var(--theme-accent-ink)', fontSize: 13, margin: 0 }}>
+          <p style={{ color: 'var(--theme-text1)', fontSize: 13, margin: 0 }}>
             You have no item categories yet, so there is nothing to file a new item under. Click <strong>⚡ Load Default Categories</strong> to add the {DEFAULT_CATEGORIES.length} Crest starts with — {DEFAULT_CATEGORIES.slice(0, -1).join(', ')} and {DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]}. Rename them or add your own afterwards.
           </p>
         </div>
@@ -1052,7 +1052,7 @@ export default function Items() {
                   {...fieldAria('items-pack-qty', packErr)}
                 />
                 {packPerUnit != null && (
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
                     → NPR {fmtPerUom(packPerUnit)} per {form.uom}
                   </span>
                 )}
@@ -1293,29 +1293,29 @@ export default function Items() {
                   const hasConversion = item.purchase_unit && item.conversion_factor && item.conversion_factor !== 1
                   return (
                     <tr key={item.id}>
-                      <td style={{ color: 'var(--theme-accent-ink)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
+                      <td style={{ color: 'var(--theme-text2)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
                         {item.item_code || '—'}
                       </td>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
                       {showCategoryCol && (
                         <td>
                           {item.categories?.name
-                            ? <span className="badge badge-yellow">{item.categories.name}</span>
+                            ? <span className="badge badge-gray">{item.categories.name}</span>
                             : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
                       )}
                       <td>{item.uom}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                         {fmtPerUom(item.per_uom_rate)}
                       </td>
-                      <td style={{ textAlign: 'right', color: parseFloat(item.yield_pct) < 100 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+                      <td style={{ textAlign: 'right', color: parseFloat(item.yield_pct) < 100 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                         {parseFloat(item.yield_pct || 100).toFixed(0)}%
                       </td>
                       <td>
                         {hasConversion ? (
                           <span style={{
-                            fontSize: 11, background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
-                            color: 'var(--theme-green-text)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)',
+                            fontSize: 11, background: 'color-mix(in srgb, var(--theme-text2) 8%, transparent)',
+                            color: 'var(--theme-text1)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)',
                             borderRadius: 'var(--radius-xs)', padding: '2px 7px', whiteSpace: 'nowrap'
                           }}>
                             🔄 1 {item.purchase_unit} = {item.conversion_factor} {item.uom}

@@ -465,9 +465,9 @@ export default function PurchaseBillPage() {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>
-                    <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>NPR {fmtRate(item.oldRate)}</span>
+                    <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>NPR {fmtRate(item.oldRate)}</span>
                     <span style={{ color: 'var(--theme-text2)' }}> → </span>
-                    <span style={{ color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {fmtRate(item.newRate)}</span>
+                    <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {fmtRate(item.newRate)}</span>
                     <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 1 }}>per {item.unit}</div>
                   </div>
                 </label>

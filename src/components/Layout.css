@@ -2431,6 +2431,24 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
   color: var(--theme-green-text);
 }
 
+/* An instruction or a plain fact about the page — "enter quantities in the item's UOM", "labour
+   comes from your finalized payroll run". Neutral on purpose (S796, the IMS critique): these were
+   accent-tinted boxes with accent-ink text, which under Modernist Light is a dark red, so a how-to
+   line read like a warning and spent the colour a real one needs. Amber (`amberBanner`, S741) is
+   for "you can, but this is not the usual case"; red is ClosedPeriodBanner's "you cannot". This is
+   neither — a verdict never rides on it. `.note-banner strong` is the lead phrase, in ink. */
+.note-banner {
+  background: color-mix(in srgb, var(--theme-text2) 6%, transparent);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--theme-text2);
+}
+.note-banner strong { color: var(--theme-text1); }
+
 /* A report that could not load. This is deliberately NOT the empty state: "nothing to show" and
    "could not load" are different facts and only one of them means the figures on screen are real.
    See ReportPage.jsx for why every report renders one or the other and never a page of zeros. */

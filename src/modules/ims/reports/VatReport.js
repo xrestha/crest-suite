@@ -449,12 +449,12 @@ export default function VatReport() {
           <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-amber-text)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatLines.length} lines
-            {vatReturns.length > 0 && <span style={{ color: 'var(--theme-red-text)' }}> − {vatReturns.length} returns</span>}
+            {vatReturns.length > 0 && <span style={{ color: 'var(--theme-text2)' }}> − {vatReturns.length} returns</span>}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text={isPan ? 'VAT paid to suppliers = (taxable VAT purchases after discount − VAT returns) × 13%. This outlet is not VAT-registered, so it is not claimable and is counted in food cost.' : 'Net input VAT claimable = (taxable VAT purchases after discount − VAT returns) × 13%. Use this for your IRD VAT return.'} width={270}>{isPan ? 'VAT Paid (13%)' : 'Net Input VAT (13%)'}</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-green-text)' }}>NPR {Math.round(netVatAmt).toLocaleString('en-IN')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(netVatAmt).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatReturns.length > 0
               ? <span>Purchases {fmtNPR(vatAmtGross)} − returns {fmtNPR(retVatTotal)}</span>
@@ -509,7 +509,7 @@ export default function VatReport() {
                       <th style={{ textAlign: 'right' }}>Qty</th>
                       <th>UOM</th>
                       <th style={{ textAlign: 'right' }}><Tip text="The rate you entered × qty, ex-VAT, before this line's share of the bill discount." width={240}>Gross (ex-VAT)</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="This line's share of its bill's discount, in proportion to line value. On a bill with non-VAT lines the rest of the discount sits in the Non-VAT Report." width={260}>Discount</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="This line's share of its bill's discount, in proportion to line value. On a bill with non-VAT lines the rest of the discount sits in the Non-VAT Report." width={260}>Discount</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Gross − discount share. VAT is levied on this amount per Nepal IRD." width={220}>Taxable</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text={isPan ? 'VAT = Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Input VAT = Taxable × 13%. Claimable as input tax credit from IRD.'} width={220}>VAT (13%)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Taxable + VAT — what this line actually cost including VAT.">Total (incl. VAT)</Tip></th>
@@ -527,21 +527,21 @@ export default function VatReport() {
                       const total = e.lineNet + vat
                       return (
                         <tr key={e.id}>
-                          <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(e.bs_day, selectedPeriod?.bs_month)}</td>
+                          <td style={{ color: 'var(--theme-text1)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(e.bs_day, selectedPeriod?.bs_month)}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                           <td>
                             {e.items?.categories?.name
-                              ? <span className="badge badge-yellow">{e.items.categories.name}</span>
+                              ? <span className="badge badge-gray">{e.items.categories.name}</span>
                               : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{e.vendors?.name || '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(e.qty).toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                           <td style={{ color: 'var(--theme-text2)' }}>{e.items?.uom}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(e.lineGross)}</td>
-                          <td style={{ textAlign: 'right', color: disc > 0.005 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{disc > 0.005 ? `−${fmtNPR(disc)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: disc > 0.005 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{disc > 0.005 ? `−${fmtNPR(disc)}` : '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(e.lineNet)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)', fontWeight: 600 }}>{fmtNPR(vat)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmtNPR(total)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(total)}</td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{e.invoice_ref || '—'}</td>
                         </tr>
                       )
@@ -552,10 +552,10 @@ export default function VatReport() {
                     <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700, background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
                       <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TOTALS</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseList)}</td>
-                      <td style={{ textAlign: 'right', color: totalVatDiscount > 0.005 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{totalVatDiscount > 0.005 ? `−${fmtNPR(totalVatDiscount)}` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: totalVatDiscount > 0.005 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totalVatDiscount > 0.005 ? `−${fmtNPR(totalVatDiscount)}` : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(vatAmtGross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(vatTotalGross)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatTotalGross)}</td>
                       <td></td>
                     </tr>
                   </tbody>
@@ -570,7 +570,7 @@ export default function VatReport() {
               figures — gating one card is not gating the page (S616). */}
           {!loading && vatReturns.length > 0 && (
             <div className="card" style={{ marginBottom: 16, border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
-              <h2 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-red-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>VAT-Inclusive Returns <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', marginLeft: 8 }}>Input VAT reversed on returned goods</span></span>
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{vatReturns.length} return{vatReturns.length !== 1 ? 's' : ''}</span>
               </h2>
@@ -585,7 +585,7 @@ export default function VatReport() {
                       <th style={{ textAlign: 'right' }}>Returned Qty</th>
                       <th>UOM</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Value credited back, at the discounted rate the original bill carried — not the list rate." width={250}>Base Returned</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>VAT Reversed</th>
+                      <th style={{ textAlign: 'right' }}>VAT Reversed</th>
                       <th style={{ textAlign: 'right' }}>Total Returned</th>
                       <th>Notes</th>
                     </tr>
@@ -600,28 +600,28 @@ export default function VatReport() {
                       const total = base + vat
                       return (
                         <tr key={r.id}>
-                          <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(r.bs_day, selectedPeriod?.bs_month)}</td>
+                          <td style={{ color: 'var(--theme-text1)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(r.bs_day, selectedPeriod?.bs_month)}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.items?.name}</td>
                           <td>
                             {r.items?.categories?.name
-                              ? <span className="badge badge-yellow">{r.items.categories.name}</span>
+                              ? <span className="badge badge-gray">{r.items.categories.name}</span>
                               : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{r.vendors?.name || '—'}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{Number(r.qty).toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{Number(r.qty).toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                           <td style={{ color: 'var(--theme-text2)' }}>{r.items?.uom}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(base)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>−{fmtNPR(vat)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>−{fmtNPR(total)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmtNPR(base)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>−{fmtNPR(vat)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>−{fmtNPR(total)}</td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{r.notes || '—'}</td>
                         </tr>
                       )
                     })}
                     <tr style={{ borderTop: '2px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', fontWeight: 700 }}>
-                      <td colSpan={6} style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>TOTAL RETURNS</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(retBaseTotal)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(retVatTotal)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(retTotal)}</td>
+                      <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TOTAL RETURNS</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmtNPR(retBaseTotal)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmtNPR(retVatTotal)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmtNPR(retTotal)}</td>
                       <td></td>
                     </tr>
                   </tbody>
@@ -636,11 +636,11 @@ export default function VatReport() {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 2 }}>Net Input VAT (13%)</div>
-                  <div style={{ fontWeight: 700, color: 'var(--theme-green-text)', fontSize: 14 }}>{fmtNPR(netVatAmt)}</div>
+                  <div style={{ fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14 }}>{fmtNPR(netVatAmt)}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 2 }}>Net (incl. VAT)</div>
-                  <div style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14 }}>{fmtNPR(netVatTotal)}</div>
+                  <div style={{ fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14 }}>{fmtNPR(netVatTotal)}</div>
                 </div>
               </div>
             </div>
@@ -679,9 +679,9 @@ export default function VatReport() {
                     <th><Tip text="PAN or VAT registration number of the supplier — add it in Vendors if missing.">PAN / VAT No.</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Number of bills from this vendor this period carrying at least one VAT-inclusive line — bills, not lines."># Bills</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Gross purchases at list price before trade discount, ex-VAT.">Gross Base</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Trade/promo discount from the vendor, prorated to VAT items. Reduces the taxable base." width={260}>Discount</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Trade/promo discount from the vendor, prorated to VAT items. Reduces the taxable base." width={260}>Discount</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Taxable base = Gross − Discount. VAT is levied on this amount per Nepal IRD." width={240}>Taxable Base</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Base amount of VAT-inclusive goods returned to this vendor." width={230}>Returned</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Base amount of VAT-inclusive goods returned to this vendor." width={230}>Returned</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Net taxable = Taxable Base − Returns, ex-VAT.">Net Taxable</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text={isPan ? 'VAT paid to this supplier = Net Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Net claimable input VAT = Net Taxable × 13%. Use for IRD VAT return.'} width={230}>{isPan ? 'VAT Paid' : 'Net Input VAT'}</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Net amount paid to this vendor including VAT, after discount and returns.">Net Total</Tip></th>
@@ -702,32 +702,32 @@ export default function VatReport() {
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{v.count}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(v.gross)}</td>
-                        <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+                        <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                           {disc > 0 ? `−${fmtNPR(disc)}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(taxBase)}</td>
-                        <td style={{ textAlign: 'right', color: v.returned > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+                        <td style={{ textAlign: 'right', color: v.returned > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                           {v.returned > 0 ? `−${fmtNPR(v.returned)}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(netBase)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)', fontWeight: 600 }}>{fmtNPR(netVat)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmtNPR(netTotal)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(netTotal)}</td>
                       </tr>
                     )
                   })}
                   <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>PERIOD NET</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseList)}</td>
-                    <td style={{ textAlign: 'right', color: totalVatDiscount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+                    <td style={{ textAlign: 'right', color: totalVatDiscount > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                       {totalVatDiscount > 0 ? `−${fmtNPR(totalVatDiscount)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseGross)}</td>
-                    <td style={{ textAlign: 'right', color: retBaseTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+                    <td style={{ textAlign: 'right', color: retBaseTotal > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                       {retBaseTotal > 0 ? `−${fmtNPR(retBaseTotal)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(netVatBase)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(netVatAmt)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(netVatTotal)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(netVatTotal)}</td>
                   </tr>
                 </tbody>
               </table>

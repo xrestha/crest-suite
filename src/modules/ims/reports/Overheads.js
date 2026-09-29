@@ -22,15 +22,17 @@ import { disabledStyle } from '../../../shared/inlineFieldState'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { groupSavedRows, nearestPeriodWithFigures, overheadInserts } from './overheadsRows'
 import { SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
+import { COST_BREAKDOWN_COLORS } from '../../../shared/chartColors'
 
-// labor's blue has no dedicated theme token — accent/green/red/amber/purple are already spoken
-// for by food/overhead/profit-loss/target-warning/tax elsewhere on this page, so it stays a fixed
-// hex (same reasoning as a chart legend needing more distinct hues than the semantic token set).
+// A bucket is a CATEGORY, so its fill takes a chart slot, never a semantic token (S796): Overhead
+// was green and Tax & Fees purple on the page that says "✓ Profitable" in green. The slots are the
+// Dashboard's cost-breakdown map, so a bucket is one colour on both pages. `textColor` is ink: the
+// figure beside a bar is read, and a category colour on it would be decoration pretending to judge.
 const BUCKET_CONFIG = {
   overhead: {
     label: 'Fixed Overheads',
-    color: 'var(--theme-accent)',
-    textColor: 'var(--theme-accent-ink)',
+    color: COST_BREAKDOWN_COLORS['Overheads'],
+    textColor: 'var(--theme-text1)',
     target: 25,
     presets: ['Rent', 'Utilities', 'Tech & Software', 'Marketing', 'Insurance', 'Miscellaneous'],
     placeholders: {
@@ -44,7 +46,7 @@ const BUCKET_CONFIG = {
   },
   labor: {
     label: 'Labor Costs',
-    color: 'var(--theme-text1)',
+    color: COST_BREAKDOWN_COLORS['Labor'],
     textColor: 'var(--theme-text1)',
     target: 30,
     presets: ['Manager / Head Chef', 'Kitchen Staff', 'Service Staff', 'Part-time / Hourly', 'Benefits & Bonuses'],
@@ -58,8 +60,8 @@ const BUCKET_CONFIG = {
   },
   tax_fees: {
     label: 'Tax & Fees',
-    color: 'var(--theme-purple)',
-    textColor: 'var(--theme-purple-text)',
+    color: COST_BREAKDOWN_COLORS['Tax & Fees'],
+    textColor: 'var(--theme-text1)',
     target: 5,
     presets: ['VAT Compliance', 'Card Processing', 'Bank Charges', 'License & Permits', 'Accountant Fees'],
     placeholders: {
@@ -83,9 +85,6 @@ const LC_FILL = { good: 'var(--theme-green)', watch: 'var(--theme-accent)', high
 
 // Same banner shape PayrollRun.jsx's stale-draft card uses (design-system.md, S741).
 const amberBanner = { background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }
-// The accent note this page already used for the superseded Labor tab: a fact about the month the
-// owner should know, not a warning. Shared now that a second note wears it (S792, COSTS-14).
-const infoBanner = { background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }
 
 function seedBucket(key) {
   return BUCKET_CONFIG[key].presets.map(cat => emptyRow(cat))
@@ -570,14 +569,14 @@ export default function Overheads() {
   // called Food Cost (S792, D30): Food Cost % is what was USED, from the month-end count, and
   // lives on Monthly Summary. It is still measured against the food cost target, as a guide.
   const pnlRows = hasSales ? [
-    { key: 'food',   label: 'Purchases',  amount: entered.food  ? foodCost         : null, target: fcThresholds(settings).warn, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)',
+    { key: 'food',   label: 'Purchases',  amount: entered.food  ? foodCost         : null, target: fcThresholds(settings).warn, color: COST_BREAKDOWN_COLORS['Food Cost'], textColor: 'var(--theme-text1)',
       note: 'bought, not stock used' },
-    { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: LABOR_WARN, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)',
+    { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: LABOR_WARN, color: COST_BREAKDOWN_COLORS['Labor'], textColor: 'var(--theme-text1)',
       note: labourSource === 'payroll' ? 'from finalized payroll'
           : labourSource === 'unreadable' ? (totals.labor > 0 ? 'payroll cannot be read on this login — Labor tab only' : 'payroll cannot be read on this login')
           : labourSource === 'overheads' ? 'from Overheads entry' : hrOn ? 'no finalized payroll run, and nothing on the Labor tab' : 'nothing on the Labor tab' },
-    { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: 'var(--theme-green)', textColor: 'var(--theme-green-text)' },
-    { key: 'tax',    label: 'Tax & Fees', amount: entered.tax   ? totals.tax_fees  : null, target: 5,  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
+    { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: COST_BREAKDOWN_COLORS['Overheads'], textColor: 'var(--theme-text1)' },
+    { key: 'tax',    label: 'Tax & Fees', amount: entered.tax   ? totals.tax_fees  : null, target: 5,  color: COST_BREAKDOWN_COLORS['Tax & Fees'], textColor: 'var(--theme-text1)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
       color:     noVerdict ? 'var(--theme-text2)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
       textColor: noVerdict ? 'var(--theme-text1)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
@@ -723,8 +722,8 @@ export default function Overheads() {
       {/* S792 (COSTS-14): a month saved with no fixed costs is a record of zero, not "nothing saved
           yet" — and its figures below are this month's, not a copy of the last one's. */}
       {!loading && savedEmpty && (
-        <div role="status" style={infoBanner}>
-          <strong style={{ color: 'var(--theme-accent-ink)' }}>{period?.label || 'This period'} is saved with no fixed costs.</strong>{' '}
+        <div role="status" className="note-banner">
+          <strong>{period?.label || 'This period'} is saved with no fixed costs.</strong>{' '}
           Nothing is copied from an earlier month: the Fixed Overheads, Labor and Tax &amp; Fees tabs count as zero for it.
           {!isLocked && ' To record some, enter them below and press Save — they replace this.'}
         </div>
@@ -746,8 +745,8 @@ export default function Overheads() {
           owner who notices the two figures differ can reconcile them instead of guessing which
           one the statement used. */}
       {ignoredLabourBucket > 0 && (
-        <div style={infoBanner}>
-          <strong style={{ color: 'var(--theme-accent-ink)' }}>Labour comes from your finalized payroll run this period ({fmt(labourEffective)}).</strong>{' '}
+        <div className="note-banner">
+          <strong>Labour comes from your finalized payroll run this period ({fmt(labourEffective)}).</strong>{' '}
           The {fmt(ignoredLabourBucket)} on the Labor tab is <strong>not</strong> added to the P&amp;L below — payroll and the Labor bucket are two measurements of the same cost, and summing them would double-count it. The tab stays editable for months with no payroll run.
         </div>
       )}
@@ -765,7 +764,7 @@ export default function Overheads() {
             label: 'Fixed Overheads', value: entered.oh ? fmt(totals.overhead) : '—',
             sub: !entered.oh ? 'Not entered yet'
                : fmtPct(totals.overhead, revenue) ? `${fmtPct(totals.overhead, revenue)} ${ofRevenue}` : 'No sales data',
-            color: 'var(--theme-accent-ink)',
+            color: 'var(--theme-text1)',
             tip: 'Rent, utilities, tech, marketing — costs that exist regardless of how many customers you serve.'
           },
           {
@@ -782,7 +781,7 @@ export default function Overheads() {
             label: 'Tax & Fees', value: entered.tax ? fmt(totals.tax_fees) : '—',
             sub: !entered.tax ? 'Not entered yet'
                : fmtPct(totals.tax_fees, revenue) ? `${fmtPct(totals.tax_fees, revenue)} ${ofRevenue}` : 'No sales data',
-            color: 'var(--theme-purple-text)',
+            color: 'var(--theme-text1)',
             tip: 'VAT compliance, card processing fees, bank charges, licenses. Often forgotten but real.'
           },
           {
@@ -824,14 +823,14 @@ export default function Overheads() {
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 padding: '10px 20px', fontSize: 13, fontWeight: 500,
-                color: activeBucket === key ? (c.textColor || c.color) : 'var(--theme-text2)',
-                borderBottom: activeBucket === key ? `2px solid ${c.color}` : '2px solid transparent',
+                color: activeBucket === key ? 'var(--theme-text1)' : 'var(--theme-text2)',
+                borderBottom: activeBucket === key ? '2px solid var(--theme-accent)' : '2px solid transparent',
                 marginBottom: -1, transition: 'color 0.12s', whiteSpace: 'nowrap'
               }}
             >
               {c.label}
               {totals[key] > 0 && (
-                <span style={{ marginLeft: 8, fontSize: 11, background: 'color-mix(in srgb, var(--theme-text1) 8%, transparent)', borderRadius: 'var(--radius-md)', padding: '2px 7px', color: c.textColor || c.color }}>
+                <span style={{ marginLeft: 8, fontSize: 11, background: 'color-mix(in srgb, var(--theme-text1) 8%, transparent)', borderRadius: 'var(--radius-md)', padding: '2px 7px', color: 'var(--theme-text2)' }}>
                   {fmt(totals[key])}
                 </span>
               )}
@@ -1070,9 +1069,9 @@ export default function Overheads() {
           )}
         </div>
       ) : (
-        <div className="card" style={{ marginBottom: 16, background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderColor: 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' }}>
+        <div className="note-banner" style={{ marginBottom: 16 }}>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
-            💡 Add sales entries for this period to unlock the <strong style={{ color: 'var(--theme-accent-ink)' }}>P&L Summary</strong>, <strong style={{ color: 'var(--theme-accent-ink)' }}>Break-Even</strong>, and <strong style={{ color: 'var(--theme-accent-ink)' }}>Overhead per Cover</strong> panels.
+            💡 Add sales entries for this period to unlock the <strong style={{ color: 'var(--theme-text1)' }}>P&L Summary</strong>, <strong style={{ color: 'var(--theme-text1)' }}>Break-Even</strong>, and <strong style={{ color: 'var(--theme-text1)' }}>Overhead per Cover</strong> panels.
           </p>
         </div>
       )}
@@ -1084,10 +1083,10 @@ export default function Overheads() {
 
           {/* Revenue cost stack — only when sales data available */}
           {hasSales && (() => {
-            const fc  = { key: 'food',     label: 'Purchases', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
-            const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', textColor: 'var(--theme-text1)', amount: labourEffective, pct: pct(labourEffective, revenue) || 0 }
-            const oh  = { key: 'overhead', label: 'Overhead',  color: 'var(--theme-green)', textColor: 'var(--theme-green-text)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
-            const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
+            const fc  = { key: 'food',     label: 'Purchases', color: COST_BREAKDOWN_COLORS['Food Cost'], textColor: 'var(--theme-text1)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
+            const lb  = { key: 'labor',    label: 'Labor',     color: COST_BREAKDOWN_COLORS['Labor'], textColor: 'var(--theme-text1)', amount: labourEffective, pct: pct(labourEffective, revenue) || 0 }
+            const oh  = { key: 'overhead', label: 'Overhead',  color: COST_BREAKDOWN_COLORS['Overheads'], textColor: 'var(--theme-text1)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
+            const tx  = { key: 'tax',      label: 'Tax & Fees',color: COST_BREAKDOWN_COLORS['Tax & Fees'], textColor: 'var(--theme-text1)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
             const prPct = netProfit != null ? pct(netProfit, revenue) : null
             const pr  = { key: 'profit',   label: prPct != null && prPct < 0 ? 'Loss' : 'Net Profit',
                           color:     noVerdict ? 'var(--theme-text2)' : prPct != null && prPct < 0 ? 'var(--theme-red)'      : 'var(--theme-green)',
@@ -1100,7 +1099,7 @@ export default function Overheads() {
                     P&L Summary header — a report that states a scope must state it everywhere the
                     report goes, and this bar carries the same Purchases line. */}
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>
-                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Revenue{periodOpen ? ' so far' : ''} {fmt(revenue)}</span>
+                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>Revenue{periodOpen ? ' so far' : ''} {fmt(revenue)}</span>
                   <span style={{ color: 'var(--theme-text3)' }}> &nbsp;·&nbsp; Purchases are what was bought (net), not food cost used
                   {missingLines.length > 0 ? ` · no ${missingLines.join(', ')} recorded, so the profit slice absorbs ${missingLines.length === 1 ? 'it' : 'them'}` : ''}</span>
                 </div>
@@ -1218,7 +1217,7 @@ export default function Overheads() {
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.category}</td>
                           <td style={{ color: 'var(--theme-text2)', maxWidth: 220 }}>{item.description || '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
                           {revenue > 0 && (
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {item.pctOfRev != null ? `${item.pctOfRev.toFixed(1)}%` : '—'}
@@ -1239,7 +1238,7 @@ export default function Overheads() {
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10, fontSize: 12 }}>TOTAL FIXED COSTS</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>{totalFixed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 10 }}>100%</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>100%</td>
                       {revenue > 0 && (
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10 }}>
                           {fmtPct(totalFixed, revenue)}
@@ -1325,7 +1324,7 @@ export default function Overheads() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fixed OH / Dish</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>
                   {dishes > 0 && totals.overhead > 0 ? fmt(totals.overhead / dishes) : '—'}
                 </div>
               </div>
@@ -1337,7 +1336,7 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Tax & Fees / Dish</div>
-                <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--theme-purple-text)' }}>
+                <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--theme-text1)' }}>
                   {dishes > 0 && totals.tax_fees > 0 ? fmt(totals.tax_fees / dishes) : '—'}
                 </div>
               </div>
@@ -1356,12 +1355,12 @@ export default function Overheads() {
       )}
 
       {/* Footer note */}
-      <div className="card" style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderColor: 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' }}>
+      <div className="note-banner" style={{ marginBottom: 0 }}>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.7 }}>
-          💡 <strong style={{ color: 'var(--theme-accent-ink)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
+          💡 <strong style={{ color: 'var(--theme-text1)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
         </p>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '10px 0 0', lineHeight: 1.7 }}>
-          📐 <strong style={{ color: 'var(--theme-accent-ink)' }}>What the figures on this page mean:</strong>{' '}
+          📐 <strong style={{ color: 'var(--theme-text1)' }}>What the figures on this page mean:</strong>{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Purchases</strong> are net purchases — what you bought in the period, less bill discounts and vendor returns — not food cost. They ignore opening and closing stock, so a month where you built stock reads worse than it was and a month where you ran it down reads better; Food Cost % (what was used, from the stock count) is on Monthly Summary.{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Dishes</strong> is portions sold, not guests — Crest counts guests as <em>covers</em>, from POS bills only, which this page does not read.{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Labor</strong> is your finalized payroll run when one exists for the period, otherwise whatever is on the Labor tab — never both added together.

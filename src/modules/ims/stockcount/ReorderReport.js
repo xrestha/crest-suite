@@ -486,7 +486,7 @@ export default function ReorderReport() {
               <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={!figuresReady || reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
             </Tip>
             {selectedIds.size > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {selectedIds.size} selected
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
               </span>
@@ -545,15 +545,15 @@ export default function ReorderReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Period</div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-accent-ink)' }}>{periodLabel}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>{periodLabel}</div>
           <div className="stat-sub">{selectedPeriod?.status === 'open' ? 'Open period' : 'Closed period'}</div>
         </div>
       </div>
       )}
 
       {!loading && noPar > 0 && (
-        <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
-          <strong style={{ color: 'var(--theme-accent-ink)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
+        <div className="no-print note-banner">
+          <strong style={{ color: 'var(--theme-text1)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
         </div>
       )}
 
@@ -649,7 +649,7 @@ export default function ReorderReport() {
                           <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</div>
                           {row.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{row.item.item_code}</div>}
                         </td>
-                        <td><span className="badge badge-yellow">{row.category}</span></td>
+                        <td><span className="badge badge-gray">{row.category}</span></td>
                         <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>
                         <td style={{ textAlign: 'right' }}>
                           {isEditing ? (

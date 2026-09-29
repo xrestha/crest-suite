@@ -526,7 +526,7 @@ export default function FifoReport() {
                     <th>Category</th>
                     <th><Tip text="The day this batch was bought. Batches from the 12 months up to the selected month are included — expiry does not respect a month or a fiscal-year boundary." width={280}>Bought</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="What is left of this batch: purchased quantity, less returns, less consumption (sales usage, wastage, staff meals) taken oldest-batch-first. At every closed month with a stock count the item is set to what was counted — stock the count did not find comes off the oldest batches too. Stock carried into the window is consumed before any batch listed here. Not batch-precise — nothing in the data records which lot a portion came out of." width={320}>On Hand</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>
+                    <th style={{ textAlign: 'right' }}>Returned</th>
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>Rate</th>
                     <th style={{ textAlign: 'right' }}>Value</th>
@@ -541,15 +541,15 @@ export default function FifoReport() {
                     return (
                       <tr key={row.id} style={{ background: row.flag === 'expired' ? 'color-mix(in srgb, var(--theme-red) 4%, transparent)' : row.flag === 'warning' ? 'color-mix(in srgb, var(--theme-amber) 4%, transparent)' : 'transparent' }}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.itemName}</td>
-                        <td><span className="badge badge-yellow">{row.category}</span></td>
+                        <td><span className="badge badge-gray">{row.category}</span></td>
                         <td style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{row.boughtLabel}</td>
                         <td style={{ textAlign: 'right' }}>{Number(row.qty.toFixed(3))}</td>
-                        <td style={{ textAlign: 'right', color: row.returnedQty > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
+                        <td style={{ textAlign: 'right', color: row.returnedQty > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                           {row.returnedQty > 0 ? `−${Number(row.returnedQty.toFixed(3))}` : '—'}
                         </td>
                         <td style={{ color: 'var(--theme-text2)' }}>{row.uom}</td>
                         <td style={{ textAlign: 'right' }}>{nprInt(row.rate)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{npr(row.value)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{npr(row.value)}</td>
                         <td style={{ color: fs.color, whiteSpace: 'nowrap' }}>{row.expiryDate}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: fs.color, whiteSpace: 'nowrap' }}>
                           {row.daysUntilExpiry === null ? '—'

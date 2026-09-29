@@ -246,9 +246,12 @@ export function billKeyOf(e, period) {
 }
 
 // Aging bucket for a Credit bill's remaining balance, by calendar days since the bill date.
+// Colour is a verdict, so it starts where "overdue" does (S796): Outstanding Payables counts a bill
+// overdue past 60 days, and a 31-60 chip in red beside an "Overdue Bills 0" card said the opposite.
+// A current bill is not good news either (it is ordinary credit), so it takes no green.
 export function aging(days) {
-  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green-text)' }
-  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent-ink)' }
+  if (days <= 30) return { label: 'Current',    color: 'var(--theme-text2)' }
+  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-text1)' }
   if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber-text)' }
   return                 { label: '90+ days',   color: 'var(--theme-red-text)' }
 }

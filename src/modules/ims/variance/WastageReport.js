@@ -197,7 +197,7 @@ export default function WastageReport() {
           <div className="stat-label">
             <Tip text="Everything logged as waste this period, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike. The Wastage tiles on the Dashboard and the Owner Dashboard show this same total." width={260}>Total Wastage Value</Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{fmt(totalValue)}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{fmt(totalValue)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Items with Wastage</div>
@@ -230,9 +230,9 @@ export default function WastageReport() {
               <tbody>
                 {reasons.map(r => (
                   <tr key={r.reason}>
-                    <td><span className="badge badge-yellow">{r.reason}</span></td>
+                    <td><span className="badge badge-gray">{r.reason}</span></td>
                     <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(r.value)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.value)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
                 ))}
@@ -284,7 +284,7 @@ export default function WastageReport() {
                   <td>{r.category}</td>
                   <td>{r.uom}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(r.value)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.value)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                     {totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}
                   </td>
@@ -295,7 +295,7 @@ export default function WastageReport() {
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={3}>Total ({filtered.length} items)</td>
                 <td />
-                <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(filtered.reduce((s, r) => s + r.value, 0))}</td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(filtered.reduce((s, r) => s + r.value, 0))}</td>
                 {/* Computed, never asserted. A hardcoded 100% is right only for as long as the
                     two sums stay identical, and it is exactly the shape that survives the change
                     that breaks it (S594's Supplier Contribution finding). */}

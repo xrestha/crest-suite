@@ -333,7 +333,7 @@ export default function RecipeMargin() {
           <div className="stat-label">
             <Tip text="Revenue less ingredient cost, across every costed recipe with sales this period — the whole period, not the category tab selected below. Revenue is valued at the prices actually charged, extras guests paid for included, and the cost includes the stock those extras used, so it will not always equal Contribution per Portion × Qty." width={320}>Total Contribution</Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{fmtNPR(totalContrib)}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{fmtNPR(totalContrib)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -476,7 +476,7 @@ export default function RecipeMargin() {
                       {r.cost != null && r.extrasCost ? fmtNPR(r.extrasCost) : '—'}
                     </td>
                   )}
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: r.totalContribution != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: r.totalContribution != null ? 'var(--theme-text1)' : 'var(--theme-text3)' }}
                       title={r.totalContribution == null ? r.costReason : undefined}>
                     {r.totalContribution != null ? fmtNPR(r.totalContribution) : '—'}
                   </td>
@@ -497,7 +497,7 @@ export default function RecipeMargin() {
                 </td>
                 <td style={{ textAlign: 'right' }}>{catWithSales.reduce((s, r) => s + r.qty, 0).toLocaleString('en-IN')}</td>
                 {showExtras && <td style={{ textAlign: 'right' }}>{fmtNPR(catTotals.extras)}</td>}
-                <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(catTotals.contrib)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(catTotals.contrib)}</td>
                 <td style={{ textAlign: 'right', ...fcFigure(catTotals.fcPct, settings).style }} title={fcFigure(catTotals.fcPct, settings).title}>
                   {fcFigure(catTotals.fcPct, settings).text}
                 </td>

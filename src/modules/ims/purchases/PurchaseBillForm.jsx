@@ -740,7 +740,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle', textAlign: 'right' }}>
                       {lineAmount > 0 && (
                         <>
-                          <div style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600, paddingTop: 7 }}>
+                          <div style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600, paddingTop: 7 }}>
                             {lineAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                           {line.vat_inclusive && parseFloat(line.rate) > 0 && (
@@ -856,7 +856,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
               )}
               {discount > 0 && (
                 <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                  Discount: <span style={{ color: 'var(--theme-red-text)', fontWeight: 600, marginLeft: 8 }}>− NPR {fmt(discount)}</span>
+                  Discount: <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>− NPR {fmt(discount)}</span>
                 </div>
               )}
               {vatTotal > 0 && (
@@ -864,7 +864,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                   VAT (13%): <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(vatTotal)}</span>
                 </div>
               )}
-              <div style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>
+              <div style={{ color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>
                 Grand Total: NPR {fmt(grandTotal)}
               </div>
             </div>

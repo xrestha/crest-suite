@@ -85,7 +85,7 @@ function BarTooltipContent({ active, payload, label }) {
   return (
     <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 12 }}>
       <div style={{ fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{label}</div>
-      <div style={{ color: 'var(--theme-text2)' }}>Revenue: <span style={{ fontWeight: 600, color: 'var(--theme-accent-ink)' }}>NPR {(payload[0]?.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+      <div style={{ color: 'var(--theme-text2)' }}>Revenue: <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>NPR {(payload[0]?.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
     </div>
   )
 }
@@ -617,7 +617,7 @@ export default function MenuEngineering() {
               footer={topItems.length > 0 && (
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
                   Top {topItems.length} = <strong style={{ color: 'var(--theme-text1)' }}>NPR {topItemsRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
-                  {allItemsRevenue > 0 && <> · <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
+                  {allItemsRevenue > 0 && <> · <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
                 </div>
               )}
               renderChart={h => topItems.length === 0 ? (
@@ -826,13 +826,13 @@ export default function MenuEngineering() {
         <div className="card" style={{ marginTop: 16, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '12px 20px' }}>
           <span style={{ fontSize: 11, color: 'var(--theme-text2)', alignSelf: 'center' }}>Thresholds:</span>
           <Tip text={`Dishes with food cost ≤ ${FC_CUTOFF}% of selling price are 'high profit'. Above ${FC_CUTOFF}% = low profit. A dish with no selling price or no costed ingredients has no food cost to judge, so it is listed as Not rated rather than being placed in a quadrant. So is a build-your-own dish: each plate costs what its guest picked, so it has a cost range (on Recipe Costing) rather than one food cost.`}>
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>FC% cutoff <span style={{ color: 'var(--theme-accent-ink)' }}>{FC_CUTOFF}%</span></span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>FC% cutoff <span style={{ color: 'var(--theme-text1)' }}>{FC_CUTOFF}%</span></span>
           </Tip>
           <Tip text={`Median portions sold this period, across every dish on the menu. Dishes at or above ${medianQty.toFixed(0)} are 'high popularity'; below that, and anything that sold nothing at all, is low popularity.`}>
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Volume cutoff <span style={{ color: 'var(--theme-accent-ink)' }}>median = {medianQty.toFixed(1)} portions</span></span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Volume cutoff <span style={{ color: 'var(--theme-text1)' }}>median = {medianQty.toFixed(1)} portions</span></span>
           </Tip>
           <Tip text="The Bikram Sambat period being analysed. Change the period in the dropdown above to compare months.">
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Period <span style={{ color: 'var(--theme-accent-ink)' }}>{selectedPeriod?.label || ''}</span></span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Period <span style={{ color: 'var(--theme-text1)' }}>{selectedPeriod?.label || ''}</span></span>
           </Tip>
         </div>
       )}

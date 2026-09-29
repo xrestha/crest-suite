@@ -82,11 +82,11 @@ export default function ValuationReportTab({ assets }) {
             </div>
             <div className="stat-card">
               <div className="stat-label">Accumulated Depreciation</div>
-              <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>NPR {fmt(valuation.accumulatedDepreciation)}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>NPR {fmt(valuation.accumulatedDepreciation)}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Net Book Value</div>
-              <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(valuation.nbv)}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>NPR {fmt(valuation.nbv)}</div>
             </div>
           </div>
 
@@ -126,7 +126,7 @@ export default function ValuationReportTab({ assets }) {
                   <tr key={c.categoryName}>
                     <td>{c.categoryName}</td>
                     <td style={{ textAlign: 'right' }}>{fmt(c.totalCost)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(c.accumulatedDepreciation)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(c.accumulatedDepreciation)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(c.nbv)}</td>
                   </tr>
                 ))}
@@ -135,8 +135,8 @@ export default function ValuationReportTab({ assets }) {
                 <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                   <td>Total</td>
                   <td style={{ textAlign: 'right' }}>{fmt(valuation.totalCost)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(valuation.accumulatedDepreciation)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(valuation.nbv)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(valuation.accumulatedDepreciation)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(valuation.nbv)}</td>
                 </tr>
               </tfoot>
             </table>

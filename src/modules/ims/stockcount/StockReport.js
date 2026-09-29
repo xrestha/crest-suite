@@ -370,7 +370,7 @@ export default function StockReport() {
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</div>
                       {r.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{r.item.item_code}</div>}
                     </td>
-                    <td><span className="badge badge-yellow">{r.category}</span></td>
+                    <td><span className="badge badge-gray">{r.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: r.status === 'out' ? 'var(--theme-red-text)' : r.status === 'low' ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
                       {r.onHand.toFixed(2)}
@@ -384,9 +384,9 @@ export default function StockReport() {
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.openQty ? r.openQty.toFixed(1) : '—'}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.netPurch ? r.netPurch.toFixed(1) : '—'}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.usageQty ? r.usageQty.toFixed(1) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: r.wasteQty ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.wasteQty ? r.wasteQty.toFixed(1) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: r.wasteQty ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{r.wasteQty ? r.wasteQty.toFixed(1) : '—'}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.unitRate.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{r.stockValue > 0 ? npr(r.stockValue) : '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{r.stockValue > 0 ? npr(r.stockValue) : '—'}</td>
                     <td>{statusBadge(r.status)}</td>
                   </tr>
                 ))}
@@ -394,7 +394,7 @@ export default function StockReport() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={10} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total stock value ({filtered.length} item{filtered.length !== 1 ? 's' : ''})</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>NPR {npr(filteredValue)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>NPR {npr(filteredValue)}</td>
                   <td></td>
                 </tr>
               </tfoot>

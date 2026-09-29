@@ -23,7 +23,7 @@ import { Navigate } from 'react-router-dom'
 const STATUS_STYLE = {
   Consistent: { badge: 'badge-red',    color: 'var(--theme-red-text)' },
   Occasional: { badge: 'badge-amber',  color: 'var(--theme-amber-text)' },
-  Once:       { badge: 'badge-yellow', color: 'var(--theme-accent-ink)' },
+  Once:       { badge: 'badge-gray',   color: 'var(--theme-text2)' },
   Clear:      { badge: 'badge-green',  color: 'var(--theme-green-text)' },
 }
 
@@ -225,9 +225,9 @@ export default function ShrinkageReport() {
       {loadError && <ReportLoadError error={loadError} />}
 
       {!loadError && <>
-      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-        <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
-        Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: unlogged theft, over-portioning, unlogged spillage, or data entry errors. Anything you log on the Daily Wastage tab — theft included — is explained, and so leaves this figure.
+      <div className="note-banner">
+        <strong style={{ color: 'var(--theme-text1)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
+        Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-text1)' }}>unexplained</em>. Possible causes: unlogged theft, over-portioning, unlogged spillage, or data entry errors. Anything you log on the Daily Wastage tab — theft included — is explained, and so leaves this figure.
         Only items that appear in a recipe are analysed — and a month in which one was used while none of its dishes
         sold counts too, since all of that use is unexplained. A period counts as shrinkage when the item was
         over-used by more than your ±{flagPct}% tolerance <em>and</em> by more than NPR {VARIANCE_MATERIALITY_NPR.toLocaleString('en-IN')} — the
@@ -341,7 +341,7 @@ export default function ShrinkageReport() {
                 {filtered.map(row => (
                   <tr key={row.item.id} className={row.status.label === 'Consistent' ? 'row-tinted' : undefined} style={{ background: row.status.label === 'Consistent' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
-                    <td><span className="badge badge-yellow">{row.category}</span></td>
+                    <td><span className="badge badge-gray">{row.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: row.shrinkCount > 0 ? row.status.color : 'var(--theme-text2)' }}>
                       {row.shrinkCount > 0 ? row.shrinkCount : '—'}

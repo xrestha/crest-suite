@@ -679,7 +679,7 @@ export default function Vendors() {
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {v.name}
                       <span className="cell-sub" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: 'monospace', color: 'var(--theme-accent-ink)' }}>
+                        <span style={{ fontFamily: 'monospace', color: 'var(--theme-text2)' }}>
                           {v.vendor_code || '—'}
                         </span>
                         {usageChip(v)}

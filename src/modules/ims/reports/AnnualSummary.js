@@ -396,14 +396,14 @@ export default function AnnualSummary() {
       {!busy && !loadError && report.rows.length > 0 && (
         <div className="stat-grid">
           {[
-            { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-green-text)',
+            { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-text1)',
               tip: 'Total net sales revenue across all months in this period.' },
-            { label: 'Annual COGS',     value: fmt(report.totCogs),    color: 'var(--theme-accent-ink)',
+            { label: 'Annual COGS',     value: fmt(report.totCogs),    color: 'var(--theme-text1)',
               tip: `Total Cost of Goods Sold: ${COGS_FORMULA}, summed across all months.` },
             { label: 'Annual FC%',      value: fcCell(report.totFcPct, report.totGap).text,
               color: fcCell(report.totFcPct, report.totGap).color,
               tip: 'Annual COGS ÷ Annual Revenue. More accurate than averaging monthly FC% figures.' },
-            { label: 'Annual Wastage',  value: fmt(report.totWaste),   color: 'var(--theme-red-text)',
+            { label: 'Annual Wastage',  value: fmt(report.totWaste),   color: 'var(--theme-text1)',
               tip: 'Total value of stock logged as wastage across all months in this period.' },
           ].map(s => (
             <div key={s.label} className="stat-card">
@@ -431,8 +431,8 @@ export default function AnnualSummary() {
                   <th>Month</th>
                   <th style={{ textAlign: 'right' }}>Revenue</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Bill value before any bill-level discount and before returns — what was invoiced." width={230}>Gross Purchases</Tip></th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value — the same allocation Monthly Summary and Consolidated P&L use, which is what keeps the three pages' COGS tied." width={260}>Discount</Tip></th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value — the same allocation Monthly Summary and Consolidated P&L use, which is what keeps the three pages' COGS tied." width={260}>Discount</Tip></th>
+                  <th style={{ textAlign: 'right' }}>Returns</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus bill discounts minus returns. What COGS is built from." width={240}>Net Purchases</Tip></th>
                   <th style={{ textAlign: 'right' }}>Wastage</th>
                   <th style={{ textAlign: 'right' }}>
@@ -456,7 +456,7 @@ export default function AnnualSummary() {
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                         {row.label}
                         {row.period.status === 'open' && (
-                          <span style={{ fontSize: 10, marginLeft: 6, color: 'var(--theme-green-text)', fontWeight: 700 }}>OPEN</span>
+                          <span style={{ fontSize: 10, marginLeft: 6, color: 'var(--theme-amber-text)', fontWeight: 700 }}>OPEN</span>
                         )}
                         {gapShown(row) && (
                           <span className="badge badge-amber" style={{ marginLeft: 6 }} title={`${row.gap.uncountedCount} of ${row.gap.presentCount} items with stock have no closing count`}>
@@ -464,12 +464,12 @@ export default function AnnualSummary() {
                           </span>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.revenue > 0 ? fmt(row.revenue) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.grossPurch > 0 ? fmt(row.grossPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.discVal > 0 ? `−${fmt(row.discVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.retVal > 0 ? `−${fmt(row.retVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(row.netPurch)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.wasteVal > 0 ? fmt(row.wasteVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.revenue > 0 ? fmt(row.revenue) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.grossPurch > 0 ? fmt(row.grossPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.discVal > 0 ? `−${fmt(row.discVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.retVal > 0 ? `−${fmt(row.retVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(row.netPurch)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.wasteVal > 0 ? fmt(row.wasteVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{row.cogs !== 0 ? fmt(row.cogs) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: fc.color }} title={fc.title}>
                         {row.fcPct != null ? fc.text : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
@@ -497,17 +497,17 @@ export default function AnnualSummary() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 14 }}>ANNUAL TOTAL</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 14 }}>{fmt(report.totRevenue)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totPurch)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totRevenue)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totPurch)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
                     {report.totDisc > 0 ? `−${fmt(report.totDisc)}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
                     {report.totRet > 0 ? `−${fmt(report.totRet)}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totNetPurch)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>{fmt(report.totWaste)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totCogs)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totNetPurch)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totWaste)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totCogs)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 800, paddingTop: 14, fontSize: 14, color: fcCell(report.totFcPct, report.totGap).color }} title={fcCell(report.totFcPct, report.totGap).title}>
                     {fcCell(report.totFcPct, report.totGap).text}
                   </td>

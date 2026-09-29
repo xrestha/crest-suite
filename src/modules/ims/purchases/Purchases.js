@@ -595,7 +595,7 @@ export default function Purchases() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Goods sent back to suppliers in this month, at the rate on the original bill. A return counts in the month it happened — including one against a bill from an earlier month (milk bought on the 28th of last month and returned on the 2nd of this one is this month's return)." width={300}>Returns</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: returnTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+          <div className="stat-value" style={{ fontSize: 16, color: returnTotal > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
             {returnTotal > 0 ? `−NPR ${returnTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
           <div className="stat-sub">
@@ -727,7 +727,7 @@ export default function Purchases() {
                 </select>
               )}
               {filterVendor !== 'all' && (
-                <span style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
+                <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>
                   Vendor Total: NPR {vendorTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
@@ -832,7 +832,7 @@ export default function Purchases() {
                         ) : null
 
                         const dayCell = (
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                             {gIdx === 0 ? (
                               <>
                                 {formatBsDay(day, selectedPeriod?.bs_month)}
@@ -848,10 +848,10 @@ export default function Purchases() {
                         const actionsCell = (
                           <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-                              {/* Credit is a normal commercial arrangement, not a fault — it was badge-red beside a green
-                                  Cash, which reads as a warning on every credit bill a restaurant enters.
-                                  badge-yellow is the categorical tag; overdue-ness is Outstanding Payables' job. */}
-                              <span className={`badge ${methodOf(first) === 'Cash' ? 'badge-green' : methodOf(first) === 'Credit' ? 'badge-yellow' : 'badge-purple'}`}>
+                              {/* A payment method is a category, never a verdict (S796): Cash was green, Credit the
+                                  accent, the rest purple — three colours for one fact, one of them "good". The label
+                                  carries it; overdue-ness is Outstanding Payables' job. */}
+                              <span className="badge badge-gray">
                                 {methodOf(first)}
                               </span>
                               {!isLocked && <>
@@ -895,14 +895,14 @@ export default function Purchases() {
                                 {fmtLineRate(displayRate)}
                                 {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                               </td>
-                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13, verticalAlign: 'middle' }}>
                                 {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                                {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                                 {invoiceFlag}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
-                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
+                                {entry.expiry_date ? <span style={{ color: 'var(--theme-text1)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
                               </td>
                               {actionsCell}
                             </tr>
@@ -929,10 +929,10 @@ export default function Purchases() {
                               {entryLine}
                             </td>
                             <td colSpan={3}></td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13, verticalAlign: 'middle' }}>
                               {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                              {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               {invoiceFlag}
                             </td>
                             <td></td>
@@ -969,11 +969,11 @@ export default function Purchases() {
                                   </>
                                 )
                               })()}
-                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--theme-accent-ink)' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--theme-text1)' }}>
                                 {(entry.qty * entry.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
-                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
+                                {entry.expiry_date ? <span style={{ color: 'var(--theme-text1)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
                               </td>
                               <td></td>
                             </tr>
@@ -990,7 +990,7 @@ export default function Purchases() {
                       </td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12, paddingTop: 12 }}>{filteredQtyUnit}</td>
                       <td></td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                         NPR {filteredValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td colSpan={2}></td>
@@ -1122,7 +1122,7 @@ export default function Purchases() {
                         <th key={d} style={{ ...thStyle, width: 52, color: d % 2 === 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>{d}</th>
                       ))}
                       {/* A QUANTITY, in the item's base unit — the tooltip claimed money until S698. */}
-                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}><Tip text="Total quantity bought across every day of the month, in the item's base unit (the UOM column). Returns are not deducted here. For money, see the Purchases tab." width={260}>Total</Tip></th>
+                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-text1)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}><Tip text="Total quantity bought across every day of the month, in the item's base unit (the UOM column). Returns are not deducted here. For money, see the Purchases tab." width={260}>Total</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1133,7 +1133,7 @@ export default function Purchases() {
                         {/* Category header — click to collapse/expand, so a long item list can be
                             narrowed down without scrolling past categories you don't need right now */}
                         <tr key={`cat-${cat}`} style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', cursor: 'pointer' }} onClick={() => toggleRegisterCat(cat)}>
-                          <td colSpan={3 + numDays + 1} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-accent-ink)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
+                          <td colSpan={3 + numDays + 1} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-text1)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
                             {/* A real disclosure button inside the cell: the row click stays for the mouse,
                                 this is the keyboard path (S682). */}
                             <button type="button" aria-expanded={!collapsed} onClick={e => { e.stopPropagation(); toggleRegisterCat(cat) }}
@@ -1171,7 +1171,7 @@ export default function Purchases() {
                                   </td>
                                 )
                               })}
-                              <td style={{ ...tdStyle, color: 'var(--theme-accent-ink)', fontWeight: 700, borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, background: rowBg }}>
+                              <td style={{ ...tdStyle, color: 'var(--theme-text1)', fontWeight: 700, borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, background: rowBg }}>
                                 {total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                               </td>
                             </tr>

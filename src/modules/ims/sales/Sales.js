@@ -1199,7 +1199,7 @@ export default function Sales() {
         )
       })()}
       {!loading && !loadError && tillHandover?.ignoredForStock.length > 0 && (
-        <div role="note" className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <div role="note" className="no-print note-banner">
           🛈 {tillHandover.ignoredForStock.map(e => dishName(e.recipeId)).join(', ')}{' '}
           {tillHandover.ignoredForStock.length === 1 ? 'has a Bulk total' : 'have Bulk totals'} that stock does not count,{' '}
           {tillHandover.ignoredForStock.every(e => e.reason === 'till_from_day_one')
@@ -1340,13 +1340,13 @@ export default function Sales() {
           {loadError && <ReportLoadError error={loadError} />}
           {!loadError && viewMode === 'bulk' && (
             <>
-              <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+              <div className="no-print note-banner">
                 Enter total qty sold for the entire period per menu item. Sub-recipes are excluded.
               </div>
               <div className="card">
                 <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                    Period total — <strong style={{ color: 'var(--theme-accent-ink)' }}>{periodLabel}</strong>
+                    Period total — <strong style={{ color: 'var(--theme-text1)' }}>{periodLabel}</strong>
                   </span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
@@ -1405,7 +1405,7 @@ export default function Sales() {
                         return (
                           <tr key={recipe.id}>
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
-                            <td><span className="badge badge-yellow">{recipe.category}</span></td>
+                            <td><span className="badge badge-gray">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
@@ -1424,7 +1424,7 @@ export default function Sales() {
                                 }, isLocked)}
                               />
                             </td>
-                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
+                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
                               {rev > 0 ? `NPR ${rev.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                             </td>
                           </tr>
@@ -1441,7 +1441,7 @@ export default function Sales() {
           {/* DAILY ENTRY */}
           {!loadError && viewMode === 'daily' && (
             <>
-              <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+              <div className="no-print note-banner">
                 Enter qty sold per menu item for a single day. Use Bulk Entry for period totals instead.
               </div>
               {/* POS runs this client's sales; only the pre-till days of a hand-started month are
@@ -1545,9 +1545,9 @@ export default function Sales() {
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, marginBottom: 12, fontSize: 13, flexWrap: 'wrap' }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Total qty sold ({formatBsDay(selectedDay, selectedPeriod?.bs_month)}): <strong style={{ color: 'var(--theme-text1)' }}>{totQty.toLocaleString('en-IN')}</strong></span>
                         {totDiscount > 0 && (
-                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {totDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-text1)' }}>NPR {totDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
                         )}
-                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue (typed here): <strong style={{ color: 'var(--theme-accent-ink)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
+                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue (typed here): <strong style={{ color: 'var(--theme-text1)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
                         {hasPosDay && (
                           <span style={{ color: 'var(--theme-text2)' }}>From POS: <strong style={{ color: 'var(--theme-text1)' }}>{posDayRevenue > 0 ? `NPR ${posDayRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
                         )}
@@ -1555,7 +1555,7 @@ export default function Sales() {
                     )
                   })()}
                   {hasPosDay && (
-                    <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 12, fontSize: 12, color: 'var(--theme-text2)' }}>
+                    <div className="no-print note-banner" style={{ padding: '10px 14px', marginBottom: 12, fontSize: 12 }}>
                       🛈 The till already posted sales for this day — shown in the read-only <strong>From POS</strong> column. Save Day writes only what you type in Qty Sold and Discount; it never changes or deletes a POS sale.
                     </div>
                   )}
@@ -1587,7 +1587,7 @@ export default function Sales() {
                         return (
                           <tr key={recipe.id}>
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
-                            <td><span className="badge badge-yellow">{recipe.category}</span></td>
+                            <td><span className="badge badge-gray">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
@@ -1629,7 +1629,7 @@ export default function Sales() {
                                 }, dailyLocked)}
                               />
                             </td>
-                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
+                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
                               {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                           </tr>
@@ -1713,7 +1713,7 @@ export default function Sales() {
                           <tr key={recipe.id}>
                             <td style={{ position: 'sticky', left: 0, background: 'var(--theme-bg)', fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
                             <td style={{ position: 'sticky', left: 160, background: 'var(--theme-bg)' }}>
-                              <span className="badge badge-yellow">{recipe.category}</span>
+                              <span className="badge badge-gray">{recipe.category}</span>
                             </td>
                             {activeDays.map(d => {
                               const qty = pivot[recipe.id]?.[d] || 0
@@ -1728,7 +1728,7 @@ export default function Sales() {
                                 {fmtQty(pivot[recipe.id]?.[0] || 0)}
                               </td>
                             )}
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: total > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: total > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                               {total > 0 ? total.toLocaleString('en-IN') : '—'}
                             </td>
                           </tr>
@@ -1746,7 +1746,7 @@ export default function Sales() {
                             {bulkColTotal > 0 ? bulkColTotal.toLocaleString('en-IN') : '—'}
                           </td>
                         )}
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14 }}>{grandTotal.toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 14 }}>{grandTotal.toLocaleString('en-IN')}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1817,17 +1817,17 @@ export default function Sales() {
                         return (
                           <tr key={recipe.id}>
                             <td style={{ fontWeight: 600, color: sold === 0 ? 'var(--theme-text3)' : 'var(--theme-text1)' }}>{recipe.name}<HiddenTag recipe={recipe} /></td>
-                            <td><span className="badge badge-yellow">{recipe.category}</span></td>
+                            <td><span className="badge badge-gray">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: sold > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                               {sold > 0 ? sold.toLocaleString('en-IN') : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
-                            <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
+                            <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                               {disc > 0 ? `NPR ${disc.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
-                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: 600 }}>
+                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', fontWeight: 600 }}>
                               {rev > 0 ? `NPR ${rev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
@@ -1847,10 +1847,10 @@ export default function Sales() {
                         <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{footerLabel}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString('en-IN')}</td>
                         <td></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
                           {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                           NPR {sumTotalRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td></td>

@@ -51,7 +51,7 @@ import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import SetupGuideCard from '../../components/SetupGuideCard'
 import SupportContactLine from '../../components/SupportContactLine'
 import WeatherHeaderSlot from './WeatherHeaderSlot'
-import { CHART_COLORS } from '../../shared/chartColors'
+import { CHART_COLORS, COST_BREAKDOWN_COLORS } from '../../shared/chartColors'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -1558,14 +1558,8 @@ export default function ClientDashboard() {
   // color. The four cost slices are now plainly categorical and only Net Margin keeps a semantic
   // hue. #60a5fa here is NOT the undocumented accent S521 removed from AdminClients/SuiteGate —
   // that was UI chrome, where the one-accent rule applies; this is a chart series hue, the same
-  // exemption CHART_COLORS already relies on.
-  const COST_BREAKDOWN_COLORS = {
-    'Food Cost':  '#c9a84c', // gold — kept, so the slice matches the FC% line and the Owner Dashboard
-    'Labor':      '#60a5fa', // blue
-    'Overheads':  '#8b5cf6', // violet
-    'Tax & Fees': '#ec4899', // pink
-    'Net Margin': '#34d399', // green — the one slice that stays semantic (profit reads as good)
-  }
+  // exemption CHART_COLORS already relies on. The map itself lives in shared/chartColors.js since
+  // S796, so Overheads' cost stack and bucket bars draw the same slots.
   // Falls back to one combined slice for a `stats` object restored from a pre-S526 session cache,
   // which has overheadTotal but no overheadBuckets — still correct, just less broken out.
   const costBreakdown = [

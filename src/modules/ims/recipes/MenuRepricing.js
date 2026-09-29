@@ -280,7 +280,7 @@ export default function MenuRepricing() {
           <div className="stat-label">
             <Tip text="Sum of (Price Gap × Qty Sold) across all underpriced dishes this period. Extra margin you'd capture by repricing to target — ingredient cost is unchanged, so it drops straight to the bottom line." width={320}>Monthly Opportunity</Tip>
           </div>
-          <div className="stat-value" style={{ color: totalOpportunity ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{fmtNPR(totalOpportunity)}</div>
+          <div className="stat-value" style={{ color: totalOpportunity ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{fmtNPR(totalOpportunity)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Biggest Leak</div>
@@ -420,14 +420,14 @@ export default function MenuRepricing() {
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.targetPct.toFixed(0)}%</td>
                   {/* A suggested price is derived from a cost. With no cost this used to print
                       "NPR 0" in green under a column captioned "the number to print on the menu". */}
-                  <td style={{ textAlign: 'right', fontWeight: r.suggestedMenuPrice != null ? 600 : 400, color: r.suggestedMenuPrice != null ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}
+                  <td style={{ textAlign: 'right', fontWeight: r.suggestedMenuPrice != null ? 600 : 400, color: r.suggestedMenuPrice != null ? 'var(--theme-text1)' : 'var(--theme-text3)' }}
                       title={r.suggestedMenuPrice == null ? r.costReason : undefined}>
                     {r.suggestedMenuPrice != null ? `NPR ${r.suggestedMenuPrice.toFixed(0)}` : '—'}
                   </td>
                   <td style={{ textAlign: 'right', color: r.priceGap > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
                     {r.priceGap > 0 ? `NPR ${r.priceGap.toFixed(2)}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: r.monthlyOpportunity > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: r.monthlyOpportunity > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                     {r.monthlyOpportunity > 0 ? fmtNPR(r.monthlyOpportunity) : '—'}
                   </td>
                 </tr>
@@ -441,7 +441,7 @@ export default function MenuRepricing() {
                   {display.filter(r => r.notCosted).length > 0 ? `, ${display.filter(r => r.notCosted).length} not costed` : ''}
                   {display.filter(r => r.byBuild).length > 0 ? `, ${display.filter(r => r.byBuild).length} build-your-own not rated` : ''})
                 </td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                   {fmtNPR(display.reduce((s, r) => s + (r.monthlyOpportunity || 0), 0))}
                 </td>
               </tr>

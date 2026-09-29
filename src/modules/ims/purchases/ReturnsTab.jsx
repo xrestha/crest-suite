@@ -519,7 +519,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
   return (
     <>
       {purchases.length === 0 && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+        <div className="note-banner">
           No purchases in this month yet. You can still record a return here against a bill from an earlier month.
         </div>
       )}
@@ -673,7 +673,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                 <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmtLineRate(displayRate)}/{displayRateUnit}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{linked.vendors?.name || '—'}</strong></span>
                 <span>Payment: <strong style={{ color: 'var(--theme-text1)' }}>{linked.payment_method || 'Cash'}</strong></span>
-                {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-red-text)' }}>−NPR {retValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>}
+                {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-text1)' }}>−NPR {retValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>}
                 <span style={{ color: 'var(--theme-text3)', fontSize: 11 }}>Rate, vendor & payment inherited from original purchase</span>
               </div>
             )
@@ -724,7 +724,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                   const lateBill = !!bill && bill.period_id !== period?.id
                   return (
                   <tr key={ret.id}>
-                    <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(ret.bs_day, period?.bs_month) || '—'}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{formatBsDay(ret.bs_day, period?.bs_month) || '—'}</td>
                     <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                       {!bill ? (
                         <Tip text="The bill this return was made against has since been deleted or re-saved, so the return is no longer linked to it. It still counts in this month's returns." width={260}>
@@ -733,7 +733,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                       ) : (
                         <>
                           <span style={{ whiteSpace: 'nowrap' }}>{formatBsDay(bill.bs_day, billMonth?.bs_month ?? period?.bs_month) || '—'}{lateBill && billMonth ? ` ${billMonth.bs_year}` : ''}</span>
-                          {lateBill && <span className="badge badge-yellow" style={{ marginLeft: 6 }}>earlier month</span>}
+                          {lateBill && <span className="badge badge-gray" style={{ marginLeft: 6 }}>earlier month</span>}
                           {bill.invoice_ref && <span style={{ display: 'block', whiteSpace: 'nowrap', fontSize: 11, color: 'var(--theme-text3)' }}>#{bill.invoice_ref}</span>}
                         </>
                       )}
@@ -747,7 +747,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                       const displayRate = cf > 1 ? ret.rate * cf : ret.rate
                       return (
                         <>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>
                             −{Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                             {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{Number(ret.qty).toLocaleString('en-IN')} {ret.items?.uom}</div>}
                           </td>
@@ -756,13 +756,13 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                         </>
                       )
                     })()}
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 700 }}>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>
                       −NPR {(ret.qty * ret.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td>
-                      {/* badge-yellow for Credit, as the Purchases tab: a credit bill is a normal
-                          commercial arrangement, not a fault, and red is this product's warning. */}
-                      <span className={`badge ${ret.payment_method === 'Cash' ? 'badge-green' : ret.payment_method === 'Credit' ? 'badge-yellow' : 'badge-purple'}`}>
+                      {/* A payment method is a category, as on the Purchases tab (S796): neutral, the label
+                          carries it. */}
+                      <span className="badge badge-gray">
                         {ret.payment_method || 'Cash'}
                       </span>
                     </td>
@@ -783,7 +783,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                 })}
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={7} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total Returns</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                     −NPR {returnTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td colSpan={3}></td>

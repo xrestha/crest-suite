@@ -455,15 +455,15 @@ export default function VendorReport() {
         // US, and clamping that to zero deletes the state rather than reporting it. Outstanding
         // Payables dropped the same clamp for the same reason and surfaces it as a Credit.
         remaining = Math.round((owed - paid) * 100) / 100
-        if (remaining < -EPS) status = { label: 'Credit', color: 'var(--theme-purple-text)' }
+        if (remaining < -EPS) status = { label: 'Credit', color: 'var(--theme-text1)' }
         else if (remaining <= EPS) status = { label: 'Paid', color: 'var(--theme-green-text)' }
-        else if (paid > EPS) status = { label: 'Partial', color: 'var(--theme-purple-text)' }
+        else if (paid > EPS) status = { label: 'Partial', color: 'var(--theme-amber-text)' }
         else if (selectedPeriod) {
           const adDate = bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, e.bs_day || 1)
           const daysOld = Math.max(0, Math.floor((new Date() - adDate) / (1000 * 60 * 60 * 24)))
           status = aging(daysOld)
         } else {
-          status = { label: 'Outstanding', color: 'var(--theme-red-text)' }
+          status = { label: 'Outstanding', color: 'var(--theme-amber-text)' }
         }
       }
 
@@ -775,7 +775,7 @@ export default function VendorReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Returns</div>
-          <div className="stat-value" style={{ fontSize: 17, color: grandReturn > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+          <div className="stat-value" style={{ fontSize: 17, color: grandReturn > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
             {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
         </div>
@@ -794,7 +794,7 @@ export default function VendorReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total trade/promo discounts received from vendors this period across all bills." width={240}>Discounts Received</Tip></div>
-          <div className="stat-value" style={{ fontSize: 17, color: grandDiscount > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>
+          <div className="stat-value" style={{ fontSize: 17, color: grandDiscount > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
             {grandDiscount > 0 ? `NPR ${grandDiscount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
           {grandDiscount > 0 && <div className="stat-sub">{discountedBills.length} bill{discountedBills.length !== 1 ? 's' : ''}</div>}
@@ -875,7 +875,7 @@ export default function VendorReport() {
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  {r.vendor.vendor_code && <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', marginRight: 8 }}>{r.vendor.vendor_code}</span>}
+                  {r.vendor.vendor_code && <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-text2)', marginRight: 8 }}>{r.vendor.vendor_code}</span>}
                   {r.vendor.name}
                   <span style={{ float: 'right', fontSize: 11, color: 'var(--theme-text3)' }}>NPR {r.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
                 </div>
@@ -912,8 +912,8 @@ export default function VendorReport() {
                   <th>Vendor</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Number of BILLS from this vendor in the period — the same count the drill-down shows when you click the vendor name. Not the number of line items." width={250}>Bills</Tip></th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Trade/promo discount received from this vendor — deducted from net spend." width={230}>Discount</Tip></th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount. A return this month against a bill from an earlier month is credited at that bill's own discount, and shows in the drill-down as its own row naming that bill." width={280}>Returns</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Trade/promo discount received from this vendor — deducted from net spend." width={230}>Discount</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount. A return this month against a bill from an earlier month is credited at that bill's own discount, and shows in the drill-down as its own row naming that bill." width={280}>Returns</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text={vatMode === 'pan' ? 'Net spend = Gross − Discount − Returns. This outlet is not VAT-registered, so the 13% VAT paid to suppliers is not claimable and is included here as part of the cost.' : 'Net spend = Gross − Discount − Returns (ex-VAT). Your true cost obligation to this vendor.'} width={250}>Net Spend</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="This vendor's share of total net purchase spend for the period." width={220}>% of Net Total</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Average daily spend (net) across days this vendor had deliveries.">Avg/Day</Tip></th>
@@ -951,10 +951,10 @@ export default function VendorReport() {
                         {r.returnCount > 0 && <span className="cell-sub" style={{ marginLeft: 6 }}>({r.returnCount} return{r.returnCount > 1 ? 's' : ''})</span>}
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.count}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>NPR {r.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: r.discount > 0 ? 600 : 400 }}>{r.discount > 0 ? `−NPR ${r.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{r.returned > 0 ? `−NPR ${r.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {r.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>NPR {r.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: r.discount > 0 ? 600 : 400 }}>{r.discount > 0 ? `−NPR ${r.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{r.returned > 0 ? `−NPR ${r.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {r.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                           <div style={{ width: 70, height: 5, background: 'var(--theme-border)', borderRadius: 'var(--radius-xs)' }}>
@@ -966,9 +966,9 @@ export default function VendorReport() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                         NPR {r.days > 0 ? (r.net / r.days).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', color: r.cash > 0 ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>{fmt(r.cash)}</td>
-                      <td style={{ textAlign: 'right', color: r.credit > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>{fmt(r.credit)}</td>
-                      <td style={{ textAlign: 'right', color: r.fonepay > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>{fmt(r.fonepay)}</td>
+                      <td style={{ textAlign: 'right', color: r.cash > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{fmt(r.cash)}</td>
+                      <td style={{ textAlign: 'right', color: r.credit > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{fmt(r.credit)}</td>
+                      <td style={{ textAlign: 'right', color: r.fonepay > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{fmt(r.fonepay)}</td>
                     </tr>
                   )
                 })}
@@ -994,10 +994,10 @@ export default function VendorReport() {
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{foot.count}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {foot.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{foot.discount > 0 ? `−NPR ${foot.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{foot.returned > 0 ? `−NPR ${foot.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>NPR {foot.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>NPR {foot.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{foot.discount > 0 ? `−NPR ${foot.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{foot.returned > 0 ? `−NPR ${foot.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>NPR {foot.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{footPct.toFixed(1)}%</td>
                   <td style={{ paddingTop: 12 }}></td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{fmt(foot.cash)}</td>
@@ -1066,7 +1066,7 @@ export default function VendorReport() {
                     })}
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
-                      <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
+                      <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                         NPR {vendorNet(singleVendor.id).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                       </td>
                       <td></td>
@@ -1083,7 +1083,7 @@ export default function VendorReport() {
                     <th>Day</th>
                     {filteredActiveVendors.map(v => <th key={v.id} style={{ textAlign: 'right' }}>{v.name}</th>)}
                     {showUnassignedCol && <th style={{ textAlign: 'right', fontStyle: 'italic', color: 'var(--theme-text3)' }}>Unassigned</th>}
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Day Net Total</th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>Day Net Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1091,7 +1091,7 @@ export default function VendorReport() {
                     const dn = dayShown(day)
                     return (
                       <tr key={day}>
-                        <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(day, selectedPeriod?.bs_month)}</td>
+                        <td style={{ fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{formatBsDay(day, selectedPeriod?.bs_month)}</td>
                         {filteredActiveVendors.map(v => {
                           const val = vendorDayNet(v.id, day)
                           return (
@@ -1115,7 +1115,7 @@ export default function VendorReport() {
                             {vendorDayNet(null, day) !== 0 ? vendorDayNet(null, day).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
                           </td>
                         )}
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                           NPR {dn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </td>
                       </tr>
@@ -1124,7 +1124,7 @@ export default function VendorReport() {
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                     <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
                     {filteredActiveVendors.map(v => (
-                      <td key={v.id} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>
+                      <td key={v.id} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
                         NPR {vendorNet(v.id).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                       </td>
                     ))}
@@ -1133,7 +1133,7 @@ export default function VendorReport() {
                         NPR {vendorNet(null).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                       </td>
                     )}
-                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                       NPR {shownNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </td>
                   </tr>
@@ -1167,7 +1167,7 @@ export default function VendorReport() {
                         <th>Vendor</th>
                         <th style={{ textAlign: 'right' }}><Tip text="Number of bills from this vendor that included a trade discount."># Discounted Bills</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Total ex-VAT list price of all discounted bills from this vendor.">Bill Total (ex-VAT)</Tip></th>
-                        <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Total discount amount received from this vendor across all bills.">Discount Received</Tip></th>
+                        <th style={{ textAlign: 'right' }}><Tip text="Total discount amount received from this vendor across all bills.">Discount Received</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Average discount rate = Total Discount ÷ Bill Total × 100." width={220}>Avg Disc %</Tip></th>
                       </tr>
                     </thead>
@@ -1177,7 +1177,7 @@ export default function VendorReport() {
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{v.name}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{v.count}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {v.totalGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 700 }}>NPR {v.totalDiscount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>NPR {v.totalDiscount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{v.totalGross > 0 ? ((v.totalDiscount / v.totalGross) * 100).toFixed(1) : '0'}%</td>
                         </tr>
                       ))}
@@ -1185,7 +1185,7 @@ export default function VendorReport() {
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TOTAL</td>
                         <td style={{ textAlign: 'right' }}>{discountedBills.length}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {discountedBills.reduce((s, b) => s + b.billTotal, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>NPR {grandDiscount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>NPR {grandDiscount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                           {discountedBills.reduce((s, b) => s + b.billTotal, 0) > 0
                             ? ((grandDiscount / discountedBills.reduce((s, b) => s + b.billTotal, 0)) * 100).toFixed(1)
@@ -1207,7 +1207,7 @@ export default function VendorReport() {
                       <th>Vendor</th>
                       <th>Invoice</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Sum of qty × rate for all items on the bill, before discount and VAT.">Bill Total (ex-VAT)</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Trade/promo discount amount as shown on the vendor invoice.">Discount</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Trade/promo discount amount as shown on the vendor invoice.">Discount</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Discount as a percentage of the bill total ex-VAT.">Disc %</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text="VAT computed on the taxable base (bill total minus discount), per Nepal IRD." width={250}>VAT (13%)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Grand Total = (Bill Total − Discount) + VAT on taxable amount." width={230}>Grand Total</Tip></th>
@@ -1217,14 +1217,14 @@ export default function VendorReport() {
                   <tbody>
                     {discountedBills.map((b, i) => (
                       <tr key={i}>
-                        <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
+                        <td style={{ color: 'var(--theme-text1)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{b.vendor}</td>
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {b.billTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 700 }}>NPR {b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>NPR {b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.discPct.toFixed(1)}%</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{b.vat > 0 ? `NPR ${b.vat.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {b.grand.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>NPR {b.grand.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod || '—'}</span></td>
                       </tr>
                     ))}
@@ -1264,9 +1264,9 @@ export default function VendorReport() {
                   {drilldownBills.filter(b => !b.kind).length} bill{drilldownBills.filter(b => !b.kind).length !== 1 ? 's' : ''}
                   {drilldownBills.some(b => b.kind) && ` · ${drilldownBills.filter(b => b.kind).length} return row${drilldownBills.filter(b => b.kind).length !== 1 ? 's' : ''} against other bills`}
                 </span>
-                <span>Net: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {drilldownBills.reduce((s, b) => s + b.net, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
+                <span>Net: <strong style={{ color: 'var(--theme-text1)' }}>NPR {drilldownBills.reduce((s, b) => s + b.net, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
                 {drilldownOutstanding > 0 && (
-                  <span>Outstanding: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {drilldownOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
+                  <span>Outstanding: <strong style={{ color: 'var(--theme-text1)' }}>NPR {drilldownOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
                 )}
               </div>
               <div className="table-wrap">
@@ -1278,8 +1278,8 @@ export default function VendorReport() {
                       <th style={{ textAlign: 'right' }}>Items</th>
                       <th>Payment</th>
                       <th style={{ textAlign: 'right' }}>Bill Total</th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Discount</th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
+                      <th style={{ textAlign: 'right' }}>Discount</th>
+                      <th style={{ textAlign: 'right' }}>Returns</th>
                       <th style={{ textAlign: 'right' }}><Tip text={vatMode === 'pan' ? 'After discount and returns, with the VAT paid on VAT bills included (not claimable on a PAN-bill outlet) — the same basis as the Net Spend column on the vendor row that opened this.' : 'Ex-VAT, after discount and returns — the same basis as the Net Spend column on the vendor row that opened this.'} width={250}>Net</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced: bill discount applied, goods returned taken off at the discounted price, 13% VAT on the taxable part. For a Credit bill it counts goods returned in ANY month, including after this one — the Returns and Net columns count only this month's. This is the figure payments are measured against, and it is what Outstanding Payables shows for the same bill." width={300}>Payable</Tip></th>
                       <th>Status</th>
@@ -1296,7 +1296,7 @@ export default function VendorReport() {
                               The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
                           <tr style={{ cursor: 'pointer' }}
                             onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}>
-                            <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
+                            <td style={{ color: 'var(--theme-text1)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
                             <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
                               {/* S756 (D10): a return row carries no invoice of its own — it names
                                   the bill it came off, since that bill is in another month's report. */}
@@ -1317,9 +1317,9 @@ export default function VendorReport() {
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.kind ? '—' : b.itemCount}</td>
                             <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.kind ? '—' : `NPR ${b.total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}</td>
-                            <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                            <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{b.returned > 0 ? `−NPR ${b.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {b.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{b.returned > 0 ? `−NPR ${b.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {b.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {/* A return row has no payable of its own here: what is owed is
                                   measured on its bill, in that bill's month (S756). */}
@@ -1329,7 +1329,7 @@ export default function VendorReport() {
                                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>net of a later month&apos;s return</div>
                               )}
                               {b.paymentMethod === 'Credit' && Math.abs(b.remaining) > EPS && (
-                                <div style={{ fontSize: 11, color: b.remaining < 0 ? 'var(--theme-purple-text)' : 'var(--theme-red-text)' }}>
+                                <div style={{ fontSize: 11, color: b.remaining < 0 ? 'var(--theme-text2)' : 'var(--theme-text2)' }}>
                                   {b.remaining < 0 ? 'credit ' : 'due '}NPR {Math.abs(b.remaining).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                                 </div>
                               )}
@@ -1385,7 +1385,7 @@ export default function VendorReport() {
                                           </td>
                                           <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString('en-IN')}</td>
                                           <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString('en-IN')}</td>
-                                          <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>NPR {(e.qty * e.rate).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                                          <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {(e.qty * e.rate).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -1408,7 +1408,7 @@ export default function VendorReport() {
                                               {/* retValueOf, not qty × rate (S756): the Returns cell on the
                                                   row above is net of the bill's discount, so its lines
                                                   must be too or they cannot be added up to it. */}
-                                              <td style={{ padding: '5px 0 5px 16px', textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>−NPR {ix.retValueOf(r).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                                              <td style={{ padding: '5px 0 5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>−NPR {ix.retValueOf(r).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -1423,14 +1423,14 @@ export default function VendorReport() {
                                         <tbody>
                                           {b.payments.map(p => (
                                             <tr key={p.id}>
-                                              <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green-text)' }}>{p.paid_at}</td>
+                                              <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)' }}>{p.paid_at}</td>
                                               <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {parseFloat(p.amount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                                               <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
                                             </tr>
                                           ))}
                                           <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                             <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
-                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {b.paid.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {b.paid.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                                             <td />
                                           </tr>
                                         </tbody>

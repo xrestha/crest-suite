@@ -484,8 +484,8 @@ export default function TheoreticalVariance() {
       )}
 
       {/* Explanation banner */}
-      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
-        <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
+      <div className="note-banner">
+        <strong style={{ color: 'var(--theme-text1)' }}>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
         Actual = {COGS_FORMULA}. The gap reveals over-portioning, theft, or data entry errors.
         Red rows need investigation. Green = within the ±{varianceFlagPct(settings)}% tolerance set in
         Settings → Thresholds; ≈ marks a gap too small in rupees to be worth chasing. An ingredient
@@ -626,7 +626,7 @@ export default function TheoreticalVariance() {
                           </Tip>
                         )}
                       </td>
-                      <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
+                      <td><span className="badge badge-gray">{item.categories?.name}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtQty(theoreticalUsed)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtQty(actualUsed)}</td>
@@ -670,7 +670,7 @@ export default function TheoreticalVariance() {
                 return (
                   <tfoot>
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text1)' }}>
                         {excluded > 0
                           ? <Tip text="The totals on this row cover counted items that appear in a recipe. An item with no closing count has an 'actual' that is everything on hand — a figure, not a finding — and an item in no recipe has nothing to compare against, so both are left out, exactly as in the cards above." width={300}>
                               Total — {vis.length} judged of {visible.length} shown

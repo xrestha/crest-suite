@@ -302,8 +302,8 @@ export default function MonthlySummary() {
           <div className="stat-grid">
             {[
               { label: 'Opening Stock',    value: fmt(report.totalOpening),     color: 'var(--theme-text1)' },
-              { label: 'Gross Purchases',  value: fmt(report.totalPurchase),    color: 'var(--theme-accent-ink)' },
-              { label: 'Returns',          value: fmt(report.totalReturn),      color: 'var(--theme-red-text)',
+              { label: 'Gross Purchases',  value: fmt(report.totalPurchase),    color: 'var(--theme-text1)' },
+              { label: 'Returns',          value: fmt(report.totalReturn),      color: 'var(--theme-text1)',
                 sub: report.totalReturn > 0 || report.totalDiscount > 0
                   ? `Net purchases: ${fmt(report.totalNetPurchase)}${report.totalDiscount > 0 ? ` (after ${fmt(report.totalDiscount)} discount)` : ''}`
                   : 'None this period' },
@@ -311,16 +311,16 @@ export default function MonthlySummary() {
               // Wasted prep is already in COGS through the raw items it was made from, so the
               // dashboards' and the Wastage Report's all-items figure (periodWastageValue) would
               // count it twice here.
-              { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-red-text)',
+              { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-text1)',
                 tip: 'The wastage taken out of COGS: raw items only. Wasted prep (a tray of momo filling) is already counted through the flour and meat it was made from, so the Wastage Report and the Dashboard, which list everything thrown away, can show a higher figure for the same month.' },
               // Nothing counted yet is not NPR 0 of stock (S796): the figure the page cannot know
               // says so, in neutral ink, instead of printing a zero in the verdict colour.
               closingUncounted(report.gap)
                 ? { label: 'Closing Stock', value: 'Not counted', color: 'var(--theme-text2)',
                     sub: isOpenPeriod ? 'Counted at month end' : 'No closing count was saved' }
-                : { label: 'Closing Stock', value: fmt(report.totalClosing), color: 'var(--theme-green-text)',
+                : { label: 'Closing Stock', value: fmt(report.totalClosing), color: 'var(--theme-text1)',
                     sub: gapNamed && report.gap?.uncountedCount > 0 ? `${report.gap.uncountedCount} item${report.gap.uncountedCount === 1 ? '' : 's'} not counted` : undefined },
-              { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-accent-ink)',
+              { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-text1)',
                 sub: cogsShareLine(report.fcPct, withholdVerdict, isOpenPeriod),
                 tip: `Cost of Goods Used: ${COGS_FORMULA}. The actual ingredient cost consumed.` }
             ].map(s => (
@@ -355,14 +355,14 @@ export default function MonthlySummary() {
           }}>
             <div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Net Sales Revenue</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green-text)' }}>{fmt(report.totalRevenue)}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmt(report.totalRevenue)}</div>
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>From sales entries (excl. VAT)</div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
                 <Tip text={`${COGS_FORMULA}. This is the actual ingredient cost consumed during the period.`} width={260}>Cost of Goods Used (COGS)</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmt(report.totalCOGS)}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmt(report.totalCOGS)}</div>
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>{COGS_FORMULA}</div>
             </div>
             <div>
@@ -414,11 +414,11 @@ export default function MonthlySummary() {
                     <th>Category</th>
                     <th style={{ textAlign: 'right' }}>Opening Stock</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Bill value before any bill-level discount and before returns — what was invoiced." width={230}>Gross Purchases</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value. Vendor Report and Consolidated P&amp;L net the same amount off." width={250}>Discount</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value. Vendor Report and Consolidated P&amp;L net the same amount off." width={250}>Discount</Tip></th>
+                    <th style={{ textAlign: 'right' }}>Returns</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus bill discounts minus returns to vendor. The true amount spent on stock this period, and what COGS is built from." width={240}>Net Purchases</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Wastage taken out of COGS, raw items only: wasted prep is already counted through the raw items it was made from. The Wastage Report lists everything thrown away, prep included." width={250}>Wastage</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from COGS separately from wastage." width={240}>Staff Meals</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from COGS separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing Stock</th>
                     <th style={{ textAlign: 'right' }}><Tip text={`Cost of Goods Used: ${COGS_FORMULA}. Ingredient cost actually consumed.`} width={250}>COGS</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="This category's COGS as a share of total COGS. Shows which category drives your ingredient spend." width={230}>% of Total COGS</Tip></th>
@@ -444,28 +444,28 @@ export default function MonthlySummary() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                           {row.openingVal > 0 ? fmt(row.openingVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>
                           {row.purchaseVal > 0 ? fmt(row.purchaseVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {row.discountVal > 0 ? `−${fmt(row.discountVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {row.returnVal > 0 ? `−${fmt(row.returnVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
                         {/* Always printed, never a dash: this column has a TOTAL under it, and a
                             column whose cells cannot be added up to its own total is unreadable.
                             It previously showed "—" whenever net equalled gross. */}
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {fmt(row.netPurchaseVal)}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {row.wastageVal > 0 ? fmt(row.wastageVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {(row.staffMealsVal || 0) > 0 ? fmt(row.staffMealsVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {row.closingVal > 0 ? fmt(row.closingVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
@@ -489,18 +489,18 @@ export default function MonthlySummary() {
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                     <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 14, fontSize: 14 }}>TOTAL</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 14 }}>{fmt(report.totalOpening)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totalPurchase)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totalPurchase)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
                       {report.totalDiscount > 0 ? `−${fmt(report.totalDiscount)}` : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
                       {report.totalReturn > 0 ? `−${fmt(report.totalReturn)}` : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totalNetPurchase)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>{fmt(report.totalWastage)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple-text)', paddingTop: 14 }}>{report.totalStaffMeals > 0 ? fmt(report.totalStaffMeals) : '—'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 14 }}>{closingUncounted(report.gap) ? <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>Not counted</span> : fmt(report.totalClosing)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totalCOGS)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totalNetPurchase)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totalWastage)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{report.totalStaffMeals > 0 ? fmt(report.totalStaffMeals) : '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{closingUncounted(report.gap) ? <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>Not counted</span> : fmt(report.totalClosing)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totalCOGS)}</td>
                     <td style={{ textAlign: 'right', paddingTop: 14, fontWeight: 700, color: 'var(--theme-text2)' }}>100%</td>
                   </tr>
                 </tfoot>

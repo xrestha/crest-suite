@@ -141,11 +141,11 @@ The asset is still on the register as active.`, detail })
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total cost less any depreciation already taken before Crest, less every depreciation charge posted for this asset, reversals included, whatever period each one covers." width={270}>Current NBV</Tip></div>
-          <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{figuresReal ? `NPR ${fmt(currentNbv)}` : '—'}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{figuresReal ? `NPR ${fmt(currentNbv)}` : '—'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Accumulated Depreciation</div>
-          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{figuresReal ? `NPR ${fmt(accumulatedDepreciation)}` : '—'}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{figuresReal ? `NPR ${fmt(accumulatedDepreciation)}` : '—'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">% Depreciated</div>

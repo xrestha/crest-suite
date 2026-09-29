@@ -225,7 +225,7 @@ export default function BudgetVsActual() {
         </div>
       </div>
 
-      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+      <div className="note-banner">
         Enter a budget for each category — the app compares it against net purchases (purchases − bill discounts − returns) for the selected period, the same figure Monthly Summary shows. Budgets are saved automatically when you click out of the box.
       </div>
 
@@ -340,7 +340,7 @@ export default function BudgetVsActual() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td></td>
-                  <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                  <td style={{ fontWeight: 700, color: 'var(--theme-text1)' }}>
                     {unbudgeted !== 0
                       ? <Tip text="Budget totals the categories you have set one for. Actual is the period's whole net purchase value, including the unbudgetable row above — the same figure as Monthly Summary's Net Purchases. Variance compares budget against the budgeted categories only." width={290}>Totals</Tip>
                       : 'Totals'}

@@ -381,7 +381,7 @@ export default function StockMovements() {
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total batches across every sub-recipe below — a rough measure of how much prep work this period's sales required." width={260}>Batches Used</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>{subBatchTotal.toLocaleString('en-IN', { maximumFractionDigits: 1 })}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-text1)' }}>{subBatchTotal.toLocaleString('en-IN', { maximumFractionDigits: 1 })}</div>
             <div className="stat-sub">summed across all sub-recipes</div>
           </div>
           <div className="stat-card">
@@ -404,7 +404,7 @@ export default function StockMovements() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Same calc, restricted to POS Comp rows — the food-cost value of dishes given away complimentary, with zero revenue collected." width={260}>Comp Value</Tip></div>
-          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>NPR {compValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-text1)' }}>NPR {compValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">value given away</div>
         </div>
         <div className="stat-card">
@@ -589,7 +589,7 @@ export default function StockMovements() {
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {r.qty.toLocaleString('en-IN', { maximumFractionDigits: 3 })} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>{r.yieldUom}</span>
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-purple-text)' }}>{r.batches.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{r.batches.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.batchCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   </tr>
@@ -608,11 +608,11 @@ export default function StockMovements() {
                       ? `${subRows.reduce((s, r) => s + r.qty, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${subRows[0].yieldUom}`
                       : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple-text)', paddingTop: 12, fontSize: 13 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12, fontSize: 13 }}>
                     {subBatchTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </td>
                   <td style={{ paddingTop: 12 }} />
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12, fontSize: 14 }}>
                     <Tip width={320} text="Raw-ingredient value, counting each ingredient once. It is deliberately NOT the sum of the Value column: a sub-recipe made from another sub-recipe has the inner one's cost inside its own, so adding every row would pay for it twice.">
                       {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </Tip>
@@ -653,7 +653,7 @@ export default function StockMovements() {
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</div>
                       {r.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{r.item.item_code}</div>}
                     </td>
-                    <td><span className="badge badge-yellow">{r.category}</span></td>
+                    <td><span className="badge badge-gray">{r.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{r.qtyAbs.toFixed(3)}</td>
                     <td>
@@ -690,7 +690,7 @@ export default function StockMovements() {
                       pcs), so one summed quantity would mean nothing. Value is the comparable one. */}
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)', paddingTop: 12 }}>—</td>
                   <td colSpan={3} style={{ paddingTop: 12 }} />
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12, fontSize: 14 }}>
                     {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
                 </tr>

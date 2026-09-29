@@ -31,8 +31,8 @@ const round3 = n => Math.round((parseFloat(n) || 0) * 1000) / 1000
 
 const STATUS_META = {
   draft:     { label: 'Draft',     color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' },
-  sent:      { label: 'Sent',      color: 'var(--theme-purple-text)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' },
-  partial:   { label: 'Partial',   color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' },
+  sent:      { label: 'Sent',      color: 'var(--theme-text1)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' },
+  partial:   { label: 'Partial',   color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)' },
   received:  { label: 'Received',  color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-green) 30%, transparent)' },
   cancelled: { label: 'Cancelled', color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' },
 }
@@ -736,7 +736,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>{l.qty_ordered}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>{l.qty_received || 0}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', color: rem > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{rem}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: rem > 0 ? 'var(--theme-text1)' : 'var(--theme-green-text)' }}>{rem}</td>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>
                         {isFullyReceived ? (
                           <span style={{ color: 'var(--theme-green-text)', fontSize: 12 }}>✓ Done</span>
@@ -751,7 +751,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                         {/* Per BASE unit, so a gram's price keeps its decimals (the PURCHASES-9 rule, S792). */}
                         NPR {fmtLineRate(l.unit_price)}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>
                         {val > 0 ? `NPR ${val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                       </td>
                     </tr>
@@ -761,7 +761,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={6} style={{ ...tdStyle, fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 16 }}>Total Receiving Value</td>
-                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 16 }}>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 16 }}>
                     NPR {receiveLines.reduce((s, l) => s + round3(l.receiving) * l.unit_price, 0)
                       .toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
@@ -891,7 +891,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                         style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
                           padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }} />
                     </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'right', fontSize: 13, color: subtotal > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: 600 }}>
+                    <td style={{ padding: '5px 8px', textAlign: 'right', fontSize: 13, color: subtotal > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', fontWeight: 600 }}>
                       {subtotal > 0 ? `NPR ${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
                     <td style={{ padding: '5px 0', textAlign: 'right' }}>
@@ -906,7 +906,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={4} style={{ paddingTop: 12, fontWeight: 700, color: 'var(--theme-text2)', fontSize: 13 }}>PO Total</td>
-                  <td style={{ paddingTop: 12, textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14 }}>
+                  <td style={{ paddingTop: 12, textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', fontSize: 14 }}>
                     NPR {liveTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
                   <td></td>
@@ -1155,14 +1155,14 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                 return (
                   <tr key={po.id}>
                     <td>
-                      <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{po.po_number}</span>
+                      <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--theme-text2)' }}>{po.po_number}</span>
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{po.vendors?.name || '—'}</td>
                     <td><StatusBadge status={po.status} /></td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
                       {receivedCount}/{itemCount} items
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                       {total > 0 ? `NPR ${total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
                     <td style={{ color: 'var(--theme-text2)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatAdAsBs(po.expected_date)}</td>

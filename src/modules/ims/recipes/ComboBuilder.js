@@ -338,8 +338,8 @@ export default function ComboBuilder() {
                         )}
                       </td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(combined)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(comboMenuPrice)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>−{fmtNpr(savings)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNpr(comboMenuPrice)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmtNpr(savings)}</td>
                       <td style={{ textAlign: 'right', fontWeight: comboFc != null ? 700 : 400, ...fcFig.style }}
                           title={fcFig.title || 'One or both dishes have no food cost recorded, so the bundle cannot be costed'}>
                         {fcFig.text}

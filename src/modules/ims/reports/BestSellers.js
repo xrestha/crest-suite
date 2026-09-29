@@ -29,7 +29,9 @@ const MUTED_HEX = '#6b7280'
 // Every one of these constants is only ever used as TEXT on this page (rank numbers, margin
 // figures, the "% of total revenue" callout, KPI values), so they take the -text/-ink variants.
 // The base tokens above stay on the chart, where they are fills.
-const GOLD  = 'var(--theme-accent-ink)'
+// Ink, not the accent (S796): a rank, a share and a profit are figures, and the accent now means
+// "press this". The 40-60% margin tier is the unjudged middle between GREEN and RED.
+const INK   = 'var(--theme-text1)'
 const GREEN = 'var(--theme-green-text)'
 const RED   = 'var(--theme-red-text)'
 const MUTED = 'var(--theme-text2)'
@@ -55,7 +57,7 @@ function MarginCell({ row }) {
     )
   }
   return (
-    <td style={{ textAlign: 'right', fontWeight: 600, color: row.margin >= 60 ? GREEN : row.margin >= 40 ? GOLD : RED }}>
+    <td style={{ textAlign: 'right', fontWeight: 600, color: row.margin >= 60 ? GREEN : row.margin >= 40 ? INK : RED }}>
       {row.margin.toFixed(1)}%
     </td>
   )
@@ -337,10 +339,10 @@ export default function BestSellers() {
             footer={
               <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
                 {sortBy === 'revenue' && totalRevenueAll > 0 && (
-                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{fmt(top10Revenue)}</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Revenue / totalRevenueAll) * 100).toFixed(0)}%</span> of total revenue</>
+                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{fmt(top10Revenue)}</strong> · <span style={{ color: INK, fontWeight: 600 }}>{((top10Revenue / totalRevenueAll) * 100).toFixed(0)}%</span> of total revenue</>
                 )}
                 {sortBy === 'qty' && totalQtyAll > 0 && (
-                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{Math.round(top10Qty).toLocaleString('en-IN')} units</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Qty / totalQtyAll) * 100).toFixed(0)}%</span> of total volume sold</>
+                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{Math.round(top10Qty).toLocaleString('en-IN')} units</strong> · <span style={{ color: INK, fontWeight: 600 }}>{((top10Qty / totalQtyAll) * 100).toFixed(0)}%</span> of total volume sold</>
                 )}
                 {sortBy === 'margin' && (
                   <>Top 10 average margin <strong style={{ color: 'var(--theme-text1)' }}>{top10AvgMargin.toFixed(1)}%</strong> vs <span style={{ color: MUTED }}>{overallAvgMargin.toFixed(1)}%</span> across all {ranked.length} costed items · simple average of each dish's margin</>
@@ -384,7 +386,7 @@ export default function BestSellers() {
                   <tbody>
                     {top10.map((r, i) => (
                       <tr key={r.name}>
-                        <td style={{ color: i < 3 ? GOLD : MUTED, fontWeight: i < 3 ? 700 : 400, width: 28 }}>{i + 1}</td>
+                        <td style={{ color: i < 3 ? INK : MUTED, fontWeight: i < 3 ? 700 : 400, width: 28 }}>{i + 1}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                           {r.name}
                           <div style={{ fontSize: 11, color: MUTED, fontWeight: 400 }}>{r.category}</div>
@@ -462,9 +464,9 @@ export default function BestSellers() {
               { label: 'Total COGS',     tip: 'Ingredient cost of the dishes that have one, including the stock of extras guests added. Dishes with no cost, and build-your-own dishes, are left out of this and of the two figures beside it.',
                 val: fmt(costedCogs), color: RED },
               { label: 'Gross Profit',   tip: 'Revenue − COGS across the costed dishes only.',
-                val: fmt(costedProfit), color: GOLD },
+                val: fmt(costedProfit), color: INK },
               { label: 'Overall Margin', tip: 'Gross Profit ÷ Revenue across the costed dishes — weighted by revenue, so a high-volume dish moves it more than a rarely-ordered one. The chart footer shows the unweighted average instead, and the two will not match.',
-                val: costedRevenue > 0 ? `${((costedProfit / costedRevenue) * 100).toFixed(1)}%` : '—', color: GOLD },
+                val: costedRevenue > 0 ? `${((costedProfit / costedRevenue) * 100).toFixed(1)}%` : '—', color: INK },
               { label: 'Items Sold',     tip: 'Distinct menu items with at least one sale this period.',
                 val: filteredRows.length, color: MUTED },
             ].map(s => (

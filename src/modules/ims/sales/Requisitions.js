@@ -765,7 +765,7 @@ ${text}`, detail })
                       <Tip text="Quantity actually issued from the store. Leave blank to issue the full requested quantity when you confirm." width={260}>Qty Issued</Tip>
                     </th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Estimated store issue cost = Qty Issued (or Requested) × Rate / UOM." width={240}>Est. Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Estimated store issue cost = Qty Issued (or Requested) × Rate / UOM." width={240}>Est. Value</Tip></th>
                     <th style={{ width: 36 }}></th>
                   </tr>
                 </thead>
@@ -807,7 +807,7 @@ ${text}`, detail })
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                           {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', fontSize: 12 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 12 }}>
                           {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                         </td>
                         <td>
@@ -889,7 +889,7 @@ ${text}`, detail })
               <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 3 }}>Day</div>
-                  <div style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 18 }}>{selectedReq.bs_day}</div>
+                  <div style={{ fontWeight: 700, color: 'var(--theme-text1)', fontSize: 18 }}>{selectedReq.bs_day}</div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{periodLabel}</div>
                 </div>
                 <div>
@@ -987,7 +987,7 @@ ${text}`, detail })
                         <Tip text="Set the actual quantity you are issuing from the store. Can be less than requested." width={230}>Qty Issued</Tip>
                       </th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods leaving the store." width={240}>Value Issued</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods leaving the store." width={240}>Value Issued</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1010,7 +1010,7 @@ ${text}`, detail })
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                             {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                           </td>
                         </tr>
@@ -1043,7 +1043,7 @@ ${text}`, detail })
                         <Tip text="Qty actually issued from the store. Green = full qty issued, red = partial." width={220}>Qty Issued</Tip>
                       </th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods that left the store." width={240}>Value</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods that left the store." width={240}>Value</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1059,19 +1059,19 @@ ${text}`, detail })
                           <td style={{ fontWeight: 600 }}>{line.items?.name}</td>
                           <td>
                             {line.items?.categories?.name
-                              ? <span className="badge badge-yellow">{line.items.categories.name}</span>
+                              ? <span className="badge badge-gray">{line.items.categories.name}</span>
                               : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{line.items?.uom}</td>
                           <td style={{ textAlign: 'right' }}>{Number(reqQty).toLocaleString('en-IN')}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: selectedReq.status === 'issued' ? (partial ? 'var(--theme-red-text)' : 'var(--theme-green-text)') : 'var(--theme-text2)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: selectedReq.status === 'issued' ? (partial ? 'var(--theme-amber-text)' : 'var(--theme-green-text)') : 'var(--theme-text2)' }}>
                             {selectedReq.status === 'issued' ? Number(issdQty).toLocaleString('en-IN') : '—'}
                             {partial && <span style={{ fontSize: 10, marginLeft: 4 }}>partial</span>}
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                             {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                           </td>
                         </tr>
@@ -1092,7 +1092,7 @@ ${text}`, detail })
                                 ? 'Total Requested Value (rejected — nothing was issued)'
                                 : 'Total Requested Value'}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
                             NPR {Math.round(total).toLocaleString('en-IN')}
                           </td>
                         </tr>
@@ -1116,11 +1116,11 @@ ${text}`, detail })
             </div>
             <div className="stat-card">
               <div className="stat-label">Issued{statScope}</div>
-              <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{issuedReqs.length}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{issuedReqs.length}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Draft / Pending{statScope}</div>
-              <div className="stat-value" style={{ color: draftReqs.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>{draftReqs.length}</div>
+              <div className="stat-value" style={{ color: draftReqs.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{draftReqs.length}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Total Issued Value{statScope}</div>
@@ -1196,7 +1196,7 @@ ${text}`, detail })
                       const lineCount = (req.requisition_lines || []).length
                       return (
                         <tr key={req.id} style={{ cursor: 'pointer' }} onClick={() => viewReq(req)}>
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(req.bs_day, selectedPeriod?.bs_month) || '—'}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{formatBsDay(req.bs_day, selectedPeriod?.bs_month) || '—'}</td>
                           <td style={{ fontWeight: 600 }}>{req.department}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{lineCount}</td>
                           <td>
@@ -1211,7 +1211,7 @@ ${text}`, detail })
                             )}
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{req.notes || '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                           </td>
                           <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>

@@ -376,7 +376,7 @@ export default function DeadStock() {
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Dead Stock Items</div>
-          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{deadCount}</div>
+          <div className="stat-value" style={{ color: deadCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{deadCount}</div>
           <div className="stat-label" style={{ marginTop: 4 }}>No use for {DEAD_AFTER_MONTHS}+ months</div>
         </div>
         <div className="stat-card">
@@ -388,7 +388,7 @@ export default function DeadStock() {
           <div className="stat-label">
             <Tip text="Total closing stock value of all dead and slow-moving items — capital currently tied up in idle inventory." width={260}>Value at Risk</Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{fmt(totalValueAtRisk)}</div>
+          <div className="stat-value" style={{ color: totalValueAtRisk > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{fmt(totalValueAtRisk)}</div>
         </div>
       </div>
       )}
@@ -496,7 +496,7 @@ export default function DeadStock() {
                    under AA, across the whole table. The Status chip already says Dead or Slow. */
                 <tr key={r.id}>
                   <td><strong>{r.name}</strong></td>
-                  <td><span className="badge badge-yellow">{r.category}</span></td>
+                  <td><span className="badge badge-gray">{r.category}</span></td>
                   <td>{r.uom}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.opening)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.purchased - r.returned)}</td>
@@ -504,7 +504,7 @@ export default function DeadStock() {
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.staffMeals)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.used)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.closing)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{fmt(r.valueAtRisk)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(r.valueAtRisk)}</td>
                   <td>
                     <span style={{
                       fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-xs)',

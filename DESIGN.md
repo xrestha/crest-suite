@@ -481,6 +481,18 @@ third and amber in the employee app, and amber alone carried eight distinct mean
 including "Foodmandu" and "supervisor". A button is exempt: it is an instruction, not a verdict, so
 the Void button stays red while the *record* it writes reads as a close type in the accent.
 
+**IMS takes this one step further, by owner decision (S796): a figure or a category there takes no
+colour at all.** Under Modernist Light accent-ink is a dark red, so the accent-as-category of the
+paragraph above painted every purchase total, COGS, item category chip and code in near-danger ink,
+while Returns and Wastage were red and Closing Stock, Revenue and Paid were green whatever they
+said. In IMS, figures are `--theme-text1` (codes `--theme-text2`); a category chip is `badge-gray`
+(item and recipe categories, payment methods, wastage reasons); red, amber and green come only from
+a band, a threshold or a status word (over/under variance, overdue past 60 days, expired, below
+par, Paid); and the accent is kept for what can be pressed or is current — buttons, links, the
+active tab or toggle, today, focus. A category that is a SERIES (a bucket bar, a payment-method
+split) takes a chart slot (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`), never a semantic token.
+HR and POS keep the accent-for-category vocabulary above until they are reviewed the same way.
+
 **Under Modernist the accent slot and the danger slot are the same HUE, which makes the rest of
 this rule load-bearing rather than tidy.** They are still separated — measured, the two `*-text`
 variants sit ΔE 33 apart under deuteranopia — but they no longer separate by hue name the way brass
@@ -1312,6 +1324,12 @@ screen an open period is the normal working state and flagging it would be noise
 Red says you cannot; amber says you can, but this is not the usual case. An amber banner is what an
 admin editing a closed month gets — the action is permitted and the notice must not read as a
 block.
+
+The third form says neither: **`.note-banner`** (S796) is an instruction or a plain fact about the
+page — "enter quantities in the item's UOM", "labour comes from your finalized payroll run". It is
+neutral: a `--theme-text2` 6% fill, the ordinary border, text2 copy with an ink `strong` lead. IMS
+had drawn these as accent-tinted boxes in accent-ink, which under Modernist Light is a dark red — a
+how-to line read like a warning. No verdict ever rides on it.
 
 ### Where a month stands, and a decision taken in bulk (S768)
 

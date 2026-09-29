@@ -272,7 +272,7 @@ export default function SalesImportButton({ recipes, onMatched, disabled, select
       {importError && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 6 }}>{importError}</div>}
       {importSummary && (
         <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 6 }}>
-          <strong style={{ color: 'var(--theme-accent-ink)' }}>{importSummary.matched}</strong> of {importSummary.total} rows matched.
+          <strong style={{ color: 'var(--theme-text1)' }}>{importSummary.matched}</strong> of {importSummary.total} rows matched.
           {importSummary.dateWarning && (
             <div role="note" style={{ marginTop: 4, color: 'var(--theme-amber-text)' }}>⚠ {importSummary.dateWarning} Check the figures before you save.</div>
           )}

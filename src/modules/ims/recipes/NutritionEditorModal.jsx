@@ -170,7 +170,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
               className="btn btn-ghost"
               style={{
                 fontSize: 12,
-                color: nutriMatchSource === lib ? (lib === 'DFTQC Nepal' ? 'var(--theme-green-text)' : lib === 'IFCT 2017' ? 'var(--theme-accent-ink)' : 'var(--theme-text1)') : undefined,
+                color: nutriMatchSource === lib ? 'var(--theme-text1)' : undefined,
                 borderColor: nutriMatchSource === lib ? 'currentColor' : undefined,
               }}
               onClick={() => findNutriSeedsFor(lib)}
@@ -180,13 +180,13 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
           ))}
         </div>
         {nutriForm.source && (
-          <span style={{ fontSize: 11, color: 'var(--theme-green-text)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
+          <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
         )}
       </div>
 
       {nutriMatches.length > 0 && (
-        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-purple) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 20%, transparent)', borderRadius: 'var(--radius-sm)' }}>
-          <div style={{ fontSize: 11, color: 'var(--theme-purple-text)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
             {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} from {nutriMatchSource}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -204,7 +204,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
 
       {/* Open Food Facts — branded / packaged products */}
       <div style={{ marginBottom: 16, padding: '12px 14px', background: 'color-mix(in srgb, var(--theme-green) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 18%, transparent)', borderRadius: 'var(--radius-sm)' }}>
-        <div style={{ fontSize: 11, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
           <Tip width={280} text="For branded / packaged goods (sauces, drinks, snacks). Search by product name or paste a barcode. Pulls nutrition per 100 g from the Open Food Facts database.">Fetch from Open Food Facts</Tip>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -219,7 +219,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
             {offBusy ? 'Searching…' : '🔍 Fetch'}
           </button>
         </div>
-        {offError && <p style={{ color: 'var(--theme-accent-ink)', fontSize: 12, margin: '8px 0 0' }}>{offError}</p>}
+        {offError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '8px 0 0' }}>{offError}</p>}
         {offResults.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
             {offResults.map((r, i) => (

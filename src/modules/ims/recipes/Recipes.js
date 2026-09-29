@@ -1639,7 +1639,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 <button className="btn btn-ghost" onClick={duplicateChecked} aria-disabled={checkedRecipes.length !== 1 || undefined}>⧉ Duplicate</button>
               </Tip>
               {selectedIds.size > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   {selectedIds.size} selected
                   <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
                 </span>
@@ -1662,7 +1662,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
             </div>
           </div>
           {ingQ && (
-            <div className="no-print" style={{ fontSize: 12, color: 'var(--theme-accent-ink)', margin: '-8px 0 14px' }}>
+            <div className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '-8px 0 14px' }}>
               Showing recipes that use an ingredient matching "<strong>{ingSearch}</strong>" ({filtered.length} found).
             </div>
           )}
@@ -1800,7 +1800,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             <input type="checkbox" checked={selectedIds.has(recipe.id)} onChange={() => toggleSelectRecipe(recipe.id)}
                               aria-label={`Select ${recipe.name}`} />
                           </td>
-                          <td style={{ color: 'var(--theme-accent-ink)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
+                          <td style={{ color: 'var(--theme-text2)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
                             {recipe.recipe_code || '—'}
                           </td>
                           {/* S765: `.btn-linklike` — the documented class for a cell whose IDENTITY
@@ -1812,7 +1812,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             </button>
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{(recipe.recipe_ingredients || []).length} items</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>NPR {cost.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>NPR {cost.toFixed(2)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{recipe.yield_qty} {recipe.yield_uom}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                             NPR {costPerUnit.toFixed(2)} / {recipe.yield_uom}
@@ -1896,10 +1896,10 @@ Check the recipe list before saving again — if it timed out after the recipe w
                                 label={`Cost by size for ${recipe.name}`} />
                             )}
                             <button type="button" className="btn-linklike" onClick={() => openDetail(recipe)}>{recipe.name}</button>
-                            {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
-                            {recipe.is_build_your_own && <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
+                            {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-text1)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
+                            {recipe.is_build_your_own && <span className="badge badge-gray" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
                           </td>
-                          {activeTab === 'all' && <td><span className="badge badge-yellow">{recipe.category}</span></td>}
+                          {activeTab === 'all' && <td><span className="badge badge-gray">{recipe.category}</span></td>}
                           <td style={{ color: 'var(--theme-text2)' }}>
                             {(recipe.recipe_ingredients || []).length} items
                             {/* S754: no longer keyed on pos_enabled. A dish a supervisor creates now
@@ -1913,7 +1913,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             )}
                           </td>
                           {isByo ? (
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: byo && !byo.empty ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: byo && !byo.empty ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                               {byoCost.error ? (
                                 <Tip width={260} text="The choices and their stock could not be read, so this dish's cost was not worked out. The fixed-ingredient figure would read as a near-zero food cost, so it is not shown.">not checked</Tip>
                               ) : byoCost.loading && !byo ? '…'
@@ -1924,7 +1924,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                                 )}
                             </td>
                           ) : (
-                          <td style={{ textAlign: 'right', color: cost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}
+                          <td style={{ textAlign: 'right', color: cost != null ? 'var(--theme-text1)' : 'var(--theme-text3)' }}
                             title={cost == null ? 'Not costed — add ingredients, or a manual cost in Menu Pricing' : manualCost ? 'Manual cost entered in Menu Pricing — this dish has no costed ingredients' : undefined}>
                             {cost != null ? `NPR ${cost.toFixed(2)}${manualCost ? ' (manual)' : ''}` : '—'}
                           </td>
@@ -2200,22 +2200,18 @@ Check the recipe list before saving again — if it timed out after the recipe w
 
           {/* Live cost panel */}
           {liveCost > 0 && (
-            <div style={{
-              background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)',
-              borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 20,
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 16
-            }}>
+            <div className="note-banner" style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 16 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
                   {isSubRecipeForm ? 'Total Batch Cost' : formByBuild ? 'Fixed ingredients' : 'Food Cost'}
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {liveCost.toFixed(2)}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {liveCost.toFixed(2)}</div>
                 {formByBuild && <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>The plate adds the guest's choices</div>}
               </div>
               {isSubRecipeForm && liveCostPerUnit != null && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Cost per {recipeForm.yield_uom || 'unit'}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {liveCostPerUnit.toFixed(2)}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {liveCostPerUnit.toFixed(2)}</div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Yield: {recipeForm.yield_qty} {recipeForm.yield_uom}</div>
                 </div>
               )}
@@ -2247,7 +2243,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
               {suggestedPrice && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Suggested @ {recipeForm.target_fc_pct || 30}% FC ({vatMode === 'pan' ? PAN_LABEL : 'incl. VAT'})</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {suggestedPrice}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {suggestedPrice}</div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{formVat > 0 ? `incl. ${(formVat*100).toFixed(0)}% VAT, ` : ''}rounded</div>
                 </div>
               )}
@@ -2257,17 +2253,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
           {/* Live nutrition line */}
           {liveNutri && liveNutri.coverage.total > 0 && (
             <div style={{
-              background: 'color-mix(in srgb, var(--theme-purple) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 18%, transparent)',
+              background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)',
               borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 20,
               display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 13
             }}>
-              <span style={{ color: 'var(--theme-purple-text)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <span style={{ color: 'var(--theme-text2)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 🍽 {isSubRecipeForm ? 'total batch' : 'per portion'}
               </span>
               {NUTRIENTS.map(def => (
                 <span key={def.key} style={{ color: 'var(--theme-text1)' }}>{def.label} <strong>{fmtNutrient(def, liveNutri.perPortion[def.key])}</strong></span>
               ))}
-              <span style={{ color: liveNutri.coverage.have < liveNutri.coverage.total ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', fontSize: 12 }}>
+              <span style={{ color: liveNutri.coverage.have < liveNutri.coverage.total ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 12 }}>
                 · data {liveNutri.coverage.have}/{liveNutri.coverage.total}
               </span>
             </div>
@@ -2279,7 +2275,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
               <h3 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Ingredients</h3>
               <div style={{ display: 'flex', gap: 8 }}>
                 {showNutrition && (
-                  <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-purple-text)', borderColor: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' }} onClick={autoFillNutrition} disabled={autoFillBusy}>
+                  <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={autoFillNutrition} disabled={autoFillBusy}>
                     <Tip width={290} text="Fills every ingredient that's missing nutrition with its best match from the regional library (DFTQC Nepal / IFCT 2017 / USDA), in one step. Doesn't reach for the live USDA FoodData Central API on a miss — that's offered separately below so USDA is never a silent default. Branded items (Open Food Facts) and unmatched items are left for you to add manually.">
                       {autoFillBusy ? 'Filling…' : '⚡ Auto-fill nutrition'}
                     </Tip>
@@ -2304,13 +2300,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
             {showNutrition && usdaCandidates.length > 0 && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12,
-                background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 25%, transparent)',
+                background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)',
                 borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 18,
               }}>
                 <span style={{ color: 'var(--theme-text2)' }}>
                   {usdaCandidates.length} ingredient{usdaCandidates.length > 1 ? 's' : ''} not in the regional library: {usdaCandidates.map(i => i.name).join(', ')}
                 </span>
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-purple-text)', borderColor: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' }} onClick={fillFromUsda} disabled={usdaFillBusy}>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={fillFromUsda} disabled={usdaFillBusy}>
                   {usdaFillBusy ? 'Fetching…' : '🔍 Try USDA FoodData Central'}
                 </button>
                 <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 8 }} onClick={dismissUsdaCandidates} title="Dismiss" aria-label="Dismiss USDA suggestion">✕</button>
@@ -2358,7 +2354,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         <select aria-label="Ingredient type"
                           value={ing.type}
                           onChange={e => setIngType(ing._key, e.target.value)}
-                          style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: ing.type === 'sub_recipe' ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', outline: 'none', width: 95 }}
+                          style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: ing.type === 'sub_recipe' ? 'var(--theme-text1)' : 'var(--theme-text2)', outline: 'none', width: 95 }}
                         >
                           <option value="item">Item</option>
                           <option value="sub_recipe">⚙ Sub-Recipe</option>
@@ -2387,8 +2383,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           placeholder="0"
                           style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right' }} />
                       </td>
-                      <td style={{ padding: '6px 12px', color: ing.type === 'sub_recipe' ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', fontSize: 13 }}>{uomLabel}</td>
-                      <td style={{ padding: '6px 12px', textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 13, fontWeight: 600 }}>
+                      <td style={{ padding: '6px 12px', color: ing.type === 'sub_recipe' ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 13 }}>{uomLabel}</td>
+                      <td style={{ padding: '6px 12px', textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13, fontWeight: 600 }}>
                         {cost != null ? `NPR ${cost.toFixed(2)}` : '—'}
                       </td>
                       <td style={{ padding: '6px 12px', textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
@@ -2493,19 +2489,19 @@ Check the recipe list before saving again — if it timed out after the recipe w
               </div>
             )}
             {isSubRec && (
-              <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+              <div className="note-banner">
                 ⚙ Sub-Recipe — Yield: {selectedRecipe.yield_qty} {selectedRecipe.yield_uom} · Cost per {selectedRecipe.yield_uom}: NPR {costPerUnit.toFixed(2)}
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px,1fr))', gap: 14, marginBottom: 24 }}>
               {(isSubRec ? [
-                { label: 'Total Batch Cost', value: `NPR ${cost.toFixed(2)}`, color: 'var(--theme-accent-ink)' },
-                { label: `Cost per ${selectedRecipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}`, color: 'var(--theme-green-text)' },
+                { label: 'Total Batch Cost', value: `NPR ${cost.toFixed(2)}`, color: 'var(--theme-text1)' },
+                { label: `Cost per ${selectedRecipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}`, color: 'var(--theme-text1)' },
                 { label: 'Yield', value: `${selectedRecipe.yield_qty} ${selectedRecipe.yield_uom}`, color: 'var(--theme-text1)' },
               ] : [
                 byBuild
-                  ? { label: 'Food Cost (by build)', value: byoCost.error ? 'not checked' : byoRange && !byoRange.empty ? costRangeText(byoRange) : byoCost.loading ? '…' : 'no choices yet', color: byoRange && !byoRange.empty ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', text: true, title: 'From the cheapest build of the smallest size to the typical build of the biggest — each size is below.' }
-                  : { label: manualCost ? 'Food Cost (manual)' : 'Food Cost', value: dishCost != null ? `NPR ${dishCost.toFixed(2)}` : '— not costed', color: dishCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' },
+                  ? { label: 'Food Cost (by build)', value: byoCost.error ? 'not checked' : byoRange && !byoRange.empty ? costRangeText(byoRange) : byoCost.loading ? '…' : 'no choices yet', color: byoRange && !byoRange.empty ? 'var(--theme-text1)' : 'var(--theme-text3)', text: true, title: 'From the cheapest build of the smallest size to the typical build of the biggest — each size is below.' }
+                  : { label: manualCost ? 'Food Cost (manual)' : 'Food Cost', value: dishCost != null ? `NPR ${dishCost.toFixed(2)}` : '— not costed', color: dishCost != null ? 'var(--theme-text1)' : 'var(--theme-text3)' },
                 byBuild
                   ? { label: 'Food Cost %', value: BYO_STATUS, color: 'var(--theme-text2)', text: true, title: BYO_TIP }
                   : { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}% ${fcB2.mark}` : '—', color: fcColor },
@@ -2527,7 +2523,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 // carries no VAT, and says so (S792).
                 // A suggestion from an unknown cost is NPR 0 — "charge nothing" (S756); from a
                 // build-your-own dish's fixed part it was NPR 35 for a NPR 300 bowl (S792).
-                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (${vatMode === 'pan' ? PAN_LABEL : 'incl. VAT'})`, value: dishCost != null ? `NPR ${getSuggestedPrice(dishCost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}` : '—', color: dishCost != null ? 'var(--theme-green-text)' : 'var(--theme-text3)', title: byBuild ? BYO_TIP : undefined },
+                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (${vatMode === 'pan' ? PAN_LABEL : 'incl. VAT'})`, value: dishCost != null ? `NPR ${getSuggestedPrice(dishCost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}` : '—', color: dishCost != null ? 'var(--theme-text1)' : 'var(--theme-text3)', title: byBuild ? BYO_TIP : undefined },
               ]).map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-label">{s.label}</div>
@@ -2569,20 +2565,20 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   background: 'color-mix(in srgb, var(--theme-green) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)',
                   borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 20
                 }}>
-                  <div style={{ fontSize: 11, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14, fontWeight: 600 }}>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14, fontWeight: 600 }}>
                     ⚖ True Cost with Overheads
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 16 }}>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Overhead / Portion</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {ohPerPortion.toFixed(2)}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {ohPerPortion.toFixed(2)}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                         {covers > 0 ? `${(revenueSharePct * 100).toFixed(1)}% of revenue ÷ ${covers} covers sold` : 'No sales this period'}
                       </div>
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Cost / Portion</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: trueCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{trueCost != null ? `NPR ${trueCost.toFixed(2)}` : '—'}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: trueCost != null ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{trueCost != null ? `NPR ${trueCost.toFixed(2)}` : '—'}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueCost != null ? 'Food + Overhead' : byBuild ? BYO_STATUS : 'Food cost not known yet'}</div>
                     </div>
                     <div>
@@ -2598,7 +2594,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Suggested Price @ 30% margin</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: suggestedVat != null ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>{suggestedVat != null ? `NPR ${suggestedVat}` : '—'}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: suggestedVat != null ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{suggestedVat != null ? `NPR ${suggestedVat}` : '—'}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{vatMode === 'pan' ? `${PAN_LABEL}, ` : `incl. ${(vat*100).toFixed(0)}% VAT, `}rounded to ÷5</div>
                     </div>
                   </div>
@@ -2609,14 +2605,14 @@ Check the recipe list before saving again — if it timed out after the recipe w
             {/* Nutrition panel (per portion) */}
             {nutri && (
               <div style={{
-                background: 'color-mix(in srgb, var(--theme-purple) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 20%, transparent)',
+                background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)',
                 borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 20
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-                  <div style={{ fontSize: 11, color: 'var(--theme-purple-text)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
                     🍽 Nutrition ({nutriLabel})
                   </div>
-                  <div style={{ fontSize: 11, color: nutri.coverage.have < nutri.coverage.total ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
+                  <div style={{ fontSize: 11, color: nutri.coverage.have < nutri.coverage.total ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                     <Tip width={260} text="How many ingredients have nutrition data entered. Missing ingredients contribute 0, so values below 100% are underestimates. Add data on each item's Nutrition tab.">
                       Data: {nutri.coverage.have}/{nutri.coverage.total} ingredients
                     </Tip>
@@ -2639,7 +2635,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     : <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>None tagged</span>}
                 </div>
                 {nutri.coverage.have < nutri.coverage.total && (
-                  <div style={{ fontSize: 11, color: 'var(--theme-accent-ink)', marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 10 }}>
                     ⚠ {nutri.coverage.total - nutri.coverage.have} ingredient(s) missing nutrition data — values are estimates.
                   </div>
                 )}
@@ -2683,12 +2679,12 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     const isDrillable = !!(ri.sub_recipe_id && ri.sub_recipe)
                     return (
                       <tr key={ri.id}>
-                        <td style={{ fontWeight: 600, color: ri.sub_recipe_id ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
+                        <td style={{ fontWeight: 600, color: ri.sub_recipe_id ? 'var(--theme-text1)' : 'var(--theme-text1)' }}>
                           {ri.items?.item_code && (
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', marginRight: 7, fontWeight: 400 }}>{ri.items.item_code}</span>
+                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-text2)', marginRight: 7, fontWeight: 400 }}>{ri.items.item_code}</span>
                           )}
                           {ri.sub_recipe?.recipe_code && (
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', marginRight: 7, fontWeight: 400 }}>{ri.sub_recipe.recipe_code}</span>
+                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-text2)', marginRight: 7, fontWeight: 400 }}>{ri.sub_recipe.recipe_code}</span>
                           )}
                           {/* A real button in the cell (S794, the S653 rule): this was a
                               <td onClick>, so a keyboard user could not open a sub-recipe's own
@@ -2702,14 +2698,14 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             </button>
                           ) : name}
                         </td>
-                        <td><span className={`badge ${ri.sub_recipe_id ? 'badge-yellow' : 'badge-gray'}`}>{ri.sub_recipe_id ? 'Sub-Recipe' : 'Item'}</span></td>
+                        <td><span className="badge badge-gray">{ri.sub_recipe_id ? 'Sub-Recipe' : 'Item'}</span></td>
                         <td style={{ textAlign: 'right' }}>{ri.qty_per_portion}</td>
                         <td style={{ color: 'var(--theme-text2)' }}>{uom}</td>
-                        <td style={{ textAlign: 'right', color: yieldPct != null && yieldPct < 100 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+                        <td style={{ textAlign: 'right', color: yieldPct != null && yieldPct < 100 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                           {yieldPct != null ? `${yieldPct.toFixed(0)}%` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {unitRate.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>NPR {itemCost.toFixed(2)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {itemCost.toFixed(2)}</td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                             <div style={{ width: 60, height: 4, background: 'var(--theme-border)', borderRadius: 'var(--radius-xs)' }}>
@@ -2730,7 +2726,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       {totalQtyPerPortion != null ? [...ingredientUoms][0] : ''}
                     </td>
                     <td colSpan={2} style={{ paddingTop: 12 }}></td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>NPR {cost.toFixed(2)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>NPR {cost.toFixed(2)}</td>
                     <td></td>
                   </tr>
                 </tbody>

@@ -573,11 +573,11 @@ export default function SupplierPriceTracker() {
                   ⚠ Rate updated for {affectedRecipes.itemName} — but the recipe list could not be read, so this may have re-costed dishes not shown here. Check Recipes before relying on this month's food cost.
                 </p>
               ) : <>
-                <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', margin: '0 0 6px', fontWeight: 600 }}>
+                <p style={{ fontSize: 13, color: 'var(--theme-amber-text)', margin: '0 0 6px', fontWeight: 600 }}>
                   ⚠ Rate updated — {affectedRecipes.recipes.length} recipe{affectedRecipes.recipes.length !== 1 ? 's' : ''} affected for {affectedRecipes.itemName}
                 </p>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {affectedRecipes.recipes.map(r => <span key={r} className="badge badge-yellow">{r}</span>)}
+                  {affectedRecipes.recipes.map(r => <span key={r} className="badge badge-gray">{r}</span>)}
                 </div>
               </>}
             </div>
@@ -734,11 +734,11 @@ export default function SupplierPriceTracker() {
                       <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{item.categories?.name || '—'}</td>
                       <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <span style={{ color: rateMismatch ? 'var(--theme-accent-ink)' : 'var(--theme-text1)', fontWeight: 600 }}
+                        <span style={{ color: rateMismatch ? 'var(--theme-amber-text)' : 'var(--theme-text1)', fontWeight: 600 }}
                           title={rateMismatch ? 'Master rate differs from last purchase by >5%' : ''}>
                           {masterRate > 0 ? masterRate.toFixed(4) : '—'}
                         </span>
-                        {rateMismatch && <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)', marginLeft: 4 }}>⚠</span>}
+                        {rateMismatch && <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginLeft: 4 }}>⚠</span>}
                       </td>
                       <td className="no-print" style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                         {isEditing ? (

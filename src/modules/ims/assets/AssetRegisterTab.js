@@ -162,7 +162,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                   <td style={{ textAlign: 'right' }}>{fmt(a.unit_cost)}</td>
                   <td style={{ textAlign: 'right' }}>{fmt(a.total_cost)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(a.acquisition_date)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(nbvOf(a))}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(nbvOf(a))}</td>
                   <td style={{ textAlign: 'right' }}>{pctDepreciatedOf(a).toFixed(1)}%</td>
                   <td>
                     <span className={`badge ${a.status === 'active' ? 'badge-green' : 'badge-red'}`}>{a.status}</span>

@@ -565,7 +565,7 @@ export default function PeriodComparison() {
             {highestPurchasePeriod ? periodLabel(highestPurchasePeriod) : '—'}
           </div>
           {highestPurchasePeriod && (
-            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-accent-ink)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-text1)' }}>
               {fmt(stats[highestPurchasePeriod.id]?.netPurch)}
             </div>
           )}

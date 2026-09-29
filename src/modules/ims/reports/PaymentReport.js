@@ -17,6 +17,7 @@ import { PURCHASE_PAYMENT_METHODS } from '../purchases/purchasesHelpers'
 import { billPayables, summariseUnlinkedReturns, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
 import { applyPriorBillFactors } from './supplierAttribution'
 import { readPriorBillLines } from './readPriorBillLines'
+import { CHART_COLORS } from '../../../shared/chartColors'
 
 const METHODS = PURCHASE_PAYMENT_METHODS
 // Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
@@ -26,8 +27,10 @@ const METHODS = PURCHASE_PAYMENT_METHODS
 // METHODS now tracks PURCHASE_PAYMENT_METHODS rather than a local literal, so these maps can fall
 // behind it. A method with no entry would otherwise paint a transparent segment in the split bar
 // and an invisible legend swatch — silent, and only on the newest method. Neutral is the floor.
-const METHOD_COLORS = { Cash: 'var(--theme-green)', Credit: 'var(--theme-red)', FonePay: 'var(--theme-purple)' }
-const METHOD_TEXT   = { Cash: 'var(--theme-green-text)', Credit: 'var(--theme-red-text)', FonePay: 'var(--theme-purple-text)' }
+// Chart slots, not the semantic tokens (S796): Cash was green and Credit red, a verdict on a
+// category. Literal chart hex is the sanctioned exemption (DESIGN.md → The Chart Palette Rule).
+const METHOD_COLORS = { Cash: CHART_COLORS[2], Credit: CHART_COLORS[4], FonePay: CHART_COLORS[6] }
+const METHOD_TEXT   = { Cash: 'var(--theme-text1)', Credit: 'var(--theme-text1)', FonePay: 'var(--theme-text1)' }
 const fillOf = m => METHOD_COLORS[m] || 'var(--theme-text3)'
 const textOf = m => METHOD_TEXT[m] || METHOD_COLORS[m] || 'var(--theme-text1)'
 
@@ -299,7 +302,7 @@ export default function PaymentReport() {
           <div className="stat-label">
             <Tip text="Value of goods returned to suppliers, subtracted from gross to get net spend — credited at the price actually paid: net of the bill's discount, plus VAT where charged. A return against a bill from an earlier month is credited at that bill's own discount." width={270}>Total Returns</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 17, color: 'var(--theme-red-text)' }}>
+          <div className="stat-value" style={{ fontSize: 17, color: 'var(--theme-text1)' }}>
             {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
         </div>
@@ -371,7 +374,7 @@ export default function PaymentReport() {
                 <tr>
                   <th>Payment Method</th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
+                  <th style={{ textAlign: 'right' }}>Returns</th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Gross purchases − returns for this method." width={220}>Net Amount</Tip>
                   </th>
@@ -388,7 +391,7 @@ export default function PaymentReport() {
                   <tr key={s.method}>
                     <td style={{ fontWeight: 600, color: textOf(s.method) }}>{s.method}</td>
                     <td style={{ textAlign: 'right' }}>NPR {s.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                       {s.returnAmt > 0 ? `−NPR ${s.returnAmt.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {s.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
@@ -401,10 +404,10 @@ export default function PaymentReport() {
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 700, paddingTop: 12 }}>Total</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
                     {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   <td style={{ textAlign: 'right', paddingTop: 12 }}>{pctText(footShare)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{bills.length}</td>
                 </tr>
@@ -424,7 +427,7 @@ export default function PaymentReport() {
               <tbody>
                 {dailyByMethod.map(d => (
                   <tr key={d.day}>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(d.day, selectedPeriod?.bs_month)}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{formatBsDay(d.day, selectedPeriod?.bs_month)}</td>
                     {METHODS.map(m => (
                       <td key={m} style={{ textAlign: 'right', color: d.byMethod[m] !== 0 ? textOf(m) : 'var(--theme-text3)' }}>
                         {d.byMethod[m] !== 0 ? `NPR ${d.byMethod[m].toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}

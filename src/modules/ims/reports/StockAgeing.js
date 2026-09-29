@@ -415,7 +415,7 @@ export default function StockAgeing() {
       borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
       fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6,
     }}>
-      <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> {BASIS}{' '}
+      <strong style={{ color: 'var(--theme-text1)' }}>How to read this:</strong> {BASIS}{' '}
       Each purchase is a batch. Everything sold, wasted or served as staff meals is taken off the <em>oldest</em> batches
       first, and at every closed month with a stock count the item is set to what was counted — if the count is lower,
       the missing stock comes off the oldest batches; if it is higher, the extra is added as stock of unknown age.
@@ -542,7 +542,7 @@ export default function StockAgeing() {
                         </Tip>
                       )}
                     </td>
-                    <td><span className="badge badge-yellow">{meta.categories?.name || 'Uncategorised'}</span></td>
+                    <td><span className="badge badge-gray">{meta.categories?.name || 'Uncategorised'}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{meta.uom}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{Number(r.qty.toFixed(2)).toLocaleString('en-IN')}</td>
                     {AGE_BANDS.map(b => {
@@ -567,7 +567,7 @@ export default function StockAgeing() {
                     <td style={{ color: counted ? 'var(--theme-text2)' : 'var(--theme-text3)', whiteSpace: 'nowrap' }}>
                       {counted ? monthLabel(counted) : 'Estimate'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{npr(r.value)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{npr(r.value)}</td>
                   </tr>
                 )
               })}
