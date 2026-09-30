@@ -31,7 +31,8 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
-import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText, closerMakesReport, deferredReportNote } from '../periods/closePeriod'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText, closerMakesReport, deferredReportNote, nextBsMonth } from '../periods/closePeriod'
+import { backfillLeaveText } from '../../modules/hr/leave/backfillApprovedLeave'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd } from '../../utils/bsCalendar'
@@ -1132,6 +1133,13 @@ export default function ClientDashboard() {
           text: closeFailureText({ stage: first.stage, period: activePeriod, isAdmin }),
           neutral: first.stage === 'already_closed',
         })
+      } else if (result.leaveFill) {
+        // A clean close says nothing — except that opening the next month marked leave approved
+        // earlier for it (S741). Periods.js always said so; this close, the one IMS supervisors use,
+        // did not, and since S798 its back-fill is the one that actually marks the days.
+        const next = nextBsMonth(activePeriod)
+        const leave = backfillLeaveText(result.leaveFill, `${BS_MONTHS[next.bs_month - 1]} ${next.bs_year}`)
+        if (leave) setPeriodCloseNotice({ text: leave, neutral: true })
       }
       if (result.closed) loadStats(loadIdRef.current)
     } finally {

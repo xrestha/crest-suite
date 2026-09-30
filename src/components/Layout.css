@@ -3622,6 +3622,14 @@ textarea::placeholder {
   color: var(--theme-text2);
 }
 .bulk-approve__text strong { color: var(--theme-text1); }
+/* "Your own …" where a queue row's decision buttons would be (OwnRecordNote, S798): a fact, not a
+   control, so plain text2 with a Tip saying who decides instead. */
+.own-record-note {
+  font-size: 12px;
+  color: var(--theme-text2);
+  padding: 0 8px;
+  white-space: nowrap;
+}
 
 .stat-label {
   font-size: 11px;

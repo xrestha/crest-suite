@@ -9,7 +9,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { formatAd } from '../../../utils/bsCalendar'
-import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, rehireNeedsNewJoinDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES } from './employeeFormData'
+import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, rehireNeedsNewJoinDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
 
 // The fields THIS form owns. Pay basis, basic salary, bank and SSF are not here on purpose: Pay
 // Setup owns them, and until S748 this form carried them anyway (spread in from the loaded row) and
@@ -194,8 +194,10 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     if (isEdit) {
       const patch = changedEmployeeFields(employee, form, keys)
       if (Object.keys(patch).length > 0) {
-        const { error: err } = await scopedUpdate('hr_employees', patch).eq('id', employee.id)
+        const { data: savedRows, error: err } = await scopedUpdate('hr_employees', patch).eq('id', employee.id).select('id')
         if (err) { setError('The changes were not saved. ' + errorLine(err)); setSaving(false); return }
+        // A write RLS refuses is 0 rows and no error; writes here need HR manager rank (S798).
+        if (!savedRows?.length) { setError('The changes were not saved. ' + NOT_SAVED_RLS); setSaving(false); return }
       }
     } else {
       const { error: err } = await scopedInsert('hr_employees', newEmployeePayload(form, keys))
@@ -227,8 +229,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </>
       ),
       run: async () => {
-        const { error: err } = await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id)
+        const { data: savedRows, error: err } = await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id).select('id')
         if (err) { setError(`${employee.full_name} is still ${employee.status} — the change was not saved. ` + errorLine(err)); return }
+        if (!savedRows?.length) { setError(`${employee.full_name} is still ${employee.status} — the change was not saved. ` + NOT_SAVED_RLS); return }
         onSave()
       },
     })
@@ -238,8 +241,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     const rehire = rehireProblem('active', employee.join_date)
     if (rehire) { setError(rehire); return }
     if (!window.confirm(`Reactivate ${employee.full_name}? They return to payroll, the Roster and Attendance.`)) return
-    const { error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id)
+    const { data: savedRows, error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id).select('id')
     if (err) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + errorLine(err)); return }
+    if (!savedRows?.length) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + NOT_SAVED_RLS); return }
     onSave()
   }
 
@@ -307,7 +311,12 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </>
       ),
       run: async () => {
-        const { error: err } = await scopedDelete('hr_employees').eq('id', employee.id)
+        const { data: deletedRows, error: err } = await scopedDelete('hr_employees').eq('id', employee.id).select('id')
+        if (!err && !deletedRows?.length) {
+          // A delete RLS refuses is 0 rows and no error, which used to close the form as if it had gone.
+          setError(`${employee.full_name} was not deleted — the record is unchanged. ` + NOT_SAVED_RLS)
+          return
+        }
         if (err) {
           // Backstops: a pay record or login that appeared after the check above (the trigger), or a
           // table added later with a non-cascading FK. Add either to the pre-check when it happens.

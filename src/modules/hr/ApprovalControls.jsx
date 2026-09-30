@@ -13,6 +13,8 @@
 // single-row approval for each (so every guard that row would meet still applies), and reports what
 // did not go through by name rather than failing the batch on the first refusal.
 
+import Tip from '../../components/Tip'
+
 export function DecisionButtons({ who, onApprove, onReject, disabled, stopPropagation = false }) {
   const wrap = fn => e => { if (stopPropagation) e.stopPropagation(); fn() }
   return (
@@ -20,6 +22,17 @@ export function DecisionButtons({ who, onApprove, onReject, disabled, stopPropag
       <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={wrap(onApprove)} aria-label={`Approve — ${who}`}>Approve</button>
       <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={wrap(onReject)} aria-label={`Reject — ${who}`}>Reject</button>
     </>
+  )
+}
+
+// In place of a decision the database would refuse (hr_own_request, S798): the row is the viewer's
+// own, so it says who decides it instead of offering a button that fails. `label` names the row
+// ("Your own request"); `tip` names who acts on it.
+export function OwnRecordNote({ label, tip }) {
+  return (
+    <Tip text={tip} width={240}>
+      <span className="own-record-note">{label}</span>
+    </Tip>
   )
 }
 

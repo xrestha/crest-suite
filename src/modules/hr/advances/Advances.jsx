@@ -22,6 +22,8 @@ import { firstRecoveryMonth } from '../payroll/payrollData'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useIsOwnEmployee } from '../ownRecord'
+import { OwnRecordNote } from '../ApprovalControls'
 
 const fmt = nprInt
 const fmtD = iso => {
@@ -163,7 +165,8 @@ export default function Advances() {
     const key = loadReq.begin(clientId)
     setLoading(true)
     const [emps, advs, reps, runs] = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, status').order('full_name'),
+      // `email`: the second half of the own-record test (useIsOwnEmployee).
+      scopedFrom('hr_employees', 'id, full_name, employee_code, status, email').order('full_name'),
       // Both are unfiltered lifetime ledgers — every advance and every repayment the client has
       // ever recorded — so they page, for the same reason PayrollRun and PayrollCalculation page
       // them (S620). Outstanding is derived as `amount − repaid`, so truncating the REPAYMENTS
@@ -213,6 +216,9 @@ export default function Advances() {
   // four more passes for the KPI strip — none of which the form can change.
   const empMap = useMemo(
     () => Object.fromEntries((employees || []).map(e => [e.id, e])), [employees])
+  // Your own advance: the database refuses you recording a repayment on it, writing it off or
+  // deleting it (hr_own_request, S798), so the panel says who does instead.
+  const isOwnEmployee = useIsOwnEmployee(empMap)
 
   // Per-advance repayment totals and rows
   const repayMap = useMemo(() => {
@@ -467,6 +473,7 @@ export default function Advances() {
   const selectedRepaid = selectedAdv ? (repayMap[selected]?.total || 0) : 0
   const selectedOutstanding = selectedAdv ? Math.max(0, parseFloat(selectedAdv.amount) - selectedRepaid) : 0
   const selectedNextCut = selectedAdv?.status === 'active' ? cutFor(selectedAdv.issued_date) : null
+  const selectedIsOwn = !!selectedAdv && isOwnEmployee(selectedAdv.employee_id)
 
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
@@ -620,8 +627,12 @@ export default function Advances() {
                 {selectedNextCut && selectedOutstanding > OWED_EPS && ` · Next salary cut: ${monthLabel(selectedNextCut.cut)} payroll`}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {selectedAdv.status === 'active' && selectedOutstanding > OWED_EPS && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {selectedIsOwn && selectedAdv.status !== 'settled' && (
+                <OwnRecordNote label="Your own advance"
+                  tip="This advance is yours, so someone else — another HR manager or the Owner — records a repayment on it, writes it off or deletes it. Payroll still cuts it as usual." />
+              )}
+              {!selectedIsOwn && selectedAdv.status === 'active' && selectedOutstanding > OWED_EPS && (
                 <>
                   <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={!ready}
                     onClick={() => openRepay(selectedAdv, selectedOutstanding)}>
@@ -651,7 +662,7 @@ export default function Advances() {
               )}
               {/* Not on a written-off advance: its copy says the delete stops payroll deductions, which
                   are already stopped there — reactivate first. */}
-              {ready && selectedReps.length === 0 && selectedAdv.status !== 'written_off' && (
+              {!selectedIsOwn && ready && selectedReps.length === 0 && selectedAdv.status !== 'written_off' && (
                 <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}
                   onClick={() => handleDelete(selectedAdv.id)}>
                   Delete
@@ -716,7 +727,9 @@ export default function Advances() {
                         <td style={{ color: 'var(--theme-text3)' }}>{r.notes || '—'}</td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {src === 'manual' ? (
-                            selectedAdv.status === 'written_off' ? (
+                            selectedIsOwn ? (
+                              <span style={{ color: 'var(--theme-text3)' }}>—</span>
+                            ) : selectedAdv.status === 'written_off' ? (
                               <Tip text="Reactivate the advance first — a written-off balance cannot change." width={220}>
                                 <span style={{ color: 'var(--theme-text3)' }}><Lock size={13} aria-hidden="true" /></span>
                               </Tip>

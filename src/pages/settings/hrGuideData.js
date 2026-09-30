@@ -98,6 +98,7 @@ export const HR_GUIDE_GROUPS = [
           'Basic Payroll / Month sums basic salary over active + probation employees paid MONTHLY only — a daily or hourly rate is not a month\'s pay and is left out.',
         ],
         gotchas: [
+          'Writes to the employee record need HR MANAGER rank or the Owner in the database (S798, hr_employees_write_rank_*), like every money table. A supervisor still reads pay (Overtime and the Roster price hours from it), but a supervisor\'s PATCH of basic, bank or SSF over REST changes 0 rows — and the forms check the count, so a refused save says it was not saved.',
           'Delete is refused — by the database, not just the page — for anyone with finalized payslips, a finalized Final Settlement, finalized festival allowances, any advance or loan, a Self-Service login, or TADA claims / incentives / shift-swap requests. Use Deactivate instead, exactly like Item Master\'s Hide-vs-Delete rule in IMS. An employee with none of those (added by mistake, say) can still be deleted.',
           'Self-Service status per employee is read through a dedicated RPC because the profiles table\'s security only lets an account read its own row — a raw query would show every employee as having no login.',
         ],
@@ -278,7 +279,8 @@ export const HR_GUIDE_GROUPS = [
           'days is derived from the dates by the database — the Staff app used to send its own figure, so ten days could be filed as half a day against the balance.',
           'Approving past the annual quota asks first and names how far over it goes; it is never blocked.',
           'Approve and cancel are refused for leave touching a month whose payroll is finalized. Approving a full day of leave also clears any hours and OT that day carried.',
-          'An approval is only half the write: the other half is the hr_attendance rows, which is what payroll actually reads. A client may have ONE open period at a time, so leave approved months ahead has nowhere to write — until S741 those days were simply never marked, and an approved unpaid leave was silently PAID when its month came round. Creating the period now back-fills them (backfillApprovedLeave), and a day that already carries a mark is never overwritten.',
+          'Nobody below the Owner decides their own leave (S752), and taking back an approval is a decision too (S798, H8): cancelling your own APPROVED leave is refused, because its days go back on the balance and are encashed at exit. Withdrawing your own pending request stays allowed. A decided request keeps its employee, type, dates and day type for everyone, and only a pending request can be deleted (the hss #43 port). The rows say "Your own request" / "Yours, approved" instead of offering the buttons, and "Approve all" leaves them out by name. The finalized-month refusal is in the database too since S798.',
+          'An approval is only half the write: the other half is the hr_attendance rows, which is what payroll actually reads. A client may have ONE open period at a time, so leave approved months ahead has nowhere to write — until S741 those days were simply never marked, and an approved unpaid leave was silently PAID when its month came round. Creating the period now back-fills them, and a day that already carries a mark is never overwritten. Since S798 the back-fill runs in the database (hr_backfill_approved_leave, SECURITY DEFINER): run with the closer\'s login it read nothing for an IMS supervisor, whose RLS view of every HR table is empty, so it marked no leave and said nothing.',
         ],
         connections: 'Approval writes hr_attendance (which payroll reads). Balances and request submission also surface in the employee\'s Self-Service Leave tab. The Roster warns when a shift is assigned over approved leave.',
       },
@@ -290,7 +292,8 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'Per-employee, per-day OT entries with their own approval ladder (pending → approved / rejected) and an estimated pay preview. This is the module that exists so extraordinary OT — especially holiday OT at double rate — is an approved, attributable record rather than a number typed into the attendance sheet.',
         workflow: [
-          '"Approve all N…" (S768) approves each pending entry in turn with the same conditional write as the row button and names any it could not (your own entry, or one decided elsewhere).',
+          '"Approve all N…" (S768) approves each pending entry in turn with the same conditional write as the row button and names any it could not (one decided elsewhere). Your own entries are left out before it starts (S798).',
+          'An approved entry that is yours, before or after the edit, cannot be edited below the Owner (S798, hr_overtime_guard_own): an edit keeps its approval (S749), so editing your own would approve the new hours yourself — and moving a colleague\'s approved entry onto yourself is refused the same way. The row says "Yours, approved"; Undo sends it back to Pending.',
           'Add an entry: employee, BS day, hours, type (weekday or holiday). The type auto-suggests Holiday when the date matches a gazetted entry in the Holiday Calendar.',
           'Anyone who can open the page (supervisor rank and up) approves or rejects a pending entry; the estimated amount previews what payroll will pay.',
           'Undo puts an approved or rejected entry back to Pending, so a mis-click can be decided again. It has no confirmation, and an entry undone after payroll was generated only changes pay once the draft is regenerated.',
@@ -497,6 +500,7 @@ export const HR_GUIDE_GROUPS = [
         ],
         gotchas: [
           'The database now owns the ledger\'s rules (S751): a repayment may not exceed what is owed or land on a non-active advance; an AFTER trigger keeps status in step with the balance (repaid → settled, a repayment removed → active); Settle is refused while anything is owed; an advance with repayments cannot be deleted — write it off instead.',
+          'Your own advance (S798): below the Owner you cannot delete it, move it to someone else, write it off, or change its amount, instalment, issue date or type, and you cannot record, change or delete a repayment on it (hr_advances_guard_own, hr_advance_repayments_guard_own). The panel says "Your own advance". Payroll and Final Settlement write through SECURITY DEFINER functions and are unaffected.',
           'Finalize settles an advance the moment its balance reaches zero; Reopen deletes payroll\'s own repayment rows and reactivates anything that regains a balance — manual repayments are never touched by either.',
           'HR Dashboard\'s Advances Outstanding tile shows "—" when its reads fail, never NPR 0.',
           'Exact to the paisa since S791: an advance settles only when its last paisa is recovered (it used to settle with Rs. 0.01 still owed, which was then never recovered), a repayment may not exceed what is owed by even a paisa, and a Reopen that removes a last paisa-sized cut makes the advance active again.',
@@ -530,7 +534,7 @@ export const HR_GUIDE_GROUPS = [
           'Paid by payroll month M ⇔ status = approved AND end_date ≤ last day of M. One claim, one payroll — a trip crossing a month end is paid in the month it ends.',
         ],
         gotchas: [
-          'The ladder is enforced by trigger (S751): pending → approved/rejected (never your own); approved → paid needs a manager and a method; paid (Payroll) → approved only through a payroll Reopen. A decided claim\'s employee, dates and total are frozen, and only a pending claim can be deleted.',
+          'The ladder is enforced by trigger (S751): pending → approved/rejected (never your own); approved → paid needs a manager and a method; paid (Payroll) → approved only inside reopen_payroll_run / reopen_final_settlement (S798: the direct branch, which let an HR manager move a paid claim back to Approved over REST so the next payroll paid it again, is gone). A decided claim\'s employee, dates and total are frozen, and only a pending claim can be deleted.',
           'TADA is NOT month-scoped like the rest of HR — claims live on plain AD trip dates with no BS period attached; the month filter buckets them by converting the start date. A claim belongs to a payroll only by the end-date rule above.',
           'A trip cannot end before it starts and amounts cannot be negative (numeric accepts \'NaN\' and NaN > 0 is true, so the CHECK spells out <> \'NaN\'). A manager-entered claim matching another on employee, dates and total gets a duplicate warning; submit_my_tada_claim refuses an identical claim outright.',
           'Payroll adds TADA AFTER tax — it is a reimbursement of the employee\'s own money, never taxable income. The payslip\'s TADA amount is not editable; change or reject the claim instead.',

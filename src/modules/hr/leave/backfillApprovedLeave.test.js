@@ -1,13 +1,12 @@
-import { scopedFrom, scopedUpsert } from '../../../shared/scopedDb'
+import { supabase } from '../../../supabaseClient'
+import { scopedFrom } from '../../../shared/scopedDb'
 import { backfillApprovedLeave, backfillLeaveText, findApprovedLeaveGaps } from './backfillApprovedLeave'
 
-// backfillApprovedLeave.js reaches scopedDb directly; both it and supabaseClient are mocked so the
-// suite runs in a plain checkout, the same way closePeriod.test.js does it. babel-jest hoists
-// jest.mock above the imports, so they sit below them here only to satisfy import/first.
-jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn() } }))
-jest.mock('../../../shared/scopedDb', () => ({
-  scopedFrom: jest.fn(), scopedUpsert: jest.fn(),
-}))
+// backfillApprovedLeave.js reaches supabase and scopedDb directly; both are mocked so the suite runs
+// in a plain checkout, the same way closePeriod.test.js does it. babel-jest hoists jest.mock above
+// the imports, so they sit below them here only to satisfy import/first.
+jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
+jest.mock('../../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 
 // Ashwin is BS month 6 (Baisakh, Jestha, Ashadh, Shrawan, Bhadra, Ashwin), and Ashwin 2083 spans
 // 2026-09-17 → 2026-10-17 with 31 days. Read off bsCalendar's own table rather than assumed — the
@@ -38,161 +37,45 @@ function mockTables(map) {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  scopedUpsert.mockResolvedValue({ data: null, error: null })
 })
 
+// S798: the rules (blanks only, one row per day, holidays, settled leavers, the finalized-month
+// refusal) moved into hr_backfill_approved_leave and were exercised against the live database in the
+// migration's rolled-back dry run. What is left here is the wrapper's contract with its callers.
 describe('backfillApprovedLeave', () => {
-  // S791: a finalized Final Settlement locks its leaver's last month and every later one in the
-  // database, so their rows would fail the whole upsert. They are left out; a rehire is not.
-  test("a settled leaver's leave is left out and counted; everyone else's is still marked", async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ, { ...REQ, id: 'r2', employee_id: 'e2' }], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-      hr_final_settlements: { data: [{ employee_id: 'e2', last_working_date: '2026-09-20' }], error: null },
-      hr_employees: { data: [{ id: 'e2', join_date: '2024-01-01' }], error: null },
-    })
+  test('asks the database for the period and passes its counts through', async () => {
+    supabase.rpc.mockResolvedValue({ data: { filled: 2, skipped: 1, settled: 2, employees: 1 }, error: null })
     const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 2, skipped: 0, settled: 2, employees: 1, error: null })
-    expect(scopedUpsert.mock.calls[0][2].every(row => row.employee_id === 'e1')).toBe(true)
+    expect(supabase.rpc).toHaveBeenCalledWith('hr_backfill_approved_leave', { p_period_id: 'p-ashwin' })
+    expect(r).toEqual({ filled: 2, skipped: 1, settled: 2, employees: 1, error: null })
     expect(backfillLeaveText(r, 'Ashwin 2083')).toMatch(/2 days of leave belonging to staff whose Final Settlement already paid Ashwin 2083 were left out/)
   })
 
-  test('a rehire (join date after the settled last day) is marked like anyone else', async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-      hr_final_settlements: { data: [{ employee_id: 'e1', last_working_date: '2026-03-01' }], error: null },
-      hr_employees: { data: [{ id: 'e1', join_date: '2026-06-01' }], error: null },
-    })
+  test('a refusal or a failed call is an error, never "filled 0" — that would read as synced', async () => {
+    const refused = { code: 'P0001', message: 'hr_month_finalized: payroll for this month is finalized' }
+    supabase.rpc.mockResolvedValue({ data: null, error: refused })
+    expect(await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN }))
+      .toEqual({ filled: 0, skipped: 0, settled: 0, employees: 0, error: refused })
+  })
+
+  test('a thrown or hung call is reported, not thrown — period creation must not fail on it', async () => {
+    supabase.rpc.mockRejectedValue(new Error('Failed to fetch'))
     const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toMatchObject({ filled: 2, settled: 0 })
-  })
-
-
-  test('writes one attendance row per day of an approved leave that falls in the period', async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-    })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 2, skipped: 0, settled: 0, employees: 1, error: null })
-    const [, , rows] = scopedUpsert.mock.calls[0]
-    expect(rows).toEqual([
-      { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 7, status: 'unpaid_leave' },
-      { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 8, status: 'unpaid_leave' },
-    ])
-  })
-
-  test('a public holiday inside the leave is written as Holiday, not leave (S749)', async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-      hr_holiday_calendar: { data: [{ bs_day: 8 }], error: null },
-    })
-    await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    const [, , rows] = scopedUpsert.mock.calls[0]
-    expect(rows.map(r => [r.bs_day, r.status])).toEqual([[7, 'unpaid_leave'], [8, 'holiday']])
-  })
-
-  test('a failed holiday read is a failed back-fill, not a leave day', async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-      hr_holiday_calendar: { data: null, error: { message: 'boom' } },
-    })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r.error).toEqual({ message: 'boom' })
-    expect(scopedUpsert).not.toHaveBeenCalled()
-  })
-
-  test('a paid type writes paid_leave, and a half-day writes the half status', async () => {
-    mockTables({
-      hr_leave_requests: {
-        data: [{ ...REQ, leave_type_id: 't-sick', end_date: '2026-09-23', day_type: 'first_half' }],
-        error: null,
-      },
-      hr_leave_types: { data: [{ id: 't-sick', paid: true }], error: null },
-      hr_attendance: { data: [], error: null },
-    })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r.filled).toBe(1)
-    expect(scopedUpsert.mock.calls[0][2][0].status).toBe('half_paid_leave')
-  })
-
-  test('a day that already carries an attendance mark is left alone, not overwritten', async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      // Someone marked 7 Ashwin present by hand. A months-old approval must not silently undo it.
-      hr_attendance: { data: [{ employee_id: 'e1', bs_day: 7 }], error: null },
-    })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 1, skipped: 1, settled: 0, employees: 1, error: null })
-    expect(scopedUpsert.mock.calls[0][2]).toEqual([
-      { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 8, status: 'unpaid_leave' },
-    ])
-  })
-
-  test('only the days inside THIS period are written — a leave spanning a month boundary splits', async () => {
-    mockTables({
-      // 30 Ashwin → 3 Kartik.
-      hr_leave_requests: {
-        data: [{ ...REQ, start_date: '2026-10-16', end_date: '2026-10-20' }],
-        error: null,
-      },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-    })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    const days = scopedUpsert.mock.calls[0][2].map(x => x.bs_day)
-    expect(days).toEqual([30, 31])
-    expect(r.filled).toBe(2)
-  })
-
-  test('two approved requests covering one day send that day ONCE', async () => {
-    // Postgres refuses an upsert that affects a row twice, which would lose the whole month.
-    mockTables({
-      hr_leave_requests: { data: [REQ, { ...REQ, id: 'r2' }], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-    })
-    await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    const keys = scopedUpsert.mock.calls[0][2].map(x => `${x.employee_id}:${x.bs_day}`)
-    expect(new Set(keys).size).toBe(keys.length)
-  })
-
-  test('a failed read reports the error and writes nothing — it must not read as "no leave"', async () => {
-    mockTables({
-      hr_leave_requests: { data: null, error: { code: '42501', message: 'permission denied' } },
-      hr_leave_types: { data: [], error: null },
-      hr_attendance: { data: [], error: null },
-    })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r.error).toMatchObject({ code: '42501' })
     expect(r.filled).toBe(0)
-    expect(scopedUpsert).not.toHaveBeenCalled()
+    expect(r.error?.message).toBe('Failed to fetch')
   })
 
-  test('a failed write is reported as filled: 0, never as a partial success', async () => {
-    mockTables({
-      hr_leave_requests: { data: [REQ], error: null },
-      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
-      hr_attendance: { data: [], error: null },
-    })
-    scopedUpsert.mockResolvedValue({ data: null, error: { code: '23503', message: 'fk' } })
-    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
-    expect(r).toEqual({ filled: 0, skipped: 0, settled: 0, employees: 0, error: { code: '23503', message: 'fk' } })
+  test('an answer missing a count reads that count as 0', async () => {
+    supabase.rpc.mockResolvedValue({ data: { filled: 3 }, error: null })
+    expect(await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN }))
+      .toEqual({ filled: 3, skipped: 0, settled: 0, employees: 0, error: null })
   })
 
-  test('a period with no id or no BS month writes nothing rather than guessing', async () => {
-    expect(await backfillApprovedLeave({ clientId: 'c1', period: null }))
-      .toEqual({ filled: 0, skipped: 0, settled: 0, employees: 0, error: null })
-    expect(scopedFrom).not.toHaveBeenCalled()
+  test('a period with no id or no BS month asks nothing rather than guessing', async () => {
+    expect((await backfillApprovedLeave({ clientId: 'c1', period: { bs_year: 2083, bs_month: 6 } })).filled).toBe(0)
+    expect((await backfillApprovedLeave({ clientId: 'c1', period: { id: 'p', bs_year: 2083 } })).filled).toBe(0)
+    expect((await backfillApprovedLeave({ clientId: null, period: ASHWIN })).filled).toBe(0)
+    expect(supabase.rpc).not.toHaveBeenCalled()
   })
 })
 

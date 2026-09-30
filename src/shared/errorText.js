@@ -743,7 +743,21 @@ const rules = [
   {
     test: e => /hr_own_request/i.test(e.message || ''),
     staff: 'That request is your own, so someone else has to decide it. Nothing was changed.',
-    operator: 'This is your own record, so someone else — another manager or the Owner — has to approve, reject or write it off. Nothing was changed.',
+    // S798: also cancelling your own approved leave, changing your own approved overtime or advance,
+    // deleting your own advance, and recording a repayment on it.
+    operator: 'This is your own record, so someone else — another manager or the Owner — has to decide, change or cancel it. Nothing was changed.',
+  },
+  // S798 (20260930120000): a decided leave request keeps its employee, type, dates and day type, and
+  // only a pending one can be deleted.
+  {
+    test: e => /leave_request_locked/i.test(e.message || ''),
+    staff: 'That leave has already been decided, so it cannot be changed that way. Nothing was changed.',
+    operator: 'That leave request has already been decided, so its employee, type and dates stay as they were decided, and it cannot be deleted — cancel it instead, or file a new request for different dates. Nothing was changed.',
+  },
+  {
+    test: e => /hr_backfill_forbidden|hr_backfill_no_period|hr_backfill_no_calendar/i.test(e.message || ''),
+    staff: 'Approved leave could not be marked from this login. Nothing was written — ask your manager.',
+    operator: 'Approved leave could not be marked on that month from this login — the Owner, an HR supervisor or manager, or an IMS supervisor or manager can. Nothing was written.',
   },
   {
     test: e => /payroll_run_stale|payroll_repayments_mismatch|payroll_repayment_invalid/i.test(e.message || ''),

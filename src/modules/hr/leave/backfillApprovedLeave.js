@@ -1,6 +1,7 @@
-import { scopedFrom, scopedUpsert } from '../../../shared/scopedDb'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
-import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
+import { supabase } from '../../../supabaseClient'
+import { scopedFrom } from '../../../shared/scopedDb'
+import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { withTimeout } from '../../../utils/withTimeout'
 import { workingDaysInRange } from './leaveConstants'
 
 /**
@@ -12,119 +13,50 @@ import { workingDaysInRange } from './leaveConstants'
  * that exist; a day with no row is a paid day). Those rows hang off a `monthly_periods` row, and a
  * client may have only one open period at a time (`monthly_periods_one_open_per_client`). So a
  * leave approved for a month two or three ahead — which is most leave, since staff plan around
- * Dashain and family trips — had nowhere to write. `approveRequest()` approved it anyway, which is
- * right, and printed "Create the period(s), then re-approve to mark those days".
+ * Dashain and family trips — had nowhere to write, and nothing back-filled it when the month came:
+ * an approved unpaid leave was silently PAID in full. This runs at the one moment the write becomes
+ * possible — when the period is minted — and backs the Leave page's catch-up button.
  *
- * That instruction could not be followed. The period cannot be opened early (the index refuses it),
- * an approved row has no Approve button to press later, and nothing anywhere back-filled: the
- * Attendance Sheet reads `hr_attendance` and never looks at `hr_leave_requests`. The result was an
- * approved unpaid leave that was silently PAID in full when its month finally came round, with the
- * Leave page and the attendance sheet each looking correct on their own.
+ * WHERE (S798, LEAVE-OT-HOLIDAYS-1). The rules run in the database, in
+ * `hr_backfill_approved_leave(p_period_id)` (SECURITY DEFINER). This file used to read the requests,
+ * types, holidays and settlements with the CALLER's login, and RLS hides every HR row from an IMS
+ * login — so when an IMS supervisor ended the month the read came back empty, the function reported
+ * "filled 0" with no error, and the approved unpaid leave was paid. The function checks the caller
+ * (admin, the Owner, an IMS or HR supervisor/manager of that client) and keeps every rule this file
+ * had:
  *
- * This runs at the one moment the write becomes possible — when the period is minted — so no one
- * has to remember a warning from three months ago.
+ *   • **Blanks only.** A day that already carries a mark (by hand, by an approval, by Generate) is
+ *     never overwritten; those are counted as `skipped`.
+ *   • **One row per employee-day**, so two approved requests on one day cannot fail the batch.
+ *   • **A public holiday inside the leave is marked `holiday`** (decided 2026-09-14).
+ *   • **A leaver settled in the current employment is left out and counted as `settled`** (S791) —
+ *     their finalized Final Settlement already paid this month. A rehire is marked like anyone else.
+ *   • **A finalized payroll month is refused** (`hr_month_finalized`), row by row through the same
+ *     `hr_pay_month_guard` the attendance trigger calls.
  *
- * Two properties are deliberate:
- *
- *   • **It only fills days that have no attendance row yet.** At period creation that is every day,
- *     so the common path is unaffected; but the same helper is what the Leave page's catch-up
- *     banner calls, and there a month may already have marks on it. A months-old approval silently
- *     overwriting a day someone marked `present` by hand is a worse failure than the one being
- *     fixed. Skipped days are counted and reported rather than dropped.
- *   • **It reports rather than throws.** Period creation must never fail because of an HR read;
- *     the caller records `{ filled, skipped, error }` alongside its own result and surfaces it,
- *     because a best-effort second write's silence proves nothing (CLAUDE.md, "two writes in one
- *     function can diverge").
+ * **It reports rather than throws.** Period creation must never fail because of an HR write; the
+ * caller records `{ filled, skipped, settled, employees, error }` beside its own result and surfaces
+ * it, because a best-effort second write's silence proves nothing (CLAUDE.md, "one write never
+ * proves another landed"). `clientId` is only a guard here — the function reads the period's own.
  *
  * @param {{clientId: string, period: {id: string, bs_year: number, bs_month: number}}} args
- * @returns {Promise<{filled: number, skipped: number, employees: number, error: any}>}
+ * @returns {Promise<{filled: number, skipped: number, settled: number, employees: number, error: any}>}
  */
 export async function backfillApprovedLeave({ clientId, period }) {
   const empty = { filled: 0, skipped: 0, settled: 0, employees: 0, error: null }
   if (!clientId || !period?.id || !period.bs_year || !period.bs_month) return empty
-
-  // The AD window this BS month occupies, as plain date strings — `start_date`/`end_date` are
-  // `date` columns. formatAd, never .toISOString(): bsToAd returns LOCAL midnight, and at Nepal's
-  // UTC+05:45 .toISOString() lands on the previous day (CLAUDE.md).
-  const firstAd = bsToAd(period.bs_year, period.bs_month, 1)
-  const lastAd = bsToAd(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month))
-  if (!firstAd || !lastAd || isNaN(firstAd) || isNaN(lastAd)) return empty
-  const monthStart = formatAd(firstAd)
-  const monthEnd = formatAd(lastAd)
-
-  // Overlap, not containment: a leave running Ashwin 29 → Kartik 3 belongs partly to this month,
-  // and the day filter below keeps only the days that are actually in it.
-  const [reqRes, typeRes, attRes, holRes, setRes] = await Promise.all([
-    scopedFrom('hr_leave_requests', clientId, 'id, employee_id, leave_type_id, start_date, end_date, day_type')
-      .eq('status', 'approved').lte('start_date', monthEnd).gte('end_date', monthStart),
-    scopedFrom('hr_leave_types', clientId, 'id, paid'),
-    // One row per employee per day: 40 staff on a 31-day month is already 1,240, so a bare
-    // .select() would silently truncate at 1,000 — and a truncated "already marked" set does not
-    // read as an error, it reads as free days to fill, which would overwrite real marks.
-    fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'employee_id, bs_day')
-      .eq('period_id', period.id).order('employee_id').order('bs_day').order('id')),
-    // This month's public holidays: a holiday inside an approved leave is marked Holiday, not
-    // leave — the day the leave does not charge (decided 2026-09-14), the same as approval does.
-    scopedFrom('hr_holiday_calendar', clientId, 'bs_day')
-      .eq('holiday_type', 'public').is('removed_at', null)
-      .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
-    // S791: a finalized Final Settlement locks its leaver's last month and every later one in the
-    // database (hr_pay_month_guard), so their rows here would fail the WHOLE upsert — one leaver's
-    // approved leave would cost every other employee's back-fill. They are left out and counted.
-    scopedFrom('hr_final_settlements', clientId, 'employee_id, last_working_date')
-      .eq('status', 'finalized').lte('last_working_date', monthEnd),
-  ])
-  // A failed read is not "no approved leave" — returning `filled: 0` on an error would report the
-  // month as fully synced and hide exactly the days this exists to rescue.
-  const readErr = reqRes.error || typeRes.error || attRes.error || holRes.error || setRes.error
-  if (readErr) return { ...empty, error: readErr }
-
-  const requests = reqRes.data || []
-  if (requests.length === 0) return empty
-
-  // Settled in the CURRENT employment only: a rehire (a join date after the settled last day) is a
-  // new employment and gets their leave marked like anyone else.
-  let settledIds = new Set()
-  const settlements = setRes.data || []
-  if (settlements.length > 0) {
-    const empRes = await scopedFrom('hr_employees', clientId, 'id, join_date')
-      .in('id', [...new Set(settlements.map(s => s.employee_id))])
-    if (empRes.error) return { ...empty, error: empRes.error }
-    const joinOf = new Map((empRes.data || []).map(e => [e.id, e.join_date ? String(e.join_date).slice(0, 10) : null]))
-    settledIds = new Set(settlements
-      .filter(s => { const j = joinOf.get(s.employee_id); return !j || String(s.last_working_date).slice(0, 10) >= j })
-      .map(s => s.employee_id))
+  try {
+    const { data, error } = await withTimeout(
+      supabase.rpc('hr_backfill_approved_leave', { p_period_id: period.id }),
+      20000, 'Marking approved leave'
+    )
+    if (error) return { ...empty, error }
+    const count = k => Number(data?.[k]) || 0
+    return { filled: count('filled'), skipped: count('skipped'), settled: count('settled'), employees: count('employees'), error: null }
+  } catch (e) {
+    // A timeout may still land; the Leave page's banner finds whatever did not.
+    return { ...empty, error: e }
   }
-  const paidById = Object.fromEntries((typeRes.data || []).map(t => [t.id, t.paid !== false]))
-  // Days already carrying a mark — keyed employee:day, so a pre-existing row is never overwritten.
-  const taken = new Set((attRes.data || []).map(a => `${a.employee_id}:${a.bs_day}`))
-  const holidayDays = new Set((holRes.data || []).map(h => h.bs_day))
-
-  const rows = []
-  let skipped = 0
-  let settled = 0
-  for (const req of requests) {
-    const isHalf = req.day_type && req.day_type !== 'full'
-    const status = paidById[req.leave_type_id]
-      ? (isHalf ? 'half_paid_leave' : 'paid_leave')
-      : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
-    for (const d of workingDaysInRange(req.start_date, req.end_date)) {
-      if (d.bsYear !== period.bs_year || d.bsMonth !== period.bs_month) continue
-      if (settledIds.has(req.employee_id)) { settled += 1; continue }
-      const key = `${req.employee_id}:${d.bsDay}`
-      if (taken.has(key)) { skipped += 1; continue }
-      // Two approved requests overlapping one day would otherwise send the same key twice in one
-      // upsert, which Postgres refuses outright ("cannot affect row a second time") and would lose
-      // the whole month's back-fill over one double-booking.
-      taken.add(key)
-      rows.push({ employee_id: req.employee_id, period_id: period.id, bs_day: d.bsDay, status: holidayDays.has(d.bsDay) ? 'holiday' : status })
-    }
-  }
-  if (rows.length === 0) return { ...empty, skipped, settled }
-
-  const { error } = await scopedUpsert('hr_attendance', clientId, rows, { onConflict: 'employee_id,period_id,bs_day' })
-  if (error) return { filled: 0, skipped, settled, employees: 0, error }
-  return { filled: rows.length, skipped, settled, employees: new Set(rows.map(r => r.employee_id)).size, error: null }
 }
 
 /**

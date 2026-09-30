@@ -252,10 +252,19 @@ export default function EmployeeList() {
     const ids = selectedVisible.map(e => e.id)
     if (ids.length === 0) return
     setBulkBusy(true); setBulkError(null)
-    const { error } = await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', ids)
+    const { data: savedRows, error } = await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', ids).select('id')
     if (error) {
       const a = asActionError(error)
       setBulkError({ text: `The ${ids.length} selected employee(s) were not ${blocked ? 'deactivated' : 'activated'} — their access is unchanged. ` + a.text, detail: a.detail })
+      setBulkBusy(false)
+      return
+    }
+    // A write RLS refuses is 0 rows and no error (S798: HR manager rank), and one removed on another
+    // screen is the same silence, so the count is compared rather than trusted.
+    if ((savedRows?.length || 0) < ids.length) {
+      const done = savedRows?.length || 0
+      setBulkError(`${done} of ${ids.length} selected employee(s) were ${blocked ? 'deactivated' : 'activated'}; the rest are unchanged — this login may no longer have HR manager rank, or they were removed on another screen. The list has been reloaded.`)
+      await fetchEmployees()
       setBulkBusy(false)
       return
     }

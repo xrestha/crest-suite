@@ -73,6 +73,11 @@ export const PAY_HISTORY_LABELS = {
   self_service_login:  'a Self-Service login',
 }
 
+// An employee write that came back as 0 rows with no error: RLS refused it (writes need HR manager
+// rank or the Owner since S798, hr_employees_write_rank_*) or the record went on another screen.
+// Employees and Pay Setup are manager pages, so for their readers this is a rank changed mid-session.
+export const NOT_SAVED_RLS = 'Nothing was changed: this login may no longer have HR manager rank, or the employee was removed on another screen. Reload to see the record as it is.'
+
 // Statuses that take an employee OFF every payroll picker (Payroll Run, Calculation, Final
 // Settlement all filter on active/probation).
 export const OFF_PAYROLL_STATUSES = new Set(['inactive', 'resigned', 'terminated'])

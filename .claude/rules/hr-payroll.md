@@ -651,8 +651,9 @@ Sixteen decisions taken with Aashish (2026-09-14). Migration `20260914210000`; e
   and Final Settlement's own status writes still run and are now redundant-but-harmless.
 - **TADA ladder, by trigger:** pending → approved/rejected (never your own claim — matched on
   `profiles.hr_employee_id` or the employee record's email; `approved_by` set server-side), approved →
-  paid needs a manager and a method, paid(Payroll) → approved only for a payroll Reopen; a decided
-  claim's employee, dates and total are frozen. Manager-entered claims go through `create_tada_claim`
+  paid needs a manager and a method, paid → approved only inside `reopen_payroll_run` /
+  `reopen_final_settlement` (S798: the direct branch let a manager re-open a paid claim over REST and
+  be paid twice); a decided claim's employee, dates and total are frozen. Manager-entered claims go through `create_tada_claim`
   (one transaction); `submit_my_tada_claim` refuses an identical claim twice, NaN and reversed dates.
   **numeric accepts `'NaN'` and `NaN > 0` is true** — a CHECK needs `<> 'NaN'` spelled out.
 
@@ -862,3 +863,26 @@ Decided with Aashish (2026-09-28). Migrations `20260928100000` (advances), `2026
   Import decide "blank" from the screen. `loadAttendance` returns true / false / null (superseded),
   and a write whose reload fails says it landed. Generate writes with `ignoreDuplicates` and counts
   the days it kept.
+
+## Own records, the employee fence, the back-fill in the database (S798 stage 1b)
+
+Migration `20260930120000`, applied live after a rolled-back dry run. Findings: `HR_TODO.md` S798.2.
+
+- **`hr_employees` writes need HR manager rank** (`hr_employees_write_rank_*`, the S751 shape); reads
+  stay open to supervisors. A refused write is 0 rows, so the three writers `.select('id')` and say
+  `NOT_SAVED_RLS` (`employeeFormData.js`).
+- **"Your own" covers more than Approve/Reject**, below the Owner, OLD or NEW employee: your own advance
+  (delete, move, write-off, amount, instalment, issue date, type) and any repayment on it; your own
+  approved overtime (employee, hours, type, day); your own APPROVED leave (no cancel, no reopen — H8).
+  Withdrawing your own pending leave stays allowed. Pages test with `useIsOwnEmployee` (`ownRecord.js`,
+  Owner exempt like `hr_self_decision_exempt`; TADA keeps `isOwnClaim`, operator-only) and render
+  `OwnRecordNote`; a batch leaves own rows out.
+- **A decided leave request keeps employee, type, dates and day type for every client caller, and
+  only a pending one can be deleted** (`leave_request_locked`). An approval, or any change to an
+  approved request, in a month with finalized payroll is refused in the database
+  (`hr_leave_range_finalized`, DEFINER, because a supervisor's view of runs is empty).
+- **The leave back-fill is `hr_backfill_approved_leave(p_period_id)`** (DEFINER; admin, Owner, IMS or
+  HR supervisor+). `backfillApprovedLeave.js` only calls it. Inside a DEFINER body the INVOKER
+  attendance guard returns early, so it calls `hr_pay_month_guard` per row itself — a new DEFINER
+  writer of `hr_attendance` must too.
+- `employee_pay_history` answers only a login that can see employees at all (SELF-SERVICE-2).

@@ -11,6 +11,7 @@ import {
   PAY_BASES, minRateFor,
 } from '../payrollConstants'
 import { isSsfContributor } from '../payroll/payrollCompute'
+import { NOT_SAVED_RLS } from '../employees/employeeFormData'
 
 const CIT_CHIP = 'CIT / Provident Fund'
 const QUICK_EARNINGS   = ['Housing Allowance', 'Transport', 'Medical Allowance', 'Food Allowance', 'Grade Pay']
@@ -118,7 +119,7 @@ export default function PayForm({ employee, onSave, onClose }) {
     setError('')
     setSaving(true)
 
-    const { error: err } = await scopedUpdate('hr_employees', {
+    const { data: savedRows, error: err } = await scopedUpdate('hr_employees', {
       pay_basis:       form.pay_basis,
       basic_salary:    parseFloat(form.basic_salary) || 0,
       bank_name:       form.bank_name || null,
@@ -128,8 +129,11 @@ export default function PayForm({ employee, onSave, onClose }) {
       ssf_enrolled:             form.ssf_enrolled,
       life_insurance_premium:   parseFloat(form.life_insurance_premium) || 0,
       health_insurance_premium: parseFloat(form.health_insurance_premium) || 0,
-    }).eq('id', employee.id)
+    }).eq('id', employee.id).select('id')
     if (err) { setError('The pay details were not saved. ' + errorLine(err)); setSaving(false); return }
+    // A write RLS refuses is 0 rows and no error — writes here need HR manager rank (S798) — so an
+    // unchecked count read as saved and went on to replace the allowances below.
+    if (!savedRows?.length) { setError('The pay details were not saved. ' + NOT_SAVED_RLS); setSaving(false); return }
 
     // Build component rows — dearness first (if set), then the rest. Delete-then-insert: once the
     // delete has landed the employee has NO components until the insert does, so each half names

@@ -11,7 +11,8 @@ import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, HR_REQUEST_STATUS } from '../payr
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
+import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
+import { useIsOwnEmployee } from '../ownRecord'
 
 // One ladder for all five HR approval queues (S660) — Pending was brass here and on Leave, grey on
 // TADA and amber on the dashboard and in the employee app, for the same word. `tint` already
@@ -80,7 +81,7 @@ export default function Overtime() {
       const [pRes, eRes, hRes] = await Promise.all([
         scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-        scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status')
+        scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status, email')
           .in('status', ['active', 'probation']).order('full_name'),
         // Removed holidays (removed_at set, S748) are kept only so Seed does not re-add them —
         // never a holiday for pay purposes.
@@ -261,11 +262,11 @@ export default function Overtime() {
   }
 
   // Every pending entry on screen, approved one after another through the same conditional write a
-  // row's own button makes — so an entry decided on another screen, or one this login may not decide
-  // (its own), is reported by name rather than failing the batch (S768).
+  // row's own button makes — so an entry decided on another screen is reported by name rather than
+  // failing the batch (S768). Your own entries are left out before the batch starts (S798).
   function requestBulkApprove() {
     if (refuseIfLocked()) return
-    const pending = filtered.filter(e => e.status === 'pending')
+    const pending = filtered.filter(e => e.status === 'pending' && !isOwnEmployee(e.employee_id))
     if (pending.length < 2) return
     const hours = pending.reduce((s, e) => s + (parseFloat(e.ot_hours) || 0), 0)
     askConfirm({
@@ -325,6 +326,9 @@ export default function Overtime() {
   const empMap = useMemo(
     () => ({ ...extraEmps, ...Object.fromEntries(employees.map(e => [e.id, e])) }),
     [employees, extraEmps])
+  // Your own entry (S798): the database refuses you deciding it, and once it is approved, editing
+  // it (an edit keeps its approval, S749) — so neither is offered, and the batch leaves it out.
+  const isOwnEmployee = useIsOwnEmployee(empMap)
 
   useEffect(() => {
     const known = new Set(employees.map(e => e.id))
@@ -332,7 +336,7 @@ export default function Overtime() {
       .filter(id => id && !known.has(id) && !attemptedRef.current.has(id))
     if (missing.length === 0) return
     missing.forEach(id => attemptedRef.current.add(id))
-    scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status').in('id', missing)
+    scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status, email').in('id', missing)
       .then(({ data, error }) => {
         if (error) { console.error('overtime: could not resolve former employees', error); return }
         if (data?.length) setExtraEmps(p => ({ ...p, ...Object.fromEntries(data.map(e => [e.id, e])) }))
@@ -494,8 +498,8 @@ export default function Overtime() {
         </div>
       ) : (
         <div className="card" style={{ padding: 0 }}>
-          <BulkApproveBar count={locked ? 0 : filtered.filter(e => e.status === 'pending').length} noun="overtime entries"
-            detail={`${Math.round(filtered.filter(e => e.status === 'pending').reduce((s, e) => s + (parseFloat(e.ot_hours) || 0), 0) * 10) / 10} hours`}
+          <BulkApproveBar count={locked ? 0 : filtered.filter(e => e.status === 'pending' && !isOwnEmployee(e.employee_id)).length} noun="overtime entries"
+            detail={`${Math.round(filtered.filter(e => e.status === 'pending' && !isOwnEmployee(e.employee_id)).reduce((s, e) => s + (parseFloat(e.ot_hours) || 0), 0) * 10) / 10} hours`}
             onApprove={requestBulkApprove} />
           <div className="table-wrap table-wrap--fab-clear">
             <table className="data-table">
@@ -523,6 +527,7 @@ export default function Overtime() {
                 {filtered.map(e => {
                   const emp = empMap[e.employee_id] || {}
                   const sc  = STATUS_COLORS[e.status] || STATUS_COLORS.pending
+                  const own = isOwnEmployee(e.employee_id)
                   return (
                     <tr key={e.id}>
                       <td>
@@ -554,17 +559,25 @@ export default function Overtime() {
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                          {e.status === 'pending' && (
-                            <>
-                              <DecisionButtons who={`${emp.full_name || 'this entry'}, ${formatBsDay(e.bs_day, e.bs_month)}`}
-                                onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
-                            </>
-                          )}
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {e.status === 'pending' && (own ? (
+                            <OwnRecordNote label="Your own entry"
+                              tip="This overtime is yours, so someone else decides it — another supervisor, a manager or the Owner." />
+                          ) : (
+                            <DecisionButtons who={`${emp.full_name || 'this entry'}, ${formatBsDay(e.bs_day, e.bs_month)}`}
+                              onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
+                          ))}
                           {e.status !== 'pending' && (
                             <button className="btn btn-ghost btn-sm" onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
                           )}
-                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)} disabled={locked}>Edit</button>
+                          {/* An approved entry keeps its approval through an edit (S749), so editing your
+                              own would be approving the new hours yourself. */}
+                          {own && e.status === 'approved' ? (
+                            <OwnRecordNote label="Yours, approved"
+                              tip="Your own approved overtime can only be changed by someone else. Undo sends it back to pending if the hours were wrong." />
+                          ) : (
+                            <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)} disabled={locked}>Edit</button>
+                          )}
                           <button className="btn btn-danger btn-sm" onClick={() => del(e)} disabled={locked}>Del</button>
                         </div>
                       </td>

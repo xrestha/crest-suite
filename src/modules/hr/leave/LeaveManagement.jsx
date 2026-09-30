@@ -14,7 +14,8 @@ import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
+import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
+import { useIsOwnEmployee } from '../ownRecord'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -100,6 +101,9 @@ export default function LeaveManagement() {
   const isSingleDay = fStart && fEnd && fStart === fEnd
 
   const empMap  = Object.fromEntries(employees.map(e => [e.id, e]))
+  // Your own request (S752, S798): the database refuses you approving or rejecting it, and cancelling
+  // it once approved (H8) — so neither is offered, and the batch leaves it out by name.
+  const isOwnEmployee = useIsOwnEmployee(empMap)
   const typeMap = Object.fromEntries(types.map(t => [t.id, t]))
   const activeTypes = types.filter(t => t.active)
   // Reopening a decided request is manager-and-above; the page itself opens at supervisor.
@@ -133,7 +137,8 @@ export default function LeaveManagement() {
     const results = await Promise.all([
       // Every status, not just active/probation — the Balances tab filters in JS so it can show a
       // leaver on request, while every other tab here still works from the active list below.
-      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status').order('full_name'),
+      // `email`: the second half of the own-record test (useIsOwnEmployee).
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, email').order('full_name'),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status'),
       // Paged: this is the client's ENTIRE request history and the source of the Balances tab, so
       // the silent 1000-row cap would quietly overstate an employee's remaining leave once the
@@ -372,6 +377,7 @@ export default function LeaveManagement() {
     for (const req of pending) {
       const type = typeMap[req.leave_type_id]
       const name = empMap[req.employee_id]?.full_name || 'A request'
+      if (isOwnEmployee(req.employee_id)) { skipped.push(`${name} — your own request, so another manager or the Owner decides it`); continue }
       if (!type) { skipped.push(`${name} — leave type missing`); continue }
       const locked = lockedMonthsLabel(req)
       if (locked) { skipped.push(`${name} — payroll for ${locked} is finalized`); continue }
@@ -757,13 +763,19 @@ export default function LeaveManagement() {
                         </td>
                         <td><span style={{ fontSize: 11, fontWeight: 700, color: sc.color }}>{sc.label}</span></td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {req.status === 'pending' && (
-                            <>
-                              <DecisionButtons who={`${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} disabled={busy}
-                                onApprove={() => approveRequest(req)} onReject={() => decideRequest(req, 'rejected')} />
-                            </>
-                          )}
-                          {(req.status === 'pending' || req.status === 'approved') && (
+                          {req.status === 'pending' && (isOwnEmployee(req.employee_id) ? (
+                            <OwnRecordNote label="Your own request"
+                              tip="This leave is yours, so someone else approves or rejects it — another supervisor, a manager or the Owner. You can still cancel it while it waits." />
+                          ) : (
+                            <DecisionButtons who={`${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} disabled={busy}
+                              onApprove={() => approveRequest(req)} onReject={() => decideRequest(req, 'rejected')} />
+                          ))}
+                          {/* Withdrawing your own pending request moves no pay or balance; cancelling your
+                              own APPROVED leave puts the days back on the balance, so someone else does it (H8). */}
+                          {req.status === 'approved' && isOwnEmployee(req.employee_id) ? (
+                            <OwnRecordNote label="Yours, approved"
+                              tip="Your own approved leave can only be cancelled by someone else — another supervisor, a manager or the Owner." />
+                          ) : (req.status === 'pending' || req.status === 'approved') && (
                             <button className="btn btn-ghost btn-sm" onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel</button>
                           )}
                           {(req.status === 'rejected' || req.status === 'cancelled') && (
