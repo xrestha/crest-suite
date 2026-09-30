@@ -1,19 +1,20 @@
-// Floating action button — fixed bottom-right, always reachable regardless of scroll.
-// Used as the single "+ Add X" create affordance on list pages. Pass `show` to gate
-// it on the active tab/view and lock/permission state.
+// The page's primary "+ Add X" (S797). The page places it in its header's action group, last (or,
+// on a tab with no header of its own, at the right of the tab's toolbar): on a computer or tablet it
+// is an ordinary primary button there, and under 768px CSS alone turns the same element into the
+// floating bottom-right button a thumb reaches (`.fab` in Layout.css). It used to float everywhere,
+// fixed bottom-right with no space reserved, so on a desktop it sat on the Edit/Del buttons of
+// whichever row was scrolled behind it. Pass `show` to gate it on the active tab/view and on
+// lock/permission state; the page's header is shared across views, so `show` must carry every
+// condition the old placement's enclosing branches carried.
 export default function Fab({ onClick, label = '+ Add', show = true, title, disabled = false }) {
   if (!show) return null
   return (
     <button
-      className="btn btn-primary no-print"
+      type="button"
+      className="btn btn-primary fab no-print"
       onClick={onClick}
       disabled={disabled}
       title={title || label}
-      style={{
-        position: 'fixed', right: 28, bottom: 28, zIndex: 50,
-        padding: '12px 20px', fontSize: 14, fontWeight: 600,
-        borderRadius: 0, boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
-      }}
     >
       {label}
     </button>

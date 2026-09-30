@@ -3,7 +3,10 @@
 // rain is moving the sales forecast carries a "×N%" tag, explained once under the strip ("×60% =
 // rainy-day sales forecast") and in full in the day's Tip, so the dip in the dashed line has its
 // reason in view without reading the chart footer. Each day is two lines beside its picture, so the
-// strip stands about as tall as the title beside it.
+// strip stands about as tall as the title beside it. On a phone (S797) the four days are one row,
+// each the day and its tag over the picture and the high/low; the word leaves the tile there (it is
+// still read out, and it is in the Tip), because a 2 × 2 grid of full tiles stood taller than the
+// title and the first KPI row together.
 //
 // The words and the thresholds are weatherEffect.js's (weatherLook), so a tagged day can never read
 // as light rain or dry. The detail — the BS date, the rain in mm, whether today's figure covers the
@@ -140,7 +143,7 @@ export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fe
                     <span className="weather-strip__temp">
                       {hasTemp ? (
                         <>
-                          <span aria-hidden="true">{deg(w.temp_max)} / {deg(w.temp_min)}</span>
+                          <span aria-hidden="true">{deg(w.temp_max)}/{deg(w.temp_min)}</span>
                           <span className="sr-only">high {deg(w.temp_max)}, low {deg(w.temp_min)}</span>
                         </>
                       ) : '—'}

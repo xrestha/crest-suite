@@ -3,6 +3,7 @@ import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { getCf, calcBillTotals, parseInvoiceAmount, invoiceMismatch } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
+import { unitRateCell } from '../../../shared/unitRate'
 
 // A4 print-only Purchase Entry Voucher — auto-printed right after a new bill is saved (Purchases.js)
 // so it can be stapled to the vendor's physical bill for record-keeping/approval. Line items print
@@ -75,8 +76,9 @@ export default function PurchaseBillPrint({ header, lines, items, vendorName, pe
                 <td style={{ padding: '5px 6px 5px 0' }}>{item?.name || '—'}</td>
                 <td style={{ padding: '5px 6px', textAlign: 'right' }}>{qty}</td>
                 <td style={{ padding: '5px 6px' }}>{unit}</td>
-                {/* Not toFixed(2): a rate per gram such as 0.004 printed as 0.00 (S792, PURCHASES-9). */}
-                <td style={{ padding: '5px 6px', textAlign: 'right' }}>{fmtLineRate(rate)}</td>
+                {/* Not toFixed(2): a rate per gram such as 0.004 printed as 0.00 (S792, PURCHASES-9).
+                    A GM / ML rate prints per KG / LTR first, the per-gram figure beside it (S797). */}
+                <td style={{ padding: '5px 6px', textAlign: 'right' }}>{rate === 0 ? fmtLineRate(rate) : unitRateCell(rate, unit)}</td>
                 <td style={{ padding: '5px 6px', textAlign: 'right' }}>{l.vat_inclusive ? '13%' : '—'}</td>
                 <td style={{ padding: '5px 0 5px 6px', textAlign: 'right', fontWeight: 600 }}>{fmt(amount)}</td>
               </tr>

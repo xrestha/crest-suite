@@ -7,6 +7,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { npr, nprInt } from '../../../shared/nepalMoney'
+import { unitRateCell } from '../../../shared/unitRate'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -548,7 +549,7 @@ export default function FifoReport() {
                           {row.returnedQty > 0 ? `−${Number(row.returnedQty.toFixed(3))}` : '—'}
                         </td>
                         <td style={{ color: 'var(--theme-text2)' }}>{row.uom}</td>
-                        <td style={{ textAlign: 'right' }}>{nprInt(row.rate)}</td>
+                        <td style={{ textAlign: 'right' }}>{row.rate > 0 ? unitRateCell(row.rate, row.uom) : nprInt(row.rate)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{npr(row.value)}</td>
                         <td style={{ color: fs.color, whiteSpace: 'nowrap' }}>{row.expiryDate}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: fs.color, whiteSpace: 'nowrap' }}>

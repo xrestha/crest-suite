@@ -26,6 +26,7 @@ import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { chipKeys } from '../../../shared/rovingFocus'
 import { FilterChips } from '../../../components/Tabs'
+import { unitRateCell } from '../../../shared/unitRate'
 
 const DEPARTMENTS = [
   'Kitchen',
@@ -681,6 +682,9 @@ ${text}`, detail })
           {mode !== 'list' && (
             <button className="btn btn-ghost" onClick={backToList}>← Back to List</button>
           )}
+          {/* Hidden while the list is empty, where the empty state carries the same button (S796):
+              two identical "+ New Requisition" controls on one screen made a first-time user choose. */}
+          <Fab onClick={startNew} label="+ New Requisition" show={mode === 'list' && !periodClosed && filteredReqs.length > 0} />
         </div>
       </div>
 
@@ -764,7 +768,7 @@ ${text}`, detail })
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Quantity actually issued from the store. Leave blank to issue the full requested quantity when you confirm." width={260}>Qty Issued</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item. Items counted in grams or ml show the price per KG / LTR first, then the stored per-GM / per-ML figure." width={240}>Rate / UOM</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Estimated store issue cost = Qty Issued (or Requested) × Rate / UOM." width={240}>Est. Value</Tip></th>
                     <th style={{ width: 36 }}></th>
                   </tr>
@@ -805,7 +809,7 @@ ${text}`, detail })
                           />
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                          {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
+                          {rate > 0 ? `NPR ${unitRateCell(rate, item?.uom)}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 12 }}>
                           {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
@@ -986,7 +990,7 @@ ${text}`, detail })
                       <th style={{ textAlign: 'right' }}>
                         <Tip text="Set the actual quantity you are issuing from the store. Can be less than requested." width={230}>Qty Issued</Tip>
                       </th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item. Items counted in grams or ml show the price per KG / LTR first, then the stored per-GM / per-ML figure." width={240}>Rate / UOM</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods leaving the store." width={240}>Value Issued</Tip></th>
                     </tr>
                   </thead>
@@ -1008,7 +1012,7 @@ ${text}`, detail })
                             />
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                            {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
+                            {rate > 0 ? `NPR ${unitRateCell(rate, line.items?.uom)}` : '—'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
@@ -1042,7 +1046,7 @@ ${text}`, detail })
                       <th style={{ textAlign: 'right' }}>
                         <Tip text="Qty actually issued from the store. Green = full qty issued; amber with the word 'partial' = less than requested." width={220}>Qty Issued</Tip>
                       </th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item. Items counted in grams or ml show the price per KG / LTR first, then the stored per-GM / per-ML figure." width={240}>Rate / UOM</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods that left the store." width={240}>Value</Tip></th>
                     </tr>
                   </thead>
@@ -1069,7 +1073,7 @@ ${text}`, detail })
                             {partial && <span style={{ fontSize: 10, marginLeft: 4 }}>partial</span>}
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                            {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
+                            {rate > 0 ? `NPR ${unitRateCell(rate, line.items?.uom)}` : '—'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
@@ -1241,10 +1245,6 @@ ${text}`, detail })
           )}
         </div>
       )}
-
-      {/* Hidden while the list is empty, where the empty state carries the same button (S796):
-          two identical "+ New Requisition" controls on one screen made a first-time user choose. */}
-      <Fab onClick={startNew} label="+ New Requisition" show={mode === 'list' && !periodClosed && filteredReqs.length > 0} />
 
       {rejecting && (
         <RequisitionRejectModal

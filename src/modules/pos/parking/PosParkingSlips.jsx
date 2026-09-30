@@ -111,11 +111,16 @@ export default function PosParkingSlips() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">Parking Slips</h1>
-        <p className="page-subtitle">
-          Issue a parking token for a customer's vehicle — no order required. Printing a new slip needs Supervisor access.
-        </p>
+      <div className="page-header page-header--split">
+        <div>
+          <h1 className="page-title">Parking Slips</h1>
+          <p className="page-subtitle">
+            Issue a parking token for a customer's vehicle — no order required. Printing a new slip needs Supervisor access.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Fab onClick={() => setShowNew(true)} label="+ New Parking Slip" show={hasPosAccess('supervisor') && !showNew && !loading && !loadError} />
+        </div>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 20 }}>
@@ -209,8 +214,6 @@ export default function PosParkingSlips() {
           onIssued={() => { setShowNew(false); loadSlips() }}
         />
       )}
-
-      <Fab onClick={() => setShowNew(true)} label="+ New Parking Slip" show={hasPosAccess('supervisor') && !showNew && !loading && !loadError} />
     </div>
   )
 }

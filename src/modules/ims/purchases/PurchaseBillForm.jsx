@@ -12,7 +12,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { nepalTime, nepalBsLong } from '../../../shared/nepalTime'
 import {
-  getCf, calcBillTotals, billDiscountError, fmtRate, lineState, PURCHASE_PAYMENT_METHODS,
+  getCf, calcBillTotals, billDiscountError, lineState, PURCHASE_PAYMENT_METHODS,
   parseInvoiceAmount, invoiceAmountError, invoiceMismatch, invoiceMismatchText,
 } from './purchasesHelpers'
 import {
@@ -22,6 +22,7 @@ import { withLineTotal, withLineVat, withAllLinesVat } from './billLineVat'
 import { linesWithUnlistedItems, unlistedItemsText } from './purchaseLines'
 import { withTimeout } from '../../../utils/withTimeout'
 import { vatCostFactor } from '../reports/supplierAttribution'
+import { unitRateText } from '../../../shared/unitRate'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -710,7 +711,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                         style={{ ...cellInput, boxSizing: 'border-box', fontFamily: 'inherit' }} />
                       {masterRate > 0 && (
                         <div style={{ fontSize: 10, textAlign: 'right', marginTop: 2, color: rateSuspect ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
-                          {rateSuspect ? '⚠ ' : ''}Master: {fmtRate(masterRate)}/{inputUnit || selItem?.uom}{paidFactor(line) > 1 ? ' incl. VAT' : ''}
+                          {/* Per the unit the box counts in; a GM / ML item reads per KG / LTR first, with
+                              the per-gram figure the box takes beside it (S797). */}
+                          {rateSuspect ? '⚠ ' : ''}Master: {unitRateText(masterRate, inputUnit || selItem?.uom, { prefix: '', per: '/' })}{paidFactor(line) > 1 ? ' incl. VAT' : ''}
                         </div>
                       )}
                     </td>

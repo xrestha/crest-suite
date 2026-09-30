@@ -480,7 +480,10 @@ export default function Vendors() {
           <h1 className="page-title">Vendors</h1>
           <p className="page-subtitle">Manage your supplier list — linked to daily purchase entries</p>
         </div>
-        <button className="btn btn-ghost" onClick={() => printWithTitle('Vendors')}>Print</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="btn btn-ghost" onClick={() => printWithTitle('Vendors')}>Print</button>
+          <Fab onClick={openNew} label="+ Add Vendor" show={!showForm} />
+        </div>
       </div>
 
       {/* A refresh that failed over a list already on screen (the cached one, or the last good
@@ -749,7 +752,6 @@ export default function Vendors() {
         )}
       </div>
 
-      <Fab onClick={openNew} label="+ Add Vendor" show={!showForm} />
       {confirmEl}
     </div>
   )

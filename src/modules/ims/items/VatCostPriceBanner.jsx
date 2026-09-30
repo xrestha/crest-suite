@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { readItemRefCounts, PRICE_CHANGE_KEEPS } from './itemRefTables'
+import { unitRateText } from '../../../shared/unitRate'
 import {
   vatCostPriceReview, reviewImpactSentence, reviewSignature, REVIEW_PERIODS,
 } from './vatCostPriceReview'
@@ -20,7 +21,6 @@ import {
 // the list changes (a per-viewer convenience in localStorage — never needed for correctness).
 
 const SHOW = 6
-const fmt = n => (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 4 })
 const dismissKey = clientId => `crest.vatCostPriceReview.${clientId}`
 
 function readDismissed(clientId) {
@@ -112,7 +112,7 @@ export default function VatCostPriceBanner({ items, clientId, vatMode, canUpdate
   function line(r) {
     return (
       <li key={r.id}>
-        <strong style={{ color: 'var(--theme-text1)' }}>{r.name}</strong>: Item Master NPR {fmt(r.currentRate)}/{r.uom}, {adding ? 'you paid' : 'before VAT'} NPR {fmt(r.suggestedRate)}/{r.uom}
+        <strong style={{ color: 'var(--theme-text1)' }}>{r.name}</strong>: Item Master {unitRateText(r.currentRate, r.uom)}, {adding ? 'you paid' : 'before VAT'} {unitRateText(r.suggestedRate, r.uom)}
       </li>
     )
   }

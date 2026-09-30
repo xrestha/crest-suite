@@ -443,6 +443,7 @@ export default function PosReservations() {
           {!isToday && dayScoped && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(todayIso())}>Today</button>
           )}
+          <Fab label="+ New booking" onClick={() => setModal({ row: null })} show={!modal && !seatTarget} />
         </div>
       </div>
 
@@ -840,8 +841,6 @@ export default function PosReservations() {
           </ul>
         </ConfirmModal>
       ))}
-
-      <Fab label="+ New booking" onClick={() => setModal({ row: null })} show={!modal && !seatTarget} />
     </div>
   )
 }

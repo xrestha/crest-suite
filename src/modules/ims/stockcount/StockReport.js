@@ -17,6 +17,7 @@ import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { buildStockRows } from './stockReportCalc'
+import { unitRateCell } from '../../../shared/unitRate'
 import { periodRowIds, periodValuationItems } from '../reports/periodCost'
 
 const npr = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
@@ -385,7 +386,7 @@ export default function StockReport() {
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.netPurch ? r.netPurch.toFixed(1) : '—'}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.usageQty ? r.usageQty.toFixed(1) : '—'}</td>
                     <td style={{ textAlign: 'right', color: r.wasteQty ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{r.wasteQty ? r.wasteQty.toFixed(1) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.unitRate.toFixed(2)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{unitRateCell(r.unitRate, r.item.uom)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{r.stockValue > 0 ? npr(r.stockValue) : '—'}</td>
                     <td>{statusBadge(r.status)}</td>
                   </tr>

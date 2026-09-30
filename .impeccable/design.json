@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-07T03:28:58.620Z",
+  "generatedAt": "2026-09-30T02:53:05.961Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -661,7 +661,7 @@
       {
         "name": "floating-action",
         "value": "0 6px 20px rgba(0,0,0,0.45)",
-        "purpose": "The Fab only. Lifts a fixed control off scrolling content."
+        "purpose": "The Fab only, and only on a phone, where it floats (S797); above 768px it is a header button and carries none."
       },
       {
         "name": "live-pulse",
@@ -859,10 +859,10 @@
   ],
   "narrative": {
     "northStar": "The Lit Instrument",
-    "overview": "Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Aged Brass is that light: it falls on the thing you are working in — the active route, the live table, the period this report covers, the button that commits — and everything else sits in an unlit, even charcoal. Depth here is not a stack of shadows; it is the difference between what the light reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial lights over an otherwise dead ground); inside the app it is disciplined down to a single accent that never spends itself twice on one screen.\n The instrument half is the constraint on all of it. Two people read the same figure: an owner deciding between services, and an accountant who has to file on it. So a number is never dressed up, never approximated for effect, and never coloured unless the colour is a verdict the product is prepared to defend. Signal green, red and amber are reserved for that verdict and spent nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments, and they take brass or grey. Where a verdict is shown it carries a shape mark as well as a hue, because roughly one man in twelve cannot separate the hues and every one of these screens gets printed in monochrome eventually.\n Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px page padding, no reading measure anywhere inside the app. This is a working surface, not a document. The softness that keeps it from reading as legacy Nepali ERP comes from the radius scale (8/12/18/24px) and the warm neutral ground, not from whitespace the data cannot spare. The one document in the product — the Terms and Privacy Policy at `/legal/*` — is the one place a measure is earned, and it is set at **60ch on the body's children** (measured 66–72 real characters per line; the 76ch it shipped with held ~95, because `ch` is the width of Poppins' wide zero, not of its average letter).",
+    "overview": "Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Signal Red is that light: it falls on the thing you are working in — the active route, the live table, the period this report covers, the button that commits — and everything else sits in an even, unlit neutral — ink on Night, paper on Light. Depth here is not a stack of shadows; it is the difference between what the light reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial lights over an otherwise dead ground); inside the app it is disciplined down to a single accent that never spends itself twice on one screen.\n\nThe instrument half is the constraint on all of it. Two people read the same figure: an owner deciding between services, and an accountant who has to file on it. So a number is never dressed up, never approximated for effect, and never coloured unless the colour is a verdict the product is prepared to defend. Signal green, red and amber are reserved for that verdict and spent nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments, and they take the accent or grey. Where a verdict is shown it carries a shape mark as well as a hue, because roughly one man in twelve cannot separate the hues and every one of these screens gets printed in monochrome eventually.\n\nDensity is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px page padding, no reading measure anywhere inside the app. This is a working surface, not a document. What keeps it from reading as legacy Nepali ERP is no longer the radius scale — Modernist squares every corner — but the RULE WEIGHTS and the drawn grid: a 2px rule separates sections, a 1px rule separates rows, and nothing else divides anything. Legacy ERP is not square; it is undifferentiated, boxing every cell at one weight. Two weights used consistently is the whole discipline, and it costs no whitespace the data cannot spare.\n\nThe one document in the product — the Terms and Privacy Policy at `/legal/*` — is the one place a measure is earned, and it is set at **60ch on the body's children** (measured 66–72 real characters per line; the 76ch it shipped with held ~95, because `ch` is the width of the body font's zero, not of its average letter).",
     "keyCharacteristics": [
-      "One accent (Aged Brass), one rationed fourth-category hue (violet), four semantic signals.",
-      "Two presets — Dark (default) and Light — plus a `system` mode that follows the device.",
+      "One accent (Signal Red), one rationed fourth-category hue (violet), four semantic signals.",
+      "Two presets — Modernist Night (default) and Modernist Light — plus a `system` mode that follows the device.",
       "Colour is never the only carrier: a band ships a `✓`/`△`/`▲` mark, a state ships a word.",
       "Flat, tinted chips over solid fills; a card's elevation is uniform policy, not a highlight.",
       "Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the guest pages and paper. They do not share a density, and paper does not share the palette — and they must not leak into each other.",
@@ -870,8 +870,13 @@
     ],
     "rules": [
       {
+        "name": "What makes the app's tokens safe on a public page is the pin, not the palette",
+        "body": "The theme is read from `localStorage` *before* the per-surface default applies, so a phone that had ever opened the admin app would render a customer's page in whatever preset that staff member picked — a private staff setting reaching a customer, which is the reason the scoped palette existed at all. `isPinnedGuestSurface()` in `ThemeContext.js` makes `/pos/menu/*` and `/pos/book/*` ignore the saved theme and apply `dark`, and never write it. Pinning at the provider, rather than re-declaring tokens in a stylesheet, reaches the route's lazy-load fallback and error screens too, which render before or outside the page's own root. **A new public, customer-facing route joins `PINNED_GUEST_PREFIXES`**, or it inherits the viewer's staff theme.",
+        "section": "colors"
+      },
+      {
         "name": "The One Accent Rule",
-        "body": "Aged Brass is the only non-semantic colour on any screen. A second \"brand\" hue is a mistake, not a design choice. This has been violated seven times by the same undocumented indigo (`#60a5fa` / `#818cf8`), most instructively as a drifted `var()` **fallback** — `var(--theme-purple, #8b5cf6)` reads as correct because the token name beside it is correct, and it only paints in the instant before hydration, which is precisely when nobody is looking. Check the fallback half of a `var()` as carefully as a standalone literal.",
+        "body": "Signal Red is the only non-semantic colour on any screen. A second \"brand\" hue is a mistake, not a design choice. This has been violated seven times by the same undocumented indigo (`#60a5fa` / `#818cf8`), most instructively as a drifted `var()` **fallback** — `var(--theme-purple, #8b5cf6)` reads as correct because the token name beside it is correct, and it only paints in the instant before hydration, which is precisely when nobody is looking. Check the fallback half of a `var()` as carefully as a standalone literal.",
         "section": "colors"
       },
       {
@@ -886,12 +891,22 @@
       },
       {
         "name": "The Signal Separation Rule",
-        "body": "Two signal colours a reader compares must stay distinguishable **without hue**, measured under deuteranopia (~6% of men) and protanopia (~2%), not judged by eye. Light's danger and warning text shipped at ΔE 3.2 — one colour for a red-green colour-blind reader — and were retuned to `#8f2440` / `#a85200`, the only pair of 120 searched that clears both axes while every variant still holds 4.5:1 on card and page. Tritanopia is deliberately not chased: separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%.",
+        "body": "Two signal colours a reader compares must stay distinguishable **without hue**, measured under deuteranopia (~6% of men) and protanopia (~2%), not judged by eye. Light's danger and warning text shipped at ΔE 3.2 — one colour for a red-green colour-blind reader — and were retuned to `#8f2440` / `#a85200`, the only pair of 120 searched that clears both axes while every variant still holds 4.5:1 on card and page (amber has since moved to `#964900` for the badge-on-page ground above; the pair re-measured at ΔE 13.5 deuteranopia / 17.6 protanopia, still over the floor of 8). Tritanopia is deliberately not chased: separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%.",
         "section": "colors"
       },
       {
         "name": "The One Signal Meaning Rule",
-        "body": "A signal colour carries exactly one meaning across a module, and a category never takes a signal colour at all. The vocabulary is written down twice — HR's `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) and POS's `posSignals.js` — and both say the same thing: **amber** = open, waiting on a person; **brass** = decided but the money has not moved, plus every plain category (a rank, a close type, a table state, a period); **green** = closed and good; **red** = closed and refused, or wrong and expensive; **grey** = inert or a plain identity. Before this was one file, \"Pending\" was brass on two HR queues, grey on a third and amber in the employee app, and amber alone carried eight distinct meanings across POS — including \"Foodmandu\" and \"supervisor\". A button is exempt: it is an instruction, not a verdict, so the Void button stays red while the *record* it writes reads as a close type in brass.",
+        "body": "A signal colour carries exactly one meaning across a module, and a category never takes a signal colour at all. The vocabulary is written down twice — HR's `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) and POS's `posSignals.js` — and both say the same thing: **amber** = open, waiting on a person; **accent** = decided but the money has not moved, plus every plain category (a rank, a close type, a table state, a period); **green** = closed and good; **red** = closed and refused, or wrong and expensive; **grey** = inert or a plain identity. Before this was one file, \"Pending\" was accent on two HR queues, grey on a third and amber in the employee app, and amber alone carried eight distinct meanings across POS — including \"Foodmandu\" and \"supervisor\". A button is exempt: it is an instruction, not a verdict, so the Void button stays red while the *record* it writes reads as a close type in the accent.",
+        "section": "colors"
+      },
+      {
+        "name": "IMS takes this one step further, by owner decision (S796): a figure or a category there takes no colour at all",
+        "body": "Under Modernist Light accent-ink is a dark red, so the accent-as-category of the paragraph above painted every purchase total, COGS, item category chip and code in near-danger ink, while Returns and Wastage were red and Closing Stock, Revenue and Paid were green whatever they said. In IMS, figures are `--theme-text1` (codes `--theme-text2`); a category chip is `badge-gray` (item and recipe categories, payment methods, wastage reasons); red, amber and green come only from a band, a threshold or a status word (over/under variance, overdue past 60 days, expired, below par, Paid); and the accent is kept for what can be pressed or is current — buttons, links, the active tab or toggle, today, focus. A category that is a SERIES (a bucket bar, a payment-method split) takes a chart slot (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`), never a semantic token. HR and POS keep the accent-for-category vocabulary above until they are reviewed the same way.",
+        "section": "colors"
+      },
+      {
+        "name": "Under Modernist the accent slot and the danger slot are the same HUE, which makes the rest of this rule load-bearing rather than tidy",
+        "body": "They are still separated — measured, the two `*-text` variants sit ΔE 33 apart under deuteranopia — but they no longer separate by hue name the way brass and red did, so the LABEL and the shape mark carry more of the distinction than they used to. Do not add a sixth hue to recover the old separation; say the word.",
         "section": "colors"
       },
       {
@@ -901,7 +916,7 @@
       },
       {
         "name": "The Chart Palette Rule",
-        "body": "Chart series never come from the semantic tokens — they are five *roles*, not five validated hues, and nothing measures them as a series set. Use the fixed literal palettes (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`; `var()` does not resolve in SVG presentation attributes anyway) and re-measure when you touch them: `CHART_COLORS` carried a **ΔE 0.4** deuteranopia collision between two of its eight slots — two identical lines on any chart with five or more series — from the day it was written until it was measured. Prefer **encoding a relationship over adding a hue**: a projection shares its metric's colour and is distinguished by a dash; a derived total reads as a dashed composite, not a fifth peer.",
+        "body": "Re-measured at the Modernist re-theme and UNCHANGED, which is the point of the rule: the palettes are theme-independent literals, so a new accent does not reach them. Measured, `CHART_COLORS` holds worst-pair ΔE 37.9 normal / 14.7 deuteranopia / 17.5 protanopia and `COST_BREAKDOWN_COLORS` 56.3 / 12.4 / 30.6, all clear of the 15 and 8 floors; the new accent's nearest chart slot is `#ea580c` at ΔE 16–17, so chart and chrome do not collide either. The gold slot stays gold — it is Food Cost's identity across three surfaces, and it used to double as \"the accent\", which it no longer is. That second meaning is what the re-theme removed, not the colour.",
         "section": "colors"
       },
       {
@@ -915,7 +930,7 @@
         "section": "colors"
       },
       {
-        "name": "Brass is a range, not one value, on the signed-out pages",
+        "name": "The accent is a range, not one value, on the signed-out pages",
         "body": "`Login.css` derives every colour on the page from `--theme-accent` by `color-mix` — a wash (6%), a tint (12%), a rule (24%), an edge (80%), and the three light layers at 34/17/11%. That is the One Accent Rule taken literally: no second hue anywhere, only more and less of the one that was already there.",
         "section": "colors"
       },
@@ -925,13 +940,18 @@
         "section": "typography"
       },
       {
+        "name": "The Brand Lockup Rule",
+        "body": "The mark and the wordmark name the same brand, or neither is shown. Four of the five surfaces that draw the lockup — the shell (the top bar above 768px, the phone drawer below it, one lockup either way) and the three signed-out pages (`/login`, `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the shell and on `/pricing`, `objectFit: contain`, square. Only the shell carried that conditional for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*, so a white-labelled operator met their own name beside somebody else's mark on the page they log in through — and on the page a password-reset email lands them on, where a mismatched brand reads as a phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt=\"\"` and `aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it twice. Product names are not the client's to rebrand — Pricing's plan names stay \"Crest IMS\" and \"Crest HR\".",
+        "section": "typography"
+      },
+      {
         "name": "Form controls do not inherit `font-family` and must be told to",
         "body": "Every browser substitutes its own UA default into `<input>`, `<button>`, `<select>` and `<textarea>`. Measured before the single rule in `index.css` existed: all 14 controls on the login page, all 13 pricing CTAs and **every `.btn` in the product** rendered in Arial — the product's typeface reached its prose and none of its controls. `optgroup` is in that selector list because Firefox styles it separately from `select`. Do not re-add per-class `font-family: inherit` patches.",
         "section": "typography"
       },
       {
         "name": "Numbers are tabular",
-        "body": "Poppins' default figures are proportional, so a right-aligned currency column does not line up digit for digit and a page of money reads ragged. Every `.data-table` cell, every `tfoot` cell and `.stat-value` carry `font-variant-numeric: tabular-nums` from one rule. Only digits are affected; text cells are unchanged.",
+        "body": "The body font's default figures are proportional, so a right-aligned currency column does not line up digit for digit and a page of money reads ragged. Every `.data-table` cell, every `tfoot` cell and `.stat-value` carry `font-variant-numeric: tabular-nums` from one rule. Only digits are affected; text cells are unchanged.",
         "section": "typography"
       },
       {
@@ -940,8 +960,18 @@
         "section": "typography"
       },
       {
-        "name": "The shell is a fixed sidebar plus a flowing content column",
-        "body": "`.sidebar-wrap` is `position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching `margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every page and nothing is centred in a reading measure — every screen here is a working surface rather than a document. (`/legal/*` renders outside the shell and is the exception; see Density above.)",
+        "name": "The shell is a two-band top bar above a flowing content column",
+        "body": "`.app-topnav` is `position: sticky` at the top of `.layout-root`, and `.main-content` is simply the row beneath it — no reserved margin, nothing to keep in lockstep. Band 1 (`.topbar-primary`) is SESSION: brand, module switcher, tenant, BS period, plan, search, account. Band 2 (`.topbar-nav`) is NAVIGATION within the selected module. Two bands rather than one because those are independent axes; a single strip makes them read as one list. Content padding is 32px on every page and nothing is centred in a reading measure — every screen here is a working surface rather than a document.",
+        "section": "layout"
+      },
+      {
+        "name": "Between 768 and 1280px both bands wrap rather than clip (S776; 1120 until S790)",
+        "body": "Measured at 820 — a tablet in landscape — band 1 held 891px of content in 810, so the tenant and period (which may shrink) collapsed to 2px and spilled under the account button, and band 2 held 1,094px behind a hidden scrollbar, so three module menus sat past the edge with nothing saying the row scrolls. Below 1280 the account actions stay top-right, tenant and period take their own full-width line, and the pills wrap onto a second row: the bar grows (108 → 172px at 820) and nothing is unreachable. From 1280 up it is one row each, as before. S790's labelled Help button widened the actions by 74px and the context then ran under them from 1120 to ~1260px, so the line moved up. Above the line the tenant, month and plan shorten with \"…\" rather than run under the actions, however narrow the row gets (owner decision, S790). A new top-bar element is checked at 820, 1024 and just above the wrap line by measurement, not by eye — and against the actions' left edge, not only the page's `scrollWidth`, which stays 0 while the context slides under the buttons. (`/legal/*` renders outside the shell and is the exception; see Density above.)",
+        "section": "layout"
+      },
+      {
+        "name": "`.layout-root` owns the scrollport, and that is what makes the bar sticky",
+        "body": "`src/index.css` opens with `html, body { overflow-x: hidden }`, so `body` becomes its own scroll container sized to its content and a `position: sticky` child of the body flow has a scrollport that never scrolls — it renders, computes to `sticky`, and moves 1:1 with the content forever (measured: the bar's viewport `top` went 0 → −600 after a 600px scroll). The root therefore takes `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` and carries **no `min-height`**: 100vh ≥ 100dvh, so a min-height would push the root past its own scrollport and hand the scroll back to the body, which is the original bug. Same rule as the guest menu and `/login` (see `.claude/rules/design-system.md`). One consequence to remember: `window.scrollTo` no longer describes the page — scroll `.layout-root`.",
         "section": "layout"
       },
       {
@@ -950,8 +980,13 @@
         "section": "layout"
       },
       {
+        "name": "On a page of stacked sections, the ratio is the rhythm — not the absolute gap",
+        "body": "`.dash-section` (28) and `.dash-row` (16) are the dashboards' pair, with 8 from a section heading to its own content: a 3.5x contrast between \"next group\" and \"this label belongs to that block\", which is what makes groups separate when the page is squinted at. Below that ratio the grouping stops reading — ClientDashboard ran at 10 under a 14 (1.4x) and its module headings floated free of the cards they named. Both classes zero themselves on `:last-child`, so a section can never stack its own margin on `.main-content`'s 32px bottom padding and a row landing last inside a section cannot double up with the section's gap. Under 768px they step to 16/8: `.main-content` drops 32 → 16 there, and a 28px group gap would separate sections by nearly twice the page's own margin on the screen with the least vertical room to give — the contrast is the rhythm, the absolute size is not.",
+        "section": "layout"
+      },
+      {
         "name": "The page root takes no padding of its own, and the header is `.page-header`",
-        "body": "`.main-content` already owns the 32px; a page that adds its own doubles it. `.page-header--split` is the title-block-left / actions-right shape that ~50 of the 78 header sites were hand-rolling inline, and it carries two properties neither hand-rolled version had complete: `flex-wrap` and the mobile hamburger clearance. Measured at 390px, an unclassed header put 40x33px of the fixed hamburger *over* the title — `elementFromPoint` at the title's first character returned the button — while a no-wrap header squeezed that title from 298px to 154px and one carrying a period `<select>` overflowed its container by 29.7px into the clip from `html { overflow-x: hidden }`.",
+        "body": "`.main-content` already owns the 32px; a page that adds its own doubles it. `.page-header--split` is the title-block-left / actions-right shape that ~50 of the 78 header sites were hand-rolling inline, and it carries two properties neither hand-rolled version had complete: `flex-wrap` and the mobile hamburger clearance. Measured at 390px, an unclassed header put 40x33px of the fixed hamburger *over* the title — `elementFromPoint` at the title's first character returned the button — while a no-wrap header squeezed that title from 298px to 154px and one carrying a period `<select>` overflowed its container by 29.7px into the clip from `html { overflow-x: hidden }`. (Since S797 there is no clearance to carry: the ☰ lives in `.phone-topbar`, a strip above the page, and the header's 60px phone indent is gone.)",
         "section": "layout"
       },
       {
@@ -960,13 +995,18 @@
         "section": "layout"
       },
       {
-        "name": "One breakpoint: 768px",
-        "body": "No tablet tier and no desktop max-width. Below it the sidebar leaves the flow entirely (`translateX(-100%)` plus a 44px fixed hamburger and a 55%-black overlay), `.main-content` drops its reserved margin and takes 16px padding, and every multi-column dashboard grid collapses to one column.",
+        "name": "And every card in a KPI row is the same rectangle — the same height as well as the same width",
+        "body": "The `1fr` columns already give equal width; equal height comes from the grid's default `align-items: stretch`, so **never set `alignItems: 'start'` on a stat strip.** It sized each card to its own content, and the admin strip shipped at 123 / 101 / 87 / 87 / 87 / 87 with a ragged bottom edge until S691. A card that holds less simply carries empty space below its figure; that is what one rectangle costs. Two consequences that were both measured before this was written: a card that is a `<button>` (the admin strip's filter cards) vertically CENTRES its content, so once stretched its label sinks below the div cards' — give it `display: flex; flexDirection: column; justifyContent: flex-start` so it lays out top-down like its neighbours (labels all at 13px, where they had been 13 / 23 / 31); and **\"the same size\" means both dimensions**, so measure the label offset inside each card as well as the outer box, because the outer boxes agreeing is exactly the state in which the inner drift shows.",
+        "section": "layout"
+      },
+      {
+        "name": "One layout breakpoint: 768px",
+        "body": "No tablet tier and no desktop max-width. (Two narrower rules sit beside it and are not tiers: the top bar's 1280px wrap above, and the POS order screen's 700px, where the full-screen till puts the menu full width and the cart in a bottom sheet — a width, because a 320px cart column beside a 390px phone left the menu 70px.) Above 768 the top bar IS the navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away and the same `.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` and a 55%-black overlay), `.main-content` takes 16px padding, and every multi-column dashboard grid collapses to one column. The 44px ☰ and `.context-bar` (the only place a phone states tenant and period) share `.phone-topbar` (S797), a slim strip above the page that stays put while the page scrolls under it; until S797 the ☰ was fixed over the page and sat on table headings as they scrolled past. The strip, the drawer, the arrival alert and the POS till and kitchen layers each pad by `env(safe-area-inset-*)`, because `index.html` asks for `viewport-fit=cover` with a `black-translucent` status bar, so an installed iPhone draws the app under its clock — reported from a phone as the tenant line sitting there, unreadable. That block is `screen and (max-width: 768px)`: A4 portrait is narrower than 768px, so a bare width query put the phone shell on every printout (S778). **`display` for both lives in `Layout.css`, never inline in `Layout.js`** — an inline declaration beats an external rule at any specificity, so a component that sets its own display can never be hidden by a media query.",
         "section": "layout"
       },
       {
         "name": "Touch sizing is scoped to the input method, not to a width",
-        "body": "`@media (pointer: coarse)` gives `.btn` 44px and tunes every control down from there — `.sidebar-link` and `.module-tab` 44, `.btn-sm` / `.tab-btn` / an in-table `.btn` 32, the chart controls 44x44 — plus the shell controls a finger actually hits, which were in no coarse rule at all until they were measured (the outlet switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at 27x25). A narrow desktop window keeps its own density, which a width breakpoint could not express.",
+        "body": "`@media (pointer: coarse)` gives `.btn` 44px and tunes every control down from there — `.sidebar-link`, `.module-tab` and every top-bar control (`.topbar-pill`, the context and account triggers) 44, `.btn-sm` / `.tab-btn` / an in-table `.btn` 32, the chart controls 44x44 — plus the shell controls a finger actually hits, which were in no coarse rule at all until they were measured (the outlet switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at 27x25). A narrow desktop window keeps its own density, which a width breakpoint could not express. The POS order screen, inline-styled throughout, reaches the floor through two classes of its own: `.till-hit` (44x44 minimum) and `.till-hit--row` (44px tall), which also carry the focus pair, plus `.ticket-btn`. `min-*` beats an inline width or height, so the classes sit on controls whose inline size stays right for a mouse; an inline `minWidth`/`minHeight` on the same control would beat the class. Measured at 820px touch: 0 of 32 order-screen controls under 44px, from 24 of 36.",
         "section": "layout"
       },
       {
@@ -976,12 +1016,27 @@
       },
       {
         "name": "Wide tables scroll; they do not compress",
-        "body": "`.table-wrap` is `overflow-x: auto` around every wide table and the data keeps its native column widths. Pair it with `.table-wrap--fab-clear` on any page that also renders a `Fab` — the Fab is fixed with no reserved space, so without it the button sits on top of the last row's actions.",
+        "body": "`.table-wrap` is `overflow-x: auto` around every wide table and the data keeps its native column widths. It is also `position: relative` (S776): an `.sr-only` label inside a table is `position: absolute`, and with no positioned ancestor it escaped the scroll container and widened the whole page — `/pos` measured 478px of scroll width at 390. Pair it with `.table-wrap--fab-clear` on any page that also renders a `Fab` — on a phone the Fab floats with no reserved space, so without it the button sits on top of the last row's actions.",
+        "section": "layout"
+      },
+      {
+        "name": "The page's Add lives in its header, and floats only on a phone (S797)",
+        "body": "`Fab` is placed last in the page header's action group: a primary button beside Print and the period picker on a computer or tablet, and under 768px the same element floats bottom-right where a thumb reaches it. It floated at every width before, and on a desktop it sat on the Edit and Del buttons of whichever row scrolled behind it — the last row's clearance never helped the rows in the middle of a list.",
         "section": "layout"
       },
       {
         "name": "A page that renders into the body flow needs its own scrollport",
         "body": "`index.css` sets `html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow is then not `visible`, body becomes its own scroll container sized to its content and a `position: sticky` child of the body has a scrollport that never scrolls. Every screen inside the app shell is immune because the shell scrolls its own div — the exceptions are the pages that render directly into the body (`/login`, `/pricing`, the guest menu), and all three had a sticky bar that had never once stuck. Measured at 390x780, `.login-nav`'s viewport `top` went 0 → −250 → −600, moving 1:1 with the content. The fix is per page: `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` on the page root, **and delete the `min-height: 100vh` it was carrying**. Use `dvh`, not `vh` — on a phone `100vh` is the tallest the viewport ever gets, so the fold lands under the URL bar.",
+        "section": "layout"
+      },
+      {
+        "name": "Paper gets the whole page and the Light ink, whatever the screen had (S778)",
+        "body": "The shell scrolls inside `.layout-root`/`.main-content`, and printed as it stood that box was one screenful plus its scrollbar, with the rest of the page dropped. The print block sets both to `height: auto; overflow: visible`. It also re-points the ink tokens (`--theme-text1..3`, `--theme-accent-ink`, the signal `*-text` variants, border and ground) at Modernist Light with `!important`, because ThemeContext sets them inline on `<html>` and Night's near-white text otherwise prints a faint grey. A running footer is an `@page` margin box, never a `position: fixed` element that a long table paints over; the Owner Report's also counts pages.",
+        "section": "layout"
+      },
+      {
+        "name": "Promoting a label to a `<button>` deletes it from paper",
+        "body": "`button { display: none !important }` is blanket, so the moment a column heading becomes a sort control the printed table loses that column's *title* — the figures print under nothing. `.th-sort` reprints as plain black text and drops only its arrow; any future label-turned-control needs the same override, written in the same change as the control.",
         "section": "layout"
       },
       {
@@ -1016,7 +1071,7 @@
       },
       {
         "name": "The signed-out surfaces carry a light source; the app does not",
-        "body": "`/login` and `/pricing` are lit by three brass radial layers on the scrollport itself — a key breaking over the sign-in card's top-right shoulder, a rim grazing the right edge, a weak bounce lifting the pitch column out of flat black. Two things there were measured rather than guessed. **Radii are percentages of the box, not pixels**: in px the rim was 680px wide, which on a 390px phone is nearly two screens across — it stopped being a rim and flooded the lower half of the page. And a fourth \"shade\" layer mixing toward `--theme-sidebar` was removed because on Dark it was mathematically inert (`#0e1117` over `#0f1117`), spending half the depth budget on nothing. **Unlit ground is the shadow here.** Do not carry any of this into the app: a dense table under an atmospheric wash is worse than one on a flat card.",
+        "body": "`/login` and `/pricing` are lit by three accent radial layers on the scrollport itself — a key breaking over the sign-in card's top-right shoulder, a rim grazing the right edge, a weak bounce lifting the pitch column out of flat black. Two things there were measured rather than guessed. **Radii are percentages of the box, not pixels**: in px the rim was 680px wide, which on a 390px phone is nearly two screens across — it stopped being a rim and flooded the lower half of the page. And a fourth \"shade\" layer mixing toward `--theme-sidebar` was removed because on the dark preset it was mathematically inert (the sidebar sat one hair off the page ground), spending half the depth budget on nothing. **Unlit ground is the shadow here.** Do not carry any of this into the app: a dense table under an atmospheric wash is worse than one on a flat card.",
         "section": "elevation"
       },
       {
@@ -1025,43 +1080,43 @@
         "section": "elevation"
       },
       {
-        "name": "Six radius steps, and they are a closed set",
-        "body": "4px (`--radius-xs`, micro-elements only), 8px (`--radius-sm`), 12px (`--radius-md`), 18px (`--radius-lg`), 24px (`--radius-xl`), 999px (`--radius-full`). Radius does not vary per preset — the shape scale is theme-invariant while colour and shadow are not.",
+        "name": "Radius is zero, everywhere, with no size classes and no exceptions inside the app",
+        "body": "The six `--radius-*` tokens still exist and every one of them resolves to 0. They were kept rather than deleted because ~420 call sites read them by name: a scale that still has a home can be re-tuned in one edit, where 420 hardcoded zeroes cannot.",
         "section": "shapes"
       },
       {
-        "name": "Radius tracks the element's size class, not its importance",
-        "body": "Chip-sized things take `sm` (badges, small icon buttons); control-sized things take `md` (buttons, inputs, selects, tab pills, nav links); surface-sized things take `lg` (cards, stat cards, table containers); `xl` is for the largest panels only (the sign-in card, the chart expand modal). This is why a badge and a card do not share a radius even though both are \"containers\": the corner has to stay proportional to the box, or a small chip reads as a lozenge and a large card reads as a rectangle.",
+        "name": "Squareness applies to signals as well as containers",
+        "body": "The previous system exempted \"the circular status dot and its pulse ring, which is a signal rather than a container\" — that exemption is withdrawn. Status dots, toggle knobs, avatars, step markers and PIN dots are all square now. A signal that is round in a system where nothing else is round reads as a leftover, not as a signal, and the dot already carries its meaning in colour and position.",
         "section": "shapes"
       },
       {
-        "name": "`full` (999px) is reserved, not available",
-        "body": "It belongs to the sidebar module switcher's pill signature, the period chip, and shapes whose radius is genuinely half their own height (the 6px scrollbar thumb). `.tab-btn` deliberately stays at `md` — two pill treatments on one screen would dilute the switcher from a signature into a pattern.",
+        "name": "The two exemptions are both outside the interface itself",
+        "body": "Print templates (`@media print` and the generated print-HTML strings) keep whatever they had, because `Layout.css`'s print block already forces `border-radius: 0` on the classed elements and the rest never sees an app stylesheet. And the **veg / non-veg food mark** — an outlined square holding a filled dot, green or red — keeps its round dot: it is the market's food-labelling symbol, whose shape IS its meaning, not a status dot the system drew (`.gm-diet` in `guestMenu.css`). The guest pages were an exemption too, with their own shape language, until S767 moved them onto the default preset; they are square now.",
         "section": "shapes"
       },
       {
-        "name": "Borders carry structure, and the two weights are not interchangeable",
-        "body": "`--theme-border` is structural (card edges, the table header rule, input outlines); `--theme-border-lt` is internal (row dividers, ghost button edges). Using the structural weight for a row divider makes a dense table read as a grid of boxes, which is precisely the legacy-ERP failure mode.",
+        "name": "Borders carry structure, and now they carry ALL of it",
+        "body": "With the corner gone, the rule weight is the only thing left describing hierarchy, so the two weights matter more than they did and are not interchangeable. `--theme-border` is structural — card edges, input outlines, the 2px section rule and the 2px rule under a table header or above a totals row. `--theme-border-lt` is internal — row dividers and ghost button edges, at 1px. Using the structural weight for a row divider makes a dense table read as a grid of boxes, which is precisely the legacy-ERP failure mode; using the internal weight for a section break loses the section.",
         "section": "shapes"
       },
       {
-        "name": "No clipping, no masks, no non-rectangular silhouettes",
-        "body": "Every surface is a rounded rectangle. The only recurring non-rectangular shape is the circular status dot and its pulse ring, which is a signal rather than a container.",
+        "name": "KPI cells share their edges",
+        "body": "A stat strip is one drawn grid, not a row of floating cards: `border-right: 0` between siblings so a single line separates two cells rather than two lines sitting a gap apart. This is the clearest expression of the whole system — structure by rule, not by container.",
         "section": "shapes"
       },
       {
-        "name": "The Proportional Corner Rule",
-        "body": "If a new element needs a radius, pick the step by asking how big the box is, not how important it is. An important card does not get a larger corner; it gets the accent colour or a better position.",
+        "name": "The Zero Corner Rule",
+        "body": "No element in the app takes a radius. If a shape needs to be distinguished from its neighbour, it takes a rule, a ground, or a position — never a corner. This replaces the old Proportional Corner Rule, which sized a corner to its box; there is no longer a corner to size.",
         "section": "shapes"
       },
       {
         "name": "The Closed-Scale Rule",
-        "body": "A radius, a type size or a spacing value that is not on its scale is drift. When the system is genuinely missing a step, add it to the scale and to this file — that is how `--radius-xs` arrived, after 38 sites had independently reached for a 2–4px literal because a 10x10 legend swatch reads as a circle at 8px.",
+        "body": "A radius, a type size or a spacing value that is not on its scale is drift. The radius scale is now a single value, which makes the rule easier rather than harder: any non-zero radius inside `src/` that is not in a print template or the food mark's dot is drift by definition, and the `/impeccable` hook will say so. The rule still runs the other way too — if the system is genuinely missing a step, add it here first, then use it.",
         "section": "shapes"
       },
       {
-        "name": "The one accepted layout-property animation",
-        "body": "`.sidebar-shell` animates `width` and `.main-content` tracks it with `margin-left`, both at `0.22s ease` — normally an anti-pattern, and correctly flagged as one by any detector. It stays, and the reasoning has held through two sidebar rewrites: `.sidebar-wrap` is `position: fixed`, so **real space has to be reserved** for whichever width the sidebar currently is. A `transform`-only version would slide the sidebar over the content rather than resizing the column, so avoiding it means restructuring the shell's positioning strategy app-wide. The animation also fires only on a rare, manual, user-triggered toggle — never continuously and never scroll-linked — so the actual jank risk is low. Revisit only if the positioning mechanism changes for other reasons. Both values are recorded in `.impeccable/config.json`'s `ignoreValues`; this paragraph is why.",
+        "name": "There is no longer an accepted layout-property animation",
+        "body": "This paragraph used to argue for one: `.sidebar-shell` animated `width` while `.main-content` tracked it with `margin-left`, both at `0.22s ease`, because a `position: fixed` sidebar meant **real space had to be reserved** for whichever width it currently was. The argument was sound and it is now moot — the shell is a column, the collapse toggle is gone, and the only shell transition left is the drawer's `transform`, which is not a layout property. **The two `layout-transition` entries in `.impeccable/config.json`'s `ignoreValues` were removed in the same change**: an exemption that no longer exempts anything is a claim the next reader has to go and disprove. Kept as a note rather than deleted, because “restructuring the shell's positioning strategy app-wide” was named here as the price of avoiding it, and that is exactly what was eventually paid.",
         "section": "components"
       },
       {
@@ -1080,49 +1135,15 @@
         "section": "components"
       },
       {
-        "name": "The Brand Lockup Rule",
-        "body": "The mark and the wordmark name the same brand, or neither is shown. Four of the five surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`, `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar and on `/pricing`, `objectFit: contain` on a 4px corner. Only the sidebar carried that conditional for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*, so a white-labelled operator met their own name beside somebody else's mark on the page they log in through — and on the page a password-reset email lands them on, where a mismatched brand reads as a phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt=\"\"` and `aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it twice. Product names are not the client's to rebrand — Pricing's plan names stay \"Crest IMS\" and \"Crest HR\".",
-        "section": "typography"
+        "name": "`.month-status` is a summary card, not a banner",
+        "body": "Payroll and the HR Dashboard open on five steps — Attendance, Approvals, Payroll, Staff paid (S782), SSF deposit — each an 11px uppercase label, a mark with a sentence, and a link to the page that moves that step. The mark is the only colour: `✓` in green-text when the step is done, `△` in amber-text when it needs someone, `—` in fog when there is nothing to say or it could not be read. The sentence always carries the state on its own, so the strip reads in greyscale. **No step is ever red**, because nothing on it is a failure the app can prove: deposits are not recorded, so a passed SSF date says what *was due*, not that it was missed; and a step whose read failed says \"Could not check\" rather than falling back to `✓`.",
+        "section": "components"
       },
       {
-        "name": "The fifth surface is `/legal/*`, and it is the deliberate exception: it does not white-label at all",
-        "body": "(S678). Those pages carry Crest's hexagon and the literal `PRODUCT_NAME`, with `COMPANY.name` on the copyright line and in the printed running foot — never `settings.app_name`, never `settings.logo_url`. The rule above is right everywhere a client's own staff sign in; it is wrong on a contract between the provider and that client, whose first sentence names the provider. Reading `app_name` there put a tenant's trading name above Crest's own Terms of Service, in `© <year> …` beneath them, and on every printed copy — a filed contract identifying itself by the name of one of the parties it binds. It was wrong in fact as well as in principle: signed out there is no client, so `SettingsContext` resolves the `client_id IS NULL` row and the live page rendered whatever the operator last saved into it. Same line this rule already draws for Pricing's plan names — product names are not the client's to rebrand.",
-        "section": "typography"
-      },
-      {
-        "name": "A size class exists only if the stylesheet says so",
-        "section": "components",
-        "body": "`btn btn-sm` read as complete for a month while `.btn-sm` had no base rule — the only selector was the coarse-pointer min-height — so on every mouse device it rendered identically to `.btn`. CSS raises no error for a class that does not exist. Verify a size or variant class in Layout.css before trusting its name; the S678 bare-`.btn` failure is the same shape one step over."
-      },
-      {
-        "name": "A pressed button stays enabled and wears aria-busy",
-        "section": "components",
-        "body": "Disabling the control a keyboard user just pressed drops focus to `<body>`, so when the write lands they restart from the top of the page. The pressed button keeps focus, its handler ignores a second press, and `.btn[aria-busy=\"true\"]` gives it disabled’s opacity with `cursor: progress`. Its neighbours on other rows are disabled as before, so one write is in flight at a time."
-      },
-      {
-        "name": "A row’s actions are one next step plus an overflow, never a bar of equals",
-        "section": "components",
-        "body": "When a row’s actions are a column width rather than a control, show the move made every time (Confirm → Arrived → Seat), the contact button, and a ⋯ `RowMenu` for the rest, with the destructive items last under a separator in the red text variant. Six identical ghost pills per row, the irreversible ones interleaved with the routine ones, is how a Saturday book became a wall of 120 look-alike buttons."
-      },
-      {
-        "name": "Readout is a till step, not a KPI step",
-        "section": "typography",
-        "body": "The 48px covers readout on the order screen is the one size the product genuinely needs above figure-lg, and it is named so it stops living as an inline literal. It belongs to a keypad a cook or waiter reads with their hands busy. Every other working screen keeps figure / figure-lg as its ceiling; the 34px estimate readout that shipped beside it was drift and is 32 now (S682)."
-      },
-      {
-        "name": "A switch’s off-track is slate and its knob is the card colour",
-        "section": "components",
-        "body": "Both hand-rolled switches shipped a white knob on a --theme-border track — on Light that measured ~1.2:1 and the off state was unreadable. Track: accent (or amber) on, --theme-text3 off; knob: --theme-card. The state label beside it is text and takes the *-text variant or fog, never the track’s token (S682)."
-      },
-      {
-        "name": "ReportLoadError is the one channel that converts at render",
-        "section": "components",
-        "body": "Every one of its ~70 callers handed it a Supabase error object or the raw error.message string, so the card printed “TypeError: Failed to fetch” as a report body. A report is only ever read by the operator, so the audience decision the call-site rule protects is the same at every site; the component runs errorInfo(error, ‘operator’) itself and keeps the raw text as the monospace fine-print line. ActionError still converts at the call site because it renders hand-written validation copy verbatim (S682)."
-      },
-      "The Zero Corner Rule. No element in the app takes a radius. If a shape needs to be distinguished from its neighbour, it takes a rule, a ground, or a position — never a corner. Replaces the Proportional Corner Rule. Two exemptions, both outside the interface itself: print templates, and the veg / non-veg food mark’s round dot. The guest pages were exempt until S767 and are square now.",
-      "A rig built as percentages of the accent is only as neutral as the accent is. /login’s three radial light layers were each a colour-mix of --theme-accent; at 34% of a muted gold they read as light, and at 34% of a saturated red as a brown cast over the whole page. Derived decoration inherits the accent’s temperament, not just its hue.",
-      "A red accent lands next to the danger and warning slots in a way a brass accent never did, so accentInk is the one token a new accent genuinely forces. Both presets’ inks moved a ramp step further out after measurement: Light’s #ae1800 sat at ΔE 0.5 from amberText under deuteranopia, Night’s #ff9783 at ΔE 7.4 from red. Re-run those pairs before changing either.",
-      "The contrast lives in the fill, not the label size. 15px/600 is not WCAG large text (24px, or 18.66px bold), so it never protected white on Light's old #ec3013 accent (4.20:1); since S768 the Light accent is #dd2b0f, where white clears 4.74:1 at any size. Check any size defended as a contrast floor against 24px / 18.66px-bold."
+        "name": "`.bulk-approve` is a strip at the head of a queue's card, not a toolbar button",
+        "body": ", so it reads as belonging to the rows under it. It appears from two pending rows, states the count and the total (hours, rupees) before anyone presses, and confirms once. Its button — like every per-row Approve / Reject pair — is a neutral `btn-ghost btn-sm`: approving is routine work rather than the page's primary act, and the outcome is shown by the row's status badge afterwards, not by the colour of the button that caused it.",
+        "section": "components"
+      }
     ],
     "dos": [
       "**Do** read every colour from a `--theme-*` token, and check the fallback half of a `var()` as carefully as a standalone literal — a drifted fallback paints in the one instant nobody is watching and reads as correct in review.",

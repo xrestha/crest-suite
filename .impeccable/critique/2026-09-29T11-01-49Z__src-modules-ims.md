@@ -63,3 +63,14 @@ Emotional journey: the period close ends silent on success; valleys at 215.3% FO
 - If signal red paints every rupee on Light, what colour is left for "you are losing money"?
 - Should an open month show a food-cost % at all, or refuse the way Variance does?
 - Could Variance, Theoretical Variance and Shrinkage be one report with three views?
+
+## Resolution
+
+Every finding above was fixed in S796 (seven stages, last commit `0d660124`, `crest-v360`), with the
+owner's four decisions: honest figures first, colour means a verdict only, withhold the Net Margin
+✓ when HR is on and no payroll is finalized, and scope everything. The four things S796 left open
+were fixed in S797 (`crest-v361`): the hamburger that covered table headings now sits in a phone top
+bar above the page (which also clears an installed iPhone's status bar); the floating Add button is
+a header button on a computer or tablet and floats only on a phone; "0.1944 per GM" reads
+"NPR 194.40 per KG (0.1944 per GM)" wherever a gram or ml price is shown; and the Dashboard's
+Revenue vs Cost card withholds its Net Margin verdict before day 10, as the tile does.

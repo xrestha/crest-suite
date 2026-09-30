@@ -21,6 +21,7 @@ import {
   readItemRefCounts, refCodesFromCounts, priceImpactSentence, PRICE_CHANGE_KEEPS,
 } from './itemRefTables'
 import VatCostPriceBanner from './VatCostPriceBanner'
+import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import { FilterChips } from '../../../components/Tabs'
 import { vatModeOf } from '../recipes/menuPriceVat'
 
@@ -594,7 +595,7 @@ export default function Items() {
     if (priceMoved && pastRecords) {
       parts.push(
         <p key="price" style={{ margin: '0 0 8px' }}>
-          Price per {payload.uom} goes from <strong>NPR {fmtPerUom(oldRate)}</strong> to <strong>NPR {fmtPerUom(payload.rate)}</strong>.{' '}
+          Price goes from <strong>{unitRateText(oldRate, payload.uom)}</strong> to <strong>{unitRateText(payload.rate, payload.uom)}</strong>.{' '}
           {pastRecords}
           {' '}{PRICE_CHANGE_KEEPS}
         </p>
@@ -784,16 +785,6 @@ export default function Items() {
     setTogglingId(null)
   }
 
-  // A sub-paisa unit rate is legitimate (a PCS item bought by the 1000), so `toFixed(2)` alone
-  // flattens it to "0.00" — which hides exactly the mis-entry this figure exists to reveal.
-  const fmtPerUom = v => {
-    const n = parseFloat(v)
-    if (!isFinite(n)) return '—'
-    if (n > 0 && n < 0.01) return parseFloat(n.toFixed(6)).toString()
-    return n.toFixed(2)
-  }
-
-
   // Conversion preview string
   function conversionPreview(pu, bu, cf) {
     if (!pu || !bu || !cf) return null
@@ -901,6 +892,7 @@ export default function Items() {
             </button>
           )}
           <button className="btn btn-ghost" onClick={() => printWithTitle('Item Master')}>Print</button>
+          <Fab onClick={openNew} label="+ Add Item" show={!showForm} />
         </div>
       </div>
 
@@ -1059,7 +1051,7 @@ export default function Items() {
                 />
                 {packPerUnit != null && (
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                    → NPR {fmtPerUom(packPerUnit)} per {form.uom}
+                    → {unitRateText(packPerUnit, form.uom)}
                   </span>
                 )}
                 <FieldError id="items-pack-qty" message={packErr} />
@@ -1124,7 +1116,7 @@ export default function Items() {
                     </p>
                     {form.rate && form.conversion_factor && (
                       <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                        NPR {fmtPerUom(form.rate)} per {form.uom} → NPR {(parseFloat(form.rate) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
+                        {unitRateText(form.rate, form.uom)} → NPR {(parseFloat(form.rate) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
                       </p>
                     )}
                   </div>
@@ -1260,7 +1252,7 @@ export default function Items() {
                   {showCategoryCol && <th>Category</th>}
                   <th>UOM</th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Cost of ONE base unit — the figure recipe costing, stock valuation and every IMS report use. Items are always stored in their smallest unit, so a 1 KG bag counted in GM shows its per-GM price here, not the bag price." width={300}>Rate (NPR) / UOM</Tip>
+                    <Tip text="Cost of ONE base unit — the figure recipe costing, stock valuation and every IMS report use. Items are always stored in their smallest unit, so a 1 KG bag counted in GM is stored at its per-GM price, not the bag price. Items counted in grams or ml show the price per KG / LTR first, then the stored per-GM / per-ML figure." width={300}>Rate (NPR) / UOM</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip width={240} text="Usable % after trim/prep. Below 100% means trim loss, which recipe costing already includes. 100% = no loss (default).">
@@ -1294,7 +1286,7 @@ export default function Items() {
                       )}
                       <td>{item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
-                        {fmtPerUom(item.per_uom_rate)}
+                        {unitRateCell(item.per_uom_rate, item.uom)}
                       </td>
                       <td style={{ textAlign: 'right', color: parseFloat(item.yield_pct) < 100 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                         {parseFloat(item.yield_pct || 100).toFixed(0)}%
@@ -1356,7 +1348,6 @@ export default function Items() {
         )}
       </div>
 
-      <Fab onClick={openNew} label="+ Add Item" show={!showForm} />
       {confirmEl}
     </div>
   )

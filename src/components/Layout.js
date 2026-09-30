@@ -409,6 +409,11 @@ export default function Layout() {
   // The two pre-existing booleans (client / outlet switcher) folded into this for the same reason.
   const [openMenu, setOpenMenu] = useState(null)
   const [allClients, setAllClients] = useState([])
+  // The phone bar's tenant (S797): for an admin, the client being viewed, as the desktop bar names
+  // it; `clientName` is the admin's own profile's client, a different outlet once they switch.
+  const phoneContextName = isAdmin
+    ? allClients.find(c => c.id === adminViewClientId)?.name
+    : clientName
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
   const [pendingTrialCount, setPendingTrialCount] = useState(0)
   const [newTrialCount, setNewTrialCount] = useState(0)
@@ -1916,7 +1921,13 @@ export default function Layout() {
         </nav>
       </header>
 
-      <main id="main-content" tabIndex={-1} className="main-content">
+      {/* The phone's top bar (S797): the ☰ and the tenant/period line in one strip that stays put
+          while the page scrolls under it. Hidden above 768px, where the bar above says the same
+          things. The ☰ used to be position: fixed over the page, so it sat on table headings as they
+          scrolled past, and every page title carried a 60px indent to clear it. On an installed
+          iPhone the app also draws under the status bar (black-translucent, viewport-fit=cover in
+          index.html), and nothing reserved that space, so the tenant line sat under the clock. */}
+      <div className="phone-topbar">
         {/* "☰" is a glyph, not an accessible name — this button announced as the character itself,
             with no indication it opens anything or whether it is currently open. */}
         <button
@@ -1930,6 +1941,38 @@ export default function Layout() {
           <span aria-hidden="true">☰</span>
         </button>
 
+        {/* The ONLY place a phone user can read which tenant and which period the figures belong
+            to: below 768px the top bar is gone and the drawer that would otherwise carry them is
+            off-canvas. Kept mounted rather than conditioned on a width in JS: a JS breakpoint and
+            a CSS one drift, and only one of them can be tested in print. For an admin it names the
+            client being VIEWED, as the desktop bar does — `clientName` is the admin's own
+            profile's client, which is a different outlet whenever the admin has switched. */}
+        {phoneContextName && (
+          <div className="context-bar">
+            <span className="context-bar-client">{phoneContextName}</span>
+            {adminViewClientId && <span className="context-bar-tag">Viewing as admin</span>}
+            {activePeriod && (
+              <>
+                <span aria-hidden="true" className="context-bar-sep">·</span>
+                <span className="context-bar-period">
+                  {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year}
+                </span>
+                <span className={`badge ${activePeriod.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
+                  {activePeriod.status === 'open' ? 'Open' : 'Closed'}
+                </span>
+              </>
+            )}
+            {!isAdmin && (
+              <>
+                <span aria-hidden="true" className="context-bar-sep">·</span>
+                <span className="context-bar-plan">{plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <main id="main-content" tabIndex={-1} className="main-content">
         {/* Grace period — the subscription end date has passed but access is not cut yet. This is
             the only warning a paying client gets before SubscriptionLock replaces the whole app,
             so it states the exact date access stops rather than just "expired". */}
@@ -2000,37 +2043,6 @@ export default function Layout() {
             is now locked out by ProtectedRoute and never renders Layout at all, so they were
             unreachable. Their copy — including the trial_purge_at retention countdown — moved into
             SubscriptionLock's `trial` case. */}
-
-        {/* PHONE ONLY now (`.context-bar` is display:none above 768px). The top bar states these
-            same facts on desktop, and saying them twice on one screen is worse than saying them
-            once — but below 768px the bar is gone and the drawer that would otherwise carry them
-            is off-canvas, so this stays as the ONLY place a phone user can read which tenant and
-            which period the figures belong to. Kept mounted rather than conditioned on a width in
-            JS: a JS breakpoint and a CSS one drift, and only one of them can be tested in print.
-            Quiet by construction — secondary text, one hairline, no card. */}
-        {clientName && (
-          <div className="context-bar">
-            <span className="context-bar-client">{clientName}</span>
-            {adminViewClientId && <span className="context-bar-tag">Viewing as admin</span>}
-            {activePeriod && (
-              <>
-                <span aria-hidden="true" className="context-bar-sep">·</span>
-                <span className="context-bar-period">
-                  {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year}
-                </span>
-                <span className={`badge ${activePeriod.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
-                  {activePeriod.status === 'open' ? 'Open' : 'Closed'}
-                </span>
-              </>
-            )}
-            {!isAdmin && (
-              <>
-                <span aria-hidden="true" className="context-bar-sep">·</span>
-                <span className="context-bar-plan">{plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}</span>
-              </>
-            )}
-          </div>
-        )}
 
         {/* Page scope (S673): wraps ONLY the Suspense/Outlet, not the whole <main> — a crash inside
             a page renders this fallback in place with the sidebar and header still standing;

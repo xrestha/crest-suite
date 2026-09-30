@@ -731,11 +731,17 @@ export default function PosTableManagement() {
   return (
     <div>
 
-      <div className="page-header">
-        <h1 className="page-title">POS Setup</h1>
-        <p className="page-subtitle">
-          Set up your floor plan and configure ticket routing for the kitchen and bar.
-        </p>
+      <div className="page-header page-header--split">
+        <div>
+          <h1 className="page-title">POS Setup</h1>
+          <p className="page-subtitle">
+            Set up your floor plan and configure ticket routing for the kitchen and bar.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* The header spans every tab, so the Tables tab's own condition rides on `show`. */}
+          <Fab show={mainTab === 'tables' && tables.length > 0} onClick={openAdd} label="+ Add Table" />
+        </div>
       </div>
 
       {/* Main tab bar */}
@@ -1293,10 +1299,8 @@ export default function PosTableManagement() {
               No tables in this section.
             </div>
           ) : tables.length > 0 ? (
-            // 88px of bottom clearance for the <Fab> below, which is position: fixed and reserves
-            // nothing. Same rule as .table-wrap--fab-clear, applied by hand because this is a card
-            // GRID rather than a .table-wrap — without it the Fab covers the last row's QR buttons.
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14, marginBottom: 88 }}>
+            // .fab-clear: on a phone, where the header's Add floats, the last row's QR buttons stay clear of it.
+            <div className="fab-clear" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
               {visible.map(t => (
                 <div
                   key={t.id}
@@ -1357,8 +1361,6 @@ export default function PosTableManagement() {
               ))}
             </div>
           ) : null}
-
-          <Fab show={tables.length > 0} onClick={openAdd} />
         </>
       )}
 

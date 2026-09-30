@@ -391,6 +391,7 @@ export default function Overtime() {
           <select className="form-select" aria-label="Period" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
+          <Fab onClick={openAdd} label="+ Log OT" show={!drawerOpen} />
         </div>
       </div>
 
@@ -690,7 +691,6 @@ export default function Overtime() {
         </Modal>
       )}
 
-      <Fab onClick={openAdd} label="+ Log OT" show={!drawerOpen} />
       {confirmEl}
     </div>
   )

@@ -416,6 +416,10 @@ textarea,
      i.e. already inside that padding, so repeating the variable here double-counts it and parks
      the bar one banner-height below the banner. Measured, not reasoned: it left a 62px gap. */
   top: 0;
+  /* An iPad with the app installed draws under its status bar (index.html's black-translucent), so
+     the bar's own fill extends under it; less the arrival alert's height when that is up, since
+     the alert then covers the status bar itself (S797, the .phone-topbar rule). 0 in a browser. */
+  padding-top: max(0px, env(safe-area-inset-top, 0px) - var(--arrival-alert-h, 0px));
   /* Above .main-content and its cards; below Modal (100+) and the POS full-screen layers (1000),
      which are meant to cover the shell rather than sit under it. */
   z-index: 100;
@@ -1458,20 +1462,20 @@ tr.interactive-row:focus-visible {
   border: 0;
 }
 
-/* Context bar — "which tenant, which period" on every route. A hairline and a row of text rather
-   than a card: it must be readable without ever competing with the page's own H1 directly below
-   it. Wraps rather than truncating, since on a phone it is the ONLY place this information
-   appears at all (the sidebar that otherwise carries it is off-canvas). */
+/* Context bar — "which tenant, which period" on every route. A row of text rather than a card: it
+   must be readable without ever competing with the page's own H1 below it. Wraps rather than
+   truncating, since on a phone it is the ONLY place this information appears at all (the drawer
+   that otherwise carries it is off-canvas). Since S797 it sits inside .phone-topbar beside the ☰,
+   and the bar carries the rule under it, so this carries none of its own. */
 .context-bar {
   /* Phone-only. See the @media (max-width: 768px) block near the end of this file, which turns it
      back on, and the comment beside it in Layout.js. */
   display: none;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 10px;
-  margin-bottom: 18px;
-  border-bottom: 1px solid var(--theme-border-lt);
+  gap: 2px 8px;
+  flex: 1;
+  min-width: 0;
   font-size: var(--font-size-micro);
   color: var(--theme-text3);
 }
@@ -2126,9 +2130,17 @@ tr.interactive-row:focus-visible {
   position: relative;
 }
 
-/* Reserves space at the bottom of a scrollable table so the fixed-position Fab
-   (bottom: 28px, ~40px tall) never overlaps the last row's action buttons.
-   Apply alongside .table-wrap only on pages that also render a <Fab>.
+/* The page's primary Add (Fab.js, S797). On a computer or tablet it is an ordinary primary button
+   in the page header's action group; under 768px the same element floats bottom-right, where a
+   thumb reaches it. It floated at every width until S797, fixed with no space reserved, so on a
+   desktop it sat on the Edit/Del buttons of whichever row was scrolled behind it — the last row's
+   clearance below never helped the rows in the middle of the list. */
+.fab { white-space: nowrap; flex-shrink: 0; }
+
+/* Reserves space at the bottom of a list so the floating Add (phone only since S797) never covers
+   the last row's action buttons. Apply alongside .table-wrap only on pages that render a <Fab>;
+   `.fab-clear` is the same clearance for a block that is not a .table-wrap (a card grid, a
+   phone-cards list).
 
    MARGIN, not padding. Padding sits INSIDE the scroll container, so the horizontal scrollbar
    rendered 88px below the last row — on a table long enough to scroll the page, that is off the
@@ -2137,8 +2149,22 @@ tr.interactive-row:focus-visible {
    rather than as something scrollable. Margin puts the scrollbar directly under the table and
    keeps the identical 88px of Fab clearance, since a margin on the last child of a padded .card
    cannot collapse out of it. */
-.table-wrap--fab-clear {
-  margin-bottom: 88px;
+@media screen and (max-width: 768px) {
+  .fab {
+    position: fixed;
+    right: 16px;
+    /* Clears an installed iPhone's home bar; env() is 0 in a browser tab. */
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+  .table-wrap--fab-clear,
+  .fab-clear {
+    margin-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* ── A phone gets the answer, not a sideways scroll (S796) ─────────────────────────────────
@@ -2153,7 +2179,9 @@ tr.interactive-row:focus-visible {
   .phone-hide { display: none !important; }
 }
 
-.phone-cards { list-style: none; margin: 0 0 88px; padding: 0; }
+/* The 88px is the floating Add's clearance (the list only shows on a phone, where the Add floats),
+   plus an installed iPhone's home bar (S797; env() is 0 in a browser tab). */
+.phone-cards { list-style: none; margin: 0 0 calc(88px + env(safe-area-inset-bottom, 0px)); padding: 0; }
 .phone-cards__day {
   font-size: 12px; font-weight: 700; color: var(--theme-text2);
   text-transform: uppercase; letter-spacing: 0.06em;
@@ -3343,8 +3371,12 @@ textarea::placeholder {
    a width typed here that a longer word ("Partly cloudy", or "Heavy rain" plus a tag) would break.
    Measured with the real stylesheet: 58px tall against the title's 42px, and beside the title
    from 1024px up; below that the split header wraps it under the title.
-   Under 768px the four days go 2 × 2 and keep the same two-line cell: four columns at a phone's
-   74px each stacked five lines per day (99px) and still clipped a long word. */
+   Under 768px (S797) the four days are ONE row, and the cell is re-flowed rather than squeezed:
+   the day and its tag on top, the picture and the high/low under it, the word visually hidden (it
+   is still read out, and every day's Tip says it in full). S785 had tried four columns keeping the
+   word, which stacked five lines per day at a phone's 74px and clipped a long word, so it went
+   2 × 2 — and 2 × 2 of full tiles plus a two-line credit stood taller than the title and the first
+   KPI row together, reported from a phone as the weather taking too much space. */
 .weather-strip {
   display: flex;
   flex-direction: column;
@@ -3457,14 +3489,31 @@ textarea::placeholder {
 
 @media screen and (max-width: 768px) {
   .weather-strip { align-items: stretch; width: 100%; }
-  .weather-strip__days {
-    grid-auto-flow: row;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* One row of four equal columns (the base grid), each day re-flowed into two short lines. */
+  .weather-strip__days { grid-auto-columns: minmax(0, 1fr); }
+  .weather-strip__day { position: relative; padding: 5px 6px; }
+  .weather-strip__cell {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "label label" "icon temp";
+    column-gap: 4px;
   }
-  /* 2 × 2: the column rule only between the pair, and a row rule above the second pair. */
-  .weather-strip__day:nth-child(odd) { border-left: none; }
-  .weather-strip__day:nth-child(n + 3) { border-top: 1px solid var(--theme-border-lt); }
-  .weather-strip__skeleton { width: 100%; }
+  /* The two line wrappers step aside so their children become the cell's grid items. */
+  .weather-strip__line { display: contents; }
+  .weather-strip__label { grid-area: label; justify-self: start; }
+  .weather-strip__tag { grid-area: label; justify-self: end; }
+  .weather-strip__icon { grid-area: icon; width: 15px; height: 15px; }
+  .weather-strip__temp { grid-area: temp; overflow: hidden; text-overflow: ellipsis; }
+  /* The .sr-only shape: off the tile, still in the accessibility tree. */
+  .weather-strip__word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .weather-strip__skeleton { width: 100%; height: 30px; }
   .weather-strip__credit,
   .weather-strip__note { text-align: left; }
 }
@@ -3797,6 +3846,7 @@ textarea::placeholder {
 
 /* ── MOBILE RESPONSIVE ───────────────────────────────────────────────────── */
 .mobile-hamburger { display: none; }
+.phone-topbar     { display: none; }
 .sidebar-overlay  { display: none; }
 
 /* `screen and`, because a printed page matches a bare width query too: A4 portrait leaves ~718px
@@ -3824,6 +3874,12 @@ textarea::placeholder {
   .sidebar-wrap.mobile-open {
     transform: translateX(0);
   }
+  /* The drawer runs the full height of the screen, so on an installed iPhone its logo row sat under
+     the clock and its last row under the home bar. env() is 0 in a browser tab. */
+  .sidebar-shell {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
   .sidebar-overlay {
     display: block;
     position: fixed;
@@ -3835,18 +3891,32 @@ textarea::placeholder {
     margin-left: 0 !important;
     padding: 16px !important;
   }
-  /* Clears the fixed hamburger (44px + 12px inset) so a page title never sits under it. */
-  .page-header {
-    padding-left: 60px;
+  /* The phone's top bar (S797): the ☰ and the tenant line in one strip above the page, which scrolls
+     inside .main-content underneath it. Until S797 the ☰ was position: fixed over the page, so it
+     sat on table headings as they scrolled past and every page title carried a 60px indent to
+     clear it. Sticky as well as outside the scroller, so it holds even if .layout-root scrolls.
+
+     The top padding clears an installed iPhone's status bar: index.html asks for black-translucent
+     and viewport-fit=cover, so the app draws under the clock, and reported from a phone the tenant
+     line sat there, unreadable. When the arrival alert is up it is the thing under the clock (it
+     pads itself) and .layout-root already pads by its height, so the bar subtracts that rather
+     than clearing the status bar twice. env() is 0 in a browser tab and on a phone with no notch. */
+  .phone-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-shrink: 0;
+    padding: calc(6px + max(0px, env(safe-area-inset-top, 0px) - var(--arrival-alert-h, 0px))) 16px 6px;
+    background: var(--theme-sidebar);
+    border-bottom: 1px solid var(--theme-border);
   }
   .mobile-hamburger {
     display: flex;
     align-items: center;
     justify-content: center;
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 150;
     background: var(--theme-card);
     border: 1px solid var(--theme-border);
     border-radius: var(--radius-md);

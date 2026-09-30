@@ -2,6 +2,7 @@ import { formatBsDay } from '../../../utils/bsCalendar'
 import { npr2 } from '../../../shared/nepalMoney'
 import { getCf, methodOf } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
+import { unitRateCell } from '../../../shared/unitRate'
 
 // The Purchases bill list on a phone (S796). The desktop table is 745px wide, so in a 298px phone
 // column the Bill Total — the figure an owner opens this page for — sat past the right edge behind a
@@ -52,7 +53,7 @@ export default function PurchaseBillCards({ byDay, billTotals, bsMonth, isLocked
                         const rate = cf > 1 ? e.rate * cf : e.rate
                         return (
                           <li key={e.id}>
-                            <span>{e.items?.name} — {Number(qty).toLocaleString('en-IN', { maximumFractionDigits: 3 })} {unit} × {fmtLineRate(rate)}</span>
+                            <span>{e.items?.name} — {Number(qty).toLocaleString('en-IN', { maximumFractionDigits: 3 })} {unit} × {Number(rate) === 0 ? fmtLineRate(rate) : unitRateCell(rate, unit)}</span>
                             <span>{npr2(e.qty * e.rate)}</span>
                           </li>
                         )

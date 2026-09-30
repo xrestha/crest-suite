@@ -23,7 +23,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 
 ## Tables
 
-- Wrap a wide table in `table-wrap`, plus `table-wrap--fab-clear` when the page also renders a `Fab`.
+- Wrap a wide table in `table-wrap`, plus `table-wrap--fab-clear` when the page also renders a `Fab` (phone-only clearance since S797; `.fab-clear` for a card grid or list). The `Fab` itself goes last in the page header's action group, never at the foot of the page.
 - `nowrap` goes on the atom (a date, code, invoice ref, phone, figure, unit, button), never on a whole cell and never as a fixed width. Every table needs one column that can wrap; let names wrap.
 - Give the identity column a `min-width` only if that column is also sticky.
 - Row density is a table-level class (e.g. `table.purchases-table`), never per-cell inline padding.

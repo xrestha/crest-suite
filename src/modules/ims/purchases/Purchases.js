@@ -16,6 +16,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { getCf, billTotalsByKey, methodOf, invoiceMismatchText, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
+import { unitRateCell, unitRateText } from '../../../shared/unitRate'
 import ReturnsTab from './ReturnsTab'
 import PurchaseBillCards from './PurchaseBillCards'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -28,6 +29,13 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import Tabs from '../../../components/Tabs'
 import { chipKeys } from '../../../shared/rovingFocus'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
+
+// A line's rate in the unit shown beside it (S797): a GM / ML rate reads per KG / LTR first, with the
+// stored per-gram / per-ml figure beside it; any other unit, the figure alone. A pack line's per-CTN
+// figure is left as it is. A 0 is a free line (S698), a real figure, so it still prints "0.00".
+const lineRateCell = (rate, unit) => (Number(rate) === 0 ? fmtLineRate(rate) : unitRateCell(rate, unit))
+// The stored per-base-unit rate under a pack line's figure, unit included: "194.40/KG (0.1944/GM)".
+const baseRateLine = (rate, uom) => (Number(rate) === 0 ? `${fmtLineRate(rate)}/${uom || ''}` : unitRateText(rate, uom, { prefix: '', per: '/' }))
 
 export default function Purchases() {
   const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
@@ -574,6 +582,8 @@ export default function Purchases() {
             ))}
           </select>
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Purchases - ${periodLabel}`)}>Print</button>
+          {/* The header is shared by all three tabs; only the Purchases tab adds a bill from here. */}
+          <Fab onClick={openNew} label="+ Add Purchase" show={!loadError && activeTab === 'purchases' && !isLocked && !!selectedPeriod} />
         </div>
       </div>
 
@@ -903,8 +913,8 @@ export default function Purchases() {
                               <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {/* fmtLineRate, not 2 decimals: a per-base-unit rate like 0.004/GM read "0" (S792, PURCHASES-9). */}
-                                {fmtLineRate(displayRate)}
-                                {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
+                                {lineRateCell(displayRate, displayUnit)}
+                                {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {baseRateLine(entry.rate, entry.items?.uom)}</div>}
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13, verticalAlign: 'middle' }}>
                                 {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -975,8 +985,8 @@ export default function Purchases() {
                                     </td>
                                     <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                      {fmtLineRate(displayRate)}
-                                      {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
+                                      {lineRateCell(displayRate, displayUnit)}
+                                      {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {baseRateLine(entry.rate, entry.items?.uom)}</div>}
                                     </td>
                                   </>
                                 )
@@ -1027,8 +1037,6 @@ export default function Purchases() {
               </>
             )}
           </div>
-
-          <Fab onClick={openNew} label="+ Add Purchase" show={!isLocked && !!selectedPeriod} />
         </>
       )}
 

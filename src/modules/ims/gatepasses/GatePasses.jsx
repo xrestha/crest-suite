@@ -285,6 +285,9 @@ export default function GatePasses() {
           <h1 className="page-title">Gate Passes</h1>
           <p className="page-subtitle">Issue a printable gate pass for a vendor or delivery vehicle</p>
         </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Fab onClick={() => setShowNew(true)} label="+ New Gate Pass" show={!showNew} />
+        </div>
       </div>
 
       <FilterChips
@@ -423,8 +426,6 @@ export default function GatePasses() {
           </div>
         </ConfirmModal>
       )}
-
-      <Fab onClick={() => setShowNew(true)} label="+ New Gate Pass" show={!showNew} />
     </div>
 
       {/* Print-only gate pass — see handleSaved()/reprint(); mounted only for the brief setTimeout

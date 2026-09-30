@@ -121,6 +121,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
           {locations.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
         <button className="btn btn-ghost" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setShowCategories(true)}>Manage Categories</button>
+        <Fab onClick={() => setShowForm(true)} label="+ Add Asset" />
       </div>
 
       {filtered.length === 0 ? (
@@ -185,7 +186,6 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
       )}
 
       <ActionError error={nbvError} />
-      <Fab onClick={() => setShowForm(true)} label="+ Add Asset" />
 
       {showForm && (
         <AssetFormModal categories={categories} onClose={() => setShowForm(false)} onSaved={handleSaved} />

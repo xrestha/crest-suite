@@ -5,6 +5,23 @@ import { BYO_STATUS } from './buildYourOwnRating'
 import { guestVatRate, PAN_LABEL } from './menuPriceVat'
 import { costRangeText } from '../../customization/BuildCostDetail'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
+import { bigUnitOf, unitRateCell, unitRateParts } from '../../../shared/unitRate'
+
+// A sub-recipe's cost per yield unit as a tile: label, value, and the stored per-GM / per-ML figure
+// for a quiet line under it (S797, owner decision: both, side by side). A yield in GM or ML reads per
+// KG / LTR first — "Cost per KG · NPR 194.40", with "0.1944 per GM" beneath — and any other unit
+// keeps its own label at the precision the figure needs (a two-decimal 0.1944 printed 0.19). '—' for
+// an uncosted sub-recipe, never NPR 0.00. Display only: the mirror item's rate and every sum stay
+// per base unit. Shared by this card and Recipes.js's edit-form panel and detail tiles.
+export function costPerYieldTile(cpu, uom) {
+  const big = bigUnitOf(uom)
+  const p = unitRateParts(cpu, uom)
+  return {
+    label: `Cost per ${big ? big.unit : (uom || 'unit')}`,
+    value: p ? `NPR ${p.primary.value}` : '—',
+    stored: p?.secondary ? `${p.secondary.value} per ${p.secondary.unit}` : null,
+  }
+}
 
 // The day the card was printed, in BS with the AD date beside it — "12 Ashwin 2083 BS · 28 September
 // 2026" (S792, RECIPES-6). It printed `new Date().toLocaleDateString('en-IN')`, a browser-locale AD
@@ -43,6 +60,7 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
   const fcPct = menuFcPct(dishCost, price)
   const yieldQty = parseFloat(recipe.yield_qty) || 1
   const costPerUnit = cost / yieldQty
+  const cpuTile = costPerYieldTile(costPerUnit, recipe.yield_uom)
   const nutri = showNutrition ? calcRecipeNutrition(recipe, recipes) : null
   const nutriLabel = isSubRec ? 'total batch' : 'per portion'
   const nutriValues = nutri ? nutri.perPortion : null
@@ -56,7 +74,7 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
       ]
   const summary = isSubRec ? [
     { label: 'Total Batch Cost', value: `NPR ${cost.toFixed(2)}` },
-    { label: `Cost per ${recipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}` },
+    { label: cpuTile.label, value: cpuTile.value, sub: cpuTile.stored },
     { label: 'Yield', value: `${recipe.yield_qty} ${recipe.yield_uom}` },
   ] : byBuild ? [
     { label: 'Food Cost (by build)', value: byoRange && !byoRange.empty ? costRangeText(byoRange) : '— costed by build' },
@@ -91,6 +109,7 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
           <div key={m.label}>
             <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#777', marginBottom: 3 }}>{m.label}</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: '#000' }}>{m.value}</div>
+            {m.sub && <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{m.sub}</div>}
           </div>
         ))}
       </div>
@@ -128,7 +147,7 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
                 <td style={{ padding: '5px 6px 5px 0', color: '#000' }}>{ingName}</td>
                 <td style={{ padding: '5px 6px', textAlign: 'right' }}>{ri.qty_per_portion}</td>
                 <td style={{ padding: '5px 6px', color: '#555' }}>{ingUom}</td>
-                <td style={{ padding: '5px 6px', textAlign: 'right', color: '#555' }}>{ingRate.toFixed(2)}</td>
+                <td style={{ padding: '5px 6px', textAlign: 'right', color: '#555' }}>{unitRateCell(ingRate, ingUom)}</td>
                 <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 600 }}>{ingCost.toFixed(2)}</td>
                 <td style={{ padding: '5px 0 5px 6px', textAlign: 'right', color: '#555' }}>{pct.toFixed(1)}%</td>
               </tr>

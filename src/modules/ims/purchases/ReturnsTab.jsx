@@ -14,8 +14,10 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError from '../../../components/FieldError'
 import { getCf, returnBillPeriods, remainingReturnableQty, returnDayProblem, LATE_RETURN_MONTHS } from './purchasesHelpers'
 // Every rate on this tab goes through fmtLineRate, not a 2-decimal format, so a per-base-unit rate
-// such as 0.004/GM no longer reads "0" (S792, PURCHASES-9).
+// such as 0.004/GM no longer reads "0" (S792, PURCHASES-9). A GM / ML rate also reads per KG / LTR
+// first, with the stored per-gram / per-ml figure beside it (S797, display only).
 import { fmtLineRate } from './purchaseLines'
+import { unitRateCell, unitRateText } from '../../../shared/unitRate'
 import { BS_MONTHS, formatBsDay, daysInBsMonth } from '../../../utils/bsCalendar'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -23,6 +25,10 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 const EMPTY_RETURN = { bill_period_id: '', vendor_filter: '', purchase_entry_id: '', qty: '', bs_day: '', notes: '' }
 
 const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '')
+
+// A line's rate in the unit shown with it: per KG / LTR first for GM / ML, the figure alone for any
+// other unit (a pack line's per-CTN figure is left as it is). A 0 is a free line and prints "0.00".
+const lineRateCell = (rate, unit) => (Number(rate) === 0 ? fmtLineRate(rate) : unitRateCell(rate, unit))
 
 // What deleting a return has to know about its bill (S792 stage 2): every line's figures and its
 // settle stamp. `invoice_ref` names the bill in the sentences below.
@@ -509,7 +515,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
       const dRate = cf > 1 ? p.rate * cf : p.rate
       return {
         value: p.id,
-        label: `${formatBsDay(p.bs_day, billPeriod?.bs_month) || 'No day'} · ${p.items?.name || 'Item'} · ${Number(dQty).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${dUnit || ''} @ NPR ${fmtLineRate(dRate)} (${p.payment_method || 'Cash'})${p.vendors?.name ? ` — ${p.vendors.name}` : ''}${p.invoice_ref ? ` #${p.invoice_ref}` : ''}`,
+        label: `${formatBsDay(p.bs_day, billPeriod?.bs_month) || 'No day'} · ${p.items?.name || 'Item'} · ${Number(dQty).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${dUnit || ''} @ NPR ${lineRateCell(dRate, dUnit)} (${p.payment_method || 'Cash'})${p.vendors?.name ? ` — ${p.vendors.name}` : ''}${p.invoice_ref ? ` #${p.invoice_ref}` : ''}`,
       }
     }), [monthLines, returnForm.vendor_filter, billPeriod])
 
@@ -518,6 +524,14 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
 
   return (
     <>
+      {/* No longer needs a purchase in THIS month (S756, D10): the bill may be an earlier month's.
+          The row renders only with its button, so a locked month or an open form leaves no gap. */}
+      {!isLocked && !showReturnForm && !!period && (
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+          <Fab onClick={openNewReturn} label="+ Add Return" />
+        </div>
+      )}
+
       {purchases.length === 0 && (
         <div className="note-banner">
           No purchases in this month yet. You can still record a return here against a bill from an earlier month.
@@ -670,7 +684,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
             const retValue = baseRetQty * linked.rate
             return (
               <div style={{ marginTop: 12, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 15%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-text2)', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmtLineRate(displayRate)}/{displayRateUnit}</strong></span>
+                <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>{Number(displayRate) === 0 ? `NPR ${fmtLineRate(displayRate)}/${displayRateUnit || ''}` : unitRateText(displayRate, displayRateUnit, { per: '/' })}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{linked.vendors?.name || '—'}</strong></span>
                 <span>Payment: <strong style={{ color: 'var(--theme-text1)' }}>{linked.payment_method || 'Cash'}</strong></span>
                 {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-text1)' }}>−NPR {retValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>}
@@ -709,9 +723,9 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                   <th><Tip text="Day of the Nepali month the goods went back to the vendor — not the day the bill was raised." width={250}>Day</Tip></th>
                   <th><Tip text="The day of the bill these goods came in on. A different month here means the goods were bought in that month and returned in this one — the return counts in this month." width={270}>Bill Date</Tip></th>
                   <th>Item</th><th>Vendor</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="How much went back, in the item's base unit. e.g. a 12-bottle crate returned on an item tracked in bottles shows 12." width={260}>Returned Qty</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="How much went back, in the unit in the UOM column. Where the item is bought by the pack, that is the pack, with the base-unit quantity beneath it: a 12-bottle crate returned on an item bought by the crate and tracked in bottles shows 1, with 12 BTL under it." width={280}>Returned Qty</Tip></th>
                   <th>UOM</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Rate per base unit, inherited from the original purchase — a return is credited at what you paid, not at today's price." width={260}>Rate</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Rate for one of the unit in the UOM column (a carton, where the item is bought by the carton), inherited from the original purchase — a return is credited at what you paid, not at today's price. A rate per gram or ml also shows per KG or LTR." width={280}>Rate</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Returned Qty × Rate. This is subtracted from the vendor's purchases everywhere in IMS, so net purchases and COGS both drop by it." width={270}>Return Value</Tip></th>
                   <th><Tip text="Whether the original bill was Cash or Credit. A Cash return is money back; a Credit return reduces what you still owe that vendor." width={260}>Payment</Tip></th>
                   <th>Notes</th><th></th>
@@ -752,7 +766,7 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
                             {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{Number(ret.qty).toLocaleString('en-IN')} {ret.items?.uom}</div>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
-                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{fmtLineRate(displayRate)}</td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{lineRateCell(displayRate, displayUnit)}</td>
                         </>
                       )
                     })()}
@@ -793,8 +807,6 @@ export default function ReturnsTab({ period, periods, purchases, returns, isLock
           </div>
         )}
       </div>
-      {/* No longer needs a purchase in THIS month (S756, D10): the bill may be an earlier month's. */}
-      <Fab onClick={openNewReturn} label="+ Add Return" show={!isLocked && !showReturnForm && !!period} />
       {confirmEl}
     </>
   )

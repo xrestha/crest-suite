@@ -21,7 +21,8 @@ import { suggestSeeds } from '../../../data/nutritionSeed'
 import { fetchUsdaNutrition } from '../../../utils/usdaNutrition'
 import { EMPTY_RECIPE, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead } from './recipeCostCalc'
 import { productCodePrefix, nextProductCode, SUB_RECIPE_CATEGORY } from '../../../shared/productCode'
-import RecipeCostCardPrint from './RecipeCostCardPrint'
+import RecipeCostCardPrint, { costPerYieldTile } from './RecipeCostCardPrint'
+import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
 import DishPhotoField from './DishPhotoField'
@@ -1379,6 +1380,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
   const suggestedPrice = liveCost > 0 && !isSubRecipeForm && !formByBuild ? getSuggestedPrice(liveCost, formVat, liveFcTarget) : null
   const liveYieldQty = parseFloat(recipeForm.yield_qty) || 1
   const liveCostPerUnit = isSubRecipeForm && liveYieldQty > 0 ? liveCost / liveYieldQty : null
+  // Per KG / LTR first for a GM / ML yield, the stored per-GM / per-ML figure under it (S797).
+  const liveCpuTile = liveCostPerUnit != null ? costPerYieldTile(liveCostPerUnit, recipeForm.yield_uom) : null
   const liveNutri = useMemo(
     () => showNutrition ? calcLiveNutrition(ingredients, items, recipes) : null,
     [showNutrition, ingredients, items, recipes])
@@ -1558,7 +1561,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
       printShareRows.forEach(recipe => {
         const cost = calcRecipeCost(recipe, recipes)
         const yieldQty = parseFloat(recipe.yield_qty) || 1
-        lines.push(`⚙ ${recipe.name} — NPR ${(cost / yieldQty).toFixed(2)} / ${recipe.yield_uom}`)
+        // Per KG / LTR first for a GM / ML yield, the stored per-GM / per-ML figure beside it (S797).
+        lines.push(`⚙ ${recipe.name} — ${cost > 0 ? unitRateText(cost / yieldQty, recipe.yield_uom) : 'not costed'}`)
       })
     } else {
       printShareRows.forEach(recipe => {
@@ -1604,6 +1608,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           {view === 'edit' && <button className="btn btn-ghost" onClick={() => setView('list')}>← Back</button>}
+          <Fab onClick={openNew} label="+ New Recipe" show={view === 'list'} />
         </div>
       </div>
 
@@ -1789,7 +1794,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>NPR {cost.toFixed(2)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{recipe.yield_qty} {recipe.yield_uom}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
-                            NPR {costPerUnit.toFixed(2)} / {recipe.yield_uom}
+                            {unitRateText(costPerUnit, recipe.yield_uom)}
                           </td>
                           <td>
                             {/* Only the exception is marked (S796): a green "Active" on every row was a column of the same word that hid the few hidden ones. The Hide button says "Hide", so the state says "Hidden". */}
@@ -2217,11 +2222,11 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {liveCost.toFixed(2)}</div>
                 {formByBuild && <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>The plate adds the guest's choices</div>}
               </div>
-              {isSubRecipeForm && liveCostPerUnit != null && (
+              {isSubRecipeForm && liveCpuTile && (
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Cost per {recipeForm.yield_uom || 'unit'}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {liveCostPerUnit.toFixed(2)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Yield: {recipeForm.yield_qty} {recipeForm.yield_uom}</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>{liveCpuTile.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{liveCpuTile.value}</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{liveCpuTile.stored && `${liveCpuTile.stored} · `}Yield: {recipeForm.yield_qty} {recipeForm.yield_uom}</div>
                 </div>
               )}
               {!isSubRecipeForm && livePrice > 0 && (
@@ -2467,6 +2472,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
         const fcPct = menuFcPct(dishCost, price)
         const yieldQty = parseFloat(selectedRecipe.yield_qty) || 1
         const costPerUnit = cost / yieldQty
+        const cpuTile = costPerYieldTile(costPerUnit, selectedRecipe.yield_uom)
         const fcB2 = fcBand(fcPct, settings)
         const fcColor = fcB2.color
         const nutri = showNutrition ? calcRecipeNutrition(selectedRecipe, recipes) : null
@@ -2508,13 +2514,15 @@ Check the recipe list before saving again — if it timed out after the recipe w
             )}
             {isSubRec && (
               <div className="note-banner">
-                ⚙ Sub-Recipe — Yield: {selectedRecipe.yield_qty} {selectedRecipe.yield_uom} · Cost per {selectedRecipe.yield_uom}: NPR {costPerUnit.toFixed(2)}
+                ⚙ Sub-Recipe — Yield: {selectedRecipe.yield_qty} {selectedRecipe.yield_uom} · Cost: {unitRateText(costPerUnit, selectedRecipe.yield_uom)}
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px,1fr))', gap: 14, marginBottom: 24 }}>
               {(isSubRec ? [
                 { label: 'Total Batch Cost', value: `NPR ${cost.toFixed(2)}`, color: 'var(--theme-text1)' },
-                { label: `Cost per ${selectedRecipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}`, color: 'var(--theme-text1)' },
+                // Per KG / LTR first for a GM / ML yield; the stored per-GM / per-ML figure is the
+                // quiet line under it (S797) — not the amber `sub`, which is a warning.
+                { label: cpuTile.label, value: cpuTile.value, color: 'var(--theme-text1)', quietSub: cpuTile.stored },
                 { label: 'Yield', value: `${selectedRecipe.yield_qty} ${selectedRecipe.yield_uom}`, color: 'var(--theme-text1)' },
               ] : [
                 byBuild
@@ -2549,6 +2557,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   <div className="stat-value" title={s.title || (s.text ? s.value : undefined)}
                     style={{ fontSize: s.text ? 14 : 18, color: s.color, ...(s.text ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : {}) }}>{s.value}</div>
                   {s.sub && <div className="stat-sub" style={{ color: 'var(--theme-amber-text)' }}>{s.sub}</div>}
+                  {s.quietSub && <div className="stat-sub">{s.quietSub}</div>}
                 </div>
               ))}
             </div>
@@ -2722,7 +2731,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         <td style={{ textAlign: 'right', color: yieldPct != null && yieldPct < 100 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                           {yieldPct != null ? `${yieldPct.toFixed(0)}%` : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {unitRate.toFixed(2)}</td>
+                        {/* Per KG / LTR first for a GM / ML item, the stored per-GM / per-ML rate
+                            beside it (S797); two decimals had printed a per-GM 0.1944 as 0.19. */}
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{unitRate > 0 ? `NPR ${unitRateCell(unitRate, uom)}` : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {itemCost.toFixed(2)}</td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
@@ -2781,7 +2792,6 @@ Check the recipe list before saving again — if it timed out after the recipe w
         <NutritionEditorModal item={nutriItem} onClose={() => setNutriItemId(null)} onSaved={handleNutriSaved} />
       )}
 
-      <Fab onClick={openNew} label="+ New Recipe" show={view === 'list'} />
       {confirmEl}
     </div>
   )

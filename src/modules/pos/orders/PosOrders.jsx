@@ -4070,12 +4070,19 @@ The tables were left occupied rather than freed with their orders still open.`)
       position: 'fixed', inset: 0, zIndex: 1000,
       background: 'var(--theme-bg)',
       display: 'flex', flexDirection: 'column',
+      // An installed iPhone draws under its home bar (index.html's viewport-fit=cover); env() is 0 in
+      // a browser tab (S797). The top inset is the top bar's own padding, below, so its fill runs
+      // under the status bar instead of leaving a strip of page ground there.
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     }}>
 
       {/* ── Top bar ── */}
       <div style={{
         display: 'flex', alignItems: 'center', columnGap: narrowTill ? 8 : 12, rowGap: 6, flexWrap: 'wrap',
-        padding: narrowTill ? '6px 12px' : '0 16px', minHeight: 52, flexShrink: 0,
+        padding: narrowTill
+          ? 'calc(6px + env(safe-area-inset-top, 0px)) 12px 6px'
+          : 'env(safe-area-inset-top, 0px) 16px 0',
+        minHeight: 'calc(52px + env(safe-area-inset-top, 0px))', flexShrink: 0,
         background: 'var(--theme-card)', borderBottom: '1px solid var(--theme-border)',
       }}>
         <button onClick={requestBackToFloor} className="till-hit--row" style={{

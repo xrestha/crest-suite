@@ -12,6 +12,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import PeriodScope from '../../../components/PeriodScope'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { getCf, fmtRate } from './purchasesHelpers'
+import { bigUnitOf, unitRateText } from '../../../shared/unitRate'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import Modal from '../../../components/Modal'
 import PurchaseBillForm from './PurchaseBillForm'
@@ -30,6 +31,12 @@ import PurchaseBillPrint from './PurchaseBillPrint'
 //                                  admin adding to a past month lands in that month, not the open
 //                                  one. Falls back to the open period when absent (a bare URL).
 //   /purchases/:groupId/edit     — the period is read off the bill's own rows; nothing to pass.
+
+// The rate prompt's old → new pair is in the bill box's unit. Where that unit is GM / ML the pair
+// reads per KG / LTR, with the per-gram / per-ml pair on a line under it (S797). Display only: what
+// is compared and written stays per the box's unit.
+const inShownUnit = (rate, unit) => rate * (bigUnitOf(unit)?.factor || 1)
+
 export default function PurchaseBillPage() {
   const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
@@ -461,14 +468,17 @@ export default function PurchaseBillPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.itemName}</div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                      Item Master will hold NPR {fmtRate(toPerBase(item))} per {item.baseUom}{item.vatIncluded ? ' — the price you paid, 13% VAT included (not claimable on a PAN bill)' : ''}
+                      Item Master will hold {unitRateText(toPerBase(item), item.baseUom)}{item.vatIncluded ? ' — the price you paid, 13% VAT included (not claimable on a PAN bill)' : ''}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>
-                    <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>NPR {fmtRate(item.oldRate)}</span>
+                    <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>NPR {fmtRate(inShownUnit(item.oldRate, item.unit))}</span>
                     <span style={{ color: 'var(--theme-text2)' }}> → </span>
-                    <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {fmtRate(item.newRate)}</span>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 1 }}>per {item.unit}</div>
+                    <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {fmtRate(inShownUnit(item.newRate, item.unit))}</span>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 1 }}>per {bigUnitOf(item.unit)?.unit || item.unit}</div>
+                    {bigUnitOf(item.unit) && (
+                      <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 1 }}>({fmtRate(item.oldRate)} → {fmtRate(item.newRate)} per {item.unit})</div>
+                    )}
                   </div>
                 </label>
               ))}

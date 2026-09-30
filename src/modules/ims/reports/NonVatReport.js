@@ -17,6 +17,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { splitPurchaseVat, buildVendorSummary, summariseUnlinkedReturns, returnLinesOutsidePeriod } from './purchaseTaxSplit'
 import Tabs from '../../../components/Tabs'
+import { unitRateCell } from '../../../shared/unitRate'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -359,7 +360,7 @@ export default function NonVatReport() {
                     <th style={{ textAlign: 'right' }}>Qty</th>
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Rate per UOM as entered on the purchase.">Rate</Tip>
+                      <Tip text="Rate per UOM as entered on the purchase. A rate per gram or ml also shows per KG or LTR.">Rate</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Total = Qty × Rate. No VAT included — this is the full cost.">Total (NPR)</Tip>
@@ -382,7 +383,9 @@ export default function NonVatReport() {
                         <td style={{ color: 'var(--theme-text2)' }}>{e.vendors?.name || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(e.qty).toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                         <td style={{ color: 'var(--theme-text2)' }}>{e.items?.uom}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtNPR(e.rate)}</td>
+                        {/* A GM / ML rate reads per KG / LTR first, the stored per-gram figure beside it
+                            (S797); a 0 is a free line and keeps "NPR 0.00". */}
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(e.rate) > 0 ? `NPR ${unitRateCell(e.rate, e.items?.uom)}` : fmtNPR(e.rate)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(rowTotal)}</td>
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{e.invoice_ref || '—'}</td>
                       </tr>

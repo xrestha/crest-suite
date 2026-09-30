@@ -695,7 +695,9 @@ and it carries two properties neither hand-rolled version had complete: `flex-wr
 hamburger clearance. Measured at 390px, an unclassed header put 40x33px of the fixed hamburger
 *over* the title — `elementFromPoint` at the title's first character returned the button — while a
 no-wrap header squeezed that title from 298px to 154px and one carrying a period `<select>`
-overflowed its container by 29.7px into the clip from `html { overflow-x: hidden }`.
+overflowed its container by 29.7px into the clip from `html { overflow-x: hidden }`. (Since S797
+there is no clearance to carry: the ☰ lives in `.phone-topbar`, a strip above the page, and the
+header's 60px phone indent is gone.)
 
 **KPI rows are auto-fitting grids, not fixed columns.** `.stat-grid` is
 `repeat(auto-fit, minmax(200px, 1fr))` with a 16px gap, so four cards reflow to 2x2 and then to one
@@ -724,10 +726,15 @@ beside it and are not tiers: the top bar's 1280px wrap above, and the POS order 
 the full-screen till puts the menu full width and the cart in a bottom sheet — a width, because a
 320px cart column beside a 390px phone left the menu 70px.) Above 768 the top bar IS the
 navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away and the same
-`.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` plus a 44px fixed hamburger and a
-55%-black overlay), `.main-content` takes 16px padding, `.context-bar` turns back on as the only
-place a phone states tenant and period, and every multi-column dashboard grid collapses to one
-column. That block is `screen and (max-width: 768px)`: A4 portrait is narrower than 768px, so a bare
+`.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` and a 55%-black overlay),
+`.main-content` takes 16px padding, and every multi-column dashboard grid collapses to one column.
+The 44px ☰ and `.context-bar` (the only place a phone states tenant and period) share
+`.phone-topbar` (S797), a slim strip above the page that stays put while the page scrolls under it;
+until S797 the ☰ was fixed over the page and sat on table headings as they scrolled past. The strip,
+the drawer, the arrival alert and the POS till and kitchen layers each pad by
+`env(safe-area-inset-*)`, because `index.html` asks for `viewport-fit=cover` with a
+`black-translucent` status bar, so an installed iPhone draws the app under its clock — reported from
+a phone as the tenant line sitting there, unreadable. That block is `screen and (max-width: 768px)`: A4 portrait is narrower than 768px, so a bare
 width query put the phone shell on every printout (S778). **`display` for both lives in `Layout.css`, never inline in `Layout.js`** — an inline
 declaration beats an external rule at any specificity, so a component that sets its own display can
 never be hidden by a media query.
@@ -759,8 +766,14 @@ deliberately excluded. A control on a class is still the better answer — it al
 table and the data keeps its native column widths. It is also `position: relative` (S776): an
 `.sr-only` label inside a table is `position: absolute`, and with no positioned ancestor it escaped
 the scroll container and widened the whole page — `/pos` measured 478px of scroll width at 390. Pair it with `.table-wrap--fab-clear` on any
-page that also renders a `Fab` — the Fab is fixed with no reserved space, so without it the button
-sits on top of the last row's actions.
+page that also renders a `Fab` — on a phone the Fab floats with no reserved space, so without it the
+button sits on top of the last row's actions.
+
+**The page's Add lives in its header, and floats only on a phone (S797).** `Fab` is placed last in
+the page header's action group: a primary button beside Print and the period picker on a computer or
+tablet, and under 768px the same element floats bottom-right where a thumb reaches it. It floated at
+every width before, and on a desktop it sat on the Edit and Del buttons of whichever row scrolled
+behind it — the last row's clearance never helped the rows in the middle of a list.
 
 **A page that renders into the body flow needs its own scrollport.** `index.css` sets
 `html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow is
@@ -870,7 +883,8 @@ pulse, which is an alarm rather than a depth cue.
 
 - **Card** (`var(--theme-card-shadow)`): every `.card` and `.stat-card`. Per preset, never
   hand-written.
-- **Floating action** (`0 6px 20px rgba(0,0,0,0.45)`): the `Fab` only.
+- **Floating action** (`0 6px 20px rgba(0,0,0,0.45)`): the `Fab` only, and only on a phone, where it
+  floats (S797; above 768px it is a header button and carries none).
 - **Focus** (`0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring)`): a solid
   indicator inside a soft ring. This is the standing pair for every focusable control.
 - **Live pulse** (`0 0 0 0 → 0 0 0 6px rgba(251,191,36,0.5→0.18)`): a guest QR order waiting to be

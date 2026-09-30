@@ -356,6 +356,7 @@ export default function EmployeeList() {
           <button className="btn btn-ghost" onClick={() => setPrintForm(true)} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
             🖨 Print Joining Form
           </button>
+          <Fab onClick={openAdd} label="+ Add Employee" show={!drawerOpen} />
         </div>
       </div>
 
@@ -633,8 +634,6 @@ export default function EmployeeList() {
           onClose={closeDrawer}
         />
       )}
-
-      <Fab onClick={openAdd} label="+ Add Employee" show={!drawerOpen} />
 
       {printForm && <EmployeeJoiningForm onClose={() => setPrintForm(false)} />}
 

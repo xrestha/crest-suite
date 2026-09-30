@@ -21,6 +21,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
+import { unitRateCell } from '../../../shared/unitRate'
 
 // Quantities are numeric(12,3) in the database, and every one of these figures has been through
 // `parseFloat` on the way here. Without this, ordering 0.3 and receiving 0.1 twice leaves
@@ -748,8 +749,9 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                         )}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>
-                        {/* Per BASE unit, so a gram's price keeps its decimals (the PURCHASES-9 rule, S792). */}
-                        NPR {fmtLineRate(l.unit_price)}
+                        {/* Per BASE unit, so a gram's price keeps its decimals (the PURCHASES-9 rule, S792);
+                            a GM / ML price reads per KG / LTR first, the per-gram figure beside it (S797). */}
+                        NPR {Number(l.unit_price) === 0 ? fmtLineRate(l.unit_price) : unitRateCell(l.unit_price, l.uom)}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>
                         {val > 0 ? `NPR ${val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
@@ -1015,7 +1017,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                       <td style={{ padding: '9px 10px', fontSize: 13, textAlign: 'right' }}>{x.qty_ordered}</td>
                       <td style={{ padding: '9px 10px', fontSize: 13, color: '#555' }}>{x.items?.uom || '—'}</td>
                       <td style={{ padding: '9px 10px', fontSize: 13, textAlign: 'right' }}>
-                        {x.unit_price ? `NPR ${fmtLineRate(x.unit_price)}` : '—'}
+                        {x.unit_price ? `NPR ${unitRateCell(x.unit_price, x.items?.uom)}` : '—'}
                       </td>
                       <td style={{ padding: '9px 10px', fontSize: 13, textAlign: 'right', fontWeight: 600 }}>
                         {subtotal > 0 ? `NPR ${money2(subtotal)}` : '—'}
@@ -1067,6 +1069,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
               <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</option>
             ))}
           </select>
+          <Fab onClick={openNew} label="+ New PO" show={!isLocked && !loadError && !!selectedPeriod} />
         </div>
       </div>
 
@@ -1225,7 +1228,6 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
         </div>
       )}
 
-      <Fab onClick={openNew} label="+ New PO" show={!isLocked && !loadError && !!selectedPeriod} />
       {confirmEl}
     </div>
   )

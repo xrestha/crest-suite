@@ -29,7 +29,8 @@ export const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf
  * Meaning Rule). Measured S689: worst pair ΔE 56.3 normal, 12.4 deuteranopia, 30.6 protanopia.
  * Red is deliberately absent — red means over threshold here. Net Margin is the one slot that stays
  * semantic, because profit reads as good. Each page greys it on its own trigger: the Dashboard pie
- * through `costSliceColor` below when `resolveLabour().verdictWithheld`, and Overheads its own Net
+ * through `costSliceColor` below when `resolveLabour().verdictWithheld` or the month is under
+ * SETTLE_DAY days old (S797, the Est. Net Margin tile's two triggers), and Overheads its own Net
  * Profit segment, from theme tokens, on `noVerdict` (withheld labour OR an open month) — its bars
  * are HTML, not SVG, so `var()` resolves there.
  */
@@ -47,10 +48,11 @@ export const COST_BREAKDOWN_COLORS = {
 export const COST_BREAKDOWN_NEUTRAL = '#6b7280'
 
 /**
- * One slice's colour. `withheld` is `resolveLabour().verdictWithheld` (S796): the margin may have no
- * wages in it, so the tile says "Not judged" and a green Net Margin slice beside it would be the
- * verdict the tile declines to give. Pass the slice fill AND its legend swatch through this, so the
- * two cannot disagree. An unknown key gets the neutral rather than no fill.
+ * One slice's colour. `withheld` is whatever makes the page's margin tile decline its verdict — on the
+ * Dashboard `resolveLabour().verdictWithheld` (S796: the margin may have no wages in it) or a month
+ * too young to judge (S797) — and a green Net Margin slice beside that tile would be the verdict it
+ * declines to give. Pass the slice fill AND its legend swatch through this, so the two cannot
+ * disagree. An unknown key gets the neutral rather than no fill.
  */
 export function costSliceColor(key, { withheld = false } = {}) {
   if (key === 'Net Margin' && withheld) return COST_BREAKDOWN_NEUTRAL

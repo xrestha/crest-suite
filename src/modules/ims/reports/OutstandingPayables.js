@@ -17,6 +17,8 @@ import {
   planSupplierLumpSum, supplierCreditSlots, billPaymentProblems, planBillPayment,
   expandCreditPartners, linesToReopen, linesToCloseByReturns, paymentsMovedSince, paymentsMovedText,
 } from './payablesAllocation'
+import { fmtLineRate } from '../purchases/purchaseLines'
+import { unitRateCell } from '../../../shared/unitRate'
 import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -1243,7 +1245,9 @@ export default function OutstandingPayables() {
                                           <tr key={e.id}>
                                             <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                                             <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString('en-IN')} {e.items?.uom}</td>
-                                            <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString('en-IN')}</td>
+                                            {/* Per the unit in the Qty cell; a GM / ML rate reads per KG / LTR first, the
+                                                per-gram figure beside it (S797). A 0 is a free line. */}
+                                            <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{Number(e.rate) === 0 ? fmtLineRate(e.rate) : unitRateCell(e.rate, e.items?.uom)}</td>
                                             <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(e.value)}</td>
                                           </tr>
                                         ))}

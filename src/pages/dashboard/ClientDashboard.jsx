@@ -1577,9 +1577,12 @@ export default function ClientDashboard() {
   ].filter(r => r.value > 0)
   const costBreakdownTotal = costBreakdown.reduce((s, r) => s + r.value, 0)
   // One colour per slice for the pie AND its legend swatch (S796): a withheld margin draws its slice
-  // grey, as the footer below withholds, instead of a green "profit" slice. The tile also withholds
-  // before SETTLE_DAY; this card does not, and adding that belongs to the pill, slice and footer at once.
-  const costSliceFill = name => costSliceColor(name, { withheld: labour.verdictWithheld })
+  // grey, as the footer below withholds, instead of a green "profit" slice. Withheld for the same two
+  // reasons the Est. Net Margin tile withholds (S797): labour that may be missing, and a month not yet
+  // SETTLE_DAY days old, where one bulk purchase decides the sign. The pill, slice and footer all read
+  // `marginWithheld`, so the card cannot judge a figure the tile beside it does not.
+  const marginWithheld = labour.verdictWithheld || periodTooEarly
+  const costSliceFill = name => costSliceColor(name, { withheld: marginWithheld })
   // The sentence for whichever labour branch the page took (S683's rule: a branch the page knows
   // about is said out loud). Before S756 this only fired for "Labor tab empty but HR has basic
   // salaries" — the page now reads the finalized run itself, so what is left to say is: payroll
@@ -2632,10 +2635,15 @@ export default function ClientDashboard() {
               smallHeight={costTabAvailable && mixTabAvailable ? 172 : 140}
               footer={costCardEffectiveView === 'cost' ? (
                 <>
-                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginPct == null || labour.verdictWithheld ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginPct == null || marginWithheld ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
                     {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
                   </div>
+                  {periodTooEarly && netMarginPct != null && (
+                    <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-text3)' }}>
+                      Day {dayOfPeriod} of {periodDays} · too early in the month to judge; judged from day {SETTLE_DAY}
+                    </div>
+                  )}
                   {/* Percentages below the slices are a share of whatever the pie actually contains,
                       which flips with the sign of the margin — say which, rather than leaving a bare
                       "23.4%" to be read against the wrong denominator. */}
@@ -2691,8 +2699,8 @@ export default function ClientDashboard() {
                               isn't gold the pill would otherwise disagree with the slice it summarizes. */}
                           {/* The tile's figure, so the tile's name (S792, D30): purchases ÷ sales. */}
                           {fcPct != null && <StatPill label={SPEND_SO_FAR_LABEL} value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
-                          {/* No verdict dot while labour.verdictWithheld, matching the footer (the tile also withholds before SETTLE_DAY; this card does not). */}
-                          <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null || labour.verdictWithheld ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                          {/* No verdict dot while the margin is withheld (labour missing, or before SETTLE_DAY), matching the footer and the tile. */}
+                          <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null || marginWithheld ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
                         </div>
                       )}
                       <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>

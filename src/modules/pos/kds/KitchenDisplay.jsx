@@ -359,7 +359,10 @@ export default function KitchenDisplay() {
     // PosOrders.jsx already uses to escape the shell for its own full-screen order-taking view.
     // Full-bleed (no maxWidth cap) so a wide kitchen monitor shows more of the board, not a
     // centered column with wasted space on either side.
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--theme-bg)', display: 'flex', flexDirection: 'column', padding: '20px 28px', overflowY: 'auto' }}>
+    // The top and bottom insets clear an installed iPhone's or iPad's status and home bars (env() is
+    // 0 in a browser tab, S797). While the arrival alert is up it covers the status bar itself and
+    // pads for it, and the header below already pads by its height, so the top inset is left out.
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--theme-bg)', display: 'flex', flexDirection: 'column', padding: `${alertOn ? '20px' : 'calc(20px + env(safe-area-inset-top, 0px))'} 28px calc(20px + env(safe-area-inset-bottom, 0px))`, overflowY: 'auto' }}>
       {/* ArrivalAlert is position: fixed at z-index 3000, so it paints OVER this 1000 layer rather
           than inside it — the board keeps its full height and nothing below shifts. The padding
           here is what stops the Exit button sitting underneath it. */}

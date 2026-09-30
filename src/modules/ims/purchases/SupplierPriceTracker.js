@@ -17,6 +17,7 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
+import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import { readItemRefCounts, priceImpactSentence, PRICE_CHANGE_KEEPS } from '../items/itemRefTables'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
@@ -316,7 +317,6 @@ export default function SupplierPriceTracker() {
     // none of the item's records is valued at this price.
     const pastRecords = priceImpactSentence(countErr ? {} : (refCounts[item.id] || {}), { complete: !countErr })
 
-    const per = item.uom ? ` per ${item.uom}` : ''
     askConfirm({
       title: `Change ${item.name}'s Item Master price?`,
       confirmLabel: 'Change the price',
@@ -324,7 +324,7 @@ export default function SupplierPriceTracker() {
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            Price{per} goes from <strong>NPR {oldRate > 0 ? oldRate.toFixed(4) : '—'}</strong> to <strong>NPR {newPerUomRate.toFixed(4)}</strong>.
+            Price goes from <strong>{unitRateText(oldRate, item.uom, { precise: true })}</strong> to <strong>{unitRateText(newPerUomRate, item.uom, { precise: true })}</strong>.
           </p>
           <p style={{ margin: '0 0 8px' }}>
             {affected === null
@@ -683,9 +683,9 @@ export default function SupplierPriceTracker() {
                 <th>Item</th>
                 <th>Category</th>
                 <th>UOM</th>
-                <th style={{ textAlign: 'right' }}><Tip text="Current rate per UOM in the Item Master — what recipe costing uses. The ⚠ mark means it differs from the last purchase by more than 5%." width={260}>Master Rate</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Current rate per UOM in the Item Master — what recipe costing uses. The ⚠ mark means it differs from the last purchase by more than 5%. Items counted in grams or ml show the price per KG / LTR first, then the stored per-GM / per-ML figure." width={260}>Master Rate</Tip></th>
                 <th style={{ textAlign: 'right' }} className="no-print"><Tip text={isPan ? 'Manually set a new master rate — the price you pay, VAT included (this outlet cannot claim VAT back). Updates the Item Master and affects all recipe costs immediately.' : 'Manually set a new master rate. Updates the Item Master and affects all recipe costs immediately.'} width={240}>{isPan ? 'Update Rate (price you pay, VAT included)' : 'Update Rate'}</Tip></th>
-                <th style={{ textAlign: 'right' }}><Tip text={selectedPeriod ? `Rate per UOM from the most recent purchase entry in ${periodLabel}.` : 'Rate per UOM from the most recent purchase entry across all periods.'}>Last Rate</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text={`${selectedPeriod ? `Rate per UOM from the most recent purchase entry in ${periodLabel}.` : 'Rate per UOM from the most recent purchase entry across all periods.'} Items counted in grams or ml show the price per KG / LTR first, then the stored per-GM / per-ML figure.`}>Last Rate</Tip></th>
                 <th>Last Period</th>
                 <th><Tip text="Price direction vs. previous purchase: ↑ Rising (red), ↓ Falling (green), → Stable.">Trend</Tip></th>
                 <th style={{ textAlign: 'right' }}><Tip text="% change from the second-to-last purchase to the most recent one. Red = price increase." width={240}>Change %</Tip></th>
@@ -737,7 +737,7 @@ export default function SupplierPriceTracker() {
                       <td style={{ textAlign: 'right' }}>
                         <span style={{ color: rateMismatch ? 'var(--theme-amber-text)' : 'var(--theme-text1)', fontWeight: 600 }}
                           title={rateMismatch ? 'Master rate differs from last purchase by >5%' : ''}>
-                          {masterRate > 0 ? masterRate.toFixed(4) : '—'}
+                          {unitRateCell(masterRate, item.uom, { precise: true })}
                         </span>
                         {rateMismatch && <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginLeft: 4 }}>⚠</span>}
                       </td>
@@ -775,7 +775,7 @@ export default function SupplierPriceTracker() {
                         )}
                       </td>
                       <td style={{ textAlign: 'right', color: trend === 'up' ? 'var(--theme-red-text)' : trend === 'down' ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>
-                        {lastEntry ? lastEntry.perUomRate.toFixed(4) : '—'}
+                        {lastEntry ? unitRateCell(lastEntry.perUomRate, item.uom, { precise: true }) : '—'}
                       </td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{lastEntry?.period_label || '—'}</td>
                       <td>{trendBadge(trend)}</td>
@@ -811,7 +811,8 @@ export default function SupplierPriceTracker() {
                           <td></td>
                           <td className="no-print"></td>
                           <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text2)' }}>
-                            {entry.perUomRate.toFixed(4)}
+                            {/* A free line (rate 0) is a real receipt and keeps its 0.0000 (S728). */}
+                            {entry.perUomRate > 0 ? unitRateCell(entry.perUomRate, item.uom, { precise: true }) : entry.perUomRate.toFixed(4)}
                           </td>
                           <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Qty: {entry.qty}</td>
                           <td></td>
