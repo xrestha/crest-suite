@@ -151,6 +151,21 @@ describe('wording', () => {
     expect(renderToStaticMarkup(<UncountedItemsBanner gap={{ uncountedCount: 0, uncounted: [] }} />)).toBe('')
   })
 
+  it('banner promises only the food cost % its page shows (S796)', () => {
+    const { renderToStaticMarkup } = require('react-dom/server')
+    const closed = renderToStaticMarkup(<UncountedItemsBanner gap={gap} scope="Bhadra 2083" />)
+    expect(closed).toContain('food cost % is shown without a verdict until the count is finished.')
+    // An open Monthly Summary prints no % until the close, so the banner must not promise one.
+    const open = renderToStaticMarkup(<UncountedItemsBanner gap={gap} scope="Bhadra 2083"
+      fcLine="food cost % is shown once the month is closed" />)
+    expect(open).toContain('Totals below still include them; food cost % is shown once the month is closed.')
+    expect(open).not.toContain('without a verdict')
+    // Stock Count prints no food cost % at all.
+    const none = renderToStaticMarkup(<UncountedItemsBanner gap={gap} scope="Bhadra 2083" fcLine={null} />)
+    expect(none).toContain('Totals below still include them.')
+    expect(none).not.toContain('food cost %')
+  })
+
   it('renders an unjudged FC% with no mark and no signal colour', () => {
     const f = unjudgedFcFigure(41.26)
     expect(f.text).toBe('41.3%')

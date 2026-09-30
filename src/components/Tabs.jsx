@@ -115,6 +115,13 @@ export function TabPanel({ idBase, active, className = '', style, children }) {
 export function FilterChips({ label, options, active, onChange, multi = false, className = '', style }) {
   const onKeyDown = e => { moveRovingFocus(e, 'button:not([disabled])') }
   const isOn = key => (multi ? (active || []).includes(key) : active === key)
+  // The row must always keep a Tab stop — exactly one when single-select (S796 review). With nothing on — `active` null,
+  // an empty multi selection, or a stored key whose chip has left the options (Recipes' Build-your-
+  // own under a band pill, an Items category whose last item moved) — every chip used to get -1
+  // and Tab skipped the whole row. The first ENABLED chip takes the stop then; a disabled one
+  // cannot hold focus.
+  const anyOn = options.some(o => !o.disabled && isOn(o.key))
+  const firstEnabled = options.find(o => !o.disabled)
 
   return (
     <div
@@ -133,7 +140,7 @@ export function FilterChips({ label, options, active, onChange, multi = false, c
             aria-pressed={on}
             disabled={o.disabled}
             title={o.title}
-            tabIndex={rovingTabIndex(on || (!multi && active == null && o === options[0]))}
+            tabIndex={rovingTabIndex(on || (!anyOn && o === firstEnabled))}
             className={`tab-btn${on ? ' tab-btn--active' : ''}${o.className ? ` ${o.className}` : ''}`}
             onClick={() => onChange(o.key)}
           >{o.label}</button>

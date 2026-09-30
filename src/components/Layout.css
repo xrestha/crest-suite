@@ -1983,6 +1983,14 @@ tr.interactive-row:focus-visible {
     display: inline-flex;
     align-items: center;
   }
+  /* The second non-inline case (S796 review): a phone card's name is the only way into a dish on a
+     phone, where the table is hidden, and at 15px with no padding it stood ~18px tall. min-height
+     alone: as a flex item of `.phone-card__top` the button is already blockified and a button
+     centres its own label, so `inline-flex` is not needed and would change how a long name wraps.
+     Scoped to `.btn-linklike` so PurchaseBillCards' plain-span title is untouched. */
+  .phone-card__title.btn-linklike {
+    min-height: 44px;
+  }
   /* The shell was left out of the original sweep, so on a tablet the entire navigation — the one
      thing every route depends on — stayed at desktop density: nav links 37px, module tabs 35px,
      the calculator trigger 27x25. These are the controls a finger reaches for first. */
@@ -2176,9 +2184,13 @@ tr.interactive-row:focus-visible {
 .phone-card__lines { margin-top: 8px; font-size: 13px; color: var(--theme-text2); }
 .phone-card__lines summary { cursor: pointer; color: var(--theme-text1); min-height: 32px; display: flex; align-items: center; list-style: none; }
 .phone-card__lines summary::-webkit-details-marker { display: none; }
-/* `display: flex` drops the native disclosure triangle, so the mark is drawn: ▸ closed, ▾ open. */
-.phone-card__lines summary::before { content: '▸'; width: 16px; color: var(--theme-text2); }
-.phone-card__lines[open] summary::before { content: '▾'; }
+/* `display: flex` drops the native disclosure triangle, so the mark is drawn: ▸ closed, ▾ open.
+   Generated content joins the summary's accessible name, so the glyph takes empty alt text (the
+   `/ ''` form) and a screen reader hears only "Show the 3 items" plus the state the summary
+   already reports. The plain `content` line before it is the fallback for engines without the
+   alt syntax, which drop the second declaration. */
+.phone-card__lines summary::before { content: '▸'; content: '▸' / ''; width: 16px; color: var(--theme-text2); }
+.phone-card__lines[open] summary::before { content: '▾'; content: '▾' / ''; }
 .phone-card__lines ul { list-style: none; margin: 4px 0 0; padding: 0; }
 .phone-card__lines li {
   display: flex; justify-content: space-between; gap: 12px;

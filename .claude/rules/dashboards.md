@@ -101,7 +101,7 @@ History: docs/rules-archive/dashboards.md#s569-critique-and-accessibility
 - Don't gate a card on module count when a single-module client has the data (the pie once rendered only at 2+ modules).
 - `useFoodBeverageSplit.js` (the hook, still in `src/modules/dashboard/`) returns `{ buckets, loading, error }` from its own effect and its own `loadIdRef`, independent of `loadStats`' cycle. ClientDashboard derives `salesMixBuckets` / `salesMixCategories` from it and owns the category fallback colours.
 - Sales Mix carries no tier gate, only data-source gates (`salesMixIncludeManual` / `salesMixIncludePos`).
-- When deleting a file that other comments cite as a convention, repoint them: `PeriodComparison.js` cites "the Dashboard's Sales Mix", and `OwnerDashboard.jsx`'s colour comment cites ClientDashboard's `COST_BREAKDOWN_COLORS`.
+- When deleting a file that other comments cite as a convention, repoint them: `PeriodComparison.js` cites "the Dashboard's Sales Mix", and `OwnerDashboard.jsx`'s `TREND_COLORS` imports `COST_BREAKDOWN_COLORS` from `src/shared/chartColors.js` (S796), so it no longer needs repointing when ClientDashboard changes.
 
 Why: the pie competed for row width the pivots needed, and was hidden from single-module clients who had the data.
 

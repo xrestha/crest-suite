@@ -560,9 +560,10 @@ export default function SupplierPriceTracker() {
 
       {saveError && <ActionError error={saveError} className="no-print" />}
 
-      {/* Recipe impact banner */}
+      {/* Recipe impact banner. The product's amber banner shape (S796): its lines are ⚠ warnings,
+          and an accent-tinted box around amber text was two signals on one message. */}
       {affectedRecipes && (
-        <div className="card no-print" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-accent) 40%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
+        <div className="card no-print" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
             <div>
               {/* `recipes: null` is "the rate saved but we could not read which recipes use this

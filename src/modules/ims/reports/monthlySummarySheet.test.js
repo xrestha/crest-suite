@@ -1,7 +1,7 @@
 // Monthly Summary's Excel export (S792, FIGURES-10): the sheet says what the page says, in the page's
 // order, and its TOTAL row adds up. Every expected figure is worked by hand from the fixture.
 import {
-  buildMonthlySummaryWorkbook, cogsShareLine, foodCostSentence, foodCostVerdict,
+  buildMonthlySummaryWorkbook, cogsShareLine, foodCostSentence, foodCostVerdict, openFcText, openMonthLine,
   uncountedNamed, verdictWithheld,
 } from './monthlySummarySheet'
 
@@ -53,7 +53,7 @@ describe('the Food Cost % verdict and the COGS line', () => {
   })
 
   it('says why a withheld verdict is withheld, and what to do with no sales', () => {
-    expect(foodCostSentence(foodCostVerdict(41, settings, { withhold: true }), 'open')).toBe('Shown once the month is closed with a stock count')
+    expect(foodCostSentence(foodCostVerdict(41, settings, { withhold: true }), 'open')).toBe('Stock used ÷ sales, shown once the month is closed')
     expect(foodCostSentence(foodCostVerdict(41, settings, { withhold: true }), 'closed')).toBe('Not judged: count incomplete')
     // No sales stays "none" even when withheld — there is no figure to withhold a verdict on.
     expect(foodCostVerdict(null, settings, { withhold: true }).key).toBe('none')
@@ -64,6 +64,44 @@ describe('the Food Cost % verdict and the COGS line', () => {
     expect(cogsShareLine(32.14, false)).toBe('32.1% of revenue')
     expect(cogsShareLine(32.14, true)).toBe('32.1% of revenue · not judged')
     expect(cogsShareLine(null, false)).toBe('No sales data')
+  })
+
+  it('on an open month prints no share, and says what it waits for as the count moves', () => {
+    expect(cogsShareLine(32.14, true, true, { presentCount: 15, uncountedCount: 15 })).toBe('Provisional until the closing count')
+    expect(cogsShareLine(32.14, true, true, { presentCount: 15, uncountedCount: 2 })).toBe('Provisional until the count is finished')
+    expect(cogsShareLine(32.14, true, true, { presentCount: 15, uncountedCount: 0 })).toBe('Provisional until the month is closed')
+  })
+})
+
+describe('openFcText: what the Food Cost % box waits for on an open month', () => {
+  it('asks for the closing count while any item still lacks one', () => {
+    expect(openFcText({ presentCount: 15, uncountedCount: 15 })).toBe('Needs closing count')
+    expect(openFcText({ presentCount: 15, uncountedCount: 2 })).toBe('Needs closing count')
+  })
+
+  it('waits for the close once the count is in, rather than asking for a count that exists', () => {
+    expect(openFcText({ presentCount: 15, uncountedCount: 0 })).toBe('Shown when the month closes')
+  })
+})
+
+describe('openMonthLine: the open month\'s provisional reason follows the count', () => {
+  it('says every shelf counts as used only while nothing is counted', () => {
+    expect(openMonthLine({ presentCount: 15, uncountedCount: 15 }))
+      .toBe('closing stock is counted at month end, so COGS counts every shelf as used and food cost % is shown once the month is closed')
+  })
+
+  it('names the part still missing once counting has begun', () => {
+    expect(openMonthLine({ presentCount: 15, uncountedCount: 2 }))
+      .toBe('2 of 15 items are not counted yet (named below), so COGS counts their stock as used and food cost % is shown once the month is closed')
+    expect(openMonthLine({ presentCount: 15, uncountedCount: 1 })).toMatch(/^1 of 15 items is not counted yet \(named below\), so COGS counts its stock/)
+  })
+
+  it('claims nothing is used up once every item is counted, and still waits for the close', () => {
+    const line = openMonthLine({ presentCount: 15, uncountedCount: 0 })
+    expect(line).toBe('closing stock is counted, but the figures can still change until the month is closed, and food cost % is shown once it is')
+    expect(line).not.toMatch(/every shelf/)
+    // Nothing had stock to count: no claim that a count was made.
+    expect(openMonthLine({ presentCount: 0, uncountedCount: 0 })).toBe('the figures can still change until the month is closed, and food cost % is shown once it is')
   })
 })
 
@@ -121,12 +159,14 @@ describe('buildMonthlySummaryWorkbook', () => {
   it('marks an open month provisional everywhere it goes, with the running-month label', () => {
     const open = buildMonthlySummaryWorkbook({ ...report, gap: { ...gap, uncountedCount: 15 } },
       { periodLabel: 'Ashwin 2082', periodStatus: 'open', settings })
-    expect(open.scopeLine).toMatch(/^Period : Ashwin 2082 — PROVISIONAL: month still open/)
+    expect(open.scopeLine).toMatch(/^Period : Ashwin 2082 — PROVISIONAL: month still open; closing stock is counted at month end, so COGS counts every shelf as used/)
+    // S796 prints no Food Cost % on an open month, so the scope line must not describe one.
+    expect(open.scopeLine).not.toMatch(/reads high/)
     expect(open.filename).toBe('Monthly-Summary-Ashwin-2082-provisional.xlsx')
     const by = Object.fromEntries(open.summaryRows.map(r => [r.Figure, r]))
     // S796: an open month has no Food Cost %, so the sheet writes none — and not its twin under COGS.
     expect(by['Food Cost %']['%']).toBe('')
-    expect(by['Food Cost %'].Note).toBe('Needs closing count — Shown once the month is closed with a stock count')
+    expect(by['Food Cost %'].Note).toBe('Needs closing count — Stock used ÷ sales, shown once the month is closed')
     expect(by['COGS'].Note).toBe('Provisional until the closing count')
     // Every item still uncounted: the zero stays for the arithmetic, the note says it is no count.
     expect(by['Closing Stock'].Note).toBe('Not counted yet')
@@ -135,6 +175,23 @@ describe('buildMonthlySummaryWorkbook', () => {
     // Nothing counted yet on an open month: the items are not named, as on screen.
     expect(open.notes.some(n => /no closing count/.test(n))).toBe(false)
     expect(open.categoryRows[0]['Not counted']).toBe('')
+  })
+
+  it('on an open month says what the count has reached, the way the page banner does', () => {
+    const args = { periodLabel: 'Ashwin 2082', periodStatus: 'open', settings }
+    // Part counted: the missing part is on the scope line and named in the note directly under it.
+    const part = buildMonthlySummaryWorkbook(report, args)
+    expect(part.scopeLine).toMatch(/— PROVISIONAL: month still open; 2 of 15 items are not counted yet \(named below\)/)
+    expect(part.notes[0]).toMatch(/Not counted: Paneer, Cream\./)
+    expect(Object.fromEntries(part.summaryRows.map(r => [r.Figure, r]))['COGS'].Note).toBe('Provisional until the count is finished')
+    // All counted, month not yet closed: no "every shelf as used", and no "not counted" anywhere.
+    const counted = buildMonthlySummaryWorkbook({ ...report, gap: { ...gap, uncountedCount: 0, uncounted: [] } }, args)
+    expect(counted.scopeLine).toMatch(/— PROVISIONAL: month still open; closing stock is counted, but the figures can still change until the month is closed/)
+    expect(counted.scopeLine).not.toMatch(/every shelf|not counted/)
+    const by = Object.fromEntries(counted.summaryRows.map(r => [r.Figure, r]))
+    expect(by['COGS'].Note).toBe('Provisional until the month is closed')
+    expect(by['Closing Stock'].Note).toBe('')
+    expect(by['Food Cost %']['%']).toBe('')
   })
 
   it('leaves an unknown ratio blank rather than writing 0', () => {

@@ -371,7 +371,9 @@ export default function BestSellers() {
           <div className="pair-grid">
             {/* Best sellers */}
             <div className="card">
-              <h2 style={{ margin: '0 0 14px', fontSize: 14, color: GREEN }}>▲ Top 10 Performers</h2>
+              {/* Ink, not green/red (S796): a rank is not a verdict — the ▲/▼ carry the direction,
+                  and the margin cells below carry the only judgement on this table. */}
+              <h2 style={{ margin: '0 0 14px', fontSize: 14, color: INK }}>▲ Top 10 Performers</h2>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -403,7 +405,7 @@ export default function BestSellers() {
 
             {/* Worst sellers */}
             <div className="card">
-              <h2 style={{ margin: '0 0 14px', fontSize: 14, color: RED }}>▼ Bottom 10 Performers</h2>
+              <h2 style={{ margin: '0 0 14px', fontSize: 14, color: INK }}>▼ Bottom 10 Performers</h2>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -460,9 +462,9 @@ export default function BestSellers() {
           <div className="card" style={{ marginTop: 20, display: 'flex', gap: 32, flexWrap: 'wrap' }}>
             {[
               { label: 'Total Revenue',  tip: 'Every dish sold this period, valued at the price actually charged, less discounts.',
-                val: fmt(totalRevenueAll), color: GREEN },
+                val: fmt(totalRevenueAll), color: INK },
               { label: 'Total COGS',     tip: 'Ingredient cost of the dishes that have one, including the stock of extras guests added. Dishes with no cost, and build-your-own dishes, are left out of this and of the two figures beside it.',
-                val: fmt(costedCogs), color: RED },
+                val: fmt(costedCogs), color: INK },
               { label: 'Gross Profit',   tip: 'Revenue − COGS across the costed dishes only.',
                 val: fmt(costedProfit), color: INK },
               { label: 'Overall Margin', tip: 'Gross Profit ÷ Revenue across the costed dishes — weighted by revenue, so a high-volume dish moves it more than a rarely-ordered one. The chart footer shows the unweighted average instead, and the two will not match.',

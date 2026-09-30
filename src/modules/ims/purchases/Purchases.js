@@ -908,7 +908,8 @@ export default function Purchases() {
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13, verticalAlign: 'middle' }}>
                                 {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {/* VAT is a figure, not a verdict (S796): the same quiet sub-line as −Disc below it. */}
+                                {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                                 {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                                 {invoiceFlag}
                               </td>
@@ -942,7 +943,7 @@ export default function Purchases() {
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13, verticalAlign: 'middle' }}>
                               {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               {invoiceFlag}
                             </td>

@@ -6,6 +6,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
+import { COST_BREAKDOWN_COLORS } from '../../shared/chartColors'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
@@ -38,19 +39,20 @@ import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote } from '../..
 // and Labor Cost drew as one indistinguishable line, with matching legend swatches above them.
 // That is the whole proposition of this chart: seeing which of the two is the one climbing.
 //
-// Values are the set already brute-forced against the CVD and normal-vision floors for
-// ClientDashboard's COST_BREAKDOWN_COLORS (worst pair ΔE 16.8 normal / 8.6 deutan), reused here
-// so Food Cost keeps one identity across every surface that draws it. Duplicated locally rather
-// than shared, since that constant lives in a page file, not a shared module.
+// Food Cost, Labor and Net Margin take their slots from COST_BREAKDOWN_COLORS in
+// shared/chartColors.js (the set brute-forced against the CVD and normal-vision floors), so each
+// keeps the colour the Dashboard's Revenue vs Cost pie gives it. Imported, not copied: the map
+// moved to a shared module in S796, and a hand copy is how two surfaces drift apart.
 //
-// Prime Cost additionally carries a dash: it is the SUM of the two lines above it, not a fifth
-// peer measure, and it previously took red — which on the KPI cards directly above means "over
-// threshold", so the Prime line read as permanently alarming whatever its value.
+// Prime Cost stays a local literal and additionally carries a dash: it is the SUM of the two lines
+// above it, not a fifth peer measure, and it previously took red — which on the KPI cards directly
+// above means "over threshold", so the Prime line read as permanently alarming whatever its value.
+// Its violet happens to equal the Overheads slot, but Prime Cost is not Overheads, so it is not tied.
 const TREND_COLORS = {
-  fc:     '#c9a84c', // gold — same as the Food Cost slice and the FC% trend line (see below)
-  labor:  '#60a5fa', // blue — same as the Labor slice
-  prime:  '#8b5cf6', // violet, dashed (a derived total, not a peer)
-  margin: '#34d399', // green — profit reads as good
+  fc:     COST_BREAKDOWN_COLORS['Food Cost'],  // gold — the Food Cost slice
+  labor:  COST_BREAKDOWN_COLORS['Labor'],      // blue — the Labor slice
+  prime:  '#8b5cf6',                           // violet, dashed (a derived total, not a peer)
+  margin: COST_BREAKDOWN_COLORS['Net Margin'], // green — profit reads as good
 }
 
 // Owner Dashboard — Phase 1 (Crest IMS + Crest HR only; POS revenue integration is Phase 2).

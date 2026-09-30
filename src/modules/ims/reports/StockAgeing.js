@@ -409,13 +409,8 @@ export default function StockAgeing() {
   )
 
   const note = (
-    <div style={{
-      background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)',
-      border: '1px solid color-mix(in srgb, var(--theme-accent) 22%, transparent)',
-      borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
-      fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6,
-    }}>
-      <strong style={{ color: 'var(--theme-text1)' }}>How to read this:</strong> {BASIS}{' '}
+    <div className="note-banner">
+      <strong>How to read this:</strong> {BASIS}{' '}
       Each purchase is a batch. Everything sold, wasted or served as staff meals is taken off the <em>oldest</em> batches
       first, and at every closed month with a stock count the item is set to what was counted — if the count is lower,
       the missing stock comes off the oldest batches; if it is higher, the extra is added as stock of unknown age.

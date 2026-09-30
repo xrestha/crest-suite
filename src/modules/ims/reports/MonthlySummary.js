@@ -19,7 +19,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
-import { buildMonthlySummaryWorkbook, closingUncounted, cogsShareLine, foodCostSentence, foodCostVerdict, OPEN_FC_TEXT, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
+import { buildMonthlySummaryWorkbook, closingUncounted, cogsShareLine, foodCostSentence, foodCostVerdict, openFcText, openMonthLine, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -211,10 +211,12 @@ export default function MonthlySummary() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const clientName = profile?.clients?.name || 'Property'
   // Two reasons the FC% verdict is withheld, and either is enough (S756):
-  //  - D7: the month is still OPEN. Closing stock is counted at month end, so until then COGS counts
-  //    every shelf as used and food cost reads high — a red ▲ there is an artefact of the calendar.
+  //  - D7: the month is still OPEN. Before the month-end count COGS counts every shelf as used, so a
+  //    verdict there would be an artefact of the calendar, and the figures can move until the close.
   //  - D6: the month is closed but a MATERIAL share of its stock was never counted (uncountedItems.js).
-  // The figure still prints; only the colour, the mark and the sentence that judges it go.
+  // On D6 the figure still prints; only the colour, the mark and the sentence that judges it go. On
+  // D7 no Food Cost % prints at all (S796): the box says openFcText(gap), and the COGS tile's share of
+  // revenue is withheld with it.
   // Both rules live in monthlySummarySheet.js (verdictWithheld, uncountedNamed), so the Excel export
   // withholds and names exactly what this page does.
   const isOpenPeriod = selectedPeriod?.status === 'open'
@@ -287,16 +289,20 @@ export default function MonthlySummary() {
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No data for this period yet.</p></div>
       ) : (
         <>
-          {/* D7 (S756): the open month is the page's default, so the caveat is the first thing on it. */}
+          {/* D7 (S756): the open month is the page's default, so the caveat is the first thing on it.
+              Its reason follows the count (openMonthLine, shared with the sheet's scope line): the
+              month-end count is routinely entered before the close, and "COGS counts every shelf
+              as used" over a counted Closing Stock tile contradicted the tile. */}
           {isOpenPeriod && (
             <div role="status" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
-              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — closing stock is counted at month end, so COGS counts every shelf as used and food cost % is shown once the month is closed.
+              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — {openMonthLine(report.gap)}.
             </div>
           )}
           {/* D6 (S756): named on a closed month always; on an open month only once counting has begun,
               since before that every item is uncounted and the line above already says so. */}
           {gapNamed && (
-            <UncountedItemsBanner gap={report.gap} scope={periodLabel} />
+            <UncountedItemsBanner gap={report.gap} scope={periodLabel}
+              fcLine={isOpenPeriod ? 'food cost % is shown once the month is closed' : undefined} />
           )}
           {/* KPI row */}
           <div className="stat-grid stat-grid--pair">
@@ -321,7 +327,7 @@ export default function MonthlySummary() {
                 : { label: 'Closing Stock', value: fmt(report.totalClosing), color: 'var(--theme-text1)',
                     sub: gapNamed && report.gap?.uncountedCount > 0 ? `${report.gap.uncountedCount} item${report.gap.uncountedCount === 1 ? '' : 's'} not counted` : undefined },
               { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-text1)',
-                sub: cogsShareLine(report.fcPct, withholdVerdict, isOpenPeriod),
+                sub: cogsShareLine(report.fcPct, withholdVerdict, isOpenPeriod, report.gap),
                 tip: `Cost of Goods Used: ${COGS_FORMULA}. The actual ingredient cost consumed.` }
             ].map(s => (
               <div key={s.label} className="stat-card">
@@ -377,8 +383,8 @@ export default function MonthlySummary() {
                   it needs instead, the way Variance says "Not measurable yet". */}
               {isOpenPeriod && report.fcPct != null ? (
                 <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.5, color: 'var(--theme-text2)' }}
-                  title="Food cost % is the stock USED ÷ sales, and what was used is only known once the closing stock is counted at month end. Spend % so far, beside this, is what you have bought ÷ sales.">
-                  {OPEN_FC_TEXT}
+                  title="Food cost % is the stock USED ÷ sales. What was used is final only once the closing stock is counted and the month is closed. Spend % so far, beside this, is what you have bought ÷ sales.">
+                  {openFcText(report.gap)}
                 </div>
               ) : (() => { const f = withholdVerdict ? unjudgedFcFigure(report.fcPct, { reason: 'Not judged: count incomplete' }) : fcFigure(report.fcPct, settings); return (
                 <div style={{ fontSize: 24, fontWeight: 800, ...f.style }} title={f.title}>{f.text}</div>

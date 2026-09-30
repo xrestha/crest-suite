@@ -280,8 +280,9 @@ export default function BudgetVsActual() {
                             onBlur={() => saveBudget(cat.id)}
                             placeholder="Set budget…"
                             style={{
-                              background: 'var(--theme-bg)', border: '1px solid',
-                              borderColor: budget > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)',
+                              // No accent border once a budget is typed (S796): it read as the
+                              // invalid state, and a filled box is not a warning.
+                              background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                               borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13,
                               color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right',
                             }}

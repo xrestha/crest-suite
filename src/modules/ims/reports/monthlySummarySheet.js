@@ -9,17 +9,19 @@
 //
 // It carries what the page shows, in the page's order and under the page's labels: the headline
 // figures (the KPI row, then the food-cost box) on a Summary sheet, then the Category Breakdown
-// table with its TOTAL row. The verdict under Food Cost %, the "% of revenue" line under COGS and
-// the rule for when the uncounted items are named are exported from this file and read by the page
-// too, so a mailed workbook cannot say something the screen did not.
+// table with its TOTAL row. The verdict under Food Cost %, the "% of revenue" line under COGS, the
+// open month's provisional line and the rule for when the uncounted items are named are exported
+// from this file and read by the page too, so a mailed workbook cannot say something the screen did not.
 import { COGS_FORMULA, fcBand } from '../../../shared/imsFormulas'
 import { gapNote } from '../../../shared/uncountedItems'
 import { SPEND_LABEL, SPEND_SO_FAR_LABEL } from './foodCostBasis'
 
 /**
- * Whether the FC% verdict is withheld (S756): D7, the month is still OPEN (closing stock is counted
- * at month end, so COGS counts every shelf as used), or D6, a MATERIAL share of its stock was never
- * counted. Either is enough. The figure still prints; only the colour, the mark and the sentence go.
+ * Whether the FC% verdict is withheld (S756): D7, the month is still OPEN (its figures can move until
+ * it closes, and before the month-end count COGS counts every shelf as used), or D6, a MATERIAL share
+ * of its stock was never counted. Either is enough. On D6 the figure still prints; only the colour,
+ * the mark and the sentence go. On D7 no Food Cost % prints at all (S796): openFcText(gap) stands in its
+ * place, and the COGS line's share of revenue is withheld with it (cogsShareLine).
  */
 export function verdictWithheld(periodStatus, gap) {
   return periodStatus === 'open' || !!gap?.material
@@ -55,16 +57,41 @@ export function closingUncounted(gap) {
 }
 
 /**
+ * Why an OPEN month's figures are provisional: the page's "△ Provisional" banner and the sheet's
+ * scope line. It follows the count, off the same gap the Closing Stock tile reads, because the
+ * month-end count is routinely entered before the month is closed and a sentence saying "COGS counts
+ * every shelf as used" beside a counted Closing Stock contradicts the tile under it:
+ *  - nothing counted yet: COGS counts every shelf as used;
+ *  - part counted: only the items still to count do (UncountedItemsBanner, or the sheet's first
+ *    note, names them just below this line);
+ *  - all counted: nothing is missing, but the figures can still change until the month is closed.
+ * Each ends on the same promise: food cost % is shown once the month is closed.
+ */
+export function openMonthLine(gap) {
+  if (closingUncounted(gap)) {
+    return 'closing stock is counted at month end, so COGS counts every shelf as used and food cost % is shown once the month is closed'
+  }
+  if (gap?.uncountedCount > 0) {
+    const n = gap.uncountedCount
+    return `${n} of ${gap.presentCount} items ${n === 1 ? 'is' : 'are'} not counted yet (named below), so COGS counts ${n === 1 ? 'its' : 'their'} stock as used and food cost % is shown once the month is closed`
+  }
+  return `${gap?.presentCount > 0 ? 'closing stock is counted, but ' : ''}the figures can still change until the month is closed, and food cost % is shown once it is`
+}
+
+/**
  * An open month has no Food Cost % (S792, D30: it is COGS ÷ sales, and COGS needs the month-end
  * count). S756 printed it anyway, neutral, and mid-month that meant "215.3%" as the largest figure
- * on the page (S796 critique). The page and the sheet now say what it needs instead of a number.
+ * on the page (S796 critique). The page and the sheet now say what it waits for instead of a number:
+ * the closing count while any item still lacks one, the month's close once the count is in.
  */
-export const OPEN_FC_TEXT = 'Needs closing count'
+export function openFcText(gap) {
+  return closingUncounted(gap) || gap?.uncountedCount > 0 ? 'Needs closing count' : 'Shown when the month closes'
+}
 
 /** The sentence under Food Cost %, on the page and in the sheet's Note column. */
 export function foodCostSentence(verdict, periodStatus) {
   if (verdict.key === 'none') return 'Add sales entries to calculate'
-  if (verdict.key === 'unjudged') return periodStatus === 'open' ? 'Shown once the month is closed with a stock count' : 'Not judged: count incomplete'
+  if (verdict.key === 'unjudged') return periodStatus === 'open' ? 'Stock used ÷ sales, shown once the month is closed' : 'Not judged: count incomplete'
   if (verdict.key === 'good') return `✓ Within your target (≤${verdict.warn}%)`
   if (verdict.key === 'watch') return `△ Above target — review purchases (${verdict.warn}–${verdict.critical}%)`
   return `▲ Critical — immediate review needed (>${verdict.critical}%)`
@@ -72,10 +99,14 @@ export function foodCostSentence(verdict, periodStatus) {
 
 /**
  * The line under the COGS tile: its share of revenue, or why there is none. On an OPEN month that
- * share IS the food cost % the box beside it declines to print, so it is not printed here either.
+ * share IS the food cost % the box beside it declines to print, so it is not printed here either;
+ * the line says what it waits for, in the same three states as openMonthLine.
  */
-export function cogsShareLine(fcPct, withhold, open = false) {
-  if (open) return 'Provisional until the closing count'
+export function cogsShareLine(fcPct, withhold, open = false, gap = null) {
+  if (open) {
+    if (closingUncounted(gap)) return 'Provisional until the closing count'
+    return gap?.uncountedCount > 0 ? 'Provisional until the count is finished' : 'Provisional until the month is closed'
+  }
   return fcPct != null ? `${fcPct.toFixed(1)}% of revenue${withhold ? ' · not judged' : ''}` : 'No sales data'
 }
 
@@ -102,9 +133,10 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
   const verdict = foodCostVerdict(report.fcPct, settings, { withhold })
 
   // The provisional marker rides on the scope line, the one line sheetWithLetterhead requires, so it
-  // cannot be dropped from the sheet without dropping the period with it.
+  // cannot be dropped from the sheet without dropping the period with it. Its reason is the page
+  // banner's own sentence (openMonthLine), so it follows the count the same way.
   const scopeLine = `Period : ${periodLabel}${open
-    ? ' — PROVISIONAL: month still open, closing stock not counted yet, so food cost reads high until the month is closed'
+    ? ` — PROVISIONAL: month still open; ${openMonthLine(report.gap)}`
     : ' (closed)'} · all categories, sub-recipes (prep items) excluded`
 
   const notes = [
@@ -130,9 +162,9 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
     // The zero stays when nothing is counted — COGS is rebuilt from this column — and the note says
     // it is not a count.
     row('Closing Stock',     money(report.totalClosing),     '', closingUncounted(report.gap) ? 'Not counted yet' : ''),
-    row('COGS',              money(report.totalCOGS),        '', cogsShareLine(report.fcPct, withhold, open)),
+    row('COGS',              money(report.totalCOGS),        '', cogsShareLine(report.fcPct, withhold, open, report.gap)),
     row('Net Sales Revenue', money(report.totalRevenue),     '', 'From sales entries (excl. VAT)'),
-    row('Food Cost %',       '', open ? '' : pct1(report.fcPct), open ? `${OPEN_FC_TEXT} — ${foodCostSentence(verdict, periodStatus)}` : foodCostSentence(verdict, periodStatus)),
+    row('Food Cost %',       '', open ? '' : pct1(report.fcPct), open ? `${openFcText(report.gap)} — ${foodCostSentence(verdict, periodStatus)}` : foodCostSentence(verdict, periodStatus)),
     row(open ? SPEND_SO_FAR_LABEL : SPEND_LABEL, '', pct1(report.purchaseFcPct), 'Net purchases ÷ revenue'),
   ]
 

@@ -533,9 +533,12 @@ export default function PeriodComparison() {
           <div className="stat-value" style={{ fontSize: 14 }}>
             {bestFcPeriod ? periodLabel(bestFcPeriod) : '—'}
           </div>
+          {/* Banded like Latest FC%, not green because it is the lowest (S796): "best" is a
+              superlative, not a verdict, and the best month in range can still be over the
+              client's warning level. bestFcPeriod skips unjudged periods, so this is the band. */}
           {bestFcPeriod && stats[bestFcPeriod.id]?.fcPct != null && (
-            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-green-text)' }}>
-              {stats[bestFcPeriod.id].fcPct.toFixed(1)}%
+            <div className="stat-label" style={{ marginTop: 4, color: fcCell(stats[bestFcPeriod.id]).color }} title={fcCell(stats[bestFcPeriod.id]).title}>
+              {fcCell(stats[bestFcPeriod.id]).text}
             </div>
           )}
         </div>
@@ -552,7 +555,7 @@ export default function PeriodComparison() {
             {highestRevenuePeriod ? periodLabel(highestRevenuePeriod) : '—'}
           </div>
           {highestRevenuePeriod && (
-            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-green-text)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-text1)' }}>
               {fmt(stats[highestRevenuePeriod.id]?.revenue)}
             </div>
           )}

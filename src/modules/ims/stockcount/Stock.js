@@ -82,6 +82,12 @@ const sameStored = (fieldKey, a, b) => (isNoRow(fieldKey, a) && isNoRow(fieldKey
 // until it is named here — which is the direction that fails safe.
 const FIELD_TAB = { opening: 'opening', closing: 'closing', wastage: 'wastage', staff_meal: 'staff_meal' }
 const fieldKeyOf = tab => FIELD_TAB[tab] || null
+// The tab a month opens on when nobody has picked one (S796): Closing once the month has any
+// opening figure, Opening while it has none. Asked of the figures as LOADED, never of what is on
+// screen — derived live, the first digit typed on Opening flipped the page to Closing, and the
+// next Enter saved that box as a closing count.
+const defaultTabOf = data =>
+  Object.values(data || {}).some(r => r && r.opening !== '' && r.opening != null) ? 'closing' : 'opening'
 
 // The Summary's Hidden badge (S792, D29) — worded like Stock Report's, the other page that keeps them.
 const HIDDEN_ITEM_TIP = 'Hidden in Item Master. Shown because it had stock or movement this month, so the month’s figures still include it — hiding an item never changes a past month. It is not on the entry tabs, because a hidden item is no longer counted; show it again in Item Master to count it.'
@@ -211,12 +217,11 @@ export default function Stock() {
   // while the month has none, Closing Stock once it does. Opening is normally carried in when the
   // last month closes, so opening on it mid-month put a live entry grid over the month's starting
   // figures in front of someone who came to count. A brand-new client still lands on Opening,
-  // which is where the setup guide's first count sends them.
+  // which is where the setup guide's first count sends them. `defaultTab` is set where a month's
+  // figures load (defaultTabOf), so typing, Clear All or a pull never moves the page.
   const [tabChoice, setActiveTab] = useState(null)
-  const hasOpeningCount = useMemo(
-    () => Object.values(stockData).some(r => r && r.opening !== '' && r.opening != null),
-    [stockData])
-  const wantedTab = tabChoice ?? (hasOpeningCount ? 'closing' : 'opening')
+  const [defaultTab, setDefaultTab] = useState('opening')
+  const wantedTab = tabChoice ?? defaultTab
   const activeTab = TABS.some(t => t.id === wantedTab) ? wantedTab : TABS[0].id
   const [filterCat, setFilterCat] = useState('all')
   const [search, setSearch] = useState('')
@@ -382,6 +387,7 @@ export default function Stock() {
               }
             })
             setStockData(sd)
+            setDefaultTab(defaultTabOf(sd))
             // Queued figures count as recorded: the queue is what will write them.
             resetStored(open.id, sd)
             restoreSummaryPopulation(cached)
@@ -561,6 +567,7 @@ export default function Stock() {
     Object.keys(staffMealMap).forEach(id => { cellOf(id).staff_meal = staffMealMap[id] })
 
     setStockData(data)
+    setDefaultTab(defaultTabOf(data))
     resetStored(periodId, data)
 
     const purchMap = {}
@@ -623,6 +630,7 @@ export default function Stock() {
       setCountedBy({})   // not cached; an empty line is better than the previous month's names
       if (cached) {
         setStockData(cached.stockData    || {})
+        setDefaultTab(defaultTabOf(cached.stockData))
         resetStored(periodId, cached.stockData)
         restoreSummaryPopulation(cached)
         setPurchases(cached.purchases    || {})
@@ -636,7 +644,7 @@ export default function Stock() {
         // month's period id.
         const blank = {}
         items.forEach(item => { blank[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
-        setStockData(blank); setPurchases({}); setReturns({}); setRequisitioned({})
+        setStockData(blank); setDefaultTab('opening'); setPurchases({}); setReturns({}); setRequisitioned({})
         setPurchaseValues({}); setReturnValues({})
         setDailyWastage({}); setDailyRows([])
         restoreSummaryPopulation(null)
@@ -1988,7 +1996,7 @@ export default function Stock() {
                 <>
                 {/* D6 (S756): named here, above the Totals a month is closed on. Totals are unchanged —
                     the uncounted items are still in them, counted as fully used. */}
-                <UncountedItemsBanner gap={gap} scope={periodLabel}>
+                <UncountedItemsBanner gap={gap} scope={periodLabel} fcLine={null}>
                   They are marked in the item table below and in the Excel export.
                 </UncountedItemsBanner>
                 <div className="card" style={{ marginBottom: 24 }}>
@@ -2443,7 +2451,7 @@ export default function Stock() {
             <div className="note-banner">
               {/* Each box saves when it is left (onCommit → saveRow), so "then click Save All" taught a
                   step that does not exist and made the ✓ Saved beside each box look doubtful (S796). */}
-              {TABS.find(t => t.id === activeTab)?.desc} — enter quantities in the item's UOM. Each box saves when you leave it; Enter or ↓ moves to the next one. Save All re-sends any box that did not save.
+              {TABS.find(t => t.id === activeTab)?.desc} — enter quantities in the item's UOM. Each box saves when you leave it; Enter or ↓ moves to the next one. Save All sends again any box the server did not accept.
             </div>
 
             {isMobile ? (
@@ -2499,7 +2507,7 @@ export default function Stock() {
                       <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
                     )}
                   </div>
-                  <Tip width={260} text="Each box already saves when you leave it. Save All sends again any box that has not saved — after a dropped connection, for example. It never writes a box you have not changed.">
+                  <Tip width={260} text="Each box already saves when you leave it. If the connection drops, the figure is kept on this device: press Sync Now once the connection is back. It also goes by itself when the device reports it is back online, or the next time this page opens. Save All sends again any box the server did not accept. It never writes a box you have not changed.">
                     <button className="btn btn-primary" onClick={saveAll} disabled={saveAllLoading || isLocked}>
                       {saveAllLoading ? 'Saving…' : saved ? '✓ Saved' : 'Save All'}
                     </button>

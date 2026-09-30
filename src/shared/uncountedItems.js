@@ -155,8 +155,12 @@ const amberBanner = {
  * The warning, naming the count and the items. The first UNCOUNTED_NAME_LIMIT names (largest value
  * first) are always visible; the rest sit behind a native <details>, so nothing needs state and the
  * disclosure is keyboard-operable for free. `children` carries a page-specific closing sentence.
+ * `fcLine` is what a material gap does to the page's food cost % (S796): the default suits a closed
+ * month; an open Monthly Summary prints no % until the close, and Stock Count prints none at all
+ * (`null` drops the clause), so the banner must not promise one it will not show.
  */
-export function UncountedItemsBanner({ gap, scope, children, className = '' }) {
+export function UncountedItemsBanner({ gap, scope, children, className = '',
+  fcLine = 'food cost % is shown without a verdict until the count is finished' }) {
   if (!gap || !gap.uncountedCount) return null
   const shown = gap.uncounted.slice(0, UNCOUNTED_NAME_LIMIT)
   const rest = gap.uncounted.slice(UNCOUNTED_NAME_LIMIT)
@@ -164,7 +168,7 @@ export function UncountedItemsBanner({ gap, scope, children, className = '' }) {
     <div role="alert" className={`card ${className}`.trim()} style={amberBanner}>
       <strong style={{ color: 'var(--theme-amber-text)' }}>△ {gapHeadline(gap, scope)}.</strong>{' '}
       {gap.material
-        ? 'Without a count, everything still on the shelf reads as used. Totals below still include them; food cost % is shown without a verdict until the count is finished.'
+        ? `Without a count, everything still on the shelf reads as used. Totals below still include them${fcLine ? `; ${fcLine}` : ''}.`
         : 'Totals below include them.'}
       {children ? <> {children}</> : null}
       <div style={{ marginTop: 6 }}>

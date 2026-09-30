@@ -1040,7 +1040,7 @@ ${text}`, detail })
                       <th>UOM</th>
                       <th style={{ textAlign: 'right' }}>Qty Requested</th>
                       <th style={{ textAlign: 'right' }}>
-                        <Tip text="Qty actually issued from the store. Green = full qty issued, red = partial." width={220}>Qty Issued</Tip>
+                        <Tip text="Qty actually issued from the store. Green = full qty issued; amber with the word 'partial' = less than requested." width={220}>Qty Issued</Tip>
                       </th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods that left the store." width={240}>Value</Tip></th>

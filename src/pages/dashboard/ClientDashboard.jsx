@@ -51,7 +51,7 @@ import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import SetupGuideCard from '../../components/SetupGuideCard'
 import SupportContactLine from '../../components/SupportContactLine'
 import WeatherHeaderSlot from './WeatherHeaderSlot'
-import { CHART_COLORS, COST_BREAKDOWN_COLORS } from '../../shared/chartColors'
+import { CHART_COLORS, COST_BREAKDOWN_COLORS, costSliceColor } from '../../shared/chartColors'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -1576,6 +1576,10 @@ export default function ClientDashboard() {
       : []),
   ].filter(r => r.value > 0)
   const costBreakdownTotal = costBreakdown.reduce((s, r) => s + r.value, 0)
+  // One colour per slice for the pie AND its legend swatch (S796): a withheld margin draws its slice
+  // grey, as the footer below withholds, instead of a green "profit" slice. The tile also withholds
+  // before SETTLE_DAY; this card does not, and adding that belongs to the pill, slice and footer at once.
+  const costSliceFill = name => costSliceColor(name, { withheld: labour.verdictWithheld })
   // The sentence for whichever labour branch the page took (S683's rule: a branch the page knows
   // about is said out loud). Before S756 this only fired for "Labor tab empty but HR has basic
   // salaries" — the page now reads the finalized run itself, so what is left to say is: payroll
@@ -2687,7 +2691,8 @@ export default function ClientDashboard() {
                               isn't gold the pill would otherwise disagree with the slice it summarizes. */}
                           {/* The tile's figure, so the tile's name (S792, D30): purchases ÷ sales. */}
                           {fcPct != null && <StatPill label={SPEND_SO_FAR_LABEL} value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
-                          <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                          {/* No verdict dot while labour.verdictWithheld, matching the footer (the tile also withholds before SETTLE_DAY; this card does not). */}
+                          <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null || labour.verdictWithheld ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
                         </div>
                       )}
                       <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
@@ -2706,7 +2711,7 @@ export default function ClientDashboard() {
                               labelLine: { stroke: colors.text3, strokeWidth: 1 },
                             } : {})}
                           >
-                            {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
+                            {costBreakdown.map(entry => <Cell key={entry.name} fill={costSliceFill(entry.name)} />)}
                           </Pie>
                           <Tooltip
                             contentStyle={TOOLTIP_CHROME}
@@ -2717,7 +2722,7 @@ export default function ClientDashboard() {
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: 8 }}>
                         {costBreakdown.map(entry => (
                           <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
+                            <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: costSliceFill(entry.name), flexShrink: 0 }} />
                             <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                               {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
                               {' '}<span style={{ color: 'var(--theme-text3)' }}>({(entry.value / costBreakdownTotal * 100).toFixed(1)}%)</span>

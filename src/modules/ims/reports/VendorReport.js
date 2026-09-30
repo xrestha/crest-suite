@@ -1209,7 +1209,7 @@ export default function VendorReport() {
                       <th style={{ textAlign: 'right' }}><Tip text="Sum of qty × rate for all items on the bill, before discount and VAT.">Bill Total (ex-VAT)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Trade/promo discount amount as shown on the vendor invoice.">Discount</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Discount as a percentage of the bill total ex-VAT.">Disc %</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text="VAT computed on the taxable base (bill total minus discount), per Nepal IRD." width={250}>VAT (13%)</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="VAT computed on the taxable base (bill total minus discount), per Nepal IRD." width={250}>VAT (13%)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Grand Total = (Bill Total − Discount) + VAT on taxable amount." width={230}>Grand Total</Tip></th>
                       <th>Payment</th>
                     </tr>
@@ -1223,9 +1223,11 @@ export default function VendorReport() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {b.billTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>NPR {b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.discPct.toFixed(1)}%</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{b.vat > 0 ? `NPR ${b.vat.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                        {/* VAT is a figure and a payment method a category (S796): neither takes a colour.
+                            Credit was red and Cash green here, so buying on credit read as a fault. */}
+                        <td style={{ textAlign: 'right', color: b.vat > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{b.vat > 0 ? `NPR ${b.vat.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>NPR {b.grand.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                        <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod || '—'}</span></td>
+                        <td><span className="badge badge-gray">{b.paymentMethod || '—'}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -1315,7 +1317,7 @@ export default function VendorReport() {
                               ) : (b.invoice || '—')}
                             </td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.kind ? '—' : b.itemCount}</td>
-                            <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod}</span></td>
+                            <td><span className="badge badge-gray">{b.paymentMethod || '—'}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.kind ? '—' : `NPR ${b.total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{b.returned > 0 ? `−NPR ${b.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>

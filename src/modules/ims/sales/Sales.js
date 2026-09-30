@@ -1175,10 +1175,11 @@ export default function Sales() {
           include what you change here until it is regenerated.
         </div>
       )}
-      {/* POS-supersedes-manual banner. Accent rather than red — this is how the product is meant
-          to work for a two-module client, not an error or a lockout they need to resolve. */}
+      {/* POS-supersedes-manual banner. A neutral note-banner, not red or amber (S796): it states a
+          plain fact — this is how the product is meant to work for a two-module client, not an
+          error or a lockout they need to resolve. */}
       {posOwnsSales && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
+        <div className="note-banner" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.
             {preTillOpen && <> The exception is {preTillRange}: this month began before the till&apos;s first sale on {formatBsDay(tillStart, monthNo)}, so Daily Entry stays open for those days to enter or correct by hand.</>}
           </span>
@@ -1434,7 +1435,8 @@ export default function Sales() {
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
-                                  borderColor: parseFloat(qty) > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)'
+                                  // No accent border once a value is typed (S796): it read as the
+                                  // invalid state, and a filled box is not a warning.
                                 }, isLocked)}
                               />
                             </td>
@@ -1616,7 +1618,8 @@ export default function Sales() {
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
-                                  borderColor: qty > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)'
+                                  // No accent border once a value is typed (S796): it read as the
+                                  // invalid state, and a filled box is not a warning.
                                 }, dailyLocked)}
                               />
                             </td>
@@ -1639,7 +1642,8 @@ export default function Sales() {
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right',
-                                  borderColor: disc > 0 ? 'color-mix(in srgb, var(--theme-red) 40%, transparent)' : 'var(--theme-border)'
+                                  // No red border once a discount is typed (S796): a discount is not
+                                  // an error, and the red read as the invalid state.
                                 }, dailyLocked)}
                               />
                             </td>

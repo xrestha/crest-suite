@@ -28,12 +28,31 @@ export const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf
  * wearing a verdict colour on the page that also says "✓ Profitable" in green (DESIGN.md's One Signal
  * Meaning Rule). Measured S689: worst pair ΔE 56.3 normal, 12.4 deuteranopia, 30.6 protanopia.
  * Red is deliberately absent — red means over threshold here. Net Margin is the one slot that stays
- * semantic, because profit reads as good; a page that withholds the verdict greys it instead.
+ * semantic, because profit reads as good. Each page greys it on its own trigger: the Dashboard pie
+ * through `costSliceColor` below when `resolveLabour().verdictWithheld`, and Overheads its own Net
+ * Profit segment, from theme tokens, on `noVerdict` (withheld labour OR an open month) — its bars
+ * are HTML, not SVG, so `var()` resolves there.
  */
 export const COST_BREAKDOWN_COLORS = {
-  'Food Cost':  '#c9a84c', // gold — the FC% line and the Owner Dashboard use the same slot
+  'Food Cost':  '#c9a84c', // gold — the Owner Dashboard's Food Cost % line imports this slot too
   'Labor':      '#60a5fa', // blue
   'Overheads':  '#8b5cf6', // violet
   'Tax & Fees': '#ec4899', // pink
   'Net Margin': '#34d399', // green
+}
+
+// DESIGN.md's `chart-tick` grey — the one neutral the chart palette already documents, so a
+// withheld slice introduces no new hex. Against the four cost slots it measured (CIEDE2000, S796)
+// worst ΔE 19.6 normal, 14.5 deuteranopia, 8.5 protanopia, 14.4 tritanopia — over the 15/8 floors.
+export const COST_BREAKDOWN_NEUTRAL = '#6b7280'
+
+/**
+ * One slice's colour. `withheld` is `resolveLabour().verdictWithheld` (S796): the margin may have no
+ * wages in it, so the tile says "Not judged" and a green Net Margin slice beside it would be the
+ * verdict the tile declines to give. Pass the slice fill AND its legend swatch through this, so the
+ * two cannot disagree. An unknown key gets the neutral rather than no fill.
+ */
+export function costSliceColor(key, { withheld = false } = {}) {
+  if (key === 'Net Margin' && withheld) return COST_BREAKDOWN_NEUTRAL
+  return COST_BREAKDOWN_COLORS[key] || COST_BREAKDOWN_NEUTRAL
 }

@@ -25,13 +25,14 @@ const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_v
 // SET NULL, so the delete SUCCEEDS and those rows quietly lose their supplier. vendor_returns keeps
 // no name of its own, so that loss is unrecoverable and nothing on screen would say it happened.
 // payable_payments hangs off purchase_entries rather than the vendor, so it is covered by that row.
-// `code` is what the row's usage chip shows; P and VR mean the same here as they do in Item
-// Master's Used In column, deliberately — one vocabulary across the two pages that use it.
+// `label` is what the row's usage chip shows (words since S796, not the old P / VR codes). It is
+// spelled as Item Master's Used In column names the same tables (`name` in items/itemRefTables.js),
+// deliberately — one vocabulary across the two pages that use the chip.
 const VENDOR_REF_TABLES = [
-  { table: 'purchase_entries', code: 'P', label: 'Purchases', one: 'purchase entry', many: 'purchase entries' },
-  { table: 'purchase_orders', code: 'PO', label: 'Purchase Orders', one: 'purchase order', many: 'purchase orders' },
-  { table: 'vendor_returns', code: 'VR', label: 'Vendor Returns', one: 'vendor return', many: 'vendor returns' },
-  { table: 'ims_gate_passes', code: 'GP', label: 'Gate Passes', one: 'gate pass', many: 'gate passes' },
+  { table: 'purchase_entries', label: 'Purchases', one: 'purchase entry', many: 'purchase entries' },
+  { table: 'purchase_orders', label: 'Purchase Orders', one: 'purchase order', many: 'purchase orders' },
+  { table: 'vendor_returns', label: 'Vendor Returns', one: 'vendor return', many: 'vendor returns' },
+  { table: 'ims_gate_passes', label: 'Gate Passes', one: 'gate pass', many: 'gate passes' },
 ]
 
 // "12 purchase entries and 1 vendor return" — named in the reader's terms, not the table's, so the
@@ -409,8 +410,8 @@ export default function Vendors() {
   )
 
   // The 🔗 mark beside a vendor's code, so "have we actually bought from this one?" is answerable by
-  // scanning the list rather than by opening a report. Same chip and the same short codes as Item
-  // Master's Used In column — P and VR mean the same thing on both. Nothing renders while the usage
+  // scanning the list rather than by opening a report. Same chip and the same words as Item Master's
+  // Used In column: it names the first two places, then "+N". Nothing renders while the usage
   // read is in flight or if it failed: an absent chip must only ever mean "no records", so a chip
   // that could also mean "we could not check" would be worse than no chip at all.
   function usageChip(v) {
@@ -664,7 +665,7 @@ export default function Vendors() {
                       lines and the row is 86px, for 59px more horizontal scroll — a trade worth
                       making only because this column is STICKY, so that scroll never takes the name
                       off screen. Inert at 1280+ where the column is already 238px. */}
-                  <th style={{ minWidth: 180 }}><Tip width={300} text="The vendor's name, with its auto-generated code underneath — that code is the short reference used on purchase entries and reports. A 🔗 chip beside the code means this vendor already has records: P = Purchases, PO = Purchase Orders, VR = Vendor Returns, GP = Gate Passes. No chip means nothing has ever been bought from or issued against it.">Vendor</Tip></th>
+                  <th style={{ minWidth: 180 }}><Tip width={300} text="The vendor's name, with its auto-generated code underneath — that code is the short reference used on purchase entries and reports. A 🔗 chip beside the code means this vendor already has records: it names the first two places (Purchases, Purchase Orders, Vendor Returns, Gate Passes); hover it for the full list. No chip means nothing has ever been bought from or issued against it.">Vendor</Tip></th>
                   <th><Tip text="Phone, with the sales rep or account manager's name underneath when one is recorded.">Phone / Contact</Tip></th>
                   <th><Tip text="Supplier's PAN or VAT registration number — needed for VAT invoice reconciliation." width={260}>PAN/VAT<span style={{ display: 'block' }}>No.</span></Tip></th>
                   <th><Tip text="Standard credit period or payment arrangement agreed with this supplier.">Payment<span style={{ display: 'block' }}>Terms</span></Tip></th>

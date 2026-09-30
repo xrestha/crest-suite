@@ -163,7 +163,7 @@ export default function Recipes() {
   // it's offered as a separate, explicit action once the user sees exactly which items missed.
   const [usdaCandidates, setUsdaCandidates] = useState([])
   const [usdaFillBusy, setUsdaFillBusy] = useState(false)
-  const [nutriStatus, setNutriStatus] = useState(null) // { text } | null — result banner for auto-fill runs
+  const [nutriStatus, setNutriStatus] = useState(null) // { text, warn? } | null — result banner for auto-fill runs; warn = a save failed
 
   const init = useCallback(async () => {
     if (!clientId) return
@@ -642,7 +642,8 @@ export default function Recipes() {
 
     setNutriStatus({ text: `Filled ${filled} ingredient(s) from the regional library.`
       + (failed ? ` ${failed} failed to save.` : '')
-      + (unmatchedItems.length ? ` ${unmatchedItems.length} still need nutrition data (no local match): ${unmatchedItems.map(i => i.name).join(', ')}.` : '') })
+      + (unmatchedItems.length ? ` ${unmatchedItems.length} still need nutrition data (no local match): ${unmatchedItems.map(i => i.name).join(', ')}.` : ''),
+      warn: failed > 0 })
   }
 
   // Explicit, separate step — a live call to USDA FoodData Central, only for ingredients the
@@ -691,7 +692,7 @@ export default function Recipes() {
     setUsdaFillBusy(false)
     setUsdaCandidates([])
 
-    setNutriStatus({ text: `Filled ${filled} ingredient(s) from USDA FoodData Central.` + (failed ? ` ${failed} failed to save.` : '') })
+    setNutriStatus({ text: `Filled ${filled} ingredient(s) from USDA FoodData Central.` + (failed ? ` ${failed} failed to save.` : ''), warn: failed > 0 })
   }
 
   function dismissUsdaCandidates() { setUsdaCandidates([]) }
@@ -1510,15 +1511,21 @@ Check the recipe list before saving again — if it timed out after the recipe w
   // Role guard AFTER every hook (S601 pattern) — the memos above must run on every render.
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
-  const tabFiltered = activeTab === 'all'
-    ? regularRecipes
-    : activeTab === 'byo'
-      ? regularRecipes.filter(r => r.is_build_your_own)
-    : activeTab === 'sub-recipes'
-      ? subRecipeList
-      : filtered.filter(r => r.category === activeTab)
+  // The tab actually applied. The Build-your-own chip exists only while the search and band leave
+  // one such dish, and a category chip only while the category holds a recipe, so a pressed chip
+  // could vanish and leave an empty list with nothing pressed (S796 review). Derived, not reset:
+  // `activeTab` keeps the choice, so clearing the search brings Build-your-own back pressed.
+  const shownTab = tabs.some(t => t.key === activeTab) ? activeTab : 'all'
 
-  const activeTabLabel = (tabs.find(t => t.key === activeTab)?.label || 'All Recipes').replace(/^⚙\s*/, '')
+  const tabFiltered = shownTab === 'all'
+    ? regularRecipes
+    : shownTab === 'byo'
+      ? regularRecipes.filter(r => r.is_build_your_own)
+    : shownTab === 'sub-recipes'
+      ? subRecipeList
+      : filtered.filter(r => r.category === shownTab)
+
+  const activeTabLabel = (tabs.find(t => t.key === shownTab)?.label || 'All Recipes').replace(/^⚙\s*/, '')
 
   // Print/Share are both bound to the current tab (Print literally prints the live DOM table;
   // Share stays in lockstep with it rather than silently reaching into other tabs' checked rows).
@@ -1547,7 +1554,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
   // in this tab once any are checked.
   function buildRecipeWhatsAppText() {
     const lines = [`*Recipe Costing — ${activeTabLabel}*`, `${printShareRows.length} recipe${printShareRows.length !== 1 ? 's' : ''}`, '']
-    if (activeTab === 'sub-recipes') {
+    if (shownTab === 'sub-recipes') {
       printShareRows.forEach(recipe => {
         const cost = calcRecipeCost(recipe, recipes)
         const yieldQty = parseFloat(recipe.yield_qty) || 1
@@ -1712,7 +1719,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
               key: tab.key,
               label: <>{tab.label} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{tab.count}</span></>,
             }))}
-            active={activeTab}
+            active={shownTab}
             onChange={setActiveTab}
           />
 
@@ -1726,12 +1733,12 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 <p className="empty-state-text">
                   {search
                     ? `No results for "${search}" in this tab.`
-                    : activeTab === 'sub-recipes'
+                    : shownTab === 'sub-recipes'
                       ? 'No sub-recipes yet. Create one by setting category to ⚙ Sub-Recipe.'
                       : 'No recipes yet. Click + New Recipe to build your first costed dish.'}
                 </p>
               </div>
-            ) : activeTab === 'sub-recipes' ? (
+            ) : shownTab === 'sub-recipes' ? (
               /* ── Sub-recipes tab ── */
               <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
@@ -1751,7 +1758,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       <th style={{ textAlign: 'right' }}>Total Cost</th>
                       <th style={{ textAlign: 'right' }}>Yield</th>
                       <th style={{ textAlign: 'right' }}>Cost per Unit</th>
-                      <th><Tip text="Blank means in use. Hidden takes this sub-recipe out of view, but it stays fully usable as an ingredient in other recipes — deactivating it never affects another recipe's cost calculation." width={280}>Status</Tip></th>
+                      <th><Tip text="Blank means active. Hidden takes this sub-recipe out of the ingredient picker for new rows; recipes that already use it keep it, and their cost does not change." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
                     </tr>
                   </thead>
@@ -1827,7 +1834,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         </span>
                       </div>
                       <div className="phone-card__meta">
-                        {activeTab === 'all' ? `${recipe.category || 'Uncategorised'} · ` : ''}
+                        {shownTab === 'all' ? `${recipe.category || 'Uncategorised'} · ` : ''}
                         Cost {isByo ? (byo && !byo.empty ? costRangeText(byo) : 'by build') : cost != null ? `NPR ${cost.toFixed(2)}` : '—'}
                         {' · '}Price {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toFixed(2)}` : '—'}
                         {!recipe.is_active && ' · Hidden'}
@@ -1854,7 +1861,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         </Tip>
                       </th>
                       <th>Recipe</th>
-                      {activeTab === 'all' && <th>Category</th>}
+                      {shownTab === 'all' && <th>Category</th>}
                       <th>Ingredients</th>
                       <th style={{ textAlign: 'right' }}>Food Cost</th>
                       <th style={{ textAlign: 'right' }}><Tip text={vatMode === 'pan'
@@ -1900,7 +1907,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             {subIngCount > 0 && <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
                             {recipe.is_build_your_own && <span className="badge badge-gray" style={{ marginLeft: 6 }}>Build-your-own</span>}
                           </td>
-                          {activeTab === 'all' && <td><span className="badge badge-gray">{recipe.category}</span></td>}
+                          {shownTab === 'all' && <td><span className="badge badge-gray">{recipe.category}</span></td>}
                           <td style={{ color: 'var(--theme-text2)' }}>
                             {(recipe.recipe_ingredients || []).length} items
                             {/* S754: no longer keyed on pos_enabled. A dish a supervisor creates now
@@ -1958,7 +1965,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         {byo && !byo.empty && byoOpen && (
                           <tr id={`byo-cost-${recipe.id}`} className={rowHidden ? 'print-hide-row' : ''}>
                             <td className="no-print" />
-                            <td colSpan={activeTab === 'all' ? 8 : 7}>
+                            <td colSpan={shownTab === 'all' ? 8 : 7}>
                               <BuildCostDetail range={byo} settings={settings} vatNote={vatMode !== 'pan'} />
                             </td>
                           </tr>
@@ -2199,9 +2206,10 @@ Check the recipe list before saving again — if it timed out after the recipe w
             )}
           </div>
 
-          {/* Live cost panel */}
+          {/* Live cost panel. A card, not a .note-banner: it carries the banded Food Cost %, and a
+              verdict never rides on a note-banner (DESIGN.md → Page-state banners). */}
           {liveCost > 0 && (
-            <div className="note-banner" style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 16 }}>
+            <div className="card card--compact" style={{ marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 16 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
                   {isSubRecipeForm ? 'Total Batch Cost' : formByBuild ? 'Fixed ingredients' : 'Food Cost'}
@@ -2286,13 +2294,22 @@ Check the recipe list before saving again — if it timed out after the recipe w
               </div>
             </div>
 
+            {/* The result of an auto-fill run is a plain fact, so a .note-banner (S796: it was an
+                accent-tinted box, which reads as a warning on Modernist Light). A run where a save
+                failed is not a plain fact, and a verdict never rides on a .note-banner, so that run
+                drops the class for the amber banner's own box (S741's 8% / 35%). Not a `.card` like
+                the other amber banners, since this sits inside the Ingredients card. */}
             {nutriStatus && (
-              <div role="status" aria-live="polite" style={{
-                display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12,
-                background: 'color-mix(in srgb, var(--theme-accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)',
-                borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 14,
+              <div role={nutriStatus.warn ? 'alert' : 'status'} aria-live={nutriStatus.warn ? undefined : 'polite'} className={nutriStatus.warn ? undefined : 'note-banner'} style={{
+                display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14,
+                ...(nutriStatus.warn ? {
+                  padding: '12px 16px', fontSize: 13, lineHeight: 1.6, color: 'var(--theme-text1)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+                  background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+                } : {}),
               }}>
-                <span style={{ color: 'var(--theme-text1)' }}>{nutriStatus.text}</span>
+                <span>{nutriStatus.text}</span>
                 <button onClick={() => setNutriStatus(null)} aria-label="Dismiss"
                   style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: '4px 6px', flexShrink: 0 }}>×</button>
               </div>

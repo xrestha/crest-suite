@@ -446,7 +446,7 @@ export default function VatReport() {
           {/* S756: these figures are AFTER each line's share of the bill discount, so neither the
               tooltip nor the sub-line may call them "Gross" — the Gross column is the pre-discount one. */}
           <div className="stat-label"><Tip text="VAT-inclusive purchases after their share of any bill discount, minus VAT-inclusive goods returned — including the VAT." width={260}>Net VAT Purchases</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-amber-text)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-IN')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatLines.length} lines
             {vatReturns.length > 0 && <span style={{ color: 'var(--theme-text2)' }}> − {vatReturns.length} returns</span>}
@@ -511,7 +511,9 @@ export default function VatReport() {
                       <th style={{ textAlign: 'right' }}><Tip text="The rate you entered × qty, ex-VAT, before this line's share of the bill discount." width={240}>Gross (ex-VAT)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="This line's share of its bill's discount, in proportion to line value. On a bill with non-VAT lines the rest of the discount sits in the Non-VAT Report." width={260}>Discount</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Gross − discount share. VAT is levied on this amount per Nepal IRD." width={220}>Taxable</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text={isPan ? 'VAT = Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Input VAT = Taxable × 13%. Claimable as input tax credit from IRD.'} width={220}>VAT (13%)</Tip></th>
+                      {/* VAT is a figure, not a verdict (S796): no amber on its column here or below —
+                          amber in IMS means open, suspect or waiting, and nothing about VAT is. */}
+                      <th style={{ textAlign: 'right' }}><Tip text={isPan ? 'VAT = Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Input VAT = Taxable × 13%. Claimable as input tax credit from IRD.'} width={220}>VAT (13%)</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Taxable + VAT — what this line actually cost including VAT.">Total (incl. VAT)</Tip></th>
                       <th>Invoice</th>
                     </tr>
@@ -540,7 +542,7 @@ export default function VatReport() {
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(e.lineGross)}</td>
                           <td style={{ textAlign: 'right', color: disc > 0.005 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{disc > 0.005 ? `−${fmtNPR(disc)}` : '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(e.lineNet)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)', fontWeight: 600 }}>{fmtNPR(vat)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(vat)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(total)}</td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{e.invoice_ref || '—'}</td>
                         </tr>
@@ -554,7 +556,7 @@ export default function VatReport() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseList)}</td>
                       <td style={{ textAlign: 'right', color: totalVatDiscount > 0.005 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totalVatDiscount > 0.005 ? `−${fmtNPR(totalVatDiscount)}` : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(vatAmtGross)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatAmtGross)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatTotalGross)}</td>
                       <td></td>
                     </tr>
@@ -683,7 +685,7 @@ export default function VatReport() {
                     <th style={{ textAlign: 'right' }}><Tip text="Taxable base = Gross − Discount. VAT is levied on this amount per Nepal IRD." width={240}>Taxable Base</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Base amount of VAT-inclusive goods returned to this vendor." width={230}>Returned</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Net taxable = Taxable Base − Returns, ex-VAT.">Net Taxable</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text={isPan ? 'VAT paid to this supplier = Net Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Net claimable input VAT = Net Taxable × 13%. Use for IRD VAT return.'} width={230}>{isPan ? 'VAT Paid' : 'Net Input VAT'}</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={isPan ? 'VAT paid to this supplier = Net Taxable × 13%. Not claimable on a PAN-bill outlet — counted in food cost.' : 'Net claimable input VAT = Net Taxable × 13%. Use for IRD VAT return.'} width={230}>{isPan ? 'VAT Paid' : 'Net Input VAT'}</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Net amount paid to this vendor including VAT, after discount and returns.">Net Total</Tip></th>
                   </tr>
                 </thead>
@@ -710,7 +712,7 @@ export default function VatReport() {
                           {v.returned > 0 ? `−${fmtNPR(v.returned)}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(netBase)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)', fontWeight: 600 }}>{fmtNPR(netVat)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(netVat)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmtNPR(netTotal)}</td>
                       </tr>
                     )
@@ -726,7 +728,7 @@ export default function VatReport() {
                       {retBaseTotal > 0 ? `−${fmtNPR(retBaseTotal)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(netVatBase)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(netVatAmt)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(netVatAmt)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(netVatTotal)}</td>
                   </tr>
                 </tbody>

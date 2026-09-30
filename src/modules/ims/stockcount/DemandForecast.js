@@ -481,7 +481,7 @@ export default function DemandForecast() {
                       </td>
                       <td>{f.holiday && (
                         f.holiday.multiplier != null
-                          ? <Tip text={`Adjusted ×${f.holiday.multiplier} for ${f.holiday.name} — set in Holiday Calendar. Covers, revenue, and item quantities above already reflect this.`}><span className="badge badge-yellow">{f.holiday.name} ×{f.holiday.multiplier}</span></Tip>
+                          ? <Tip text={`Adjusted ×${f.holiday.multiplier} for ${f.holiday.name} — set in Holiday Calendar. Covers, revenue, and item quantities above already reflect this.`}><span className="badge badge-gray">{f.holiday.name} ×{f.holiday.multiplier}</span></Tip>
                           : <Tip text={`No demand multiplier set for ${f.holiday.name} in Holiday Calendar — this forecast is NOT adjusted for it. Treat it as a floor, not a ceiling, on a festival day.`}><span className="badge badge-amber">⚠ {f.holiday.name}</span></Tip>
                       )}</td>
                     </tr>

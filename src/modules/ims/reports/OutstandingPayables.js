@@ -1192,8 +1192,10 @@ export default function OutstandingPayables() {
                                 </td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, color: b.aging.color }}>{b.daysOld}</td>
                                 <td>
+                                  {/* Supplier credit is a state the word names, not a verdict (S796): grey, as
+                                      Vendor Report shows the same Credit in plain ink. */}
                                   {b.isCredit
-                                    ? <span className="badge badge-purple" style={{ whiteSpace: 'nowrap' }}>Credit</span>
+                                    ? <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Credit</span>
                                     // Not an aging chip (S792, PURCHASES-8): a red "90+ days" on a
                                     // bill that owes nothing reads as the most urgent bill on the page.
                                     : b.remaining <= EPS
@@ -1207,8 +1209,8 @@ export default function OutstandingPayables() {
                               </>) : (<>
                                 <td style={{ color: 'var(--theme-text2)', fontWeight: 600, fontSize: 13 }}>
                                   {fmtBsDate(b.settledOn) || '—'}
-                                  {b.isCredit && <span className="badge badge-purple" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(-b.remaining)} credit</span>}
-                                  {b.creditOut > EPS && <Tip text={`${fmt(b.creditOut)} of this bill's credit has been used to pay other bills from ${b.vendorName}. See the Supplier credit entries in its payment history.`} width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}><span className="badge badge-purple" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(b.creditOut)} credit used</span></Tip>}
+                                  {b.isCredit && <span className="badge badge-gray" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(-b.remaining)} credit</span>}
+                                  {b.creditOut > EPS && <Tip text={`${fmt(b.creditOut)} of this bill's credit has been used to pay other bills from ${b.vendorName}. See the Supplier credit entries in its payment history.`} width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}><span className="badge badge-gray" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(b.creditOut)} credit used</span></Tip>}
                                 </td>
                                 <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
                               </>)}
@@ -1304,7 +1306,7 @@ export default function OutstandingPayables() {
                                                         ? 'Credit this bill was holding (goods returned after it was paid), used to pay another bill from the same supplier. It is not money paid out. Deleting it also deletes the matching entry on that bill.'
                                                         : 'Paid with credit the supplier owed from another bill, not with money. Deleting it also deletes the matching entry on the bill the credit came from.'}
                                                         width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
-                                                        <span className="badge badge-purple" style={{ whiteSpace: 'nowrap' }}>{SUPPLIER_CREDIT_MODE}</span>
+                                                        <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>{SUPPLIER_CREDIT_MODE}</span>
                                                       </Tip>
                                                     : (p.payment_mode || '—')}
                                                 </td>

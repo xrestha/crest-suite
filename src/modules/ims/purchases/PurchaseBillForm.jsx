@@ -734,8 +734,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                       />
                       {/* 10px, not 9: 9 is the chevron GLYPH step on the type ramp and 10 is the
                           floor for real text (DESIGN.md → Typography). This is a live VAT marker
-                          on a money row, not a decorative caret. */}
-                      {line.vat_inclusive && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2, fontWeight: 700 }}>13%</div>}
+                          on a money row, not a decorative caret. Neutral since S796: VAT is a fact
+                          about the line, and amber TEXT on this row belongs to the ⚠ Master rate warning (the
+                          checkbox's tint above is the control's own). */}
+                      {line.vat_inclusive && <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2, fontWeight: 700 }}>13%</div>}
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle', textAlign: 'right' }}>
                       {lineAmount > 0 && (
@@ -744,7 +746,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                             {lineAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                           {line.vat_inclusive && parseFloat(line.rate) > 0 && (
-                            <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>
+                            <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>
                               +VAT {(parseFloat(line.rate) * 0.13 * (parseFloat(line.qty) || 1)).toFixed(2)}
                             </div>
                           )}
@@ -861,7 +863,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
               )}
               {vatTotal > 0 && (
                 <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                  VAT (13%): <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(vatTotal)}</span>
+                  VAT (13%): <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(vatTotal)}</span>
                 </div>
               )}
               <div style={{ color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>

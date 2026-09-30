@@ -803,7 +803,12 @@ export default function Items() {
   const catsWithItems   = useMemo(
     () => categories.filter(c => items.some(i => i.category_id === c.id)),
     [categories, items])
-  const showCategoryCol = filterCat === 'all'
+  // The category actually applied. A chip exists only while its category holds an item, so
+  // deleting or moving the last one left `filterCat` naming a chip that was gone: an empty list
+  // with nothing pressed. Derived rather than reset in an effect, which would fire on a reload's
+  // brief empty `items` and wipe the choice; the chips and the list read this one value.
+  const shownCat = filterCat === 'all' || catsWithItems.some(c => c.id === filterCat) ? filterCat : 'all'
+  const showCategoryCol = shownCat === 'all'
 
   // One memoized pass replaces what used to be a fresh filter here PLUS a full items.filter()
   // inside every category tab's render (O(tabs × items), with the same predicate re-evaluated
@@ -826,7 +831,7 @@ export default function Items() {
       tabCounts.all += 1
       if (item.category_id) tabCounts[item.category_id] = (tabCounts[item.category_id] || 0) + 1
     })
-    const filtered = (filterCat === 'all' ? searchMatched : searchMatched.filter(i => i.category_id === filterCat))
+    const filtered = (shownCat === 'all' ? searchMatched : searchMatched.filter(i => i.category_id === shownCat))
       .sort((a, b) => {
         if (!sortConvFirst) return 0
         const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
@@ -834,7 +839,7 @@ export default function Items() {
         return bHas - aHas
       })
     return { filtered, tabCounts }
-  }, [items, search, refMap, filterUsage, filterCat, sortConvFirst])
+  }, [items, search, refMap, filterUsage, shownCat, sortConvFirst])
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -844,7 +849,7 @@ export default function Items() {
   // it. Built here rather than inline so the header and the sheet cannot describe different things.
   const usageScopeLabel = { all: null, R: 'used in recipes', P: 'used in purchases', stock: 'in stock counts', unused: 'unused items only' }
   const printScope = [
-    filterCat === 'all' ? 'All categories' : (categories.find(c => c.id === filterCat)?.name || 'One category'),
+    shownCat === 'all' ? 'All categories' : (categories.find(c => c.id === shownCat)?.name || 'One category'),
     search.trim() ? `matching "${search.trim()}"` : null,
     usageScopeLabel[filterUsage],
   ].filter(Boolean).join(' · ')
@@ -909,8 +914,8 @@ export default function Items() {
       )}
 
       {categories.length === 0 && !loading && (
-        <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
-          <p style={{ color: 'var(--theme-text1)', fontSize: 13, margin: 0 }}>
+        <div className="note-banner">
+          <p style={{ margin: 0 }}>
             You have no item categories yet, so there is nothing to file a new item under. Click <strong>⚡ Load Default Categories</strong> to add the {DEFAULT_CATEGORIES.length} Crest starts with — {DEFAULT_CATEGORIES.slice(0, -1).join(', ')} and {DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]}. Rename them or add your own afterwards.
           </p>
         </div>
@@ -1215,7 +1220,7 @@ export default function Items() {
           key: tab.id,
           label: <>{tab.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{tabCounts[tab.id] || 0}</span></>,
         }))}
-        active={filterCat}
+        active={shownCat}
         onChange={setFilterCat}
       />
 
@@ -1258,12 +1263,12 @@ export default function Items() {
                     <Tip text="Cost of ONE base unit — the figure recipe costing, stock valuation and every IMS report use. Items are always stored in their smallest unit, so a 1 KG bag counted in GM shows its per-GM price here, not the bag price." width={300}>Rate (NPR) / UOM</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip width={240} text="Usable % after trim/prep. Red = trim loss is factored into recipe costing. 100% = no loss (default).">
+                    <Tip width={240} text="Usable % after trim/prep. Below 100% means trim loss, which recipe costing already includes. 100% = no loss (default).">
                       Yield %
                     </Tip>
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
-                  <th><Tip text="Blank means in use. Hidden takes the item out of the pickers and off the stock sheet from now on; its past purchases and counts keep their figures." width={260}>Status</Tip></th>
+                  <th><Tip text="Blank means active: the item shows in pickers and on the stock sheet. Hidden takes it out of them from now on; its past purchases and counts keep their figures." width={260}>Status</Tip></th>
                   <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. The chip names the first two places; hover it for the full list." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
