@@ -18,6 +18,9 @@ const MIN_GRID_DAYS = 7
 // A lone punch before 5 AM in a punch list closes the shift that began the evening before, when
 // that evening has a punch of its own.
 export const NIGHT_CUTOFF_MIN = 5 * 60
+// The earliest clock-in a shift ending after midnight can have, for a grid or daily cell (S798,
+// ATTENDANCE-3). A 17:00 bar shift and a 21:00 night shift both clear it; a morning shift does not.
+export const EVENING_IN_MIN = 14 * 60
 
 const clean = v => (v == null || v instanceof Date ? '' : String(v)).replace(/[\s ]+/g, ' ').trim()
 const low = v => clean(v).toLowerCase()
@@ -421,16 +424,71 @@ const hasPunch = cell => !!cell && cell.punches.length > 0
 const saysSomething = cell => !!cell && (cell.punches.length > 0 || !!cell.mark)
 
 /**
+ * A grid or daily cell holds ONE calendar date's punches, so a shift that ends after midnight is
+ * split across two cells: "17:00" on the day it began, "01:05-17:02" on the next — that night's
+ * clock-out and the next evening's clock-in (S798, ATTENDANCE-3). Read as it stands, every day is
+ * 01:05 to 17:02: sixteen hours, seven of them overtime.
+ *
+ * A day's first punch moves back to the day before as its clock-out only when all of these hold,
+ * so a 04:30 bakery start stays on its own day:
+ *   • it is before NIGHT_CUTOFF_MIN, and the day before has punches of its own;
+ *   • the day before ends on a clock-in at EVENING_IN_MIN or later;
+ *   • the overnight shift that makes is shorter than the same-day reading it replaces.
+ * A day that receives a clock-out this way and still starts before the cutoff had its first punch
+ * from a night the file does not show: a blank day inside the month takes it as a clock-out with no
+ * clock-in (flagged to check), and the night before the month's first day is not this month's, so
+ * that clock-out is left out and counted.
+ *
+ * Mutates `raw`. Explicit In/Out columns are left to say what they say.
+ * @returns {number} clock-outs left out because their night began before the month.
+ */
+function closeNightsInCells(raw) {
+  const cellDay = d => !!d && d.inAt == null && d.outAt == null
+  const order = [...raw.keys()].sort((a, b) => a - b)
+  for (const idx of order) {
+    const d = raw.get(idx)
+    if (!cellDay(d) || !d.punches.length) continue
+    d.punches.sort((a, b) => a - b)
+    const first = d.punches[0]
+    if (first >= NIGHT_CUTOFF_MIN) continue
+    const prev = raw.get(idx - 1)
+    if (!cellDay(prev) || !prev.punches.length) continue
+    const eveningIn = prev.punches[prev.punches.length - 1]
+    if (eveningIn < EVENING_IN_MIN) continue
+    const rest = d.punches.slice(1)
+    const overnight = first + 1440 - eveningIn
+    const sameDay = rest.length ? rest[rest.length - 1] - first : Infinity
+    if (overnight >= sameDay) continue
+    prev.nightOut = [...(prev.nightOut || []), first + 1440]
+    d.punches = rest
+  }
+  let beforeMonth = 0
+  for (const idx of order) {
+    const d = raw.get(idx)
+    if (!cellDay(d) || !d.nightOut?.length || d.punches.length < 2 || d.punches[0] >= NIGHT_CUTOFF_MIN) continue
+    const prev = raw.get(idx - 1)
+    if (prev && (!cellDay(prev) || prev.punches.length || prev.mark || prev.nightOut?.length)) continue
+    const orphan = d.punches.shift()
+    if (idx - 1 < 1) { beforeMonth += 1; continue }
+    if (prev) prev.nightOut = [orphan + 1440]
+    else raw.set(idx - 1, { punches: [], inAt: null, outAt: null, mark: null, stamps: [], nightOut: [orphan + 1440] })
+  }
+  return beforeMonth
+}
+
+/**
  * Reads the sheet with a mapping. Returns { error, fileMonth? } — 'no-dates', 'wrong-month',
  * 'no-people', 'no-times' — or
  *   {
  *     layout, mode: { cal, order },
- *     people: [{ key, id, name, days: { [bsDay]: { in, out, mark } }, dataDays }],
+ *     people: [{ key, id, name, days: { [bsDay]: { in, out, mark } }, dataDays, beforeMonth }],
  *     coverage: [bsDay…]  the days of this month the file speaks for,
  *     outside: number     person-days in the file outside this month,
  *   }
  * `in` / `out` are "H:MM" or null; a day with one distinct time has only `in` (or only `out`,
- * where the file said which). `mark` is a status written instead of times.
+ * where the file said which). `mark` is a status written instead of times. An `out` earlier than
+ * its `in` is the next morning (closeNightsInCells). `beforeMonth` counts clock-outs on the 1st
+ * that closed the last night of the month before, which the file does not show, and were left out.
  */
 export function readAttendance(aoa, mapping, period, { forced = {} } = {}) {
   if (!mapping) return { error: 'no-layout' }
@@ -541,16 +599,24 @@ export function readAttendance(aoa, mapping, period, { forced = {} } = {}) {
       prev.late = (prev.late || []).concat(early.map(at => at + 1440))
       d.stamps = d.stamps.filter(at => at >= NIGHT_CUTOFF_MIN)
     }
+    const beforeMonth = mapping.layout === 'punches' ? 0 : closeNightsInCells(p.raw)
     const days = {}
     for (const [idx, d] of [...p.raw].sort((a, b) => a[0] - b[0])) {
       if (idx < 1 || idx > monthDays) continue
       let inAt = d.inAt, outAt = d.outAt
       if (inAt == null && outAt == null) {
-        const times = d.punches.length ? d.punches : [...d.stamps, ...(d.late || [])].sort((a, b) => a - b)
-        if (times.length) {
-          inAt = times[0]
-          const last = times[times.length - 1]
-          outAt = last !== inAt ? last : null
+        if (!d.punches.length && d.nightOut?.length) {
+          // A clock-out after midnight whose clock-in is on a day the file left blank.
+          outAt = d.nightOut[d.nightOut.length - 1]
+        } else {
+          const times = d.punches.length
+            ? [...d.punches, ...(d.nightOut || [])].sort((a, b) => a - b)
+            : [...d.stamps, ...(d.late || [])].sort((a, b) => a - b)
+          if (times.length) {
+            inAt = times[0]
+            const last = times[times.length - 1]
+            outAt = last !== inAt ? last : null
+          }
         }
       } else if (inAt === outAt) {
         outAt = null
@@ -559,7 +625,7 @@ export function readAttendance(aoa, mapping, period, { forced = {} } = {}) {
       if (inAt == null && outAt == null && !mark) continue
       days[idx] = { in: inAt == null ? null : formatMinutes(inAt), out: outAt == null ? null : formatMinutes(outAt), mark }
     }
-    list.push({ key: p.key, id: p.id, name: p.name, days, dataDays: Object.keys(days).length })
+    list.push({ key: p.key, id: p.id, name: p.name, days, dataDays: Object.keys(days).length, beforeMonth })
   }
   if (!list.length) return { error: 'no-people' }
   if (!list.some(p => p.dataDays > 0)) return { error: 'no-times' }

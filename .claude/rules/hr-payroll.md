@@ -790,6 +790,11 @@ Decided with Aashish (2026-09-17). No migration. `attendanceImport.js` reads the
 - **Dates: the reading with the most REAL dates wins, then the most inside the month.** Ranked the
   other way, a Bhadra grid's "05-04" read day-first is Shrawan 5 and one column pours into Shrawan.
 - **A CSV is read with `raw: true`.** Read as a spreadsheet, SheetJS turns a BS "05-01" into an AD date.
+- **A grid cell is one DATE, so a shift past midnight is split across two cells (S798).**
+  `closeNightsInCells` moves a first punch before 5 AM back only on proof (the day before ends on an
+  evening clock-in, and the overnight is shorter than the same-day reading); never unconditionally,
+  or a 04:30 start leaves its day. `suspectReason` sends the rest to check with hours `''`, which
+  `stillIncomplete` holds open.
 
 ## Salary payments: finalizing pays nobody (S782)
 

@@ -295,4 +295,113 @@ describe('stillIncomplete', () => {
     expect(stillIncomplete({ status: 'absent' })).toBe(false)
     expect(stillIncomplete(undefined)).toBe(false)
   })
+  it('holds a day sent to check with its hours blank until someone touches its times or hours (S798)', () => {
+    expect(stillIncomplete({ status: 'present', start_time: '1:30', end_time: '16:00', hours_worked: '' })).toBe(true)
+    expect(stillIncomplete({ status: 'present', start_time: '17:00', end_time: '1:05', hours_worked: 7.3 })).toBe(false)
+  })
+})
+
+// S798 ATTENDANCE-3. A made-up Bhadra 2083 grid in the ZKTeco shape (owner decision: no real
+// late-shift export exists yet). Each cell holds one DATE's first and last punch, so a 17:00–01:00
+// bar shift reads "01:05-17:02": last night's clock-out, then tonight's clock-in.
+describe('a shift that ends after midnight, in a machine grid', () => {
+  const days31 = f => Array.from({ length: 31 }, (_, i) => f(i + 1))
+  const grid = people => [
+    ['Monthly Check In&Out Report'],
+    ['Time Period: 2083-05-01 - 2083-05-31'],
+    ['First Name', 'Last Name', 'ID', 'Department', 'Attendance Group', ...days31(d => `05-${pad(d)}`), 'Total Work Hours'],
+    ...people.map(([name, id, cells]) => [name, '-', id, 'All Departments', '-', ...cells, '00 : 00']),
+  ]
+  // The bar: on the Evening shift all month, off on the 5th, the 1st carrying Shrawan's last night.
+  const bar = days31(d => ({ 1: '01:03-17:00', 2: '01:05-17:02', 3: '01:02-17:01', 4: '00:58-None', 5: '-', 6: '17:00-None', 31: '01:01-16:59' }[d]
+    || `01:0${d % 6}-17:0${d % 4}`))
+  // A bakery starting at 04:30, a long day and a short one — its early clock-in must stay put.
+  const bakery = days31(d => (d === 9 ? '04:30-13:00' : '04:30-16:00'))
+  // A night cook on 21:00–07:00: every cell is that morning's clock-out and that evening's clock-in.
+  const cook = days31(() => '06:55-21:05')
+  // A clock-in before 5 AM with no evening before it to close.
+  const odd = days31(d => (d === 3 ? '01:30-16:00' : '-'))
+  const rows = grid([['bar', '7', bar], ['bakery', '8', bakery], ['cook', '9', cook], ['odd', '10', odd], ['sarita', '5', days31(() => '08:05-20:00')]])
+  const read = readAttendance(rows, detectMapping(rows), BHADRA)
+  const person = id => read.people.find(p => p.id === id)
+
+  it('joins each clock-out after midnight back to the evening it began', () => {
+    expect(read.error).toBeUndefined()
+    const b = person('7')
+    expect(b.days[1]).toEqual({ in: '17:00', out: '1:05', mark: null })
+    expect(b.days[2]).toEqual({ in: '17:02', out: '1:02', mark: null })
+    expect(b.days[3]).toEqual({ in: '17:01', out: '0:58', mark: null })
+    expect(b.days[4]).toBeUndefined()
+    expect(b.days[5]).toBeUndefined()
+    expect(b.days[6]).toEqual({ in: '17:00', out: '1:01', mark: null })
+    expect(b.days[7]).toEqual({ in: '17:03', out: '1:02', mark: null })
+    expect(b.days[30]).toEqual({ in: '17:02', out: '1:01', mark: null })
+    // The month's last night ends in Ashwin, which this file does not hold.
+    expect(b.days[31]).toEqual({ in: '16:59', out: null, mark: null })
+    // The 1st's 01:03 closed Shrawan's last night: left out, and counted.
+    expect(b.beforeMonth).toBe(1)
+  })
+
+  it('leaves an early start on its own day when that day reads shorter than the overnight', () => {
+    const k = person('8')
+    expect(k.days[1]).toEqual({ in: '4:30', out: '16:00', mark: null })
+    expect(k.days[2]).toEqual({ in: '4:30', out: '16:00', mark: null })
+    expect(k.days[9]).toEqual({ in: '4:30', out: '13:00', mark: null })
+    expect(k.beforeMonth).toBe(0)
+    expect(person('5').days[2]).toEqual({ in: '8:05', out: '20:00', mark: null })
+  })
+
+  it('does not move a morning clock-out after the cutoff, and does not move what it cannot prove', () => {
+    expect(person('9').days[2]).toEqual({ in: '6:55', out: '21:05', mark: null })
+    expect(person('10').days[3]).toEqual({ in: '1:30', out: '16:00', mark: null })
+  })
+
+  describe('planImport', () => {
+    const employees = ['bar', 'bakery', 'cook', 'odd'].map(n => ({ id: `e-${n}`, full_name: n, join_date: null, end_date: null }))
+    const shiftTypesById = {
+      evening: { id: 'evening', name: 'Evening', start_time: '17:00', end_time: '01:00', hours: 8 },
+      night: { id: 'night', name: 'Night', start_time: '21:00', end_time: '07:00', hours: 10 },
+    }
+    const rosterByKey = { 'e-bar:2': 'evening', 'e-cook:2': 'night' }
+    const plan = planImport({
+      people: read.people, coverage: read.coverage,
+      matches: { 'id:7': 'e-bar', 'id:8': 'e-bakery', 'id:9': 'e-cook', 'id:10': 'e-odd', 'id:5': SKIP },
+      employees, records: {}, period: BHADRA, rosterByKey, shiftTypesById,
+      autoHours: () => ({ hours_worked: 7.25, ot_hours: 0 }), breakMinutes: 45,
+      today: { year: 2083, month: 6, day: 1 },
+    })
+    const find = key => plan.changes.find(c => c.key === key)
+
+    it('brings the joined night in as a worked day, named as ending the next day', () => {
+      const c = find('e-bar:2')
+      expect(c.kind).toBe('worked')
+      expect(c.cell).toMatchObject({ status: 'present', start_time: '17:02', end_time: '1:02', hours_worked: 7.25 })
+      expect(c.machine).toBe('17:02–1:02 (next day)')
+      expect(describeMachineDay({ in: '17:00', out: '1:05' })).toBe('17:00–1:05 (next day)')
+    })
+
+    it('sends a whole-looking day that reads like two shifts\' ends to check, times kept, hours blank', () => {
+      const early = find('e-odd:3')
+      expect(early.kind).toBe('flagged')
+      expect(early.cell).toMatchObject({ status: 'present', start_time: '1:30', end_time: '16:00', hours_worked: '', ot_hours: '' })
+      expect(early.machine).toMatch(/1:30–16:00 — 14h 30m from a clock-in before 5 AM/)
+      expect(stillIncomplete(early.cell)).toBe(true)
+      const cook = find('e-cook:2')
+      expect(cook.kind).toBe('flagged')
+      expect(cook.machine).toMatch(/over 4 hours longer than the 10-hour Night shift/)
+      // Not rostered that day, so nothing to measure against: taken as the machine has it.
+      expect(find('e-cook:3').kind).toBe('worked')
+    })
+
+    it('leaves the bakery worked, and never sends a suspect day over times already on the sheet', () => {
+      expect(find('e-bakery:2').kind).toBe('worked')
+      const kept = planImport({
+        people: read.people, coverage: read.coverage, matches: { 'id:10': 'e-odd' }, employees,
+        records: { 'e-odd:3': { employee_id: 'e-odd', bs_day: 3, status: 'present', start_time: '17:00', end_time: '1:00' } },
+        period: BHADRA, rosterByKey: {}, shiftTypesById, autoHours: () => null, breakMinutes: 0, today: { year: 2083, month: 6, day: 1 },
+      })
+      expect(kept.changes.find(c => c.key === 'e-odd:3')).toBeUndefined()
+      expect(kept.byEmployee['e-odd'].kept).toBe(1)
+    })
+  })
 })

@@ -23,6 +23,8 @@ const LAYOUTS = [
 ]
 const layoutLabel = key => LAYOUTS.find(l => l.key === key)?.label.toLowerCase() || ''
 const calLabel = cal => (cal === 'ad' ? 'English (AD) dates' : 'Nepali (BS) dates')
+// "17:00" → 1020; null when the cell holds no time.
+const clockMinutes = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null }
 
 const cellText = v => (v instanceof Date ? v.toLocaleDateString() : String(v ?? '')).replace(/\s+/g, ' ').trim()
 const colLetter = c => { let s = '', n = c + 1; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26) } return s }
@@ -138,6 +140,11 @@ export default function AttendanceImportModal({
   }, [result, step, matches, employees, records, period, rosterByKey, shiftTypesById, autoHours, breakMin, today])
   const toApply = plan ? plan.changes.filter(c => !(c.kind === 'updated' && kept.has(c.key))) : []
   const updates = plan ? plan.changes.filter(c => c.kind === 'updated') : []
+  // A count cannot show a night read the wrong way round, so shifts read as ending after midnight
+  // and the days sent to check are listed with their times (S798, ATTENDANCE-3).
+  const overnight = plan ? plan.changes.filter(c => (c.kind === 'worked' || c.kind === 'updated') && clockMinutes(c.cell.end_time) < clockMinutes(c.cell.start_time)) : []
+  const toCheck = plan ? plan.changes.filter(c => c.kind === 'flagged') : []
+  const beforeMonth = result ? result.people.filter(p => matches[p.key] && matches[p.key] !== SKIP).reduce((s, p) => s + (p.beforeMonth || 0), 0) : 0
   const matchedIds = result ? [...new Set(result.people.map(p => matches[p.key]).filter(v => v && v !== SKIP))] : []
   const coverageText = result?.coverage.length
     ? `${formatBsDay(result.coverage[0], period.bs_month)} to ${formatBsDay(result.coverage[result.coverage.length - 1], period.bs_month)}`
@@ -373,7 +380,7 @@ export default function AttendanceImportModal({
                     <th>Employee</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Blank days with a full in and out on the machine — marked Present with those times, the break, and hours and overtime." width={240}>Worked</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Days already marked Present that take the machine's in and out times instead. Untick any below to keep what is on the sheet." width={240}>New times</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Only one punch, or in and out under an hour apart. Brought in as Present with the times the machine has and hours left blank, and shown in amber on the sheet until you fix them." width={260}>To check</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Only one punch, in and out under an hour apart, or a day that reads like two different shifts' ends — a clock-in before 5 AM running past 12 hours, or over 4 hours longer than the rostered shift. Brought in as Present with the times the machine has and hours left blank, and shown in amber on the sheet until you fix them." width={280}>To check</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="No punch on a day the roster had them working." width={200}>Absent</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="No punch on a day the roster had them off — marked Off, or the leave or holiday the roster shift is named for." width={240}>Off / leave</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Days the file marks with a letter or word instead of times, such as P, A, Off or Leave. A leave that does not say paid is marked Unpaid Leave." width={240}>Marked</Tip></th>
@@ -422,6 +429,39 @@ export default function AttendanceImportModal({
               </details>
             )}
 
+            {toCheck.length > 0 && (
+              <details open={toCheck.length <= 8}>
+                <summary style={{ cursor: 'pointer', color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+                  △ {toCheck.length} {toCheck.length === 1 ? 'day comes' : 'days come'} in to check — what the machine shows
+                </summary>
+                <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 12 }}>
+                  {toCheck.map(c => (
+                    <li key={c.key}>
+                      <strong style={{ color: 'var(--theme-text1)' }}>{empById.get(c.employeeId)?.full_name}</strong> · {formatBsDay(c.day, period.bs_month)} · {c.machine}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {overnight.length > 0 && (
+              <details open={overnight.length <= 12}>
+                <summary style={{ cursor: 'pointer', color: 'var(--theme-text1)', fontWeight: 600 }}>
+                  {overnight.length} {overnight.length === 1 ? 'shift ends' : 'shifts end'} after midnight — check the times read right
+                </summary>
+                <p style={{ margin: '6px 0 0', fontSize: 12 }}>
+                  The machine puts each date&apos;s punches in one cell, so a clock-out after midnight sits in the next day&apos;s cell. These were joined back to the evening they began.
+                </p>
+                <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 12 }}>
+                  {overnight.map(c => (
+                    <li key={c.key}>
+                      <strong style={{ color: 'var(--theme-text1)' }}>{empById.get(c.employeeId)?.full_name}</strong> · {formatBsDay(c.day, period.bs_month)} · {c.machine}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
             {plan.conflicts.length > 0 && (
               <details>
                 <summary style={{ cursor: 'pointer', color: 'var(--theme-amber-text)', fontWeight: 600 }}>
@@ -438,13 +478,14 @@ export default function AttendanceImportModal({
               </details>
             )}
 
-            {(plan.skipped.future > 0 || plan.skipped.notEmployed > 0 || result.outside > 0) && (
+            {(plan.skipped.future > 0 || plan.skipped.notEmployed > 0 || result.outside > 0 || beforeMonth > 0) && (
               <p style={{ margin: 0, fontSize: 12 }}>
                 Not brought in:{' '}
                 {[
                   plan.skipped.future > 0 && `${plan.skipped.future} day${plan.skipped.future === 1 ? '' : 's'} from today on with no punch yet, or after today`,
                   plan.skipped.notEmployed > 0 && `${plan.skipped.notEmployed} day${plan.skipped.notEmployed === 1 ? '' : 's'} before someone joined or after they left`,
                   result.outside > 0 && `${result.outside} day${result.outside === 1 ? '' : 's'} in the file outside ${periodLabel}`,
+                  beforeMonth > 0 && `${beforeMonth} clock-out${beforeMonth === 1 ? '' : 's'} after midnight on the 1st, which closed the last night of the month before`,
                 ].filter(Boolean).join(' · ')}.
               </p>
             )}
