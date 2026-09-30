@@ -187,7 +187,8 @@ export function computePayslip(employee, components, attendanceRows, period, tds
   const base = {
     pay_basis: basis,
     basic,
-    present_days:      t.present + t.half_day * 0.5 + t.half_paid_leave * 0.5,
+    // A half-day leave's other half was worked, whichever the leave type (S798 ENGINE-1).
+    present_days:      t.present + t.half_day * 0.5 + t.half_paid_leave * 0.5 + t.half_unpaid_leave * 0.5,
     absent_days:       t.absent,
     // Every day the absence deduction actually docks — absences PLUS unpaid leave, half days and
     // pre-join days. `absent_days` stays literal absences (Payroll Run's Excel column is labelled
@@ -209,7 +210,12 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     // So is a Holiday day (decided with Aashish, 2026-09-14): Labour Act s.41 gives EVERY worker
     // paid public holidays, and until S749 a daily-wage employee was paid nothing for one — which
     // also meant a paid leave spanning a holiday (marked Holiday since S749) paid a day less.
-    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave * 0.5 + t.holiday
+    // A half-day leave is one row for a day the employee worked the other half of (S798 ENGINE-1):
+    // a PAID half pays the whole day (leave half + worked half), an UNPAID half pays the worked
+    // half. The monthly branch below has always read it that way — a paid half costs nothing, an
+    // unpaid half docks 0.5 — and since S309 this line paid 0.5 and 0, so a daily-wage employee
+    // lost half a day's pay on every half-day leave.
+    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave + t.half_unpaid_leave * 0.5 + t.holiday
     const earned     = r(basic * workedDays)
     const otAmount   = r(t.sumOt * (basic / STANDARD_HOURS_PER_DAY) * OT_MULTIPLIER)
     const ssfEmp     = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0

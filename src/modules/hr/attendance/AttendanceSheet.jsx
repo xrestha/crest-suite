@@ -129,6 +129,12 @@ export default function AttendanceSheet() {
   // not run has not passed (decided 2026-09-14: a paid month is read-only).
   const [runStatus, setRunStatus] = useState('none')
   const [loadError, setLoadError] = useState(null)
+  // The month's own attendance read failed (S798 ATTENDANCE-1). Held apart from `loadError` (the
+  // periods and staff reads) because it is per month, and the sheet renders an error card in place
+  // of the grid while it is set: a grid that could not be read looks blank, and Generate, All
+  // Present and Import decide "blank" from the screen, so they overwrote approved unpaid leave and
+  // absences with Present days that payroll then paid.
+  const [attendanceError, setAttendanceError] = useState(null)
   // One sheet at a time (S749). Arrowing the period <select> starts a load per keypress, and the
   // last response to land used to win `records` while `period` was whatever was picked last —
   // so Save Day then wrote one month's rows under another month's period_id.
@@ -230,6 +236,8 @@ export default function AttendanceSheet() {
   // `carry` keeps the reader's unsaved edits through the reload (every write on the sheet reloads
   // the month, and used to wipe them); `drop(key)` names cells the write just deleted on purpose.
   // A period switch passes neither — another month's edits must not follow the reader into this one.
+  // Returns true when the month loaded, false when the read failed, null when a newer load took over,
+  // so a write never reports plain success over a sheet it could not re-read.
   const loadAttendance = useCallback(async (periodId, { carry = false, drop } = {}) => {
     // Paged: one row per employee per day, so the grid itself silently loses whole employees'
     // rows past the 1000-row cap at ~34 staff — and this sheet is what payroll then reads (S529).
@@ -238,11 +246,14 @@ export default function AttendanceSheet() {
       fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id')),
       scopedFrom('hr_payroll_runs', 'status').eq('period_id', periodId).maybeSingle(),
     ])
-    if (!periodReq.isCurrent(periodId)) return
+    if (!periodReq.isCurrent(periodId)) return null
     setRunStatus(runRes.error ? 'unknown' : (runRes.data?.status || 'none'))
     // A failed read is not a blank sheet (S682): this grid batch-saves what is on screen, so
-    // painting it empty and letting a Save through would write blanks over real days.
-    if (error) { setSavedMsg('error:Could not load this month\'s attendance — the sheet shows the last successful load. Reload before saving. ' + errorLine(error)); return }
+    // painting it empty and letting a Save through would write blanks over real days. Keeping "the
+    // last successful load" was no answer either — on a first load there was none, and after a month
+    // switch it was the previous month's marks under this month's name. So the grid goes (S798).
+    if (error) { setAttendanceError(error); return false }
+    setAttendanceError(null)
     const map = {}
     // Postgres's `time` column reads back as "08:00:00" — normalize to the display convention
     // ("8:00") on load rather than waiting for the admin to focus/blur each cell once.
@@ -257,7 +268,35 @@ export default function AttendanceSheet() {
     savedRef.current = map
     setSavedRecords(map)
     setRecords(current => carry ? carryUnsavedEdits(map, current, prevSaved, timeKey, drop) : map)
+    return true
   }, [scopedFrom, periodReq])
+
+  // Empties the sheet before a month is read, so nothing from another month or client can stand in
+  // for this one while the read is in flight or after it fails.
+  function resetSheet() {
+    savedRef.current = {}
+    setSavedRecords({})
+    setRecords({})
+    setAttendanceError(null)
+  }
+
+  // The error card's Try again. A fresh load, never `carry`: the grid was hidden, so nothing on it
+  // could have been edited, and carrying would lay whatever `records` still holds over real days.
+  async function retryAttendance() {
+    if (!period) return
+    periodReq.begin(period.id)
+    resetSheet()
+    setSavedMsg('')
+    setLoading(true)
+    await loadAttendance(period.id)
+    if (periodReq.isCurrent(period.id)) setLoading(false)
+  }
+
+  // Words for a write that landed when the reload after it did not (S798): the card replaces the
+  // grid, so this is the only place the reader learns the write itself went through.
+  function landedButUnread(what) {
+    return `ok:${what}. The sheet could not be read back afterwards, so it is hidden until it loads.`
+  }
 
   function applyPeriod(p) {
     setPeriod(p)
@@ -285,7 +324,12 @@ export default function AttendanceSheet() {
       setEmployees(emps)
       setSelectedEmployeeId(prev => prev || emps[0]?.id || '')
       const open = p.find(x => x.status === 'open') || p[0]
-      if (open) { periodReq.begin(open.id); applyPeriod(open); await loadAttendance(open.id) }
+      if (open) {
+        periodReq.begin(open.id); applyPeriod(open)
+        // resetSheet(), spelled out: an admin's client switch re-runs this over the last client's grid.
+        savedRef.current = {}; setSavedRecords({}); setRecords({}); setAttendanceError(null)
+        await loadAttendance(open.id)
+      }
       setLoading(false)
     }
     load()
@@ -306,6 +350,7 @@ export default function AttendanceSheet() {
     applyPeriod(p)
     setImportFlags({})
     setRunStatus('none')
+    resetSheet()
     setLoading(true)
     await loadAttendance(id)
     if (periodReq.isCurrent(id)) setLoading(false)
@@ -527,14 +572,14 @@ export default function AttendanceSheet() {
       keys.forEach(k => { delete next[k] })
       return next
     })
-    await loadAttendance(period.id, { carry: true })
-    setSavedMsg(`ok:Saved ${describeChanges(keys)}`)
+    const reread = await loadAttendance(period.id, { carry: true })
+    setSavedMsg(reread === false ? landedButUnread(`Saved ${describeChanges(keys)}`) : `ok:Saved ${describeChanges(keys)}`)
     setSaving(false)
   }
 
   // ── Import from machine ────────────────────────────────────────────────────
   function openImport() {
-    if (!period || refuseIfLocked()) return
+    if (!period || attendanceError || refuseIfLocked()) return
     // A day with no punch follows the roster, and a punched day's overtime is measured against its
     // shift, so an unread roster would mark working days Off and pay the wrong overtime.
     if (rosterReadError) {
@@ -591,8 +636,8 @@ export default function AttendanceSheet() {
       .in('employee_id', employees.map(e => e.id))
     if (error) { setSavedMsg(`error:Day ${selectedDay} may not have been cleared — reload to see what is stored. ` + errorLine(error)); setSaving(false); return }
     const listed = new Set(employees.map(e => e.id))
-    await loadAttendance(period.id, { carry: true, drop: key => { const k = splitCellKey(key); return k.day === selectedDay && listed.has(k.employeeId) } })
-    setSavedMsg(`ok:Cleared Day ${selectedDay}`)
+    const reread = await loadAttendance(period.id, { carry: true, drop: key => { const k = splitCellKey(key); return k.day === selectedDay && listed.has(k.employeeId) } })
+    setSavedMsg(reread === false ? landedButUnread(`Cleared Day ${selectedDay}`) : `ok:Cleared Day ${selectedDay}`)
     setSaving(false)
   }
 
@@ -628,11 +673,18 @@ export default function AttendanceSheet() {
     const plan = pendingGenerate
     if (!plan || !period || refuseIfLocked()) { setPendingGenerate(null); return }
     setGenerating(true); setSavedMsg('')
-    const { error } = await scopedUpsert('hr_attendance', plan.rows, { onConflict: 'employee_id,period_id,bs_day' })
+    // ON CONFLICT DO NOTHING (S798): the plan decided "blank" from the screen, and only the database
+    // knows what is really stored. A day saved meanwhile, in another tab or by a leave approval, is
+    // kept rather than overwritten; RETURNING lists only the rows that went in.
+    const { data: written, error } = await scopedUpsert('hr_attendance', plan.rows, { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true })
     setPendingGenerate(null)
     if (error) { setSavedMsg('error:The roster days may not have been written — reload to see what is stored, then generate again (it never overwrites a day that already has a mark). ' + errorLine(error)); setGenerating(false); return }
-    await loadAttendance(period.id, { carry: true })
-    setSavedMsg(`ok:Generated ${plan.rows.length} entr${plan.rows.length === 1 ? 'y' : 'ies'} from roster`)
+    const made = written?.length ?? plan.rows.length
+    const kept = plan.rows.length - made
+    const done = `Generated ${made} entr${made === 1 ? 'y' : 'ies'} from roster`
+      + (kept > 0 ? ` · ${kept} day${kept === 1 ? '' : 's'} already had a mark saved and ${kept === 1 ? 'was' : 'were'} left as ${kept === 1 ? 'it was' : 'they were'}` : '')
+    const reread = await loadAttendance(period.id, { carry: true })
+    setSavedMsg(reread === false ? landedButUnread(done) : `ok:${done}`)
     setGenerating(false)
   }
 
@@ -658,8 +710,9 @@ export default function AttendanceSheet() {
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
     if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
-    await loadAttendance(period.id, { carry: true, drop: key => splitCellKey(key).employeeId === empId })
-    setSavedMsg(`ok:Cleared ${name}'s records for ${periodLabel}`)
+    const reread = await loadAttendance(period.id, { carry: true, drop: key => splitCellKey(key).employeeId === empId })
+    const done = `Cleared ${name}'s records for ${periodLabel}`
+    setSavedMsg(reread === false ? landedButUnread(done) : `ok:${done}`)
     setSaving(false)
   }
 
@@ -697,8 +750,9 @@ export default function AttendanceSheet() {
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).in('employee_id', employees.map(e => e.id))
     if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
     const listed = new Set(employees.map(e => e.id))
-    await loadAttendance(period.id, { carry: true, drop: key => listed.has(splitCellKey(key).employeeId) })
-    setSavedMsg(`ok:Cleared ${periodLabel} for all ${employees.length} listed staff`)
+    const reread = await loadAttendance(period.id, { carry: true, drop: key => listed.has(splitCellKey(key).employeeId) })
+    const done = `Cleared ${periodLabel} for all ${employees.length} listed staff`
+    setSavedMsg(reread === false ? landedButUnread(done) : `ok:${done}`)
     setSaving(false)
   }
 
@@ -832,9 +886,9 @@ export default function AttendanceSheet() {
             ))}
           </select>
           <Tip text="Bring in a month of punches from the attendance machine's Excel or CSV export. You pick which Crest employee each person on the machine is, and see what will change before anything goes on the sheet. Nothing is saved until you press Save." width={280}>
-            <button className="btn btn-ghost" onClick={openImport} disabled={loading || !period || employees.length === 0} style={{ fontSize: 12 }}>↑ Import from machine</button>
+            <button className="btn btn-ghost" onClick={openImport} disabled={loading || !period || employees.length === 0 || !!attendanceError} style={{ fontSize: 12 }}>↑ Import from machine</button>
           </Tip>
-          {tab === 'summary' && <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export Excel</button>}
+          {tab === 'summary' && !attendanceError && <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export Excel</button>}
         </div>
       </div>
 
@@ -900,6 +954,22 @@ export default function AttendanceSheet() {
           {isAdmin
             ? 'No period found. Create a period in Periods first.'
             : 'No month is open yet. Crest opens your first month for you, so contact Crest support if it is missing.'}
+        </div>
+      ) : attendanceError ? (
+        /* In place of the grid, never above it (S798): every write here decides from what is on
+           screen, and an unread month would show as blank. */
+        <div role="alert" className="card" style={{ padding: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-red-text)', marginBottom: 6 }}>Could not load {periodLabel}&apos;s attendance</div>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, marginBottom: 12 }}>
+            Nothing can be marked, generated, imported or saved until it loads. A sheet that could not be read looks blank, and filling it in would replace days already marked, such as approved leave and absences.
+          </div>
+          {savedMsg && (
+            <div role="status" style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginBottom: 12 }}>
+              {savedMsg.split(':').slice(1).join(':')}
+            </div>
+          )}
+          <button type="button" className="btn btn-primary" onClick={retryAttendance}>Try again</button>
+          <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--theme-text3)', marginTop: 12 }}>{errorLine(attendanceError)}</div>
         </div>
       ) : tab === 'mark' ? (
         /* ── MARK ATTENDANCE ── */
@@ -1367,7 +1437,7 @@ export default function AttendanceSheet() {
                       </th>
                     ))}
                     <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>
-                      <Tip text="Present days for the month — half-days and half-day paid leave count as 0.5, matching how Payroll counts present days." width={250}>P</Tip>
+                      <Tip text="Present days for the month — half-days and half-day leave (paid or unpaid) count as 0.5, matching how Payroll counts present days." width={250}>P</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Absent days for the month." width={180}>A</Tip>
@@ -1388,7 +1458,7 @@ export default function AttendanceSheet() {
                 <tbody>
                   {employees.map(emp => {
                     const s = summaryFor(emp)
-                    const pVal  = s.counts.present + s.counts.half_day * 0.5 + s.counts.half_paid_leave * 0.5
+                    const pVal  = s.counts.present + s.counts.half_day * 0.5 + s.counts.half_paid_leave * 0.5 + s.counts.half_unpaid_leave * 0.5
                     const aVal  = s.counts.absent
                     const oVal  = s.counts.weekly_off
                     const otVal = s.otHours

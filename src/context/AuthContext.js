@@ -2,6 +2,7 @@ import { isStationTeam, posPathReachable } from '../shared/posTeamAccess'
 import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
+import { signOutThisDevice } from '../shared/deviceSignOut'
 import { getAccessState, suiteLive } from '../utils/subscription'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
 import { weatherEntitled } from '../modules/dashboard/weatherSettings'
@@ -368,7 +369,12 @@ export function AuthProvider({ children }) {
     return { data, error }
   }
 
-  async function signOut() {
+  // `to` is where the device goes if the network sign-out fails (S798 SELF-SERVICE-1): this device's
+  // session is then cleared by hand and the page reloaded there, since the in-memory client still
+  // holds it. Returns false in that case, so a caller must not navigate on top. A caller wired
+  // straight to onClick passes an event, which is why `to` is read defensively.
+  async function signOut(opts) {
+    const to = typeof opts?.to === 'string' ? opts.to : '/login'
     setProfile(null)
     setFeatureFlags({})
     setAdminViewClientId(null)
@@ -384,7 +390,11 @@ export function AuthProvider({ children }) {
     // own header claimed this could not happen (S731).
     try { sessionStorage.clear() } catch { /* private mode */ }
     setReady(false)
-    await supabase.auth.signOut()
+    // A shared till or counting tablet: a failed /logout used to leave the last login's session for
+    // the next person, because the result was never read.
+    const clean = await signOutThisDevice()
+    if (!clean) window.location.replace(to)
+    return clean
   }
 
   const isAdmin  = profile?.role === 'admin'

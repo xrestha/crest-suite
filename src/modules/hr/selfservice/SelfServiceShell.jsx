@@ -31,7 +31,7 @@ function initialsOf(name) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
-export default function SelfServiceShell({ profile, tab, onTab, badges = {}, onSignOut, children }) {
+export default function SelfServiceShell({ profile, tab, onTab, badges = {}, onSignOut, signingOut = false, children }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const activeLabel = TABS.find(t => t.key === tab)?.label || 'Self-service'
 
@@ -102,7 +102,7 @@ export default function SelfServiceShell({ profile, tab, onTab, badges = {}, onS
 
       {menuOpen && (
         <Modal variant="sheet" title="Account" onClose={() => setMenuOpen(false)}>
-          <AccountSheet profile={profile} onClose={() => setMenuOpen(false)} onSignOut={onSignOut} />
+          <AccountSheet profile={profile} onClose={() => setMenuOpen(false)} onSignOut={onSignOut} signingOut={signingOut} />
         </Modal>
       )}
     </div>
@@ -111,7 +111,7 @@ export default function SelfServiceShell({ profile, tab, onTab, badges = {}, onS
 
 // Sign Out lives here rather than in the header: it is not the second most important thing an
 // employee does, and it was sitting at the top right of every screen where a thumb lands.
-function AccountSheet({ profile, onClose, onSignOut }) {
+function AccountSheet({ profile, onClose, onSignOut, signingOut }) {
   const [state, setState] = useState(PUSH.UNSUPPORTED)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -198,8 +198,9 @@ function AccountSheet({ profile, onClose, onSignOut }) {
         Light or dark follows your phone&rsquo;s own setting.
       </p>
 
-      <button className="btn btn-danger btn-block" style={{ gap: 8 }} onClick={onSignOut}>
-        <LogOut size={16} aria-hidden="true" /> Sign out
+      {/* Up to a few seconds on a weak connection, so it says so rather than looking dead. */}
+      <button className="btn btn-danger btn-block" style={{ gap: 8 }} onClick={onSignOut} disabled={signingOut}>
+        <LogOut size={16} aria-hidden="true" /> {signingOut ? 'Signing out…' : 'Sign out'}
       </button>
     </>
   )

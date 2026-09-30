@@ -139,8 +139,9 @@ export function CalcDetail({ row, monthDays, advances, ytd }) {
             <Line label="Present Days" value={t.present || 0} />
             <Line label="Half-day × 0.5" op="+" value={((t.half_day || 0) * 0.5).toFixed(2)} />
             <Line label="Paid Leave Days" op="+" value={t.paid_leave || 0} />
-            <Line label="Half-day Paid Leave × 0.5" op="+" value={((t.half_paid_leave || 0) * 0.5).toFixed(2)} />
-            <Line label="Holiday Days (paid)" op="+" value={t.holiday || 0} />
+            <Line label="Half-day Paid Leave × 1" op="+" value={(t.half_paid_leave || 0).toFixed(2)} hint="The whole day is paid: the leave half because the leave type is paid, and the other half because it was worked." />
+            <Line label="Half-day Unpaid Leave × 0.5" op="+" value={((t.half_unpaid_leave || 0) * 0.5).toFixed(2)} hint="The half that was worked is paid. The leave half is not." />
+            <Line label="Holiday Days (paid)" op="+" value={t.holiday || 0} hint="Public holidays are paid to daily-wage staff too (Labour Act s.41)." />
             <Line label="Worked Days" op="=" value={`${b.workedDays.toFixed(2)} days`} strong />
             <Line label="Daily Rate" value={`NPR ${fmt(b.dailyRate)}`} />
             <Line label="Worked Days" op="×" value={`${b.workedDays.toFixed(2)} days`} />

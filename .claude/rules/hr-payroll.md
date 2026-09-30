@@ -851,3 +851,14 @@ Decided with Aashish (2026-09-28). Migrations `20260928100000` (advances), `2026
 - **A two-day swap trades a Day Off the other way** (`hr_shift_kind`: off / leave / work). Only a
   working shift or leave on the other day refuses (`swap_day_taken`, raised at request time too), and
   the traded rows must both be working shifts.
+
+## Half-day leave, the unread sheet (S798 stage 1a)
+
+- **A half-day leave row is a day whose other half was worked, on every pay basis.** Daily: a paid
+  half pays the day, an unpaid half pays 0.5 (`workedDays`). Monthly: a paid half docks 0, an unpaid
+  half 0.5. Hourly: typed hours plus 4 h for a paid half. `present_days` counts either as 0.5. Daily
+  paid 0.5 and 0 from S309 to S798 (ENGINE-1); no client had a daily-wage employee, so none was owed.
+- **A failed attendance read hides the grid** (`attendanceError`): Generate, the bulk marks and
+  Import decide "blank" from the screen. `loadAttendance` returns true / false / null (superseded),
+  and a write whose reload fails says it landed. Generate writes with `ignoreDuplicates` and counts
+  the days it kept.

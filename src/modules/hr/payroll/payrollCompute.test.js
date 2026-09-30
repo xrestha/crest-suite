@@ -304,6 +304,40 @@ describe('computePayslip — daily basis', () => {
     expect(slip.worked_days).toBe(22)
     expect(slip.gross).toBe(22000)
   })
+
+  // S798 ENGINE-1: the half not on leave was worked. It paid 0.5 and 0 until S798.
+  test('a half-day of PAID leave pays the whole day, like the monthly branch', () => {
+    const employee = { pay_basis: 'daily', basic_salary: 1000, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [
+      ...Array(20).fill({ status: 'present' }),
+      { status: 'half_paid_leave' },
+    ], period)
+    expect(slip.worked_days).toBe(21)
+    expect(slip.gross).toBe(21000)
+    expect(slip.present_days).toBe(20.5)
+  })
+
+  test('a half-day of UNPAID leave pays the half that was worked', () => {
+    const employee = { pay_basis: 'daily', basic_salary: 1000, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [
+      ...Array(20).fill({ status: 'present' }),
+      { status: 'half_unpaid_leave' },
+    ], period)
+    expect(slip.worked_days).toBe(20.5)
+    expect(slip.gross).toBe(20500)
+    expect(slip.present_days).toBe(20.5)
+  })
+
+  test('SSF is taken on the corrected earned figure', () => {
+    const employee = { pay_basis: 'daily', basic_salary: 1000, ssf_enrolled: true, ssf_no: 'S-1' }
+    const slip = computePayslip(employee, [], [
+      ...Array(20).fill({ status: 'present' }),
+      { status: 'half_paid_leave' }, { status: 'half_unpaid_leave' },
+    ], period)
+    expect(slip.gross).toBe(21500)
+    expect(slip.ssf_employee).toBe(2365)  // 21500 × 11%
+    expect(slip.ssf_employer).toBe(4300)  // 21500 × 20%
+  })
 })
 
 describe('computePayslip — hourly basis', () => {

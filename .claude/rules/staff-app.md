@@ -201,6 +201,11 @@ predicate refuses `TypeError: Failed to fetch` and a plain null-property read.
   RPC to return the client name, which is a backend change this app avoids.
 - **Sign-out returns to the remembered PIN pad**, the same place an expired session lands. It went to
   `/login`, which no employee has an account for.
+- **Sign-out goes through `signOutThisDevice()`** (`src/shared/deviceSignOut.js`, S798). A failed
+  /logout keeps the stored session, so on a shared phone the next person was signed in as the last.
+  It waits 6 s, then clears `sb-*-auth-token*` itself and returns false; the caller then leaves by
+  `location.replace`, never `navigate`. Push is turned off first (4 s bound). `AuthContext.signOut({ to })`
+  does the same for tills and tablets.
 - **`useStaffAppManifest(themeColor)` takes the page's own ground** and sets `document.title` to
   "Crest Staff"; it was pinned to Night's ink on a light phone and the title said Crest Suite.
 - A swap status is a sentence (`SWAP_STATUS_LABEL`), never the database value with its underscores

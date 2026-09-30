@@ -19,6 +19,9 @@ import { todayView, nextShift, pendingSwapsForMe } from './todayView'
 import { employeeErrorText } from './employeeError'
 import { useStaffAppManifest } from './useStaffApp'
 import { rememberedStaffClient } from './staffClient'
+import { signOutThisDevice } from '../../../shared/deviceSignOut'
+import { unsubscribeFromPush } from '../../../utils/webPush'
+import { withTimeout } from '../../../utils/withTimeout'
 import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS, isOffDay } from '../payrollConstants'
 import { methodLabel } from '../payroll/salaryPayments'
 import './selfService.css'
@@ -489,10 +492,24 @@ export default function SelfServiceHome() {
 
   // Back to this restaurant's PIN pad, the same place an expired session lands (S768). It went to
   // /login — the Owner's email-and-password page, which no employee has an account for.
+  // A phone is often shared, so sign-out must leave it signed out even when the network fails
+  // (S798 SELF-SERVICE-1): the result used to be ignored, and a failed /logout kept the session
+  // for the next person who opened the app.
+  const [signingOut, setSigningOut] = useState(false)
   async function signOut() {
-    await supabase.auth.signOut()
+    if (signingOut) return
+    setSigningOut(true)
+    // Notifications first, while the session can still delete this phone's row: on a shared phone
+    // the last employee's pushes kept arriving for the next one. Best effort, and bounded, because
+    // `serviceWorker.ready` never settles where no worker registered.
+    await withTimeout(unsubscribeFromPush(), 4000, 'Notifications')
+      .catch(e => console.error('Could not turn notifications off at sign-out', e))
+    const clean = await signOutThisDevice()
     const known = rememberedStaffClient() || profile?.client_id
-    navigate(known ? `/hr/self-service/login/${known}` : '/login', { replace: true })
+    const to = known ? `/hr/self-service/login/${known}` : '/login'
+    // Cleared by hand: the in-memory client still holds the session, so only a page load drops it.
+    if (clean) navigate(to, { replace: true })
+    else window.location.replace(to)
   }
 
   if (authLoading || !profile?.hr_self_service) {
@@ -526,6 +543,7 @@ export default function SelfServiceHome() {
       onTab={setTab}
       badges={{ roster: swapsForMe.length }}
       onSignOut={signOut}
+      signingOut={signingOut}
     >
       {tab === 'home' && (
         <SelfServiceToday

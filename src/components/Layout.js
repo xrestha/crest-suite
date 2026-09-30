@@ -568,10 +568,12 @@ export default function Layout() {
     // A till locking — idle, or Lock POS — first lets the order screen keep its unsent cart for this
     // login (S776, posLockedCart.js). Before this the lock simply discarded it.
     if (isPosDevice && isPinStaff) await runBeforePosLock()
-    await signOut()
     // A counting tablet goes back to its PIN screen (S792, D39): the email /login page is a door
     // the next counter has no key for, so the tablet read as broken until a manager came.
-    navigate(imsCountOnly ? IMS_COUNT_LOGIN : isPosDevice && isPinStaff ? '/pos/login' : '/login')
+    const to = imsCountOnly ? IMS_COUNT_LOGIN : isPosDevice && isPinStaff ? '/pos/login' : '/login'
+    // false: the network sign-out failed and the device is already reloading there (S798).
+    if (!(await signOut({ to }))) return
+    navigate(to)
   }
 
   // ── POS idle lock ────────────────────────────────────────────────────────────────────────────
