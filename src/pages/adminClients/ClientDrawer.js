@@ -214,6 +214,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // machine where no folder has been chosen — could never run a Danger Zone action at all.
   const [skipBackup, setSkipBackup]   = useState(false)
   const [restoreMsg, setRestoreMsg]   = useState('')
+  // The backup's roster, held only while a relink after a restore has failed (S798).
+  const [relinkRoster, setRelinkRoster] = useState(null)
   const [restoreBusy, setRestoreBusy] = useState(false)
 
   // Edit client state
@@ -755,10 +757,42 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     return true
   }
 
+  // Puts back each kept login's employee link and a settled leaver's block (relink_staff_accounts).
+  // Returns the sentence for the restore message. On a failure the roster is held so the operator
+  // can run it again: the restore itself cannot be repeated over a client it has just filled.
+  async function relinkStaffLogins(roster) {
+    try {
+      const link = await adminOp('relink_staff_accounts', { client_id: client.id, roster })
+      setRelinkRoster(null)
+      const n = link.relinked?.length || 0
+      const b = link.reblocked?.length || 0
+      let text = ''
+      if (n) text += ` ${n} staff login${n !== 1 ? 's' : ''} re-linked to ${n !== 1 ? 'their' : 'its'} employee record${n !== 1 ? 's' : ''}.`
+      if (b) text += ` Login blocks put back for ${b} settled leaver${b !== 1 ? 's' : ''}: ${link.reblocked.join(', ')}.`
+      if (link.skipped?.length) text += ` Not re-linked: ${link.skipped.map(s => `${s.full_name} (${s.reason})`).join('; ')}.`
+      return { text, failed: false }
+    } catch (err) {
+      setRelinkRoster(roster)
+      return {
+        text: ` But staff logins were NOT re-linked to their employee records (${err.message}): until they are, Crest Staff refuses those logins and a leaver settled later keeps theirs. Press "Re-link staff logins" below.`,
+        failed: true,
+      }
+    }
+  }
+
+  async function retryRelink() {
+    if (!relinkRoster) return
+    setRestoreBusy(true)
+    const { text, failed } = await relinkStaffLogins(relinkRoster)
+    setRestoreMsg(`${failed ? 'error' : 'ok'}:${text.trim() || 'Staff logins checked — nothing needed re-linking.'}`)
+    setRestoreBusy(false)
+  }
+
   async function handleRestoreFile(file) {
     if (!file) return
     setRestoreBusy(true)
     setRestoreMsg('')
+    setRelinkRoster(null)
     try {
       const parsed = JSON.parse(await file.text())
       const result = await restoreClientData(client.id, parsed, {
@@ -773,13 +807,17 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // fall into the rebuild branch, where every existing login came back from the Edge Function
       // as "must be recreated by hand" — an instruction to delete and recreate accounts that
       // already work. The data is restored either way; only the login step is skipped.
+      // Every kind of staff login counts (S798): counting till PINs alone read an HR-only or
+      // IMS-only client as having none, and the rebuild then named every live Self-Service and
+      // count login as one to recreate by hand.
       const { count: existingLogins, error: loginCountErr } = await supabase
         .from('profiles').select('id', { count: 'exact', head: true })
-        .eq('client_id', client.id).not('pos_email', 'is', null)
+        .eq('client_id', client.id)
+        .or('pos_email.not.is.null,hr_self_service.eq.true,ims_email.not.is.null,ims_role.not.is.null,hr_role.not.is.null')
       if (loginCountErr) {
         note = ' Staff logins were NOT rebuilt because the existing logins could not be counted — if this client has none, run the restore again to rebuild them. ' + errorLine(loginCountErr)
       } else if ((existingLogins || 0) > 0) {
-        note = ' Existing staff logins were left untouched.'
+        note = ' Existing staff logins were kept.'
       } else {
         setRestoreMsg('info:Rebuilding staff logins…')
         const accounts = await adminOp('restore_staff_accounts', {
@@ -789,11 +827,21 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         })
         const restoredCount = accounts.restored?.length || 0
         note = restoredCount ? ` ${restoredCount} PIN login${restoredCount !== 1 ? 's' : ''} restored with their original PINs.` : ''
+        // A settled leaver's till or count PIN comes back blocked, as their settlement left it (S798).
+        const blockedBack = (accounts.restored || []).filter(r => /blocked/.test(r.kind))
+        if (blockedBack.length) note += ` Restored blocked, as their Final Settlement left them: ${blockedBack.map(r => r.full_name).join(', ')}.`
         if (accounts.manual?.length) {
           note += ` ${accounts.manual.length} account${accounts.manual.length !== 1 ? 's' : ''} must be recreated by hand: ` +
             accounts.manual.map(m => `${m.full_name} (${m.kind})`).join(', ') + '.'
         }
       }
+
+      // Deleting the employees and settlements cleared every kept login's link to them, so Crest
+      // Staff, leaver blocks, the own-record rules and push notifications all need them put back
+      // (S798, DATABASE-1). In every branch — it only fills a link that is empty — and after a full
+      // Delete it finds nothing to do.
+      const relink = await relinkStaffLogins(parsed.data?.profiles || [])
+      note += relink.text
 
       // `renamed` is not a failure and must not read as one: those rows DID restore, under a
       // changed name, because the backup held two items sharing one (S707). Said plainly, with the
@@ -801,7 +849,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       const renamedNote = result.renamed?.length
         ? ` ${result.renamed.length} duplicate item name${result.renamed.length !== 1 ? 's were' : ' was'} restored with a "-DUP" suffix — merge or retire them in Item Master: ${result.renamed.join(', ')}.`
         : ''
-      setRestoreMsg(`ok:Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}` +
+      setRestoreMsg(`${relink.failed ? 'error' : 'ok'}:Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}` +
         (result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}.` : ''))
       onClientUpdated()
     } catch (err) {
@@ -1985,6 +2033,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     {restoreMsg.replace(/^(ok|error|info):/, '')}
                   </p>
                 )}
+                {relinkRoster && (
+                  <button type="button" className="btn btn-ghost" style={{ fontSize: 12, marginTop: 8 }}
+                    disabled={restoreBusy} onClick={retryRelink}>
+                    {restoreBusy ? 'Re-linking…' : 'Re-link staff logins'}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -2029,7 +2083,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.65 }}>
                   The recommended way to close out a client who has left. Takes a backup, clears their operational
                   data, and locks the account — but <strong style={{ color: 'var(--theme-text1)' }}>keeps their user
-                  accounts, logins, settings and client record</strong>, so restoring the backup fully reverses it.
+                  accounts, logins, settings and client record</strong>, so restoring the backup fully reverses it:
+                  the restore also re-links each staff login to its employee record and puts back a settled leaver&apos;s block.
                 </p>
                 <button
                   className="btn btn-ghost"

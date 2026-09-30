@@ -147,10 +147,12 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     supabase.from('settings').select('*').eq('client_id', clientId),
     // The roster restore re-provisions from. Password material is never selected — there is none
     // to select; GoTrue holds it and it is not exportable at any privilege level.
+    // hr_employee_id and settlement_blocked_by are what relink_staff_accounts puts back after a
+    // restore (S798): deleting the employees and settlements clears both on every kept login.
     supabase.from('profiles')
       .select('id, full_name, role, client_id, pos_role, pos_team, pos_discount_limit, pos_allow_void, ' +
               'pos_email, ims_role, ims_job_title, hr_role, hr_job_title, hr_self_service, ' +
-              'hr_self_service_email, ims_email, hr_employee_id, pos_job_title')
+              'hr_self_service_email, ims_email, hr_employee_id, settlement_blocked_by, pos_job_title')
       .eq('client_id', clientId),
     // Ciphertext only. The AES-GCM key lives in app_secrets and never enters this file, so these
     // rows are inert on disk — but they let a restore give POS/Self-Service staff their original

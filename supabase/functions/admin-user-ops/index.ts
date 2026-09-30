@@ -103,6 +103,11 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
   return { tablets_revoked: devices.length, legacy_key_retired: legacyRetired, ims_tablets_signed_out: imsTabletsSignedOut }
 }
 
+// How long a settled leaver's login is banned for when a restore puts the block back (S798). Final
+// Settlement writes banned_until = 2999 in SQL; GoTrue's admin API takes a duration, and a hundred
+// years is the same answer. reopen_final_settlement clears whichever it finds.
+const LEAVER_BAN = '876000h'
+
 // S792 (DATABASE-5). An id list travels in the URL, and the gateway refuses one past a few hundred
 // uuids (414, measured at ~254 in S706). The wipes below used to pass a client's whole list at once
 // — every recipe, order or bill line — so on a mature client they threw part-way, after
@@ -1094,6 +1099,14 @@ Deno.serve(async (req) => {
       const restored: Array<{ full_name: string; kind: string }> = []
       const manual:   Array<{ full_name: string; kind: string; reason: string }> = []
 
+      // A leaver's till or count PIN comes back blocked, as their Final Settlement left it (S798,
+      // DATABASE-1) — the vaulted PIN would otherwise recreate it working. Only while that settlement
+      // came back finalized; the Restore restores settlements before it calls this. Tens of rows.
+      const { data: finalizedRows, error: finalizedErr } = await admin.from('hr_final_settlements')
+        .select('id').eq('client_id', client_id).eq('status', 'finalized')
+      if (finalizedErr) return json({ error: `could not read the restored settlements: ${finalizedErr.message}` }, 500)
+      const finalizedIds = new Set((finalizedRows || []).map((s: { id: string }) => s.id))
+
       for (const p of roster) {
         // Three PIN kinds now (S737): POS, Self-Service and IMS stock count. An account is
         // restorable when it has a generated login email in the roster AND a vaulted PIN — the
@@ -1179,10 +1192,155 @@ Deno.serve(async (req) => {
         }
 
         await vaultPin(authData.user.id, client_id, vaultKind, pin)
-        restored.push({ full_name: p.full_name, kind: kindLabel })
+
+        // Final Settlement blocks till and stock logins (never Self-Service, which access_blocked on
+        // the employee ends), so only those two kinds carry the stamp.
+        let blocked = false
+        if ((isPos || isImsCount) && p.settlement_blocked_by && finalizedIds.has(p.settlement_blocked_by)) {
+          const { error: banErr } = await admin.auth.admin.updateUserById(authData.user.id, { ban_duration: LEAVER_BAN })
+          let stampErr: { message: string } | null = null
+          if (!banErr) {
+            const { error } = await admin.from('profiles')
+              .update({ settlement_blocked_by: p.settlement_blocked_by }).eq('id', authData.user.id)
+            stampErr = error
+          }
+          if (banErr || stampErr) {
+            // A working login for someone settled out is the thing this step exists to prevent, so
+            // it does not stay: removed and named for the operator instead.
+            await admin.auth.admin.deleteUser(authData.user.id)
+            manual.push({ full_name: p.full_name, kind: kindLabel, reason: `left out — settled leaver, and the block could not be re-applied (${(banErr || stampErr)?.message})` })
+            continue
+          }
+          blocked = true
+        }
+        restored.push({ full_name: p.full_name, kind: blocked ? `${kindLabel}, blocked (settled leaver)` : kindLabel })
       }
 
       return json({ success: true, restored, manual })
+    }
+
+    // ── Re-link staff logins to the records a Restore brought back (S798, DATABASE-1) ────────
+    //
+    // Archive deletes hr_employees and hr_final_settlements and keeps every login, and both profile
+    // links to them (hr_employee_id, settlement_blocked_by) are ON DELETE SET NULL. The Restore
+    // brings the rows back under their old ids and, before this, nothing pointed at them again:
+    // Crest Staff refused every sign-in, Final Settlement found no login to block, the own-record
+    // guards fell back to the employee's email, and hr-push reached nobody. hr_employee_id is written
+    // only when a login is created and guard_profiles_privileged_columns keeps the browser off it, so
+    // this is the one repair. The Restore calls it after restoreClientData whether or not logins
+    // exist; a login restore_staff_accounts just recreated has a new id and is not in the roster.
+    //
+    // A link is filled only where it is NULL, only to a record that exists in this client, and never
+    // where it would give an employee a second login of a kind that allows one. A leaver's block comes
+    // back only while the restored settlement is still finalized, and its ban is re-asserted. A backup
+    // from before the export carried settlement_blocked_by infers it the way Final Settlement chose:
+    // a till, stock or HR login, linked to that leaver, already banned, settled in the current
+    // employment. Tens of rows per client, so the three reads are not paged.
+    if (action === 'relink_staff_accounts') {
+      if (!isCallerAdmin) return json({ error: 'Forbidden' }, 403)
+
+      const { client_id, roster } = params
+      if (!client_id || !Array.isArray(roster)) {
+        return json({ error: 'client_id and roster are required' }, 400)
+      }
+
+      const [liveRes, empRes, finRes] = await Promise.all([
+        admin.from('profiles')
+          .select('id, full_name, hr_employee_id, settlement_blocked_by, pos_email, hr_self_service, ims_role, hr_role')
+          .eq('client_id', client_id),
+        admin.from('hr_employees').select('id, join_date').eq('client_id', client_id),
+        admin.from('hr_final_settlements').select('id, employee_id, last_working_date')
+          .eq('client_id', client_id).eq('status', 'finalized'),
+      ])
+      const readErr = liveRes.error || empRes.error || finRes.error
+      if (readErr) return json({ error: `could not read the restored client: ${readErr.message}` }, 500)
+
+      type Live = { id: string; full_name: string | null; hr_employee_id: string | null; settlement_blocked_by: string | null;
+        pos_email: string | null; hr_self_service: boolean | null; ims_role: string | null; hr_role: string | null }
+      const live = (liveRes.data || []) as Live[]
+      const liveById = new Map(live.map(p => [p.id, p]))
+      const joinOf = new Map((empRes.data || []).map((e: { id: string; join_date: string | null }) => [e.id, e.join_date]))
+      const finalized = (finRes.data || []) as Array<{ id: string; employee_id: string; last_working_date: string }>
+      const finalizedIds = new Set(finalized.map(s => s.id))
+      // The settlement that closed an employee's CURRENT employment (a join date after the settled last
+      // day is a rehire, S791) — the one Final Settlement would have blocked their logins under.
+      const currentSettlementOf = (employeeId: string) => {
+        const join = joinOf.get(employeeId)
+        return finalized
+          .filter(s => s.employee_id === employeeId && (!join || s.last_working_date >= join))
+          .sort((a, b) => (a.last_working_date < b.last_working_date ? 1 : -1))[0] || null
+      }
+      // profiles_hr_employee_self_service_unique and profiles_hr_employee_pos_unique: one login of each
+      // of those kinds per employee.
+      const held = {
+        selfService: new Set(live.filter(p => p.hr_self_service && p.hr_employee_id).map(p => p.hr_employee_id as string)),
+        pos: new Set(live.filter(p => p.pos_email && p.hr_employee_id).map(p => p.hr_employee_id as string)),
+      }
+
+      const relinked: string[] = []
+      const reblocked: string[] = []
+      const skipped: Array<{ full_name: string; reason: string }> = []
+
+      for (const r of roster) {
+        const p = r?.id ? liveById.get(r.id) : undefined
+        if (!p) continue
+        const name = p.full_name || r.full_name || '(unnamed)'
+        const patch: Record<string, string> = {}
+
+        if (!p.hr_employee_id && r.hr_employee_id) {
+          if (!joinOf.has(r.hr_employee_id)) {
+            skipped.push({ full_name: name, reason: 'their employee record is not in this restore' })
+          } else if ((p.hr_self_service && held.selfService.has(r.hr_employee_id)) || (p.pos_email && held.pos.has(r.hr_employee_id))) {
+            skipped.push({ full_name: name, reason: 'another login of the same kind is already linked to that employee' })
+          } else {
+            patch.hr_employee_id = r.hr_employee_id
+            if (p.hr_self_service) held.selfService.add(r.hr_employee_id)
+            if (p.pos_email) held.pos.add(r.hr_employee_id)
+          }
+        }
+
+        const employeeId = patch.hr_employee_id || p.hr_employee_id
+        const blocksLogins = !!(p.pos_email || p.ims_role || p.hr_role)
+        // Read once, only when a block is in question. A failed read counts as not banned: an inferred
+        // block is then not made, and a named one re-bans, which is harmless if it already was.
+        let banned: boolean | null = null
+        const isBanned = async () => {
+          if (banned === null) {
+            const { data: u } = await admin.auth.admin.getUserById(p.id)
+            const until = u?.user?.banned_until ? Date.parse(u.user.banned_until) : NaN
+            banned = Number.isFinite(until) && until > Date.now()
+          }
+          return banned
+        }
+        let blockBy: string | null = null
+        if (!p.settlement_blocked_by && blocksLogins) {
+          if (r.settlement_blocked_by) {
+            if (finalizedIds.has(r.settlement_blocked_by)) blockBy = r.settlement_blocked_by
+          } else if (!('settlement_blocked_by' in r) && employeeId) {
+            const s = currentSettlementOf(employeeId)
+            if (s && await isBanned()) blockBy = s.id
+          }
+        }
+
+        if (blockBy) {
+          if (!(await isBanned())) {
+            const { error: banErr } = await admin.auth.admin.updateUserById(p.id, { ban_duration: LEAVER_BAN })
+            if (banErr) {
+              skipped.push({ full_name: name, reason: `settled leaver, but the login could not be blocked (${banErr.message}) — block it by hand` })
+              blockBy = null
+            }
+          }
+          if (blockBy) patch.settlement_blocked_by = blockBy
+        }
+
+        if (!Object.keys(patch).length) continue
+        const { error: upErr } = await admin.from('profiles').update(patch).eq('id', p.id).eq('client_id', client_id)
+        if (upErr) { skipped.push({ full_name: name, reason: upErr.message }); continue }
+        if (patch.hr_employee_id) relinked.push(name)
+        if (patch.settlement_blocked_by) reblocked.push(name)
+      }
+
+      return json({ success: true, relinked, reblocked, skipped })
     }
 
     // ── Enable HR Employee Self-Service — PIN login, mirrors create_pos_staff exactly ────────
