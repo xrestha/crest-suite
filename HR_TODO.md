@@ -654,7 +654,7 @@ readers, dashboards.md; `SelfServiceHome.jsx`, `SwapRequestsPanel.jsx`, `todayVi
 | REPORTS-7 | `useNavBadgeCounts` keeps the last good value on a failed count (HR and `posPending`). | 🔴 |
 | REPORTS-8 | Disable the .xlsx exports while `clientInfoError` is set, with a notice. | 🔴 |
 | REPORTS-9 | "monthly-paid staff, basic only"; BS dates in the leave queue. | 🔴 |
-| REPORTS-10 | Reword hr-payroll.md (S768, S751), component-library.md:28, `hrGuideData.js:49`, the HrDashboard comment: rank fences writes; supervisors read pay (S750). | 🔴 |
+| REPORTS-10 | Reword hr-payroll.md (S768, S751), component-library.md:28, `hrGuideData.js:49`, the HrDashboard comment: rank fences writes; supervisors read pay (S750). | 🟡 The two rules files reworded in S799 (hr-payroll.md's rank and `PayrollMonthStatus` bullets, component-library.md's row). `hrGuideData.js:49` and the `HrDashboard.jsx` comment are open. |
 | LABOUR-FIGURES-8 | Employer SSF on min(basic × days worked ÷ month days, cap) in both estimates. | 🔴 |
 | LABOUR-FIGURES-9 | Tick the pay step only when no active employee has basic 0; say how many; optional Payroll Run warning. | 🔴 |
 | LABOUR-FIGURES-10 | Show every failed close stage's sentence (Periods.js, ClientDashboard.jsx). | 🔴 |

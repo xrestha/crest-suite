@@ -3,943 +3,715 @@ paths:
   - "src/modules/hr/**"
 ---
 
-# HR payroll engine
-
-> Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
-
-### HR payroll engine (pure functions)
-
-`src/modules/hr/payroll/payrollCompute.js` — no React, no Supabase. Three pay bases: `monthly`, `daily`, `hourly`.
-
-**Monthly-basis pay is prorated for `join_date` (added S482)** — `daysNotYetJoined()` folds days-before-hire, within the period being paid, into the same `unpaidDays` figure attendance-based absence already uses, so a newly hired employee (or one who joins mid-period) is paid only from their join date onward instead of a full contractual month. This one change also correctly shrinks the SSF base and TDS (both already derive from `gross − absence_deduction`), so no other file needed touching for it to flow through. Daily/hourly staff never needed this — their pay comes straight from attendance rows, which can't exist for days before the employee's record was created. Any caller of `computePayslip()` must pass `join_date` on the `employee` object (both `PayrollRun.jsx` and `PayrollCalculation.jsx`'s employee queries include it) — found live via a smoke test: without it, Payroll Run happily paid a brand-new hire a full month's basic for a period that had already closed before they joined.
-
-`src/modules/hr/payroll/tds.js` — Nepal income-tax TDS via YTD cumulative projection. FY 2083/84 slabs apply from Shrawan 2083 onwards. SSF contributors have the 1% first slab waived.
-
-Constants in `src/modules/hr/payrollConstants.js`: SSF rates (11% employee / 20% employer), SSF cap (NPR 100,000 basic), OT multiplier (1.5×).
-
-**SSF requires the enrolment flag AND a registration number (S570).** `computePayslip` gates on `ssf_enrolled && ssf_no`, not the flag alone. The flag alone deducted 11% while `HrReports.jsx`'s challan tab has always filtered on `ssf_no` too — so a flagged employee with a blank number had money withheld that no filing sheet ever claimed, with one quiet "N employees excluded" line as the only tell. The same gate is mirrored in `PayrollRun.jsx`'s and `PayrollCalculation.jsx`'s `isSsf` (the TDS 1%-waiver flag) — **all three must agree**, or an employee shows a permanent false Stale badge against a correct payslip. Payroll Run flags the state inline as `⚠ SSF no. missing`.
-
-**Approved overtime SUPERSEDES attendance-sheet OT, per day (S570).** They used to be added together, which paid the same hours twice and was surfaced only as a `⚠ OT ×2?` warning the user had to act on. `tallyAttendance(rows, supersededOtDays)` now withholds attendance OT on any `bs_day` an approved entry covers, and reports the withheld hours as `sumOtSuperseded` so a page can explain the difference. Consequence for callers: **the OT query must select `bs_day`** — it is load-bearing, not display data, and both payroll pages had to add it. Holiday 2× remains reachable only through the Overtime module. Same shape as POS-supersedes-manual in sales depletion.
-
-**`hr_payslips.unpaid_days` vs `absent_days` (S570, migration `20260818120000`).** `absent_days` is literal absences and must stay that way — Payroll Run's Excel export renders it under the header "Absent Days". The payslip's absence line covers absences **plus** unpaid leave, half days and pre-join days, so it prints `unpaid_days`; printing the narrow figure understated it (one absence + three unpaid-leave days read "(1.0 days)" against four days of money). Payslips finalized before the migration have no value and correctly print no count rather than a wrong one.
-
-> **S751 supersedes parts of the next five sections** — the TADA filter (S565), the `net_pay`/override comparison (S570/S620), the departed bucket being non-blocking (S600), and the two pages' own `buildRows`. **S752 supersedes the Final Settlement and gratuity parts of S600/S613/S620** — the partial-month salary, the SSF start-date offset, the browser-side Finalize/Reopen and its `isAdmin` Reopen gate. Read the S751 and S752 sections at the end first.
-
-**Payroll Run refuses to finalize a stale draft (S570).** The draft is a snapshot from Generate time, so approving OT or editing attendance afterwards left it quietly wrong while Finalize locked whatever was on screen — and the only staleness detection lived on `/hr/calculation`, a page nobody had to visit first. `PayrollRun.jsx` now recomputes live via **`buildRows` itself** (never a second copy of the arithmetic) and compares `net_pay` per employee; mismatches and employees added after the run block Finalize outright, with a named amber banner pointing at Regenerate. Finalize's confirm is now a consequence summary — payslip count, total net pay, advance recoveries and TADA claims to be closed — because those are real writes to other ledgers. This is why `fetchYtdMap`/`fetchApprovedTadaMap` are loaded on every page load here, not just inside generate/regenerate.
-
-**`payrollData.js`'s three fetch helpers are shared by Payroll Run and Payroll Calculation on purpose, and a filter that's correct for one can be wrong for the other (S565).** `/hr/payroll-calculation` exists solely to recompute every figure live and compare it against the stored `hr_payslips` snapshot, flagging a per-employee **⚠ Stale** badge when `Math.round(stored.net_pay) !== Math.round(netPay)`. That comparison is only meaningful if the live side sees the same *inputs* the stored side was built from — so **any helper feeding it must be robust to state the Finalize action itself changed.** `fetchApprovedTadaMap()` was not: Finalize marks the claims it paid `status='paid', paid_method='Payroll'` (the double-reimbursement guard from S324), while the helper filtered `.eq('status','approved')`, so on an already-finalized period it returned an empty map, live net pay came out short by exactly the TADA amount, and **every employee paid TADA through payroll showed a false Stale flag** — pointing at a genuinely correct payslip. It now matches `.in('status', ['approved','paid'])` and drops any `paid` row whose `paid_method` isn't `'Payroll'`, so a claim settled by hand in cash/bank is still correctly excluded. `fetchYtdMap` is immune to the same shape by construction (it deliberately reads only *prior* months' finalized runs, never this one), and `buildAdvanceMap` is a pure function over rows the caller already fetched. **Before adding a fourth helper here, ask what Finalize does to the rows it reads** — if the answer is "changes them", the Calculation page will read the post-finalize state and the Stale badge becomes noise the moment payroll locks.
-
-### Final Settlement writes, and what that changed elsewhere (S600)
-
-`/hr/settlement` used to compute and print, writing nothing, with an amber card listing three
-follow-ups for the operator. It now records the settlement in **`hr_final_settlements`** and
-Finalize performs those three itself. Five things worth knowing before touching it:
-
-- **The write order is the design.** The row goes in as a **draft** first so every later step has an
-  id to tag itself with, and only flips to `finalized` once the ledgers are written. A crash
-  part-way therefore leaves a draft — which closes nothing and claims nothing — rather than a
-  finalized document asserting money moved that never did. Every write checks its error and stops.
-- **`hr_advance_repayments.final_settlement_id`** is the mirror of `payroll_run_id` and the only
-  reason Reopen can undo the advance recovery. Both Reopens now reactivate **only the advances read
-  off their own tagged rows** — payroll's used to reactivate any settled advance client-wide with a
-  balance, which would have un-settled advances a settlement had closed.
-- **Recovery is capped at the payout.** A settlement that nets negative has not recovered the full
-  balance, so those advances stay `active`; there is no receivable ledger to move a shortfall into.
-- **Finalize refuses** rather than warns on: a finalized payslip already covering the final month, a
-  prior settlement overlapping the current `join_date` (which would pay gratuity twice for the same
-  years on a rehire), and a concurrent finalize in another tab.
-- **Identity and rate constants are frozen on the row** — name, code, basic, join date, `SSF_CAP`,
-  the gratuity share, the vesting months, the ÷26 divisor. The printed statement shows its own
-  workings, so re-deriving `basic` from a live employee makes a reprint contradict itself after any
-  raise. Same rule as the Monthly Owner Report.
-
-**Gratuity now lives in `src/modules/hr/gratuity/gratuityCompute.js`**, shared by Gratuity Tracker
-and Final Settlement, which each carried their own copy and disagreed on four behaviours. Two of
-those were money bugs:
-
-- **The SSF gate is `ssf_enrolled && ssf_no`**, matching `computePayslip`. A flagged employee with a
-  blank number had nothing contributed on their behalf, so netting an SSF-funded share off their
-  gratuity underpaid them.
-- **The SSF offset is capped at real enrolment.** Both copies multiplied `3.33% × capped basic`
-  across the employee's *entire service* — but SSF only began in 2075/76 and most clients enrolled
-  later. A ten-year employee enrolled two years ago lost eight phantom years, roughly **NPR
-  320,000**. There is no enrolment date in the schema, so `ssfEnrolment.js` derives it from evidence:
-  the first finalized payslip carrying an SSF deduction. **No evidence means no offset** — never a
-  guess, because the wrong guess silently reduces what a leaver is paid.
-
-**`computePayslip` now prorates for `end_date`** (`daysAfterExit`, the mirror of
-`daysNotYetJoined`). Without it a leaver drew a full contractual month and the settlement added its
-partial month on top — the same month paid ~1.5×. **Any query feeding `computePayslip` must select
-`end_date`**, exactly as it must select `join_date`; both payroll pages do. Do not implement this by
-writing `absent` rows for post-exit days — `absent_days` is a reported figure and that would
-misreport a departure as absenteeism.
-
-**Payroll Run's staleness check gained a third bucket**: a stored payslip whose employee is no
-longer active. It was invisible before (the check only iterates live employees), while Regenerate
-hard-deletes payslips and re-inserts only live ones — so settling someone mid-month and then
-regenerating that month's draft silently destroyed their issued payslip. It deliberately does **not**
-block Finalize (that would strand the run with no legal move); it gates Regenerate with a confirm.
-
-**`hr_tada_claims` has no `bs_year`/`bs_month` and is not plumbed through `monthly_periods` at all** — it's a standalone ledger keyed on plain AD `start_date`/`end_date`, which is why `fetchApprovedTadaMap` converts the BS period to an AD range rather than filtering on period columns, and why TADA Claims' own month filter (S564) buckets client-side via `adToBs(start_date)` instead of a `.eq()`. Don't reach for `period_id` on this table; it isn't there.
-
-### Finalize and Reopen (S682, superseded)
-
-Since S753 Finalize and Reopen are one transaction each (`finalize_payroll_run` / `reopen_payroll_run`; see "The S751/S752 open list" below), which superseded S682's per-ledger failure messages. The S682 record, the S628 row-cap sweep of `payrollData.js` and the S628 render-body fix (which names the since-deleted `PayrollCalculation`) moved word for word to `docs/rules-archive/hr-payroll.md`.
-
-### A finalize gate that drops its read error passes vacuously (S613)
-
-Final Settlement's three refusal checks — a finalized payslip already covering the final month, an
-overlapping prior settlement, a concurrent finalize in another tab — each read the database and each
-**dropped the error**. So a failed `hr_payslips` read produced an empty array, which reads as "no
-payroll covers this month", and the gate waved through **exactly the double-payment it exists to
-block**. All three now push a refusal naming the failure instead ("Could not verify whether payroll
-already covers the final month… finalizing without this check could pay that month twice").
-
-`reopen()` had the same shape with worse consequences: it dropped the error on the read of *its own*
-tagged `hr_advance_repayments` rows, so a failed read meant it deleted the repayments and reactivated
-**nothing** — the advances this settlement had closed stayed closed while the settlement that closed
-them was gone. It now aborts before touching anything.
-
-**The rule for any new gate here: a check that could not run has not passed.** Refuse and name the
-failure. The same reasoning applies to Payroll Run's freshness gate, which reads live data to decide
-whether Finalize is safe.
-
-## BS day labels, and the month list (S614)
-
-Anywhere HR prints a day inside a known month — the OT list and swap column on HR Dashboard,
-Overtime's date column, Attendance's clear-a-day confirm, Self-Service's swap-day picker — it uses
-`formatBsDay(day, bsMonth)` ("1st Bhadra") or `bsDayOrdinal(day)` where the month is already stated
-beside it. Both live in `src/utils/bsCalendar.js`. The confirm dialog is the one that matters most:
-a destructive action must name the day it will wipe in the same words the roster shows.
-
-`FinalSettlement.jsx` carried the twelve month names as its own `BS_MONTH_NAMES` — the same list as
-`BS_MONTHS`, under a different name, so no name-based search would ever have paired it with the
-other 30 copies. It now imports `BS_MONTHS`. **Never retype the month list**; there is exactly one.
-
-## The payroll data path: three failures that all look like a normal month (S620)
-
-Every one of these produced a complete, confident payroll. None of them raised anything.
-
-**Page every read that is narrowed in JS rather than in the query.** `fetchYtdMap` and
-`fetchApprovedTadaMap` in `payrollData.js` apply the fiscal-year and period windows *after* the
-fetch, so each reads the client's entire history — every finalized payslip ever, every
-approved-or-paid claim ever. Unpaged they stopped at 1000 rows, which for payslips is roughly 20
-staff × 4 years, and a truncated YTD understates prior taxable income, under-withholds TDS and
-under-remits to the IRD. `hr_advances`/`hr_advance_repayments` are worse: unfiltered lifetime
-ledgers in both `PayrollRun` and `PayrollCalculation`, and `buildAdvanceMap` derives outstanding as
-`amount − repaid`, so truncating the repayments side over-deducts from take-home pay. Note
-`.order('issued_date')` is NOT a unique tiebreaker — several advances share a date — so paging on it
-alone trades truncation for row-repeat/row-skip. Append `.order('id')`.
-
-**An empty map is a real value here, so a dropped read error is invisible.** No prior finalized
-payslips this fiscal year is a genuine state — the year's first month — so a failed `fetchYtdMap`
-does not look like a failure, it looks like a fresh starter, and `computeMonthlyTds` spreads the
-year's tax over twelve months instead of the months actually left. Both helpers now return
-`{ data, error }` so they compose with `firstError()`. The write paths matter most: `generate()` and
-`regenerate()` compute TDS from these maps and INSERT the result, so the wrong figure is *persisted*
-— and `regenerate()` hard-deletes every payslip first, so its check must run before the DELETE, not
-after. `FinalSettlement` had `.catch(() => ({}))`, the same fallback stated out loud; its writes are
-now blocked while the read is failing, because **an error nobody can act on is not a guard**.
-
-**Compare inputs, never `net_pay`, when asking whether a draft is stale.** TDS and TADA are
-deliberately hand-editable while a run is a draft and each edit rewrites `net_pay`, so a `net_pay`
-comparison could not tell an intended override from real staleness. On Payroll Run that was a
-deadlock, not a false alarm: `finalize()` refuses while stale and offers no override branch, and the
-only escape — Regenerate — resets the very edit that caused it, so a legitimate override could never
-be finalized. `payslipDrift(stored, live)` in `payrollData.js` is the one comparison, returning
-`'moved' | 'overridden' | null`. It checks the six computed fields nobody can type into, plus the
-TADA **claim id set** rather than its amount — which keeps exactly what the amount comparison used to
-detect, since approving or withdrawing a claim changes the ids while a typed correction does not. An
-override is reported (`overridden`), never blocking: the Finalize confirmation names it, and
-`PayrollCalculation` shows a neutral "Adjusted" chip where it used to show a red ⚠ Stale against a
-correct payslip. It lives in `payrollData.js` because that module exists so those two pages cannot
-drift; a third copy of the comparison is the failure it was written to prevent.
-
-## Reopen is an HR-manager action, not a Crest-admin one (S620)
-
-`isAdmin` is the **Crest platform operator**; the tenant's own owner is `isOwner`, and both resolve
-`hrRole` to `'manager'`. Payroll Run, Festival Allowance and Incentive Run all gated Reopen on
-`isAdmin`, so the person accountable for a run had to contact support to correct it. All three are
-now `hasHrAccess('manager')`, matching the guard already on each page.
-
-**(Superseded S752: Reopen is now Owner or HR manager, in the database, with a reason.)** `FinalSettlement.jsx` was deliberately still `isAdmin` and was the one place this pattern was left
-alone: reopening a settlement un-blocks a departed employee's Crest Staff login and reverses their
-status stamp, which is a different order of consequence from re-running a month. Decide it on its own
-merits rather than sweeping it for consistency.
-
-**Leave's `Reopen` (S740) follows the same rank, and adds the rule that makes an undo safe.** A
-`rejected`/`cancelled` leave request had no action on its row at all — the CHECK constraint always
-allowed `pending` back, only the UI did not — so a mis-click on the Cancel sitting beside Approve
-ended the request permanently, losing its dates, the employee's reason, `created_at` and the audit
-trail. Reopen returns it to **Pending, never straight to `approved`**: `approveRequest()` is the one
-writer of the `hr_attendance` rows and the cancel deleted them, so a restore that skipped the queue
-would show an approved leave over an attendance sheet with those days blank — and payroll reads the
-sheet, so an unpaid leave stops deducting and a daily-wage paid leave goes unpaid. Generalise that
-to any undo here: **restore to the state before the write, not to the state after it, unless the undo
-itself performs the write.** It also re-reads the row's status first, the mirror of the decide path's
-guard above — a concurrent reopen-and-approve would otherwise be silently un-approved with its days
-still marked — and refuses on a FAILED read rather than falling through.
-
-Overtime's `Undo` is the older sibling of both and is **not** aligned with them: it sits at the
-page's own `supervisor` rank, with no confirmation and no freshness re-read. Left alone rather than
-swept, on the same "decide it on its own merits" footing as `FinalSettlement` — an OT entry's undo
-touches no attendance row — but know it is a deliberate difference, not an oversight.
-
-## An approval is two writes, and the second one has a precondition the first does not (S741)
-
-Approving leave stamps the request AND writes an `hr_attendance` row per day. **The second write is
-the one that matters**: `payrollCompute` builds `unpaidDays` only from rows that exist, so a day
-with no row is a paid day, and the Attendance Sheet reads `hr_attendance` and never looks at
-`hr_leave_requests`.
-
-Those rows hang off a `monthly_periods` row, and `monthly_periods_one_open_per_client` allows a
-client ONE open period at a time. So leave approved for a month two or three ahead — which is most
-leave, since staff book around Dashain and family trips — had nowhere to write. It was approved
-anyway (right: recording the decision beats refusing it) under a banner reading *"Create the
-period(s), then re-approve to mark those days"*, and **neither half was possible**: the index
-refuses the early period, and an approved row has no Approve button. Nothing back-filled. The
-request read Approved, the sheet was blank, and an approved UNPAID leave was paid in full when its
-month finally came round.
-
-`backfillApprovedLeave({ clientId, period })` runs at the one moment the write becomes possible —
-`createPeriodWithCarryForward` and `performPeriodClose`'s open-next, the two places a period is
-minted. Five things are load-bearing:
-
-- **It fills only days with no attendance row.** At creation that is every day; the same helper
-  backs the Leave page's catch-up button, where the month may already carry marks, and a months-old
-  approval silently overwriting a hand-marked `present` is worse than the bug being fixed.
-- **It reports, never throws.** Period creation must not fail on an HR read, so the result rides
-  back as `leaveFill` and a failure is its own `leave_backfill` stage in `performPeriodClose`'s
-  `failures` — the CLAUDE.md "two writes in one function can diverge" rule: the second write's
-  silence proves nothing, so it gets its own answer.
-- **One day is sent once.** Two approved requests covering the same day would send the same
-  conflict key twice in one upsert, which Postgres refuses outright ("cannot affect row a second
-  time") — losing the whole month's back-fill over one double-booking.
-- **`findApprovedLeaveGaps()` makes an existing gap visible**, split into `waiting` (no period yet
-  — nobody's to act on, say so) and `unmarked` (period exists, days missing — actionable). Months
-  before the client's earliest period are ignored as imported history. Its failed read returns the
-  error rather than an empty list, because "nothing is missing" is the most reassuring answer the
-  function has.
-- **Say what the reader can do, or say there is nothing to do.** The approval banner now states
-  that the days will be marked when the month is created. A warning that asks for an impossible
-  action is worse than no warning: it trains people to ignore the banner.
-
-## The Holiday Calendar is what pays the 2× rate, and it was empty (S635)
-
-`hr_holiday_calendar` is read by `Overtime.jsx` to decide the **holiday 2× rate** — and only on
-`holiday_type = 'public'`, never `'optional'`. So a row's type is money, not a label, and a missing
-holiday pays 1.5× on the biggest working days of the Nepali year.
-
-Reported live from an FY 2083/84 calendar showing **five** holidays and no Dashain. The page was
-working as built: only the seven whose BS date never moves were seedable, and the empty state told
-the owner to add Dashain, Tihar and Holi "manually". Nobody transcribes thirty gazette rows by hand,
-so in practice the calendar stayed empty of precisely the days it exists to flag.
-
-**Three kinds of holiday, and only the first is derivable in code.** `holidayData.js` is organised
-around this and `holidayData.test.js` pins it:
-
-- **FIXED** — same BS date every year (Republic Day is always Jestha 15). Seedable forever. The BS
-  *year* comes from `resolveYear(fyYear, bs_month)`, never a per-row field; the old list carried its
-  own `yearOffset` saying the same thing, which is one rule too many for a value both sides must
-  agree on.
-- **MOVABLE** — lunar, plus the AD-fixed ones (Christmas, Workers' Day, Women's Day) which move in
-  BS for the mirror-image reason. **Transcribed** from the Nepal Gazette once the Home Ministry
-  publishes the year — usually in Falgun of the preceding year. Keyed by REAL BS year, because a
-  Nepali FY spans two of them and the gazette is published per BS year.
-- **SIGHTED** — the two Eids, Mohammad Jayanti, Guru Nanak Jayanti, Bhoto Jatra. No gazetted date at
-  all. Named on screen so their absence reads as a known gap rather than an oversight.
-
-**Extending the table is a transcription job, never a calculation.** Verify each date in two
-independent places and against `bsCalendar.js`'s own month lengths — Fulpati on *Ashwin 31* exists
-only because Ashwin 2083 has 31 days; it has 30 in 2084. A wrong date here is a wrong figure on a
-real payslip.
-
-**Report coverage rather than seeding short.** A fiscal year runs into a BS year whose gazette may
-not exist yet, so the seed names the uncovered year instead of adding 39 rows and looking complete.
-An owner who reads "39 added" and then finds no Buddha Jayanti cannot otherwise tell a gap in our
-table from a gap in the gazette.
-
-**The NAME is the dedupe key, which makes two things load-bearing.** Three `Dashain holiday` rows
-and two `Tihar holiday` rows sharing a name meant only the first would ever insert — Kartik 5, 6 and
-26 silently dropped, inside the two festivals the whole feature is about. Days with no tithi name of
-their own are named by BS day. And renaming a FIXED holiday needs a `legacy` name list, or every
-client who pressed the old button gets a second row on the same day: `Prithvi Narayan Shah's
-Birthday` → `Prithvi Jayanti (National Unity Day)` would have done exactly that. Both are asserted
-by tests, and both were caught by those tests before shipping.
-
-**Seeding is additive and name-keyed** — a client's own entry or edit is never overruled, because
-the gazette is a starting point for a movable date, not an authority over a decision the owner made.
-The one exception is a FIXED holiday found on the wrong date: those are definitional, so **Martyrs'
-Day at Magh 5 is corrected to Magh 16** (Sahid Diwas, the day the four martyrs were executed in 1997
-BS) and the correction is named in the result rather than applied silently. That row had been wrong
-since the page shipped, in both directions at once: 2× offered on an ordinary day, weekday rate on
-the real holiday.
-
-**Region-split holidays are seeded twice, named, and the operator removes one** (a `removed_at` stamp since S748, so the next Seed does not bring it back — see the S748 section below). Holi is a real day
-off in both halves of the country and falls a day apart in each. Guessing the outlet's district from
-nothing is worse than asking.
-
-## Roster: Swap History is not scoped to the week on the board (S633)
-
-The pending-approval queue and the permanent swap record both moved out of two collapsible
-drop-downs above the Roster Board into a fourth tab, **Shift Swaps**. History has never been
-period-scoped and was never meant to be — but sitting inside the board's period controls made a log
-of Shrawan and Ashadh decisions read as news about the Bhadra week on screen.
-
-**Moving an action queue off a screen is how an approval waits a week**, so the pending count rides
-on the tab button (`pending_admin` only — a swap still awaiting the coworker's own accept is not yet
-a manager action, the same filter `useHrApprovalCounts.js` uses). `Roster.jsx` fetches that count
-itself with a `head: true` query rather than lifting it out of the panel, because the panel only
-mounts once the tab is opened — which is exactly when the badge has stopped being useful.
-
-**A history outlives the people in it.** `Roster.jsx` loads only `status IN ('active','probation')`
-for the board, which is right for a board and wrong for a record: a resigned employee rendered as a
-bare `—` beside a named coworker. Any page showing historical rows must resolve names its own list
-filtered out — fetch the unknown ids once, tracked in a ref so an id that resolves to nothing does
-not re-query forever. Related: `rejected_by_target` and `cancelled` never reach a manager, so
-`admin_decided_by` is null on both; name the coworker who declined or the requester who withdrew
-instead of printing a dash.
-
-### A pending count of zero is the reader's good news, so a failed read must not produce one (S734)
-
-HR runs five approval queues and both dashboards summarise them from one hook,
-`useHrApprovalCounts` — four `head: true` counts, which destructured `{ count }` and discarded
-`{ error }`. A refusal or a dropped connection returns `count: null`, `|| 0` turns that into a
-zero, and both consumers then spent their most reassuring vocabulary on it: HrDashboard's four
-tiles read **"0 · all clear" in green**, ClientDashboard's Pending Approvals headline a neutral 0.
-
-The general rule ("a failed read is not an empty list") is everywhere in this repo. What HR adds
-is the sharper case: **on a queue tile, empty is the OUTCOME THE MANAGER WANTS**, so a failed read
-does not merely show a wrong number — it tells them not to open the page. A tile whose empty state
-is good news needs a THIRD rendering, distinct from both the good state and the loading skeleton;
-ours is an em-dash plus "count unavailable — open the page", with the section label saying so too.
-
-Two corollaries worth holding:
-
-- **A shared hook must RETURN the failure, never swallow it.** Only the consumer knows how its own
-  tile says so, and these two say it differently.
-- **The same page had it again one row down.** HrDashboard's Headcount tiles rendered "Active
-  Staff 0" in green over "no probation" and "Basic Payroll / Month NPR 0" whenever the employee
-  read failed — `empStats` was set from `(emps || [])` regardless, so the `?? '—'` fallback the
-  cards already had could never be reached. `setEmpStats(err ? null : {…})`. When you find this
-  shape, check the rest of the screen before moving on.
-
-### One status vocabulary, and one labour band (S660)
-
-**`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` in `payrollConstants.js` are the module's only status
-colours.** HR runs five parallel approval queues — Leave, Overtime, TADA, Advances, Shift Swaps —
-and Self-Service shows the *same rows* back to the employee who filed them. Before this, "Pending"
-was brass on Leave and Overtime, **grey** on TADA (grey being this module's withdrawn/void colour,
-so the one queue actually awaiting a decision read as the most inert thing on screen), and amber on
-the HR Dashboard and in the employee app. Amber simultaneously meant "waiting on you" on the
-dashboard and "already approved" on TADA — one hue, opposite verdicts, on two screens a manager
-works in one sitting. The HR module guide had already written the rule down and TADA contradicted it.
-
-    amber = open, something is still required of someone
-    brass = decided, but the money has not moved   (badge-yellow)
-    green = closed, good
-    red   = closed, refused
-    grey  = closed, void — withdrawn or cancelled
-
-Self-Service was the one internally consistent surface, so its ladder was adopted rather than a new
-one invented. Three things follow. **Take `.badge` for a chip and `.tint` for a hand-drawn one** —
-the tint already carries S549's fill-vs-text split (base token for the 10%/20% bg/border, `*-text`
-variant for the label). **A ladder with a payment step extends the map, it does not restate it** —
-`TADA_REQUEST_STATUS` spreads the base and overrides only `approved` (brass: owed, not yet paid) and
-`paid` (green). **Two open states on one page separate by LABEL and the amber/brass split, never a
-sixth hue** — an extra colour to distinguish two states of one verdict is how a five-token palette
-becomes eight.
-
-Corollary that costs nothing to hold: **a category never takes a signal colour.** Public-vs-optional
-holidays and holiday-vs-weekday OT rates were amber-vs-grey, so a gazetted holiday wore the same
-colour as an overdue approval. Both are brass; Holiday Calendar's table now also agrees with its own
-two stat cards, which had been brass and purple for those same categories all along.
-
-**Staff rank is that corollary's other half, and it now lives outside this module (S661).** HR settled
-it first — a Supervisor is not a "warning" and a Staff account is not "healthy", so all three levels
-take `badge-yellow` — but IMS and POS each held their own copy and both were still on the old
-green/amber/brass ladder, so on one product a Supervisor was amber in two modules and brass here.
-`HrStaff.jsx` now reads `STAFF_LEVEL_BADGE` from `src/shared/staffLevelBadge.js` along with the other
-two, and `STAFF_LEVEL_BADGE_NONE` covers an account with no access to the module — the one genuinely
-inert state on the axis, and previously a loose `'badge-gray'` literal at all three sites.
-
-**Labour Cost % bands through `lcBand` in `src/shared/operatingBands.js`** — never a local
-threshold. Roster's Labor Forecast had `costPct > 35 ? amber : inherit`: a different threshold from
-both dashboards, no healthy state, no too-high state, and hue-only on a row already spending amber
-on a staffing shortfall and a holiday tag. Use `bandFigure(pct, lcBand, { decimals: 0 })` and render
-its `text`, which carries the ✓/△/▲ — see `ims-figures.md` for why the marks are not optional.
-
-### The Labor Forecast prices the hour the way payroll pays it, and the roster stands in for a missing day (S692)
-
-Four rules for `laborForecast.js`, each from a figure that read plausibly and was wrong:
-
-- **A scheduled hour costs the LOADED rate, never `hourlyRateOf(basic)` alone.** `loadedHourlyRateOf`
-  is the Owner Report estimate per hour — monthly `(basic + earning components) / (monthDays × 8)`,
-  daily `basic / 8`, hourly `basic`, plus the 20% employer SSF share (gated on `ssf_enrolled AND
-  ssf_no`, the engine's rule) spread over the same hours. The tab shares `lcBand` with the Owner
-  Dashboard, and a band shared on a different definition of the numerator is a lie: an enrolled
-  employee costs ≥1.2× basic before any allowance, so a day at 30% ✓ here was 36% △ there. With no
-  components and no SSF it equals `hourlyRateOf` exactly — every difference is a cost that was
-  left out.
-- **A roster row is not a person on duty.** Help tells managers to mark rest days with the
-  zero-hour "Day Off" shift, so `computeScheduledCount` uses `isOnDutyShift`: an off-type NAME
-  (`isOffDay`, the same keywords Generate from Roster uses) or an explicit `hours: 0` is off duty.
-  A working shift with UNKNOWN hours (the default "Split": `hours: null`, no times) is on duty and
-  flagged "unpriced" — it adds a head and nothing else until someone sets its length.
-- **Hours and cost follow the Department filter; Scheduled Staff never does.** Recommended Staff
-  is covers ÷ target for the whole outlet, so the head it is compared with must be too, or filtering
-  the Board to one department made every day read "Short". The tab shows the filter and says which
-  columns it narrows.
-- **A past day reads actuals, and when Attendance has none the ROSTER stands in — labelled.**
-  Revenue from `sales_entries` (the Owner Dashboard's definition, hence the band's own
-  denominator; POS posts there per day so it works for IMS-only clients), covers from closed paid
-  `pos_orders` (only where the VIEWED client has POS — `clientModules.pos`, not `posEnabled`,
-  which is true for every admin session), hours from `hr_attendance` with `ot_hours` priced at
-  basic × 1.5 because it sits INSIDE `hours_worked`. A day with no attendance rows is
-  `basis: 'roster'`: the rostered hours, cost and heads, with "as rostered · no attendance" under
-  each — never 0h, and never a dash against a board showing three full shifts. Recommended Staff
-  and Status are hidden entirely for a non-POS outlet: covers are only ever counted by POS bills,
-  so the axis can never hold a value, and a footer that said "covered every measured day" over
-  zero measured days was vacuous (`staffedDays` guards it).
-
-### The labour STANDARD: what the day needs, learned from the outlet's own history (S693)
-
-`laborStandard.js` derives sales-per-labour-hour from a trailing 120-day window and turns forecast
-revenue into required hours. Five rules, each of which produces a plausible number when broken:
-
-- **Ratio of totals, never a mean of per-day ratios**, and linear through the origin with no
-  fixed-crew intercept — the per-weekday split absorbs most of what an intercept would do, and a
-  two-parameter fit produces a figure nobody can check by hand. `typicalShiftHours` is
-  `Σ hours / Σ heads` from the window, NEVER `STANDARD_HOURS_PER_DAY`: that is the statutory day,
-  a payroll constant, not a rostering fact about this outlet.
-- **Only evidence may train it.** `isTrainingSample` requires recorded hours, an existing period,
-  and non-zero hours and revenue. A bulk `bs_day = 0` sales month is barred ENTIRELY — its revenue
-  is understated with no day to attach it to, which deflates the standard and INFLATES required
-  hours on every future day.
-- **Attendance is the strong basis, the roster the weak one, and the gap between them is MEASURED.**
-  Most clients enter attendance in one batch at month end, so an attendance-only model is blind to
-  the current month. `measureRosterBias` computes `Σ attendanceHours / Σ rosteredHours` over the
-  days carrying both and scales roster-only samples by it; below 10 overlap days they train
-  unadjusted and the tab says so. Never assume a direction — overtime pushes the ratio above 1.
-- **The window's hours read EVERY employee, whatever their status.** `computeActualLabor` skips any
-  row whose employee is not in the list it was given, and the board's list is
-  `status IN ('active','probation')` — so reusing it here would discard every hour worked by anyone
-  who has since left, and required hours would come out LOW, telling the owner to roster fewer
-  people than his own history says he needed. `tallyWindowAttendance` filters by nothing. S633 on a
-  second surface: a history outlives the people in it.
-- **Say which basis each number came from, on the row.** A weekday under 4 samples falls back to
-  the all-days figure and announces it (`describeBasis`); under 20 qualifying days there is no
-  standard at all rather than a thin one; a failed window read is an `ActionError` saying it is a
-  failed read, not a lack of history. And say what the thing IS: it learns what this outlet
-  normally uses per rupee, not what it ideally should — a chronically overstaffed outlet trains a
-  chronically overstaffed standard.
-
-`covers_per_staff_target` stays a POLICY the owner sets; the learned covers-per-shift figure is
-shown beside it and never written into it. Collapsing the two would destroy the ability to say "we
-are understaffing against our own standard".
-
-## A shift's length is not its normal day (S742)
-
-`hr_shift_types.regular_hours` ("Normal hrs") splits a shift into normal time and overtime. A shift
-used to carry one number, so a rostered 12-hour day could never carry its overtime: Generate from
-Roster wrote `ot_hours: 0` and a punched 8am–8pm measured 12 − 12 = 0. `shiftRegularHours` /
-`shiftOvertimeHours` in `laborForecast.js` are the one definition. Four rules:
-
-- **NULL means the whole shift is normal time**, which is the pre-column behaviour, so nothing moves
-  until a manager fills it in. Never default it.
-- **Normal hours are CLOCK time, lunch included** (client decision). On a shift with them, Attendance
-  compares the Start-to-End span, so Break does not reduce OT. On a shift WITHOUT them the old
-  net-worked formula stays, on purpose: a shift typed with a net length would otherwise gain an hour
-  of OT on every day a break is entered. The "short" nudge follows the same basis.
-- **OT sits INSIDE `hours_worked`**, everywhere it is written. So the hourly branch of
-  `computePayslip` pays ordinary wage on `hours_worked − OT` (superseded OT included). Paying all of
-  it and then 1.5× on top paid 2.5× until S742. `computeActualLabor` and
-  `computePlannedLaborCost` price the OT part at basic × 1.5 on the same reading.
-- **Attendance reads `hr_shift_types` with `*`, not a column list.** Naming a new column there fails
-  the whole read on a database the migration has not reached, and an empty shift map makes every
-  rostered day's full span overtime.
-
-`zeroHourStatus()` (attendanceFromRoster.js) reads a zero-hour roster marker by name: unpaid first
-("UNPAID LEAVE" contains "paid leave"), then paid, and a leave name that says neither is UNPAID; then
-holiday; and everything else — an off name, no name, or a name that says none of these — is Off
-(S749: it was Holiday, which now PAYS daily and hourly staff). `isOffDay` is deliberately unchanged, because Self-Service and the Labor Forecast
-only need on/off duty.
-
-## Clearing a month is scoped to the people on screen (S743)
-
-Attendance's Clear Month refuses when the period's payroll run is finalized, and when that read
-fails. It deletes `.in('employee_id', listed)`, never the whole period: the sheet lists
-active/probation staff only, and a mid-month leaver's days are what Final Settlement reads. **A
-blank attendance day is PAID for monthly staff** (`unpaidDays` comes only from rows that exist), so
-the consequence of any clear is that marked absences and unpaid leave stop deducting. Never write
-"a blank day is unpaid" in copy.
-
-## Advances recover from the month AFTER issue, and SSF is one predicate (S747)
-
-- **An advance is first deducted in the BS month after the month it was issued** (day irrelevant;
-  Chaitra → Baisakh next year) — decided with Aashish, the rule hss-suite already runs.
-  `firstRecoveryMonth` / `advanceDueIn` / `dueAdvances` in `payrollData.js` are the one filter every
-  per-period reader uses (deduction, Finalize's allocation, Calculation's count), and
-  `buildAdvanceMap(advances, repayments, period)` **throws** without a period rather than deducting
-  everything. Final Settlement deliberately does not use it — a leaver repays everything outstanding.
-- **`isSsfContributor(employee)` in `payrollCompute.js` is the one "enrolled AND has an SSF number"
-  test.** Festival Allowance and Incentives waived the 1% slab and projected SSF relief on the flag
-  alone, and the Owner Dashboard / Monthly Owner Report added employer SSF to labour the same way.
-  Copies still inline in `gratuityCompute.js`, `laborForecast.js`, `HrReports.jsx`, `PayslipBody.jsx`
-  agree today; move them to the helper when touched. `PaySetup.jsx` / `PayForm.jsx` previews adopted
-  it in S748.
-
-## Employees, Pay Setup and the Holiday Calendar (S748)
-
-- **CIT / provident fund is retirement relief, in ONE cap with SSF** (decided with Aashish). A deduction
-  component marked `retirement_fund` is taken off take-home pay AND off taxable income;
-  `retirementRelief(annualContributions, annualGross)` in `tds.js` is the only cap (lower of NPR 5,00,000
-  or a third of income) and `retirementContributionOf()` in `payrollCompute.js` the only sum. The
-  payslip stores `retirement_contribution` so `fetchYtdMap` relieves real prior months, and it is a
-  `FRESHNESS_INPUT_FIELDS` member — ticking the box on an existing deduction moves no amount, only TDS,
-  which would otherwise read as a hand override. Monthly TDS, Final Settlement and — since S750 — Festival
-  Allowance and Incentive Run use it; the two bonus pages share `projectBonusTaxableBase()` in `tds.js`
-  rather than each carrying a copy of the projection (they had, and both relieved SSF alone). A marker, never a name match: the owner
-  names these rows, and a guess would move real tax.
-- **A form saves the fields it owns and changed, never the row it loaded.** `EmployeeForm` spread the
-  loaded row (up to 10 minutes old from the page cache) into its payload, so a phone-number edit
-  reverted a Pay Setup raise, a Final Settlement's status and end date, and a login block.
-  `changedEmployeeFields()` (`employeeFormData.js`) is the patch. Any other edit form over a table two
-  screens write needs the same shape.
-- **A field that affects pay is never hidden while it holds a value.** The end-date picker showed only
-  for Contract/Part-time, the value stayed saved, and `daysAfterExit` pays a monthly employee nothing
-  after it. It now shows whenever set, with a warning when past on an active employee. Live check
-  2026-09-14: no employee in that state.
-- **Pay Setup's editor refuses Save until its component read is `ok`.** Save deletes and re-inserts
-  the whole set, so an unfinished or failed read wiped every allowance. The general rule for any
-  replace-the-set save: the set you send must be one you actually read.
-- **An employee with pay history cannot be deleted, by anyone** (`hr_employees_guard_delete`,
-  `employee_pay_history()`): finalized payslips, a finalized settlement, finalized festival
-  allowances, any advance, or a Self-Service login. Deactivate is the lossless path; there is no force
-  path. A whole-client deletion still cascades (the guard lets the delete through once the `clients`
-  row is gone).
-- **Holiday Calendar writes need HR supervisor rank** (page and a RESTRICTIVE policy per write command);
-  `(client_id, bs_year, bs_month, bs_day, name)` is unique; the table is audited. Seed runs only over a
-  list that loaded, because it dedupes against the screen. **An OT entry stores its own `ot_type`**, so
-  editing or deleting a holiday never reprices existing overtime — copy must not say otherwise.
-- **Removing a holiday is a stamp (`removed_at`), never a DELETE** (decided with Aashish). Seed is
-  name-keyed, so a deleted seeded holiday came back on the next Seed. `planSeed()` (`holidayData.js`)
-  counts a removed row as present and never corrects its date. **Every reader outside the page must
-  filter `removed_at IS NULL`** — today Overtime.jsx and demandForecastData.js; a new reader that
-  forgets suggests 2× on a day the owner took out. Delete for good exists and forgets the removal.
-- **SSF is deposited by the 25th of the following month** (`SSF_DEPOSIT_DAY`, the July 2025 amendment
-  to s.4(4); it was 15). Never hard-code the day in copy — read the constant.
-- **Pay Setup previews are a full month before income tax**, and say so. Default tab is On payroll
-  (active + probation), matching every payroll picker.
-
-## Roster, Attendance, Leave and Overtime (S749)
-
-Eight decisions taken with Aashish, and the rules that hold them. Migration `20260914170000`.
-
-- **Rank is a database fence here too.** RESTRICTIVE supervisor-rank INSERT/UPDATE/DELETE policies on
-  `hr_attendance`, `hr_leave_requests`, `hr_leave_types`, `hr_overtime_entries`, `hr_roster`,
-  `hr_shift_types`, `hr_shift_swap_requests`, `hr_roster_publish_state` (the S748 Holiday Calendar
-  shape). **A new HR table a supervisor page writes gets the same three policies.** Self-Service writes
-  through SECURITY DEFINER RPCs and is unaffected.
-- **A month whose payroll run is FINALIZED is read-only** — Attendance, leave approve/cancel, every
-  overtime action. Pages lock and say "reopen the payroll run"; `hr_attendance_guard_finalized` /
-  `hr_overtime_guard_finalized` refuse any caller that skips the page. A failed run-status read locks
-  (`runStatus === 'unknown'`). **The parent-exists test that lets a client/period cascade through lives
-  in the SECURITY DEFINER lookup, never in the INVOKER trigger** — an HR account's RLS view of
-  `monthly_periods` is empty, so the first draft's `EXISTS` passed vacuously and a supervisor deleted a
-  paid month's row on the live verification.
-- **A non-working day carries no clock.** `NON_WORKING_STATUSES` in `attendance/attendanceRules.js`
-  (absent, paid/unpaid leave, off, holiday — never the half-day ones). `withStatus()` clears the cell,
-  the inputs switch off, `attendanceRowFor()` saves zeros, and leave approval's upsert clears a full
-  day. **`tallyAttendance` adds `ot_hours` from every row whatever its status** — which is the reason.
-- **Bulk marks fill blanks only** (`fillBlankCells`). An overwrite turned approved leave into Present.
-  Save writes a cell blank at load ON CONFLICT DO NOTHING and names the days kept (S798, `splitFirstMarks`).
-- **Leave: `days` is derived by the database** (`hr_leave_requests_validate`), and two pending/approved
-  requests for one employee may not share a day (operator exempt, for restore; an operator INSERT that is
-  all public holidays is stored at 0 days, S798 — key a restore seam on `is_admin()`). `leaveRules.js`'s
-  `findOverlappingRequest` / `finalizedMonthsFor` / `quotaOverrun` let the page say so first. Over
-  quota WARNS, never blocks. `submit_my_leave_request` keeps `p_days` in its signature and ignores it.
-- **One overtime entry per employee per day** (`hr_overtime_entries_employee_day_key`). An edit of an
-  approved entry stays approved — decided, not an oversight. Overtime reloads the month ON SCREEN after
-  a save to another month, never the saved one.
-- **Shift types: unique name per client, and no delete while the roster uses one**
-  (`hr_shift_types_guard_delete`; leave types likewise, `hr_leave_types_guard_delete`, S798). The page used to delete duplicate-named types on every load; never
-  reintroduce a destructive tidy-up on a read path. A seed runs only after a successful read, and a
-  23505 on the seed is a second tab, answered by re-reading.
-- **A swap approval is `approve_shift_swap(p_request_id)`**, SECURITY INVOKER, one transaction, every
-  UPDATE's row count asserted (a write RLS filters out is 0 rows, not an error). Same day → trade
-  `shift_type_id`; different days → trade `employee_id`, refused if either already works the other day.
-  The sentinel-`bs_day = -1` dance is gone.
-- Attendance's period switch and Roster's board/publish loads are request-guarded; `hr_overtime_entries`,
-  `hr_shift_types` and `hr_shift_swap_requests` are audited (`hr_roster` deliberately not — volume).
-- **A public holiday inside a leave is not charged** (decided 2026-09-14, migration `20260914180000`).
-  `days` = calendar days − public, not-removed Holiday Calendar days, derived in the trigger through
-  `hr_public_holiday_count()` (SECURITY DEFINER, caller-checked) over `bs_months`; approval and
-  `backfillApprovedLeave` mark those days `holiday`. A revert touches only leave-status days and marks a
-  day that is a holiday NOW `holiday` (S798, `planLeaveRevert`). `leaveDayCount()` /
-  `publicHolidayKeys()` in `leaveConstants.js` are the page's copy. Rostered days off still count.
-  **A `holiday` row PAYS daily and hourly staff** (decided with Aashish, 2026-09-14 — Labour Act s.41
-  gives every worker paid public holidays): `computePayslip` adds `t.holiday` to a daily employee's
-  worked days and `t.holiday × 8` to an hourly employee's paid hours, like paid leave; monthly pay does
-  not move. Before it, a daily-wage employee's paid leave over a holiday paid a day less. So
-  `zeroHourStatus()` returns Off, not Holiday, for a zero-hour shift named like nothing — only a
-  "holiday" name may create a paid day. The Labor Forecast's actual cost still prices a holiday row
-  at 0 hours — deliberately: it costs hours worked on the floor, and paid leave reads 0 there too. A days-only UPDATE does not fire the trigger; a request
-  decided before a holiday was added keeps the count it was decided on.
-- **`request_shift_swap` refuses a past day, an unpublished day, and a shift already in an open swap**
-  (`swap_day_past` / `swap_day_unpublished` / `swap_already_requested`); the Staff app's picker hides
-  past days.
-- Generate from Roster and the Roster board's assign-over-leave ask through `ConfirmModal`, naming
-  what will be written.
-
-## Payroll, Calculation, Festival, Incentives, Advances and TADA (S751)
-
-Sixteen decisions taken with Aashish (2026-09-14). Migration `20260914210000`; engine tests in
-`payrollS751.test.js`. Several rules ABOVE are superseded here — read this section as the current one.
-
-- **One builder for both payroll pages: `buildPayrollRows()` in `payrollData.js`.** Payroll Run's
-  `buildRows` and Calculation's `rows` were two copies held together by "must stay identical"
-  comments. Order of the money: `computePayslip` → TDS (capped at what is left) → advance cut
-  (capped at what is left after TDS — decision: take-home never below zero, the rest stays owed and
-  later cuts take it; there are no arrears, so a shortfall lengthens the loan) → TADA on top.
-  `computePayslip` itself cuts a fixed deduction (CIT) before take-home goes negative, and
+# HR: payroll engine, payroll run, tax, settlement, attendance, leave, roster
+
+Rule statements only, grouped by topic (S799). Every `History:` anchor is a heading in
+`docs/rules-archive/hr-payroll.md`, where the original sections sit word for word with the story
+behind each rule. Read it before reversing a rule. Where a later session superseded an earlier
+rule, the bullet states what holds now; the archive keeps both.
+
+## The engine: `computePayslip` and what it must be given
+
+- `src/modules/hr/payroll/payrollCompute.js` is pure: no React, no Supabase. Pay bases `monthly`,
+  `daily`, `hourly`. Constants live in `src/modules/hr/payrollConstants.js`: SSF 11% employee / 20%
+  employer, SSF cap NPR 100,000 basic, OT 1.5×.
+- **Every query feeding `computePayslip()` selects `join_date` and `end_date`**; payroll reads them
+  through `fetchPayrollEmployees()` (`PAYROLL_EMPLOYEE_COLUMNS`). `daysNotYetJoined()` (S482) and
+  `daysAfterExit()` (S600) return day numbers (S791); for monthly staff those days fold into
+  `unpaidDays`, which also shrinks the SSF base (basic × the paid fraction) and TDS
+  (`gross − absence_deduction`). Never write `absent` rows for days after exit: `absent_days` is a
+  reported figure.
+- **A day outside the employment is docked once** (S791): a MONTHLY employee's attendance rows on
+  those days are dropped. Daily and hourly staff keep every row.
+- **SSF needs the flag AND a number.** `isSsfContributor(employee)` (`payrollCompute.js`) is the one
+  `ssf_enrolled && ssf_no` test (S570, S747); `computePayslip` and `buildPayrollRows` call it, and
+  `PaySetup.jsx` / `PayForm.jsx` previews use it (S748). The copies still inline must agree with it;
+  move them to the helper when touched: `laborForecast.js` (agrees), `PayslipBody.jsx` (does not trim
+  `ssf_no`, so a whitespace number prints an SSF line; display only), and the "flag set, number
+  missing" tests in `PayrollApprovalSheet.jsx` and `PayrollRun.jsx` (agree). Payroll Run flags the
+  state as `⚠ SSF no. missing`.
+- **Approved overtime supersedes sheet OT, per day** (S570).
+  `tallyAttendance(rows, supersededOtDays)` withholds sheet OT on any `bs_day` an approved entry
+  covers and reports `sumOtSuperseded`. The OT query must select `bs_day`. Holiday 2× is reachable
+  only through the Overtime module.
+- **OT sits INSIDE `hours_worked`** wherever it is written (S742). The hourly branch pays ordinary
+  wage on `hours_worked − OT` (superseded OT included); `computeActualLabor` and
+  `computePlannedLaborCost` price the OT part at basic × 1.5. `tallyAttendance` adds `ot_hours` from
+  every row whatever its status.
+- **A half-day leave row is a day whose other half was worked**, on every basis (S798 1a). Daily: a
+  paid half pays the day, an unpaid half pays 0.5 (`workedDays`). Monthly: a paid half docks 0, an
+  unpaid half 0.5. Hourly: typed hours plus 4 h for a paid half. `present_days` counts either as 0.5.
+- **A `holiday` row PAYS daily and hourly staff** (Labour Act s.41, decided 2026-09-14):
+  `t.holiday` adds to a daily employee's worked days and `t.holiday × 8` to hourly paid hours, like
+  paid leave. Monthly pay does not move.
+- `computePayslip` cuts a fixed deduction (CIT) before take-home goes negative, and
   `retirement_contribution` follows the cut so tax relief follows the money.
-- **Who a month's payroll covers is `fetchPayrollEmployees()`**, not `status IN (active, probation)`:
-  active/probation OR `end_date` on/after the month start (a leaver is paid to their last day
-  whatever their status), filtered by `employedInPeriod` (no payslip for a month not worked at all —
-  a future hire used to get a zero-gross payslip with a negative net), minus anyone whose FINALIZED
-  Final Settlement's `last_working_date` is inside the month (the settlement paid that month; a
-  draft payslip for them used to be finalized on top). This supersedes S600's "departed" bucket being
-  non-blocking: a stored payslip for someone NOT on the list must not be finalized.
-- **A TADA claim is paid by exactly one payroll: `status = 'approved' AND end_date <= month end`.**
-  The S565 rule above (approved OR paid-by-payroll, overlapping the month) paid a cross-month trip in
-  both months. There is no paid half any more, because the Calculation page shows a finalized month as
-  STORED (next bullet), so nothing compares live TADA against a locked month. The TADA amount on a
-  payslip is not editable — it always equals its claims; change the claim instead.
-- **Calculation shows a finalized month as it was paid**, never recomputed against today's salaries —
-  every raise used to turn every past month red "Stale".
-- **`payslipDrift` calls a TDS difference an override only when `hr_payslips.tds_overridden` is true**
-  (set by the TDS box). This supersedes S620's "a TDS difference is an override": prior months
-  finalized late, an insurance premium or a bonus all move TDS without anyone typing.
-- **Bonus tax lives in `bonusTax.js`** (Festival Allowance and Incentives), and four things are
-  load-bearing: the pay month (`bs_month` on both tables) decides the fiscal year; the months left are
-  projected at basic + earning components (`projectedMonthlyGross`), for the employed months only;
-  every OTHER finalized bonus that fiscal year raises the base (`otherBonusesForFy`, keyed by
-  `runKey`); and YTD gross includes overtime. **`fetchYtdMap` adds finalized bonuses from earlier FY
-  months to `gross` and `withheld` but not `count`**, so monthly TDS and Final Settlement's lump-sum
-  base both know about them. A new bonus-like table must join `fetchFinalizedBonuses` or it is taxed
-  as though it were never paid.
-- **A bonus counts only the bonuses paid BEFORE it** (`otherBonusesForFy(rows, fyStart, runKey, pay)`,
-  by fiscal-year month, then run key within a month). Counting every other finalized bonus made the tax
-  depend on finalize order. And **monthly TDS treats bonus tax as settled at source**
-  (`ytdBonusWithheld`): the year's tax minus bonus tax is what gets spread, or the months after a bonus
-  withhold nothing. Festival/bonus Finalize re-checks each draft's stored tax against a fresh figure.
-- **Festival months of service are completed BS months to the festival date** (`completedServiceMonths`,
-  decision: keep the share for months worked). Several festival runs a year are allowed, with a warning.
-  Daily/hourly rows are typed by hand and Finalize is blocked while any is 0.
-- **Rank is a database fence on every money table** — manager for runs, payslips, components,
-  settlements, advances, repayments, festival, incentives, incentive types; supervisor for TADA
-  claims. **A refused RLS UPDATE returns 0 rows and no error**, so a status write that matters selects
-  `id` and checks the count.
-- **Locked by trigger, not by the page:** payslips of a finalized run (`hr_run_finalized`); a finalized
-  run's delete; festival/incentive rows once finalized, where Reopen (status → draft, nothing else
-  changed) is the only allowed update (`bonus_finalized`) — a Generate from a stale tab used to upsert
-  a paid run back to draft; a period with finalized payroll (`period_has_finalized_payroll`), and a
-  period delete needs admin/Owner (IMS and POS PIN logins could delete one over REST, cascading payroll).
-  The operator (`is_admin()`) passes these guards so an Export/Import restore can write history.
-- **Advances:** a repayment may not exceed what is owed or land on a non-active advance; an AFTER
-  trigger keeps `status` in step with the balance (repaid → settled, a repayment removed → active);
-  Settle is refused while owed; forgiving money is `status = 'written_off'` with a required reason, and
-  the amount/who/when are stamped server-side; an advance with repayments cannot be deleted. Payroll
-  and Final Settlement's own status writes still run and are now redundant-but-harmless.
-- **TADA ladder, by trigger:** pending → approved/rejected (never your own claim — matched on
-  `profiles.hr_employee_id` or the employee record's email; `approved_by` set server-side), approved →
-  paid needs a manager and a method, paid → approved only inside `reopen_payroll_run` /
-  `reopen_final_settlement` (S798: the direct branch let a manager re-open a paid claim over REST and
-  be paid twice); a decided claim's employee, dates and total are frozen. Manager-entered claims go through `create_tada_claim`
-  (one transaction); `submit_my_tada_claim` refuses an identical claim twice, NaN and reversed dates.
-  **numeric accepts `'NaN'` and `NaN > 0` is true** — a CHECK needs `<> 'NaN'` spelled out.
+- **The payslip's absence line prints `hr_payslips.unpaid_days`** (absences + unpaid leave + half
+  days + pre-join days, migration `20260818120000`). `absent_days` stays literal absences, which
+  Payroll Run's Excel export heads "Absent Days". Older payslips have no value and print no count.
+- **Every taxable-income sum over payslips is `earnedPay()`** (gross − `absence_deduction` + OT), in
+  `fetchYtdMap` and `payslipYtdForFy` (S781). A query feeding either selects `absence_deduction`;
+  `earnedPay` throws without it.
 
-## Final Settlement, Gratuity, HR Reports and HR Staff (S752)
+Why: the engine pays only what it is handed. A column left out of the query pays a full month,
+and a tally line read twice pays the same hours twice.
 
-Twelve decisions taken with Aashish (2026-09-14). Migration `20260914230000`; tests in
-`settlementCompute.test.js` and `gratuityCompute.test.js`.
+History: #s570-engine-inputs, #s600-leaver-proration-and-departed-bucket, #s742-normal-hours,
+#s747-advances-and-ssf-predicate, #s749-roster-attendance-leave-overtime, #s751-payroll-decisions,
+#s781-ytd-earned-pay (and `docs/CROSS-REPO.md`, Closed, 2026-09-17), #s791-hss-ports, #s798-stage-1a
 
-- **A leaver's final month is paid INSIDE the settlement, through the payroll engine.**
-  `computeSettlement()` (`settlement/settlementCompute.js`) calls `computePayslip` with `end_date` =
-  last working day and attendance/OT cut at that `bs_day`, then `computeFinalMonthTds()` (`tds.js`),
-  which trues the year up to actual income. Every figure is stored (`month_*`, `calc_version = 2`)
-  and **a finalized row is rendered from what it stored, never recomputed** — `statementOf(row)` is
-  the one renderer. SSF challan, TDS Report and TDS Certificate read settlements; a new filing sheet
-  must too, or a leaver's last month vanishes from it.
-- **Finalize and Reopen are database functions, not browser sequences.** `finalize_final_settlement`
-  re-reads outstanding advances, the approved TADA id set, finalized payslips for the month or later
-  and an overlapping finalized settlement, and refuses (`settlement_stale*`, `settlement_month_paid`,
-  `settlement_overlap`) before writing any ledger. `reopen_final_settlement` needs a reason and puts
-  back only what its own `final_settlement_id` rows name. **Both take `hr_pay_lock(client)`, and so
-  does payroll Finalize** (`hr_payroll_runs_guard_settled`) — two checks in two transactions paid
-  Shrawan 2083 twice, 22 seconds apart. A new path that finalizes pay for a month takes the same lock.
-- **`hr_final_settlements_guard`**: insert as draft only; a draft cannot become finalized by UPDATE; a
-  finalized row cannot be deleted or edited, only marked paid once (`paid_amount := net_payout`).
-  One finalized settlement per spell is a unique index.
-- **Notice is basic ÷ 30 per calendar day, and its direction follows the reason** (`noticeDirection`):
-  resignation deducts (`notice_deduction`), termination adds (`notice_pay`, taxed with the lump sum),
-  mutual/retirement none. Leave encashment is EARNED to date (`earnedLeaveBalance`: quota × completed
-  months this BS year ÷ 12 − taken − encashed), still ÷26. TADA: every approved unpaid claim.
-- **Gratuity counts COMPLETED months** (`completedMonths`, BS anniversary walk, day clamped) and the
-  SSF offset is **stored employer SSF × `SSF_GRATUITY_SHARE_OF_EMPLOYER`** (`fetchSsfContributions` /
-  `ssfFundedFor`), never a start date × a rate. `calcGratuity` takes `ssfFunded = {amount, months} |
-  null`; null is unknown coverage, and unknown is no offset.
-- **Nobody below the Owner decides their own record**: `hr_leave_requests_guard_decision` (stamps
-  `decided_by`), `hr_overtime_guard_own`, `hr_advances_guard_own` refuse `hr_own_request`;
-  `hr_self_decision_exempt()` is admin OR Owner. A new approval queue gets the same trigger.
-- **HR-role logins read `monthly_periods`.** The S430 `no_hr_role_staff` FOR ALL policy made every
-  months join empty for them, so three settlement gates passed vacuously; it is per-command write
-  policies now. **When a check reads a table an HR login cannot see, it is not a check for that login.**
-- **Staff rank (all three modules):** no rankless staff login (admin-user-ops refuses, pages have no
-  "No Access"); HR Manager is granted by Owner/admin only; the staff role lists in `settings` are
-  Owner-or-that-module's-manager (`settings_guard_staff_roles`); **no page re-ranks on load** — a
-  mismatch is a banner and a confirmed Apply. `pos_email` joins every negative Owner test.
-- `RESTORE_ORDER` restores `hr_advance_repayments`/`hr_tada_claims` AFTER the payroll runs and
-  settlements they reference; Danger Zone deletes repayments before runs (their FK is NO ACTION).
+## Income tax, retirement relief and bonus tax
 
-## The S751/S752 open list (S753)
-
-Decisions taken with Aashish (2026-09-14). Migration `20260915090000`.
-
-- **Payroll Finalize and Reopen are database functions** (`finalize_payroll_run(run, payslip_ids,
-  repayments)` / `reopen_payroll_run(run)`), one transaction each under `hr_pay_lock`. The page still
-  re-reads and runs `assessDraft` + `allocateAdvanceRepayments` (the JS engine owns the arithmetic);
-  the function refuses unless the stored payslip ids are exactly the ones checked, re-validates the
-  allocation (sums per payslip, advance active and owed), and writes every ledger or none. This
-  supersedes S682's per-ledger failure messages and S751's post-flip payslip recount.
-- **A repayment tagged `payroll_run_id` or `final_settlement_id` is written only by those functions**
-  (`hr_advance_repayments_guard_ledger`; admin passes for a restore). Advances & Loans deletes Manual
-  rows only, and the database now agrees.
-- **A leaver's staff logins are BLOCKED at settlement Finalize, never deleted** (decided): every
-  `profiles` FK from bills, KOTs, shifts and cash movements is `ON DELETE SET NULL`, so deleting a
-  waiter's login blanks their name on every bill they closed. Finalize bans the auth user, revokes
-  its sessions, stamps `profiles.settlement_blocked_by` and lists names in `blocked_logins`; Reopen
-  unbans exactly its own. Only logins linked through `hr_employee_id` are found.
-  `settlement_linked_logins(employee)` names them for the confirm. Nobody below the Owner finalizes
-  or reopens their own settlement.
-- **`access_blocked` ends Self-Service access** — sessions revoked by trigger, and the fourteen
-  Staff-app RPCs call `hr_self_service_assert_active()` first (patched from their LIVE bodies inside
-  the migration). **A new Staff-app RPC must call it too**, or a blocked employee keeps using it for
-  the life of their access token.
-- **Payslips and settlements store `life_insurance_premium` / `health_insurance_premium`**; the TDS
-  certificate reads the latest stored pair of the year and falls back to the employee record (saying
-  so) only for years paid before S753.
-- **A typed or kept bonus tax is `tds_overridden`** on `hr_festival_allowances` / `hr_incentives`;
-  every automatic tax write clears it.
-- **Cost to Business = `payrollCashCost()`**: earned pay (gross − absence + OT) + employer SSF; travel
-  claims shown apart.
-- **Still with the accountant, deliberately unchanged:** leave encashment ÷26, the 12-month gratuity
+- `src/modules/hr/payroll/tds.js`: TDS by year-to-date cumulative projection; `computeMonthlyTds`
+  spreads the year's tax over the months actually left. FY 2083/84 slabs apply from Shrawan 2083. SSF
+  contributors have the 1% first slab waived.
+- **CIT / provident fund is retirement relief, in ONE cap with SSF** (S748). A deduction component
+  marked `retirement_fund` comes off take-home AND taxable income.
+  `retirementRelief(annualContributions, annualGross)` in `tds.js` is the only cap (lower of NPR
+  5,00,000 or a third of income); `retirementContributionOf()` in `payrollCompute.js` is the only sum.
+  The payslip stores `retirement_contribution` (so `fetchYtdMap` relieves real prior months), and it
+  is a `FRESHNESS_INPUT_FIELDS` member. Monthly TDS, Final Settlement and, since S750, Festival
+  Allowance and Incentive Run use it; the bonus pages share `projectBonusTaxableBase()` in `tds.js`.
+  A marker, never a name match.
+- **Bonus tax lives in `bonusTax.js`** (Festival Allowance, Incentives). The pay month (`bs_month` on
+  both tables) decides the fiscal year. The months left are projected at basic + earning components
+  (`projectedMonthlyGross`), for the current employment's unpaid months only (`monthsStillToPay`,
+  S798 2b). YTD gross includes overtime.
+- **A bonus counts only what was paid BEFORE it:** other finalized bonuses by fiscal-year month,
+  then run key within a month (`otherBonusesForFy(rows, fyStart, runKey, pay)`), and only a
+  settlement from before its pay month. `fetchYtdMap` adds earlier-FY finalized bonuses to `gross`
+  and `withheld`, not `count`. A new bonus-like table must join `fetchFinalizedBonuses`, or it is
+  taxed as though never paid.
+- **Monthly TDS treats bonus tax as settled at source** (`ytdBonusWithheld`): the year's tax minus
+  bonus tax is what gets spread. Festival/bonus Finalize re-checks each draft's stored tax against a
+  fresh figure.
+- **A typed or kept tax is `tds_overridden`**: on `hr_festival_allowances` / `hr_incentives`, every
+  automatic tax write clears it; `hr_payslips.tds_overridden` is set by the TDS box, and
+  `payslipDrift` calls a TDS difference an override only when it is true (S751).
+- **A finalized settlement from an earlier FY month is year-to-date income**
+  (`fetchFinalizedSettlements`, S798 2b): `partial_salary` and the month SSF/CIT/tax as a paid month,
+  the lump sums and `lump_tds` in the bonus fields. A settlement counts a bonus paid in its own month
+  (`includeSameMonthBonuses`, Final Settlement only); never both ways.
+- Payslips and settlements store `life_insurance_premium` / `health_insurance_premium`. The TDS
+  certificate reads the year's latest stored pair, and falls back to the employee record (saying so)
+  only for years paid before S753.
+- **Festival months of service are completed BS months to the festival date**
+  (`completedServiceMonths`; the share is kept for months worked). Several festival runs a year are
+  allowed, with a warning. Daily/hourly rows are typed by hand, and Finalize is blocked while any is 0.
+- **A month's SSF and tax to deposit is `monthDeposit`** (payslips + that month's finalized
+  settlements + its finalized bonus tax). A failed read of the extras shows no figure, never the
+  payroll-only one.
+- **SSF is deposited by the 25th of the following month.** Read `SSF_DEPOSIT_DAY`; never hard-code
+  the day in copy.
+- Still with the accountant, deliberately unchanged: leave encashment ÷26, the 12-month gratuity
   rule, and taxing exit lump sums on top of the year at slab rates.
 
-## The HR critique fixes (S768)
+Why: the tax is a projection over the whole year, so any paid amount it does not see is withheld
+wrongly in every month after it.
 
-Decided with Aashish (2026-09-17). No migration. Several sections above name `PayrollCalculation.jsx`,
-which no longer exists — read them as history.
+History: #s748-employees-pay-setup-holiday-calendar, #s751-payroll-decisions, #s753-open-list,
+#s798-stage-2b
 
-- **Attendance saves every unsaved cell, not the day on screen.** Unsaved work is `records` compared
-  with `savedRecords` by `cellSignature()` (`attendanceRules.js`) — what a cell SAVES as, so a typed
-  "0800" and a stored "08:00:00" are one cell. One `saveChanges()` upserts all of them from either
-  tab. **Every reload after a write passes `{ carry: true }`** and names what it deleted with `drop`,
-  or the reload replaces the grid and throws away marks left on other days — which is exactly the
-  S768 defect (a blank day pays daily and hourly staff nothing). A period switch passes neither, and
-  asks first when there is unsaved work. `clearCell` removes the key from the saved copy on success,
-  or re-marking that day compares equal to a deleted row and never saves.
-- **A correct payroll figure takes the ink; the sign carries direction.** Registers, the working
-  panel, Festival/Incentive runs, Final Settlement, Gratuity, Pay Setup's preview and `PayslipBody`.
-  Colour is for flags only (SSF no. missing, no bank, out of date, split month, owed by the employee —
-  amber with △). `RunStatusBadge` is the one Draft (amber) / Finalized (green) chip. A resigned or
-  terminated employee is grey, not red.
-- **The Calculation page is Payroll's expandable row.** `/hr/calculation` redirects to `/hr/payroll`;
-  the panels live in `PayslipCalculation.jsx` (`CalcDetail` for a draft, from `buildPayrollRows`'
-  `detail`; `StoredDetail` for a finalized month, never recomputed). A drifted draft's working opens
-  with what moved (`driftParts`), because the live working then disagrees with the stored row above
-  it on purpose.
+## Payroll Run: one builder, who is paid, and when a draft is stale
+
+- **`buildPayrollRows()` in `payrollData.js` is the one builder**, used by Payroll Run
+  (`PayrollRun.jsx`) and its expandable working. Order of the money:
+  `computePayslip` → TDS (capped at what is left) → advance cut (capped at what is left after TDS;
+  take-home never below zero; the rest stays owed and later cuts take it; there are no arrears) →
+  TADA on top.
+- **Who a month covers is `fetchPayrollEmployees()`**, not a status filter: active/probation OR
+  `end_date` on/after the month start, filtered by `employedInPeriod`, minus anyone settled in the
+  current employment from the month of `last_working_date` (`hr_run_settled_employee_names`). A join
+  date after the settled last day is a rehire and is paid. Never key this on `settle_bs_*`. A stored
+  payslip for someone NOT on the list must not be finalized.
+- **Payroll Run refuses to finalize a stale draft.** It recomputes live through `buildPayrollRows` on
+  every load and compares each employee with `payslipDrift(stored, live)` (`payrollData.js`), the one
+  comparison: `'moved' | 'overridden' | null`. It compares inputs, never `net_pay`: the
+  `FRESHNESS_INPUT_FIELDS` nobody can type into, the TADA claim id set and amount, and a net that is
+  not its own parts (`payslipNetGap`) is `'moved'`. An override is reported, never blocking: the
+  page names it ("typed by hand — locked as entered") and the TDS cell offers ↺ back to the
+  calculated figure. Never write a second copy of the comparison.
+- Finalize's confirm is a consequence summary: payslip count, total net pay, advance recoveries,
+  TADA claims to be closed.
+- **Net pay is its own parts:** gross + OT − absence − SSF − other − advance − TDS + TADA, within
+  0.01. `payslipNetGap` (JS), `hr_payslips_guard_net` and `finalize_payroll_run` hold three copies; a
+  new payslip column that moves money changes all three (S798 2b).
+- **The Calculation page is Payroll's expandable row** (S768). `/hr/calculation` redirects to
+  `/hr/payroll`. `PayslipCalculation.jsx` holds `CalcDetail` (a draft, from `buildPayrollRows`'
+  `detail`) and `StoredDetail` (a finalized month as it was paid, never recomputed). A drifted draft's
+  working opens with what moved (`driftParts`). `PayrollCalculation.jsx` no longer exists; archive
+  sections that name it are history.
+- **Page every read that is narrowed in JS rather than in the query** (S620): `fetchYtdMap` and the
+  lifetime advance and repayment ledgers, where a truncated repayments side over-deducts, because
+  `buildAdvanceMap` derives outstanding as `amount − repaid`. Use a unique tiebreaker:
+  `.order('issued_date')` is not unique, so append `.order('id')`. `fetchApprovedTadaMap` filters in
+  the query since S751 and is still paged.
+- **An empty map is a real value** (S620; no prior payslips is the fiscal year's first month), so the
+  `payrollData.js` helpers return `{ data, error }` and compose with `firstError()`. `generate()` and
+  `regenerate()` persist TDS from these maps, so the check runs before `regenerate()`'s DELETE.
+- **Before adding a fetch helper to `payrollData.js`, ask what Finalize does to the rows it reads.**
+  If Finalize changes them, a live recompute of a locked month reads the post-finalize state.
 - **Where a month stands is `PayrollMonthStatus`** (`monthStatus.js` for the arithmetic): unmarked
-  days for daily/hourly staff only, approvals touching the month, the run, and the SSF deposit. It
-  never calls a passed deposit date missed — deposits are not recorded. On the HR Dashboard it is
-  MANAGER-only: runs and payslips are manager-rank, so a supervisor's empty read would say "not
-  generated" over a finalized month. HR Reports opens on `?tab=` and `?period=`.
-- **One approval control for Leave, Overtime, TADA and Shift Swaps** (`src/modules/hr/ApprovalControls.jsx`).
-  A batch runs each row's OWN decision one after another (`decideEach`) and names every refusal; it
-  never writes a set in one statement, because a trigger refusing one row (self-approval) would fail
-  them all. Leave's batch leaves out a request over quota or in a finalized month, and checks quota
-  as if the batch's earlier requests were already approved — `approveCore()` is the approval without
-  the page's busy flag, message or reload. If its status write fails after the days are written, it
-  re-reads the request and, only if still pending, puts the days back as read before (S798). Approve and Reject are both neutral small ghosts: green and
-  red on a button spend verdict colours on a decision not yet made.
-- **Final Settlement sits in the Payroll nav group** — it finalizes a leaver's pay. Gratuity stays in
-  Reports.
+  days for daily/hourly staff only, approvals touching the month, the run, staff paid (S782), the SSF
+  deposit. It never calls a passed deposit date missed (deposits are not recorded). On the HR
+  Dashboard it is MANAGER-only because its steps link to manager pages, not because a supervisor's
+  read would be empty (it is not; REPORTS-10). Its month is last month until that payroll is
+  finalized, then the running month (H32), never a search back. HR Reports opens on `?tab=` and `?period=`.
+- **Cost to Business is `payrollCashCost()`**: earned pay (gross − absence + OT) + employer SSF, with
+  travel claims shown apart.
 
-## Import from machine (S775)
+Why: a draft is a snapshot from Generate time, and every one of these failures produced a complete,
+confident payroll with nothing raised.
 
-Decided with Aashish (2026-09-17). No migration. `attendanceImport.js` reads the file,
-`attendanceImportPlan.js` decides what each day becomes, `AttendanceImportModal.jsx` is the dialog.
+History: #s570-stale-draft-and-fetch-helpers, #s600-leaver-proration-and-departed-bucket,
+#s620-payroll-data-path, #s751-payroll-decisions, #s753-open-list, #s768-critique-fixes,
+#s791-hss-ports, #s798-stage-2b
 
-- **An import writes nothing.** Its days land as unsaved marks and the sheet's Save writes them, so
-  the lock, the unsaved banner and the one upsert all hold. Never give the dialog its own write.
-- **People are confirmed on every import; no machine ID is stored.** A guess is prefilled, a person
-  without one must be picked or skipped. Adding a remembered pairing is a new decision, not a fix.
-- **What a day becomes lives only in `planImport`.** Blank + full punch → Present with the sheet's
-  own `autoHoursFor`; Present → machine times, untickable; any other status is never touched. No
-  punch follows the roster (working → Absent, off → `zeroHourStatus`, unrostered → blank). One punch
-  or a span under 60 min / over 16 h → Present, hours blank, amber until `stillIncomplete` is false.
-- **The roster rule must never reach an unlived day:** nothing after today, nothing with no punch
-  today, nothing outside `join_date`–`end_date`. An unread roster refuses the import.
-- **Dates: the reading with the most REAL dates wins, then the most inside the month.** Ranked the
-  other way, a Bhadra grid's "05-04" read day-first is Shrawan 5 and one column pours into Shrawan.
-- **A CSV is read with `raw: true`.** Read as a spreadsheet, SheetJS turns a BS "05-01" into an AD date.
-- **A grid cell is one DATE, so a shift past midnight is split across two cells (S798).**
-  `closeNightsInCells` moves a first punch before 5 AM back only on proof (the day before ends on an
-  evening clock-in, and the overnight is shorter than the same-day reading); never unconditionally,
-  or a 04:30 start leaves its day. `suspectReason` sends the rest to check with hours `''`, which
-  `stillIncomplete` holds open.
+## Finalize, Reopen and the database locks
+
+- **Payroll Finalize and Reopen are database functions**, one transaction each under `hr_pay_lock`:
+  `finalize_payroll_run(run, payslip_ids, repayments)` / `reopen_payroll_run(run)` (S753). The page
+  re-reads and runs `assessDraft` + `allocateAdvanceRepayments`, because the JS engine owns the
+  arithmetic. The function refuses unless the stored payslip ids are exactly the ones checked,
+  re-validates the allocation, and writes every ledger or none.
+- **Every path that finalizes pay for a month takes `hr_pay_lock(client)`**: payroll Finalize
+  (through `hr_payroll_runs_guard_settled`), both settlement functions and the salary-payment
+  functions. Two checks in two transactions paid one month twice.
+- **A run starts as a draft and stays in its month** (`hr_payroll_runs_guard_settled`, BEFORE INSERT
+  OR UPDATE): no client write sets `finalized`/`finalized_at` or moves `period_id`
+  (`payroll_period_fixed`), and status crosses `finalized` only through Finalize/Reopen
+  (`payroll_status_direct`).
+- **Locked by trigger, not by the page:** payslips of a finalized run (`hr_run_finalized`); a
+  finalized run's delete; festival/incentive rows once finalized, where the only update allowed is
+  Reopen to draft (`bonus_finalized`; the guard freezes `amount`, `tds`, `employee_id`, `bs_year` and
+  `bs_month`, so other columns such as `tds_overridden` or the note can change with it); a period
+  with finalized payroll (`period_has_finalized_payroll`); and a period delete needs admin or Owner.
+- **The operator (`is_admin()`) passes the payslip, run-delete and bonus guards** so an
+  Export/Import restore can write history. `period_has_finalized_payroll` refuses the operator too
+  (restore deletes only an empty seed period). A guard's own stamp must sit above that seam, never
+  behind it (the 20260914220000 lesson).
+- **Reopen refuses over a write-off:** an advance the run recovered from that is now `written_off`
+  blocks `reopen_payroll_run` (`payroll_reopen_written_off`) until Advances & Loans → Reactivate. The
+  page refuses first (`writtenOffAdvancesForRun`).
+- **Reopen rank:** Payroll Run, Festival Allowance and Incentive Run gate Reopen on
+  `hasHrAccess('manager')` (S620), never `isAdmin`: that is the Crest operator, the tenant's owner is
+  `isOwner`, and both resolve `hrRole` to `'manager'`. Final Settlement's Reopen is Owner or HR
+  manager, in the database, with a reason (S752).
+- **A check that could not run has not passed** (S613). A gate that reads data to decide (a refusal
+  check, a freshness check, Reopen's read of its own tagged rows) refuses on a failed read and names
+  the failure, and aborts before it touches anything.
+
+Why: a browser sequence of writes can stop half-way, and a page check is skipped by any caller that
+goes straight to REST.
+
+History: #s613-finalize-gates, #s620-reopen-rank, #s682-finalize-and-reopen-pointer,
+#s751-payroll-decisions, #s752-settlement-decisions, #s753-open-list, #s791-hss-ports,
+#s798-stage-2a, #s798-stage-2b
 
 ## Salary payments: finalizing pays nobody (S782)
 
-Decided with Aashish (2026-09-23). Migration `20260923100000`; helpers `salaryPayments.js`.
-
-- **A payment is its own row (`hr_salary_payments`), keyed by run + employee, never a payslip column.**
-  Reopen stays allowed after payment, and Regenerate deletes and re-inserts payslips, so a paid mark on
-  the payslip would be wiped. `paymentState()` names the difference instead: still to pay, or overpaid.
+- **A payment is its own row (`hr_salary_payments`), keyed by run + employee**, never a payslip
+  column: Reopen stays allowed after payment, and Regenerate deletes and re-inserts payslips.
+  `paymentState()` names the difference: still to pay, or overpaid. Helpers: `salaryPayments.js`.
 - **Written only by `record_salary_payments` / `void_salary_payment`** (DEFINER, HR manager or Owner,
-  under `hr_pay_lock`); `hr_salary_payments_guard` refuses direct writes, operator exempt for restore.
-  The amount is never a parameter: Mark paid records net pay less active payments, and refuses someone
-  already paid rather than skipping them. Undo is a void with a required reason, never a delete.
+  under `hr_pay_lock`; migration `20260923100000`). `hr_salary_payments_guard` refuses direct writes,
+  operator exempt for restore. The amount is never a parameter: Mark paid records net pay less active
+  payments, and refuses someone already paid rather than skipping them. Undo is a void with a
+  required reason, never a delete.
 - **A failed payments read is its own state** ("not checked", Mark paid hidden), never "not paid",
   and it does not take the register down. The Staff app swallows its read and shows nothing.
-- `run_id` and `employee_id` are NO ACTION, so Danger Zone deletes payments before runs and employees.
 - **`runPaymentSummary()` walks payslips AND payments** (S788). Someone paid and then regenerated out
-  of the month has no payslip; they count in `over` and `paidTotal` (not `owed`/`paid`), are listed in
-  `noPayslip`, and Payroll Run gives them their own row so the Undo stays reachable. Walking payslips
-  alone dropped their money silently. Found by hss-suite porting the file.
+  of the month counts in `over` and `paidTotal` (not `owed`/`paid`), is listed in `noPayslip`, and
+  gets their own row on Payroll Run so the Undo stays reachable.
 
-## Year-to-date income is pay earned (S781)
+Why: a paid mark on a payslip would be wiped by the next Regenerate.
 
-- **Every taxable-income sum over payslips goes through `earnedPay()`** (`payrollCompute.js`): gross −
-  `absence_deduction` + OT, the figure the current month is taxed on. `fetchYtdMap` and `payslipYtdForFy`
-  summed gross + OT, so an unpaid day or a part month overstated the year and TDS was over-withheld
-  (found in hss-suite). A query feeding either must select `absence_deduction`; `earnedPay` throws
-  without it. History: `docs/CROSS-REPO.md`, Closed, 2026-09-17.
+History: #s782-salary-payments
 
-## The hss-suite ports: paisa, write-offs, leavers, swaps (S791)
+## Advances and TADA
 
-Decided with Aashish (2026-09-28). Migrations `20260928100000` (advances), `20260928110000` (leavers),
-`20260928130000` (swaps). History: `docs/CROSS-REPO.md`.
-
-- **A day outside the employment is docked once.** `computePayslip` drops a MONTHLY employee's attendance
-  rows on the days `daysNotYetJoined` / `daysAfterExit` return (both return day numbers now), because
-  those days are already unpaid as not employed. Daily and hourly staff keep every row.
+- **An advance is first deducted in the BS month after the month it was issued** (day irrelevant;
+  Chaitra → Baisakh next year), the rule hss-suite runs. `firstRecoveryMonth` / `advanceDueIn` /
+  `dueAdvances` (`payrollData.js`) are the one filter every per-period reader uses, and
+  `buildAdvanceMap(advances, repayments, period)` throws without a period. Final Settlement does not
+  use it: a leaver repays everything outstanding.
 - **Advances are whole paisa end to end** (`toPaisa` / `roundPaisa` in `payrollCompute.js`;
-  `buildAdvanceMap`, `recoverableAdvance`, `allocateAdvanceRepayments` in `payrollData.js`). An advance
-  settles only at EXACT coverage, in JS and in the status trigger; the 0.01 slack is gone from every
-  guard. The cut, the take-home and the register print paisa through `nprPaisa()`. Never compare an
-  advance figure with `Math.round`.
-- **Reopen refuses over a write-off.** An advance this run recovered from that is now `written_off`
-  blocks `reopen_payroll_run` (`payroll_reopen_written_off`) until Advances & Loans → Reactivate; the
-  page refuses first (`writtenOffAdvancesForRun`). A run's status never crosses `finalized` except
-  through Finalize/Reopen (`payroll_status_direct` in `hr_payroll_runs_guard_settled`).
-- **A settled leaver is settled in the CURRENT employment, from the month of `last_working_date`.**
-  Payroll (`fetchPayrollEmployees`, `hr_run_settled_employee_names`) leaves them out of that month and
-  every later one; a join date after the settled last day is a rehire and is paid. Never key this on
-  `settle_bs_*` — pre-S752 settlements have none. Employees refuses Active/Probation for a settled
-  leaver until the join date moves past it (`rehireNeedsNewJoinDate`).
-- **Settlement Finalize refuses a live salary payment for the last month or later**
-  (`settlement_salary_paid` — refused, never netted off) **and overtime not on file**
-  (`settlement_stale_ot`, `hr_ot_on_file`: approved entries supersede the sheet per day, hours exact,
-  rupees within 2).
-- **`hr_pay_month_guard()` is the one refusal for attendance and overtime writes**, called by both row
-  guards under `hr_pay_lock`: a finalized payroll month (except a leaver with no payslip there whose
-  settlement is still a draft) and a finalized settlement's last month or later (`hr_month_settled`,
-  the whole row). **A bulk writer must leave settled leavers out** or one row fails the statement —
-  `backfillApprovedLeave` does, and reports them as `settled`.
-- **A two-day swap trades a Day Off the other way** (`hr_shift_kind`: off / leave / work). Only a
-  working shift or leave on the other day refuses (`swap_day_taken`, raised at request time too), and
-  the traded rows must both be working shifts.
+  `buildAdvanceMap`, `recoverableAdvance`, `allocateAdvanceRepayments` in `payrollData.js`). An
+  advance settles only at EXACT coverage, in JS and in the status trigger, with no 0.01 slack. Print
+  through `nprPaisa()`. Never compare an advance figure with `Math.round`.
+- **By trigger:** a repayment may not exceed what is owed or land on a non-active advance; the AFTER
+  trigger `hr_advance_repayments_sync_status` keeps `status` in step with the balance (repaid →
+  settled, a repayment removed → active), and no payroll or settlement function writes advance
+  status (only Advances & Loans' own Settle, Write-off and Reactivate do);
+  Settle is refused while owed; forgiving is `status = 'written_off'` with a required reason, and the
+  amount, who and when are stamped server-side; an advance with repayments cannot be deleted.
+- **A repayment tagged `payroll_run_id` or `final_settlement_id` is written only by the
+  finalize/reopen functions** (`hr_advance_repayments_guard_ledger`; admin passes for a restore).
+  `hr_advance_repayments.final_settlement_id` is the mirror of `payroll_run_id` (S600).
+  Advances & Loans deletes Manual rows only. A Reopen reactivates only the advances read off its own
+  tagged rows.
+- **`hr_tada_claims` has no `bs_year`, `bs_month` or `period_id`.** It is keyed on AD `start_date` /
+  `end_date`: convert the BS period to an AD range, and bucket by month client-side through
+  `adToBs(start_date)` (TADA Claims' month filter, S564).
+- **A TADA claim is paid by exactly one payroll:** `status = 'approved' AND end_date <= month end`
+  (S751; supersedes S565's approved-or-paid overlap). The TADA amount on a payslip always equals its
+  claims and is not editable; change the claim instead.
+- **TADA ladder, by trigger:** pending → approved/rejected (never your own claim, matched on
+  `profiles.hr_employee_id` or the employee record's email; `approved_by` set server-side); approved →
+  paid needs a manager and a method; paid → approved only inside `reopen_payroll_run` /
+  `reopen_final_settlement` (S798); a decided claim's employee, dates and total are frozen.
+  Manager-entered claims go through `create_tada_claim` (one transaction); `submit_my_tada_claim`
+  refuses an identical claim twice, NaN, and reversed dates.
+- **`numeric` accepts `'NaN'`, and `NaN > 0` is true**, so a CHECK spells out `<> 'NaN'`.
 
-## Half-day leave, the unread sheet (S798 stage 1a)
+Why: an advance or claim lives in its own ledger, and every rule here keeps the ledger and the
+payslip from disagreeing about money already moved.
 
-- **A half-day leave row is a day whose other half was worked, on every pay basis.** Daily: a paid
-  half pays the day, an unpaid half pays 0.5 (`workedDays`). Monthly: a paid half docks 0, an unpaid
-  half 0.5. Hourly: typed hours plus 4 h for a paid half. `present_days` counts either as 0.5. Daily
-  paid 0.5 and 0 from S309 to S798 (ENGINE-1); no client had a daily-wage employee, so none was owed.
-- **A failed attendance read hides the grid** (`attendanceError`): Generate, the bulk marks and
-  Import decide "blank" from the screen. `loadAttendance` returns true / false / null (superseded),
-  and a write whose reload fails says it landed. Generate writes with `ignoreDuplicates` and counts
-  the days it kept.
+History: #tada-has-no-period, #s600-final-settlement-writes, #s620-payroll-data-path,
+#s747-advances-and-ssf-predicate, #s751-payroll-decisions, #s753-open-list, #s791-hss-ports
 
-## Own records, the employee fence, the back-fill in the database (S798 stage 1b)
+## Final Settlement and gratuity
 
-Migration `20260930120000`, applied live after a rolled-back dry run. Findings: `HR_TODO.md` S798.2.
-
-- **`hr_employees` writes need HR manager rank** (`hr_employees_write_rank_*`, the S751 shape); reads
-  stay open to supervisors. A refused write is 0 rows, so the three writers `.select('id')` and say
-  `NOT_SAVED_RLS` (`employeeFormData.js`).
-- **"Your own" covers more than Approve/Reject**, below the Owner, OLD or NEW employee: your own advance
-  (delete, move, write-off, amount, instalment, issue date, type) and any repayment on it; your own
-  approved overtime (employee, hours, type, day); your own APPROVED leave (no cancel, no reopen — H8).
-  Withdrawing your own pending leave stays allowed. Pages test with `useIsOwnEmployee` (`ownRecord.js`,
-  Owner exempt like `hr_self_decision_exempt`; TADA keeps `isOwnClaim`, operator-only) and render
-  `OwnRecordNote`; a batch leaves own rows out.
-- **A decided leave request keeps employee, type, dates and day type for every client caller, and
-  only a pending one can be deleted** (`leave_request_locked`). An approval, or any change to an
-  approved request, in a month with finalized payroll is refused in the database
-  (`hr_leave_range_finalized`, DEFINER, because a supervisor's view of runs is empty).
-- **The leave back-fill is `hr_backfill_approved_leave(p_period_id)`** (DEFINER; admin, Owner, IMS or
-  HR supervisor+). `backfillApprovedLeave.js` only calls it. Inside a DEFINER body the INVOKER
-  attendance guard returns early, so it calls `hr_pay_month_guard` per row itself — a new DEFINER
-  writer of `hr_attendance` must too.
-- `employee_pay_history` answers only a login that can see employees at all (SELF-SERVICE-2).
-
-## Final Settlement: what Finalize re-checks, once per spell (S798 stage 2a)
-
-Migration `20261001120000`, applied live after a rolled-back dry run. Findings: `HR_TODO.md` S798.3.
-
-- **Finalize re-checks the final month's attendance** (`settlement_stale_attendance`, tallied by
-  `hr_attendance_on_file` the way `computePayslip` does): monthly by unpaid days (incl. days outside
-  the employment), daily by the day wage, hourly by hours paid. **A change to the engine's tally
-  (a new status, a new weight) must change that function and this check in the same commit**, or
-  every settlement for that basis is refused. The confirm re-reads the sheet (`attendanceSignature`).
-- **An earlier employment's settlement is never recomputed, reopened or finalized** (H26,
-  `settlement_rehired`; `isEarlierSpell`). The page renders it from its stored columns and
-  `pickEmployee` never auto-opens it. A correction to it is paid by hand. This narrows S791.
-- **The festival is paid once a fiscal year, by the run or the settlement**, enforced both ways
-  under `hr_pay_lock`: `settlement_festival_paid` in Finalize, `festival_paid_by_settlement` in
+- **A leaver's final month is paid INSIDE the settlement, through the engine.** Final Settlement
+  (`/hr/settlement`, `FinalSettlement.jsx`) records `hr_final_settlements` (S600); `computeSettlement()`
+  (`settlement/settlementCompute.js`) calls `computePayslip` with `end_date` = last working day and
+  attendance/OT cut at that `bs_day`, then `computeFinalMonthTds()` (`tds.js`) trues the year up.
+  Every figure is stored (`month_*`, `calc_version = 2`).
+- **A finalized row is rendered from what it stored, never recomputed**: `statementOf(row)` is the
+  one renderer. Identity and rate constants are frozen on the row (name, code, basic, join date,
+  `SSF_CAP`, the gratuity share, the vesting months, the ÷26 divisor), as on the Monthly Owner Report.
+  SSF challan, TDS Report and TDS Certificate read settlements; a new filing sheet must too.
+- **`hr_final_settlements_guard`:** insert as draft only; a draft cannot become finalized by UPDATE;
+  a finalized row cannot be deleted or edited, only marked paid once (`paid_amount := net_payout`).
+  A paid mark always stores `paid_amount`, the operator's too. One finalized settlement per spell is
+  a unique index.
+- **`finalize_final_settlement` re-checks before writing any ledger** and refuses on: outstanding
+  advances, the approved TADA id set and finalized payslips for the month or later
+  (`settlement_stale*`, `settlement_month_paid`); an overlapping finalized settlement
+  (`settlement_overlap`); a live salary payment for the last month or later (`settlement_salary_paid`,
+  refused, never netted off); overtime not on file (`settlement_stale_ot`, `hr_ot_on_file`: approved
+  entries supersede the sheet per day, hours exact, rupees within 2); and the final month's attendance
+  (`settlement_stale_attendance`, tallied by `hr_attendance_on_file` the way `computePayslip` does).
+  **A change to the engine's tally (a new status, a new weight) changes `hr_attendance_on_file` and
+  this check in the same commit.** The confirm re-reads the sheet (`attendanceSignature`).
+- **`reopen_final_settlement` needs a reason** and puts back only what its own `final_settlement_id`
+  rows name. Nobody below the Owner finalizes or reopens their own settlement.
+- **Recovery is capped at the payout.** A settlement that nets negative leaves those advances
+  `active`; there is no receivable ledger.
+- **Notice is basic ÷ 30 per calendar day, and its direction follows the reason**
+  (`noticeDirection`): resignation deducts (`notice_deduction`), termination adds (`notice_pay`, taxed
+  with the lump sum), mutual and retirement none. Leave encashment is EARNED to date
+  (`earnedLeaveBalance`: quota × completed months this BS year ÷ 12 − taken − encashed), ÷26. TADA:
+  every approved unpaid claim.
+- **Leave taken and leave encashed are windowed to the current employment**
+  (`leaveUsed({ from, until })`, `leaveEncashed({ from })`). The Balances tab calls them without a
+  window.
+- **The year's salary tax still owed is capped at what the taxable payout bears:** month income +
+  lump sums − SSF − other deductions − notice − lump TDS. Travel claims never bear tax.
+- **The festival is paid once a fiscal year, by the run or the settlement**, enforced both ways under
+  `hr_pay_lock`: `settlement_festival_paid` in Finalize, `festival_paid_by_settlement` in
   `hr_bonus_rows_guard` (through the DEFINER `hr_festival_settled_by`, current employment only). A
   saved draft that paid a share is unticked when a festival run was finalized since, and says so.
-- **The year's salary tax still owed is capped at what the taxable payout bears**, not the final
-  month's net (SETTLEMENT-4): month income + lump sums − SSF − other deductions − notice − lump TDS.
-  Travel claims never bear tax.
-- **Leave taken and leave encashed are windowed to the current employment** (`leaveUsed({ from,
-  until })`, `leaveEncashed({ from })`): leave approved for after the last day, and an earlier
-  spell's leave or payout, do not reduce the encashment. The Balances tab calls them without one.
-- **A paid mark always stores `paid_amount`**, the operator's too: the stamp sits above the
-  operator seam and only fills an empty amount. A guard's stamp must never sit behind the seam
-  (the 20260914220000 lesson, missed here once).
-- **A rehire clears the old End Date in the same save and says so first** (H27,
-  `staleRehireEndDate`); an End Date before the Join Date is refused (`endsBeforeJoining`).
+- **An earlier employment's settlement is never recomputed, reopened or finalized** (H26,
+  `settlement_rehired`; `isEarlierSpell`). The page renders it from its stored columns, and
+  `pickEmployee` never auto-opens it. A correction to it is paid by hand.
+- **Rehire:** Employees refuses Active/Probation for a settled leaver until the join date moves past
+  the settled last day (`rehireNeedsNewJoinDate`). A rehire clears the old End Date in the same save
+  and says so first (H27, `staleRehireEndDate`); an End Date before the Join Date is refused
+  (`endsBeforeJoining`).
+- **A leaver's staff logins are BLOCKED at Finalize, never deleted**: every `profiles` FK from bills,
+  KOTs, shifts and cash movements is `ON DELETE SET NULL`. Finalize bans the auth user, revokes its
+  sessions, stamps `profiles.settlement_blocked_by` and lists the names in `blocked_logins`; Reopen
+  unbans exactly its own. Only logins linked through `hr_employee_id` are found;
+  `settlement_linked_logins(employee)` names them for the confirm.
+- **`access_blocked` ends Self-Service access:** sessions are revoked by trigger, and the Staff-app
+  RPCs call `hr_self_service_assert_active()` first. **A new Staff-app RPC must call it too**, or a
+  blocked employee keeps using it for the life of their access token.
+- **Gratuity lives in `src/modules/hr/gratuity/gratuityCompute.js`**, shared by Gratuity Tracker and
+  Final Settlement (through `settlementCompute.js`). It counts COMPLETED months (`completedMonths`, a
+  BS anniversary walk, day clamped). The SSF offset is stored employer SSF × `SSF_GRATUITY_SHARE_OF_EMPLOYER`
+  (`fetchSsfContributions` / `ssfFundedFor`), never a start date × a rate. `calcGratuity` takes
+  `ssfFunded = {amount, months} | null`; null is unknown coverage, and unknown gets no offset.
 
-## Payroll and tax: the run's month, net pay, the month's deposit (S798 stage 2b)
+Why: a settlement is a document that says money moved, and the wrong guess silently reduces what a
+leaver is paid.
 
-Migration `20261001140000`. Findings: `HR_TODO.md` S798.3.
+History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
+#s752-settlement-decisions, #s753-open-list, #s791-hss-ports, #s798-stage-2a
 
-- **A run starts as a draft and stays in its month** (`hr_payroll_runs_guard_settled`, BEFORE INSERT OR
-  UPDATE): no client write sets `finalized`/`finalized_at` or moves `period_id` (`payroll_period_fixed`).
-- **Net pay is its own parts**: gross + OT − absence − SSF − other − advance − TDS + TADA, within 0.01.
-  `payslipNetGap` (JS), `hr_payslips_guard_net` and `finalize_payroll_run` hold three copies of it; a new
-  payslip column that moves money changes all three.
-- **A finalized settlement from an earlier FY month is year-to-date income** (`fetchFinalizedSettlements`):
-  `partial_salary` and the month SSF/CIT/tax as a paid month, the lump sums and `lump_tds` in the bonus
-  fields. A bonus counts only a settlement from before its pay month; a settlement counts a bonus paid in
-  its own month (`includeSameMonthBonuses`, Final Settlement only), never both ways.
-- **Bonus months still to come are the current employment's unpaid months** (`monthsStillToPay`), not
-  employed months less every paid month — a rehire's first-spell payslips are paid months outside it.
-- **A month's SSF and tax to deposit is `monthDeposit`** (payslips + that month's finalized settlements +
-  its finalized bonus tax). A failed read of the extras shows no figure, never the payroll-only one.
-- **The strip's month is last month until its payroll is finalized, then the running month** (H32);
-  never a search back through older periods.
+## Attendance
+
+- **A blank attendance day is PAID for monthly staff** (`unpaidDays` comes only from rows that
+  exist) and pays daily and hourly staff nothing. Never write "a blank day is unpaid" in copy.
+- **A month whose payroll run is FINALIZED is read-only**: Attendance, leave approve/cancel and every
+  overtime action. Pages lock and say "reopen the payroll run"; a failed run-status read locks
+  (`runStatus === 'unknown'`).
+- **`hr_pay_month_guard()` is the one refusal for attendance and overtime writes**, called by both row
+  guards (`hr_attendance_guard_finalized` / `hr_overtime_guard_finalized`) under `hr_pay_lock`: a
+  finalized payroll month (except a leaver with no payslip there whose settlement is still a draft),
+  and a finalized settlement's last month or later (`hr_month_settled`, the whole row). A bulk writer
+  must leave settled leavers out, or one row fails the statement. Inside a DEFINER body the INVOKER
+  guard returns early, so a new DEFINER writer of `hr_attendance` calls `hr_pay_month_guard` per row
+  itself.
+- **The parent-exists test that lets a client or period cascade through lives in the SECURITY
+  DEFINER lookup, never in the INVOKER trigger**: an HR account's RLS view of `monthly_periods` can be
+  empty, so an `EXISTS` there passes vacuously. Three INVOKER delete guards still test `clients` in
+  their own body (`hr_shift_types_guard_delete`, `hr_leave_types_guard_delete`,
+  `hr_employees_guard_delete`); that holds only because `clients_select` shows a caller its own client.
+- **A non-working day carries no clock.** `NON_WORKING_STATUSES` (`attendance/attendanceRules.js`:
+  absent, paid/unpaid leave, off, holiday; never the half-day ones). `withStatus()` clears the cell,
+  the inputs switch off, `attendanceRowFor()` saves zeros, and leave approval's upsert clears a full
+  day.
+- **Bulk marks fill blanks only** (`fillBlankCells`). Save writes a cell that was blank at load ON
+  CONFLICT DO NOTHING and names the days kept (S798, `splitFirstMarks`). Generate writes with
+  `ignoreDuplicates` and counts the days it kept.
+- **Attendance saves every unsaved cell, not the day on screen** (S768). Unsaved work is `records`
+  compared with `savedRecords` by `cellSignature()` (what a cell SAVES as). One `saveChanges()`
+  upserts all of them from either tab. **Every reload after a write passes `{ carry: true }`** and
+  names what it deleted with `drop`; a period switch passes neither and asks first when there is
+  unsaved work. `clearCell` removes the key from the saved copy on success.
+- **A failed attendance read hides the grid** (`attendanceError`), because Generate, the bulk marks
+  and Import decide "blank" from the screen. `loadAttendance` returns true / false / null
+  (superseded), and a write whose reload fails says it landed.
+- **Clear Month** (S743) refuses when the period's run is finalized and when that read fails, and deletes
+  `.in('employee_id', listed)`, never the whole period: a mid-month leaver's days are what Final
+  Settlement reads.
+- **A shift's normal hours are not its length** (`hr_shift_types.regular_hours`, "Normal hrs", S742).
+  `shiftRegularHours` / `shiftOvertimeHours` (`laborForecast.js`) are the one definition. NULL means
+  the whole shift is normal time; never default it. Normal hours are CLOCK time, lunch included: on a
+  shift with them Attendance compares the Start-to-End span, so Break does not reduce OT; on a shift
+  without them the net-worked formula stays, and the "short" nudge follows the same basis.
+- **Attendance reads `hr_shift_types` with `*`, not a column list**: a named new column fails the
+  whole read on a database the migration has not reached, and an empty shift map makes every rostered
+  span overtime.
+- **Generate from Roster** (`attendanceFromRoster.js`) marks a roster row with hours Present, with
+  `shiftOvertimeHours` as OT. A zero-hour marker becomes `zeroHourStatus(name)`: unpaid first ("UNPAID
+  LEAVE" contains "paid leave"), then paid, and a leave name that says neither is UNPAID; then
+  holiday; everything else (an off name, no name, any other name) is Off (S749). Only a "holiday" name
+  may create a paid day. Generate and the board's assign-over-leave ask through `ConfirmModal`, naming
+  what will be written.
+- **Import from machine** (S775): `attendanceImport.js` reads the file, `planImport`
+  (`attendanceImportPlan.js`) alone decides what each day becomes, `AttendanceImportModal.jsx` is the
+  dialog.
+  - An import writes nothing: its days land as unsaved marks and the sheet's Save writes them. Never
+    give the dialog its own write.
+  - People are confirmed on every import; no machine ID is stored.
+  - Blank + full punch → Present with the sheet's own `autoHoursFor`; Present → machine times,
+    untickable; any other status is never touched. No punch follows the roster (working → Absent,
+    off → `zeroHourStatus`, unrostered → blank). One punch, or a span under 60 min or over 16 h →
+    Present with hours blank, amber until `stillIncomplete` is false.
+  - The roster rule never reaches an unlived day: nothing after today, nothing with no punch today,
+    nothing outside `join_date`–`end_date`. An unread roster refuses the import.
+  - Dates: the reading with the most REAL dates wins, then the most inside the month. A CSV is read
+    with `raw: true`, or SheetJS turns a BS "05-01" into an AD date.
+  - A grid cell is one DATE, so a shift past midnight splits across two cells (S798).
+    `closeNightsInCells` moves a first punch before 5 AM back only on proof (the day before ends on an
+    evening clock-in, and the overnight is shorter than the same-day reading). `suspectReason` sends
+    the rest to check with hours `''`, which `stillIncomplete` holds open.
+- Attendance's period switch is request-guarded.
+
+Why: payroll reads the sheet and nothing else, so every mark the sheet loses, overwrites or
+invents is a wrong payslip.
+
+History: #s742-normal-hours, #s743-clear-month, #s749-roster-attendance-leave-overtime,
+#s768-critique-fixes, #s775-import-from-machine, #s791-hss-ports, #s798-stage-1a, #s798-stage-1b
+
+## Leave
+
+- **An approval is two writes, and the `hr_attendance` rows are the one that pays.** Payroll builds
+  `unpaidDays` only from rows that exist, and the Attendance Sheet never reads `hr_leave_requests`.
+  On the Leave page `approveCore()` → `syncAttendance()` writes the days; the back-fill below is the
+  other writer.
+- **The back-fill** (S741): `backfillApprovedLeave({ clientId, period })` (`backfillApprovedLeave.js`) only calls
+  `hr_backfill_approved_leave(p_period_id)` (DEFINER; admin, Owner, IMS or HR supervisor+). It runs
+  where a period is minted (`createPeriodWithCarryForward`, `performPeriodClose`'s open-next), since
+  `monthly_periods_one_open_per_client` leaves leave for a later month nowhere to write, and behind
+  the Leave page's catch-up button. It fills only days with no attendance row; reports, never throws
+  (`leaveFill`, and its own `leave_backfill` stage in `performPeriodClose`'s `failures`); sends one
+  day once per upsert; and leaves settled leavers out, reporting them as `settled`.
+- **`findApprovedLeaveGaps()`** splits `waiting` (no period yet: say so) from `unmarked` (period
+  exists, days missing: actionable). Months before the client's earliest period are ignored. A failed
+  read returns the error, never an empty list.
+- **Say what the reader can do, or that there is nothing to do.** A banner that asks for an
+  impossible action trains people to ignore banners.
+- **`days` is derived by the database** (`hr_leave_requests_validate`): calendar days − public,
+  not-removed Holiday Calendar days, through `hr_public_holiday_count()` (DEFINER, caller-checked)
+  over `bs_months`. `leaveDayCount()` / `publicHolidayKeys()` (`leaveConstants.js`) are the page's
+  copy. Rostered days off still count. Approval and the back-fill mark those days `holiday`. A
+  days-only UPDATE does not fire the trigger, so a request decided before a holiday was added keeps
+  its count. `submit_my_leave_request` keeps `p_days` in its signature and ignores it.
+- **Two pending/approved requests for one employee may not share a day** (operator exempt for
+  restore; an operator INSERT that is all public holidays is stored at 0 days, so key a restore seam
+  on `is_admin()`). `findOverlappingRequest` / `finalizedMonthsFor` / `quotaOverrun` (`leaveRules.js`)
+  let the page say so first. Over quota WARNS, never blocks.
+- **Reopen (S740) returns a rejected/cancelled request to Pending, never to `approved`**, re-reads its
+  status first, and refuses on a failed read. **An undo restores the state before the write, not the
+  state after it, unless the undo itself performs the write.**
+- **A revert touches only leave-status days** and marks a day that is a holiday NOW `holiday`
+  (S798, `planLeaveRevert` in `leaveRules.js`). If an approval's status write fails after its days are written,
+  `approveCore()` re-reads the request and, only if still pending, puts the days back as read before.
+- **A decided request keeps employee, type, dates and day type** for every client caller, and only a
+  pending one can be deleted (`leave_request_locked`). An approval, or any change to an approved
+  request, in a month with finalized payroll is refused in the database (`hr_leave_range_finalized`,
+  DEFINER, because a supervisor's view of runs is empty).
+- A leave type cannot be deleted while requests use it (`hr_leave_types_guard_delete`, S798).
+
+Why: the request is the decision, but the attendance row is the money, and the two drift apart
+whenever one is written without the other.
+
+History: #s740-leave-reopen-and-overtime-undo, #s741-leave-back-fill,
+#s749-roster-attendance-leave-overtime, #s768-critique-fixes, #s791-hss-ports, #s798-stage-1b
+
+## Overtime and the Holiday Calendar
+
+- **One overtime entry per employee per day** (`hr_overtime_entries_employee_day_key`). An edit of an
+  approved entry stays approved, by decision. After a save to another month, Overtime reloads the
+  month ON SCREEN, never the saved one.
+- **An OT entry stores its own `ot_type`**, so editing or removing a holiday never reprices existing
+  overtime. Copy must not say otherwise.
+- **Overtime's Undo is deliberately unlike Leave's Reopen:** page rank `supervisor`, no confirmation,
+  no freshness re-read. Change it on its own merits, not to match.
+- **`hr_holiday_calendar` decides the holiday 2× rate**: `Overtime.jsx` reads
+  `holiday_type = 'public'` only, never `'optional'`. A row's type is money, not a label.
+- **Three kinds of holiday, and only the first is derivable** (S635; `holidayData.js`, pinned by
+  `holidayData.test.js`). FIXED: the same BS date every year, its BS year from
+  `resolveYear(fyYear, bs_month)`, never a per-row field. MOVABLE: lunar or AD-fixed, transcribed from the Nepal Gazette
+  and keyed by REAL BS year. SIGHTED (the two Eids, Mohammad Jayanti, Guru Nanak Jayanti, Bhoto
+  Jatra): no gazetted date, named on screen as a known gap.
+- **Extending the table is transcription, never calculation:** verify each date in two independent
+  places and against `bsCalendar.js`'s month lengths.
+- **Report coverage rather than seeding short:** the seed names a BS year whose gazette is not in the
+  table.
+- **The NAME is the dedupe key.** No two rows share a name (days with no tithi name of their own are
+  named by BS day), and renaming a FIXED holiday needs a `legacy` name list. Tests assert both.
+- **Seeding is additive and name-keyed:** a client's own entry or edit is never overruled. The one
+  exception is a FIXED holiday found on the wrong date, which is corrected and named in the result
+  (Martyrs' Day, Magh 5 → Magh 16). Region-split holidays (Holi) are seeded twice, named, and the
+  operator removes one.
+- **Writes need HR supervisor rank** (page and a RESTRICTIVE policy per write command).
+  `(client_id, bs_year, bs_month, bs_day, name)` is unique; the table is audited. Seed runs only over
+  a list that loaded, because it dedupes against the screen.
+- **Removing a holiday is a stamp (`removed_at`), never a DELETE**, or the next Seed brings it back.
+  `planSeed()` counts a removed row as present and never corrects its date. **Every reader outside the
+  page filters `removed_at IS NULL`** (grep `hr_holiday_calendar`: today `Overtime.jsx`,
+  `LeaveManagement.jsx`, `demandForecastData.js`, `setupSignals.js`, and in SQL
+  `hr_public_holiday_count` and `hr_backfill_approved_leave`). Delete for good exists and forgets the
+  removal.
+
+Why: a missing or wrong holiday is a wrong rate on a real payslip, on the biggest working days of
+the year.
+
+History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
+#s748-employees-pay-setup-holiday-calendar, #s749-roster-attendance-leave-overtime
+
+## Roster, shift types and swaps
+
+- **Shift types: unique name per client, and no delete while the roster uses one**
+  (`hr_shift_types_guard_delete`). Never reintroduce a destructive tidy-up on a read path. A seed runs
+  only after a successful read, and a 23505 on the seed is a second tab, answered by re-reading.
+- **A roster row is not a person on duty** (S692). `computeScheduledCount` counts heads through
+  `isOnDutyShift` (`laborForecast.js`): an off-type NAME (`isOffDay` / `OFF_SHIFT_KEYWORDS` in
+  `payrollConstants.js`, a substring test also used by the Staff app) or an explicit `hours: 0` is
+  off duty. A working shift with UNKNOWN hours (the default "Split": `hours: null`, no times) is on
+  duty and flagged unpriced (`hasUnknownHours`). Generate from Roster does not use it (it keys on
+  hours), so a "Day Off" type given hours is off duty here and Present there.
+- **A swap approval is `approve_shift_swap(p_request_id)`**: SECURITY INVOKER, one transaction, every
+  UPDATE's row count asserted (a write RLS filters out is 0 rows, not an error). Same day → trade
+  `shift_type_id`. Different days → trade `employee_id`, and a Day Off trades the other way
+  (`hr_shift_kind`: off / leave / work). Only a working shift or leave on the other day refuses
+  (`swap_day_taken`, raised at request time too), and the traded rows must both be working shifts.
+- **`request_shift_swap` refuses** a past day, an unpublished day, and a shift already in an open swap
+  (`swap_day_past` / `swap_day_unpublished` / `swap_already_requested`). The Staff app's picker hides
+  past days.
+- **Shift Swaps is the Roster page's own tab** (S633), and its history is never period-scoped. The pending
+  count rides on the tab button (`pending_admin` only, the `useHrApprovalCounts.js` filter), fetched by
+  `Roster.jsx` with a `head: true` query, because the panel mounts only once the tab is opened.
+- **A history outlives the people in it.** The board loads `status IN ('active','probation')`, so a
+  page showing historical rows resolves the names its list filtered out: fetch the unknown ids once,
+  tracked in a ref. `rejected_by_target` and `cancelled` have no `admin_decided_by`; name the coworker
+  who declined or the requester who withdrew.
+- Roster's board and publish loads are request-guarded. `hr_overtime_entries`, `hr_shift_types` and
+  `hr_shift_swap_requests` are audited; `hr_roster` deliberately is not (volume).
+
+Why: the roster is read as evidence of who works, by payroll, the forecast and the Staff app, so a
+row that is not a shift must never count as one.
+
+History: #s633-shift-swaps-tab, #s692-labor-forecast, #s749-roster-attendance-leave-overtime,
+#s791-hss-ports
+
+## Labor Forecast and the labour standard
+
+- **Labour Cost % bands through `lcBand`** (`src/shared/operatingBands.js`), never a local threshold:
+  `bandFigure(pct, lcBand, { decimals: 0 })`, rendering its `text`, which carries the ✓/△/▲ (see
+  `ims-figures.md`).
+- **A scheduled hour costs the LOADED rate** (S692), never `hourlyRateOf(basic)` alone: `loadedHourlyRateOf`
+  is monthly `(basic + earning components) / (monthDays × 8)`, daily `basic / 8`, hourly `basic`, plus
+  the 20% employer SSF (gated on `ssf_enrolled AND ssf_no`) over the same hours. With no components
+  and no SSF it equals `hourlyRateOf`.
+- **Hours and cost follow the Department filter; Scheduled Staff never does**, because Recommended
+  Staff is covers ÷ target for the whole outlet. The tab shows the filter and says which columns it
+  narrows.
+- **A past day reads actuals.** Revenue from `sales_entries` (the Owner Dashboard's definition, and so
+  the band's denominator); covers from closed paid `pos_orders`, only where the VIEWED client has POS
+  (`clientModules.pos`, not `posEnabled`); hours from `hr_attendance`, with `ot_hours` priced at basic
+  × 1.5 inside `hours_worked`. A holiday row costs 0 hours here, deliberately: this prices hours on
+  the floor. A day with no attendance rows is `basis: 'roster'`, labelled "as rostered · no
+  attendance", never 0h. Recommended Staff and Status are hidden for a non-POS outlet, and
+  `staffedDays` guards the footer.
+- **`laborStandard.js`** (S693) turns forecast revenue into required hours from a trailing 120-day window:
+  a ratio of totals, never a mean of per-day ratios, linear through the origin with no intercept.
+  `typicalShiftHours` is `Σ hours / Σ heads` from the window, NEVER `STANDARD_HOURS_PER_DAY` (a
+  payroll constant).
+- **Only evidence trains it:** `isTrainingSample` requires recorded hours, an existing period, and
+  non-zero hours and revenue. A bulk `bs_day = 0` sales month is barred entirely.
+- **`measureRosterBias`** (`Σ attendanceHours / Σ rosteredHours` over days carrying both) scales
+  roster-only samples. Under 10 overlap days they train unadjusted and the tab says so. Never assume a
+  direction: overtime pushes the ratio above 1.
+- **The window's hours read EVERY employee, whatever their status** (`tallyWindowAttendance` filters
+  by nothing); `computeActualLabor` skips anyone not in the list it is given, so never hand it the
+  board's active list.
+- **Say on the row which basis each number came from.** A weekday under 4 samples falls back to the
+  all-days figure and says so (`describeBasis`); under 20 qualifying days there is no standard; a
+  failed window read is an `ActionError` saying it failed, not a lack of history. It learns what this
+  outlet normally uses, not what it should.
+- **`covers_per_staff_target` stays a POLICY the owner sets.** The learned covers-per-shift figure is
+  shown beside it and never written into it.
+
+Why: each of these figures reads plausibly when it is wrong, and the band is shared with the Owner
+Dashboard, so both must price the same hour.
+
+History: #s660-status-colours-and-labour-band, #s692-labor-forecast, #s693-labour-standard,
+#s749-roster-attendance-leave-overtime
+
+## Rank, approvals and your own records
+
+- **Rank is a database fence.** RESTRICTIVE supervisor-rank INSERT/UPDATE/DELETE policies on
+  `hr_attendance`, `hr_leave_requests`, `hr_leave_types`, `hr_overtime_entries`, `hr_roster`,
+  `hr_shift_types`, `hr_shift_swap_requests`, `hr_roster_publish_state` and the Holiday Calendar
+  (S748–S749). Manager-rank WRITES on runs, payslips, components, settlements, salary payments,
+  advances, repayments, festival, incentives and incentive types; supervisor-rank writes on TADA
+  claims (S751). Reads are not fenced by rank: supervisors read pay, by the S750 decision, so never
+  give a page a reason that rests on a supervisor's read coming back empty. `hr_employees` writes
+  need manager (`hr_employees_write_rank_*`) while reads stay open to supervisors (S798). **A new HR table a page
+  writes gets the same three policies.** Self-Service writes through SECURITY DEFINER RPCs.
+- **A refused RLS write returns 0 rows and no error**, so a write that matters adds `.select('id')` and
+  checks the count. The three employee writers say `NOT_SAVED_RLS` (`employeeFormData.js`).
+- **Nobody below the Owner decides their own record:** `hr_leave_requests_guard_decision` (stamps
+  `decided_by`), `hr_overtime_guard_own` and `hr_advances_guard_own` refuse `hr_own_request`;
+  `hr_self_decision_exempt()` is admin OR Owner. A new approval queue gets the same trigger.
+- **"Your own" covers more than Approve/Reject** (S798 1b), OLD or NEW employee: your own advance
+  (delete, move, write-off, amount, instalment, issue date, type) and any repayment on it; your own
+  approved overtime (employee, hours, type, day); your own APPROVED leave (no cancel, no reopen, H8).
+  Withdrawing your own pending leave stays allowed. Pages test with `useIsOwnEmployee`
+  (`ownRecord.js`, Owner exempt; TADA keeps `isOwnClaim`, operator-only) and render `OwnRecordNote`;
+  a batch leaves own rows out.
+- **HR-role logins read `monthly_periods`** (per-command write policies replaced S430's FOR ALL
+  `no_hr_role_staff`). **When a check reads a table an HR login cannot see, it is not a check for
+  that login.**
+- **Staff rank, all three modules:** no rankless staff login (admin-user-ops refuses, and pages have
+  no "No Access"); HR Manager is granted by the Owner or admin only; the staff role lists in `settings`
+  are Owner-or-that-module's-manager (`settings_guard_staff_roles`); **no page re-ranks on load**, a
+  mismatch is a banner and a confirmed Apply. `pos_email` joins every negative Owner test.
+- **One approval control for Leave, Overtime, TADA and Shift Swaps** (`src/modules/hr/ApprovalControls.jsx`).
+  A batch runs each row's OWN decision one after another (`decideEach`) and names every refusal; it
+  never writes a set in one statement, because one refused row would fail them all. Leave's batch
+  leaves out a request over quota or in a finalized month, and checks quota as if its earlier
+  requests were already approved; `approveCore()` is the approval without the page's busy flag,
+  message or reload. Approve and Reject are both neutral small ghosts.
+- **A failed count is not a zero** (S734). `useHrApprovalCounts` returns the failure rather than `|| 0`. A
+  queue tile whose empty state is good news needs a third rendering for a failed read: an em-dash
+  plus "count unavailable — open the page", with the section label saying so. When you find this
+  shape, check the rest of the screen (HrDashboard's Headcount: `setEmpStats(err ? null : {…})`).
+
+Why: no route gate checks a role, and a restrictive policy answers `[]` instead of an error, so
+every rank and every own-record rule has to hold in the database.
+
+History: #s734-pending-counts, #s748-employees-pay-setup-holiday-calendar,
+#s749-roster-attendance-leave-overtime, #s751-payroll-decisions, #s752-settlement-decisions,
+#s768-critique-fixes, #s798-stage-1b
+
+## Employees and Pay Setup
+
+- **A form saves the fields it owns and changed, never the row it loaded.** `EmployeeForm` saves
+  through `changedEmployeeFields()` (`employeeFormData.js`). Any other edit form over a table two screens write needs the
+  same shape.
+- **A field that affects pay is never hidden while it holds a value.** The End Date shows whenever it
+  is set, with a warning when it is past on an active employee.
+- **Pay Setup's editor refuses Save until its component read is `ok`.** Save deletes and re-inserts
+  the set, so the set you send must be one you actually read.
+- **An employee with pay history cannot be deleted, by anyone** (`hr_employees_guard_delete`,
+  `employee_pay_history()`): finalized payslips, a finalized settlement, finalized festival
+  allowances, any advance, or a Self-Service login. Deactivate is the lossless path; there is no
+  force path. A whole-client deletion still cascades (the guard lets it through once the `clients`
+  row is gone). Since S798 1b `employee_pay_history` answers only a login that can see employees at
+  all (SELF-SERVICE-2), so for HR staff, POS, IMS and Self-Service logins it is RLS (manager-rank
+  writes), not the guard, that refuses the delete.
+- **Pay Setup previews are a full month before income tax**, and say so. The default tab is On
+  payroll (active + probation), matching every payroll picker.
+
+Why: two screens write `hr_employees`, and a stale copy saved over it reverts a raise, a settlement
+or a login block.
+
+History: #s748-employees-pay-setup-holiday-calendar, #s798-stage-1b
+
+## Colour, ink and BS dates on HR screens
+
+- **`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) are the module's only status
+  colours** (S660), across all five approval queues and Self-Service:
+
+      amber = open, something is still required of someone
+      brass = decided, but the money has not moved   (badge-yellow)
+      green = closed, good
+      red   = closed, refused
+      grey  = closed, void — withdrawn or cancelled
+
+  Take `.badge` for a chip and `.tint` for a hand-drawn one (it carries S549's fill-vs-text split:
+  base token for the fill and border, `*-text` for the label). A ladder with a payment step extends the
+  map (`TADA_REQUEST_STATUS` overrides only `approved` brass and `paid` green). Two open states on one
+  page separate by LABEL and the amber/brass split, never a sixth hue. `Advances.jsx`'s
+  `ADVANCE_STATUS` restates the same hues as literals; derive it from the map when touched.
+- **A category never takes a signal colour:** a public holiday and holiday-rate OT are brass
+  (`badge-yellow`), an optional holiday purple, weekday OT grey. Staff rank badges (S661) come from `src/shared/staffLevelBadge.js`, as in `HrStaff.jsx`
+  (`STAFF_LEVEL_BADGE`, all three levels `badge-yellow`; `STAFF_LEVEL_BADGE_NONE` for no access to the
+  module).
+- **A correct payroll figure takes the ink; the sign carries direction** (registers, the working
+  panel, Festival/Incentive runs, Final Settlement, Gratuity, Pay Setup's preview, `PayslipBody`).
+  Colour is for flags only (SSF no. missing, no bank, out of date, split month, owed by the employee:
+  amber with △). `RunStatusBadge` is the one Draft (amber) / Finalized (green) chip beside a run's
+  title; Festival Allowance and Incentive Run still build their own per-run list chip, with a third
+  state "Part finalized", in the same colours. A resigned or
+  terminated employee is grey, not red.
+- Final Settlement sits in the Payroll nav group; Gratuity stays in Reports.
+- **A day inside a known month prints as `formatBsDay(day, bsMonth)`** (S614; "1st Bhadra"), or
+  `bsDayOrdinal(day)` where the month is beside it (both `src/utils/bsCalendar.js`). A destructive
+  confirm names the day in the words the roster shows. **Never retype the month list**: import
+  `BS_MONTHS`.
+
+Why: one hue meaning opposite verdicts on two screens a manager uses in one sitting is how a
+palette stops meaning anything.
+
+History: #s614-bs-day-labels, #s660-status-colours-and-labour-band, #s768-critique-fixes
+
+## Export, restore and Danger Zone
+
+- `RESTORE_ORDER` restores `hr_advance_repayments` / `hr_tada_claims` AFTER the payroll runs and
+  settlements they reference. Danger Zone deletes repayments before runs, and salary payments before
+  runs and employees (all NO ACTION FKs).
+- The operator seam (`is_admin()`) is how a restore writes history past the HR guards; see Finalize,
+  Reopen and the database locks.
+
+Why: an FK with NO ACTION refuses the delete or insert in the wrong order.
+
+History: #s752-settlement-decisions, #s782-salary-payments
+
+## Migrations, tests and findings
+
+- Migrations: S749 `20260914170000` (rank fences, finalized-month locks, swaps) and `20260914180000`
+  (holidays inside leave); S751 `20260914210000`; S752 `20260914230000`; S753 `20260915090000`; S782
+  `20260923100000`; S791 `20260928100000` (advances), `20260928110000` (leavers), `20260928130000`
+  (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`.
+- Engine tests: `payrollS751.test.js`, `settlementCompute.test.js`, `gratuityCompute.test.js`,
+  `holidayData.test.js`. The S798 findings and stage plans: `HR_TODO.md` (S798.2, S798.3).
+- The S770 moves (S682's per-ledger Finalize/Reopen messages, the S628 row-cap sweep, the S628
+  render-body fix) are at the top of `docs/rules-archive/hr-payroll.md`; the pre-S799 title and intro
+  note: #title-and-intro-note.
