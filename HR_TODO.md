@@ -484,6 +484,37 @@ supabase-sql.md, data-export.md.
 
 ## S798.3 Stage 2 — wrong figures and lost work
 
+**Stage 2 decisions (taken with Aashish, 2026-10-01, all as recommended).** Eight rows left a choice open; the
+other 29 have one fix.
+
+- **H26 (SETTLEMENT-5):** once someone is rehired, their earlier settlement cannot be reopened; a correction is
+  paid by hand and noted. (Reopening today recomputes it on the new spell and re-bans a working login.)
+- **H27 (PEOPLE-ACCESS-3):** on a rehire, clear the stale End Date in the same save and say so, rather than
+  refusing the save.
+- **H28 (GAP-OPERATOR-3):** backfill `paid_amount` (from `net_payout` where never reopened, from `audit_logs`
+  where reopened); count first; list, never guess, any reopened row with no log entry.
+- **H29 (PAYROLL-4):** count live payslips whose net ≠ its parts before adding the trigger; if any, list them
+  (name, month, difference) for the owner and change nothing.
+- **H30 (ROSTER-9):** HR supervisors and managers see each past day's total sales and covers (totals only).
+- **H31 (LABOUR-FIGURES-7):** withhold hour-based figures when more than half the working days have no times;
+  always print the count.
+- **H32 (REPORTS-3):** the strip moves to the running month at Finalize, not at Mark paid.
+- **H33 (BONUS-LEDGERS-4):** yes, show "Settled on (date)" on Incentive Run.
+
+**Slices, one short chat and one migration each** (this replaces the single `hr_figures_s798` below):
+
+1. **2a Settlements:** GAP-OPERATOR-3, SETTLEMENT-3, -4, -5, GAP-PAY-STATE-3, ENGINE-3, PEOPLE-ACCESS-3.
+   Migration `hr_settlements_s798`. Rebuild `finalize_final_settlement` for Stage 2 only; Stage 3 rebuilds it
+   again from the live body.
+2. **2b Payroll and tax:** PAYROLL-3, -4, -5, ENGINE-4, ENGINE-5, BONUS-LEDGERS-4, PAYROLL-2, REPORTS-3.
+   Migration `hr_payroll_s798`.
+3. **2c Attendance, leave, outlet switch:** ATTENDANCE-6, GAP-OPERATOR-2, GAP-OUTLETS-2, LEAVE-OT-HOLIDAYS-3, -4,
+   DATABASE-2, -3. Migration `hr_leave_s798`; admin-user-ops. Split GAP-OUTLETS-2 off if it runs long.
+4. **2d Crest Staff and rosters:** ROSTER-2, -4, -8, ATTENDANCE-7, SELF-SERVICE-3, -4, -5. Migration
+   `hr_roster_s798`; hr-push.
+5. **2e Labour figures:** ROSTER-6, -7, -9, LABOUR-FIGURES-2, -4, -5, -6, -7. Migration `hr_labour_s798`. Before
+   the next month close: the Owner Report freezes its figures then.
+
 | ID | What to change | Status |
 | --- | --- | --- |
 | LABOUR-FIGURES-2 | Group Dashboard takes labour from `get_group_pnl` (payroll, else Labor tab); "not finalized" and no band when payroll is null on an HR outlet; group % only when every outlet has one. Consolidated P&L: a "no finalized payroll" marker and no Net Profit colour. | 🔴 |
