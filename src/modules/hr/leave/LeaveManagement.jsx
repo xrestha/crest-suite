@@ -8,7 +8,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange, leaveDayCount, publicHolidayKeys } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
-import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun } from './leaveRules'
+import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun, leaveDaysByPeriod, planLeaveRevert, LEAVE_MARK_STATUSES } from './leaveRules'
 import { backfillApprovedLeave, findApprovedLeaveGaps } from './backfillApprovedLeave'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -258,27 +258,56 @@ export default function LeaveManagement() {
   // 'present' silently fabricated an attendance record. Deleting leaves the day blank — the same
   // "no signal, needs manual entry" state AttendanceSheet.jsx already uses for un-rostered days —
   // so an admin can correct it instead of payroll silently trusting a wrong guess.
+  //
+  // Only a day still marked as leave is touched (S798, LEAVE-OT-HOLIDAYS-4, `planLeaveRevert`): a day
+  // that is a public holiday NOW becomes Holiday (a holiday added after the approval used to keep its
+  // leave mark and dock the day), and a day re-marked by hand keeps that mark.
   async function revertAttendance(req) {
-    const periodMap = {}
-    periods.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
-    const days = workingDaysInRange(req.start_date, req.end_date)
-    // One DELETE per PERIOD, not per day. This used to await a delete inside the day loop, so
+    // One write per PERIOD, not per day. This used to await a delete inside the day loop, so
     // rejecting a two-week leave cost 14 sequential round trips (a month's medical leave, 22+) —
     // seconds of spinner on a button whose work is a single set operation. Grouping by period_id
     // and passing the days as an `.in()` makes it one request per BS month the leave spans, which
-    // is almost always one. Same shape as syncAttendance's upsert directly above.
-    const daysByPeriod = new Map()
-    for (const d of days) {
-      const p = periodMap[`${d.bsYear}:${d.bsMonth}`]
-      if (!p) continue
-      // A public holiday was marked Holiday, not leave — it stays a holiday when the leave goes.
-      if (holidayKeys.has(`${d.bsYear}:${d.bsMonth}:${d.bsDay}`)) continue
-      if (!daysByPeriod.has(p.id)) daysByPeriod.set(p.id, [])
-      daysByPeriod.get(p.id).push(d.bsDay)
+    // is almost always one.
+    const writes = []
+    for (const { periodId, clear, toHoliday } of planLeaveRevert(req, periods, holidayKeys)) {
+      if (clear.length) writes.push(scopedDelete('hr_attendance')
+        .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', clear).in('status', LEAVE_MARK_STATUSES))
+      // A holiday is a non-working day, so it carries no clock (S749) — the row syncAttendance writes.
+      if (toHoliday.length) writes.push(scopedUpdate('hr_attendance', { status: 'holiday', hours_worked: 0, ot_hours: 0, start_time: null, end_time: null, break_minutes: null })
+        .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', toHoliday).in('status', LEAVE_MARK_STATUSES))
     }
-    const results = await Promise.all([...daysByPeriod.entries()].map(([periodId, bsDays]) =>
-      scopedDelete('hr_attendance')
-        .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', bsDays)))
+    const results = await Promise.all(writes)
+    return results.find(r => r && r.error)?.error || null
+  }
+
+  // What a request's days hold before its approval writes them (S798, LEAVE-OT-HOLIDAYS-3), so a refused
+  // approval can put them back. The columns are the ones syncAttendance writes. One employee's days
+  // in at most a year's periods: a few hundred rows, under the 1000-row cap.
+  const LEAVE_DAY_COLS = 'period_id, bs_day, status, hours_worked, ot_hours, start_time, end_time, break_minutes'
+  async function readLeaveDays(req) {
+    const groups = leaveDaysByPeriod(req, periods)
+    const results = await Promise.all(groups.map(({ periodId, days }) =>
+      scopedFrom('hr_attendance', LEAVE_DAY_COLS)
+        .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', days.map(d => d.bsDay))))
+    const error = results.find(r => r.error)?.error
+    if (error) return { error }
+    return { groups, rows: results.flatMap(r => r.data || []) }
+  }
+
+  // Puts a request's days back as `before` read them: a day that had a row gets it back, a day that
+  // had none loses the mark the approval wrote (and only that — a leave or holiday mark).
+  async function putLeaveDaysBack(req, before) {
+    const had = new Set(before.rows.map(r => `${r.period_id}:${r.bs_day}`))
+    const writes = []
+    if (before.rows.length) {
+      writes.push(scopedUpsert('hr_attendance', before.rows.map(r => ({ employee_id: req.employee_id, ...r })), { onConflict: 'employee_id,period_id,bs_day' }))
+    }
+    for (const { periodId, days } of before.groups) {
+      const blank = days.map(d => d.bsDay).filter(d => !had.has(`${periodId}:${d}`))
+      if (blank.length) writes.push(scopedDelete('hr_attendance')
+        .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', blank).in('status', [...LEAVE_MARK_STATUSES, 'holiday']))
+    }
+    const results = await Promise.all(writes)
     return results.find(r => r && r.error)?.error || null
   }
 
@@ -333,13 +362,26 @@ export default function LeaveManagement() {
     const status = type.paid
       ? (isHalf ? 'half_paid_leave' : 'paid_leave')
       : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
+    // What the days hold now, so a refused approval can put them back (S798, LEAVE-OT-HOLIDAYS-3).
+    const before = await readLeaveDays(req)
+    if (before.error) return { ok: false, text: 'Could not read the attendance days this leave covers, so nothing was changed — try again. ' + errorLine(before.error) }
     const { missing, error: syncErr } = await syncAttendance(req, status)
     if (syncErr) return { ok: false, text: 'The leave days could not be marked on the attendance sheet, so the request was NOT approved. Try again. ' + errorLine(syncErr) }
     const { error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
     if (apprErr) {
-      // The attendance rows are already written (upserted, so re-approving is safe); the request
-      // is the half that did not move. Say so rather than "Approved".
-      return { ok: false, reload: true, text: 'The leave days were marked on the attendance sheet, but this request still shows Pending. Approve it again — re-approving is safe. ' + errorText(apprErr, 'operator') }
+      // The days are written and the request did not move — unless the update landed and only its
+      // answer was lost. Ask before undoing anything: putting the days back under an approved
+      // request would pay an unpaid leave.
+      const { data: after, error: afterErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
+      if (!afterErr && after?.status === 'approved') return { ok: true, missing }
+      if (afterErr) {
+        return { ok: false, reload: true, text: 'The leave days were marked on the attendance sheet, but whether the approval went through could not be checked. Reload: if this request still shows Pending, approve it again — if it is refused again, its days are put back. ' + errorText(apprErr, 'operator') }
+      }
+      const putErr = await putLeaveDaysBack(req, before)
+      if (putErr) {
+        return { ok: false, reload: true, text: `This request could not be approved, and the leave already marked on the attendance sheet for ${bsLabel(req.start_date)} → ${bsLabel(req.end_date)} could not be put back. Correct those days on the Attendance Sheet, or approve again once the reason below is dealt with. ` + errorText(apprErr, 'operator') + ' ' + errorLine(putErr) }
+      }
+      return { ok: false, reload: true, text: 'This request could not be approved, so its days on the attendance sheet were put back as they were. ' + errorText(apprErr, 'operator') }
     }
     return { ok: true, missing }
   }
@@ -441,7 +483,7 @@ export default function LeaveManagement() {
         <p style={{ margin: 0 }}>
           {emp?.full_name || 'The employee'}'s {fmt(req.days)} day{req.days === 1 ? '' : 's'} from {bsLabel(req.start_date)} to {bsLabel(req.end_date)}{' '}
           {req.status === 'approved'
-            ? 'are already approved and marked on the attendance sheet — those days go back to unmarked and the leave balance is restored.'
+            ? 'are already approved and marked on the attendance sheet. Each day still marked as leave goes back to unmarked — or to Holiday, if it has since become a public holiday — and the leave balance is restored. A day someone has re-marked by hand keeps its mark.'
             : 'are marked ' + verb.toLowerCase() + 'ed and the balance is untouched.'}
         </p>
       ),

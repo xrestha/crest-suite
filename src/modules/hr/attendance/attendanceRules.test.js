@@ -1,4 +1,4 @@
-import { NON_WORKING_STATUSES, withStatus, fillBlankCells, attendanceRowFor, cellSignature, unsavedKeys, carryUnsavedEdits, splitCellKey } from './attendanceRules'
+import { NON_WORKING_STATUSES, withStatus, fillBlankCells, attendanceRowFor, cellSignature, unsavedKeys, carryUnsavedEdits, splitCellKey, splitFirstMarks, firstMarksKeptOut, keysOutsideList } from './attendanceRules'
 
 const valid = s => !s || /^\d{1,2}:\d{2}$/.test(s)
 
@@ -147,5 +147,43 @@ describe('carryUnsavedEdits', () => {
   it('leaves an untouched cell to the fresh read', () => {
     const next = carryUnsavedEdits({}, prevSaved, prevSaved, timeKey)
     expect(next).toEqual({}) // another tab deleted them; nothing here was an edit
+  })
+})
+
+// S798 (ATTENDANCE-6): Save writes a mark on a day that was blank at load with DO NOTHING, so a leave
+// approved meanwhile from the Leave page is not turned back into a paid Present day.
+describe('splitFirstMarks', () => {
+  it('sends a cell with no saved copy as a first mark and one with a saved copy as an edit', () => {
+    const saved = { 'e1:2': { status: 'present' } }
+    expect(splitFirstMarks(['e1:1', 'e1:2', 'e2:2'], saved)).toEqual({ first: ['e1:1', 'e2:2'], edits: ['e1:2'] })
+  })
+})
+
+describe('firstMarksKeptOut', () => {
+  const sent = { 'e1:20': { status: 'present', hours_worked: 8 }, 'e1:21': { status: 'present', hours_worked: 8 }, 'e1:22': { status: 'absent' } }
+  const first = ['e1:20', 'e1:21', 'e1:22']
+
+  it('names a first mark the database kept out because the day was marked meanwhile', () => {
+    const written = [{ employee_id: 'e1', bs_day: 20 }]
+    const stored = { 'e1:20': { status: 'present', hours_worked: 8 }, 'e1:21': { status: 'unpaid_leave' }, 'e1:22': { status: 'absent' } }
+    // 21 was approved Unpaid Leave from the Leave page; 22 holds what this sheet sent (its own earlier Save).
+    expect(firstMarksKeptOut(first, written, sent, stored, timeKey)).toEqual(['e1:21'])
+  })
+
+  it('names none when every first mark went in', () => {
+    const written = first.map(k => ({ employee_id: 'e1', bs_day: splitCellKey(k).day }))
+    expect(firstMarksKeptOut(first, written, sent, {}, timeKey)).toEqual([])
+  })
+
+  it('names none when RETURNING could not be read, rather than calling every mark taken', () => {
+    expect(firstMarksKeptOut(first, null, sent, { 'e1:21': { status: 'unpaid_leave' } }, timeKey)).toEqual([])
+  })
+})
+
+// S798 (GAP-OPERATOR-2): a mark for someone not on the sheet came from another client's sheet.
+describe('keysOutsideList', () => {
+  it('returns only the cells whose employee is not listed', () => {
+    expect(keysOutsideList(['e1:1', 'sita:4', 'e2:9'], ['e1', 'e2'])).toEqual(['sita:4'])
+    expect(keysOutsideList(['e1:1'], ['e1'])).toEqual([])
   })
 })

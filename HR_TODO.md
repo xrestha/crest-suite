@@ -501,19 +501,22 @@ other 29 have one fix.
 - **H32 (REPORTS-3):** the strip moves to the running month at Finalize, not at Mark paid.
 - **H33 (BONUS-LEDGERS-4):** yes, show "Settled on (date)" on Incentive Run.
 
-**Slices, one short chat and one migration each** (this replaces the single `hr_figures_s798` below). **2a DONE 2026-10-01** (crest-v367, migration live). **2b DONE 2026-10-01** (crest-v368, migration live):
+**Slices, one short chat and one migration each** (this replaces the single `hr_figures_s798` below). **2a DONE 2026-10-01** (crest-v367, migration live). **2b DONE 2026-10-01** (crest-v368, migration live). **2c DONE 2026-10-01** (crest-v369, migration live):
 
 1. **2a Settlements:** GAP-OPERATOR-3, SETTLEMENT-3, -4, -5, GAP-PAY-STATE-3, ENGINE-3, PEOPLE-ACCESS-3.
    Migration `hr_settlements_s798`. Rebuild `finalize_final_settlement` for Stage 2 only; Stage 3 rebuilds it
    again from the live body.
 2. **2b Payroll and tax:** PAYROLL-3, -4, -5, ENGINE-4, ENGINE-5, BONUS-LEDGERS-4, PAYROLL-2, REPORTS-3.
    Migration `hr_payroll_s798`.
-3. **2c Attendance, leave, outlet switch:** ATTENDANCE-6, GAP-OPERATOR-2, GAP-OUTLETS-2, LEAVE-OT-HOLIDAYS-3, -4,
-   DATABASE-2, -3. Migration `hr_leave_s798`; admin-user-ops. Split GAP-OUTLETS-2 off if it runs long.
+3. **2c Attendance and leave:** ATTENDANCE-6, GAP-OPERATOR-2 (with the H3(b) remount), LEAVE-OT-HOLIDAYS-3, -4,
+   DATABASE-2, -3. Migration `hr_leave_s798`. GAP-OUTLETS-2 moved to 2f (owner, 2026-10-01).
 4. **2d Crest Staff and rosters:** ROSTER-2, -4, -8, ATTENDANCE-7, SELF-SERVICE-3, -4, -5. Migration
    `hr_roster_s798`; hr-push.
 5. **2e Labour figures:** ROSTER-6, -7, -9, LABOUR-FIGURES-2, -4, -5, -6, -7. Migration `hr_labour_s798`. Before
    the next month close: the Owner Report freezes its figures then.
+6. **2f Outlet switch:** GAP-OUTLETS-2. No migration; admin-user-ops (409 on a client mismatch) and the shared
+   auth layer (`AuthContext.js`, `sessionKeepAlive.js`), since IMS and POS share the root. Split off 2c because
+   it is app-wide, not HR.
 
 | ID | What to change | Status |
 | --- | --- | --- |
@@ -529,7 +532,7 @@ other 29 have one fix.
 | SETTLEMENT-3 | New `hr_unpaid_days_on_file` (twin of `hr_ot_on_file`); finalize refuses `settlement_stale_attendance`; the page re-reads at the confirm. | ✅ S798 stage 2a (crest-v367), migration `20261001120000_hr_settlements_s798`, applied live 2026-10-01 after a 10-case rolled-back dry run as CASA logins. New `hr_attendance_on_file`; the formula reproduced a real stored settlement (1.00 unpaid day) before applying; a Present turned Absent was refused (1.00 vs 2.00). The confirm re-reads the sheet and offers Recalculate now. |
 | SETTLEMENT-4 | Cap `monthTds` at what the whole payout bears, not the final month's net (`settlementCompute.js:111`); add a test. | ✅ S798 stage 2a (crest-v367). Capped at what the taxable payout bears, never from travel claims; tests added. |
 | SETTLEMENT-5 | Refuse Reopen, and Finalize as backstop, once rehired (`settlement_rehired`); render an earlier spell from stored columns, never auto-opened. Narrows S791: an earlier-spell correction is paid by hand. | ✅ S798 stage 2a (crest-v367), migration `20261001120000_hr_settlements_s798`, applied live 2026-10-01 after a 10-case rolled-back dry run as CASA logins (H26). Reopen and Finalize refuse `settlement_rehired`; the page shows the earlier spell as stored. |
-| ATTENDANCE-6 | Generate: `ignoreDuplicates` (with ATTENDANCE-1) and report skips. Save: first marks in their own ON CONFLICT DO NOTHING upsert, naming days already taken. | 🟡 Generate half done in S798 stage 1a (DO NOTHING + kept count); Save half open. |
+| ATTENDANCE-6 | Generate: `ignoreDuplicates` (with ATTENDANCE-1) and report skips. Save: first marks in their own ON CONFLICT DO NOTHING upsert, naming days already taken. | ✅ Generate half S798 stage 1a; Save half S798 stage 2c (crest-v369): a cell blank at load is written ON CONFLICT DO NOTHING (`splitFirstMarks`), and a day marked meanwhile elsewhere is kept, shown and named (`firstMarksKeptOut`; a row identical to the cell is the sheet's own earlier Save, not a clash). |
 | ATTENDANCE-7 = ROSTER-5 | One classifier ported from `hr_shift_kind` (off only for zero-hour, no start time, named off/holiday; leave by name; else work) in the import, todayView, RosterWeek, the swap picker and `isOnDutyShift`; `get_coworker_roster` returns the kind. | 🔴 |
 | ROSTER-2 | SwapRequestsPanel `onDecided` reloads the Board and forecast; Clear deletes on id AND employee AND day. | 🔴 |
 | ROSTER-4 | Return published day numbers (new RPC or a per-day flag in `get_my_roster`); key Crest Staff's views by day; read the error (with SELF-SERVICE-4). | 🔴 |
@@ -537,22 +540,22 @@ other 29 have one fix.
 | ROSTER-7 | Past days load every employee with attendance in range, whatever their status. | 🔴 |
 | ROSTER-8 | hr-push checks the active outlet, else the home client; page the fan-out read; say "staff were not notified" on failure. Redeploy hr-push. | 🔴 |
 | ROSTER-9 | Caller-checked DEFINER `hr_labour_actuals(client, from, to)` (revenue and covers, HR supervisor+); until then "—" for HR logins. Close IMS_TODO.md:317 with it. | ⚪ |
-| LEAVE-OT-HOLIDAYS-3 | Refuse your own request on the page before any write and skip it in the batch; if the status update fails after the upsert, put the days back and say so truthfully. | 🟡 First half in S798 stage 1b: your own request shows no Approve/Reject and the batch leaves it out by name. Still open: putting the days back when the status update fails after the upsert. |
-| LEAVE-OT-HOLIDAYS-4 | `revertAttendance` acts only on the four leave statuses: delete them, but set a now-holiday day to 'holiday'. | 🔴 |
+| LEAVE-OT-HOLIDAYS-3 | Refuse your own request on the page before any write and skip it in the batch; if the status update fails after the upsert, put the days back and say so truthfully. | ✅ First half S798 stage 1b; second half S798 stage 2c (crest-v369): `approveCore` reads the days first, and when the status update fails it re-reads the request — approved after all stands, still pending puts the days back as read; a failed put-back names the days to correct. |
+| LEAVE-OT-HOLIDAYS-4 | `revertAttendance` acts only on the four leave statuses: delete them, but set a now-holiday day to 'holiday'. | ✅ S798 stage 2c (crest-v369). `planLeaveRevert`: only leave-status days change, a day that is a holiday now becomes Holiday (no clock), hand re-marks and Holiday rows stay; the Cancel/Reject confirm says so. |
 | PEOPLE-ACCESS-3 | The rehire path refuses (or clears, saying so) a stale End Date; refuse end_date < join_date; name both steps in the refusal, `Help.js:349`, `hrGuideData.js:634`. | ✅ S798 stage 2a (crest-v367), H27: the save clears the stale End Date and the form says so first; End Date before Join Date refused. |
 | SELF-SERVICE-3 | Hold today in state; on resume recompute it and move the week and Home days when the BS day changed; test the handler. | 🔴 |
 | SELF-SERVICE-4 | Destructure both errors in loadRoster; "Could not load suppliers" in the TADA sheet. With ROSTER-4. | 🔴 |
 | SELF-SERVICE-5 | Sign-out unsubscribes push first; `subscribeToPush` re-subscribes on an RLS upsert error. | 🟡 Sign-out unsubscribes first (S798 stage 1a); the re-subscribe on an RLS upsert error is open. |
-| DATABASE-2 | `hr_leave_requests_validate`: on an operator INSERT skip only the all-holidays refusal and store 0 days. Never key it on `current_user`. Rolled-back probe. | 🔴 |
-| DATABASE-3 | `hr_leave_types_guard_delete` (as `hr_shift_types_guard_delete`): refuse while referenced, "untick Active instead". | 🔴 |
+| DATABASE-2 | `hr_leave_requests_validate`: on an operator INSERT skip only the all-holidays refusal and store 0 days. Never key it on `current_user`. Rolled-back probe. | ✅ S798 stage 2c (crest-v369), migration `20261001160000_hr_leave_s798`, applied live 2026-10-01 after an 8-case rolled-back dry run (operator, CASA Owner, system role). Keyed on `is_admin()`; the operator's all-holiday insert stores 0 days, the Owner is still refused, and approving a pending one stays refused. Counted first: no live request was at risk. |
+| DATABASE-3 | `hr_leave_types_guard_delete` (as `hr_shift_types_guard_delete`): refuse while referenced, "untick Active instead". | ✅ S798 stage 2c (crest-v369), same migration and dry run: an in-use type is refused (`leave_type_in_use`, worded in `errorText.js`), an unused one deletes, the system role passes. Counted first: no request or settlement had lost its type. |
 | REPORTS-3 | Look only at the month before today's: show it if its payroll is not finalized, else the running month. Fix the test, docstring, `Help.js:337`, `hrGuideData.js:49`, component-library.md:28. | ✅ S798 stage 2b (crest-v368), H32. `pickStatusPeriod` looks only at last month (by year and month) and the running month; test, docstring, Help, hrGuideData and component-library.md corrected. |
 | LABOUR-FIGURES-4 | Read overheads with `.or('bucket.is.null,bucket.in.(overhead,tax_fees)')` on OwnerDashboard and computeMonthlyReport; Tax & Fees line (schema bump). | 🔴 |
 | LABOUR-FIGURES-5 | One local-date parser for 'YYYY-MM-DD' in both estimates, headcount and leave; test a month-end last day. | 🔴 |
 | LABOUR-FIGURES-6 | Owner Report leave read: approved, `formatAd` bounds, `fetchAllRows` + `.order('id')`. | 🔴 |
 | LABOUR-FIGURES-7 | Count Present rows with 0 hours, freeze it, and withhold hour-based figures as "hours not recorded" when most days lack hours. Imputing is H24. | 🔴 |
 | GAP-PAY-STATE-3 | Under `hr_pay_lock`: settlement finalize refuses `settlement_festival_paid`; `hr_bonus_rows_guard` refuses `festival_paid_by_settlement`. Page: a stale draft unticks with "Paid since this draft was saved". | ✅ S798 stage 2a (crest-v367), migration `20261001120000_hr_settlements_s798`, applied live 2026-10-01 after a 10-case rolled-back dry run as CASA logins. Both directions refused; a stale draft unticks with "Paid since this draft was saved"; Festival Finalize re-reads settlements. |
-| GAP-OUTLETS-2 | admin-user-ops 409 on a client mismatch; AuthContext checks `active_client_id` on wake and reloads; `switchOutlet` tells other tabs; fix the Outlet Access footnote. Shared layers. | 🔴 |
-| GAP-OPERATOR-2 | AttendanceSheet keeps the selected employee only if listed; `saveChanges` refuses keys for unlisted employees. Remount: H3. | 🔴 |
+| GAP-OUTLETS-2 | admin-user-ops 409 on a client mismatch; AuthContext checks `active_client_id` on wake and reloads; `switchOutlet` tells other tabs; fix the Outlet Access footnote. Shared layers. | 🔴 Moved to slice 2f (owner, 2026-10-01). |
+| GAP-OPERATOR-2 | AttendanceSheet keeps the selected employee only if listed; `saveChanges` refuses keys for unlisted employees. Remount: H3. | ✅ S798 stage 2c (crest-v369). Both page fixes (`keysOutsideList` refuses the whole save), and H3(b): `Layout.js` keys `<Outlet>` on the client for the operator, so a client switch restarts the page. The optional cross-client database check was not built. |
 | GAP-OPERATOR-3 | `hr_final_settlements_guard` fills `paid_amount` before the operator return; backfill paid, never-reopened rows; reopened rows from `audit_logs`. Ship before SETTLEMENT-1. | ✅ S798 stage 2a (crest-v367), migration `20261001120000_hr_settlements_s798`, applied live 2026-10-01 after a 10-case rolled-back dry run as CASA logins (H28). Stamp above the seam, fill-only; 1 live row backfilled (NPR 27,128.07), no reopened paid row existed. SETTLEMENT-1 (Stage 3) may now build on it. |
 
 **Migration `hr_figures_s798`:** `hr_payroll_runs_guard_settled` (PAYROLL-3); `hr_payslips` net trigger and

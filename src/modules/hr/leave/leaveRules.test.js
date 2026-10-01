@@ -1,5 +1,5 @@
-import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun } from './leaveRules'
-import { bsToAd, formatAd } from '../../../utils/bsCalendar'
+import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun, leaveDaysByPeriod, planLeaveRevert } from './leaveRules'
+import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 
 const ad = (y, m, d) => formatAd(bsToAd(y, m, d))
 const req = over => ({ id: 'r1', employee_id: 'e1', leave_type_id: 't1', status: 'approved', day_type: 'full', ...over })
@@ -58,5 +58,30 @@ describe('quotaOverrun', () => {
   it('counts a request in the BS year it starts in, not the year on screen', () => {
     const nextYear = req({ id: 'r3', status: 'pending', start_date: ad(2084, 1, 5), end_date: ad(2084, 1, 9), days: 5 })
     expect(quotaOverrun({ requests: [taken, nextYear], settlements: [], leaveType: type, request: nextYear })).toBeNull()
+  })
+})
+
+describe('leaveDaysByPeriod', () => {
+  it('groups the days by the period holding them and leaves out a month with no period yet', () => {
+    const last = daysInBsMonth(2083, 6)
+    const r = req({ start_date: ad(2083, 6, last - 1), end_date: ad(2083, 7, 2) })
+    const groups = leaveDaysByPeriod(r, [{ id: 'p6', bs_year: 2083, bs_month: 6 }])
+    expect(groups.map(g => ({ periodId: g.periodId, days: g.days.map(d => d.bsDay) }))).toEqual([{ periodId: 'p6', days: [last - 1, last] }])
+  })
+})
+
+// S798 (LEAVE-OT-HOLIDAYS-4): Hari's Unpaid Leave for Ashwin 20–24 was approved, then the 22nd was
+// added to the Holiday Calendar. Cancelling it must not leave the 22nd docked.
+describe('planLeaveRevert', () => {
+  const periods = [{ id: 'p6', bs_year: 2083, bs_month: 6 }]
+  const r = req({ start_date: ad(2083, 6, 20), end_date: ad(2083, 6, 24) })
+
+  it('clears the leave days and marks a day that is a public holiday now as Holiday', () => {
+    expect(planLeaveRevert(r, periods, new Set(['2083:6:22']))).toEqual([{ periodId: 'p6', clear: [20, 21, 23, 24], toHoliday: [22] }])
+  })
+
+  it('clears every day when none is a holiday, and plans nothing for a month with no period', () => {
+    expect(planLeaveRevert(r, periods, new Set())).toEqual([{ periodId: 'p6', clear: [20, 21, 22, 23, 24], toHoliday: [] }])
+    expect(planLeaveRevert(r, [], new Set())).toEqual([])
   })
 })

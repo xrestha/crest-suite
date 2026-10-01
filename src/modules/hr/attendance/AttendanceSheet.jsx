@@ -11,7 +11,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
-import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor, unsavedKeys, carryUnsavedEdits, splitCellKey } from './attendanceRules'
+import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor, unsavedKeys, carryUnsavedEdits, splitCellKey, splitFirstMarks, firstMarksKeptOut, keysOutsideList } from './attendanceRules'
 import { stillIncomplete } from './attendanceImportPlan'
 import AttendanceImportModal from './AttendanceImportModal'
 import { calcHours, shiftHours, shiftRegularHours } from '../roster/laborForecast'
@@ -322,7 +322,10 @@ export default function AttendanceSheet() {
       const p = pRes.data || [], emps = eRes.data || []
       setPeriods(p)
       setEmployees(emps)
-      setSelectedEmployeeId(prev => prev || emps[0]?.id || '')
+      // Kept only while still listed (S798, GAP-OPERATOR-2): after an operator's client switch the old
+      // id matched no option, the dropdown showed this client's first person, and the grid and Save
+      // went on writing the previous client's employee.
+      setSelectedEmployeeId(prev => (emps.some(e => e.id === prev) ? prev : emps[0]?.id || ''))
       const open = p.find(x => x.status === 'open') || p[0]
       if (open) {
         periodReq.begin(open.id); applyPeriod(open)
@@ -557,14 +560,31 @@ export default function AttendanceSheet() {
       setSavedMsg('ok:Nothing to save — every mark on this sheet is already saved.')
       return
     }
+    // S798 (GAP-OPERATOR-2): a mark for someone not on this sheet came from another client's sheet,
+    // and would be filed under this client against the wrong person. The state is suspect, so nothing goes.
+    const strays = keysOutsideList(keys, employees.map(e => e.id))
+    if (strays.length > 0) {
+      setSavedMsg(`error:${strays.length} unsaved mark${strays.length === 1 ? ' belongs' : 's belong'} to someone who is not on this sheet, so nothing was saved. Reload the page and enter the marks again.`)
+      return
+    }
     if (!force && unsavedFlags.length > 0) { setConfirmSaveFlags(true); return }
     setConfirmSaveFlags(false)
     setSaving(true); setSavedMsg('')
-    const rows = keys.map(key => {
+    const sent = records
+    const rowFor = key => {
       const { employeeId, day } = splitCellKey(key)
-      return attendanceRowFor(records[key], { employeeId, periodId: period.id, day, isValidTime: s => isValidTimeStr(s) })
-    })
-    const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
+      return attendanceRowFor(sent[key], { employeeId, periodId: period.id, day, isValidTime: s => isValidTimeStr(s) })
+    }
+    // An edit overwrites the row it was loaded from. A first mark never overwrites (S798, ATTENDANCE-6):
+    // the screen saw a blank day, and only the database knows whether a leave approval or another tab
+    // has marked it since. RETURNING lists the first marks that went in.
+    const { first, edits } = splitFirstMarks(keys, savedRef.current)
+    const none = { data: [], error: null }
+    const [editRes, firstRes] = await Promise.all([
+      edits.length ? scopedUpsert('hr_attendance', edits.map(rowFor), { onConflict: 'employee_id,period_id,bs_day' }) : none,
+      first.length ? scopedUpsert('hr_attendance', first.map(rowFor), { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true }) : none,
+    ])
+    const error = editRes.error || firstRes.error
     if (error) { setSavedMsg(`error:${describeChanges(keys)} may not have saved. What you entered is still on screen — press Save again (saving twice is safe). ` + errorLine(error)); setSaving(false); return }
     // A flagged day that has been saved was a decision: the reader fixed it or chose Save anyway.
     setImportFlags(f => {
@@ -572,8 +592,24 @@ export default function AttendanceSheet() {
       keys.forEach(k => { delete next[k] })
       return next
     })
-    const reread = await loadAttendance(period.id, { carry: true })
-    setSavedMsg(reread === false ? landedButUnread(`Saved ${describeChanges(keys)}`) : `ok:Saved ${describeChanges(keys)}`)
+    // A first mark kept out gives way to what is stored, so the sheet shows the leave, not the mark.
+    const landed = new Set((firstRes.data || []).map(r => `${r.employee_id}:${r.bs_day}`))
+    const notLanded = Array.isArray(firstRes.data) ? new Set(first.filter(k => !landed.has(k))) : new Set()
+    const reread = await loadAttendance(period.id, { carry: true, drop: k => notLanded.has(k) })
+    if (reread === false) { setSavedMsg(landedButUnread(`Saved ${describeChanges(keys)}`)); setSaving(false); return }
+    const keptOut = reread ? firstMarksKeptOut(first, firstRes.data, sent, savedRef.current, timeKey) : []
+    const savedKeys = keys.filter(k => !keptOut.includes(k))
+    const named = keptOut.slice(0, 4).map(k => {
+      const { employeeId, day } = splitCellKey(k)
+      const who = employees.find(e => e.id === employeeId)?.full_name || 'Someone'
+      const now = savedRef.current[k]
+      return `${who} on ${formatBsDay(day, period.bs_month)} (${now ? STATUS_MAP[now.status]?.label || now.status : 'cleared'})`
+    })
+    const one = keptOut.length === 1
+    const keptLine = `${keptOut.length} day${one ? ' was' : 's were'} marked from another screen after this sheet opened, so ${one ? 'it was' : 'they were'} left as stored and your mark${one ? ' was' : 's were'} not saved: ${named.join('; ')}${keptOut.length > 4 ? `, and ${keptOut.length - 4} more` : ''}. Change ${one ? 'it' : 'them'} again if you still mean to.`
+    setSavedMsg(keptOut.length === 0 ? `ok:Saved ${describeChanges(keys)}`
+      : savedKeys.length === 0 ? `error:Nothing was saved — ${keptLine}`
+      : `error:Saved ${describeChanges(savedKeys)}, but ${keptLine}`)
     setSaving(false)
   }
 

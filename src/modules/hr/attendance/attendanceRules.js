@@ -82,6 +82,41 @@ export function splitCellKey(key) {
 }
 
 /**
+ * Unsaved cells split by what the last read held (S798, ATTENDANCE-6). A cell with no saved copy is
+ * a FIRST mark: the screen saw a blank day, but a leave approval or another tab may have marked it
+ * since, so Save writes it with ON CONFLICT DO NOTHING. A cell with a saved copy is an edit of that
+ * row and is written over it.
+ */
+export function splitFirstMarks(keys, saved) {
+  const first = [], edits = []
+  for (const key of keys) (saved[key] ? edits : first).push(key)
+  return { first, edits }
+}
+
+/**
+ * The first marks DO NOTHING kept out: not in the upsert's RETURNING rows, and stored now as
+ * something other than what was sent. A row identical to the cell is not a clash — it is this
+ * sheet's own earlier Save, which failed to say so ("press Save again"). `stored` is the map read
+ * after the write. An unreadable RETURNING names none, and the reload shows the cell still unsaved.
+ */
+export function firstMarksKeptOut(firstKeys, written, sent, stored, timeKey) {
+  if (!Array.isArray(written)) return []
+  const landed = new Set(written.map(r => `${r.employee_id}:${r.bs_day}`))
+  return firstKeys.filter(k => !landed.has(k)
+    && cellSignature(sent[k], timeKey) !== cellSignature(stored[k], timeKey))
+}
+
+/**
+ * Unsaved cells whose employee is not on the sheet (S798, GAP-OPERATOR-2). The grid only renders
+ * listed staff, so such a cell was left by another client's sheet — the operator's client switch —
+ * and saving it would file a mark under this client against the wrong person.
+ */
+export function keysOutsideList(keys, employeeIds) {
+  const listed = new Set(employeeIds)
+  return keys.filter(k => !listed.has(splitCellKey(k).employeeId))
+}
+
+/**
  * The records to show after a reload, keeping every edit the reader has not saved (S768).
  *
  * Every write on the sheet — a save, a generate, a clear — reloads the whole month, and the reload

@@ -953,6 +953,12 @@ const rules = [
     staff: 'That shift is still on the roster, so it cannot be deleted.',
     operator: 'That shift type is still used on the roster, so it was not deleted — deleting it would blank those days, and Generate from Roster would then mark them Off. Untick Active instead: it disappears from the picker and every assigned day keeps its shift.',
   },
+  // S798 (20261001160000, DATABASE-3): the leave-type twin of shift_type_in_use.
+  {
+    test: e => /leave_type_in_use/i.test(e.message || ''),
+    staff: 'That leave type is still used by leave requests, so it cannot be deleted.',
+    operator: 'That leave type is used by leave requests or a final settlement, so it was not deleted — those requests would stop counting against anyone\'s balance, and the leave would be paid out again at settlement. Untick Active instead: it disappears from the picker and every request keeps its type.',
+  },
   {
     test: e => /hr_shift_types_client_name_key/i.test(e.message || ''),
     staff: 'A shift with that name already exists.',

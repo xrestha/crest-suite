@@ -64,3 +64,41 @@ export function quotaOverrun({ requests, settlements, leaveType, request }) {
   const after = bal.used + bal.encashed + adding
   return after > quota ? { quota, after, over: after - quota, bsYear: bs.year } : null
 }
+
+// The four statuses a leave request writes on the attendance sheet. A day holding anything else —
+// Present, Absent, Off, Holiday — was marked by someone or something other than the request.
+export const LEAVE_MARK_STATUSES = ['paid_leave', 'unpaid_leave', 'half_paid_leave', 'half_unpaid_leave']
+
+/**
+ * A request's days grouped by the period that holds them, in day order. A day in a month with no
+ * period yet is left out: nothing can have been written there.
+ * @returns {Array<{ periodId: string, days: Array<{bsYear, bsMonth, bsDay}> }>}
+ */
+export function leaveDaysByPeriod(req, periods) {
+  const byMonth = {}
+  for (const p of periods || []) byMonth[`${p.bs_year}:${p.bs_month}`] = p
+  const out = new Map()
+  for (const d of workingDaysInRange(req.start_date, req.end_date)) {
+    const p = byMonth[`${d.bsYear}:${d.bsMonth}`]
+    if (!p) continue
+    if (!out.has(p.id)) out.set(p.id, [])
+    out.get(p.id).push(d)
+  }
+  return [...out].map(([periodId, days]) => ({ periodId, days }))
+}
+
+/**
+ * What cancelling or rejecting an APPROVED request does to its days (S798, LEAVE-OT-HOLIDAYS-4). Only
+ * a day still marked as leave changes: it is cleared, or marked Holiday when that day is a public
+ * holiday now. The old revert skipped every day on today's calendar, so a holiday added after the
+ * approval kept its leave mark and a cancelled unpaid leave still docked it — and it deleted any
+ * other day whatever it held, a hand re-mark included. Those keep their mark now.
+ * @returns {Array<{ periodId: string, clear: number[], toHoliday: number[] }>}
+ */
+export function planLeaveRevert(req, periods, holidayKeys) {
+  return leaveDaysByPeriod(req, periods).map(({ periodId, days }) => {
+    const clear = [], toHoliday = []
+    for (const d of days) (holidayKeys?.has(`${d.bsYear}:${d.bsMonth}:${d.bsDay}`) ? toHoliday : clear).push(d.bsDay)
+    return { periodId, clear, toHoliday }
+  })
+}

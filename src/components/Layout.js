@@ -2055,9 +2055,13 @@ export default function Layout() {
             opened (S790). Renders nothing unless this page is the one the guide just sent them to. */}
         <SetupStepStrip />
 
+        {/* The operator's client switch restarts the open page (S798, H3(b)): a page left mounted kept
+            the last client's selections and unsaved marks, and saved them under the new client against
+            the old one's people (GAP-OPERATOR-2). Only for admin: an outlet switch already navigates to
+            /dashboard, and keying it too would remount the page for nothing on the way there. */}
         <AppErrorBoundary resetKey={location.pathname} fullPage={false} route={location.pathname}>
           <Suspense fallback={<RouteFallback />}>
-            <Outlet />
+            <Outlet key={isAdmin ? `client:${clientId || 'none'}` : undefined} />
           </Suspense>
         </AppErrorBoundary>
       </main>

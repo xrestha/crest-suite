@@ -553,15 +553,17 @@ Eight decisions taken with Aashish, and the rules that hold them. Migration `202
   the inputs switch off, `attendanceRowFor()` saves zeros, and leave approval's upsert clears a full
   day. **`tallyAttendance` adds `ot_hours` from every row whatever its status** — which is the reason.
 - **Bulk marks fill blanks only** (`fillBlankCells`). An overwrite turned approved leave into Present.
+  Save writes a cell blank at load ON CONFLICT DO NOTHING and names the days kept (S798, `splitFirstMarks`).
 - **Leave: `days` is derived by the database** (`hr_leave_requests_validate`), and two pending/approved
-  requests for one employee may not share a day (operator exempt, for restore). `leaveRules.js`'s
+  requests for one employee may not share a day (operator exempt, for restore; an operator INSERT that is
+  all public holidays is stored at 0 days, S798 — key a restore seam on `is_admin()`). `leaveRules.js`'s
   `findOverlappingRequest` / `finalizedMonthsFor` / `quotaOverrun` let the page say so first. Over
   quota WARNS, never blocks. `submit_my_leave_request` keeps `p_days` in its signature and ignores it.
 - **One overtime entry per employee per day** (`hr_overtime_entries_employee_day_key`). An edit of an
   approved entry stays approved — decided, not an oversight. Overtime reloads the month ON SCREEN after
   a save to another month, never the saved one.
 - **Shift types: unique name per client, and no delete while the roster uses one**
-  (`hr_shift_types_guard_delete`). The page used to delete duplicate-named types on every load; never
+  (`hr_shift_types_guard_delete`; leave types likewise, `hr_leave_types_guard_delete`, S798). The page used to delete duplicate-named types on every load; never
   reintroduce a destructive tidy-up on a read path. A seed runs only after a successful read, and a
   23505 on the seed is a second tab, answered by re-reading.
 - **A swap approval is `approve_shift_swap(p_request_id)`**, SECURITY INVOKER, one transaction, every
@@ -573,7 +575,8 @@ Eight decisions taken with Aashish, and the rules that hold them. Migration `202
 - **A public holiday inside a leave is not charged** (decided 2026-09-14, migration `20260914180000`).
   `days` = calendar days − public, not-removed Holiday Calendar days, derived in the trigger through
   `hr_public_holiday_count()` (SECURITY DEFINER, caller-checked) over `bs_months`; approval and
-  `backfillApprovedLeave` mark those days `holiday`, and a revert leaves them. `leaveDayCount()` /
+  `backfillApprovedLeave` mark those days `holiday`. A revert touches only leave-status days and marks a
+  day that is a holiday NOW `holiday` (S798, `planLeaveRevert`). `leaveDayCount()` /
   `publicHolidayKeys()` in `leaveConstants.js` are the page's copy. Rostered days off still count.
   **A `holiday` row PAYS daily and hourly staff** (decided with Aashish, 2026-09-14 — Labour Act s.41
   gives every worker paid public holidays): `computePayslip` adds `t.holiday` to a daily employee's
@@ -767,7 +770,8 @@ which no longer exists — read them as history.
   never writes a set in one statement, because a trigger refusing one row (self-approval) would fail
   them all. Leave's batch leaves out a request over quota or in a finalized month, and checks quota
   as if the batch's earlier requests were already approved — `approveCore()` is the approval without
-  the page's busy flag, message or reload. Approve and Reject are both neutral small ghosts: green and
+  the page's busy flag, message or reload. If its status write fails after the days are written, it
+  re-reads the request and, only if still pending, puts the days back as read before (S798). Approve and Reject are both neutral small ghosts: green and
   red on a button spend verdict colours on a decision not yet made.
 - **Final Settlement sits in the Payroll nav group** — it finalizes a leaver's pay. Gratuity stays in
   Reports.

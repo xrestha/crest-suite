@@ -276,7 +276,9 @@ to. **S721 is the instance that shows the stakes are not always a flicker**: onc
 failing open — and an ADMIN SWITCHING CLIENT re-runs `init()` on a still-mounted component with the
 previous client's period id still in the ref. Every setter in the loader is then skipped, and the
 new tenant gets the old period chip over an empty ledger. The fail-open property that makes a
-missed `begin()` survivable only holds until the FIRST claim.
+missed `begin()` survivable only holds until the FIRST claim. (Since S798 the operator's client
+switch remounts the page — `Layout.js` keys `<Outlet>` on the client, decision H3 — so that path is
+gone; the rule still holds for every reload a page runs on itself.)
 
 The S718 instance is worth noting separately because that page is where this whole rule was
 written: `StockAgeing` selects a fiscal YEAR rather than a period, and `init()`'s `setSelectedFy`
