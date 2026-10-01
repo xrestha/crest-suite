@@ -30,7 +30,8 @@ import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/report
 import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
-import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote } from '../../modules/dashboard/labourSource'
+import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote, NON_LABOUR_OVERHEADS, splitNonLabourOverheads } from '../../modules/dashboard/labourSource'
+import { parseAdDateLocal } from '../../shared/nepalTime'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
 // token set is five ROLES, not five distinguishable hues. These four lines were
@@ -161,10 +162,11 @@ export default function OwnerDashboard() {
 
   // ── IMS figures: Revenue, Food Cost (net purchases), Wastage, Overheads, Cash/Credit split ──
   // Same tables/formulas as ClientDashboard.jsx's loadStats() — Revenue excludes comps
-  // (source='pos_comp', never actually paid for). Overheads query here is scoped to
-  // bucket='overhead' only (unlike ClientDashboard's), since this page's True Net Margin
-  // also subtracts a separately-computed HR-payroll laborCostTotal — without the bucket
-  // filter, the Overheads page's "Labor Costs" tab rows would get subtracted a second time.
+  // (source='pos_comp', never actually paid for). The Overheads read leaves out the `labor`
+  // bucket (NON_LABOUR_OVERHEADS), since this page's True Net Margin also subtracts a
+  // separately-computed HR-payroll laborCostTotal — the Labor tab would be subtracted a second time.
+  // It takes Tax & Fees and rows with no bucket since S798 2e (LABOUR-FIGURES-4): S384's
+  // `.eq('bucket','overhead')` dropped them, so this margin read higher than every other page's.
   async function loadImsFigures(period, myId) {
     const results = await Promise.all([
       // `discount_amount` + the bill-key columns feed allocateBillDiscounts() below. Without them
@@ -191,7 +193,7 @@ export default function OwnerDashboard() {
       // `.neq` on the sales read had, arriving by a different route.
       fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
       // Deliberately NOT paged: one row per named fixed cost per period, tens of rows.
-      period ? supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead') : { data: [] },
+      period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id).or(NON_LABOUR_OVERHEADS) : { data: [] },
       // Each row carries its item's rate through the join (WASTAGE_VALUE_SELECT, S792 FIGURES-5), so
       // Wastage Value is the Wastage Report's own total — every item, prep and hidden ones included —
       // and no longer depends on a separate items read (an item past that read's cut was valued at
@@ -222,7 +224,7 @@ export default function OwnerDashboard() {
       return s + parseFloat(r.qty_sold || 0) * price - (parseFloat(r.discount) || 0)
     }, 0)
 
-    const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
+    const { overhead: overheadTotal, taxFees: taxFeesTotal } = splitNonLabourOverheads(overheadsData)
 
     // Informational, like every Wastage tile: nothing on this page adds it to a cost.
     const wastageValueTotal = periodWastageValue(wastagesData)
@@ -235,7 +237,7 @@ export default function OwnerDashboard() {
     })
     ;(returns || []).forEach(r => { cashNet -= returnCostValue(r) })
 
-    setStats({ purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal, cashNet, creditNet })
+    setStats({ purchaseTotal, revenueTotal, overheadTotal, taxFeesTotal, wastageValueTotal, cashNet, creditNet })
   }
 
   // ── Items below reorder par — a live inventory position, not a period total ──
@@ -442,16 +444,19 @@ export default function OwnerDashboard() {
     let accruedGross = 0, accruedSsfEmployer = 0
     ;(employees || []).forEach(emp => {
       const isActiveish = emp.status === 'active' || emp.status === 'probation'
-      const endAd = emp.end_date ? new Date(emp.end_date) : null
+      // Local dates (parseAdDateLocal), like the bsToAd bounds: `new Date('YYYY-MM-DD')` is 05:45 in
+      // Nepal, so a leaver whose end date is today fell outside `endAd <= periodElapsedEndAd`
+      // (S798 2e, LABOUR-FIGURES-5).
+      const endAd = emp.end_date ? parseAdDateLocal(emp.end_date) : null
       const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodElapsedEndAd
       if (!isActiveish && !terminatedThisPeriod) return
 
-      const joinAd = emp.join_date ? new Date(emp.join_date) : null
+      const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
       if (joinAd && joinAd > periodElapsedEndAd) return // hasn't joined yet as of the elapsed window
 
       const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
       const empEnd    = endAd && endAd < periodElapsedEndAd ? endAd : periodElapsedEndAd
-      const daysWorked = Math.max(0, Math.floor((empEnd - empStart) / 86400000) + 1)
+      const daysWorked = Math.max(0, Math.round((empEnd - empStart) / 86400000) + 1)
       if (daysWorked <= 0) return
 
       const basic = parseFloat(emp.basic_salary) || 0
@@ -501,8 +506,9 @@ export default function OwnerDashboard() {
   // cards and adds up themselves. Both inputs already exist above; this is purely their sum.
   const primeCostPct = fcPct != null && laborPct != null ? fcPct + laborPct : null
   const overheadTotal = stats?.overheadTotal || 0
+  const taxFeesTotal = stats?.taxFeesTotal || 0
   const netMarginPct = revenueTotal > 0 && laborCostTotal != null
-    ? ((revenueTotal - stats.purchaseTotal - laborCostTotal - overheadTotal) / revenueTotal) * 100
+    ? ((revenueTotal - stats.purchaseTotal - laborCostTotal - overheadTotal - taxFeesTotal) / revenueTotal) * 100
     : null
 
   const periodLabel = activePeriod ? `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}` : '—'
@@ -743,7 +749,7 @@ export default function OwnerDashboard() {
               client who does NOT got a card that navigated to a page they cannot open. */}
           <div {...kpiCard(canOverheads ? () => navigate('/overheads') : null)}>
             <div style={kpiLabelStyle}>
-              <Tip text="Revenue minus what you have spent on stock so far (net purchases), labor cost and overheads, as a % of revenue — what the business keeps. The stock half is spend, not stock used, until the month's count closes it." width={260}>True Net Margin % (MTD)</Tip>
+              <Tip text="Revenue minus what you have spent on stock so far (net purchases), labor cost, overheads and tax & fees (card and bank fees, the accountant, licences), as a % of revenue — what the business keeps. The stock half is spend, not stock used, until the month's count closes it." width={260}>True Net Margin % (MTD)</Tip>
             </div>
             {/* `canOverheads` gates the FIGURE, not just its colour: without Overheads this is not
                 a margin at all, so it must stay unbanded and unmarked rather than being painted a
@@ -756,7 +762,7 @@ export default function OwnerDashboard() {
               {/* Tier read from the catalog: this said "(Pro)" while Overheads is a Growth feature. */}
               {!canOverheads ? `Requires Overheads (${overheadsTier}) →`
                 : !loading && labour?.source === 'failed' ? 'Not shown — labour could not be loaded'
-                : !loading && overheadTotal === 0 ? `Excludes overhead — not entered${labourSuffix}`
+                : !loading && overheadTotal + taxFeesTotal === 0 ? `Excludes overhead — not entered${labourSuffix}`
                 : partialNote ? `Day ${dayOfPeriod} of ${periodDays}${labourSuffix}`
                 : `After food, labour & overhead${labourSuffix}`}
             </div>

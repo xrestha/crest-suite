@@ -559,13 +559,16 @@ History: #s633-shift-swaps-tab, #s692-labor-forecast, #s749-roster-attendance-le
   is monthly `(basic + earning components) / (monthDays × 8)`, daily `basic / 8`, hourly `basic`, plus
   the 20% employer SSF (gated on `ssf_enrolled AND ssf_no`) over the same hours. With no components
   and no SSF it equals `hourlyRateOf`.
-- **Hours and cost follow the Department filter; Scheduled Staff never does**, because Recommended
-  Staff is covers ÷ target for the whole outlet. The tab shows the filter and says which columns it
-  narrows.
-- **A past day reads actuals.** Revenue from `sales_entries` (the Owner Dashboard's definition, and so
-  the band's denominator); covers from closed paid `pos_orders`, only where the VIEWED client has POS
-  (`clientModules.pos`, not `posEnabled`); hours from `hr_attendance`, with `ot_hours` priced at basic
-  × 1.5 inside `hours_worked`. A holiday row costs 0 hours here, deliberately: this prices hours on
+- **Hours, cost and the "need Xh" follow the Department filter; the staffing axis never does.**
+  Recommended, Status, the Board's Rec hint and Suggest take the outlet-wide requirement
+  (`staffRequired`) against outlet-wide heads (S798 2e, ROSTER-6). The tab says which columns narrow.
+- **A past day reads actuals.** Revenue and covers come from `hr_labour_actuals` (S798 2e, ROSTER-9),
+  per-day TOTALS with `computeDayRevenue`'s arithmetic, for every login. Never read `sales_entries`,
+  `recipes` or `pos_orders` here: `no_hr_role_staff` returns `[]` to an HR supervisor or manager, and
+  every past day read NPR 0 and "✓ Was covered". Covers only where the VIEWED client has POS
+  (`clientModules.pos`, not `posEnabled`). Hours from `hr_attendance` for everyone who worked the
+  day, leavers included (`pastLeavers`, ROSTER-7), with `ot_hours` priced at basic × 1.5 inside
+  `hours_worked`. A holiday row costs 0 hours here, deliberately: this prices hours on
   the floor. A day with no attendance rows is `basis: 'roster'`, labelled "as rostered · no
   attendance", never 0h. Recommended Staff and Status are hidden for a non-POS outlet, and
   `staffedDays` guards the footer.

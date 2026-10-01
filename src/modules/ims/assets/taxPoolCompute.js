@@ -4,12 +4,14 @@
 // the rates/caps and the "verify before filing" caveat.
 import { adToBs, getBsFiscalYear, getBsFiscalYearStart } from '../../../utils/bsCalendar'
 import { POOL_RATES, REPAIR_CAP_RATE } from './taxPoolConstants'
+import { parseAdDateLocal } from '../../../shared/nepalTime'
 
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100
 // The leading BS year of a short fiscal-year label ("82/83" → 82), or null.
 const startOf = label => { const m = /^(\d{1,2})\//.exec(String(label || '')); return m ? Number(m[1]) : null }
 
-// A stored `date` column ("YYYY-MM-DD") as LOCAL midnight of that calendar day (S756).
+// A stored `date` column ("YYYY-MM-DD") as LOCAL midnight of that calendar day (S756). It lives in
+// src/shared/nepalTime.js since S798 stage 2e, where the Owner Report's labour figures use it too.
 //
 // `new Date('2026-01-15')` is UTC midnight, and adToBs() reads the Date's LOCAL getters. East of
 // Greenwich (Nepal, +05:45) that is still the 15th, so this never showed on a till in Kathmandu —
@@ -19,12 +21,7 @@ const startOf = label => { const m = /^(\d{1,2})\//.exec(String(label || '')); r
 // is computed at the wrong fraction of the rate and can be POSTED that way. depreciationCompute.js
 // avoids the same trap for day counts by staying in UTC throughout; here the consumer is adToBs,
 // which is local by design, so the parse has to be local too.
-export function parseAdDateLocal(dateLike) {
-  if (dateLike instanceof Date) return dateLike
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateLike || ''))
-  if (!m) return new Date(dateLike)
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-}
+export { parseAdDateLocal }
 
 // The fiscal year label ("82/83") a stored AD date falls in — the year the Tax Depreciation tab
 // counts an asset bought on it as an addition. Parsed local, like the tier below.

@@ -6,7 +6,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tip from '../../../components/Tip'
 import Tabs, { FilterChips } from '../../../components/Tabs'
@@ -15,7 +15,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import {
   calcHours, rKey, shiftHours, computeEmpHours, computeDayHours, computeScheduledCount, computeUnpricedCount,
   computePlannedLaborCost, computeRecommendedHeadcount, summarizeLaborForecastRows,
-  computeDayRevenue, computeActualLabor, computeActualStaff,
+  computeActualLabor, computeActualStaff,
 } from './laborForecast'
 import {
   LABOR_STANDARD_LOOKBACK_DAYS, MIN_SAMPLE_DAYS, buildLaborStandard, requiredHoursFor,
@@ -23,7 +23,7 @@ import {
 } from './laborStandard'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fmtTime, shiftTextColor } from './rosterHelpers'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ShiftPicker from './ShiftPicker'
@@ -326,7 +326,9 @@ export default function Roster() {
         scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, pay_basis, basic_salary, ssf_enrolled, ssf_no')
           .in('status', ['active', 'probation'])
           .order('full_name'),
-        scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value').eq('type', 'earning'),
+        // Every employee's, leavers' included: past days on the Labor Forecast price a leaver's hours
+        // too (ROSTER-7). Paged — a component per allowance per person passes 1,000 rows quickly.
+        fetchAllRows(() => scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value').eq('type', 'earning').order('id')),
       ])
       if (compsErr) {
         console.error('salary components read failed:', compsErr)
@@ -906,15 +908,17 @@ export default function Roster() {
 
   // ── Actuals for the visible days already past (Labor Forecast tab only) ───────────────────
   // Demand Forecast writes tomorrow onward and each run deletes the last, so a past day never has
-  // a forecast row; its real figures live in three other tables. Loaded only while the tab is
-  // open — the Board's "Rec: N" hint does not need them — and guarded against its own overlapping
-  // loads (arrowing through months) by useLatestRequest, keyed on the visible range.
-  //   revenue  → sales_entries for the day (the Owner Dashboard's revenue definition, so Cost %
-  //              on a past day is measured against the same denominator as the band it wears;
-  //              POS bills post here per day too, so it works for every client type)
-  //   covers   → closed, paid pos_orders by closed_at within the BS day (POS clients only)
+  // a forecast row; its real figures live in other tables. Loaded only while the tab is open — the
+  // Board's "Rec: N" hint does not need them — and guarded against its own overlapping loads
+  // (arrowing through months) by useLatestRequest, keyed on the visible range.
+  //   revenue, covers → hr_labour_actuals (S798 2e, ROSTER-9): the day's sales_entries revenue (the
+  //              Owner Dashboard's definition, computeDayRevenue's arithmetic, so Cost % on a past
+  //              day has the band's own denominator) and its paid POS covers, as TOTALS. Read
+  //              directly they come back [] with no error for an HR supervisor or manager
+  //              (RESTRICTIVE no_hr_role_staff on sales_entries, recipes and pos_orders), so every
+  //              past day read Revenue NPR 0 and "✓ Was covered" for them (owner decision H30).
   //   hours    → hr_attendance rows for the day
-  // `actualsByDay` is { 'y:m:d': { periodExists, attendance: [], sales: [], covers } } for every
+  // `actualsByDay` is { 'y:m:d': { periodExists, attendance: [], revenue, covers } } for every
   // past visible day, or null while loading / after a failed read — a failed read is not a day
   // with nothing on it (S594), so it is surfaced and the rows show "—".
   const isPastCol = useCallback(col => bsDiffDays(col.bsYear, col.bsMonth, col.bsDay, today.year, today.month, today.day) > 0,
@@ -922,13 +926,15 @@ export default function Roster() {
   const [actualsByDay,   setActualsByDay]   = useState(null)
   const [actualsError,   setActualsError]   = useState(null)
   const [actualsLoading, setActualsLoading] = useState(false)
-  const [priceByRecipe,  setPriceByRecipe]  = useState({})
+  // ROSTER-7: everyone with attendance on a visible past day who is no longer on the board's list
+  // (resigned, terminated) — their hours and cost belong to the day they worked.
+  const [pastLeavers,    setPastLeavers]    = useState([])
   const [bulkSalesMonths, setBulkSalesMonths] = useState(new Set()) // BS months with bs_day=0 (bulk) sales rows
   const actualsReq = useLatestRequest()
   const loadActuals = useCallback(async () => {
     if (!clientId || tab !== 'labor') return
     const pastCols = columns.filter(isPastCol)
-    if (pastCols.length === 0) { setActualsByDay({}); setActualsError(null); return }
+    if (pastCols.length === 0) { setActualsByDay({}); setActualsError(null); setPastLeavers([]); return }
     const first = pastCols[0], last = pastCols[pastCols.length - 1]
     const reqKey = `${first.bsYear}:${first.bsMonth}:${first.bsDay}-${last.bsYear}:${last.bsMonth}:${last.bsDay}`
     actualsReq.begin(reqKey)
@@ -938,11 +944,15 @@ export default function Roster() {
     const months = new Map()
     for (const c of pastCols) months.set(`${c.bsYear}:${c.bsMonth}`, { bsYear: c.bsYear, bsMonth: c.bsMonth })
 
-    const [periodsRes, recipesRes] = await Promise.all([
+    const [periodsRes, daysRes] = await Promise.all([
       scopedFrom('monthly_periods', 'id, bs_year, bs_month'),
-      scopedFrom('recipes', 'id, selling_price'),
+      supabase.rpc('hr_labour_actuals', {
+        p_client_id: clientId,
+        p_from: formatAd(bsToAd(first.bsYear, first.bsMonth, first.bsDay)),
+        p_to: formatAd(bsToAd(last.bsYear, last.bsMonth, last.bsDay)),
+      }),
     ])
-    const firstErr = periodsRes.error || recipesRes.error
+    const firstErr = periodsRes.error || daysRes.error
     if (firstErr) {
       if (!actualsReq.isCurrent(reqKey)) return
       setActualsError(asActionError(firstErr)); setActualsByDay(null); setActualsLoading(false); return
@@ -956,35 +966,31 @@ export default function Roster() {
       if (p) { pids.push(p.id); monthByPeriodId[p.id] = m }
     }
 
-    const [attRes, salesRes, posRes] = await Promise.all([
-      // Per-employee-per-day, so a month crosses the 1000-row cap at ~33 staff — paged, per period.
-      Promise.all(pids.map(pid => fetchAllRows(() =>
-        scopedFrom('hr_attendance', 'employee_id, period_id, bs_day, status, hours_worked, ot_hours')
-          .eq('period_id', pid).order('id')))),
-      // sales_entries is period-scoped, not client-scoped (no client_id column) — raw client with
-      // an explicit period filter, the same shape Owner Dashboard uses. Per-recipe-per-day, paged.
-      pids.length > 0
-        ? fetchAllRows(() => supabase.from('sales_entries')
-            .select('period_id, recipe_id, bs_day, qty_sold, unit_price, discount, source')
-            .in('period_id', pids).order('id'))
-        : Promise.resolve({ data: [], error: null }),
-      hasPos
-        ? fetchAllRows(() => scopedFrom('pos_orders', 'id, covers, closed_at')
-            .eq('status', 'billed').eq('close_type', 'paid').is('credit_note_id', null)
-            .gte('closed_at', bsDayBoundaryIso(first.bsYear, first.bsMonth, first.bsDay, false))
-            .lte('closed_at', bsDayBoundaryIso(last.bsYear, last.bsMonth, last.bsDay, true))
-            .order('id'))
-        : Promise.resolve({ data: null, error: null }),
-    ])
+    // Per-employee-per-day, so a month crosses the 1000-row cap at ~33 staff — paged, per period.
+    const attRes = await Promise.all(pids.map(pid => fetchAllRows(() =>
+      scopedFrom('hr_attendance', 'employee_id, period_id, bs_day, status, hours_worked, ot_hours')
+        .eq('period_id', pid).order('id'))))
     if (!actualsReq.isCurrent(reqKey)) return
-    const readErr = attRes.find(r => r.error)?.error || salesRes.error || posRes.error
+    const readErr = attRes.find(r => r.error)?.error
     if (readErr) { setActualsError(asActionError(readErr)); setActualsByDay(null); setActualsLoading(false); return }
+
+    // ROSTER-7: the board's list is active and probation staff, and computeActualLabor skips any row
+    // whose employee is not in the list it is given — so a past day dropped every hour, rupee and
+    // head of anyone who has since left, and its Cost % read low. Load those people too, whatever
+    // their status, with the columns their rate needs (supervisors can read them).
+    const onBoard = new Set(employees.map(e => e.id))
+    const leaverIds = [...new Set(attRes.flatMap(r => (r.data || []).map(a => a.employee_id)))].filter(id => !onBoard.has(id))
+    const leaversRes = await fetchAllRowsChunked(leaverIds, ids =>
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, pay_basis, basic_salary, ssf_enrolled, ssf_no')
+        .in('id', ids).order('id'))
+    if (!actualsReq.isCurrent(reqKey)) return
+    if (leaversRes.error) { setActualsError(asActionError(leaversRes.error)); setActualsByDay(null); setActualsLoading(false); return }
 
     const map = {}
     for (const c of pastCols) {
+      const periodExists = !!periodByMonth[`${c.bsYear}:${c.bsMonth}`]
       map[`${c.bsYear}:${c.bsMonth}:${c.bsDay}`] = {
-        periodExists: !!periodByMonth[`${c.bsYear}:${c.bsMonth}`],
-        attendance: [], sales: [], covers: hasPos ? 0 : null,
+        periodExists, attendance: [], revenue: periodExists ? 0 : null, covers: hasPos ? 0 : null,
       }
     }
     for (const res of attRes) for (const a of res.data || []) {
@@ -993,25 +999,20 @@ export default function Roster() {
       if (day) day.attendance.push(a)
     }
     const bulk = new Set()
-    for (const s of salesRes.data || []) {
-      const m = monthByPeriodId[s.period_id]
-      if (!m) continue
+    for (const d of daysRes.data || []) {
       // bs_day = 0 is Sales Entry's bulk-month sentinel: real revenue with no day to land on, so
       // every past day of that month is understated. Flagged on the tab rather than spread.
-      if (s.bs_day === 0) { bulk.add(`${m.bsYear}:${m.bsMonth}`); continue }
-      const day = map[`${m.bsYear}:${m.bsMonth}:${s.bs_day}`]
-      if (day) day.sales.push(s)
+      if (d.bulk_month) bulk.add(`${d.bs_year}:${d.bs_month}`)
+      const day = map[`${d.bs_year}:${d.bs_month}:${d.bs_day}`]
+      if (!day) continue
+      if (day.periodExists) day.revenue = parseFloat(d.revenue) || 0
+      if (hasPos) day.covers = d.covers || 0
     }
-    for (const o of posRes.data || []) {
-      const bs = adToBs(new Date(o.closed_at)) // same day attribution as demandForecastData.js
-      const day = map[`${bs.year}:${bs.month}:${bs.day}`]
-      if (day) day.covers += o.covers || 1
-    }
-    setPriceByRecipe(Object.fromEntries((recipesRes.data || []).map(r => [r.id, parseFloat(r.selling_price) || 0])))
+    setPastLeavers(leaversRes.data || [])
     setBulkSalesMonths(bulk)
     setActualsByDay(map)
     setActualsLoading(false)
-  }, [clientId, tab, columns, isPastCol, hasPos, scopedFrom, actualsReq])
+  }, [clientId, tab, columns, isPastCol, hasPos, scopedFrom, actualsReq, employees])
   useEffect(() => { loadActuals() }, [loadActuals])
 
   // ── The labour STANDARD: how many hours this outlet needs per rupee ───────────────────────
@@ -1047,7 +1048,7 @@ export default function Roster() {
       const ad = new Date()
       ad.setDate(ad.getDate() - i)
       const bs = adToBs(ad)
-      windowDays.push({ ...bs, weekday: ad.getDay(), key: `${bs.year}:${bs.month}:${bs.day}` })
+      windowDays.push({ ...bs, ad: formatAd(ad), weekday: ad.getDay(), key: `${bs.year}:${bs.month}:${bs.day}` })
       months.set(`${bs.year}:${bs.month}`, { bsYear: bs.year, bsMonth: bs.month })
     }
 
@@ -1065,7 +1066,7 @@ export default function Roster() {
       if (p) { pids.push(p.id); monthByPeriodId[p.id] = m }
     }
 
-    const [attRes, rosRes, salesRes, recipesRes, empsRes, posRes] = await Promise.all([
+    const [attRes, rosRes, daysRes, empsRes] = await Promise.all([
       // Per employee per day — crosses the 1000-row cap at ~34 staff in ONE month, so every
       // period's read is paged with a unique tiebreaker.
       Promise.all(pids.map(pid => fetchAllRows(() =>
@@ -1075,34 +1076,28 @@ export default function Roster() {
       Promise.all([...months.values()].map(m => fetchAllRows(() =>
         scopedFrom('hr_roster', 'employee_id, bs_year, bs_month, bs_day, shift_type_id')
           .eq('bs_year', m.bsYear).eq('bs_month', m.bsMonth).order('id')))),
-      pids.length > 0
-        ? fetchAllRows(() => supabase.from('sales_entries')
-            .select('period_id, recipe_id, bs_day, qty_sold, unit_price, discount, source')
-            .in('period_id', pids).order('id'))
-        : Promise.resolve({ data: [], error: null }),
-      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+      // Each window day's revenue and covers as totals (S798 2e, ROSTER-9) — read directly, an HR
+      // supervisor or manager got [] for every day, so the standard said "not enough history".
+      supabase.rpc('hr_labour_actuals', {
+        p_client_id: clientId,
+        p_from: windowDays[windowDays.length - 1].ad,
+        p_to: windowDays[0].ad,
+      }),
       // No status filter — see the comment above this loader.
       scopedFrom('hr_employees', 'id, department'),
-      hasPos
-        ? fetchAllRows(() => scopedFrom('pos_orders', 'id, covers, closed_at')
-            .eq('status', 'billed').eq('close_type', 'paid').is('credit_note_id', null)
-            .gte('closed_at', new Date(Date.now() - LABOR_STANDARD_LOOKBACK_DAYS * 86400000).toISOString())
-            .order('id'))
-        : Promise.resolve({ data: null, error: null }),
     ])
     if (!stdReq.isCurrent(clientId)) return
     const readErr = attRes.find(r => r.error)?.error || rosRes.find(r => r.error)?.error
-      || salesRes.error || recipesRes.error || empsRes.error || posRes.error
+      || daysRes.error || empsRes.error
     if (readErr) { setStdError(asActionError(readErr)); setLaborStd(null); setStdLoading(false); return }
 
     const deptByEmp = Object.fromEntries((empsRes.data || []).map(e => [e.id, e.department || null]))
-    const priceMap = Object.fromEntries((recipesRes.data || []).map(r => [r.id, parseFloat(r.selling_price) || 0]))
     const shiftById = Object.fromEntries((shiftTypes || []).map(t => [t.id, t]))
     const hoursOfRosterRow = r => shiftHours(shiftById[r.shift_type_id])
 
     const byKey = {}
     for (const d of windowDays) {
-      byKey[d.key] = { attendance: [], roster: [], sales: [], covers: hasPos ? 0 : null }
+      byKey[d.key] = { attendance: [], roster: [], revenue: 0, covers: hasPos ? 0 : null }
     }
     for (const res of attRes) for (const a of res.data || []) {
       const m = monthByPeriodId[a.period_id]
@@ -1116,17 +1111,12 @@ export default function Roster() {
     // A BS month whose sales were entered as one bs_day=0 lump has real revenue with no day to
     // attach it to, so EVERY day of it is understated — the whole month is barred from training.
     const bulkMonths = new Set()
-    for (const s of salesRes.data || []) {
-      const m = monthByPeriodId[s.period_id]
-      if (!m) continue
-      if (s.bs_day === 0) { bulkMonths.add(`${m.bsYear}:${m.bsMonth}`); continue }
-      const b = byKey[`${m.bsYear}:${m.bsMonth}:${s.bs_day}`]
-      if (b) b.sales.push(s)
-    }
-    for (const o of posRes.data || []) {
-      const bs = adToBs(new Date(o.closed_at))
-      const b = byKey[`${bs.year}:${bs.month}:${bs.day}`]
-      if (b) b.covers += o.covers || 1
+    for (const d of daysRes.data || []) {
+      if (d.bulk_month) bulkMonths.add(`${d.bs_year}:${d.bs_month}`)
+      const b = byKey[`${d.bs_year}:${d.bs_month}:${d.bs_day}`]
+      if (!b) continue
+      b.revenue = parseFloat(d.revenue) || 0
+      if (hasPos) b.covers = d.covers || 0
     }
 
     const samples = windowDays.map(d => {
@@ -1143,7 +1133,7 @@ export default function Roster() {
         key: d.key, weekday: d.weekday,
         hours: t.hours, hoursBasis: useAtt ? 'attendance' : 'roster',
         headCount: t.headCount, hoursByDept: t.hoursByDept,
-        revenue: computeDayRevenue(b.sales, priceMap),
+        revenue: b.revenue,
         covers: b.covers,
         recorded: t.recorded,
         periodExists: !!periodByMonth[`${d.year}:${d.month}`],
@@ -1160,6 +1150,14 @@ export default function Roster() {
   }, [clientId, tab, hasPos, shiftTypes, scopedFrom, stdReq])
   useEffect(() => { loadLaborStandard() }, [loadLaborStandard])
 
+  // Past days count everyone who worked them (ROSTER-7): the board's list plus anyone with
+  // attendance in the visible range who has since left. Department-filtered by their stored
+  // department for Hours and Labor Cost, whole-outlet for Staff.
+  const pastEmployees = useMemo(() => (pastLeavers.length > 0 ? [...employees, ...pastLeavers] : employees),
+    [employees, pastLeavers])
+  const pastFilteredEmps = useMemo(
+    () => deptFilter === 'All' ? pastEmployees : pastEmployees.filter(e => e.department === deptFilter),
+    [pastEmployees, deptFilter])
   const laborForecastRows = useMemo(() => columns.map(col => {
     const key = `${col.bsYear}:${col.bsMonth}:${col.bsDay}`
     const f = forecastByDay[key]
@@ -1171,22 +1169,27 @@ export default function Roster() {
     const costPct        = f?.revenue > 0 ? (plannedCost / f.revenue) * 100 : null
     const isPast         = isPastCol(col)
     const weekday        = bsToAd(col.bsYear, col.bsMonth, col.bsDay).getDay()
-    // How many hours this day NEEDS, learned from the outlet's own history. Narrowed by the same
-    // Department filter as Hours and Labor Cost beside it — an outlet-wide requirement against a
-    // kitchen-only roster is the apples-to-oranges comparison the filter fix already removed once.
+    // How many hours this day NEEDS, learned from the outlet's own history. `required` is the
+    // "need Xh" under Hours, narrowed by the same Department filter as Hours and Labor Cost beside
+    // it. `staffRequired` drives the STAFFING axis (Recommended, Status, the board's Rec hint and
+    // Suggest) and is outlet-wide whatever the filter, because Staff is counted outlet-wide (S692).
+    // Until S798 2e (ROSTER-6) Recommended took the department's need while Staff stayed
+    // whole-outlet, so a filtered day compared the kitchen's 4 with the outlet's 7, read "✓
+    // Covered" and hid Suggest while the kitchen itself had 2 on.
     const dept           = deptFilter === 'All' ? null : deptFilter
     const required       = requiredHoursFor(f?.revenue ?? null, laborStd, weekday, dept)
+    const staffRequired  = dept ? requiredHoursFor(f?.revenue ?? null, laborStd, weekday, null) : required
     // Prefer the learned standard: it is revenue-based, so it reaches outlets with no POS at all,
     // and it knows this outlet rather than a typed constant. Covers ÷ target stays as the fallback
     // (and is shown beside it) so an owner who set that target deliberately can still see it.
     const coversRec      = computeRecommendedHeadcount(f?.covers, coversPerStaffTarget)
-    const requiredStaff  = requiredStaffFor(required?.hours ?? null, laborStd?.typicalShiftHours)
+    const requiredStaff  = requiredStaffFor(staffRequired?.hours ?? null, laborStd?.typicalShiftHours)
     const recommended    = requiredStaff ?? coversRec
     let actual = null
     const a = isPast && actualsByDay ? actualsByDay[key] : null
     if (a) {
-      const labor = computeActualLabor(a.attendance, filteredEmps, monthDays, componentsByEmp)
-      const revenue = a.periodExists ? computeDayRevenue(a.sales, priceByRecipe) : null
+      const labor = computeActualLabor(a.attendance, pastFilteredEmps, monthDays, componentsByEmp)
+      const revenue = a.periodExists ? a.revenue : null
       // A past day with no attendance rows is not a day nobody worked — most outlets fill
       // Attendance later (or from the roster itself, via Generate from Roster), and until then
       // the roster IS the best record of the day. So the row falls back to the rostered hours,
@@ -1195,12 +1198,13 @@ export default function Roster() {
       const fromRoster = !labor.recorded
       const hours = fromRoster ? scheduledHrs : labor.hours
       const cost  = fromRoster ? plannedCost  : labor.cost
-      const staff = fromRoster ? scheduledCount : computeActualStaff(a.attendance, employees)
+      const staff = fromRoster ? scheduledCount : computeActualStaff(a.attendance, pastEmployees)
       // On a past day the requirement is measured against what the day actually EARNED — the
       // retrospective verdict on the roster, not a forecast of it.
       const actualRequired = requiredHoursFor(revenue, laborStd, weekday, dept)
+      const actualStaffRequired = dept ? requiredHoursFor(revenue, laborStd, weekday, null) : actualRequired
       const actualCoversRec = computeRecommendedHeadcount(a.covers, coversPerStaffTarget)
-      const actualReqStaff = requiredStaffFor(actualRequired?.hours ?? null, laborStd?.typicalShiftHours)
+      const actualReqStaff = requiredStaffFor(actualStaffRequired?.hours ?? null, laborStd?.typicalShiftHours)
       actual = {
         recorded: labor.recorded,
         basis: fromRoster ? 'roster' : 'attendance',
@@ -1209,13 +1213,14 @@ export default function Roster() {
         revenue,
         covers: a.covers,
         required: actualRequired,
+        staffRequired: actualStaffRequired,
         coversRec: actualCoversRec,
         recommended: actualReqStaff ?? actualCoversRec,
         costPct: revenue > 0 ? (cost / revenue) * 100 : null,
       }
     }
-    return { col, isPast, actual, weekday, scheduledHrs, plannedCost, unpricedCount, scheduledCount, required, coversRec, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null, revenueEstimated: !!f?.revenueEstimated, holiday: f?.holiday ?? null, generatedAt: f?.generated_at ?? null }
-  }), [columns, forecastByDay, filteredEmps, employees, roster, shiftMap, coversPerStaffTarget, componentsByEmp, isPastCol, actualsByDay, priceByRecipe, laborStd, deptFilter])
+    return { col, isPast, actual, weekday, scheduledHrs, plannedCost, unpricedCount, scheduledCount, required, staffRequired, coversRec, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null, revenueEstimated: !!f?.revenueEstimated, holiday: f?.holiday ?? null, generatedAt: f?.generated_at ?? null }
+  }), [columns, forecastByDay, filteredEmps, employees, pastEmployees, pastFilteredEmps, roster, shiftMap, coversPerStaffTarget, componentsByEmp, isPastCol, actualsByDay, laborStd, deptFilter])
   const forecastRowByKey = useMemo(
     () => Object.fromEntries(laborForecastRows.map(r => [`${r.col.bsYear}:${r.col.bsMonth}:${r.col.bsDay}`, r])),
     [laborForecastRows])
@@ -1496,8 +1501,8 @@ export default function Roster() {
                                 <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{col.sublabel}</div>
                                 {fr?.recommended != null && (
                                   <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
-                                    <Tip text={fr.required
-                                      ? `Recommended ${fr.recommended} staff — the forecast revenue needs about ${fr.required.hours}h at this outlet's own sales per labour hour. Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`
+                                    <Tip text={fr.staffRequired
+                                      ? `Recommended ${fr.recommended} staff — the forecast revenue needs about ${fr.staffRequired.hours}h across the outlet at its own sales per labour hour. Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`
                                       : `Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers || 0)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
                                       <span style={{ fontSize: 10, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber-text)' : 'var(--theme-text3)', cursor: 'default' }}>
                                         Rec: {fr.recommended}
@@ -1907,7 +1912,7 @@ export default function Roster() {
           )}
           {deptFilter !== 'All' && (
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>
-              Showing <strong>{deptFilter}</strong> only for Hours and Labor Cost, and the "need" figure narrows with them — it is this department's share of the outlet's hours over the last {LABOR_STANDARD_LOOKBACK_DAYS} days, applied to the day's requirement. Revenue, Recommended Staff and Staff stay whole-outlet, because the business is served by everyone — so Cost % here is this department's cost against total revenue.
+              Showing <strong>{deptFilter}</strong> only for Hours and Labor Cost, and the "need" figure narrows with them — it is this department's share of the outlet's hours over the last {LABOR_STANDARD_LOOKBACK_DAYS} days, applied to the day's requirement. Revenue, Recommended Staff, Staff and Status stay whole-outlet, because the business is served by everyone — so Cost % here is this department's cost against total revenue, and a day reads Short when the whole outlet is short.
             </p>
           )}
           {(() => {
@@ -2062,8 +2067,8 @@ export default function Roster() {
                           {showStaffing && (
                             <td style={{ textAlign: 'right' }}>
                               {rec ?? '—'}
-                              {a?.required
-                                ? plan(describeBasis(a.required.basis))
+                              {a?.staffRequired
+                                ? plan(describeBasis(a.staffRequired.basis))
                                 : (a?.coversRec != null ? plan(`covers ÷ ${coversPerStaffTarget}`) : null)}
                             </td>
                           )}
@@ -2120,8 +2125,8 @@ export default function Roster() {
                               {/* Which basis produced this number, on the row rather than in one
                                   footnote — a Tuesday with 6 samples and a Friday falling back to
                                   all-days are different bases in the same view. */}
-                              {r.required
-                                ? plan(describeBasis(r.required.basis))
+                              {r.staffRequired
+                                ? plan(describeBasis(r.staffRequired.basis))
                                 : (r.coversRec != null ? plan(`covers ÷ ${coversPerStaffTarget}`) : null)}
                             </td>
                           )}

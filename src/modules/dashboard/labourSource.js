@@ -152,6 +152,73 @@ export function ownerLabourNote(source) {
   }
 }
 
+/**
+ * The Overheads rows a page that subtracts labour SEPARATELY may read: every bucket except `labor`.
+ * For `.or()` on an `overheads` read, so the server never sends a Labor-tab row to a page that would
+ * count it beside payroll (the S526 double count).
+ *
+ * The Owner Dashboard and the Monthly Owner Report read `.eq('bucket', 'overhead')` until S798
+ * stage 2e. S384 added that filter to keep the Labor tab out, and it dropped Tax & Fees (card and
+ * bank fees, the accountant, licences) as a side effect, so their net margins read higher than
+ * Overheads, the Dashboard and Consolidated P&L for the same month (LABOUR-FIGURES-4). It also
+ * dropped rows with no bucket, which `get_group_pnl` counts as overhead. `bucket` is nullable.
+ */
+export const NON_LABOUR_OVERHEADS = 'bucket.is.null,bucket.in.(overhead,tax_fees)'
+
+/**
+ * Those rows split the way Consolidated P&L shows them: Overheads (the `overhead` bucket, and a row
+ * with none) and Tax & Fees. A `labor` row that reaches here anyway is left out of both.
+ */
+export function splitNonLabourOverheads(rows) {
+  let overhead = 0, taxFees = 0
+  for (const r of rows || []) {
+    const amount = parseFloat(r.amount) || 0
+    if (r.bucket == null || r.bucket === 'overhead') overhead += amount
+    else if (r.bucket === 'tax_fees') taxFees += amount
+  }
+  return { overhead, taxFees }
+}
+
+/**
+ * One outlet's labour on the group screens (LABOUR-FIGURES-2), from its `get_group_pnl` row.
+ *
+ * `resolveLabour` decides it, as for one outlet: finalized payroll, else the Labor tab. Owner and
+ * operator only reach the group RPCs, so nothing is fenced. On these screens a figure exists only
+ * for `payroll` and `overheads`. A source of `none` has NO figure here, for an HR outlet ("not
+ * finalized") and for an IMS-only one ("none entered") alike: `get_group_summary` returned NPR 0 for
+ * "no run", and the Group Dashboard banded that 0.0% ✓ on every outlet of the running month.
+ *
+ * @returns {{ source, amount: ?number, hasFigure: boolean, verdictWithheld: boolean,
+ *             ignoredBucket: number, note: string }}
+ */
+export function groupOutletLabour(pnlRow, hrOn) {
+  const payroll = pnlRow?.labour_payroll != null ? parseFloat(pnlRow.labour_payroll) : null
+  const r = resolveLabour({ labourBucket: parseFloat(pnlRow?.labour_bucket) || 0, payroll, hrOn: !!hrOn, fenced: false })
+  const hasFigure = r.source === 'payroll' || r.source === 'overheads'
+  const note = r.source === 'overheads' ? 'Labor tab'
+    : r.source === 'none' ? (hrOn ? 'not finalized' : 'none entered')
+    : ''
+  return { ...r, amount: hasFigure ? r.amount : null, hasFigure, note }
+}
+
+/**
+ * The group's Labour %: total labour ÷ total revenue, only when EVERY outlet in scope has a figure,
+ * the way `groupCostRatio` (foodCostBasis.js) handles food cost. Otherwise null, with the outlets
+ * missing one named, so the card can say why instead of halving the group figure (one outlet's
+ * NPR 3 lakh over two outlets' revenue read 15.0% ✓ before S798 stage 2e).
+ *
+ * `outlets`: [{ name, revenue, labour: groupOutletLabour(…) }], already in scope (included, with a
+ * period).
+ */
+export function groupLabourRatio(outlets) {
+  const list = outlets || []
+  const missing = list.filter(o => !o.labour?.hasFigure).map(o => o.name)
+  const revenue = list.reduce((s, o) => s + (Number(o.revenue) || 0), 0)
+  const labour = list.reduce((s, o) => s + (o.labour?.hasFigure ? o.labour.amount : 0), 0)
+  if (list.length === 0 || missing.length > 0 || !(revenue > 0)) return { pct: null, labour: missing.length > 0 ? null : labour, missing }
+  return { pct: (labour / revenue) * 100, labour, missing }
+}
+
 /** A short on-tile label for the source, or '' when there is nothing useful to say. */
 export function labourSourceLabel({ source }, hrOn) {
   switch (source) {

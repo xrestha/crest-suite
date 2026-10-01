@@ -18,6 +18,7 @@ import {
   withGroupCogs, periodCostRatio, groupCostRatio, fcBasisOf,
   FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, FOOD_COST_TIP, SPEND_SO_FAR_TIP,
 } from '../../modules/ims/reports/foodCostBasis'
+import { groupOutletLabour, groupLabourRatio } from '../../modules/dashboard/labourSource'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
 //
@@ -41,6 +42,14 @@ import {
 //   - Outlets are matched on (bs_year, bs_month), never period_id — monthly_periods is
 //     UNIQUE(client_id, bs_year, bs_month) with one open period each, so two outlets genuinely
 //     sit in different months. has_period = false is surfaced rather than shown as zero.
+//
+// Labour comes from get_group_pnl too (S798 2e, LABOUR-FIGURES-2), through `groupOutletLabour`:
+// finalized payroll, else the outlet's Overheads Labor tab — Consolidated P&L's rule. Before, it
+// was get_group_summary's `payroll`, which is NPR 0 for "no finalized run", so every outlet of the
+// running month (the month this page opens on) read Labour "0.0% ✓ Healthy", and a past month with
+// one outlet finalized read the group at half its true figure, still green. An outlet with no
+// labour figure now says why ("not finalized" on an HR outlet, "none entered" on an IMS-only one)
+// with no band, and the group Labour % waits until every outlet has one.
 
 // While a month is loading, `rows` still holds the PREVIOUS month's outlets — the four totals
 // below are derived from it, so they rendered last month's group revenue under this month's
@@ -119,7 +128,7 @@ export default function GroupDashboard() {
     // Both RPCs for the same (bs_year, bs_month), side by side under the one monthReq key, so a
     // stale month can win neither. get_group_pnl carries each outlet's period status and its COGS
     // components (S792, D30); it checks the same Owner/admin rule get_group_summary does.
-    const [summary, pnl] = await Promise.all([
+    const [summary, pnl, hrFlags] = await Promise.all([
       supabase.rpc('get_group_summary', {
         p_bs_year: bsYear,
         p_bs_month: bsMonth,
@@ -127,6 +136,9 @@ export default function GroupDashboard() {
         p_ad_end: iso(end),
       }),
       supabase.rpc('get_group_pnl', { p_bs_year: bsYear, p_bs_month: bsMonth }),
+      // Which outlets run Crest HR: "no finalized payroll" means "not finalized" there and "none
+      // entered" on an IMS-only outlet. `clients` is read raw (clients_select allows same-group rows).
+      supabase.from('clients').select('id, hr_enabled').eq('group_id', groupId),
     ])
     if (!monthReq.isCurrent(key)) return
     // A failure of EITHER read is the page's error. Without get_group_pnl a closed month has no
@@ -134,17 +146,22 @@ export default function GroupDashboard() {
     // the figure the owner came to compare, which is worse than saying the read failed.
     // errorText, not err.message: this reader is the Owner, and supabase-js hands back a bare
     // `TypeError: Failed to fetch` for any dead connection.
-    const err = summary.error || pnl.error
+    const err = summary.error || pnl.error || hrFlags.error
     if (err) { setError(errorText(err, 'operator')); setRows([]) }
     else {
       // has_closing rides along for the "closed with no count" mark on the row — Consolidated P&L's
       // own warning, for the same rows: such a month's COGS counts the whole shelf as used.
-      const hasClosingById = new Map((pnl.data || []).map(p => [p.client_id, p.has_closing]))
+      const pnlById = new Map((pnl.data || []).map(p => [p.client_id, p]))
+      const hrById = new Map((hrFlags.data || []).map(c => [c.id, !!c.hr_enabled]))
       setRows(withGroupCogs(summary.data || [], pnl.data || [])
-        .map(r => ({ ...r, has_closing: hasClosingById.get(r.client_id) ?? null })))
+        .map(r => ({
+          ...r,
+          has_closing: pnlById.get(r.client_id)?.has_closing ?? null,
+          labour: r.is_included ? groupOutletLabour(pnlById.get(r.client_id), hrById.get(r.client_id)) : null,
+        })))
     }
     setLoading(false)
-  }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bsYear, bsMonth, groupId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (groupId) load() }, [groupId, load])
 
@@ -173,9 +190,13 @@ export default function GroupDashboard() {
   const sum = key => included.reduce((t, r) => t + (Number(r[key]) || 0), 0)
   const groupRevenue = sum('revenue')
   const groupPurchases = sum('net_purchases')
-  const groupPayroll = sum('payroll')
   const groupCovers = sum('covers')
-  const groupLabour = groupRevenue > 0 ? (groupPayroll / groupRevenue) * 100 : null
+  // Labour % only when every outlet in scope has a labour figure (groupLabourRatio), the way
+  // groupCostRatio treats food cost; otherwise the outlets without one are named on the card.
+  const groupLab = groupLabourRatio(included.filter(r => r.has_period !== false)
+    .map(r => ({ name: r.client_name, revenue: r.revenue, labour: r.labour })))
+  const groupLabour = groupLab.pct
+  const groupLabourMissing = groupLab.missing
 
   // Food Cost % or Spend % so far (S792, D30). Each outlet's own figure follows its own month: COGS
   // once it has closed, what it has spent while it is still running. The group's is a Food Cost %
@@ -307,8 +328,11 @@ export default function GroupDashboard() {
                 <div className="stat-value" style={{ color: loading ? undefined : fcBandOf(groupFc).color }} title={loading ? undefined : bandFigure(groupFc, fcBandOf).title}>{loading ? <StatSkeleton /> : bandFigure(groupFc, fcBandOf).text}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text="Finalized payroll (gross + overtime + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use.">Group Labour %</Tip></div>
+                <div className="stat-label"><Tip text="All outlets' labour ÷ all outlets' revenue. Each outlet's labour is its finalized payroll (gross + overtime + employer SSF), or, with none, what was typed on its Overheads Labor tab — the rule Consolidated P&L uses. Shown only when every outlet has a labour figure: an outlet whose payroll is not finalized yet would otherwise count as zero and make the group look cheaper to staff than it is. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use." width={300}>Group Labour %</Tip></div>
                 <div className="stat-value" style={{ color: loading ? undefined : lcBand(groupLabour).color }} title={loading ? undefined : bandFigure(groupLabour, lcBand).title}>{loading ? <StatSkeleton /> : bandFigure(groupLabour, lcBand).text}</div>
+                {!loading && groupLabourMissing.length > 0 && (
+                  <div className="stat-sub">No labour figure yet: {groupLabourMissing.join(', ')}</div>
+                )}
               </div>
               <div className="stat-card">
                 <div className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></div>
@@ -331,8 +355,8 @@ export default function GroupDashboard() {
                     <th style={{ textAlign: 'right' }}>Net Purchases</th>
                     {/* Neutral while loading: `rows` still holds the previous month, whose outlets may stand differently. */}
                     <th style={{ textAlign: 'right' }}><Tip text={columnTip} width={300}>{loading ? 'Food Cost / Spend %' : columnLabel}</Tip></th>
-                    <th style={{ textAlign: 'right' }}>Payroll</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Finalized payroll ÷ revenue for this outlet alone.">Labour %</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="This outlet's labour for the month: its finalized payroll (gross + overtime + employer SSF), or, with none, what was typed on its Overheads Labor tab, marked as such. “Not finalized” means the outlet runs Crest HR and its payroll for this month is not finalized yet; “none entered” means an outlet without Crest HR has nothing on its Labor tab." width={300}>Labour</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Labour ÷ revenue for this outlet alone. No band while the outlet has no labour figure.">Labour %</Tip></th>
                     <th style={{ textAlign: 'right' }}>Covers</th>
                   </tr>
                 </thead>
@@ -342,7 +366,7 @@ export default function GroupDashboard() {
                   {!loading && rows.map(r => {
                     const rev = Number(r.revenue) || 0
                     const fcRatio = ratioOf(r)
-                    const lab = r.is_included && rev > 0 ? (Number(r.payroll) / rev) * 100 : null
+                    const lab = r.labour?.hasFigure && rev > 0 ? (r.labour.amount / rev) * 100 : null
                     // No opacity dimming on excluded rows. It read as de-emphasis but multiplies
                     // straight through the text colour — text2 at 0.55 measured under 3:1 — and the
                     // "No Suite Pro" badge plus a row of em-dashes already says the same thing
@@ -374,7 +398,12 @@ export default function GroupDashboard() {
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.revenue) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.net_purchases) : '—'}</td>
                         <td {...ratioCell(fcRatio, r.cogs)} />
-                        <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.payroll) : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {!r.is_included || r.has_period === false ? '—' : r.labour?.hasFigure ? fmtNpr(r.labour.amount) : '—'}
+                          {r.is_included && r.has_period !== false && r.labour?.note && (
+                            <div style={{ fontSize: 11, fontWeight: 400, color: r.labour.hasFigure ? 'var(--theme-text2)' : 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>{r.labour.note}</div>
+                          )}
+                        </td>
                         <td {...bandCell(lab, lcBand)} />
                         <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-IN') : '—'}</td>
                       </tr>
@@ -390,7 +419,7 @@ export default function GroupDashboard() {
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupRevenue)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupPurchases)}</td>
                       <td {...ratioCell(groupRatio, groupCogs)} />
-                      <td style={{ textAlign: 'right' }}>{fmtNpr(groupPayroll)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtNpr(groupLab.labour)}</td>
                       <td {...bandCell(groupLabour, lcBand)} />
                       <td style={{ textAlign: 'right' }}>{groupCovers.toLocaleString('en-IN')}</td>
                     </tr>

@@ -43,8 +43,9 @@ export function buildExecutiveSummary(snapshot, periodLabel) {
   let marginSentence = ''
   if (ims && hr && combined.netMarginPct != null) {
     const nm = combined.netMarginPct
-    const overhead = ims.overheadTotal || 0
-    const overheadNote = nm < 0 && overhead > 0 ? `, driven in part by ${fmt(overhead)} in recorded overhead expenses` : ''
+    // Tax & Fees is in the margin since schema v12 (S798 2e), so it is in the sentence explaining it.
+    const overhead = (ims.overheadTotal || 0) + (ims.taxFeesTotal || 0)
+    const overheadNote = nm < 0 && overhead > 0 ? `, driven in part by ${fmt(overhead)} in recorded overhead expenses${ims.taxFeesTotal > 0 ? ' and fees' : ''}` : ''
     marginSentence = ` Net Margin was ${nm.toFixed(1)}%${overheadNote}.`
   }
 

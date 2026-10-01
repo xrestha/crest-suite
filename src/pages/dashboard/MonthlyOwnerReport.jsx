@@ -322,6 +322,15 @@ export default function MonthlyOwnerReport() {
   // label says which basis it is, because a Tip does not print.
   const cogsBasis = snapshot?.combined?.foodCostBasis === 'cogs'
   const basisOf = s => (s?.combined?.foodCostBasis === 'cogs' ? 'cogs' : 'purchases')
+  // Since v12 (S798 2e, LABOUR-FIGURES-4) Net Margin also subtracts Tax & Fees.
+  const taxFeesInNet = s => s?.combined?.netMarginTaxFees === true
+  const netMarginTip = (() => {
+    const food = cogsBasis ? 'food used (COGS)' : 'net purchases'
+    if (taxFeesInNet(snapshot)) {
+      return `Revenue minus ${food}, labor cost, overheads and tax & fees (card and bank fees, the accountant, licences), as a % of revenue — the same costs Consolidated P&L subtracts.`
+    }
+    return `Revenue minus ${food}, labor cost and overheads, as a % of revenue — the rule this report was generated under. Tax & Fees were not subtracted then, so this margin reads higher than Consolidated P&L's by them; Regenerate Snapshot to include them.`
+  })()
   // COGS rests on the closing count: an item with stock and no count is counted as all used. While
   // that gap is material the three ratios that contain food cost are shown without a verdict, as on
   // Monthly Summary (S756, D6). Only a v9 snapshot carries the gap.
@@ -518,7 +527,7 @@ export default function MonthlyOwnerReport() {
                     )}
                     {snapshot.ims && snapshot.hr && (
                       <tr>
-                        <td><Tip text={cogsBasis ? 'Revenue minus food used (COGS), labor cost and overheads, as a % of revenue.' : 'Revenue minus net purchases, labor cost and overheads, as a % of revenue — the rule this report was generated under.'} width={260}>Net Margin %</Tip></td>
+                        <td><Tip text={netMarginTip} width={280}>Net Margin %</Tip></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: nmCellOf(snapshot.combined?.netMarginPct).color }} title={nmCellOf(snapshot.combined?.netMarginPct).title}>{!canOverheads ? 'Requires Overheads (Pro)' : `${pct(snapshot.combined?.netMarginPct)} ${nmCellOf(snapshot.combined?.netMarginPct).mark}`}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
                       </tr>
@@ -572,6 +581,14 @@ export default function MonthlyOwnerReport() {
                         : 'Items whose stock at period close was at or below par level (this report predates the rule that an item exactly at par is fine).'} />
                     <Row label="Unpaid Credit (this period)" value={fmt(snapshot.ims.payables?.unpaidTotal)}
                       tip="This period's Credit purchases still unpaid as of generation — a period-bound figure, not a live 'days overdue' count." />
+                    {/* v12 (S798 2e): the two non-labour cost lines Net Margin subtracts, so the margin
+                        can be traced. Absent on an older snapshot, which froze no Tax & Fees. */}
+                    {canOverheads && snapshot.ims.taxFeesTotal != null && <>
+                      <Row label="Overheads" value={fmt(snapshot.ims.overheadTotal)}
+                        tip="The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: labour is counted from payroll in the Crest HR section." />
+                      <Row label="Tax & Fees" value={fmt(snapshot.ims.taxFeesTotal)}
+                        tip="The Overheads page's Tax & Fees tab for the month: card and bank fees, the accountant, licences and permits. Net Margin subtracts it, as Consolidated P&L does." />
+                    </>}
                   </tbody></table>
                 </div>
               </div>
@@ -724,11 +741,20 @@ export default function MonthlyOwnerReport() {
                 <h3 style={sectionTitleStyle}>Labor Analytics</h3>
                 <div className="table-wrap">
                   <table className="data-table owner-report-table"><tbody>
-                    <Row label="Actual Hours Worked" value={`${num(snapshot.laborAnalytics.actualHoursWorked)} hrs`} />
+                    <Row label="Actual Hours Worked" value={`${num(snapshot.laborAnalytics.actualHoursWorked)} hrs`}
+                      tip="Hours entered in Attendance this month: typed or clocked times, Generate from Roster, or a machine import. A day marked Present with no times adds nothing here." />
+                    {/* v12 (S798 2e, LABOUR-FIGURES-7 / H31): how many worked days carry hours, always
+                        printed, so the hour figures can be judged. Absent on an older snapshot. */}
+                    {snapshot.laborAnalytics.workingDays != null && (
+                      <Row label="Days without clock times" value={`${num(snapshot.laborAnalytics.workingDaysWithoutHours)} of ${num(snapshot.laborAnalytics.workingDays)} worked days`}
+                        color={snapshot.laborAnalytics.hoursWithheld ? 'var(--theme-amber-text)' : undefined}
+                        tip="Days marked Present (or a half day) in Attendance with no start and end time, so they add 0 hours. When more than half the worked days are like this, Schedule Variance and Sales per Labor Hour are not shown: the hours total counts only the few days that have times." />
+                    )}
                     <Row label="Scheduled Hours (Roster)" value={`${num(snapshot.laborAnalytics.scheduledHours)} hrs`} />
-                    <Row label="Schedule Variance" value={`${snapshot.laborAnalytics.scheduleVarianceHours >= 0 ? '+' : ''}${num(snapshot.laborAnalytics.scheduleVarianceHours)} hrs${snapshot.laborAnalytics.scheduleVariancePct != null ? ` (${snapshot.laborAnalytics.scheduleVariancePct.toFixed(1)}%)` : ''}`}
+                    <Row label="Schedule Variance" value={snapshot.laborAnalytics.hoursWithheld ? 'Hours not recorded'
+                      : `${snapshot.laborAnalytics.scheduleVarianceHours >= 0 ? '+' : ''}${num(snapshot.laborAnalytics.scheduleVarianceHours)} hrs${snapshot.laborAnalytics.scheduleVariancePct != null ? ` (${snapshot.laborAnalytics.scheduleVariancePct.toFixed(1)}%)` : ''}`}
                       tip="Actual hours worked minus scheduled hours — positive means more was worked than rostered." />
-                    <Row label="Sales per Labor Hour" value={snapshot.laborAnalytics.salesPerLaborHour != null ? fmt(snapshot.laborAnalytics.salesPerLaborHour) : 'N/A'}
+                    <Row label="Sales per Labor Hour" value={snapshot.laborAnalytics.hoursWithheld ? 'Hours not recorded' : snapshot.laborAnalytics.salesPerLaborHour != null ? fmt(snapshot.laborAnalytics.salesPerLaborHour) : 'N/A'}
                       tip="Revenue ÷ actual hours worked — a productivity benchmark." />
                     {snapshot.laborAnalytics.overtime && (
                       <Row label="Overtime (reference)" value={`${num(snapshot.laborAnalytics.overtime.hours)} hrs — ${fmt(snapshot.laborAnalytics.overtime.amount)}`}
@@ -982,6 +1008,15 @@ export default function MonthlyOwnerReport() {
                           on {basisOf(t.snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue and this
                           report on {basisOf(snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue.
                           To compare them, regenerate {priorLabel}'s snapshot and then this one (this report keeps the copy of {priorLabel} it was made with).
+                        </p>
+                      )}
+                      {/* S798 2e: across the v11 → v12 line Net Margin gained Tax & Fees, so its
+                          change is left blank (buildDeltas). Same reason to say so. */}
+                      {t?.available && snapshot.ims && snapshot.hr && basisOf(snapshot) === basisOf(t.snapshot) && taxFeesInNet(snapshot) !== taxFeesInNet(t.snapshot) && (
+                        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                          Net Margin is not compared: {taxFeesInNet(snapshot) ? 'this report' : priorLabel} subtracts Tax &amp; Fees
+                          and {taxFeesInNet(snapshot) ? priorLabel : 'this report'} was made before it did.
+                          To compare them, regenerate {priorLabel}'s snapshot and then this one.
                         </p>
                       )}
                     </div>

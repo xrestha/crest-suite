@@ -19,7 +19,10 @@
 //              labour sources are never meant to be summed (see .claude/rules/dashboards.md), and
 //              when both exist the ignored one is named on screen rather than silently dropped.
 //              In the group view the rule applies PER OUTLET before consolidating, since one
-//              outlet can run payroll while a sibling enters labour manually.
+//              outlet can run payroll while a sibling enters labour manually. An HR outlet with no
+//              finalized payroll wears a "no finalized payroll" marker, and while any outlet has no
+//              labour at all Net Profit carries no colour (S798 2e, LABOUR-FIGURES-2): green over a
+//              statement missing a wage bill was the S796 reading, on the group path.
 //   Overheads / Tax & Fees — the 'overhead' and 'tax_fees' buckets, each its own line.
 //
 // Defaults to the most recent CLOSED period: COGS subtracts closing stock, so an open period
@@ -43,7 +46,7 @@ import ReportPage from '../../components/ReportPage'
 import { printWithTitle } from '../../utils/printTitle'
 import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
 import { BS_MONTHS } from '../../utils/bsCalendar'
-import { payrollLabourTotal } from '../../modules/dashboard/labourSource'
+import { payrollLabourTotal, groupOutletLabour } from '../../modules/dashboard/labourSource'
 
 const pctOf = (part, whole) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '—')
 
@@ -88,15 +91,18 @@ function buildStatement(raw) {
   }
 }
 
-const lineColor = (line, amount) =>
-  line.strong && amount < 0 ? 'var(--theme-red-text)'
+// `withheld`: Net Profit is missing a wage bill (an HR outlet with no finalized payroll and nothing
+// on its Labor tab — resolveLabour's verdictWithheld), so it is printed without a verdict colour.
+const lineColor = (line, amount, withheld = false) =>
+  withheld && line.key === 'netProfit' ? 'var(--theme-text1)'
+  : line.strong && amount < 0 ? 'var(--theme-red-text)'
   : line.strong && amount > 0 ? 'var(--theme-green-text)'
   : line.cost ? 'var(--theme-text2)' : 'var(--theme-text1)'
 
 const fmtLine = (line, amount) => (line.cost && amount !== 0 ? `(${npr(amount)})` : npr(amount))
 
 export default function ConsolidatedPnl() {
-  const { clientId, profile, loading: authLoading, clientModules, outlets, isAdmin, isOwner } = useAuth()
+  const { clientId, profile, loading: authLoading, clientModules, outlets, isAdmin, isOwner, groupId } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
@@ -163,19 +169,28 @@ export default function ConsolidatedPnl() {
   /* ── Grouped: one RPC, raw aggregates per outlet, derived here ─────────────────────────── */
   async function loadGroup(period) {
     setLoadError(null)
-    const { data, error } = await supabase.rpc('get_group_pnl', {
-      p_bs_year: period.bs_year, p_bs_month: period.bs_month,
-    })
+    const [{ data, error: rpcError }, hrFlags] = await Promise.all([
+      supabase.rpc('get_group_pnl', { p_bs_year: period.bs_year, p_bs_month: period.bs_month }),
+      // Which outlets run Crest HR, for the "no finalized payroll" marker (raw: clients_select
+      // allows same-group rows).
+      supabase.from('clients').select('id, hr_enabled').eq('group_id', groupId),
+    ])
     if (!periodReq.isCurrent(period.id)) return   // superseded by a newer period selection
     // A failed RPC must not masquerade as the no-Suite-Pro empty state — 'nothing to show' and
     // 'could not load' are different facts, and only one of them should send someone to billing.
+    const error = rpcError || hrFlags.error
     if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setLoadError(error || 'Could not load the group statement.'); return }
+    const hrById = new Map((hrFlags.data || []).map(c => [c.id, !!c.hr_enabled]))
     const rows = data || []
     setExcludedNames(rows.filter(r => !r.is_included).map(r => r.client_name))
     setGroupCols(rows.filter(r => r.is_included).map(r => ({
       name: r.client_name,
       status: r.period_status,
       hasPeriod: r.has_period,
+      // The same per-outlet rule the Group Dashboard reads (labourSource.js). buildStatement below
+      // applies its amount; this carries what the column may say about it.
+      hrOn: !!hrById.get(r.client_id),
+      labour: groupOutletLabour(r, hrById.get(r.client_id)),
       stmt: buildStatement({
         revenue: parseFloat(r.revenue) || 0,
         openingVal: parseFloat(r.opening_val) || 0,
@@ -310,6 +325,14 @@ export default function ConsolidatedPnl() {
   const ignoredBuckets = grouped
     ? cols.filter(c => c.stmt.ignoredLabourBucket > 0).map(c => ({ name: c.name, amount: c.stmt.ignoredLabourBucket }))
     : (pnl?.ignoredLabourBucket > 0 ? [{ name: null, amount: pnl.ignoredLabourBucket }] : [])
+  // S798 2e (LABOUR-FIGURES-2): an HR outlet whose payroll for the month is not finalized. With its
+  // Labor tab empty too, its Net Profit has no wage bill in it, so Net Profit — the outlet's and the
+  // consolidated one — is printed without a verdict colour (resolveLabour's verdictWithheld, the
+  // S796 rule the Dashboard applies). Named under the statement either way.
+  const noPayrollCols = grouped ? cols.filter(c => c.hasPeriod && c.hrOn && c.stmt.labourSource !== 'payroll') : []
+  const labourWithheld = grouped
+    ? cols.some(c => c.hasPeriod && c.labour?.verdictWithheld)
+    : (hrOn && pnl?.labourSource === 'none')
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -442,10 +465,10 @@ export default function ConsolidatedPnl() {
         <div className="stat-label">
           <Tip width={300} text="What is left after every cost on the statement below. This is the bottom line of the same table, not a second calculation.">Net Profit</Tip>
         </div>
-        <div className="stat-value" style={{ color: stmt.netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+        <div className="stat-value" style={{ color: labourWithheld ? 'var(--theme-text1)' : stmt.netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
           {npr(stmt.netProfit)}
         </div>
-        <div className="stat-sub">{pctOf(stmt.netProfit, stmt.revenue)} net margin</div>
+        <div className="stat-sub">{labourWithheld ? 'Not judged until payroll is finalized' : `${pctOf(stmt.netProfit, stmt.revenue)} net margin`}</div>
       </div>
     </div>
   ) : null
@@ -470,6 +493,14 @@ export default function ConsolidatedPnl() {
           if it duplicates payroll.
         </p>
       ))}
+      {(noPayrollCols.length > 0 || (!grouped && labourWithheld)) && (
+        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
+          {grouped
+            ? `No finalized payroll for ${periodLabel}: ${noPayrollCols.map(c => c.stmt.labourSource === 'overheads' ? `${c.name} (Labour is its Overheads Labor tab)` : c.name).join(', ')}.`
+            : `No finalized payroll for ${periodLabel}, and nothing on the Overheads Labor tab.`}
+          {labourWithheld && ' Net Profit has no wage bill in it there, so it is shown without a colour until payroll is finalized.'}
+        </p>
+      )}
       {missingClosing.length > 0 && !anyOpen && (
         <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
           {grouped
@@ -538,6 +569,9 @@ export default function ConsolidatedPnl() {
                           load-bearing thing about a column — that its money is provisional. */}
                       {!c.hasPeriod ? <span style={{ ...colMarkerStyle, color: 'var(--theme-text3)' }}>no period</span>
                         : c.status === 'open' ? <span style={{ ...colMarkerStyle, color: 'var(--theme-amber-text)' }}>open</span> : null}
+                      {c.hasPeriod && c.hrOn && c.stmt.labourSource !== 'payroll' && (
+                        <span style={{ ...colMarkerStyle, color: 'var(--theme-amber-text)' }}>no finalized payroll</span>
+                      )}
                     </th>
                   ))}
                   <th style={{ textAlign: 'right' }}>Consolidated</th>
@@ -555,7 +589,7 @@ export default function ConsolidatedPnl() {
                     {cols.map((c, ci) => (
                       <td key={ci} style={{
                         textAlign: 'right',
-                        color: c.hasPeriod ? lineColor(l, c.stmt[l.key]) : 'var(--theme-text3)',
+                        color: c.hasPeriod ? lineColor(l, c.stmt[l.key], c.labour?.verdictWithheld) : 'var(--theme-text3)',
                       }}>
                         {c.hasPeriod ? fmtLine(l, c.stmt[l.key]) : '—'}
                       </td>
@@ -568,7 +602,7 @@ export default function ConsolidatedPnl() {
                       // the single-outlet table. To an accountant, parenthesised-and-green reads as
                       // a credit. Weight is what was wanted here, and it is set on the next line.
                       textAlign: 'right', fontWeight: 700,
-                      color: lineColor(l, consolidated[l.key]),
+                      color: lineColor(l, consolidated[l.key], labourWithheld),
                     }}>
                       {fmtLine(l, consolidated[l.key])}
                     </td>
@@ -611,7 +645,7 @@ export default function ConsolidatedPnl() {
                     </td>
                     <td style={{
                       textAlign: 'right',
-                      fontWeight: l.strong ? 700 : 500, color: lineColor(l, pnl[l.key]),
+                      fontWeight: l.strong ? 700 : 500, color: lineColor(l, pnl[l.key], labourWithheld),
                     }}>
                       {fmtLine(l, pnl[l.key])}
                     </td>

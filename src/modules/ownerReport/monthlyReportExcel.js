@@ -56,7 +56,10 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     const imsRows = [{
       'Opening Stock (NPR)': round2(ims.openingStockValueTotal),
       'Revenue (NPR)': round2(ims.revenueTotal), 'Purchases (NPR)': round2(ims.purchaseTotal),
-      'Overheads (NPR)': round2(ims.overheadTotal), 'Wastage Value (NPR)': round2(ims.wastageValueTotal),
+      'Overheads (NPR)': round2(ims.overheadTotal),
+      // v12 only (S798 2e): an older snapshot froze no Tax & Fees, and a blank there would read as zero.
+      ...(ims.taxFeesTotal != null ? { 'Tax & Fees (NPR)': round2(ims.taxFeesTotal) } : {}),
+      'Wastage Value (NPR)': round2(ims.wastageValueTotal),
       // v9 only: an older snapshot froze no COGS, and a blank there would read as zero.
       ...(ims.staffMealsValueTotal != null ? { 'Staff Meals (NPR)': round2(ims.staffMealsValueTotal) } : {}),
       'Closing Stock (NPR)': round2(ims.closingStockValueTotal),
@@ -120,9 +123,14 @@ export function exportMonthlyReportExcel(report, bizInfo) {
   if (snapshot.laborAnalytics) {
     const la = snapshot.laborAnalytics
     const laRows = [{
-      'Actual Hours Worked': round2(la.actualHoursWorked), 'Scheduled Hours': round2(la.scheduledHours),
-      'Schedule Variance (hrs)': round2(la.scheduleVarianceHours), 'Schedule Variance %': la.scheduleVariancePct != null ? pct(la.scheduleVariancePct) : 'N/A',
-      'Sales per Labor Hour (NPR)': la.salesPerLaborHour != null ? round2(la.salesPerLaborHour) : 'N/A',
+      'Actual Hours Worked': round2(la.actualHoursWorked),
+      // v12 only (S798 2e, H31): worked days with no clock times, and the hour figures withheld when
+      // they are more than half.
+      ...(la.workingDays != null ? { 'Worked Days Without Clock Times': `${la.workingDaysWithoutHours} of ${la.workingDays}` } : {}),
+      'Scheduled Hours': round2(la.scheduledHours),
+      'Schedule Variance (hrs)': la.hoursWithheld ? 'Hours not recorded' : round2(la.scheduleVarianceHours),
+      'Schedule Variance %': la.hoursWithheld ? 'Hours not recorded' : la.scheduleVariancePct != null ? pct(la.scheduleVariancePct) : 'N/A',
+      'Sales per Labor Hour (NPR)': la.hoursWithheld ? 'Hours not recorded' : la.salesPerLaborHour != null ? round2(la.salesPerLaborHour) : 'N/A',
       'OT Hours': la.overtime ? round2(la.overtime.hours) : '', 'OT Amount (NPR)': la.overtime ? round2(la.overtime.amount) : '',
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Labor Analytics', bizInfo, periodLabel, laRows), 'Labor Analytics')

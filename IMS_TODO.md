@@ -314,7 +314,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 stage 4 — 1L report: an UNLINKED return is still deducted from its supplier's total — kept, and the page says so (owner decision).
 - ⚪ Demand Forecast Recompute now skips past holidays, which changes what Roster's Labor Forecast reads.
 
-**Stage 1 (security + closed months) shipped in S756** — migration `20260918100000`, `admin-user-ops`, `ims-staff-login`. Assets were fenced to match the page (register/categories/repairs supervisor; disposal and posting manager), not all-manager. Known gaps it left: a staff login can add lines to an issued requisition over REST; Sales, Stock Count, Overheads and Requisitions show no amber "editing a closed month" banner to the Owner; Roster's labour-actuals reads still hit tables fenced from HR logins (`recipes`, `sales_entries`, `pos_orders`).
+**Stage 1 (security + closed months) shipped in S756** — migration `20260918100000`, `admin-user-ops`, `ims-staff-login`. Assets were fenced to match the page (register/categories/repairs supervisor; disposal and posting manager), not all-manager. Known gaps it left: a staff login can add lines to an issued requisition over REST; Sales, Stock Count, Overheads and Requisitions show no amber "editing a closed month" banner to the Owner; Roster's labour-actuals reads still hit tables fenced from HR logins (`recipes`, `sales_entries`, `pos_orders`) — ✅ closed S798 stage 2e (crest-v371): both Labor Forecast loaders read the day's totals from the caller-checked `hr_labour_actuals` (migration `20261001200000`, HR_TODO.md ROSTER-9).
 
 ### 2a. Database (migrations)
 - ✅ S756 — `monthly_periods` INSERT/UPDATE rank fence (D2) — any PIN account can reopen/close/relabel over REST.

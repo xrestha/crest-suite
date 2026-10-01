@@ -121,6 +121,24 @@ export function nepalDateAd(ts) {
   return d ? adFmt.format(d) : ''
 }
 
+/**
+ * A stored `date` column ("YYYY-MM-DD") as LOCAL midnight of that calendar day (S756; moved here
+ * from taxPoolCompute.js in S798 stage 2e, which still re-exports it).
+ *
+ * `new Date('2026-09-16')` is UTC midnight. In Nepal that is 05:45 on the 16th, so it compares as
+ * later than `bsToAd(…)` for the same day, which is LOCAL midnight. The Owner Report's labour
+ * estimate tested `endAd <= periodEndAd` that way, so a leaver whose last day was the month's last
+ * day was neither active nor "terminated this period": their month's pay left the frozen estimate
+ * and they were never counted as a termination (LABOUR-FIGURES-5). West of UTC the same parse lands
+ * on the evening before, one BS day early. Compare stored dates with this, or as formatAd strings.
+ */
+export function parseAdDateLocal(dateLike) {
+  if (dateLike instanceof Date) return dateLike
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateLike || ''))
+  if (!m) return new Date(dateLike)
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
 const longFmt = new Intl.DateTimeFormat('en-GB', {
   timeZone: ZONE, day: 'numeric', month: 'long', year: 'numeric',
 })

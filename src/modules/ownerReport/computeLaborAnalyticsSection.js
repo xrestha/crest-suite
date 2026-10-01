@@ -8,6 +8,29 @@ import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { shiftHours } from '../hr/roster/laborForecast'
+import { isNonWorking } from '../hr/attendance/attendanceRules'
+
+// Share of working days with no clock times above which the hour figures are withheld (owner
+// decision H31, S798 stage 2e: "more than half").
+export const HOURS_MISSING_SHARE = 0.5
+
+// How many WORKED days carry hours (LABOUR-FIGURES-7). Marking a day Present without times saves
+// hours_worked 0 — the setup guide teaches exactly that ("press All Present, then Save") — and the
+// section summed those zeros as hours worked. Twelve staff marked Present all month then read a few
+// dozen hours against 2,700 rostered: Schedule Variance about −99% and Sales per Labour Hour in the
+// tens of thousands. A worked day is any status but the five non-working ones (attendanceRules.js),
+// so the half-day statuses count. Hours are NOT imputed from the roster (owner decision H24): that
+// would change what Sales per Labour Hour means here and on Roster's Labor Forecast together.
+export function hoursCoverage(attendanceRows) {
+  let workingDays = 0, workingDaysWithoutHours = 0
+  for (const a of attendanceRows || []) {
+    if (!a.status || isNonWorking(a.status)) continue
+    workingDays += 1
+    if (!((parseFloat(a.hours_worked) || 0) > 0)) workingDaysWithoutHours += 1
+  }
+  const hoursWithheld = workingDays > 0 && workingDaysWithoutHours > workingDays * HOURS_MISSING_SHARE
+  return { workingDays, workingDaysWithoutHours, hoursWithheld }
+}
 
 export async function computeLaborAnalyticsSection(clientId, period, { hr, ims } = {}) {
   const results = await Promise.all([
@@ -15,7 +38,7 @@ export async function computeLaborAnalyticsSection(clientId, period, { hr, ims }
     // scheduled day, so each crosses the silent 1000-row cap at ~34 staff — and a truncated read
     // would understate Actual and Scheduled Hours independently, quietly moving the variance
     // this section exists to report (S529).
-    fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'hours_worked').eq('period_id', period.id).order('id')),
+    fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'status, hours_worked').eq('period_id', period.id).order('id')),
     fetchAllRows(() => scopedFrom('hr_roster', clientId, 'shift_type_id').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month).order('id')),
     scopedFrom('hr_shift_types', clientId, 'id, hours, start_time, end_time'),
   ])
@@ -29,18 +52,24 @@ export async function computeLaborAnalyticsSection(clientId, period, { hr, ims }
   const shiftMap = Object.fromEntries((shiftTypes || []).map(s => [s.id, s]))
   const scheduledHours = (rosterRows || []).reduce((s, r) => s + shiftHours(r.shift_type_id ? shiftMap[r.shift_type_id] : null), 0)
 
-  const scheduleVarianceHours = actualHoursWorked - scheduledHours
-  const scheduleVariancePct = scheduledHours > 0 ? (scheduleVarianceHours / scheduledHours) * 100 : null
+  // Withheld, not computed, when most worked days have no hours: the sum is then a count of the few
+  // typed days, and both figures built on it would be confidently wrong. The count always freezes.
+  const coverage = hoursCoverage(attendanceRows)
+  const scheduleVarianceHours = coverage.hoursWithheld ? null : actualHoursWorked - scheduledHours
+  const scheduleVariancePct = !coverage.hoursWithheld && scheduledHours > 0 ? (scheduleVarianceHours / scheduledHours) * 100 : null
 
   // Revenue numerator: ims.revenueTotal (not POS's totalNetSales) — universally available for
   // IMS+HR clients without POS enabled, and the same "Revenue" figure the Financial Summary
   // section already shows, avoiding two different revenue bases for two different metrics.
   const revenueTotal = ims?.revenueTotal ?? null
-  const salesPerLaborHour = revenueTotal != null && actualHoursWorked > 0 ? revenueTotal / actualHoursWorked : null
+  const salesPerLaborHour = !coverage.hoursWithheld && revenueTotal != null && actualHoursWorked > 0 ? revenueTotal / actualHoursWorked : null
 
   return {
     actualHoursWorked, scheduledHours, scheduleVarianceHours, scheduleVariancePct,
     salesPerLaborHour,
+    // Since schema v12. Absent on an older snapshot, whose hour figures were never withheld.
+    workingDays: coverage.workingDays, workingDaysWithoutHours: coverage.workingDaysWithoutHours,
+    hoursWithheld: coverage.hoursWithheld,
     overtime: hr?.payroll?.ot || null, // pass-through reference, not recomputed — see Financial/HR sections for the source figure
   }
 }

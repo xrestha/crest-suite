@@ -188,7 +188,9 @@ export function computeDayRevenue(salesRows, priceByRecipe = {}) {
 }
 
 // What one day's attendance actually cost, for the employees given (the Department filter's
-// list, so it lines up with the scheduled figure beside it). Attendance's `ot_hours` is derived
+// list, so it lines up with the scheduled figure beside it). Roster passes everyone who worked the
+// visible past days, leavers included (S798 2e, ROSTER-7): a row whose employee is not in the list
+// is skipped, and the board's own list is active and probation staff only. Attendance's `ot_hours` is derived
 // as hours worked BEYOND the rostered shift, so it sits INSIDE `hours_worked`: regular hours
 // (worked − OT) are priced at the loaded rate like a planned hour, and the OT hours at the payroll
 // engine's premium — basic hourly × OT_MULTIPLIER — which is the extra the payroll run will
@@ -213,8 +215,9 @@ export function computeActualLabor(attendanceRows, employees, monthDays, compone
 }
 
 // Heads actually on the floor that day — whole outlet, to sit against Recommended Staff the same
-// way computeScheduledCount does. Only employees in `employees` count, so a row for someone who
-// has since left (not in the active/probation list) is ignored like the roster ignores them.
+// way computeScheduledCount does. Only employees in `employees` count; Roster passes the board's
+// list plus anyone with attendance in the visible range who has since left (S798 2e, ROSTER-7), so
+// a leaver who worked the day is a head that day.
 export function computeActualStaff(attendanceRows, employees) {
   const ids = new Set(employees.map(e => e.id))
   let n = 0

@@ -12,10 +12,14 @@ jest.mock('../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 // eslint-disable-next-line import/first
 import {
   netPurchaseFigures, estimatePayrollAccrual, CURRENT_SCHEMA_VERSION,
-  computeCombinedMetrics, buildDeltas, foodCostBasisOf, trendSnapshotOf,
+  computeCombinedMetrics, buildDeltas, foodCostBasisOf, trendSnapshotOf, netMarginTaxFeesOf,
 } from './computeMonthlyReport'
 // eslint-disable-next-line import/first
+import { hoursCoverage } from './computeLaborAnalyticsSection'
+// eslint-disable-next-line import/first
 import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
+// eslint-disable-next-line import/first
+import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 
 const line = (over) => ({
   item_id: 'i1', qty: 1, rate: 0, payment_method: 'Cash', discount_amount: 0,
@@ -272,5 +276,115 @@ describe('trendSnapshotOf: a Trend entry no longer embeds the whole prior snapsh
 
   test('an unavailable prior stays null', () => {
     expect(trendSnapshotOf(null)).toBeNull()
+  })
+})
+
+// S798 stage 2e, LABOUR-FIGURES-5. `new Date('YYYY-MM-DD')` is UTC midnight: 05:45 that day in
+// Nepal, later than bsToAd's LOCAL midnight for the same day. So `endAd <= periodEndAd` failed for
+// a leaver whose last day was the month's last day, and they dropped out of the frozen estimate.
+// The bug shows only east of UTC; run this file with TZ=Asia/Kathmandu to see it (Jest cannot
+// change the zone mid-run, and on a UTC machine the old parse happened to be right).
+describe('estimatePayrollAccrual reads stored dates as local dates (S798 2e)', () => {
+  const period = { bs_year: 2083, bs_month: 5 }
+  const monthDays = daysInBsMonth(2083, 5)
+  const firstDay = formatAd(bsToAd(2083, 5, 1))
+  const lastDay = formatAd(bsToAd(2083, 5, monthDays))
+  const base = { basic_salary: 30000, pay_basis: 'monthly', ssf_enrolled: false, ssf_no: null }
+
+  test('a leaver whose last day is the month’s last day is paid the whole month', () => {
+    const { gross } = estimatePayrollAccrual({
+      employees: [{ ...base, id: 'ram', status: 'resigned', join_date: '2020-01-01', end_date: lastDay }], components: [], period,
+    })
+    expect(gross).toBeCloseTo(30000, 6)
+  })
+
+  test('a joiner on the first day accrues every day of it, and one on the last day accrues one day', () => {
+    const whole = estimatePayrollAccrual({ employees: [{ ...base, id: 'a', status: 'active', join_date: firstDay }], components: [], period })
+    expect(whole.gross).toBeCloseTo(30000, 6)
+    const oneDay = estimatePayrollAccrual({ employees: [{ ...base, id: 'b', status: 'active', join_date: lastDay }], components: [], period })
+    expect(oneDay.gross).toBeCloseTo(30000 / monthDays, 6)
+  })
+})
+
+describe('the HR and overhead reads (S798 2e)', () => {
+  const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/\s+/g, ' ')
+
+  test('overheads: every bucket but labor, with the bucket selected (LABOUR-FIGURES-4)', () => {
+    expect(flat).toContain("from('overheads').select('amount, bucket').eq('period_id', period.id).or(NON_LABOUR_OVERHEADS)")
+    expect(flat).not.toContain("'bucket', 'overhead'")
+  })
+
+  test('leave: approved, overlapping the month, paged (LABOUR-FIGURES-6)', () => {
+    const at = flat.indexOf("scopedFrom('hr_leave_requests'")
+    expect(at).toBeGreaterThan(-1)
+    expect(flat.slice(Math.max(0, at - 40), at)).toMatch(/fetchAllRows\(\(\) => $/)
+    expect(flat.slice(at, at + 320)).toMatch(/\.eq\('status', 'approved'\)\.lte\('start_date', formatAd\(periodEndAd\)\)\.gte\('end_date', formatAd\(periodStartAd\)\) \.order\('id'\)\)/)
+  })
+
+  test('no stored date is parsed with new Date (LABOUR-FIGURES-5)', () => {
+    expect(flat).not.toMatch(/new Date\((emp|lr)\./)
+  })
+
+  test('the schema version moved with the figures', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(12)
+  })
+})
+
+describe('Net Margin subtracts Tax & Fees from schema v12 (S798 2e, LABOUR-FIGURES-4)', () => {
+  const ims = { revenueTotal: 1000000, cogsTotal: 350000, overheadTotal: 100000, foodCostPct: 35, foodCostBasis: 'cogs' }
+  const hr = { payroll: { total: 250000 } }
+
+  test('NPR 45,000 of card fees, bank charges and the accountant come off the margin', () => {
+    const c = computeCombinedMetrics({ ims: { ...ims, taxFeesTotal: 45000 }, hr })
+    // (10 L − 3.5 L − 2.5 L − 1 L − 0.45 L) / 10 L
+    expect(c.netMarginPct).toBeCloseTo(25.5, 9)
+    expect(c.netMarginTaxFees).toBe(true)
+    expect(netMarginTaxFeesOf({ combined: c })).toBe(true)
+  })
+
+  test('Trend gives no Net Margin change across the v11 → v12 line; the rest still compare', () => {
+    const v12 = { combined: { revenueTotal: 110, foodCostPct: 35, laborCostPct: 25, primeCostPct: 60, netMarginPct: 25.5, foodCostBasis: 'cogs', netMarginTaxFees: true } }
+    const v11 = { combined: { revenueTotal: 100, foodCostPct: 34, laborCostPct: 26, primeCostPct: 60, netMarginPct: 30, foodCostBasis: 'cogs' } }
+    const d = buildDeltas(v12, v11)
+    expect(d).toMatchObject({ foodCostBasisChanged: false, netMarginBasisChanged: true, netMarginPct: null })
+    expect(d.foodCostPct).toBeCloseTo(1, 9)
+    expect(d.primeCostPct).toBeCloseTo(0, 9)
+    // Two v12 snapshots compare as usual, through the trimmed copy Trend stores.
+    const prior = trendSnapshotOf({ combined: { ...v12.combined, netMarginPct: 20 } })
+    expect(prior.combined.netMarginTaxFees).toBe(true)
+    const same = buildDeltas(v12, prior)
+    expect(same.netMarginBasisChanged).toBe(false)
+    expect(same.netMarginPct).toBeCloseTo(5.5, 9)
+  })
+})
+
+describe('Labor Analytics withholds the hour figures when most worked days have no times (S798 2e, H31)', () => {
+  const present = (h) => ({ status: 'present', hours_worked: h })
+
+  test('twelve staff marked Present with no times all month: withheld, and the count is kept', () => {
+    const rows = [
+      ...Array.from({ length: 330 }, () => present(0)),
+      ...Array.from({ length: 30 }, () => present(8)),
+      ...Array.from({ length: 40 }, () => ({ status: 'weekly_off', hours_worked: 0 })),
+    ]
+    expect(hoursCoverage(rows)).toEqual({ workingDays: 360, workingDaysWithoutHours: 330, hoursWithheld: true })
+  })
+
+  test('exactly half without times is not withheld; days off and leave are not worked days', () => {
+    const rows = [present(0), present(8), { status: 'absent', hours_worked: 0 }, { status: 'paid_leave' }, { status: 'holiday' }]
+    expect(hoursCoverage(rows)).toEqual({ workingDays: 2, workingDaysWithoutHours: 1, hoursWithheld: false })
+  })
+
+  test('a half day is a worked day', () => {
+    expect(hoursCoverage([{ status: 'half_day', hours_worked: null }, { status: 'half_paid_leave', hours_worked: 4 }]))
+      .toEqual({ workingDays: 2, workingDaysWithoutHours: 1, hoursWithheld: false })
+  })
+
+  test('the attendance read selects the status it counts by', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'computeLaborAnalyticsSection.js'), 'utf8')
+    expect(src).toContain("scopedFrom('hr_attendance', clientId, 'status, hours_worked')")
   })
 })

@@ -3,6 +3,7 @@ import path from 'path'
 import {
   isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText,
   finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote,
+  NON_LABOUR_OVERHEADS, splitNonLabourOverheads, groupOutletLabour, groupLabourRatio,
 } from './labourSource'
 
 const readSource = (...parts) => fs.readFileSync(path.join(__dirname, '..', '..', ...parts), 'utf8')
@@ -35,9 +36,12 @@ describe('OwnerDashboard uses finalized payroll when it exists', () => {
     expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}'gross, ot_amount, ssf_employer'\)\.in\('run_id', chunk\)\.order\('id'\)/)
     expect(src).toMatch(/resolveOwnerLabour\(\{/)
   })
-  test('keeps the XOR: overheads read is the overhead bucket only', () => {
-    expect(src).toMatch(/from\('overheads'\)\.select\('amount'\)\.eq\('period_id', period\.id\)\.eq\('bucket', 'overhead'\)/)
+  // S798 2e (LABOUR-FIGURES-4): every bucket but labor — Tax & Fees and NULL-bucket rows came in.
+  test('keeps the XOR: the overheads read leaves only the labor bucket out', () => {
+    expect(src).toMatch(/from\('overheads'\)\.select\('amount, bucket'\)\.eq\('period_id', period\.id\)\.or\(NON_LABOUR_OVERHEADS\)/)
     expect(src).not.toMatch(/'bucket', 'labor'/)
+    expect(src).toMatch(/splitNonLabourOverheads\(overheadsData\)/)
+    expect(src).toMatch(/- laborCostTotal - overheadTotal - taxFeesTotal\)/)
   })
   test('the labour tile goes through settledFigure, not a bare band colour', () => {
     expect(src).not.toMatch(/lcBand\(laborPct\)\.color/)
@@ -187,4 +191,70 @@ test('every source has a label', () => {
   for (const source of ['payroll', 'overheads', 'none', 'unreadable', 'failed']) {
     expect(labourSourceLabel({ source }, true)).toMatch(/^Labour: /)
   }
+})
+
+// S798 stage 2e (LABOUR-FIGURES-4): the pages that subtract labour separately read every bucket but
+// `labor`. The S384 filter `.eq('bucket','overhead')` also dropped Tax & Fees and NULL-bucket rows.
+describe('overheads apart from labour', () => {
+  test('the filter keeps NULL, overhead and tax_fees, and nothing else', () => {
+    expect(NON_LABOUR_OVERHEADS).toBe('bucket.is.null,bucket.in.(overhead,tax_fees)')
+  })
+
+  test('splits like Consolidated P&L: a bucketless row is overhead, a labor row is neither', () => {
+    expect(splitNonLabourOverheads([
+      { bucket: 'overhead', amount: '60000' }, { bucket: null, amount: 5000 },
+      { bucket: 'tax_fees', amount: '45000' }, { bucket: 'labor', amount: 999999 }, { bucket: 'overhead', amount: null },
+    ])).toEqual({ overhead: 65000, taxFees: 45000 })
+    expect(splitNonLabourOverheads(null)).toEqual({ overhead: 0, taxFees: 0 })
+  })
+})
+
+// S798 stage 2e (LABOUR-FIGURES-2): the group screens took labour from get_group_summary, which
+// returns NPR 0 for "no finalized run", so the running month read "0.0% ✓ Healthy" everywhere.
+describe('groupOutletLabour and groupLabourRatio', () => {
+  test('payroll wins and names the ignored Labor tab; the Labor tab stands in without payroll', () => {
+    expect(groupOutletLabour({ labour_payroll: '300000', labour_bucket: '20000' }, true))
+      .toMatchObject({ source: 'payroll', amount: 300000, hasFigure: true, ignoredBucket: 20000, note: '' })
+    expect(groupOutletLabour({ labour_payroll: null, labour_bucket: '120000' }, false))
+      .toMatchObject({ source: 'overheads', amount: 120000, hasFigure: true, note: 'Labor tab' })
+  })
+
+  test('no labour at all is no figure: "not finalized" on an HR outlet, "none entered" without HR', () => {
+    expect(groupOutletLabour({ labour_payroll: null, labour_bucket: '0' }, true))
+      .toMatchObject({ source: 'none', amount: null, hasFigure: false, verdictWithheld: true, note: 'not finalized' })
+    expect(groupOutletLabour({ labour_payroll: null, labour_bucket: 0 }, false))
+      .toMatchObject({ source: 'none', amount: null, hasFigure: false, note: 'none entered' })
+  })
+
+  test('a finalized run of zero is a real zero', () => {
+    expect(groupOutletLabour({ labour_payroll: 0, labour_bucket: 0 }, true)).toMatchObject({ source: 'payroll', amount: 0, hasFigure: true })
+  })
+
+  test('the group ratio waits for every outlet, and names the ones missing', () => {
+    const thamel = { name: 'Thamel', revenue: 1000000, labour: groupOutletLabour({ labour_payroll: 300000, labour_bucket: 0 }, true) }
+    const patan = { name: 'Patan', revenue: 1000000, labour: groupOutletLabour({ labour_payroll: null, labour_bucket: 0 }, true) }
+    // The finding's own month: Thamel finalized 3 L on 10 L, Patan did not. It read 15.0% ✓.
+    expect(groupLabourRatio([thamel, patan])).toEqual({ pct: null, labour: null, missing: ['Patan'] })
+    const patanDone = { ...patan, labour: groupOutletLabour({ labour_payroll: 280000, labour_bucket: 0 }, true) }
+    const r = groupLabourRatio([thamel, patanDone])
+    expect(r.missing).toEqual([])
+    expect(r.labour).toBe(580000)
+    expect(r.pct).toBeCloseTo(29, 9)
+    expect(groupLabourRatio([])).toMatchObject({ pct: null, missing: [] })
+  })
+})
+
+describe('the group screens read labour through the shared rule (S798 2e)', () => {
+  const group = readSource('pages', 'dashboard', 'GroupDashboard.jsx')
+  const pnl = readSource('pages', 'dashboard', 'ConsolidatedPnl.jsx')
+  test('Group Dashboard: no labour from get_group_summary.payroll, no bare payroll ratio', () => {
+    expect(group).toMatch(/groupOutletLabour\(/)
+    expect(group).toMatch(/groupLabourRatio\(/)
+    expect(group).not.toMatch(/sum\('payroll'\)/)
+    expect(group).not.toMatch(/Number\(r\.payroll\)/)
+  })
+  test('Consolidated P&L: the group columns carry the rule and Net Profit can lose its colour', () => {
+    expect(pnl).toMatch(/groupOutletLabour\(r, hrById\.get\(r\.client_id\)\)/)
+    expect(pnl).toMatch(/lineColor\(l, consolidated\[l\.key\], labourWithheld\)/)
+  })
 })

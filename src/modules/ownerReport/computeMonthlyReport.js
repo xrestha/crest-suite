@@ -6,7 +6,7 @@ import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
-import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
+import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
@@ -20,6 +20,8 @@ import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
 import { computeInventoryDepthSection } from './computeInventoryDepthSection'
+import { NON_LABOUR_OVERHEADS, splitNonLabourOverheads } from '../dashboard/labourSource'
+import { parseAdDateLocal } from '../../shared/nepalTime'
 
 // ── Net purchases (pure) ─────────────────────────────────────────────────────
 // Purchases NET of bill discounts, less returns — the definition Consolidated P&L and Monthly
@@ -82,7 +84,9 @@ async function computeImsSection(clientId, period) {
     // seed the reorder walk. A recipe past the 1000-row cap prices its sales at 0 and consumes
     // nothing — frozen.
     fetchAllRows(() => scopedFrom('recipes', clientId, 'id, selling_price').order('id')),
-    supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
+    // Every bucket but `labor` (S798 2e, LABOUR-FIGURES-4): Net Margin subtracts payroll separately,
+    // so the Labor tab stays out, and Tax & Fees comes in as its own line. Tens of rows, not paged.
+    supabase.from('overheads').select('amount, bucket').eq('period_id', period.id).or(NON_LABOUR_OVERHEADS),
     // Each row carries its item's rate (WASTAGE_VALUE_SELECT): Wastage Value is the Wastage Report's
     // total over every item, prep and hidden ones included, since schema v10 (S792, FIGURES-5).
     fetchAllRows(() => supabase.from('wastages').select(WASTAGE_VALUE_SELECT).eq('period_id', period.id).order('id')),
@@ -124,7 +128,9 @@ async function computeImsSection(clientId, period) {
   // net of the row's discount, comps excluded in JS.
   const revenueTotal = periodRevenue(salesData, recipes)
 
-  const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
+  // Overheads (the `overhead` bucket and rows with none) and Tax & Fees, as Consolidated P&L splits
+  // them. Until schema v12 only the first was read and Tax & Fees was in no figure here.
+  const { overhead: overheadTotal, taxFees: taxFeesTotal } = splitNonLabourOverheads(overheadsData)
 
   const itemRateMap = {}; items.forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
   // The one Wastage Value every tile shows (periodCost.js, S792 FIGURES-5): every item, prep and
@@ -195,7 +201,7 @@ async function computeImsSection(clientId, period) {
   const gap = findUncountedItems({ items: cogsItems, openingQty: stockMaps.opening, purchaseQty, purchaseValue, countedIds, cogs: cogsTotal })
 
   return {
-    revenueTotal, purchaseTotal, overheadTotal, wastageValueTotal, openingStockValueTotal, closingStockValueTotal, cashNet, creditNet, foodCostPct,
+    revenueTotal, purchaseTotal, overheadTotal, taxFeesTotal, wastageValueTotal, openingStockValueTotal, closingStockValueTotal, cashNet, creditNet, foodCostPct,
     // New in schema v9 (D30). Absent on an older snapshot, whose foodCostPct is purchases ÷ revenue.
     foodCostBasis: 'cogs', cogsTotal, staffMealsValueTotal: cogs.staffMealsVal,
     countGap: {
@@ -213,7 +219,10 @@ async function computeImsSection(clientId, period) {
 // The fallback used when a closed period has no finalized payroll run: each active/probation
 // employee (or one whose end_date falls inside the period) accrues monthly-equivalent gross for
 // the days between join and end date, plus employer SSF on the capped base. `employees` must
-// carry `ssf_no` as well as `ssf_enrolled` (isSsfContributor needs both).
+// carry `ssf_no` as well as `ssf_enrolled` (isSsfContributor needs both). Stored dates are read as
+// LOCAL dates (parseAdDateLocal): `new Date('YYYY-MM-DD')` is 05:45 in Nepal, later than bsToAd's
+// local midnight, so a leaver whose last day was the month's last day fell out of the estimate and
+// was never a termination, and every joiner got one day too few (S798 2e, LABOUR-FIGURES-5).
 export function estimatePayrollAccrual({ employees, components, period }) {
   const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
   const periodStartAd = bsToAd(period.bs_year, period.bs_month, 1)
@@ -221,15 +230,17 @@ export function estimatePayrollAccrual({ employees, components, period }) {
   let accruedGross = 0, accruedSsfEmployer = 0
   ;(employees || []).forEach(emp => {
     const isActiveish = emp.status === 'active' || emp.status === 'probation'
-    const endAd = emp.end_date ? new Date(emp.end_date) : null
+    const endAd = emp.end_date ? parseAdDateLocal(emp.end_date) : null
     const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
     if (!isActiveish && !terminatedThisPeriod) return
-    const joinAd = emp.join_date ? new Date(emp.join_date) : null
+    const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
     if (joinAd && joinAd > periodEndAd) return
 
     const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
     const empEnd    = endAd && endAd < periodEndAd ? endAd : periodEndAd
-    const daysWorked = Math.max(0, Math.floor((empEnd - empStart) / 86400000) + 1)
+    // Local midnights both (parseAdDateLocal, bsToAd), so the difference is whole days; round, not
+    // floor, so an hour of daylight saving on a viewer's laptop abroad cannot drop one.
+    const daysWorked = Math.max(0, Math.round((empEnd - empStart) / 86400000) + 1)
     if (daysWorked <= 0) return
 
     const basic = parseFloat(emp.basic_salary) || 0
@@ -273,7 +284,13 @@ async function computeHrSection(clientId, period) {
     scopedFrom('hr_salary_components', clientId, 'employee_id, type, calc_type, value'),
     scopedFrom('hr_overtime_entries', clientId, 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
       .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
-    scopedFrom('hr_leave_requests', clientId, 'leave_type_id, status, start_date, end_date, days'),
+    // Approved requests that touch the month, filtered by the server and paged (S798 2e,
+    // LABOUR-FIGURES-6). It read the client's whole leave history in one request, so past ~1,000
+    // requests the newest were cut and the frozen Leave section came out short or empty. formatAd
+    // bounds compare as calendar days, not as UTC instants.
+    fetchAllRows(() => scopedFrom('hr_leave_requests', clientId, 'id, leave_type_id, status, start_date, end_date, days')
+      .eq('status', 'approved').lte('start_date', formatAd(periodEndAd)).gte('end_date', formatAd(periodStartAd))
+      .order('id')),
     // Paged — one row per employee per day, past the 1000-row cap at ~34 staff. This feeds the
     // frozen snapshot's labor figures, so a truncated read would be preserved permanently (S529).
     fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id).order('id')),
@@ -293,10 +310,10 @@ async function computeHrSection(clientId, period) {
   let activeCount = 0, newHiresCount = 0, terminationsCount = 0
   ;(employees || []).forEach(emp => {
     const isActiveish = emp.status === 'active' || emp.status === 'probation'
-    const endAd = emp.end_date ? new Date(emp.end_date) : null
+    const endAd = emp.end_date ? parseAdDateLocal(emp.end_date) : null
     const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
     if (!isActiveish && !terminatedThisPeriod) return
-    const joinAd = emp.join_date ? new Date(emp.join_date) : null
+    const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
     if (joinAd && joinAd > periodEndAd) return
     if (isActiveish) activeCount += 1
     if (terminatedThisPeriod) terminationsCount += 1
@@ -351,8 +368,9 @@ async function computeHrSection(clientId, period) {
   // spanning a period boundary is credited to every period it touches, not split).
   const leaveByType = {}
   ;(leaveRequests || []).forEach(lr => {
+    // The query already holds only approved requests overlapping the month; kept as a guard.
     if (lr.status !== 'approved') return
-    const start = new Date(lr.start_date), end = new Date(lr.end_date)
+    const start = parseAdDateLocal(lr.start_date), end = parseAdDateLocal(lr.end_date)
     if (end < periodStartAd || start > periodEndAd) return
     const key = lr.leave_type_id || 'unspecified'
     if (!leaveByType[key]) {
@@ -497,6 +515,10 @@ async function computePosSection(clientId, period) {
 // overheads only adds up to 100% with Food Cost % beside it if both mean the same food cost, and
 // Consolidated P&L's Net Profit subtracts COGS for the same month. `foodCostBasis` names the basis
 // so a reader, and the Trend section comparing against older snapshots, can tell.
+//
+// Since schema v12 (S798 2e, LABOUR-FIGURES-4) Net Margin also subtracts Tax & Fees, as Overheads,
+// the Dashboard and Consolidated P&L do. `netMarginTaxFees: true` marks it; a v11 margin without it
+// read higher by that month's card and bank fees, accountant and licences.
 export function computeCombinedMetrics({ ims, hr }) {
   if (!ims) return { revenueTotal: null, foodCostPct: null, laborCostPct: null, primeCostPct: null, netMarginPct: null }
   const revenueTotal = ims.revenueTotal || 0
@@ -504,9 +526,9 @@ export function computeCombinedMetrics({ ims, hr }) {
   const laborCostPct = hr && revenueTotal > 0 ? (hr.payroll.total / revenueTotal) * 100 : null
   const primeCostPct = foodCostPct != null && laborCostPct != null ? foodCostPct + laborCostPct : null
   const netMarginPct = hr && revenueTotal > 0
-    ? ((revenueTotal - ims.cogsTotal - hr.payroll.total - ims.overheadTotal) / revenueTotal) * 100
+    ? ((revenueTotal - ims.cogsTotal - hr.payroll.total - ims.overheadTotal - (ims.taxFeesTotal || 0)) / revenueTotal) * 100
     : null
-  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis }
+  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis, netMarginTaxFees: true }
 }
 
 // ── Trend section ────────────────────────────────────────────────────────────
@@ -539,6 +561,9 @@ async function lookupPriorSnapshot(clientId, bsYear, bsMonth) {
 // net purchases ÷ revenue.
 export const foodCostBasisOf = snapshot => snapshot?.combined?.foodCostBasis || 'purchases'
 
+// Whether a snapshot's Net Margin % subtracts Tax & Fees. Absent before schema v12, when it did not.
+export const netMarginTaxFeesOf = snapshot => snapshot?.combined?.netMarginTaxFees === true
+
 export function buildDeltas(current, prior) {
   if (!prior) return null
   const pctDelta = (curVal, priorVal) => (curVal == null || priorVal == null) ? null : curVal - priorVal // percentage-point delta
@@ -552,13 +577,16 @@ export function buildDeltas(current, prior) {
   // difference is mostly the change of formula, not a change in the kitchen, so the three ratios
   // that contain it get no delta, and the section says why rather than print a move that is not one.
   const sameBasis = foodCostBasisOf(current) === foodCostBasisOf(prior)
+  // The same for Net Margin across the v11→v12 line, where it started subtracting Tax & Fees.
+  const sameNetBasis = sameBasis && netMarginTaxFeesOf(current) === netMarginTaxFeesOf(prior)
   return {
     foodCostBasisChanged: !sameBasis,
+    netMarginBasisChanged: sameBasis && !sameNetBasis,
     revenueTotal: moneyDelta(current.combined?.revenueTotal, prior.combined?.revenueTotal),
     foodCostPct: sameBasis ? pctDelta(current.combined?.foodCostPct, prior.combined?.foodCostPct) : null,
     laborCostPct: pctDelta(current.combined?.laborCostPct, prior.combined?.laborCostPct),
     primeCostPct: sameBasis ? pctDelta(current.combined?.primeCostPct, prior.combined?.primeCostPct) : null,
-    netMarginPct: sameBasis ? pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct) : null,
+    netMarginPct: sameNetBasis ? pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct) : null,
     posNetSales: moneyDelta(current.pos?.totalNetSales, prior.pos?.totalNetSales),
     otHours: moneyDelta(current.hr?.payroll?.ot?.hours, prior.hr?.payroll?.ot?.hours),
     otAmount: moneyDelta(current.hr?.payroll?.ot?.amount, prior.hr?.payroll?.ot?.amount),
@@ -584,6 +612,8 @@ export function trendSnapshotOf(snapshot) {
       netMarginPct: c.netMarginPct ?? null,
       // Absent before v9 on purpose: its absence is what says "on purchases" (foodCostBasisOf).
       ...(c.foodCostBasis ? { foodCostBasis: c.foodCostBasis } : {}),
+      // Absent before v12 on purpose: its absence says Net Margin left Tax & Fees out.
+      ...(c.netMarginTaxFees ? { netMarginTaxFees: true } : {}),
     },
     pos: snapshot.pos ? { totalNetSales: snapshot.pos.totalNetSales ?? null } : null,
   }
@@ -692,7 +722,21 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // PAN outlet's v11 figure is higher than a v10 one by the VAT on its vat_is_cost bills. The flag is
 // per bill, set at save; only the open month was backfilled (Q1 a), so closed months and frozen
 // reports keep the ex-VAT basis they were made on.
-export const CURRENT_SCHEMA_VERSION = 11
+// 12 (S798 stage 2e): labour and overheads.
+//   - LABOUR-FIGURES-4: `combined.netMarginPct` also subtracts Tax & Fees (`ims.taxFeesTotal`, new),
+//     and `ims.overheadTotal` counts Overheads rows with no bucket; both were left out by S384's
+//     `.eq('bucket','overhead')`. A v12 Net Margin is lower than a v11 one by that month's Tax & Fees.
+//     `combined.netMarginTaxFees: true` marks it; Trend gives no Net Margin delta across the line
+//     (`deltas.netMarginBasisChanged`).
+//   - LABOUR-FIGURES-5: the payroll estimate and headcount read stored dates as local dates, so a
+//     leaver whose last day is the month's last day is in the estimate and counted as a termination,
+//     and a joiner accrues from their first day. An estimated v12 payroll can be higher.
+//   - LABOUR-FIGURES-6: Leave taken reads approved requests overlapping the month, paged; a v11
+//     section could be short once the client passed ~1,000 leave requests.
+//   - LABOUR-FIGURES-7 (H31): `laborAnalytics` gains `workingDays` and `workingDaysWithoutHours`, and
+//     `hoursWithheld` with Schedule Variance and Sales per Labour Hour null when more than half the
+//     working days carry no clock times.
+export const CURRENT_SCHEMA_VERSION = 12
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean
