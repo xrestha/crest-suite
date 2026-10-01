@@ -12,7 +12,7 @@ import { employedInPeriod } from '../payroll/payrollCompute'
 import { groupByEmployee, sliceFor } from '../payroll/payrollData'
 import {
   DEFAULT_BONUS_MONTH, completedServiceMonths, computeRunBonusTds, fetchFinalizedBonuses,
-  otherBonusesForFy, payslipYtdForFy,
+  fetchFinalizedSettlements, otherBonusesForFy, payslipYtdForFy,
 } from '../payroll/bonusTax'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
@@ -156,6 +156,9 @@ export default function FestivalAllowance() {
           .eq('hr_payroll_runs.status', 'finalized')
           .order('id')),
       fetchFinalizedBonuses(scopedFrom),
+      // Every finalized Final Settlement: an earlier spell's last month and exit pay are this year's
+      // income for a rehire (S798 ENGINE-5); payslipYtdForFy folds the ones before the pay month.
+      fetchFinalizedSettlements(scopedFrom),
       // ALL components, not only retirement ones: the months still to come are projected at basic
       // plus earning components (projectedMonthlyGross), and CIT relief reads the deductions.
       fetchAllRows(() => scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value, retirement_fund').order('id')),
@@ -165,8 +168,8 @@ export default function FestivalAllowance() {
     // SAVES: no payslips reads as the tax year's first month, no bonuses as none paid (S750).
     const failed = results.find(r => r && r.error)
     if (failed) { setBaseError(failed.error); setBaseLoading(false); return }
-    const [emps, slips, bonuses, comps] = results
-    setBase({ employees: emps.data || [], payslips: slips.data || [], bonuses: bonuses.data || [], components: comps.data || [] })
+    const [emps, slips, bonuses, settlements, comps] = results
+    setBase({ employees: emps.data || [], payslips: slips.data || [], bonuses: bonuses.data || [], settlements: settlements.data || [], components: comps.data || [] })
     setBaseError(null); setBaseLoading(false)
   }, [clientId, scopedFrom, baseReq])
 
@@ -223,7 +226,7 @@ export default function FestivalAllowance() {
   const { fyStart } = fiscalYearOf(bsYear, payMonth)
   // The run's key in bonusTax.js: the exact trimmed name, case kept.
   const runKey    = `festival:${bsYear}:${festival}`
-  const ytdMap    = useMemo(() => payslipYtdForFy(base?.payslips, fyStart), [base, fyStart])
+  const ytdMap    = useMemo(() => payslipYtdForFy(base?.payslips, fyStart, base?.settlements, { bs_year: bsYear, bs_month: payMonth }), [base, fyStart, bsYear, payMonth])
   // Only bonuses paid EARLIER in the tax year than this run's pay month count on top of it.
   const others    = useMemo(() => otherBonusesForFy(base?.bonuses, fyStart, runKey, { bs_year: bsYear, bs_month: payMonth }), [base, fyStart, runKey, bsYear, payMonth])
 
@@ -506,7 +509,7 @@ export default function FestivalAllowance() {
       ),
       run: async () => {
         setBusy(true); setMsg('')
-        const ytdNew = payslipYtdForFy(base.payslips, newFy)
+        const ytdNew = payslipYtdForFy(base.payslips, newFy, base.settlements, { bs_year: bsYear, bs_month: m })
         const othersNew = otherBonusesForFy(base.bonuses, newFy, runKey, { bs_year: bsYear, bs_month: m })
         const results = await Promise.all(targets.map(r => {
           const emp = empMap.get(r.employee_id)

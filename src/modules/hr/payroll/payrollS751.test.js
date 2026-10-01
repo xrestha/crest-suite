@@ -4,7 +4,7 @@ import { computePayslip, employedInPeriod } from './payrollCompute'
 import { buildPayrollRows, allocateAdvanceRepayments, payslipDrift, periodAdBounds } from './payrollData'
 import {
   completedServiceMonths, employedMonthsInFy, otherBonusesForFy, payslipYtdForFy, projectedMonthlyGross,
-  computeRunBonusTds, bonusFiscalYear,
+  computeRunBonusTds, bonusFiscalYear, monthsStillToPay, currentSpellSettlements,
 } from './bonusTax'
 import { projectBonusTaxableBase, computeBonusTds, computeMonthlyTdsBreakdown } from './tds'
 import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
@@ -107,7 +107,7 @@ describe('allocateAdvanceRepayments — Finalize books exactly what the payslip 
 })
 
 describe('payslipDrift — only a typed TDS is an override', () => {
-  const stored = { gross: 30000, ot_amount: 0, absence_deduction: 0, ssf_employee: 0, other_deductions: 0, advance_deduction: 0, retirement_contribution: 0, tds: 300, tada_amount: 0, tada_claim_ids: [] }
+  const stored = { gross: 30000, ot_amount: 0, absence_deduction: 0, ssf_employee: 0, other_deductions: 0, advance_deduction: 0, retirement_contribution: 0, tds: 300, tada_amount: 0, tada_claim_ids: [], net_pay: 29700 }
   test('a TDS that moved on its own is out of date, not "adjusted"', () => {
     expect(payslipDrift({ ...stored, tds_overridden: false }, { ...stored, tds: 450 })).toBe('moved')
   })
@@ -179,7 +179,7 @@ describe('bonus tax (festival allowance + incentives)', () => {
   const ytdSlip = (y, m, gross, ot, absence = 0) => ({ employee_id: 'e1', gross, ot_amount: ot, absence_deduction: absence, ssf_employee: 0, retirement_contribution: 0, hr_payroll_runs: { monthly_periods: { bs_year: y, bs_month: m } } })
 
   test('payslipYtdForFy counts overtime and only that fiscal year', () => {
-    expect(payslipYtdForFy([ytdSlip(2083, 4, 30000, 2000), ytdSlip(2083, 3, 30000, 0)], 2083).e1).toEqual({ gross: 32000, ssf: 0, retirement: 0, months: 1 })
+    expect(payslipYtdForFy([ytdSlip(2083, 4, 30000, 2000), ytdSlip(2083, 3, 30000, 0)], 2083).e1).toMatchObject({ gross: 32000, ssf: 0, retirement: 0, months: 1, lump: 0 })
   })
 
   test('payslipYtdForFy counts pay EARNED — unpaid days come off, as they do for the current month', () => {
@@ -191,6 +191,47 @@ describe('bonus tax (festival allowance + incentives)', () => {
   test('payslipYtdForFy refuses a row whose query left out absence_deduction', () => {
     const { absence_deduction, ...noAbsence } = ytdSlip(2083, 4, 30000, 0)
     expect(() => payslipYtdForFy([noAbsence], 2083)).toThrow(/absence_deduction/)
+  })
+
+  // S798 ENGINE-5: a cook settled in Shrawan and rehired in Poush. The festival tax's year includes the
+  // settlement — its month as pay, its exit lump sums as one-off income — and the months still to come
+  // are the new job's unpaid months, not "employed months less every paid month", which took the first
+  // job's months off the second's and projected the year short.
+  const settled = { employee_id: 'e1', settle_bs_year: 2083, settle_bs_month: 4, partial_salary: '20000', month_ssf_employee: '0',
+    month_retirement_contribution: '0', month_tds: '200', lump_tds: '900', gratuity: '50000', leave_encashment: '8000', festival_pro: '0', notice_pay: '0' }
+
+  test('payslipYtdForFy folds a settlement from before the pay month, and only from before it', () => {
+    const ytd = payslipYtdForFy([], 2083, [settled], { bs_year: 2083, bs_month: 6 })
+    expect(ytd.e1).toMatchObject({ gross: 20000, months: 1, lump: 58000 })
+    expect([...ytd.e1.paid]).toEqual([1])
+    // A settlement in the pay month itself: that settlement counts the bonus, so the bonus does not count it.
+    expect(payslipYtdForFy([], 2083, [settled], { bs_year: 2083, bs_month: 4 }).e1).toBeUndefined()
+    expect(payslipYtdForFy([], 2083, [{ ...settled, settle_bs_year: null }], { bs_year: 2083, bs_month: 6 }).e1).toBeUndefined()
+  })
+
+  test("a rehire's months still to come are the new job's unpaid months", () => {
+    const rehire = emp({ join_date: ad(2083, 9, 1) })                          // rejoined 1 Poush: 7 months
+    const ytd = payslipYtdForFy([ytdSlip(2083, 9, 30000, 0)], 2083, [settled], { bs_year: 2083, bs_month: 10 })
+    expect(ytd.e1.months).toBe(2)                                               // Shrawan's settlement + Poush
+    expect(monthsStillToPay(rehire, 2083, ytd.e1)).toBe(6)                      // Magh … Ashadh
+    expect(Math.max(0, employedMonthsInFy(rehire, 2083) - ytd.e1.months)).toBe(5)   // the old count, a month short
+    // Someone employed all year: the same as before.
+    expect(monthsStillToPay(emp(), 2083, payslipYtdForFy([ytdSlip(2083, 4, 30000, 0)], 2083).e1)).toBe(11)
+  })
+
+  test("the settlement's exit pay sits in the bonus tax's base", () => {
+    const rehire = emp({ join_date: ad(2083, 9, 1), basic_salary: 80000 })
+    const base = { employee: rehire, components: [], amount: 80000, fyStart: 2083 }
+    const without = computeRunBonusTds({ ...base, ytd: payslipYtdForFy([], 2083, [], { bs_year: 2083, bs_month: 10 }).e1 })
+    const withIt = computeRunBonusTds({ ...base, ytd: payslipYtdForFy([], 2083, [{ ...settled, gratuity: '600000' }], { bs_year: 2083, bs_month: 10 }).e1 })
+    expect(withIt).toBeGreaterThan(without)
+  })
+
+  test('Incentive Run marks a settled leaver, not a rehire whose settlement was an earlier job (H33)', () => {
+    const st = { employee_id: 'e1', last_working_date: ad(2083, 5, 20), finalized_at: '2026-09-10T05:00:00Z' }
+    expect(currentSpellSettlements([st], [emp({ join_date: '2020-01-01' })]).get('e1')).toBe(st)
+    expect(currentSpellSettlements([st], [emp({ join_date: ad(2083, 9, 1) })]).has('e1')).toBe(false)
+    expect(currentSpellSettlements([st], []).size).toBe(0)
   })
 
   test("a joiner's months before the join are not projected", () => {
@@ -214,6 +255,14 @@ describe('completedServiceMonths — festival share counts completed BS months (
   test('capped at 12, and a leaver stops counting at their end date', () => {
     expect(completedServiceMonths(emp({ join_date: '2015-01-01' }), ref)).toBe(12)
     expect(completedServiceMonths(emp({ join_date: ad(2083, 1, 15), end_date: ad(2083, 4, 20) }), ref)).toBe(3)
+  })
+  // S798 ENGINE-4: the last working day is worked in full. Joined 11 Magh 2082, last day 10 Ashwin 2083:
+  // the 11 Ashwin anniversary is reached at the end of that day, so 8 months, not 7 (NPR 16,000 on a
+  // NPR 24,000 basic, not 14,000) — the same as a colleague who joined that day and stayed.
+  test('a leaver whose last day is the day before an anniversary has completed that month', () => {
+    expect(completedServiceMonths(emp({ join_date: ad(2082, 10, 11), end_date: ad(2083, 6, 10) }), ref)).toBe(8)
+    expect(completedServiceMonths(emp({ join_date: ad(2082, 10, 11) }), ref)).toBe(8)
+    expect(completedServiceMonths(emp({ join_date: ad(2082, 10, 11), end_date: ad(2083, 6, 9) }), ref)).toBe(7)
   })
   test('not joined yet by the festival → 0', () => {
     expect(completedServiceMonths(emp({ join_date: ad(2083, 7, 1) }), ref)).toBe(0)

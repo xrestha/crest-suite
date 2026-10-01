@@ -26,6 +26,8 @@ import PayrollMonthStatus from './PayrollMonthStatus'
 import { fetchRunPayments, runPaymentSummary, methodLabel } from './salaryPayments'
 import { MarkPaidDialog, UndoPaymentDialog } from './SalaryPaymentDialogs'
 import { printWithTitle } from '../../../utils/printTitle'
+import { withTimeout } from '../../../utils/withTimeout'
+import { fetchMonthDepositExtras } from './monthDeposit'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { errorText, errorLine } from '../../../shared/errorText'
@@ -160,7 +162,7 @@ export default function PayrollRun() {
   const [expandedId, setExpandedId] = useState(null)
   const [printCalc,  setPrintCalc]  = useState(null)
   // The month's approval sheet for the Owner to sign (S777) — printed, or saved as PDF from the dialog.
-  const [printApproval, setPrintApproval] = useState(false)
+  const [printApproval, setPrintApproval] = useState(null)   // { extras } while printing
   // Company letterhead for the payslip — a payslip with no employer identity on it at all is
   // missing the single most basic thing a pay document is expected to have. Same source fields
   // Tax Invoice already prints (settings.vat_number is Nepal's PAN, reused as-is — not a new ID).
@@ -235,8 +237,10 @@ export default function PayrollRun() {
       // ~34 staff — employees past the cutoff look like they have no attendance at all (S529).
       fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', p.id).order('id')),
       // bs_day is load-bearing, not display data: approved entries supersede attendance OT per day.
-      scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
-        .eq('bs_year', p.bs_year).eq('bs_month', p.bs_month).eq('status', 'approved'),
+      // Paged (S798 PAYROLL-5): one entry per employee per day, so ~34 staff with overtime most days
+      // cross the 1000-row cap, and a dropped day fell back to the sheet's 1.5x or paid nothing.
+      fetchAllRows(() => scopedFrom('hr_overtime_entries', 'id, employee_id, bs_day, ot_hours, ot_type')
+        .eq('bs_year', p.bs_year).eq('bs_month', p.bs_month).eq('status', 'approved').order('id')),
       // Paged. Both are UNFILTERED lifetime ledgers that grow without bound; a truncated repayments
       // read makes advances look less repaid than they are and over-deducts. `.order('id')` is the
       // unique tiebreaker fetchAllRows needs — issued_date is not unique.
@@ -774,15 +778,24 @@ export default function PayrollRun() {
 
   // The Owner signs what this prints, so a draft Finalize would refuse is not printed: the signature
   // would approve figures that are about to change. A finalized month always prints, as paid.
-  function printApprovalSheet() {
+  async function printApprovalSheet() {
     if (!run || busy || loading || payslips.length === 0) return
     if (!finalized && !freshness.ok) {
       setMsg('error:The approval sheet was not printed — this draft cannot be finalized as it stands, so the Owner would be signing figures that are about to change. '
         + (freshness.reason || 'Press Regenerate, then print it.'))
       return
     }
-    setPrintApproval(true)
-    setTimeout(() => { printWithTitle(`Payroll Approval - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintApproval(false) }, 60)
+    // The month's deposit is more than this run (S798 PAYROLL-2): a leaver's Final Settlement and a
+    // festival allowance or incentive paid this month add SSF and tax to it. Read at print time; a
+    // failed read prints "could not be read" on those two lines, never the payroll-only figure.
+    const p = period
+    setBusy(true)
+    const extras = await withTimeout(fetchMonthDepositExtras(scopedFrom, p), 20000, 'Reading the month’s deposit')
+      .catch(err => ({ data: null, error: err }))
+    setBusy(false)
+    if (!periodReq.isCurrent(p.id)) return   // another month was picked while it read
+    setPrintApproval({ extras })
+    setTimeout(() => { printWithTitle(`Payroll Approval - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintApproval(null) }, 60)
   }
 
   async function exportExcel() {
@@ -1270,7 +1283,7 @@ export default function PayrollRun() {
           <PayrollApprovalSheet
             period={period} periodLabel={periodLabel} run={run} payslips={payslips}
             empMap={empMap} nameOf={nameOf} totals={totals} cost={cost} bizInfo={bizInfo}
-            settled={settled} progress={finalized ? null : monthProgress(period)}
+            settled={settled} progress={finalized ? null : monthProgress(period)} extras={printApproval.extras}
             // The Crest operator and the Owner are not the tenant's payroll preparer, so their
             // names are left for the preparer to write in rather than printed as if they were.
             preparedBy={!isAdmin && !isOwner && profile?.full_name ? { name: profile.full_name, role: profile.hr_job_title || '' } : null}

@@ -6,13 +6,14 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, formatAdAsBs, getBsToday } from '../../../utils/bsCalendar'
+import { nepalBsLong } from '../../../shared/nepalTime'
 import { fiscalYearOf } from '../payroll/tds'
 import { employedInPeriod } from '../payroll/payrollCompute'
 import { groupByEmployee, sliceFor } from '../payroll/payrollData'
 import {
   DEFAULT_BONUS_MONTH, completedServiceMonths, computeRunBonusTds, fetchFinalizedBonuses,
-  otherBonusesForFy, payslipYtdForFy,
+  currentSpellSettlements, fetchFinalizedSettlements, otherBonusesForFy, payslipYtdForFy,
 } from '../payroll/bonusTax'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import IncentiveConfigs from './IncentiveConfigs'
@@ -170,6 +171,9 @@ export default function IncentiveRun() {
           .eq('hr_payroll_runs.status', 'finalized')
           .order('id')),
       fetchFinalizedBonuses(scopedFrom),
+      // Every finalized Final Settlement: an earlier spell's last month and exit pay are this year's
+      // income for a rehire (S798 ENGINE-5); payslipYtdForFy folds the ones before the pay month.
+      fetchFinalizedSettlements(scopedFrom),
       // ALL components: the months still to come are projected at basic plus earning components.
       fetchAllRows(() => scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value, retirement_fund').order('id')),
     ])
@@ -177,8 +181,8 @@ export default function IncentiveRun() {
     // A failed read is not an empty one — every figure here becomes a saved tax amount (S750).
     const failed = results.find(r => r && r.error)
     if (failed) { setBaseError(failed.error); setBaseLoading(false); return }
-    const [emps, slips, bonuses, comps] = results
-    setBase({ employees: emps.data || [], payslips: slips.data || [], bonuses: bonuses.data || [], components: comps.data || [] })
+    const [emps, slips, bonuses, settlements, comps] = results
+    setBase({ employees: emps.data || [], payslips: slips.data || [], bonuses: bonuses.data || [], settlements: settlements.data || [], components: comps.data || [] })
     setBaseError(null); setBaseLoading(false)
   }, [clientId, scopedFrom, baseReq])
 
@@ -208,6 +212,10 @@ export default function IncentiveRun() {
   // ── Derived ────────────────────────────────────────────────────────────────────────────────
   const employees = base?.employees || NONE
   const empMap    = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees])
+  // Settled leavers of their current employment, marked on their row (S798 H33). A leaver can be owed
+  // an incentive for their last months, so they stay in the run; the mark says their tax is worked out
+  // apart from the settlement, as Festival Allowance marks its settled leavers.
+  const settledBy = useMemo(() => currentSpellSettlements(base?.settlements, employees), [base, employees])
   const compsIdx  = useMemo(() => groupByEmployee(base?.components || NONE), [base])
   const shown     = !!run && run.year === bsYear && run.label === runLabel
   const rows      = useMemo(() => (shown && run.label ? run.yearRows.filter(r => r.run_label === run.label) : NONE), [run, shown])
@@ -226,7 +234,7 @@ export default function IncentiveRun() {
   const { fyStart } = fiscalYearOf(bsYear, payMonth)
   // The run's key in bonusTax.js: the exact trimmed label, case kept.
   const runKey    = `incentive:${bsYear}:${runLabel}`
-  const ytdMap    = useMemo(() => payslipYtdForFy(base?.payslips, fyStart), [base, fyStart])
+  const ytdMap    = useMemo(() => payslipYtdForFy(base?.payslips, fyStart, base?.settlements, { bs_year: bsYear, bs_month: payMonth }), [base, fyStart, bsYear, payMonth])
   // Only bonuses paid EARLIER in the tax year than this run's pay month count on top of it.
   const others    = useMemo(() => otherBonusesForFy(base?.bonuses, fyStart, runKey, { bs_year: bsYear, bs_month: payMonth }), [base, fyStart, runKey, bsYear, payMonth])
 
@@ -501,7 +509,7 @@ export default function IncentiveRun() {
       ),
       run: async () => {
         setBusy(true); setMsg('')
-        const ytdNew = payslipYtdForFy(base.payslips, newFy)
+        const ytdNew = payslipYtdForFy(base.payslips, newFy, base.settlements, { bs_year: bsYear, bs_month: m })
         const othersNew = otherBonusesForFy(base.bonuses, newFy, runKey, { bs_year: bsYear, bs_month: m })
         const results = await Promise.all(targets.map(r => {
           const emp = empMap.get(r.employee_id)
@@ -862,6 +870,14 @@ export default function IncentiveRun() {
                               </Tip>
                             )}
                             {reason && <span className="badge badge-amber" style={{ fontSize: 10 }}>{reason}</span>}
+                            {settledBy.has(r.employee_id) && (() => {
+                              const st = settledBy.get(r.employee_id)
+                              return (
+                                <Tip text={`Their Final Settlement was finalized${st.last_working_date ? `, with ${formatAdAsBs(st.last_working_date)} as their last working day` : ''}. It paid their last month and exit pay and took the tax on those itself; it pays no incentive. Tax on this incentive is worked out on its own, on top of the year so far.`} width={300} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                                  <span className="badge badge-gray" style={{ fontSize: 10 }}>Settled on {nepalBsLong(st.finalized_at) || formatAdAsBs(st.last_working_date)}</span>
+                                </Tip>
+                              )
+                            })()}
                             {needsAmount && <span className="badge badge-amber" style={{ fontSize: 10 }}>amount needed</span>}
                             {missingBank && !excluded && <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>⚠ no bank</span>}
                           </div>

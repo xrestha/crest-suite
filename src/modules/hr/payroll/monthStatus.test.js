@@ -46,20 +46,45 @@ describe('pickStatusPeriod', () => {
     { id: 'shrawan', bs_year: 2083, bs_month: 4 },
   ]
 
-  it('takes the newest started month not yet finalized', () => {
+  // S798 REPORTS-3: on 3 Ashwin with Bhadra's run a draft, the month being paid is Bhadra. It used to
+  // pick Ashwin, the month still running, all through payroll week.
+  it('shows last month while its payroll is not finalized', () => {
     const today = { year: 2083, month: 6, day: 3 }
-    expect(pickStatusPeriod(periods, { shrawan: 'finalized', bhadra: 'draft' }, today).id).toBe('ashwin')
+    expect(pickStatusPeriod(periods, { shrawan: 'finalized', bhadra: 'draft' }, today).id).toBe('bhadra')
+    expect(pickStatusPeriod(periods, { shrawan: 'finalized' }, today).id).toBe('bhadra')
     expect(pickStatusPeriod(periods, { shrawan: 'finalized', ashwin: 'finalized' }, today).id).toBe('bhadra')
+  })
+
+  it('moves to the running month once last month is finalized (H32: at Finalize, not at Mark paid)', () => {
+    const today = { year: 2083, month: 6, day: 3 }
+    expect(pickStatusPeriod(periods, { bhadra: 'finalized' }, today).id).toBe('ashwin')
+    expect(pickStatusPeriod(periods, { ashwin: 'finalized', bhadra: 'finalized', shrawan: 'finalized' }, today).id).toBe('ashwin')
   })
 
   it('never picks a month that has not started', () => {
     const today = { year: 2083, month: 5, day: 30 }
-    expect(pickStatusPeriod(periods, {}, today).id).toBe('bhadra')
+    expect(pickStatusPeriod(periods, { shrawan: 'finalized' }, today).id).toBe('bhadra')
+    expect(pickStatusPeriod(periods, {}, today).id).toBe('shrawan')
   })
 
-  it('falls back to the newest started month when all are finalized', () => {
-    const today = { year: 2083, month: 6, day: 3 }
-    expect(pickStatusPeriod(periods, { ashwin: 'finalized', bhadra: 'finalized', shrawan: 'finalized' }, today).id).toBe('ashwin')
+  // The judge's case: with the running month finalized early, the old search walked back to the newest
+  // month with no run — for a client that used IMS before HR, a month from before HR.
+  it('never walks back past last month into months from before HR', () => {
+    const withPreHr = [...periods, { id: 'ashadh', bs_year: 2083, bs_month: 3 }]
+    expect(pickStatusPeriod(withPreHr, { bhadra: 'finalized', ashwin: 'finalized' }, { year: 2083, month: 6, day: 3 }).id).toBe('ashwin')
+    // Mid-Bhadra with Shrawan finalized: Bhadra, never Ashadh.
+    expect(pickStatusPeriod(withPreHr, { shrawan: 'finalized' }, { year: 2083, month: 5, day: 15 }).id).toBe('bhadra')
+  })
+
+  it('finds last month by year and month, across the year end and in any order', () => {
+    const yearEnd = [{ id: 'baisakh', bs_year: 2084, bs_month: 1 }, { id: 'chaitra', bs_year: 2083, bs_month: 12 }].reverse()
+    expect(pickStatusPeriod(yearEnd, {}, { year: 2084, month: 1, day: 2 }).id).toBe('chaitra')
+    expect(pickStatusPeriod(yearEnd, { chaitra: 'finalized' }, { year: 2084, month: 1, day: 2 }).id).toBe('baisakh')
+  })
+
+  it('keeps last month when the running month has no period yet, and is null with neither', () => {
+    expect(pickStatusPeriod(periods, { ashwin: 'finalized' }, { year: 2083, month: 7, day: 1 }).id).toBe('ashwin')
+    expect(pickStatusPeriod(periods, {}, { year: 2083, month: 9, day: 1 })).toBeNull()
   })
 })
 

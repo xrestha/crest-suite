@@ -10,6 +10,7 @@ import { useHrApprovalCounts } from './useHrApprovalCounts'
 import { SSF_DEPOSIT_DAY } from '../payrollConstants'
 import PayrollMonthStatus from '../payroll/PayrollMonthStatus'
 import { ssfDeadline } from '../payroll/monthStatus'
+import { fetchMonthDepositExtras, monthDeposit } from '../payroll/monthDeposit'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
 import WeatherHeaderSlot from '../../../pages/dashboard/WeatherHeaderSlot'
 
@@ -232,20 +233,28 @@ export default function HrDashboard() {
     // ── Last finalized payroll ─────────────────────────────────────────────────
     const lastRun = runs?.[0]
     if (lastRun) {
-      const { data: slips, error: slipsErr } = await scopedFrom('hr_payslips', 'net_pay, ssf_employee, ssf_employer')
-        .eq('run_id', lastRun.id)
-      if (loadIdRef.current !== myId) return // superseded again after this extra await
-      hadRealError = hadRealError || slipsErr
       const mp = lastRun.monthly_periods
+      // The SSF cards are the month's deposit (S798 REPORTS-2): a leaver settled in the month is not
+      // on the run, but their Final Settlement deducted the final month's SSF, and the SSF challan
+      // these cards link to adds it. A failed read of either half shows no figure, as below.
+      const [{ data: slips, error: slipsErr }, extras] = await Promise.all([
+        scopedFrom('hr_payslips', 'net_pay, ssf_employee, ssf_employer').eq('run_id', lastRun.id),
+        mp ? fetchMonthDepositExtras(scopedFrom, mp) : { data: { settlements: [], bonuses: [] }, error: null },
+      ])
+      if (loadIdRef.current !== myId) return // superseded again after this extra await
+      hadRealError = hadRealError || slipsErr || extras.error
+      const ssf = slipsErr || extras.error ? null : monthDeposit({ payslips: slips, ...extras.data }).ssf
       setPayInfo({
         // A failed payslip read is not a run that paid nothing (S768): the four cards below used to
         // total an empty list and say "no staff enrolled in SSF this period" over real deductions.
         failed:       !!slipsErr,
+        ssfFailed:    !ssf,
         periodId:     lastRun.period_id,
         periodLabel:  mp ? `${BS_MONTHS[mp.bs_month - 1]} ${mp.bs_year}` : '—',
         netPay:       (slips || []).reduce((s, x) => s + (x.net_pay       || 0), 0),
-        ssfEmployee:  (slips || []).reduce((s, x) => s + (x.ssf_employee  || 0), 0),
-        ssfEmployer:  (slips || []).reduce((s, x) => s + (x.ssf_employer  || 0), 0),
+        ssfEmployee:  ssf?.employee || 0,
+        ssfEmployer:  ssf?.employer || 0,
+        ssfSettled:   ssf?.settledNames || [],
         bsYear:       mp?.bs_year,
         bsMonth:      mp?.bs_month,
         count:        (slips || []).length,
@@ -414,7 +423,12 @@ export default function HrDashboard() {
       </div>
 
       {/* ── Payroll + SSF ───────────────────────────────────────────────────── */}
-      {payInfo && (
+      {payInfo && (() => {
+        // The SSF cards are the month's deposit: payslips plus that month's Final Settlements. Either
+        // read failing shows no SSF figure rather than the payslips-only one (S798 REPORTS-2).
+        const ssfUnread = payInfo.failed || payInfo.ssfFailed
+        const settledSsf = payInfo.ssfSettled.length > 0
+        return (
         <>
           <SectionLabel>
             Last Finalized Payroll — {payInfo.periodLabel} ({payInfo.count} employees)
@@ -430,31 +444,31 @@ export default function HrDashboard() {
             />
             <KCard
               label="SSF — Employee (11%)"
-              value={payInfo.failed ? '—' : `NPR ${fmt(payInfo.ssfEmployee)}`}
-              sub={payInfo.failed ? 'could not be read' : 'deducted from payslips'}
-              tip="Total employee SSF contributions (11% of capped basic) deducted across all enrolled employees."
+              value={ssfUnread ? '—' : `NPR ${fmt(payInfo.ssfEmployee)}`}
+              sub={ssfUnread ? 'could not be read' : settledSsf ? 'deducted from pay, incl. a Final Settlement' : 'deducted from payslips'}
+              tip="Total employee SSF contributions (11% of capped basic) deducted this month — from the payslips, and from the final month of anyone whose Final Settlement was in this month."
             />
             <KCard
               label="SSF — Employer (20%)"
-              value={payInfo.failed ? '—' : `NPR ${fmt(payInfo.ssfEmployer)}`}
-              sub={payInfo.failed ? 'could not be read' : 'company contribution'}
-              tip="Total employer SSF contribution (20% of capped basic) — paid by the company on top of net pay."
+              value={ssfUnread ? '—' : `NPR ${fmt(payInfo.ssfEmployer)}`}
+              sub={ssfUnread ? 'could not be read' : 'company contribution'}
+              tip="Total employer SSF contribution (20% of capped basic) — paid by the company on top of net pay, including a leaver's final month paid by Final Settlement."
             />
             {(() => {
               const ssfTotal = payInfo.ssfEmployee + payInfo.ssfEmployer
               // Nothing owed (no SSF-enrolled staff this run) means a passed due day isn't a missed
               // deadline — stay neutral instead of painting a NPR 0 deposit red.
-              const deadline = ssfTotal > 0 && !payInfo.failed ? ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth) : {}
+              const deadline = ssfTotal > 0 && !ssfUnread ? ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth) : {}
               return (
                 <KCard
                   label="SSF Total to Deposit"
-                  value={payInfo.failed ? '—' : `NPR ${fmt(ssfTotal)}`}
-                  sub={payInfo.failed ? `due by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)} — amount could not be read` : ssfTotal === 0
-                    ? 'no staff enrolled in SSF this period'
+                  value={ssfUnread ? '—' : `NPR ${fmt(ssfTotal)}`}
+                  sub={ssfUnread ? `due by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)} — amount could not be read` : ssfTotal === 0
+                    ? 'no staff or leavers in SSF this period'
                     : deadline.overdue
                       ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
                       : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
-                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
+                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}: the payslips plus the final month of anyone whose Final Settlement was in ${payInfo.periodLabel}${settledSsf ? ` (${payInfo.ssfSettled.join(', ')})` : ''}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
                   onClick={() => navigate(`/hr/reports?tab=ssf${payInfo.periodId ? `&period=${payInfo.periodId}` : ''}`)}
                   {...deadline}
                 />
@@ -462,7 +476,8 @@ export default function HrDashboard() {
             })()}
           </div>
         </>
-      )}
+        )
+      })()}
 
       {!payInfo && (
         <div className="card card--compact dash-section" style={{ fontSize: 13, color: 'var(--theme-text2)' }}>

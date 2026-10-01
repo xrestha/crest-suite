@@ -122,3 +122,25 @@ describe('PayrollMonthStatus', () => {
     expect((await screen.findAllByText(/NPR 3,100 was due by 25 Ashwin/)).length).toBe(1)
   })
 })
+
+// S798 REPORTS-2: the SSF step is the month's deposit — a leaver settled in the month is not on the
+// run, but the challan this step links to adds their final month's SSF.
+describe('SSF deposit', () => {
+  const finalized = { id: 'r', status: 'finalized' }
+  const payslips = [{ employee_id: 'a', net_pay: 20000, ssf_employee: 0, ssf_employer: 0 }]
+
+  it('counts a settled leaver who was the month’s only SSF contributor', async () => {
+    mockAnswers.hr_final_settlements = () => ({ data: [{ id: 's1', employee_name: 'Hari', month_ssf_employee: 1277, month_ssf_employer: 2323, month_tds: 0, lump_tds: 0 }], error: null })
+    renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [] })
+    const s = within(step('SSF deposit'))
+    expect(await s.findByText(/NPR 3,600/)).toBeInTheDocument()
+    expect(s.getByText(/includes a leaver’s Final Settlement/)).toBeInTheDocument()
+    expect(s.queryByText(/nobody on SSF/)).toBeNull()
+  })
+
+  it('says the amount could not be read when the settlements read fails', async () => {
+    mockAnswers.hr_final_settlements = () => ({ data: null, error: { message: 'refused' } })
+    renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [] })
+    expect(await within(step('SSF deposit')).findByText(/Could not read the amount/)).toBeInTheDocument()
+  })
+})

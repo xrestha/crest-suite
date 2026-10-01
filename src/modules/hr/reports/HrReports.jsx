@@ -10,7 +10,7 @@ import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf, retirementRelief } from '../payroll/tds'
-import { DEFAULT_BONUS_MONTH, bonusFiscalYear, fetchFinalizedBonuses } from '../payroll/bonusTax'
+import { DEFAULT_BONUS_MONTH, bonusFiscalYear, fetchFinalizedBonuses, settlementLump } from '../payroll/bonusTax'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, SSF_DEPOSIT_DAY } from '../payrollConstants'
 import { isSsfContributor } from '../payroll/payrollCompute'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -31,8 +31,10 @@ const ssfBaseOf = (employee, employer) => Math.round((num(employee) + num(employ
 // What a payslip's tax was worked out on: earned pay (gross − absence + overtime) less the employee's
 // SSF and CIT. The sheet subtracted neither the absence deduction nor CIT (S752).
 const payslipTaxable = s => num(s.gross) - num(s.absence_deduction) + num(s.ot_amount) - num(s.ssf_employee) - num(s.retirement_contribution)
-// A finalized Final Settlement's exit payments — taxed as a lump sum on top of the final month.
-const settlementLump = s => num(s.gratuity) + num(s.leave_encashment) + num(s.festival_pro) + num(s.notice_pay)
+// A finalized Final Settlement's exit payments (settlementLump) come from bonusTax.js, the definition
+// payroll's year-to-date folds a rehire's earlier settlement with (S798 ENGINE-5). This page's SSF
+// Challan and TDS Report are the reference for monthDeposit.js, which the approval sheet, the payroll
+// strip and the HR Dashboard use for the same month's deposit (S798 PAYROLL-2).
 
 // A finalized Festival Allowance or Incentive row, named the way an owner reads it (S751).
 const bonusMonthOf = b => b.bs_month || DEFAULT_BONUS_MONTH

@@ -1,4 +1,4 @@
-import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost, ytdFromPayslips } from './payrollData'
+import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost, ytdFromPayslips, payslipDrift, payslipNetGap } from './payrollData'
 import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 
 // `buildRows` in PayrollRun.jsx and `rows` in PayrollCalculation.jsx replaced a per-employee
@@ -199,5 +199,69 @@ describe('ytdFromPayslips', () => {
   it('refuses a row whose query left out absence_deduction, rather than quietly subtracting nothing', () => {
     const { absence_deduction, ...noAbsence } = slip(4)
     expect(() => ytdFromPayslips([noAbsence], [], ASHWIN)).toThrow(/absence_deduction/)
+  })
+
+  // S798 ENGINE-5: a cook settled in Shrawan and rehired is taxed from Ashwin on a year that includes
+  // the settlement — its last month as a paid month, its exit pay as one-off income taxed at source.
+  const settlement = (over = {}) => ({
+    employee_id: 'e1', settle_bs_year: 2083, settle_bs_month: 4, partial_salary: '20000',
+    month_ssf_employee: '1100', month_retirement_contribution: '500', month_tds: '200', lump_tds: '900',
+    gratuity: '50000', leave_encashment: '8000', festival_pro: '2000', notice_pay: '0', ...over,
+  })
+
+  it('folds an earlier finalized settlement in: its month, and its lump sums as already-taxed one-offs', () => {
+    const ytd = ytdFromPayslips([slip(5)], [], ASHWIN, { settlements: [settlement()] })
+    expect(ytd.e1).toMatchObject({
+      gross: 30000 + 20000 + 60000, ssf: 1100, retirement: 500, withheld: 100 + 200 + 900,
+      count: 2, bonus: 60000, bonusWithheld: 900,
+    })
+  })
+
+  it('leaves out a settlement from this month, a later one, another year and one from before S752', () => {
+    const ytd = ytdFromPayslips([], [], ASHWIN, { settlements: [
+      settlement({ settle_bs_month: 6 }), settlement({ settle_bs_month: 7 }),
+      settlement({ settle_bs_year: 2083, settle_bs_month: 3 }),          // Ashadh 2083: FY 2082/83
+      settlement({ settle_bs_year: null, settle_bs_month: null }),
+    ] })
+    expect(ytd.e1).toBeUndefined()
+  })
+
+  it('counts a month once when a rehire was settled and paid again in it', () => {
+    const ytd = ytdFromPayslips([slip(4)], [], ASHWIN, { settlements: [settlement()] })
+    expect(ytd.e1.count).toBe(1)
+  })
+
+  // S798 BONUS-LEDGERS-4: Final Settlement's year includes a Dashain paid in the leaver's last month.
+  it('includes a bonus paid this month only when asked to (Final Settlement)', () => {
+    const dashain = { employee_id: 'e1', amount: '60000', tds: '2400', bs_year: 2083, bs_month: 6 }
+    expect(ytdFromPayslips([slip(4)], [dashain], ASHWIN).e1).toMatchObject({ gross: 30000, bonus: 0 })
+    expect(ytdFromPayslips([slip(4)], [dashain], ASHWIN, { includeSameMonthBonuses: true }).e1)
+      .toMatchObject({ gross: 90000, withheld: 2500, count: 1, bonus: 60000, bonusWithheld: 2400 })
+    const later = { ...dashain, bs_month: 7 }
+    expect(ytdFromPayslips([slip(4)], [later], ASHWIN, { includeSameMonthBonuses: true }).e1.bonus).toBe(0)
+  })
+})
+
+// S798 PAYROLL-4: net pay is its own parts. The database refuses a payslip that is not
+// (hr_payslips_guard_net), and a draft holding one is out of date, never finalizable.
+describe('payslipNetGap / payslipDrift — net pay must be its parts', () => {
+  const slip = {
+    gross: 45000, ot_amount: 1500, absence_deduction: 1000, ssf_employee: 2475, other_deductions: 500,
+    advance_deduction: 2499.5, tds: 450, tada_amount: 300, retirement_contribution: 0, tada_claim_ids: [],
+  }
+  const net = 45000 + 1500 - 1000 - 2475 - 500 - 2499.5 - 450 + 300
+
+  it('is zero for a payslip the engine wrote, and within half a paisa of a rounded net', () => {
+    expect(payslipNetGap({ ...slip, net_pay: net })).toBeCloseTo(0, 6)
+    expect(Math.abs(payslipNetGap({ ...slip, other_deductions: 500.004, net_pay: net }))).toBeLessThan(0.01)
+  })
+
+  it('reads a net pay edited on its own as moved, though every input still matches', () => {
+    expect(payslipDrift({ ...slip, net_pay: net }, slip)).toBe(null)
+    expect(payslipDrift({ ...slip, net_pay: 65000 }, slip)).toBe('moved')
+  })
+
+  it('keeps a typed TDS an override, because writing it rewrites net with the identity', () => {
+    expect(payslipDrift({ ...slip, tds: 900, net_pay: net - 450, tds_overridden: true }, slip)).toBe('overridden')
   })
 })

@@ -139,9 +139,9 @@ describe('writtenOffAdvancesForRun', () => {
 describe('payslipDrift — the advance is compared to the paisa', () => {
   const base = { gross: 30000, ot_amount: 0, absence_deduction: 0, ssf_employee: 0, other_deductions: 0, retirement_contribution: 0, tds: 0, tada_amount: 0, tada_claim_ids: [] }
   test('a whole-rupee draft reads as moved when the paisa due has changed', () => {
-    expect(payslipDrift({ ...base, advance_deduction: 2500 }, { ...base, advance_deduction: 2499.5 })).toBe('moved')
+    expect(payslipDrift({ ...base, advance_deduction: 2500, net_pay: 27500 }, { ...base, advance_deduction: 2499.5 })).toBe('moved')
   })
   test('identical paisa is not drift', () => {
-    expect(payslipDrift({ ...base, advance_deduction: '2499.50' }, { ...base, advance_deduction: 2499.5 })).toBe(null)
+    expect(payslipDrift({ ...base, advance_deduction: '2499.50', net_pay: '27500.50' }, { ...base, advance_deduction: 2499.5 })).toBe(null)
   })
 })

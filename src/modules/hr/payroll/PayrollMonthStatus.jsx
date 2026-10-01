@@ -8,6 +8,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { fetchPayrollEmployees, periodAdBounds } from './payrollData'
 import { attendanceGaps, pickStatusPeriod, ssfDeadline } from './monthStatus'
 import { fetchRunPayments, runPaymentSummary } from './salaryPayments'
+import { fetchMonthDepositExtras, monthDeposit } from './monthDeposit'
 
 // Where one month's payroll stands, as four linked steps (S768): attendance → approvals → the run →
 // the SSF deposit. It is the answer to the owner's actual question — "is Bhadra's payroll right and
@@ -18,8 +19,12 @@ import { fetchRunPayments, runPaymentSummary } from './salaryPayments'
 // a colour alone. A step that could not be read says so; it does not fall back to a reassuring ✓.
 //
 // Two ways in. `period` shows that month (the Payroll page passes the one it is on, and its own loaded
-// `employees`/`attendance`/`run`/`payslips` so nothing is read twice). `auto` picks the month itself —
-// the newest started month whose payroll is not finalized — for the HR Dashboard.
+// `employees`/`attendance`/`run`/`payslips` so nothing is read twice). `auto` picks the month itself
+// for the HR Dashboard: last month while its payroll is not finalized, else the running month
+// (pickStatusPeriod, S798 REPORTS-3).
+//
+// The SSF step is the month's deposit (S798 REPORTS-2): the run's payslips plus a leaver's Final
+// Settlement in the month, which is not on the run — monthDeposit, the sum the SSF challan adds.
 //
 // "Staff paid" (S782) sits between the run and the SSF deposit: Finalize pays nobody. The Payroll page
 // passes its own `payments`/`paymentsError`, so the step always agrees with the Paid column; without
@@ -65,12 +70,14 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       let paid = null
       if (runRow?.status === 'finalized') {
         const ownPayments = payments !== undefined
-        const [slips, pays] = await Promise.all([
+        const [slips, pays, extras] = await Promise.all([
           payslips ? { data: payslips } : scopedFrom('hr_payslips', 'employee_id, net_pay, ssf_employee, ssf_employer').eq('run_id', runRow.id),
           ownPayments ? { data: payments, error: paymentsError || null } : fetchRunPayments(scopedFrom, runRow.id),
+          fetchMonthDepositExtras(scopedFrom, period),
         ])
         if (!live) return
-        ssf = slips.error ? { error: slips.error } : { total: (slips.data || []).reduce((s, p) => s + (parseFloat(p.ssf_employee) || 0) + (parseFloat(p.ssf_employer) || 0), 0) }
+        // A failed settlements read is "could not read the amount", never the payslips-only figure.
+        ssf = slips.error || extras.error ? { error: slips.error || extras.error } : monthDeposit({ payslips: slips.data, ...extras.data }).ssf
         // Kept only when read here; the page's own payments are summarised at render, so a Mark paid
         // there updates this step without a re-read.
         if (!ownPayments) paid = slips.error || pays.error ? { error: slips.error || pays.error } : runPaymentSummary(slips.data, pays.data)
@@ -100,6 +107,8 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
   const deadline = ssfDeadline(period.bs_year, period.bs_month)
   const dueLabel = `${deadline.day} ${BS_MONTHS[deadline.month - 1]}`
   const reports = tab => `/hr/reports?tab=${tab}&period=${period.id}`
+  // Why the deposit is more than the Payroll page's SSF column adds up to.
+  const settledNote = s => (s.settlements > 0 ? ` (includes ${s.settledNames.length === 1 ? 'a leaver’s' : `${s.settledNames.length} leavers’`} Final Settlement)` : '')
 
   const steps = []
   if (state.loading) {
@@ -149,8 +158,8 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       : s.total === 0 ? { name: 'SSF deposit', tone: 'done', mark: '✓', text: 'Nothing to deposit — nobody on SSF' }
       // A passed date is not a missed deposit: the product does not record deposits, so it says
       // what was due rather than asserting it is late.
-      : deadline.overdue ? { name: 'SSF deposit', tone: 'none', mark: '—', text: `NPR ${nprInt(s.total)} was due by ${dueLabel}`, link: [reports('ssf'), 'SSF challan'] }
-      : { name: 'SSF deposit', tone: 'open', mark: '△', text: `Deposit NPR ${nprInt(s.total)} by ${dueLabel}${deadline.dueThisMonth ? ' — this month' : ''}`, link: [reports('ssf'), 'SSF challan'] })
+      : deadline.overdue ? { name: 'SSF deposit', tone: 'none', mark: '—', text: `NPR ${nprInt(s.total)} was due by ${dueLabel}${settledNote(s)}`, link: [reports('ssf'), 'SSF challan'] }
+      : { name: 'SSF deposit', tone: 'open', mark: '△', text: `Deposit NPR ${nprInt(s.total)} by ${dueLabel}${deadline.dueThisMonth ? ' — this month' : ''}${settledNote(s)}`, link: [reports('ssf'), 'SSF challan'] })
   }
 
   return (

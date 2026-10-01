@@ -48,18 +48,28 @@ export function attendanceGaps({ period, employees, attendance, today = getBsTod
 }
 
 /**
- * The month the HR Dashboard should talk about: the most recent one that has STARTED and whose
- * payroll is not finalized yet — payroll is run after a month ends, so on 3rd Ashwin the live task
- * is usually Bhadra, not the Ashwin the stock module has already opened. When every started month
- * is finalized, the most recent started one (its SSF deposit may still be due).
+ * The month the HR Dashboard should talk about. Payroll is run after a month ends, so on 3rd Ashwin
+ * the live task is Bhadra, not the Ashwin the stock module has already opened: LAST month (found by
+ * year and month, not the next-older row) while its payroll is not finalized, otherwise the RUNNING
+ * month (S798 REPORTS-3, H32 — the strip moves on at Finalize, not at Mark paid). Never further back.
  *
- * @param periods newest first, as every period read in the app orders them
+ * It used to take the newest STARTED month not finalized — the running month counts as started, so
+ * all through payroll week the strip described the month still running and never the one being paid
+ * (its test pinned that, while this docstring and Help promised Bhadra). And with the running month
+ * finalized early, it walked back through the year to the newest month with no run: for a client that
+ * used IMS before HR, a month from before HR, "Ashadh 2083 payroll: Not generated yet".
+ *
+ * Without a running-month period (the stock module has not opened it), last month even if finalized:
+ * its staff payments and SSF deposit are still the live questions.
+ *
+ * @param periods any order
  * @param runStatusByPeriod period id -> 'draft' | 'finalized'
  */
 export function pickStatusPeriod(periods, runStatusByPeriod, today = getBsToday()) {
-  const todayOrd = ordinal(today.year, today.month)
-  const started = (periods || []).filter(p => ordinal(p.bs_year, p.bs_month) <= todayOrd)
-  return started.find(p => runStatusByPeriod[p.id] !== 'finalized') || started[0] || null
+  const find = (y, m) => (periods || []).find(p => p.bs_year === y && p.bs_month === m) || null
+  const last = today.month === 1 ? find(today.year - 1, 12) : find(today.year, today.month - 1)
+  if (last && runStatusByPeriod[last.id] !== 'finalized') return last
+  return find(today.year, today.month) || last
 }
 
 /**

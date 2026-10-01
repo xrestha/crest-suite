@@ -786,6 +786,17 @@ const rules = [
     staff: 'A payroll can only be finalized or reopened from the Payroll page. Nothing was changed.',
     operator: 'A payroll run is finalized with Finalize and reopened with Reopen on the Payroll page, never by changing its status directly — those two also record the advance recoveries and travel claims. Nothing was changed.',
   },
+  // S798 stage 2b (20261001140000): a run stays in its month, and a payslip's net pay is its own parts.
+  {
+    test: e => /payroll_period_fixed/i.test(e.message || ''),
+    staff: 'A payroll run cannot be moved to another month. Nothing was changed.',
+    operator: 'A payroll run stays in the month it was generated for — moving it would take its payslips, payments and month lock with it and open the original month for a second payroll. Delete the draft and generate the other month instead. Nothing was changed.',
+  },
+  {
+    test: e => /payslip_net_mismatch/i.test(e.message || ''),
+    staff: 'A payslip\'s net pay does not add up. Nothing was saved — ask your manager.',
+    operator: 'Nothing was saved or finalized: a payslip\'s net pay is not its pay less its deductions, which nothing on the Payroll page writes — it was changed some other way. Press Regenerate to rebuild the payslips from current data, then try again.',
+  },
   {
     test: e => /payroll_run_empty|payroll_run_not_found/i.test(e.message || ''),
     staff: 'That payroll run has no payslips any more. Reload the page.',

@@ -919,3 +919,23 @@ Migration `20261001120000`, applied live after a rolled-back dry run. Findings: 
   (the 20260914220000 lesson, missed here once).
 - **A rehire clears the old End Date in the same save and says so first** (H27,
   `staleRehireEndDate`); an End Date before the Join Date is refused (`endsBeforeJoining`).
+
+## Payroll and tax: the run's month, net pay, the month's deposit (S798 stage 2b)
+
+Migration `20261001140000`. Findings: `HR_TODO.md` S798.3.
+
+- **A run starts as a draft and stays in its month** (`hr_payroll_runs_guard_settled`, BEFORE INSERT OR
+  UPDATE): no client write sets `finalized`/`finalized_at` or moves `period_id` (`payroll_period_fixed`).
+- **Net pay is its own parts**: gross + OT − absence − SSF − other − advance − TDS + TADA, within 0.01.
+  `payslipNetGap` (JS), `hr_payslips_guard_net` and `finalize_payroll_run` hold three copies of it; a new
+  payslip column that moves money changes all three.
+- **A finalized settlement from an earlier FY month is year-to-date income** (`fetchFinalizedSettlements`):
+  `partial_salary` and the month SSF/CIT/tax as a paid month, the lump sums and `lump_tds` in the bonus
+  fields. A bonus counts only a settlement from before its pay month; a settlement counts a bonus paid in
+  its own month (`includeSameMonthBonuses`, Final Settlement only), never both ways.
+- **Bonus months still to come are the current employment's unpaid months** (`monthsStillToPay`), not
+  employed months less every paid month — a rehire's first-spell payslips are paid months outside it.
+- **A month's SSF and tax to deposit is `monthDeposit`** (payslips + that month's finalized settlements +
+  its finalized bonus tax). A failed read of the extras shows no figure, never the payroll-only one.
+- **The strip's month is last month until its payroll is finalized, then the running month** (H32);
+  never a search back through older periods.

@@ -3,6 +3,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 import { isSsfContributor } from './payrollCompute'
 import { ssfDeadline } from './monthStatus'
+import { monthDeposit } from './monthDeposit'
 
 // The payroll approval sheet (S777): the document the HR manager hands the Owner, who checks the
 // month's pay and signs it off. Print-only, the same shape as the payslip and the working —
@@ -25,6 +26,8 @@ const byName = (a, b) => a.name.localeCompare(b.name)
 
 export default function PayrollApprovalSheet({
   period, periodLabel, run, payslips, empMap, nameOf, totals, cost, bizInfo, settled = [], preparedBy, progress,
+  // { data: { settlements, bonuses } } or { error } — fetchMonthDepositExtras, read at print (S798 PAYROLL-2).
+  extras,
 }) {
   const finalized = run?.status === 'finalized'
   const monthName = BS_MONTHS[period.bs_month - 1]
@@ -41,8 +44,25 @@ export default function PayrollApprovalSheet({
     [totals.absence, 'unpaid days'], [totals.ssfEmp, 'employee SSF'], [totals.other, 'other deductions'],
     [totals.advDed, 'advance recovery'], [totals.tds, 'income tax'],
   ].filter(([v]) => v > 0).map(([v, label]) => `${label} ${fmt(v)}`)
-  const ssfDeposit = totals.ssfEmp + totals.ssfEmpr
+  // The month's deposit, not the run's (S798 PAYROLL-2): a leaver's Final Settlement and a festival
+  // allowance or incentive paid this month are on the SSF challan and the TDS report too. When they
+  // could not be read the two lines say so — the payroll-only figure would be a smaller deposit that
+  // looks exactly like a month without them.
+  const dep = extras?.data ? monthDeposit({ payslips, ...extras.data }) : null
   const due = ssfDeadline(period.bs_year, period.bs_month)
+  const ssfSub = !dep ? 'Settlements and bonuses could not be read — use HR Reports → SSF Challan'
+    : [
+      dep.ssf.settlements > 0 && `includes ${fmt(dep.ssf.settlements)} from the Final Settlement of ${dep.ssf.settledNames.join(', ')}`,
+      dep.ssf.total > 0 && `due by ${due.day} ${BS_MONTHS[due.month - 1]} ${due.year}`,
+    ].filter(Boolean).join(' · ') || null
+  const tdsSub = !dep ? 'Settlements and bonuses could not be read — use HR Reports → TDS Report'
+    : dep.tds.settlements + dep.tds.bonuses > 0
+      ? [
+        `salaries ${fmt(dep.tds.payroll)}`,
+        ...dep.tds.bonusRuns.map(b => `${b.run} ${fmt(b.tds)}`),
+        dep.tds.settlements > 0 && `Final Settlement of ${dep.tds.settledNames.join(', ')} ${fmt(dep.tds.settlements)}`,
+      ].filter(Boolean).join(' · ')
+      : null
 
   // What the Owner should know before signing, and nothing when there is nothing.
   const typedTax = rows.filter(r => r.slip.tds_overridden).map(r => r.name)
@@ -141,10 +161,10 @@ export default function PayrollApprovalSheet({
             sub={`pay earned ${fmt(cost.earned)} + employer SSF ${fmt(cost.employerSsf)}${cost.tada > 0 ? ` · travel claims ${fmt(cost.tada)} on top` : ''}`}
           />
           <Line
-            name="SSF to deposit (employee 11% + employer 20%)" value={deposit(ssfDeposit)}
-            sub={ssfDeposit > 0 ? `due by ${due.day} ${BS_MONTHS[due.month - 1]} ${due.year}` : null}
+            name="SSF to deposit this month (employee 11% + employer 20%)" value={dep ? deposit(dep.ssf.total) : 'could not be read'}
+            sub={ssfSub}
           />
-          <Line name="Income tax (TDS) to deposit" value={deposit(totals.tds)} />
+          <Line name="Income tax (TDS) to deposit this month" value={dep ? deposit(dep.tds.total) : 'could not be read'} sub={tdsSub} />
         </div>
       </div>
 

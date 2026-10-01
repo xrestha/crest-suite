@@ -5,7 +5,7 @@
 import { adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { computeMonthlyTdsBreakdown, fiscalYearOf } from './tds'
-import { bonusFiscalYear, fetchFinalizedBonuses } from './bonusTax'
+import { bonusFiscalYear, fetchFinalizedBonuses, fetchFinalizedSettlements, settlementFiscalYear, settlementLump } from './bonusTax'
 import { computePayslip, earnedPay, employedInPeriod, isSsfContributor, roundPaisa, toPaisa } from './payrollCompute'
 
 // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR finalized payslips
@@ -15,15 +15,18 @@ import { computePayslip, earnedPay, employedInPeriod, isSsfContributor, roundPai
 // understated income by every bonus paid. A bonus adds to `gross` and `withheld` but not to
 // `count`, which is the number of paid MONTHS the tax is spread over. Final Settlement's lump-sum
 // base reads this same map, so a leaver's gratuity is taxed above the bonuses they were paid too.
+// S798 ENGINE-5: and every finalized Final Settlement from an earlier month of the year — a leaver
+// rehired in the same fiscal year was taxed as if their first spell's last month and exit pay never
+// happened. `includeSameMonthBonuses` is Final Settlement's (BONUS-LEDGERS-4), see ytdFromPayslips.
 // Returns `{ data, error }`, not a bare map — see the `if (error)` note below.
-export async function fetchYtdMap(scopedFrom, period) {
+export async function fetchYtdMap(scopedFrom, period, { includeSameMonthBonuses = false } = {}) {
   // Paged. The fiscal-year narrowing below happens in JS, so this read is EVERY finalized payslip
   // the client has ever had — one row per employee per month, for as long as they have run payroll.
   // Unpaged that silently stops at PostgREST's 1000-row cap (~20 staff x 4 years), and a truncated
   // YTD map understates prior taxable income, which under-withholds TDS and under-remits to the IRD.
   // `.order('id')` is the unique tiebreaker fetchAllRows requires: paging a non-uniquely-ordered
   // query repeats rows on one page and skips them on the next, trading truncation for a worse bug.
-  const [{ data, error }, bonuses] = await Promise.all([
+  const [{ data, error }, bonuses, settlements] = await Promise.all([
     fetchAllRows(() =>
       // retirement_contribution (S748) is the CIT / provident-fund part of other_deductions; it needs
       // migration 20260914150000 applied before this deploys, or every payroll read fails loudly.
@@ -31,6 +34,7 @@ export async function fetchYtdMap(scopedFrom, period) {
         .eq('hr_payroll_runs.status', 'finalized')
         .order('id')),
     fetchFinalizedBonuses(scopedFrom),
+    fetchFinalizedSettlements(scopedFrom),
   ])
   // A failed read must NOT degrade to an empty YTD map. Empty means "no prior finalized months
   // this FY", which is a real and ordinary state — the first month of the year — so computeMonthlyTds
@@ -40,16 +44,31 @@ export async function fetchYtdMap(scopedFrom, period) {
   // composes with firstError() at the call sites.
   if (error) return { data: null, error }
   if (bonuses.error) return { data: null, error: bonuses.error }
-  return { data: ytdFromPayslips(data, bonuses.data, period), error: null }
+  if (settlements.error) return { data: null, error: settlements.error }
+  return { data: ytdFromPayslips(data, bonuses.data, period, { settlements: settlements.data, includeSameMonthBonuses }), error: null }
 }
 
 // The pure half of fetchYtdMap, so the arithmetic is tested without a database. `payslips` are
 // hr_payslips rows with their run's status and period embedded; `bonuses` come from
-// fetchFinalizedBonuses.
-export function ytdFromPayslips(payslips, bonuses, period) {
+// fetchFinalizedBonuses, `settlements` from fetchFinalizedSettlements.
+//
+// `includeSameMonthBonuses` (S798 BONUS-LEDGERS-4) is for Final Settlement only. Leaving out a bonus
+// paid in the current month is right for a monthly payslip — that bonus carried its own marginal tax.
+// A settlement trues the year up to actual income and is the leaver's last chance, so a Dashain paid
+// in their last month must be in it, or the year and the lump sum on top of it are taxed short.
+// Settlements always count from earlier months only: the one being worked out is in this month.
+export function ytdFromPayslips(payslips, bonuses, period, { settlements = [], includeSameMonthBonuses = false } = {}) {
   const cur = fiscalYearOf(period.bs_year, period.bs_month)
   const map = {}
   const entry = id => (map[id] = map[id] || { gross: 0, ssf: 0, retirement: 0, withheld: 0, count: 0, bonus: 0, bonusWithheld: 0 })
+  // `count` is paid MONTHS. A rehire settled and re-paid in one month is one month, not two.
+  const seen = {}
+  const countMonth = (id, m) => {
+    const s = seen[id] || (seen[id] = new Set())
+    if (s.has(m)) return 0
+    s.add(m)
+    return 1
+  }
   ;(payslips || []).forEach(r => {
     if (r.hr_payroll_runs?.status !== 'finalized') return
     const mp = r.hr_payroll_runs?.monthly_periods
@@ -64,11 +83,28 @@ export function ytdFromPayslips(payslips, bonuses, period) {
     e.ssf   += r.ssf_employee || 0
     e.retirement += parseFloat(r.retirement_contribution) || 0
     e.withheld += r.tds || 0
-    e.count += 1 // prior finalized months this FY — feeds tds.js's ytdMonths (mid-year-joiner fix)
+    e.count += countMonth(r.employee_id, fy.monthInFy) // prior finalized months this FY — feeds tds.js's ytdMonths (mid-year-joiner fix)
+  })
+  // S798 ENGINE-5: an earlier finalized settlement is a paid month (its last month's pay, SSF, CIT and
+  // tax) plus exit lump sums. The lump sums and their tax go in the bonus fields as well, because they
+  // were taxed at source the way a bonus is — tds.js takes that tax off before spreading the rest.
+  ;(settlements || []).forEach(s => {
+    const fy = settlementFiscalYear(s)
+    if (!fy || fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return
+    const e = entry(s.employee_id)
+    const lump = settlementLump(s)
+    const lumpTds = parseFloat(s.lump_tds) || 0
+    e.gross += (parseFloat(s.partial_salary) || 0) + lump
+    e.ssf += parseFloat(s.month_ssf_employee) || 0
+    e.retirement += parseFloat(s.month_retirement_contribution) || 0
+    e.withheld += (parseFloat(s.month_tds) || 0) + lumpTds
+    e.bonus += lump; e.bonusWithheld += lumpTds
+    e.count += countMonth(s.employee_id, fy.monthInFy)
   })
   ;(bonuses || []).forEach(b => {
     const fy = bonusFiscalYear(b)
-    if (fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return
+    if (fy.fyStart !== cur.fyStart || fy.monthInFy > cur.monthInFy) return
+    if (fy.monthInFy === cur.monthInFy && !includeSameMonthBonuses) return
     const e = entry(b.employee_id)
     const amount = parseFloat(b.amount) || 0
     const tds = parseFloat(b.tds) || 0
@@ -143,6 +179,18 @@ export const FRESHNESS_INPUT_FIELDS = [
   'retirement_contribution',
 ]
 
+// How far a payslip's stored net pay is from its own parts: gross + overtime − unpaid days − SSF −
+// other deductions − advance − TDS + TADA. The engine rounds net once to the paisa, so a true payslip
+// is within half a paisa. The same identity is the database's hr_payslips_guard_net and the check in
+// finalize_payroll_run (migration 20261001140000); the three change together.
+export const NET_TOLERANCE = 0.01
+export function payslipNetGap(s) {
+  const n = v => parseFloat(v) || 0
+  const parts = n(s.gross) + n(s.ot_amount) - n(s.absence_deduction) - n(s.ssf_employee) - n(s.other_deductions)
+    - n(s.advance_deduction) - n(s.tds) + n(s.tada_amount)
+  return n(s.net_pay) - parts
+}
+
 // Order-independent identity for a payslip's TADA claim set.
 const claimKey = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
 
@@ -160,8 +208,14 @@ const nearField = (f, a, b) => (f === 'advance_deduction' ? toPaisa(a) === toPai
 // generated, an insurance premium entered, a bonus paid — used to read as "manually adjusted" and
 // was locked in by Finalize as though someone had chosen it. TADA is no longer hand-editable on the
 // payslip (it always equals its approved claims), so any TADA difference is movement.
+//
+// S798 PAYROLL-4: a stored net pay that is not its own parts is 'moved' too. Comparing the inputs never
+// looked at net_pay, so a net edited over REST passed this check, Finalize, Mark paid and the bank sheet
+// with every input intact. Every writer keeps the identity (a typed TDS rewrites net with it), so this
+// does not bring back the S620/S751 deadlock.
 export function payslipDrift(stored, live) {
   if (!stored) return null
+  if (Math.abs(payslipNetGap(stored)) > NET_TOLERANCE) return 'moved'
   if (FRESHNESS_INPUT_FIELDS.some(f => !nearField(f, stored[f], live[f]))) return 'moved'
   if (claimKey(stored.tada_claim_ids) !== claimKey(live.tada_claim_ids)) return 'moved'
   if (!near(stored.tada_amount, live.tada_amount)) return 'moved'

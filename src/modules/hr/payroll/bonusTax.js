@@ -14,7 +14,10 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf, projectBonusTaxableBase } from './tds'
 import { calcAmount, earnedPay, employedInPeriod, isSsfContributor, retirementContributionOf } from './payrollCompute'
+import { dayAfter } from '../gratuity/gratuityCompute'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
+
+const num = v => parseFloat(v) || 0
 
 // A bonus row written before S751 has no pay month; those runs were always treated as Ashwin, and
 // that is what the migration back-filled, so the fallback only matters for an unmigrated read.
@@ -46,22 +49,85 @@ export async function fetchFinalizedBonuses(scopedFrom) {
   }
 }
 
+// ── Finalized Final Settlements, as year-to-date income (S798 ENGINE-5) ─────────────────────────
+// A settlement pays the leaver's last month and their exit lump sums, and withholds tax on both. A
+// leaver rehired later in the same fiscal year (payable since S791) is taxed for the rest of that year
+// on a year-to-date that must include it, or every later month projects too little and under-withholds
+// — while the TDS Certificate, which does read settlements, shows the year taxed below its slab.
+// `settle_bs_year`/`settle_bs_month` is the month it pays; a settlement from before S752 has none and
+// is left out, as HR Reports leaves it out.
+export const SETTLEMENT_YTD_COLS = 'id, employee_id, settle_bs_year, settle_bs_month, last_working_date, finalized_at, '
+  + 'partial_salary, month_ssf_employee, month_retirement_contribution, month_tds, lump_tds, '
+  + 'gratuity, leave_encashment, festival_pro, notice_pay'
+
+export async function fetchFinalizedSettlements(scopedFrom) {
+  // Paged: one row per leaver for as long as the client has used Final Settlement.
+  return fetchAllRows(() => scopedFrom('hr_final_settlements', SETTLEMENT_YTD_COLS).eq('status', 'finalized').order('id'))
+}
+
+// The exit payments, taxed as a lump sum on top of the year (settlementCompute.js lumpSum).
+export const settlementLump = s => num(s.gratuity) + num(s.leave_encashment) + num(s.festival_pro) + num(s.notice_pay)
+
+// The fiscal year and month a settlement pays, or null for a settlement from before S752.
+export function settlementFiscalYear(s) {
+  return s?.settle_bs_year && s?.settle_bs_month ? fiscalYearOf(s.settle_bs_year, s.settle_bs_month) : null
+}
+
 // Per employee, the finalized payslips of ONE fiscal year: { gross (earned: less unpaid days, plus OT),
-// ssf, retirement, months }. The rows must carry `absence_deduction` — earnedPay throws without it.
-export function payslipYtdForFy(payslipRows, fyStart) {
+// ssf, retirement, months, lump, paid }. The rows must carry `absence_deduction` — earnedPay throws
+// without it. `paid` is the set of fiscal-year months already paid (monthInFy), which
+// computeRunBonusTds takes off the months still to come.
+//
+// S798 ENGINE-5: a finalized settlement paid in an EARLIER month than the bonus (`pay`) is folded in:
+// its last month's pay, SSF and CIT as a paid month, its exit lump sums as `lump` — one-off income
+// already taxed, which computeRunBonusTds adds to the other bonuses rather than to the monthly average.
+// Earlier only, so in a shared month the bonus is taxed first and the settlement on top of it
+// (payrollData.js ytdFromPayslips includeSameMonthBonuses), never each on top of the other.
+export function payslipYtdForFy(payslipRows, fyStart, settlements = [], pay = null) {
   const ytd = {}
+  const entry = id => (ytd[id] = ytd[id] || { gross: 0, ssf: 0, retirement: 0, months: 0, lump: 0, paid: new Set() })
+  const paidMonth = (e, m) => { if (!e.paid.has(m)) { e.paid.add(m); e.months += 1 } }
   ;(payslipRows || []).forEach(r => {
     const mp = r.hr_payroll_runs?.monthly_periods
     if (!mp) return
-    if (fiscalYearOf(mp.bs_year, mp.bs_month).fyStart !== fyStart) return
-    const e = ytd[r.employee_id] || { gross: 0, ssf: 0, retirement: 0, months: 0 }
+    const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
+    if (fy.fyStart !== fyStart) return
+    const e = entry(r.employee_id)
     e.gross      += earnedPay(r)
     e.ssf        += parseFloat(r.ssf_employee) || 0
     e.retirement += parseFloat(r.retirement_contribution) || 0
-    e.months     += 1
-    ytd[r.employee_id] = e
+    paidMonth(e, fy.monthInFy)
+  })
+  const payMonth = pay ? fiscalYearOf(pay.bs_year, pay.bs_month || DEFAULT_BONUS_MONTH).monthInFy : null
+  ;(settlements || []).forEach(s => {
+    const fy = settlementFiscalYear(s)
+    if (!fy || fy.fyStart !== fyStart) return
+    if (payMonth != null && fy.monthInFy >= payMonth) return
+    const e = entry(s.employee_id)
+    e.gross      += num(s.partial_salary)
+    e.ssf        += num(s.month_ssf_employee)
+    e.retirement += num(s.month_retirement_contribution)
+    e.lump       += settlementLump(s)
+    paidMonth(e, fy.monthInFy)
   })
   return ytd
+}
+
+// Per employee, the finalized settlement of their CURRENT employment, if any: a settled leaver who
+// has not been rehired since (a rehire's join date is after the earlier spell's last day). Incentive
+// Run marks them "Settled on …" (S798 H33), as Festival Allowance marks its settled leavers.
+export function currentSpellSettlements(settlements, employees) {
+  const joinOf = new Map((employees || []).map(e => [e.id, e.join_date ? String(e.join_date).slice(0, 10) : null]))
+  const out = new Map()
+  ;(settlements || []).forEach(s => {
+    if (!joinOf.has(s.employee_id)) return
+    const join = joinOf.get(s.employee_id)
+    const last = String(s.last_working_date || '').slice(0, 10)
+    if (join && last && last < join) return
+    const prev = out.get(s.employee_id)
+    if (!prev || String(prev.last_working_date) < String(s.last_working_date)) out.set(s.employee_id, s)
+  })
+  return out
 }
 
 // Per employee, the other finalized bonuses paid EARLIER in this fiscal year than the run being
@@ -118,18 +184,34 @@ export function projectedMonthlyGross(employee, components, ytd) {
   return basis === 'daily' ? basic * 30 : basic * STANDARD_HOURS_PER_DAY * 30
 }
 
+// The fiscal-year months still to be paid: months of the CURRENT employment not already paid. It was
+// employed months less every paid month, and a rehire's payslips from the earlier spell are paid months
+// outside the current employment, so the rest of their year was projected months too short (S798
+// ENGINE-5). For anyone continuously employed the two are the same. `paid` is payslipYtdForFy's set;
+// without one (an older caller) the count is used as before.
+export function monthsStillToPay(employee, fyStart, ytd) {
+  if (!(ytd?.paid instanceof Set)) return Math.max(0, employedMonthsInFy(employee, fyStart) - (ytd?.months || 0))
+  return fyMonths(fyStart).filter((p, i) => {
+    if (ytd.paid.has(i + 1)) return false
+    const start = formatAd(bsToAd(p.bs_year, p.bs_month, 1))
+    const end   = formatAd(bsToAd(p.bs_year, p.bs_month, daysInBsMonth(p.bs_year, p.bs_month)))
+    return employedInPeriod(employee, start, end)
+  }).length
+}
+
 // TDS on one employee's bonus. `components` are ALL of this employee's salary components.
 export function computeRunBonusTds({ employee, components, amount, ytd, otherBonuses = 0, fyStart }) {
   if (!amount || amount <= 0) return 0
   const basic = parseFloat(employee.basic_salary) || 0
   const isSsf = isSsfContributor(employee)
   const monthly = (employee.pay_basis || 'monthly') === 'monthly'
-  const remainingMonths = Math.max(0, employedMonthsInFy(employee, fyStart) - (ytd?.months || 0))
+  const remainingMonths = monthsStillToPay(employee, fyStart, ytd)
   const taxable = projectBonusTaxableBase({
     basic, ytd,
     monthlyGross: projectedMonthlyGross(employee, components, ytd),
     remainingMonths,
-    otherBonuses,
+    // An earlier settlement's exit lump sums are one-off income already taxed, like another bonus.
+    otherBonuses: otherBonuses + (ytd?.lump || 0),
     monthlySsf: isSsf && monthly ? Math.min(basic, SSF_CAP) * SSF_EMPLOYEE_PCT : 0,
     monthlyRetirement: monthly ? retirementContributionOf(components, basic) : 0,
     annualLifeInsurance:   parseFloat(employee.life_insurance_premium)   || 0,
@@ -149,8 +231,12 @@ export function computeRunBonusTds({ employee, components, amount, ytd, otherBon
 export function completedServiceMonths(employee, refAd) {
   const ref = String(refAd).slice(0, 10)
   const join = employee?.join_date ? String(employee.join_date).slice(0, 10) : null
+  // The last working day is worked in full, so service runs to the start of the day after it (S798
+  // ENGINE-4) — as Final Settlement measures it (settlementCompute.js serviceUntil). Using the day
+  // itself stopped one day short of an anniversary that fell the day after, and paid a month too few.
   const endRaw = employee?.end_date ? String(employee.end_date).slice(0, 10) : null
-  const until = endRaw && endRaw < ref ? endRaw : ref
+  const endExcl = endRaw ? dayAfter(endRaw) : null
+  const until = endExcl && endExcl < ref ? endExcl : ref
   if (!join) return 12
   if (join > until) return 0
   // Walk month-anniversaries in BS: a month is complete once the same BS day of the next month has

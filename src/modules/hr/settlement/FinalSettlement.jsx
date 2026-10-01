@@ -261,7 +261,9 @@ export default function FinalSettlement() {
         // Festival rows carry the PAY month (S751); one paid Baisakh–Ashadh sits in bs_year = fyStart + 1.
         scopedFrom('hr_festival_allowances', 'id, festival_name, bs_year, bs_month, amount, tds, status')
           .eq('employee_id', empId).in('bs_year', [fyStart, fyStart + 1]),
-        fetchYtdMap(scopedFrom, period).catch(err => ({ data: null, error: err })),
+        // A festival allowance or incentive paid in the last month counts (S798 BONUS-LEDGERS-4): the
+        // settlement trues the year up to actual income, and it is the leaver's last chance.
+        fetchYtdMap(scopedFrom, period, { includeSameMonthBonuses: true }).catch(err => ({ data: null, error: err })),
         scopedFrom('monthly_periods', 'id').eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle(),
         scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
           .eq('employee_id', empId).eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).eq('status', 'approved'),

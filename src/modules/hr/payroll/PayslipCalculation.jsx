@@ -1,7 +1,7 @@
 import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { calcAmount, isSsfContributor, toPaisa } from './payrollCompute'
 import { slabsFor } from './tds'
-import { FRESHNESS_INPUT_FIELDS } from './payrollData'
+import { FRESHNESS_INPUT_FIELDS, NET_TOLERANCE, payslipNetGap } from './payrollData'
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER, SSF_CAP } from '../payrollConstants'
 
 // How one employee's pay was worked out, step by step — the breakdown that used to be the whole of
@@ -87,6 +87,11 @@ export function driftParts(stored, live) {
   }
   if (differ(stored.tds, live.tds) && !stored.tds_overridden) {
     parts.push(`Income tax (TDS) NPR ${fmt(num(stored.tds))} → NPR ${fmt(num(live.tds))}`)
+  }
+  // S798 PAYROLL-4: the stored net is not its own parts — nothing the app writes does that.
+  const gap = payslipNetGap(stored)
+  if (Math.abs(gap) > NET_TOLERANCE) {
+    parts.push(`Net pay NPR ${nprPaisa(num(stored.net_pay))} is not this payslip's pay less its deductions (NPR ${nprPaisa(num(stored.net_pay) - gap)}) — it was changed outside the Payroll page`)
   }
   return parts
 }

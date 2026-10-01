@@ -73,3 +73,30 @@ test('a draft names who a Final Settlement already paid, and a month still runni
   expect(screen.getByText('Left out because their Final Settlement already paid Bhadra: HARI KC.')).toBeInTheDocument()
   expect(screen.getByText(/Bhadra is not over yet \(4 days left\)/)).toBeInTheDocument()
 })
+
+// S798 PAYROLL-2: the deposit lines are the month's, not the run's — a leaver's Final Settlement and
+// a festival allowance paid this month are on the SSF challan and the TDS report too.
+test('the deposit lines add the month’s settlements and bonuses, and name them', () => {
+  renderSheet({
+    extras: {
+      data: {
+        settlements: [{ employee_name: 'HARI KC', month_ssf_employee: 1650, month_ssf_employer: 3000, month_tds: 0, lump_tds: 850 }],
+        bonuses: [{ run: 'Dashain', tds: 300 }],
+      },
+    },
+  })
+  const ssf = screen.getByText(/SSF to deposit this month/).closest('div')
+  expect(ssf).toHaveTextContent('4,650')
+  expect(ssf).toHaveTextContent('includes 4,650 from the Final Settlement of HARI KC')
+  const tax = screen.getByText(/Income tax \(TDS\) to deposit this month/).closest('div')
+  expect(tax).toHaveTextContent('1,958')                                   // 808 salaries + 300 + 850
+  expect(tax).toHaveTextContent('salaries 808 · Dashain 300 · Final Settlement of HARI KC 850')
+})
+
+test('a failed read of the month’s settlements prints "could not be read", never the payroll-only figure', () => {
+  renderSheet({ extras: { data: null, error: { message: 'timed out' } } })
+  const tax = screen.getByText(/Income tax \(TDS\) to deposit this month/).closest('div')
+  expect(tax).toHaveTextContent('could not be read')
+  expect(tax).toHaveTextContent('use HR Reports → TDS Report')
+  expect(tax).not.toHaveTextContent('808')
+})
