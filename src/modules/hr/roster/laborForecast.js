@@ -3,7 +3,7 @@
 // used to be Roster.jsx's local calcHours/empHrs/dayHrs, so the board's existing Total hrs/day
 // footer keeps behaving identically after the extraction.
 import { hourlyRateOf, calcAmount } from '../payroll/payrollCompute'
-import { isOffDay, SSF_CAP, SSF_EMPLOYER_PCT, STANDARD_HOURS_PER_DAY, OT_MULTIPLIER } from '../payrollConstants'
+import { shiftKind, SSF_CAP, SSF_EMPLOYER_PCT, STANDARD_HOURS_PER_DAY, OT_MULTIPLIER } from '../payrollConstants'
 
 export function calcHours(start, end) {
   if (!start || !end) return null
@@ -48,13 +48,12 @@ export function shiftOvertimeHours(shift) {
 // managers to mark a rest day by assigning the zero-hour "Day Off" shift (so the day still shows
 // on the board, in Attendance and in Self-Service), which means a roster row is NOT evidence that
 // somebody is working — six people on Day Off used to read as "Scheduled 6, Covered" (S692).
-// Two tests, both needed: an off-type NAME (the same OFF_SHIFT_KEYWORDS Attendance's Generate
-// from Roster keys on), or an explicit zero-hour shift under any name. A shift whose hours are
-// simply unknown (`hours: null`, no times — the default "Split") is still a working shift; see
+// Two tests, both needed: the shift's kind (`shiftKind`, the database's hr_shift_kind: a day-off
+// marker or leave is not work), or an explicit zero-hour shift under any name. A shift whose hours
+// are simply unknown (`hours: null`, no times — the default "Split") is still a working shift; see
 // hasUnknownHours for how that case is surfaced instead of miscounted.
 export function isOnDutyShift(shift) {
-  if (!shift) return false
-  if (isOffDay(shift.name)) return false
+  if (shiftKind(shift) !== 'work') return false
   if (shift.hours === 0) return false
   return true
 }

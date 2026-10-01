@@ -8,6 +8,28 @@ import {
   shiftRegularHours, shiftOvertimeHours,
 } from './laborForecast'
 import { hourlyRateOf } from '../payroll/payrollCompute'
+import { shiftKind } from '../payrollConstants'
+
+// The JS copy of hr_shift_kind (20260928130000) — each line is that SQL CASE read for one row.
+describe('shiftKind', () => {
+  test('a day off is a marker: no hours, no start time, and a name that says off or holiday', () => {
+    expect(shiftKind({ name: 'Day Off', hours: 0, start_time: null })).toBe('off')
+    expect(shiftKind({ name: 'OFF DAY', hours: null, start_time: '' })).toBe('off')
+    expect(shiftKind({ name: 'Public Holiday', hours: 0, start_time: null })).toBe('off')
+    expect(shiftKind(null)).toBe('off')
+  })
+  test('leave is by name, whatever the hours', () => {
+    expect(shiftKind({ name: 'Annual Leave', hours: 8, start_time: '09:00' })).toBe('leave')
+    expect(shiftKind({ name: 'UNPAID LEAVE', hours: 0, start_time: null })).toBe('leave')
+  })
+  test('everything else works, including off or holiday inside a timed shift and a zero-hour custom type', () => {
+    expect(shiftKind({ name: 'Coffee Bar', hours: 8, start_time: '07:00' })).toBe('work')
+    expect(shiftKind({ name: 'Back Office', hours: 8, start_time: null })).toBe('work')
+    expect(shiftKind({ name: 'Holiday Duty', hours: 12, start_time: '09:00' })).toBe('work')
+    expect(shiftKind({ name: 'Day Off', hours: 8, start_time: null })).toBe('work')
+    expect(shiftKind({ name: 'Rest', hours: 0, start_time: null })).toBe('work')
+  })
+})
 import { SSF_CAP, SSF_EMPLOYER_PCT, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 
 const MONTH_DAYS = 30
@@ -88,6 +110,15 @@ describe('isOnDutyShift / hasUnknownHours', () => {
     expect(isOnDutyShift(shifts.leave)).toBe(false)  // name says leave even though hours are set
     expect(isOnDutyShift(shifts.rest)).toBe(false)   // zero hours under a non-keyword name
     expect(isOnDutyShift(null)).toBe(false)
+  })
+
+  // S798 (ATTENDANCE-7 / ROSTER-5): "off" inside a word, or "holiday" on a timed shift, is not a day off.
+  test('a working shift whose name merely contains off or holiday is on duty', () => {
+    expect(isOnDutyShift({ name: 'Coffee Bar', start_time: '07:00', end_time: '15:00', hours: 8 })).toBe(true)
+    expect(isOnDutyShift({ name: 'Back Office', start_time: null, end_time: null, hours: 8 })).toBe(true)
+    expect(isOnDutyShift({ name: 'Holiday Duty', start_time: '09:00', end_time: '21:00', hours: 12 })).toBe(true)
+    expect(isOnDutyShift({ name: 'Public Holiday', start_time: null, end_time: null, hours: 0 })).toBe(false)
+    expect(isOnDutyShift({ name: 'OFF DAY', start_time: '', end_time: '', hours: null })).toBe(false)
   })
 
   test('only a working shift with no length is "unknown hours"', () => {

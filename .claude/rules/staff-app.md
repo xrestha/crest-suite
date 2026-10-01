@@ -60,10 +60,19 @@ devices install that one.
 
 ## Rules that cost something to learn
 
-- **A day with no shift and a day whose month is unpublished are identical in the data and must
-  never look identical on screen.** `get_my_roster` only returns published days, so the *absence* of
-  a row means either. `todayView()` separates them (`unpublished` / `not-scheduled`), and the week
-  renders every calendar day rather than the rows the RPC returned.
+- **A day with no shift and an unpublished day are identical in the data and must never look
+  identical on screen.** `get_my_roster` only returns published days, so the *absence* of a row means
+  either. `todayView()` separates them (`unpublished` / `not-scheduled`), and the week renders every
+  calendar day rather than the rows the RPC returned. **Publishing is per DAY, so the test is per day**
+  (`get_my_roster_published_days` → `publishedDays`, a Set of day keys, S798): the month-level
+  `get_my_roster_publish_status` called every draft day of a part-published month "Not scheduled".
+  It stays only for cached old bundles. Both reads' errors are the roster's error.
+- **Whether a row is a day off is the database's `shift_kind`** (`rowKind`), never a name test.
+- **Today is state, not a mount-time constant** (`useBsToday`, S798): a frozen PWA unlocked the next
+  day showed yesterday as Today. A new day moves the Roster week and Home's fortnight, and
+  `loadRoster` is request-guarded so the older months' load cannot land last.
+- **`subscribeToPush` re-subscribes on a 42501 upsert** (S798): on a shared phone the browser's
+  endpoint can still be another employee's row, which RLS will not let this login take over.
 - **A failed read is not an empty period.** `employeeError.js` turns a Supabase/PostgREST code into
   one honest sentence, and each area holds its own message (`errs` map) so a failed payslip read
   cannot blank a roster that loaded fine. The old portal had one shared string and rendered a failed
@@ -110,7 +119,7 @@ preference on a `/hr/self-service` path — the admin app keeps `dark`.
 
 Every figure comes from an RPC the portal already called: `get_my_hr_payslips`,
 `get_my_leave_types`, `get_my_leave_requests`, `submit_my_leave_request`, `get_my_roster`,
-`get_my_roster_publish_status`, `get_coworker_roster`, `request_shift_swap`, `respond_shift_swap`,
+`get_my_roster_published_days` (S798; it replaced `get_my_roster_publish_status`), `get_coworker_roster`, `request_shift_swap`, `respond_shift_swap`,
 `get_my_swap_requests`, `get_my_tada_claims`, `submit_my_tada_claim`, `get_my_client_vendors`, and since
 S782 `get_my_salary_payments` (the "Paid on …" line; its failure is swallowed, never shown).
 **Keep it that way where possible** — the whole rebuild carried no migration and no Edge Function

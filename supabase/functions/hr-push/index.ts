@@ -46,9 +46,14 @@ Deno.serve(async (req) => {
     if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
 
     const { data: profile } = await admin
-      .from('profiles').select('role, client_id, hr_self_service, hr_employee_id, pos_role, ims_role, hr_role').eq('id', user.id).single()
+      .from('profiles').select('role, client_id, active_client_id, hr_self_service, hr_employee_id, pos_role, ims_role, hr_role').eq('id', user.id).single()
 
     const isCallerAdmin = profile?.role === 'admin'
+    // The outlet the caller is working in: a grouped Owner switched to a sibling outlet publishes
+    // and decides THERE, and RLS already follows active_client_id (S798, ROSTER-8). Comparing the
+    // home client_id answered 403 to every publish and swap decision at a sibling, so no one there
+    // was ever notified. Same resolution as admin-user-ops' callerClientId (S750).
+    const callerClientId = profile?.active_client_id || profile?.client_id
     // Whoever can actually reach the main Roster page: the Owner (no staff markers at all) or an
     // HR staff account. `!hr_self_service` alone used to be the whole test, which was true for POS
     // and IMS staff too — so any waiter or storekeeper of the client could fire roster-published
@@ -79,23 +84,39 @@ Deno.serve(async (req) => {
     // incrementally (e.g. one week at a time), so a month-wide notify would over-notify. ─────────
     if (action === 'notify_roster_published') {
       const { client_id, bs_year, bs_month, bs_days } = params
-      if (!(isCallerAdmin || (isCallerStaffUser && profile?.client_id === client_id))) {
+      if (!(isCallerAdmin || (isCallerStaffUser && callerClientId === client_id))) {
         return json({ error: 'Forbidden' }, 403)
       }
       if (!Array.isArray(bs_days) || bs_days.length === 0) return json({ error: 'bs_days required' }, 400)
 
-      const { data: rows } = await admin
-        .from('hr_roster')
-        .select('employee_id')
-        .eq('client_id', client_id).eq('bs_year', bs_year).eq('bs_month', bs_month).in('bs_day', bs_days)
-      const employeeIds = [...new Set((rows || []).map(r => r.employee_id))]
+      // Paged (S798, ROSTER-8): a month's publish is one row per employee per day, which passes
+      // PostgREST's 1000-row cap at ~33 staff, and the rows past it were simply never notified. A
+      // failed read is an error the page reports, never "nobody to notify".
+      const employeeSet = new Set<string>()
+      for (let from = 0; ; from += 1000) {
+        const { data: page, error: rosterErr } = await admin
+          .from('hr_roster')
+          .select('id, employee_id')
+          .eq('client_id', client_id).eq('bs_year', bs_year).eq('bs_month', bs_month).in('bs_day', bs_days)
+          .order('id').range(from, from + 999)
+        if (rosterErr) return json({ error: rosterErr.message }, 500)
+        for (const r of page || []) employeeSet.add(r.employee_id)
+        if (!page || page.length < 1000) break
+      }
+      const employeeIds = [...employeeSet]
       if (employeeIds.length === 0) return json({ success: true, notified: 0 })
 
-      const { data: profiles } = await admin
-        .from('profiles').select('id')
-        .eq('client_id', client_id).eq('hr_self_service', true).in('hr_employee_id', employeeIds)
+      // In chunks: the ids travel in the URL.
+      const profiles: { id: string }[] = []
+      for (let i = 0; i < employeeIds.length; i += 100) {
+        const { data: chunk, error: profErr } = await admin
+          .from('profiles').select('id')
+          .eq('client_id', client_id).eq('hr_self_service', true).in('hr_employee_id', employeeIds.slice(i, i + 100))
+        if (profErr) return json({ error: profErr.message }, 500)
+        profiles.push(...(chunk || []))
+      }
 
-      for (const p of profiles || []) {
+      for (const p of profiles) {
         await sendToProfile(p.id, {
           title: 'Roster Published',
           body: 'Your work schedule has been published — open Self-Service to view it.',
@@ -108,7 +129,7 @@ Deno.serve(async (req) => {
           tag: 'crest-hr-roster',
         })
       }
-      return json({ success: true, notified: (profiles || []).length })
+      return json({ success: true, notified: profiles.length })
     }
 
     // ── A requester just created a swap request — notify the target coworker ──────────────────
@@ -170,7 +191,7 @@ Deno.serve(async (req) => {
       const { request_id } = params
       const { data: swap } = await admin.from('hr_shift_swap_requests').select('*').eq('id', request_id).single()
       if (!swap) return json({ error: 'Not found' }, 404)
-      if (!(isCallerAdmin || (isCallerStaffUser && profile?.client_id === swap.client_id))) {
+      if (!(isCallerAdmin || (isCallerStaffUser && callerClientId === swap.client_id))) {
         return json({ error: 'Forbidden' }, 403)
       }
 

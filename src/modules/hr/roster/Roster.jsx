@@ -468,6 +468,13 @@ export default function Roster() {
   async function publishDays(dayGroups) {
     if (!clientId || publishing) return
     setPublishing(true)
+    // The days are published either way; a manager still needs to know staff were not told (S798,
+    // ROSTER-8), because the console was the only place that said so.
+    const notNotified = (g, err) => {
+      console.error('roster publish notification failed:', err)
+      const a = asActionError(err)
+      setBoardError({ text: `${BS_MONTHS[g.bsMonth - 1]} ${g.bsYear} is published, but staff were not sent a notification. They will see it when they next open Crest Staff.`, detail: a.detail })
+    }
     for (const g of dayGroups) {
       const rows = g.bsDays.map(d => ({
         bs_year: g.bsYear, bs_month: g.bsMonth, bs_day: d,
@@ -484,8 +491,7 @@ export default function Roster() {
       // Fire-and-forget, but not silent: a notification failure does not unpublish anything.
       void supabase.functions.invoke('hr-push', {
         body: { action: 'notify_roster_published', client_id: clientId, bs_year: g.bsYear, bs_month: g.bsMonth, bs_days: g.bsDays },
-      }).then(({ error: pushErr }) => { if (pushErr) console.error('roster publish notification failed:', pushErr) },
-        err => console.error('roster publish notification failed:', err))
+      }).then(({ error: pushErr }) => { if (pushErr) notNotified(g, pushErr) }, err => notNotified(g, err))
     }
     await loadPublishedDays()
     setPublishing(false)
@@ -578,9 +584,8 @@ export default function Roster() {
       }
     }
 
-    const existingRows = cells
-      .map(c => roster[rKey(c.year, c.month, c.day, c.empId)])
-      .filter(Boolean)
+    // What each selected cell held before the optimistic update below empties it.
+    const cellRows = cells.map(c => ({ c, row: roster[rKey(c.year, c.month, c.day, c.empId)] }))
 
     // Optimistic update
     setRoster(prev => {
@@ -600,12 +605,33 @@ export default function Roster() {
     setRangeAnchor(null)
 
     if (shiftTypeId === null) {
-      const ids = existingRows.map(r => r.id).filter(Boolean)
-      if (ids.length > 0) {
-        const { error: clearErr } = await scopedDelete('hr_roster').in('id', ids)
+      // Delete by id AND by whose day the board shows it as (S798, ROSTER-2). An approved swap moves
+      // a row to the coworker while a board that has not reloaded still shows it as the old owner's,
+      // so a delete by id alone took the coworker's shift. A row that no longer matches is left
+      // alone, and the board says so and reloads.
+      const groups = new Map() // `${empId}:${year}:${month}` -> { empId, year, month, ids, days }
+      for (const { c, row } of cellRows) {
+        if (!row?.id) continue
+        const k = `${c.empId}:${c.year}:${c.month}`
+        if (!groups.has(k)) groups.set(k, { empId: c.empId, year: c.year, month: c.month, ids: [], days: [] })
+        groups.get(k).ids.push(row.id)
+        groups.get(k).days.push(c.day)
+      }
+      const wanted = [...groups.values()].reduce((n, g) => n + g.ids.length, 0)
+      if (wanted > 0) {
+        const results = await Promise.all([...groups.values()].map(g => scopedDelete('hr_roster')
+          .in('id', g.ids).eq('employee_id', g.empId).eq('bs_year', g.year).eq('bs_month', g.month).in('bs_day', g.days)
+          .select('id')))
+        const clearErr = results.find(r => r.error)?.error
         if (clearErr) {
           console.error('roster clear failed:', clearErr)
           { const a = asActionError(clearErr); setBoardError({ text: 'That shift was not cleared — the board shows what is stored. ' + a.text, detail: a.detail }) }
+          loadRoster()
+          return
+        }
+        const cleared = results.reduce((n, r) => n + (r.data?.length || 0), 0)
+        if (cleared < wanted) {
+          setBoardError({ text: 'Some of those shifts had changed since the board loaded (a swap was approved, or someone else edited the roster) and were left alone. The board now shows what is stored.' })
           loadRoster()
           return
         }
@@ -2178,7 +2204,7 @@ export default function Roster() {
           swap. Its history spans every month, so it never belonged under the board's own
           week/month controls (it read as this week's news; it isn't) ── */}
       {tab === 'swaps' && (
-        <SwapRequestsPanel employees={employees} shiftMap={shiftMap} onPendingCount={setPendingSwaps} />
+        <SwapRequestsPanel employees={employees} shiftMap={shiftMap} onPendingCount={setPendingSwaps} onDecided={loadRoster} />
       )}
     </div>
   )

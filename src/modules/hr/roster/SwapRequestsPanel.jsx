@@ -39,7 +39,7 @@ const STATUS_LABEL = {
   approved: 'Approved', rejected_by_target: 'Declined by coworker', rejected_by_admin: 'Rejected', cancelled: 'Cancelled',
 }
 
-export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount }) {
+export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount, onDecided }) {
   const { profile, clientId } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
 
@@ -109,11 +109,15 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
       .then(({ data }) => setAdminNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name]))))
   }, [clientId])
 
-  // The decision notification is fire-and-forget: a failure to notify does not undo the decision.
-  function notifyDecision(swap) {
+  // The decision notification is fire-and-forget: a failure to notify does not undo the decision,
+  // but the manager is told (S798, ROSTER-8), since the two employees are waiting on it.
+  function notifyDecision(swap, verb) {
+    const notNotified = err => {
+      console.error('swap decision notification failed:', err)
+      setMsg(`The swap was ${verb}, but the two employees were not sent a notification. Tell them yourself.`)
+    }
     void supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_admin_decision', request_id: swap.id } })
-      .then(({ error }) => { if (error) console.error('swap decision notification failed:', error) },
-        err => console.error('swap decision notification failed:', err))
+      .then(({ error }) => { if (error) notNotified(error) }, notNotified)
   }
 
   async function approve(swap) {
@@ -127,8 +131,11 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
       load()
       return
     }
-    notifyDecision(swap)
+    notifyDecision(swap, 'approved')
     load()
+    // An approval moves rows on the roster, so the Board behind this tab must reload (S798,
+    // ROSTER-2): Clear on a stale cell would act on a shift that now belongs to the coworker.
+    if (onDecided) onDecided()
   }
 
   async function reject(swap) {
@@ -141,8 +148,9 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
     setBusyId(null)
     if (error) { setMsg('That swap may not have been rejected — the list has been refreshed. ' + errorLine(error)); load(); return }
     if (!data?.length) { setMsg('That swap is no longer waiting for approval — it was withdrawn, or someone else decided it first. The list has been refreshed.'); load(); return }
-    notifyDecision(swap)
+    notifyDecision(swap, 'rejected')
     load()
+    if (onDecided) onDecided()
   }
 
   // In BS, read in Nepal (S749) — it was the runtime's AD date, the one date on the Roster page not

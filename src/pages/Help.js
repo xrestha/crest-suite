@@ -386,6 +386,7 @@ const HR_FEATURES = [
       'The Shifts tab lets you rename, recolour, and adjust the hours of any shift to match your venue\'s terminology',
       'For a long shift, fill in Normal hrs on the Shift Types tab: Full Day 8am–8pm is 12 hours, and 9 normal hours makes the other 3 overtime — Attendance → Generate from Roster fills that OT in, and the Labor Forecast prices it at the overtime rate. Leave it blank when the whole shift is normal time',
       'To mark someone\'s recurring day off, assign the "Day Off" (or any zero-hour, off-named) shift type on the Roster board for those dates — Attendance → Generate from Roster then picks it up as an Off day automatically',
+      'A shift type is a day off only when it has no hours, no start time, and a name that says Off or Holiday ("Day Off", "Public Holiday"). A "Coffee Bar" or a 9-to-9 "Holiday Duty" is a working shift: staff can swap it, Crest Staff shows it as work, and Import from machine marks a no-show Absent',
       '🖨 Print shows the Company Name/Address, the period, and the shift legend above the board — no Excel export, print/Save-as-PDF only',
       'Publish is per day — self-service employees never see a draft day, only what you\'ve explicitly published, even if the rest of the month is still being worked on',
       'Publish from Weekly view to release just that week; Publish from Monthly view releases every day in the visible month in one click — use whichever fits how you plan',

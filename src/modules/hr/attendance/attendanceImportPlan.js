@@ -92,8 +92,6 @@ function bsOrdinal(iso) {
   return bs.year * 10000 + bs.month * 100 + bs.day
 }
 
-const LEAVE_OR_HOLIDAY = new Set(['paid_leave', 'unpaid_leave', 'holiday'])
-
 /**
  * The changes an import makes, and a count of everything it did not.
  *
@@ -192,10 +190,12 @@ export function planImport({ people, coverage, matches, employees, records, peri
       // No punch: the roster decides (decision 2).
       if (existing) { counts.kept += 1; continue }
       if (!(key in rosterByKey)) { counts.blank += 1; continue }
+      // A working shift with no punch is Absent, whatever its name (S798, ATTENDANCE-7): "Coffee Bar"
+      // and a timed "Holiday Duty" are shifts. Only a day-off marker or a leave shift becomes its
+      // zeroHourStatus, so only a "holiday" marker can make a paid Holiday.
       const shift = shiftTypesById[rosterByKey[key]]
-      const status = shift?.name ? zeroHourStatus(shift.name) : 'weekly_off'
-      if (isOnDutyShift(shift) && !LEAVE_OR_HOLIDAY.has(status)) change('absent', withStatus(base, 'absent'))
-      else change('off', withStatus(base, status))
+      if (isOnDutyShift(shift)) change('absent', withStatus(base, 'absent'))
+      else change('off', withStatus(base, shift?.name ? zeroHourStatus(shift.name) : 'weekly_off'))
     }
   }
   return { changes, conflicts, byEmployee, skipped }

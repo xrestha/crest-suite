@@ -3,7 +3,9 @@
 // so re-running this after manual overrides (leave, OT, corrections) never clobbers them.
 // There's no more company-wide "weekly off weekday" — off days are whatever the roster actually
 // says for that employee on that day, same source of truth SelfServiceHome.jsx already uses to
-// grey out an employee's own off days (isOffDay/OFF_SHIFT_KEYWORDS).
+// grey out an employee's own off days (shift_kind / `shiftKind`, S798). Generate keys on HOURS, so a
+// shift with hours is Present whatever its name; `shiftKind` agrees, except that a leave-named
+// shift with hours set is leave there.
 import { shiftHours, shiftOvertimeHours } from '../roster/laborForecast'
 
 // The attendance status a zero-hour roster marker stands for. Before S742 every name containing

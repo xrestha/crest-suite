@@ -1,6 +1,5 @@
 import { ArrowRightLeft } from 'lucide-react'
-import { isOffDay } from '../payrollConstants'
-import { dayKey } from './todayView'
+import { dayKey, rowKind } from './todayView'
 
 // One Sunday–Saturday week of the employee's own roster.
 //
@@ -11,7 +10,7 @@ import { dayKey } from './todayView'
 // It iterates the seven calendar days, not the rows the RPC returned — get_my_roster only returns
 // days that exist and are published, so rendering its result directly would answer "am I working
 // on Thursday?" by silently omitting Thursday.
-export default function RosterWeek({ days, roster, publishMap, today, onRequestSwap, labelFor }) {
+export default function RosterWeek({ days, roster, publishedDays, today, onRequestSwap, labelFor }) {
   const scheduled = days.filter(d => roster.get(dayKey(d))).length
 
   return (
@@ -24,8 +23,9 @@ export default function RosterWeek({ days, roster, publishMap, today, onRequestS
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {days.map(d => {
           const row = roster.get(dayKey(d))
-          const published = publishMap.get(`${d.bsYear}-${d.bsMonth}`)
-          const off = row && isOffDay(row.shift_type_name)
+          // Per day (S798): a week can be half published, and its draft days say so.
+          const published = publishedDays.has(dayKey(d))
+          const off = row && rowKind(row) !== 'work'
           const isToday = d.bsYear === today.year && d.bsMonth === today.month && d.bsDay === today.day
           const cls = ['ss-day', !row && 'ss-day--blank', off && 'ss-day--off', isToday && 'ss-day--today']
             .filter(Boolean).join(' ')

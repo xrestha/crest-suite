@@ -71,7 +71,7 @@ export default function SelfServiceToday({
           <Quiet
             Icon={CalendarClock}
             title="Not published yet"
-            note="Your manager hasn't published this month's roster. It will appear here as soon as they do."
+            note="Your manager hasn't published today's roster yet. It will appear here as soon as they do."
           />
         ) : today.state === 'not-scheduled' ? (
           <Quiet Icon={CalendarClock} title="Not scheduled today" note="You are not on the roster for today." />

@@ -509,12 +509,17 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
 - **Shift types: unique name per client, and no delete while the roster uses one**
   (`hr_shift_types_guard_delete`). Never reintroduce a destructive tidy-up on a read path. A seed runs
   only after a successful read, and a 23505 on the seed is a second tab, answered by re-reading.
+- **What a shift IS has one answer: `shiftKind()` (`payrollConstants.js`), the JS copy of
+  `hr_shift_kind`** (S798, ATTENDANCE-7 / ROSTER-5). A day off is a marker: no hours, no start time,
+  and a name that says off or holiday; leave is by name; everything else is work, so "Coffee Bar",
+  "Back Office" and a timed "Holiday Duty" are shifts. The Staff app reads `shift_kind` from
+  `get_my_roster` / `get_coworker_roster` (`rowKind`, `todayView.js`). A change to the rule changes
+  `hr_shift_kind` and `shiftKind` in the same commit. Never a name substring test again.
 - **A roster row is not a person on duty** (S692). `computeScheduledCount` counts heads through
-  `isOnDutyShift` (`laborForecast.js`): an off-type NAME (`isOffDay` / `OFF_SHIFT_KEYWORDS` in
-  `payrollConstants.js`, a substring test also used by the Staff app) or an explicit `hours: 0` is
-  off duty. A working shift with UNKNOWN hours (the default "Split": `hours: null`, no times) is on
-  duty and flagged unpriced (`hasUnknownHours`). Generate from Roster does not use it (it keys on
-  hours), so a "Day Off" type given hours is off duty here and Present there.
+  `isOnDutyShift` (`laborForecast.js`): a shift whose kind is not work, or an explicit `hours: 0`, is
+  off duty, and Import from machine marks a no-show Absent only on an on-duty shift. A working shift
+  with UNKNOWN hours (the default "Split": `hours: null`, no times) is on duty and flagged unpriced
+  (`hasUnknownHours`).
 - **A swap approval is `approve_shift_swap(p_request_id)`**: SECURITY INVOKER, one transaction, every
   UPDATE's row count asserted (a write RLS filters out is 0 rows, not an error). Same day → trade
   `shift_type_id`. Different days → trade `employee_id`, and a Day Off trades the other way
@@ -522,7 +527,13 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
   (`swap_day_taken`, raised at request time too), and the traded rows must both be working shifts.
 - **`request_shift_swap` refuses** a past day, an unpublished day, and a shift already in an open swap
   (`swap_day_past` / `swap_day_unpublished` / `swap_already_requested`). The Staff app's picker hides
-  past days.
+  past days and any day whose `shift_kind` is not work.
+- **A swap decision reloads the Board** (`SwapRequestsPanel`'s `onDecided`), and **Clear deletes on id
+  AND the employee and day the cell shows**, then counts what went (S798, ROSTER-2): an approved swap
+  moves a row to the coworker, so a delete by id alone off a stale board took the coworker's shift.
+- **hr-push resolves the caller's outlet as `active_client_id || client_id`** (S798, ROSTER-8), pages
+  the publish fan-out, and returns a read error rather than "nobody to notify". A page that invokes it
+  says "published, but staff were not notified" on a failure, never console only.
 - **Shift Swaps is the Roster page's own tab** (S633), and its history is never period-scoped. The pending
   count rides on the tab button (`pending_admin` only, the `useHrApprovalCounts.js` filter), fetched by
   `Roster.jsx` with a `head: true` query, because the panel mounts only once the tab is opened.
@@ -537,7 +548,7 @@ Why: the roster is read as evidence of who works, by payroll, the forecast and t
 row that is not a shift must never count as one.
 
 History: #s633-shift-swaps-tab, #s692-labor-forecast, #s749-roster-attendance-leave-overtime,
-#s791-hss-ports
+#s791-hss-ports; S798 stage 2d is in the CHANGELOG (migration `20261001180000`)
 
 ## Labor Forecast and the labour standard
 

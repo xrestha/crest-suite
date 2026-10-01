@@ -42,14 +42,30 @@ export async function subscribeToPush(profileId, clientId) {
     })
   }
 
-  const json = subscription.toJSON()
-  const { error } = await supabase.from('push_subscriptions').upsert({
-    profile_id: profileId,
-    client_id: clientId,
-    endpoint: json.endpoint,
-    p256dh: json.keys.p256dh,
-    auth: json.keys.auth,
-  }, { onConflict: 'endpoint' })
+  const save = sub => {
+    const json = sub.toJSON()
+    return supabase.from('push_subscriptions').upsert({
+      profile_id: profileId,
+      client_id: clientId,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+    }, { onConflict: 'endpoint' })
+  }
+  let { error } = await save(subscription)
+  // On a shared phone the browser's subscription can still be registered to the employee who used it
+  // before (S798, SELF-SERVICE-5): the endpoint is unique, and RLS will not let this login take over
+  // their row, so the upsert is refused (42501) on every try. Drop the browser subscription and make
+  // a fresh one, whose endpoint is new. The old row then points at a dead endpoint, which hr-push
+  // prunes on its first 404/410, so the previous employee's notices stop reaching this phone too.
+  if (error?.code === '42501') {
+    await subscription.unsubscribe()
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
+    })
+    ;({ error } = await save(subscription))
+  }
   if (error) throw error
 }
 

@@ -257,6 +257,21 @@ describe('planImport', () => {
     expect(run().byEmployee['e-sarita'].blank).toBe(3)
   })
 
+  // S798 (ATTENDANCE-7): a no-show on "Coffee Bar" or a timed "Holiday Duty" is a missed shift, not Off
+  // or a paid Holiday; only a holiday MARKER still becomes Holiday.
+  it('marks a no-show Absent on a working shift whose name contains off or holiday', () => {
+    const named = {
+      ...shiftTypesById,
+      coffee: { id: 'coffee', name: 'Coffee Bar', hours: 8, start_time: '07:00' },
+      duty: { id: 'duty', name: 'Holiday Duty', hours: 12, start_time: '09:00' },
+      ph: { id: 'ph', name: 'Public Holiday', hours: 0, start_time: null },
+    }
+    const plan = planImport({ ...base, shiftTypesById: named, records: {}, rosterByKey: { 'e-sarita:3': 'coffee', 'e-sarita:10': 'duty', 'e-sarita:15': 'ph' } })
+    expect(find(plan, 'e-sarita:3').kind).toBe('absent')
+    expect(find(plan, 'e-sarita:10').kind).toBe('absent')
+    expect(find(plan, 'e-sarita:15').cell.status).toBe('holiday')
+  })
+
   it('changes a Present day\'s times, keeps its own break, and never touches leave', () => {
     const records = {
       'e-sarita:2': { employee_id: 'e-sarita', bs_day: 2, status: 'present', start_time: '11:00', end_time: '20:00', break_minutes: 30 },

@@ -1,12 +1,12 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { BS_MONTHS, adToBs, adToBsSafe, formatAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { BS_MONTHS, adToBs, adToBsSafe, formatAd, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount, tadaItemsTotal, tadaLineAmount, acceptTadaAmount, tadaDatesError } from '../tada/tadaShared'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -15,14 +15,16 @@ import PayslipBody from '../payroll/PayslipBody'
 import SelfServiceShell, { TABS } from './SelfServiceShell'
 import SelfServiceToday from './SelfServiceToday'
 import RosterWeek from './RosterWeek'
-import { todayView, nextShift, pendingSwapsForMe } from './todayView'
+import { todayView, nextShift, pendingSwapsForMe, rowKind } from './todayView'
+import { useBsToday } from './useBsToday'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { employeeErrorText } from './employeeError'
 import { useStaffAppManifest } from './useStaffApp'
 import { rememberedStaffClient } from './staffClient'
 import { signOutThisDevice } from '../../../shared/deviceSignOut'
 import { unsubscribeFromPush } from '../../../utils/webPush'
 import { withTimeout } from '../../../utils/withTimeout'
-import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS, isOffDay } from '../payrollConstants'
+import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS } from '../payrollConstants'
 import { methodLabel } from '../payroll/salaryPayments'
 import './selfService.css'
 
@@ -146,8 +148,17 @@ export default function SelfServiceHome() {
   const tab = TABS.some(t => t.key === urlTab) ? urlTab : 'home'
   const setTab = key => setSearchParams(key === 'home' ? {} : { tab: key })
 
-  const today = useMemo(() => getBsToday(), [])
+  // The week on the Roster tab and the fortnight Home is built from both move to the current week
+  // when the app comes back on a later day (S798, SELF-SERVICE-3): a frozen PWA unlocked the next
+  // evening used to show the day it was left on as Today. Their roster reload follows from the days.
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const [homeStart, setHomeStart] = useState(() => startOfWeek(new Date()))
+  const onNewDay = useCallback(() => {
+    const start = startOfWeek(new Date())
+    setWeekStart(start)
+    setHomeStart(start)
+  }, [])
+  const today = useBsToday(onNewDay)
 
   const [payslips, setPayslips] = useState(null)
   // payslip id → { paid_amount, last_paid_on, last_method } (S782). Only what the manager recorded;
@@ -175,7 +186,7 @@ export default function SelfServiceHome() {
   const [leaveRequests, setLeaveRequests] = useState(null)
   const [roster, setRoster] = useState(new Map())          // Map<"year-month-day", row>
   const [rosterLoaded, setRosterLoaded] = useState(false)
-  const [publishMap, setPublishMap] = useState(new Map())  // Map<"year-month", boolean>
+  const [publishedDays, setPublishedDays] = useState(new Set())  // Set<"year-month-day">, per day (S798)
 
   const [requestTab, setRequestTab] = useState('leave')
   const [done, setDone] = useState('')
@@ -192,6 +203,7 @@ export default function SelfServiceHome() {
   const [tadaOpen, setTadaOpen] = useState(false)
   const [tadaClaims, setTadaClaims] = useState(null)
   const [tadaVendors, setTadaVendors] = useState([])
+  const [tadaVendorsFailed, setTadaVendorsFailed] = useState(false)
   const [tadaForm, setTadaForm] = useState(emptyTadaForm)
   const [tadaPurposeMode, setTadaPurposeMode] = useState('preset')       // 'preset' | 'custom'
   const [tadaStartPointMode, setTadaStartPointMode] = useState('preset') // 'preset' | 'custom'
@@ -246,7 +258,7 @@ export default function SelfServiceHome() {
   // can still answer on a Saturday instead of going quiet at the week boundary. Both read the same
   // maps, so this is at most one extra get_my_roster pair, never a second source of truth.
   const weekDays = useMemo(() => cellsFrom(weekStart, 7), [weekStart])
-  const homeDays = useMemo(() => cellsFrom(startOfWeek(new Date()), 14), [])
+  const homeDays = useMemo(() => cellsFrom(homeStart, 14), [homeStart])
 
   const monthsNeeded = useMemo(() => {
     const map = new Map()
@@ -294,27 +306,38 @@ export default function SelfServiceHome() {
     if (!leaveTypeId && types?.length > 0) setLeaveTypeId(types[0].id)
   }, [leaveTypeId])
 
+  // A resume on a new day reloads for the new weeks while the resume's own refetch may still be in
+  // flight for the old ones, so only the latest load may set the roster.
+  const rosterReq = useLatestRequest()
+  const rosterSeq = useRef(0)
   const loadRoster = useCallback(async () => {
+    rosterSeq.current += 1
+    const key = rosterReq.begin(rosterSeq.current)
     const results = await Promise.all(monthsNeeded.map(async ({ year, month }) => {
-      const [{ data, error }, { data: published }] = await Promise.all([
+      // Publishing is per day, so the app asks which days are published (S798, ROSTER-4): the
+      // month-level answer called every draft day of a part-published month "not scheduled".
+      const [roster, published] = await Promise.all([
         supabase.rpc('get_my_roster', { p_bs_year: year, p_bs_month: month }),
-        supabase.rpc('get_my_roster_publish_status', { p_bs_year: year, p_bs_month: month }),
+        supabase.rpc('get_my_roster_published_days', { p_bs_year: year, p_bs_month: month }),
       ])
-      return { year, month, rows: data || [], error, published: !!published }
+      // Either read failing is the roster's failure (SELF-SERVICE-4): a dropped publish read used to
+      // say "not published yet" over shifts that had loaded.
+      return { year, month, rows: roster.data || [], days: published.data || [], error: roster.error || published.error }
     }))
+    if (!rosterReq.isCurrent(key)) return
     const failed = results.find(r => r.error)
     setErrFor('roster', failed ? employeeErrorText(failed.error) : '')
     if (failed) return
     const rowMap = new Map()
-    const pubMap = new Map()
+    const pubDays = new Set()
     results.forEach(r => {
-      pubMap.set(`${r.year}-${r.month}`, r.published)
+      r.days.forEach(d => pubDays.add(`${r.year}-${r.month}-${d}`))
       r.rows.forEach(row => rowMap.set(`${r.year}-${r.month}-${row.bs_day}`, row))
     })
     setRoster(rowMap)
-    setPublishMap(pubMap)
+    setPublishedDays(pubDays)
     setRosterLoaded(true)
-  }, [monthsNeeded])
+  }, [monthsNeeded, rosterReq])
 
   const loadSwapRequests = useCallback(async () => {
     const { data, error } = await supabase.rpc('get_my_swap_requests')
@@ -323,14 +346,17 @@ export default function SelfServiceHome() {
   }, [])
 
   const loadTada = useCallback(async () => {
-    const [{ data, error }, { data: vends }] = await Promise.all([
+    const [{ data, error }, vendors] = await Promise.all([
       supabase.rpc('get_my_tada_claims'),
       supabase.rpc('get_my_client_vendors'),
     ])
     setErrFor('tada', error ? employeeErrorText(error) : '')
+    // The supplier list is a shortcut in the form, so its failure is one line there, never the
+    // claims' error (S798, SELF-SERVICE-4). It used to leave the picker silently empty.
+    setTadaVendorsFailed(!!vendors.error)
+    if (!vendors.error) setTadaVendors(vendors.data || [])
     if (error) return
     setTadaClaims(data || [])
-    setTadaVendors(vends || [])
   }, [])
 
   // Home is built from the roster, the swap queue and the latest payslip, so those three load
@@ -377,9 +403,10 @@ export default function SelfServiceHome() {
   const coworkerNames = [...new Map(coworkerRoster.map(r => [r.employee_id, r.full_name])).entries()]
   // Not a day already gone — request_shift_swap refuses one (S749), so the picker does not offer it.
   // Nor a coworker's Day Off or leave (S791): there is no shift on it to take, and the request is
-  // refused for one. The same name test the week view uses for the requester's own days.
+  // refused for one. The database's own shift kind (S798), the answer request_shift_swap gives, so a
+  // "Coffee Bar" or "Holiday Duty" shift can be offered.
   const coworkerDays = coworkerRoster.filter(r => r.employee_id === swapTargetEmpId
-    && !isOffDay(r.shift_type_name)
+    && rowKind(r) === 'work'
     && (swapDay.bsYear * 10000 + swapDay.bsMonth * 100 + r.bs_day) >= (today.year * 10000 + today.month * 100 + today.day))
 
   async function submitSwapRequest() {
@@ -517,8 +544,8 @@ export default function SelfServiceHome() {
   }
 
   const swapsForMe = pendingSwapsForMe(swapRequests, profile.hr_employee_id)
-  const todayState = todayView({ days: homeDays, roster, publishMap, today })
-  const next = nextShift({ days: homeDays, roster, publishMap, today })
+  const todayState = todayView({ days: homeDays, roster, publishedDays, today })
+  const next = nextShift({ days: homeDays, roster, publishedDays, today })
 
   // Printing hides the app chrome (body.ss-printing in selfService.css) so the sheet prints alone.
   function savePayslip(slip) {
@@ -586,7 +613,7 @@ export default function SelfServiceHome() {
             <RosterWeek
               days={weekDays}
               roster={roster}
-              publishMap={publishMap}
+              publishedDays={publishedDays}
               today={today}
               onRequestSwap={openSwapRequest}
               labelFor={labelFor}
@@ -837,14 +864,18 @@ export default function SelfServiceHome() {
             <div className="ss-field">
               <label htmlFor="ss-tada-destination">Destination</label>
               <input id="ss-tada-destination" style={inp} placeholder="e.g. Pokhara" value={tadaForm.destination} onChange={e => setTada('destination', e.target.value)} />
-              {tadaForm.trip_purpose === PURCHASE_PURPOSE && (
+              {tadaForm.trip_purpose === PURCHASE_PURPOSE && (tadaVendorsFailed ? (
+                <p role="status" style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>
+                  Could not load suppliers. Type the destination instead.
+                </p>
+              ) : (
                 <SearchableSelect
                   touch
                   options={tadaVendors.map(v => ({ value: v.id, label: v.name }))}
                   value="" onChange={vId => { const v = tadaVendors.find(x => x.id === vId); if (v) setTada('destination', v.name) }}
                   placeholder="🏬 Or pick a registered vendor…"
                 />
-              )}
+              ))}
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>

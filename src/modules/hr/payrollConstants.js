@@ -153,11 +153,22 @@ export const ATTENDANCE_STATUSES = [
   { key: 'holiday',           label: 'Holiday',             short: 'H',   color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
 ]
 
-// A roster shift type whose name suggests it marks a non-working day (e.g. "OFF DAY", "Day Off",
-// "LEAVE", "Public Holiday") rather than an actual shift — matched as a substring, not an exact
-// name, since clients phrase these differently. Shared by attendanceFromRoster.js (deciding
-// whether a zero-hour roster row should generate a 'weekly_off' vs 'holiday' attendance row) and
-// SelfServiceHome.jsx (highlighting an employee's own off days on their roster view).
-export const OFF_SHIFT_KEYWORDS = ['off', 'leave', 'holiday']
-export const isOffDay = name => !name || OFF_SHIFT_KEYWORDS.some(k => name.trim().toLowerCase().includes(k))
+// What a roster shift IS: 'off', 'leave' or 'work'. The JS copy of the database's hr_shift_kind
+// (20260928130000), which request_shift_swap and approve_shift_swap decide with, so the Staff app,
+// the Labor Forecast and Import from machine give the answer the swap rules give (S798, ATTENDANCE-7
+// / ROSTER-5). It used to be a substring test on the name alone, so "Coffee Bar" and "Back Office"
+// (they contain "off") and a 12-hour "Holiday Duty" were all days off.
+// A day off is a MARKER: no hours, no start time, and a name that says off or holiday ("Day Off",
+// "OFF DAY", "Public Holiday"). Leave is by name. Everything else is work, including a zero-hour type
+// under any other name ("Rest"), which isOnDutyShift then keeps off the floor by its hours.
+// `shift` is an hr_shift_types row ({ name, hours, start_time }); no shift type at all is 'off'.
+export function shiftKind(shift) {
+  if (!shift) return 'off'
+  const name = String(shift.name || '').toLowerCase()
+  if (name.includes('leave')) return 'leave'
+  const noHours = !(Number(shift.hours) > 0)
+  const noStart = !String(shift.start_time || '').trim()
+  if (noHours && noStart && /off|holiday/.test(name)) return 'off'
+  return 'work'
+}
 
