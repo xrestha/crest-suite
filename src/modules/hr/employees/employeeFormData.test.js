@@ -1,4 +1,4 @@
-import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, normaliseEmployeeField, rehireNeedsNewJoinDate } from './employeeFormData'
+import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, endsBeforeJoining, normaliseEmployeeField, rehireNeedsNewJoinDate, staleRehireEndDate } from './employeeFormData'
 
 const KEYS = [
   'employee_code', 'full_name', 'phone', 'status', 'end_date', 'supervisor_id', 'children_count',
@@ -87,5 +87,33 @@ describe('rehireNeedsNewJoinDate', () => {
   test('off payroll, or never settled, there is nothing to refuse', () => {
     expect(rehireNeedsNewJoinDate({ settledLastDay, joinDate: '2026-06-15', status: 'resigned' })).toBe(null)
     expect(rehireNeedsNewJoinDate({ settledLastDay: null, joinDate: '2026-06-15', status: 'active' })).toBe(null)
+  })
+})
+
+describe('a rehire clears the old End Date (S798 H27)', () => {
+  const base = { settledLastDay: '2026-07-01', joinDate: '2026-10-18', endDate: '2026-07-01', status: 'active' }
+
+  it('returns the settled last day stamped as the End Date, so the save clears it', () => {
+    expect(staleRehireEndDate(base)).toBe('2026-07-01')
+    expect(staleRehireEndDate({ ...base, endDate: '2026-06-15' })).toBe('2026-06-15')
+    expect(staleRehireEndDate({ ...base, status: 'probation' })).toBe('2026-07-01')
+  })
+
+  it('leaves a real End Date of the new employment alone', () => {
+    expect(staleRehireEndDate({ ...base, endDate: '2027-04-13' })).toBe(null)
+  })
+
+  it('does nothing until the join date moves past the settled last day, or off payroll, or unread', () => {
+    expect(staleRehireEndDate({ ...base, joinDate: '2026-07-01' })).toBe(null)
+    expect(staleRehireEndDate({ ...base, status: 'resigned' })).toBe(null)
+    expect(staleRehireEndDate({ ...base, settledLastDay: null })).toBe(null)
+    expect(staleRehireEndDate({ ...base, settledLastDay: { error: 'x' } })).toBe(null)
+    expect(staleRehireEndDate({ ...base, endDate: '' })).toBe(null)
+  })
+
+  it('refuses an End Date before the Join Date', () => {
+    expect(endsBeforeJoining('2026-10-18', '2026-07-01')).toBe(true)
+    expect(endsBeforeJoining('2026-10-18', '2026-10-18')).toBe(false)
+    expect(endsBeforeJoining('2026-10-18', '')).toBe(false)
   })
 })

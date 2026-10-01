@@ -9,7 +9,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { formatAd } from '../../../utils/bsCalendar'
-import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, rehireNeedsNewJoinDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
+import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, endsBeforeJoining, rehireNeedsNewJoinDate, staleRehireEndDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
 
 // The fields THIS form owns. Pay basis, basic salary, bank and SSF are not here on purpose: Pay
 // Setup owns them, and until S748 this form carried them anyway (spread in from the loaded row) and
@@ -150,9 +150,13 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     const last = rehireNeedsNewJoinDate({ settledLastDay, joinDate: nextJoin, status: nextStatus })
     if (!last) return ''
     return `${employee.full_name} left in a finalized Final Settlement (last working day ${last}), which already paid their last month. ` +
-      'To take them back, set a Join Date after that day — the rehire is a new employment and is paid from then. ' +
-      'If the settlement was a mistake, reopen it in Final Settlement instead.'
+      'To take them back, set a Join Date after that day — the rehire is a new employment and is paid from then; ' +
+      'saving also clears the old End Date. If the settlement was a mistake, reopen it in Final Settlement instead.'
   }
+
+  // The old employment's End Date, which this save clears (S798 H27) — shown under the dates before
+  // Save, so the change is said rather than made quietly.
+  const staleEnd = staleRehireEndDate({ settledLastDay, joinDate: form.join_date, endDate: form.end_date, status: form.status })
 
   // Editing a field clears its own error. Leaving a red border under a box the user has just
   // corrected teaches them the message is stale and worth ignoring, which is how a real one gets
@@ -187,12 +191,19 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       setTab('employment')
       return
     }
+    // A rehire's old End Date goes in the same save (H27); then no End Date may precede the Join Date.
+    const toSave = staleEnd ? { ...form, end_date: '' } : form
+    if (endsBeforeJoining(toSave.join_date, toSave.end_date)) {
+      setFieldErr({ end_date: 'The End Date is before the Join Date. Payroll would pay nothing for this employment — clear the End Date, or correct one of the two.' })
+      setTab('employment')
+      return
+    }
     setError('')
     setSaving(true)
 
     const keys = Object.keys(EMPTY)
     if (isEdit) {
-      const patch = changedEmployeeFields(employee, form, keys)
+      const patch = changedEmployeeFields(employee, toSave, keys)
       if (Object.keys(patch).length > 0) {
         const { data: savedRows, error: err } = await scopedUpdate('hr_employees', patch).eq('id', employee.id).select('id')
         if (err) { setError('The changes were not saved. ' + errorLine(err)); setSaving(false); return }
@@ -200,7 +211,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         if (!savedRows?.length) { setError('The changes were not saved. ' + NOT_SAVED_RLS); setSaving(false); return }
       }
     } else {
-      const { error: err } = await scopedInsert('hr_employees', newEmployeePayload(form, keys))
+      const { error: err } = await scopedInsert('hr_employees', newEmployeePayload(toSave, keys))
       if (err) { setError('The employee was not added. ' + errorLine(err)); setSaving(false); return }
     }
 
@@ -451,11 +462,18 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                       {form.employment_type === 'contract' || form.employment_type === 'part_time' ? 'Contract End Date' : 'End Date'}
                     </Tip>
                   </label>
-                  <BsCalendarPicker id="emp-end-date" value={form.end_date} onChange={v => set('end_date', v)} placeholder="Pick end date" clearable />
+                  <BsCalendarPicker id="emp-end-date" value={form.end_date} onChange={v => set('end_date', v)} placeholder="Pick end date" clearable invalid={fieldErr.end_date} />
+                  <FieldError id="emp-end-date" message={fieldErr.end_date} />
                 </div>
               )}
             </div>
-            {endDateHasPassed(form.end_date, form.status, formatAd(new Date())) && (
+            {staleEnd && (
+              <div role="status" className="note-banner" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                <strong>Saving clears the End Date ({staleEnd}).</strong> It is the last day of {form.full_name.trim() || 'this employee'}'s earlier
+                employment, from their Final Settlement. Kept, payroll would leave them out of every month from the new Join Date.
+              </div>
+            )}
+            {!staleEnd && endDateHasPassed(form.end_date, form.status, formatAd(new Date())) && (
               <div role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', padding: '8px 12px', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)' }}>
                 ⚠ This end date has passed, but {form.full_name.trim() || 'this employee'} is still on payroll — payroll pays them nothing after it. Clear the date if they are still working.
               </div>

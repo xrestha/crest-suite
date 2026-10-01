@@ -891,3 +891,31 @@ Migration `20260930120000`, applied live after a rolled-back dry run. Findings: 
   attendance guard returns early, so it calls `hr_pay_month_guard` per row itself — a new DEFINER
   writer of `hr_attendance` must too.
 - `employee_pay_history` answers only a login that can see employees at all (SELF-SERVICE-2).
+
+## Final Settlement: what Finalize re-checks, once per spell (S798 stage 2a)
+
+Migration `20261001120000`, applied live after a rolled-back dry run. Findings: `HR_TODO.md` S798.3.
+
+- **Finalize re-checks the final month's attendance** (`settlement_stale_attendance`, tallied by
+  `hr_attendance_on_file` the way `computePayslip` does): monthly by unpaid days (incl. days outside
+  the employment), daily by the day wage, hourly by hours paid. **A change to the engine's tally
+  (a new status, a new weight) must change that function and this check in the same commit**, or
+  every settlement for that basis is refused. The confirm re-reads the sheet (`attendanceSignature`).
+- **An earlier employment's settlement is never recomputed, reopened or finalized** (H26,
+  `settlement_rehired`; `isEarlierSpell`). The page renders it from its stored columns and
+  `pickEmployee` never auto-opens it. A correction to it is paid by hand. This narrows S791.
+- **The festival is paid once a fiscal year, by the run or the settlement**, enforced both ways
+  under `hr_pay_lock`: `settlement_festival_paid` in Finalize, `festival_paid_by_settlement` in
+  `hr_bonus_rows_guard` (through the DEFINER `hr_festival_settled_by`, current employment only). A
+  saved draft that paid a share is unticked when a festival run was finalized since, and says so.
+- **The year's salary tax still owed is capped at what the taxable payout bears**, not the final
+  month's net (SETTLEMENT-4): month income + lump sums − SSF − other deductions − notice − lump TDS.
+  Travel claims never bear tax.
+- **Leave taken and leave encashed are windowed to the current employment** (`leaveUsed({ from,
+  until })`, `leaveEncashed({ from })`): leave approved for after the last day, and an earlier
+  spell's leave or payout, do not reduce the encashment. The Balances tab calls them without one.
+- **A paid mark always stores `paid_amount`**, the operator's too: the stamp sits above the
+  operator seam and only fills an empty amount. A guard's stamp must never sit behind the seam
+  (the 20260914220000 lesson, missed here once).
+- **A rehire clears the old End Date in the same save and says so first** (H27,
+  `staleRehireEndDate`); an End Date before the Join Date is refused (`endsBeforeJoining`).

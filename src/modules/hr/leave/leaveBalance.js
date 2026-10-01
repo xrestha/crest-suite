@@ -24,25 +24,53 @@ const bsYearOf = isoDate => {
   return bs ? bs.year : null
 }
 
-/** Approved days taken by one employee, for one leave type, in one BS year. */
-export function leaveUsed(requests, { employeeId, leaveTypeId, bsYear }) {
+const isoDay = d => (d ? String(d).slice(0, 10) : null)
+const dayNumber = iso => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000
+
+// The share of a request's chargeable `days` that falls inside [from, until] — by calendar days, so a
+// request straddling the last working day is prorated. A request with no end date is one day long.
+function daysWithin(r, from, until) {
+  const start = isoDay(r.start_date)
+  const end = isoDay(r.end_date) || start
+  const days = parseFloat(r.days) || 0
+  if (!start || (!from && !until)) return days
+  const lo = from && from > start ? from : start
+  const hi = until && until < end ? until : end
+  if (hi < lo) return 0
+  if (lo === start && hi === end) return days
+  const span = dayNumber(end) - dayNumber(start) + 1
+  return span > 0 ? days * (dayNumber(hi) - dayNumber(lo) + 1) / span : 0
+}
+
+/** Approved days taken by one employee, for one leave type, in one BS year.
+ *
+ *  `from` / `until` (AD 'YYYY-MM-DD', optional) bound it to one employment (S798 ENGINE-3): Final
+ *  Settlement passes the current join date and the last working day, so leave from an EARLIER spell,
+ *  and approved leave booked for after the employee leaves, no longer cut what they are paid for.
+ *  Five Dashain days approved for Ashwin used to come off a Bhadra leaver's encashment as "taken".
+ *  The Balances tab calls it without a window. */
+export function leaveUsed(requests, { employeeId, leaveTypeId, bsYear, from = null, until = null }) {
   return (requests || [])
     .filter(r => r.employee_id === employeeId
       && r.leave_type_id === leaveTypeId
       && r.status === 'approved'
       && bsYearOf(r.start_date) === bsYear)
-    .reduce((a, r) => a + (parseFloat(r.days) || 0), 0)
+    .reduce((a, r) => a + daysWithin(r, isoDay(from), isoDay(until)), 0)
 }
 
-/** Days already paid out on a FINALIZED settlement, for the same employee/type/year. */
-export function leaveEncashed(settlements, { employeeId, leaveTypeId, bsYear }) {
+/** Days already paid out on a FINALIZED settlement, for the same employee/type/year. `from` (the
+ *  current join date) leaves out an earlier employment's settlement (S798 ENGINE-3): a rehire's
+ *  earned leave restarts at the new join date, so what the earlier spell paid out is not theirs. */
+export function leaveEncashed(settlements, { employeeId, leaveTypeId, bsYear, from = null }) {
+  const since = isoDay(from)
   return (settlements || [])
     .filter(s => s.employee_id === employeeId
       && s.leave_type_id === leaveTypeId
       // A draft settlement must never move a balance: an abandoned draft would otherwise depress
       // the figure permanently, with no visible cause and no screen to find it on.
       && s.status === 'finalized'
-      && bsYearOf(s.last_working_date) === bsYear)
+      && bsYearOf(s.last_working_date) === bsYear
+      && (!since || isoDay(s.last_working_date) >= since))
     .reduce((a, s) => a + (parseFloat(s.leave_days_encashed) || 0), 0)
 }
 

@@ -32,6 +32,29 @@ export function noticeDirection(reason) {
   return null
 }
 
+/** Does this settlement belong to an EARLIER employment — its last working day before the employee's
+ *  current join date, i.e. they were taken back since (S798 H26, decided)? Such a settlement is shown
+ *  as it was stored and never recomputed, reopened or finalized: the page computes from the current
+ *  record, which zeroes the old spell, and finalize_final_settlement / reopen_final_settlement refuse
+ *  it (settlement_rehired). A correction to it is paid by hand. */
+export function isEarlierSpell(row, emp) {
+  const last = row?.last_working_date ? String(row.last_working_date).slice(0, 10) : null
+  const join = emp?.join_date ? String(emp.join_date).slice(0, 10) : null
+  return !!(last && join && join > last)
+}
+
+/** The final month's attendance as the settlement pays it — every row up to the last working day,
+ *  by day, status, hours and overtime — so the Finalize confirm can tell whether the sheet changed
+ *  after this screen read it (S798 SETTLEMENT-3). Order-free, and "08:00" vs 8 do not differ. */
+export function attendanceSignature(rows, lastDay) {
+  const n = v => Math.round((parseFloat(v) || 0) * 100) / 100
+  return (rows || [])
+    .filter(a => a.bs_day <= lastDay)
+    .map(a => `${a.bs_day}:${a.status || ''}:${n(a.hours_worked)}:${n(a.ot_hours)}`)
+    .sort()
+    .join('|')
+}
+
 const adOf = (y, m, d) => formatAd(bsToAd(y, m, d))
 
 /**
@@ -108,7 +131,6 @@ export function computeSettlement({
     annualLifeInsurance: parseFloat(emp?.life_insurance_premium) || 0,
     annualHealthInsurance: parseFloat(emp?.health_insurance_premium) || 0,
   })
-  const monthTds = Math.min(finalTax.tds, Math.max(0, slip.net_pay))
 
   // ── Gratuity ──
   // SSF funding: every contribution before the final month in this spell, plus the final month's own.
@@ -140,6 +162,16 @@ export function computeSettlement({
   const gratuity = paisa(g.payable)
   const lumpSum = gratuity + leaveEncashment + festivalPro + noticePay
   const lumpTds = computeBonusTds({ annualTaxable: finalTax.annualTaxable, bonusAmount: lumpSum, isSsf, isMarried, fyStart })
+
+  // ── The year's salary tax still owed ──
+  // computeFinalMonthTds returns the whole year's shortfall (TDS typed down earlier, a late raise).
+  // It was capped at the final month's take-home, so a two-day final month withheld two days' worth
+  // and the rest was never withheld, stored or certified (S798 SETTLEMENT-4) — while the same
+  // settlement paid gratuity and leave. Payroll may cap a month because the next month re-spreads
+  // it; a settlement is the last month. Capped now at what the taxable payout bears after its own
+  // deductions; travel claims are reimbursement, so tax never comes out of them.
+  const taxBearing = monthIncome + lumpSum - slip.ssf_employee - slip.other_deductions - noticeDeduction - lumpTds
+  const monthTds = Math.min(finalTax.tds, Math.max(0, paisa(taxBearing)))
 
   // ── Summary ──
   const tadaAmount = paisa(tada?.total || 0)

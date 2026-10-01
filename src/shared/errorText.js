@@ -836,6 +836,27 @@ const rules = [
     staff: "That employee's overtime changed since the settlement was worked out. Nothing was finalized.",
     operator: "Nothing was finalized: overtime for the last month changed since this settlement was calculated (an entry was approved, edited or re-typed, or attendance overtime changed — the detail below compares the two). Payroll leaves a settled leaver out, so that overtime would be paid by nothing. Reload the page so the settlement includes it, then finalize again.",
   },
+  // S798 stage 2a. stale_attendance must also sit ahead of the generic settlement_stale rule.
+  {
+    test: e => /settlement_stale_attendance/i.test(e.message || ''),
+    staff: "That employee's attendance changed since the settlement was worked out. Nothing was finalized.",
+    operator: "Nothing was finalized: attendance for the last month changed on another screen after this settlement was calculated (a day was marked absent, on leave or present — the detail below compares the two). The month locks once the settlement is finalized, so it would have paid the old figures. Press Recalculate now in the Finalize box, or reload the page, check the statement, then finalize again.",
+  },
+  {
+    test: e => /settlement_rehired/i.test(e.message || ''),
+    staff: 'That settlement belongs to an earlier employment and cannot be changed. Nothing was changed.',
+    operator: 'Nothing was changed: this employee was taken back after this settlement\'s last working day, so it belongs to their earlier employment. Reworking it would use the new employment\'s dates, pay the old one wrongly and mark them as left again. Pay any correction by hand and keep a note of it.',
+  },
+  {
+    test: e => /settlement_festival_paid/i.test(e.message || ''),
+    staff: 'That employee was already paid a festival allowance this year. Nothing was finalized.',
+    operator: 'Nothing was finalized: this employee was paid a festival allowance this fiscal year (named below), and this settlement also pays a festival share — the festival would be paid twice. Tick "Festival allowance paid this FY", save the draft, then finalize.',
+  },
+  {
+    test: e => /festival_paid_by_settlement/i.test(e.message || ''),
+    staff: 'Someone in this run was already paid a festival share by their Final Settlement. Nothing more was finalized.',
+    operator: 'The run stopped: someone in it (named below) left in a Final Settlement that already paid a festival share this fiscal year, so this allowance would pay them twice. Rows before them may already be finalized — reload to see what is stored, take that person out of the run, then finalize again.',
+  },
   {
     test: e => /settlement_salary_paid/i.test(e.message || ''),
     staff: "That employee's salary for the last month is already recorded as paid. Nothing was finalized.",

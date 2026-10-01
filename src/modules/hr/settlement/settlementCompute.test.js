@@ -1,4 +1,4 @@
-import { computeSettlement, earnedLeaveBalance, noticeDirection, settlementColumns, NOTICE_DAY_DIVISOR } from './settlementCompute'
+import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, NOTICE_DAY_DIVISOR } from './settlementCompute'
 import { computePayslip } from '../payroll/payrollCompute'
 import { computeMonthlyTds, computeFinalMonthTds } from '../payroll/tds'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
@@ -141,5 +141,60 @@ describe('advances and gratuity', () => {
     expect(cols.month_ssf_employee).toBe(c.slip.ssf_employee)
     expect(cols.month_retirement_contribution).toBe(2000)
     expect(cols.last_working_date).toBe(bs(2083, 5, 15))
+  })
+})
+
+describe('the salary tax still owed for the year is withheld from the whole payout (S798 SETTLEMENT-4)', () => {
+  // Head chef, not SSF-enrolled, TDS typed down to nothing for Shrawan-Mangsir, last day 2 Poush.
+  // Basic 3 lakh: the year's tax (NPR 64,000) is far more than two days' take-home (NPR 20,000).
+  const chef = { ...EMP, basic_salary: 300000, ssf_enrolled: false, ssf_no: null, join_date: bs(2078, 4, 1) }
+  const ytd = { gross: 300000 * 5, ssf: 0, retirement: 0, withheld: 0, bonusWithheld: 0 }
+  const lastDate = { year: 2083, month: 9, day: 2 }
+
+  it('withholds the whole shortfall when the exit payments can bear it, not two days of take-home', () => {
+    const c = computeSettlement({ emp: chef, lastDate, ytd, festivalPaid: true, ssfRows: [] })
+    expect(c.finalTax.tds).toBeGreaterThan(c.slip.net_pay)
+    expect(c.gratuityPayable).toBeGreaterThan(c.finalTax.tds)
+    expect(c.monthTds).toBe(c.finalTax.tds)
+    expect(c.totalDeductions).toBeCloseTo(c.slip.ssf_employee + c.slip.other_deductions + c.monthTds + c.lumpTds, 2)
+  })
+
+  it('caps it at what the taxable payout bears, and never takes it out of a travel claim', () => {
+    // A two-month hire: no gratuity, nothing encashed, so only two days of salary bear the tax.
+    const shortSpell = { ...chef, join_date: bs(2083, 7, 1) }
+    const plain = computeSettlement({ emp: shortSpell, lastDate, ytd, festivalPaid: true, ssfRows: [] })
+    const withClaim = computeSettlement({ emp: shortSpell, lastDate, ytd, festivalPaid: true, ssfRows: [], tada: { total: 50000, ids: ['t1'] } })
+    expect(plain.monthTds).toBeLessThan(plain.finalTax.tds)
+    expect(plain.monthTds).toBeCloseTo(plain.monthIncome - plain.slip.ssf_employee - plain.slip.other_deductions - plain.lumpTds, 2)
+    expect(withClaim.monthTds).toBe(plain.monthTds)
+    expect(withClaim.netPayout - plain.netPayout).toBeCloseTo(50000, 2)
+  })
+})
+
+describe('a settlement from an earlier employment (S798 H26)', () => {
+  it('is one whose last working day is before the current join date', () => {
+    expect(isEarlierSpell({ last_working_date: '2026-07-15' }, { join_date: '2026-10-18' })).toBe(true)
+    expect(isEarlierSpell({ last_working_date: '2026-07-15' }, { join_date: '2024-01-01' })).toBe(false)
+    expect(isEarlierSpell({ last_working_date: '2026-07-15' }, { join_date: '2026-07-15' })).toBe(false)
+    expect(isEarlierSpell({ last_working_date: '2026-07-15' }, { join_date: null })).toBe(false)
+    expect(isEarlierSpell(null, { join_date: '2026-10-18' })).toBe(false)
+  })
+})
+
+describe('the attendance a draft paid, compared at the Finalize confirm (S798 SETTLEMENT-3)', () => {
+  const morning = [
+    { bs_day: 2, status: 'present', hours_worked: 8, ot_hours: 0 },
+    { bs_day: 1, status: 'present', hours_worked: '8.00', ot_hours: null },
+  ]
+  it('ignores row order and number formatting', () => {
+    expect(attendanceSignature(morning, 20)).toBe(attendanceSignature([...morning].reverse().map(a => ({ ...a, hours_worked: Number(a.hours_worked) })), 20))
+  })
+  it('changes when a day is marked absent after the screen loaded', () => {
+    const afternoon = [...morning, { bs_day: 18, status: 'absent', hours_worked: 0, ot_hours: 0 }]
+    expect(attendanceSignature(afternoon, 20)).not.toBe(attendanceSignature(morning, 20))
+  })
+  it('ignores days after the last working day, which the settlement never pays', () => {
+    const late = [...morning, { bs_day: 25, status: 'absent', hours_worked: 0, ot_hours: 0 }]
+    expect(attendanceSignature(late, 20)).toBe(attendanceSignature(morning, 20))
   })
 })

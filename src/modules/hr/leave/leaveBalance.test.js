@@ -91,3 +91,41 @@ describe('leaveBalance', () => {
     expect(leaveBalance({ leaveType: null, employeeId: ME, bsYear: 2083 }).quota).toBe(0)
   })
 })
+
+describe('one employment, up to the last working day (S798 ENGINE-3)', () => {
+  // Joined 2026-06-01, leaving 2026-08-31 (Bhadra 2083).
+  const span = { employeeId: ME, leaveTypeId: HOME.id, bsYear: 2083, from: '2026-06-01', until: '2026-08-31' }
+
+  it('leaves out approved leave booked for after the last working day', () => {
+    const rows = [
+      req({ start_date: '2026-08-05', end_date: '2026-08-06', days: 2 }),
+      req({ start_date: '2026-10-10', end_date: '2026-10-14', days: 5 }),   // Dashain, after leaving
+    ]
+    expect(leaveUsed(rows, span)).toBe(2)
+    expect(leaveUsed(rows, { employeeId: ME, leaveTypeId: HOME.id, bsYear: 2083 })).toBe(7)
+  })
+
+  it('prorates a request straddling the last working day by calendar days', () => {
+    const rows = [req({ start_date: '2026-08-30', end_date: '2026-09-02', days: 4 })]
+    expect(leaveUsed(rows, span)).toBe(2)
+  })
+
+  it('leaves out leave from an earlier employment the same year', () => {
+    const rows = [req({ start_date: '2026-05-01', end_date: '2026-05-03', days: 3 })]
+    expect(leaveUsed(rows, span)).toBe(0)
+  })
+
+  it('reads a one-day request with no end date as that day', () => {
+    expect(leaveUsed([req({ start_date: '2026-08-10', days: 0.5 })], span)).toBe(0.5)
+    expect(leaveUsed([req({ start_date: '2026-09-10', days: 1 })], span)).toBe(0)
+  })
+
+  it('counts only settlements of this employment as already paid out', () => {
+    const sets = [
+      { employee_id: ME, leave_type_id: HOME.id, status: 'finalized', last_working_date: '2026-05-15', leave_days_encashed: 4 },
+      { employee_id: ME, leave_type_id: HOME.id, status: 'finalized', last_working_date: '2026-07-01', leave_days_encashed: 1 },
+    ]
+    expect(leaveEncashed(sets, { employeeId: ME, leaveTypeId: HOME.id, bsYear: 2083, from: '2026-06-01' })).toBe(1)
+    expect(leaveEncashed(sets, { employeeId: ME, leaveTypeId: HOME.id, bsYear: 2083 })).toBe(5)
+  })
+})

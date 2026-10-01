@@ -565,6 +565,28 @@ export default function FestivalAllowance() {
         ),
       run: async () => {
         setBusy(true); setMsg('')
+        // S798 GAP-PAY-STATE-3: "Paid by Final Settlement" came from the settlements this page read
+        // when it opened. One finalized since would be paid twice, so read them again right before
+        // writing. The database refuses it too (festival_paid_by_settlement), naming one person.
+        if (toFinal) {
+          const fy = fyAdBounds(fyStart)
+          const { data: setts, error: settErr } = await scopedFrom('hr_final_settlements', 'employee_id, last_working_date, festival_pro')
+            .eq('status', 'finalized').gt('festival_pro', 0)
+            .gte('last_working_date', fy.start).lte('last_working_date', fy.end)
+          if (settErr) {
+            setBusy(false)
+            setMsg('error:Nothing was finalized: could not re-check which staff a Final Settlement has already paid a festival share. Try again. ' + errorLine(settErr))
+            return
+          }
+          const paying = new Set(rows.filter(r => ids.includes(r.id) && (parseFloat(r.amount) || 0) > 0).map(r => r.employee_id))
+          const settledNow = [...new Set((setts || []).map(s => s.employee_id))].filter(id => paying.has(id))
+          if (settledNow.length > 0) {
+            await reloadRun()
+            setBusy(false)
+            setMsg(`error:Nothing was finalized: ${settledNow.map(nameOf).join(', ')} ${settledNow.length === 1 ? 'was' : 'were'} settled in a Final Settlement since this page loaded, and it already paid a festival share. The register now marks them Paid by Final Settlement — leave them out, then finalize.`)
+            return
+          }
+        }
         const { n, error } = await writeStatus(ids, status, toFinal ? 'draft' : 'finalized')
         await Promise.all([loadBase({ quiet: true }), reloadRun()])
         setBusy(false)

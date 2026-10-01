@@ -96,6 +96,28 @@ export function rehireNeedsNewJoinDate({ settledLastDay, joinDate, status }) {
   return join && join > last ? null : last
 }
 
+// The End Date a rehire must not keep (S798 H27, decided: cleared in the same save, and said so).
+// Finalize stamps end_date = the settled last working day. Taking the leaver back moved the join date
+// past it and left that End Date on the record, so payroll (employedInPeriod) dropped them from every
+// month without a word. Returns the stale date to clear, or null: only when the employee is going
+// back on payroll, the join date is after the settled last day (a rehire), and the End Date is on or
+// before that last day or before the new join date — it can only be the old employment's.
+export function staleRehireEndDate({ settledLastDay, joinDate, endDate, status }) {
+  if (status !== 'active' && status !== 'probation') return null
+  if (typeof settledLastDay !== 'string' || !settledLastDay) return null
+  const last = settledLastDay.slice(0, 10)
+  const join = joinDate ? String(joinDate).slice(0, 10) : null
+  const end = endDate ? String(endDate).slice(0, 10) : null
+  if (!end || !join || !(join > last)) return null
+  return end <= last || end < join ? end : null
+}
+
+// An End Date before the Join Date is an employment that never was: payroll docks every day of it.
+export function endsBeforeJoining(joinDate, endDate) {
+  if (!joinDate || !endDate) return false
+  return String(endDate).slice(0, 10) < String(joinDate).slice(0, 10)
+}
+
 // Is a stored end date already behind us while the employee is still on payroll? Payroll pays a
 // monthly employee NOTHING for days after end_date, so this state zeroes their pay — and before
 // S748 the field was hidden unless the type was Contract or Part-time, so it could not be seen.

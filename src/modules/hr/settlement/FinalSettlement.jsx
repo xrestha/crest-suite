@@ -20,7 +20,7 @@ import { bonusFiscalYear } from '../payroll/bonusTax'
 import { firstError } from '../../../shared/queryError'
 import { errorLine } from '../../../shared/errorText'
 import { nepalDateAd } from '../../../shared/nepalTime'
-import { computeSettlement, earnedLeaveBalance, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
+import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
 
 const fmt = nprInt
 const EMPLOYEE_COLUMNS = 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked'
@@ -166,6 +166,9 @@ export default function FinalSettlement() {
   const [leaveDays,  setLeaveDays]  = useState('0')
   const [leaveTypeId, setLeaveTypeId] = useState('')
   const [festPaid,   setFestPaid]   = useState(true)
+  // A saved draft that paid a festival share, opened after a festival run was finalized for this
+  // person (S798 GAP-PAY-STATE-3): the share is taken off and the note says why.
+  const [festPaidSince, setFestPaidSince] = useState(null)
 
   // Client-wide inputs: salary components, leave types, SSF contributions, the settlement register.
   const [clientData, setClientData] = useState({ status: 'loading', error: null, components: [], leaveTypes: [], ssf: {}, settlements: [] })
@@ -183,13 +186,16 @@ export default function FinalSettlement() {
   // Salary payments recorded for the last month or a later one (S791): the settlement pays that
   // month itself, so Finalize refuses while one stands. null = checking, { error } = could not check.
   const [paidMonths, setPaidMonths] = useState(null)
+  // The final month's attendance re-read when the Finalize confirm opens (S798 SETTLEMENT-3).
+  // null = checking, { error } = could not check, { moved } = whether it differs from this screen's.
+  const [attCheck, setAttCheck] = useState(null)
   const [reopenTarget, setReopenTarget] = useState(null)
   const [reopenReason, setReopenReason] = useState('')
 
   const clientReq = useLatestRequest()
   const empReq = useLatestRequest()
   // Which prefills have run, so reopening a saved draft keeps its own leave days and festival tick.
-  const prefilled = useRef({ leave: null, fest: null })
+  const prefilled = useRef({ leave: null, fest: null, festSync: null })
 
   const loadEmployees = useCallback(async () => {
     const { data, error } = await scopedFrom('hr_employees', EMPLOYEE_COLUMNS)
@@ -250,7 +256,8 @@ export default function FinalSettlement() {
       const results = await Promise.all([
         scopedFrom('hr_advances', 'id, amount, purpose, issued_date, status').eq('employee_id', empId).eq('status', 'active'),
         scopedFrom('hr_advance_repayments', 'advance_id, amount').eq('employee_id', empId),
-        scopedFrom('hr_leave_requests', 'employee_id, leave_type_id, status, days, start_date').eq('employee_id', empId),
+        // end_date bounds a request to this employment and the last working day (S798 ENGINE-3).
+        scopedFrom('hr_leave_requests', 'employee_id, leave_type_id, status, days, start_date, end_date').eq('employee_id', empId),
         // Festival rows carry the PAY month (S751); one paid Baisakh–Ashadh sits in bs_year = fyStart + 1.
         scopedFrom('hr_festival_allowances', 'id, festival_name, bs_year, bs_month, amount, tds, status')
           .eq('employee_id', empId).in('bs_year', [fyStart, fyStart + 1]),
@@ -299,21 +306,30 @@ export default function FinalSettlement() {
 
   const emp = employees.find(e => e.id === empId) || null
   const frozen = current?.status === 'finalized' ? current : null
-  const ready = !frozen && !!emp && clientData.status === 'ok' && empData.status === 'ok' && empData.key === currentKey
+  // A settlement from before a rehire (S798 H26) is shown as it was stored, never recomputed: the
+  // page computes from the CURRENT record, which zeroes the earlier spell. The database refuses to
+  // reopen or finalize it (settlement_rehired); a correction to it is paid by hand.
+  const earlierSpell = !!current && isEarlierSpell(current, emp)
+  const stored = frozen || (earlierSpell ? current : null)
+  const ready = !stored && !!emp && clientData.status === 'ok' && empData.status === 'ok' && empData.key === currentKey
 
   // ── Leave: earned this BS year, less taken and already encashed (S752) ──
+  // Both bounded to this employment and the last working day (S798 ENGINE-3): leave approved for
+  // after they leave, and an earlier spell's leave or payout, are not this employment's.
   const selectedLeaveType = clientData.leaveTypes.find(t => t.id === leaveTypeId) || null
   const encashable = selectedLeaveType ? selectedLeaveType.paid !== false : true
   const leaveBal = useMemo(() => {
     if (!ready || !selectedLeaveType) return null
-    const used = leaveUsed(empData.leaveReqs, { employeeId: emp.id, leaveTypeId: selectedLeaveType.id, bsYear: lastDate.year })
+    const lastAd = formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day))
+    const used = leaveUsed(empData.leaveReqs, { employeeId: emp.id, leaveTypeId: selectedLeaveType.id, bsYear: lastDate.year, from: emp.join_date, until: lastAd })
     const encashed = leaveEncashed(clientData.settlements.filter(s => s.id !== current?.id),
-      { employeeId: emp.id, leaveTypeId: selectedLeaveType.id, bsYear: lastDate.year })
+      { employeeId: emp.id, leaveTypeId: selectedLeaveType.id, bsYear: lastDate.year, from: emp.join_date })
     return earnedLeaveBalance({ quota: selectedLeaveType.annual_quota, used, encashed, joinDate: emp.join_date, lastDate })
   }, [ready, selectedLeaveType, empData, emp, lastDate, clientData.settlements, current])
 
   // "Paid" means a FINALIZED festival run carrying a real amount — a draft is not a payment.
-  const festivalAlreadyPaid = ready && (empData.festRows || []).some(f => f.status === 'finalized' && (parseFloat(f.amount) || 0) > 0)
+  const festivalPaidRow = ready ? (empData.festRows || []).find(f => f.status === 'finalized' && (parseFloat(f.amount) || 0) > 0) || null : null
+  const festivalAlreadyPaid = !!festivalPaidRow
 
   // Prefill once per employee/month/leave type — AFTER this employee's leave has loaded. It used to
   // run in the same render the leave read started, so it filled the box from the previous state
@@ -330,7 +346,17 @@ export default function FinalSettlement() {
       prefilled.current.fest = currentKey
       setFestPaid(festivalAlreadyPaid)
     }
-  }, [ready, currentKey, leaveTypeId, lastDate.day, leaveBal, encashable, festivalAlreadyPaid])
+    // A saved draft keeps its tick (openSettlement), except in the one direction that pays twice:
+    // it paid a share and a festival run has been finalized for this person since (S798
+    // GAP-PAY-STATE-3). finalize_final_settlement refuses that draft anyway (settlement_festival_paid).
+    if (prefilled.current.festSync !== currentKey) {
+      prefilled.current.festSync = currentKey
+      if (current?.status === 'draft' && !current.festival_paid && festivalPaidRow) {
+        setFestPaid(true)
+        setFestPaidSince(festivalPaidRow)
+      }
+    }
+  }, [ready, currentKey, leaveTypeId, lastDate.day, leaveBal, encashable, festivalAlreadyPaid, festivalPaidRow, current])
 
   // ── The calculation ──
   const calc = useMemo(() => {
@@ -355,9 +381,9 @@ export default function FinalSettlement() {
     leaveDaysEarned: leaveBal?.capped ? Math.round(leaveBal.earned * 100) / 100 : null,
   }) : null, [calc, emp, reason, noticeDays, noticeServed, leaveDays, encashable, leaveTypeId, festPaid, leaveBal])
 
-  const shownRow = frozen || liveRow
-  const statement = useMemo(() => shownRow ? statementOf(shownRow, frozen ? {} : { advances: empData.advances, tadaClaims: empData.tadaClaims }) : null,
-    [shownRow, frozen, empData])
+  const shownRow = stored || liveRow
+  const statement = useMemo(() => shownRow ? statementOf(shownRow, stored ? {} : { advances: empData.advances, tadaClaims: empData.tadaClaims }) : null,
+    [shownRow, stored, empData])
 
   const direction = noticeDirection(reason)
 
@@ -424,6 +450,38 @@ export default function FinalSettlement() {
       })
     return () => { live = false }
   }, [confirmEmpId, lastDate.year, lastDate.month, scopedFrom])
+
+  // S798 SETTLEMENT-3: the final month's attendance, re-read when the confirm opens. A day marked
+  // absent on another screen after this one loaded was paid, and the month then locked with nothing
+  // to say the two disagreed. finalize_final_settlement now refuses that (settlement_stale_attendance);
+  // this says so first and offers the recalculation.
+  const shownAttendance = empData.status === 'ok' ? empData.attendance : null
+  useEffect(() => {
+    if (!confirmEmpId || !shownAttendance) { setAttCheck(null); return }
+    let live = true
+    setAttCheck(null)
+    ;(async () => {
+      const per = await scopedFrom('monthly_periods', 'id').eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle()
+      if (!live) return
+      if (per.error) { setAttCheck({ error: per.error }); return }
+      let rows = []
+      if (per.data?.id) {
+        const att = await fetchAllRows(() => scopedFrom('hr_attendance', 'bs_day, status, hours_worked, ot_hours')
+          .eq('employee_id', confirmEmpId).eq('period_id', per.data.id).order('id'))
+        if (!live) return
+        if (att.error) { setAttCheck({ error: att.error }); return }
+        rows = att.data || []
+      }
+      setAttCheck({ moved: attendanceSignature(rows, lastDate.day) !== attendanceSignature(shownAttendance, lastDate.day) })
+    })()
+    return () => { live = false }
+  }, [confirmEmpId, shownAttendance, lastDate.year, lastDate.month, lastDate.day, scopedFrom])
+
+  function recalculate() {
+    setConfirmOpen(false)
+    setReloadTick(t => t + 1)
+    setMsg('ok:Recalculated with the attendance, overtime, advances and claims as they are now. Check the statement, then finalize.')
+  }
 
   async function finalize() {
     if (!liveRow) return
@@ -497,8 +555,10 @@ export default function FinalSettlement() {
     const [y, m, d] = String(row.last_working_date).split('-').map(Number)
     const bs = adToBs(new Date(y, m - 1, d))
     const key = `${clientId}:${row.employee_id}:${bs.year}-${bs.month}`
-    // A saved draft keeps the leave days and festival tick it was saved with.
-    prefilled.current = { leave: `${key}:${row.leave_type_id || leaveTypeId}:${bs.day}`, fest: key }
+    // A saved draft keeps the leave days and festival tick it was saved with — except a share paid
+    // since by a festival run, which the prefill effect takes off (festSync).
+    prefilled.current = { leave: `${key}:${row.leave_type_id || leaveTypeId}:${bs.day}`, fest: key, festSync: null }
+    setFestPaidSince(null)
     setEmpId(row.employee_id)
     setReason(row.separation_reason || 'resignation')
     setLastDate({ year: bs.year, month: bs.month, day: bs.day })
@@ -517,9 +577,13 @@ export default function FinalSettlement() {
     setMsg('')
     // Picking someone else never carries the previous settlement along: "Update draft" used to
     // rewrite whatever row was open, finalized ones included, with the new person's figures.
-    const draft = clientData.settlements.find(x => x.employee_id === id && x.status === 'draft')
+    // Never an earlier employment's draft (S798 H26): that one belongs to a spell this person has
+    // since been rehired out of, and the new settlement is the one being started.
+    const pickedEmp = employees.find(e => e.id === id) || null
+    const draft = clientData.settlements.find(x => x.employee_id === id && x.status === 'draft' && !isEarlierSpell(x, pickedEmp))
     if (draft) { openSettlement(draft); return }
     setCurrent(null)
+    setFestPaidSince(null)
     setEmpId(id)
   }
 
@@ -530,7 +594,7 @@ export default function FinalSettlement() {
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 
-  const inputsBlocked = clientData.status !== 'ok' || (empId && !frozen && empData.status !== 'ok')
+  const inputsBlocked = clientData.status !== 'ok' || (empId && !stored && empData.status !== 'ok')
   const loadFailure = clientData.status === 'failed' ? clientData.error : (empId && empData.status === 'failed' ? empData.error : null)
   const lastAdLabel = formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day))
 
@@ -574,7 +638,7 @@ export default function FinalSettlement() {
 
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-reason">Separation Reason</label>
-            <select id="settle-reason" className="form-select" value={reason} disabled={!!frozen} onChange={e => setReason(e.target.value)}>
+            <select id="settle-reason" className="form-select" value={reason} disabled={!!stored} onChange={e => setReason(e.target.value)}>
               <option value="resignation">Resignation</option>
               <option value="termination">Termination</option>
               <option value="retirement">Retirement</option>
@@ -589,7 +653,7 @@ export default function FinalSettlement() {
               tip="The last day the employee worked, in full. The final month is paid to this day, and service is counted to the end of it."
               year={lastDate.year} month={lastDate.month} day={lastDate.day}
               onChange={setLastDate}
-              disabled={!!frozen}
+              disabled={!!stored}
             />
           </div>
 
@@ -598,11 +662,11 @@ export default function FinalSettlement() {
               <Tip text={`Unused leave to pay out, at basic ÷ ${LEAVE_DAY_DIVISOR} per day. Filled in with the leave EARNED this BS year — the yearly quota × completed months worked ÷ 12 — less days taken and already paid out.`} width={280}>Unused Leave Days</Tip>
             </label>
             <input id="settle-leave-days" type="number" className="form-input form-input--auto" min={0} max={365}
-              value={leaveDays} disabled={!encashable || !!frozen}
+              value={leaveDays} disabled={!encashable || !!stored}
               onChange={e => setLeaveDays(e.target.value)} />
             {clientData.leaveTypes.length > 0 && (
               <select aria-label="Leave type being encashed" className="form-select" style={{ width: '100%', marginTop: 6 }}
-                value={leaveTypeId} disabled={!!frozen} onChange={e => setLeaveTypeId(e.target.value)}>
+                value={leaveTypeId} disabled={!!stored} onChange={e => setLeaveTypeId(e.target.value)}>
                 {clientData.leaveTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}
@@ -633,7 +697,7 @@ export default function FinalSettlement() {
               <Tip text="The notice period in the employment contract, in calendar days. Notice pay is basic ÷ 30 per day." width={280}>Notice Period (days)</Tip>
             </label>
             <input id="settle-notice-days" type="number" className="form-input form-input--auto" min={0} max={90}
-              value={noticeDays} disabled={!direction || !!frozen} onChange={e => setNoticeDays(e.target.value)} />
+              value={noticeDays} disabled={!direction || !!stored} onChange={e => setNoticeDays(e.target.value)} />
             <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
               {direction === 'deduct' ? 'Resigned without serving notice: the employee owes it, and it is deducted.'
                 : direction === 'add' ? 'Terminated without notice: the employer owes it, and it is added.'
@@ -644,7 +708,7 @@ export default function FinalSettlement() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'flex-end', paddingBottom: 2 }}>
             {direction && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={noticeServed} disabled={!!frozen} onChange={e => setNoticeServed(e.target.checked)} />
+                <input type="checkbox" checked={noticeServed} disabled={!!stored} onChange={e => setNoticeServed(e.target.checked)} />
                 <Tip text={direction === 'deduct'
                   ? 'Tick if the employee worked their full notice period. Untick and the notice period is deducted from the settlement.'
                   : 'Tick if the employee was given their full notice period. Untick and the employer pays the notice period in the settlement.'} width={280}>
@@ -653,9 +717,14 @@ export default function FinalSettlement() {
               </label>
             )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={festPaid} disabled={!!frozen} onChange={e => setFestPaid(e.target.checked)} />
+              <input type="checkbox" checked={festPaid} disabled={!!stored} onChange={e => setFestPaid(e.target.checked)} />
               <Tip text="Tick if the employee has already received their festival (Dashain) allowance this fiscal year. Untick and a share for the completed months worked this fiscal year is paid." width={300}>Festival allowance paid this FY</Tip>
             </label>
+            {festPaidSince && !stored && festPaid && (
+              <p role="status" style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', maxWidth: 320 }}>
+                △ Paid since this draft was saved: the {festPaidSince.festival_name} allowance (NPR {fmt(festPaidSince.amount)}) was finalized, so the festival share is taken off. Save the draft to keep this.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -668,7 +737,7 @@ export default function FinalSettlement() {
       )}
 
       {/* A failed read is not a smaller settlement: nothing below is shown or saved until it loads. */}
-      {loadFailure && !frozen && (
+      {loadFailure && !stored && (
         <div className="no-print" style={{ marginBottom: 16 }}>
           <ReportLoadError error={loadFailure} />
           <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
@@ -678,7 +747,7 @@ export default function FinalSettlement() {
         </div>
       )}
 
-      {empId && !frozen && !loadFailure && !ready && (
+      {empId && !stored && !loadFailure && !ready && (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading this employee's pay, leave, advances and claims…</div>
       )}
 
@@ -689,6 +758,14 @@ export default function FinalSettlement() {
               <strong style={{ color: 'var(--theme-amber-text)' }}>No attendance is marked for {BS_MONTHS[lastDate.month - 1]} {lastDate.year}</strong>
               <div>The final month is paid for every day up to the last working day — any absence or unpaid leave in it is not deducted.
               Mark it in HR → Attendance first if it matters: once this settlement is finalized {emp?.full_name} leaves the attendance sheet.</div>
+            </div>
+          )}
+          {earlierSpell && (
+            <div className="note-banner no-print" style={{ marginBottom: 12 }}>
+              <strong>From an earlier employment.</strong>{' '}
+              {shownRow.employee_name} was taken back on {emp?.join_date}, after this settlement's last working day. It is shown exactly as it was
+              saved and cannot be {frozen ? 'reopened' : 'finalized'} — reworking it would use the new employment's dates and mark them as left again.
+              Pay any correction by hand and keep a note of it.
             </div>
           )}
           {current?.reopened_at && current.status === 'draft' && (
@@ -790,8 +867,19 @@ export default function FinalSettlement() {
                       <button className="btn btn-ghost" disabled={busy} onClick={() => markPaid(frozen, 'Bank')}>Mark paid — Bank</button>
                     </>
                   )}
-                  <button className="btn btn-danger" disabled={busy} onClick={() => { setReopenReason(''); setReopenTarget(frozen) }}>Reopen</button>
+                  {!earlierSpell && (
+                    <button className="btn btn-danger" disabled={busy} onClick={() => { setReopenReason(''); setReopenTarget(frozen) }}>Reopen</button>
+                  )}
                 </div>
+              </div>
+            ) : earlierSpell ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
+                  A draft from the earlier employment. It cannot be finalized{current.reopened_at ? '; it was finalized once and reopened, so it is kept as the record of that payment' : ''}.
+                </div>
+                {!current.reopened_at && !current.paid_at && (
+                  <button className="btn btn-ghost" disabled={busy} onClick={() => deleteDraft(current)}>Delete draft</button>
+                )}
               </div>
             ) : (
               <>
@@ -907,7 +995,17 @@ export default function FinalSettlement() {
                 Payroll page (Undo payment) — otherwise the month is paid twice.
               </li>
             )}
-            <li>If anything changed since this screen calculated — an advance, a claim, overtime, a salary payment, payroll for the month — nothing is finalized and you are told what.</li>
+            <li>
+              {attCheck === null
+                ? `Checking the attendance sheet for ${BS_MONTHS[lastDate.month - 1]} again…`
+                : attCheck.error
+                  ? `△ Could not re-check the attendance sheet for ${BS_MONTHS[lastDate.month - 1]} — Finalize checks it again and refuses if it changed.`
+                  : attCheck.moved
+                    ? <span style={{ color: 'var(--theme-amber-text)' }}>△ Attendance for {BS_MONTHS[lastDate.month - 1]} changed on another screen after this one loaded, so these figures are out of date and Finalize will refuse.{' '}
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={recalculate}>Recalculate now</button></span>
+                    : `The attendance sheet for ${BS_MONTHS[lastDate.month - 1]} matches what this settlement pays.`}
+            </li>
+            <li>If anything changed since this screen calculated — attendance, an advance, a claim, overtime, a festival allowance, a salary payment, payroll for the month — nothing is finalized and you are told what.</li>
           </ul>
         </ConfirmModal>
       )}
