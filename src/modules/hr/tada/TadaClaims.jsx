@@ -456,6 +456,52 @@ export default function TadaClaims() {
     load()
   }
 
+  // S798 3a (BONUS-LEDGERS-2, H13): Undo approval. An approved claim payroll has not paid yet, or a
+  // rejected one, goes back to Pending at HR manager rank, and the database clears its decision stamp
+  // (hr_tada_claims_guard). A payroll draft or a draft Final Settlement already carrying it then refuses
+  // to finalize until it is regenerated, so the confirm names any it can find.
+  async function startUndoDecision(c) {
+    setActionError(null)
+    const emp = empMap[c.employee_id] || {}
+    const approved = c.status === 'approved'
+    const draft = approved ? draftByClaim?.[c.id] : null
+    let settleNames = []
+    let settleFailed = false
+    if (approved) {
+      setBusyId(c.id)
+      const { data, error: err } = await scopedFrom('hr_final_settlements', 'employee_name')
+        .eq('status', 'draft').contains('tada_claim_ids', [c.id])
+      setBusyId(null)
+      if (err) settleFailed = true
+      else settleNames = (data || []).map(s => s.employee_name || emp.full_name || 'an employee')
+    }
+    askConfirm({
+      title: approved ? 'Undo the approval of this claim?' : 'Undo the rejection of this claim?',
+      confirmLabel: 'Back to Pending', busyLabel: 'Moving…',
+      body: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ margin: 0 }}>
+            {emp.full_name ? `${emp.full_name}'s` : 'The'} {approved ? 'approved' : 'rejected'} claim for NPR {fmt(c.total_amount)}{c.destination ? ` (${c.destination})` : ''} goes
+            back to Pending, to be corrected and decided again.{approved ? ' Payroll does not pay a pending claim.' : ''}
+          </p>
+          {draft && <p style={{ margin: 0 }}>It is already in the {draft.label ? `${draft.label} ` : ''}payroll draft: regenerate that payroll before you finalize it, or Finalize will refuse.</p>}
+          {settleNames.length > 0 && <p style={{ margin: 0 }}>It is in {settleNames.join(', ')}'s draft Final Settlement: recalculate it before you finalize it, or Finalize will refuse.</p>}
+          {approved && (!draftByClaim || settleFailed) && (
+            <p style={{ margin: 0, color: 'var(--theme-amber-text)' }}>Could not check whether a {!draftByClaim ? 'payroll draft' : 'draft Final Settlement'} already carries it. If one does, regenerate it before finalizing.</p>
+          )}
+        </div>
+      ),
+      run: async () => {
+        setActionError(null)
+        const { data, error: err } = await scopedUpdate('hr_tada_claims', { status: 'pending' })
+          .eq('id', c.id).eq('status', c.status).select('id')
+        if (err) { decisionFailed('The claim was not moved back to Pending.', err); load(); return }
+        if (!data?.length) { await reportMoved(c.id, 'The claim was not moved back to Pending.'); return }
+        load()
+      },
+    })
+  }
+
   function handleDelete(c) {
     const emp = empMap[c.employee_id] || {}
     askConfirm({
@@ -509,15 +555,25 @@ export default function TadaClaims() {
       </>
     )
     if (c.status === 'approved') return canPay ? (
-      <Tip text="Paid in cash or bank transfer, outside payroll. Use it only if payroll is not paying this claim — never both.">
-        <button className="btn btn-ghost btn-sm" disabled={busy}
-          onClick={act(() => startMarkPaid(c))}>
-          💵 Mark Paid
-        </button>
-      </Tip>
+      <>
+        <Tip text="Paid in cash or bank transfer, outside payroll. Use it only if payroll is not paying this claim — never both.">
+          <button className="btn btn-ghost btn-sm" disabled={busy}
+            onClick={act(() => startMarkPaid(c))}>
+            💵 Mark Paid
+          </button>
+        </Tip>
+        <Tip text="Back to Pending, for a claim approved by mistake or approved twice (a corrected copy beside the first). Payroll does not pay a pending claim.">
+          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={act(() => startUndoDecision(c))}>Undo approval</button>
+        </Tip>
+      </>
     ) : (
       <Tip text="Marking a claim paid by hand needs an HR manager. Otherwise payroll pays it automatically.">
         <span style={note}>Awaiting payment</span>
+      </Tip>
+    )
+    if (c.status === 'rejected' && canPay) return (
+      <Tip text="Back to Pending, to be decided again, for a claim rejected by mistake.">
+        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={act(() => startUndoDecision(c))}>Undo rejection</button>
       </Tip>
     )
     return <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>

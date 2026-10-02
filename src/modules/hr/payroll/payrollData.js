@@ -402,7 +402,8 @@ export function payrollCashCost(payslips) {
 }
 
 // ── Who a month's payroll covers (S751) ────────────────────────────────────────────────────────
-export const PAYROLL_EMPLOYEE_COLUMNS = 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date'
+// `email` is read for Payroll Run's own-payslip test (useIsOwnEmployee, S798 3a), not by the engine.
+export const PAYROLL_EMPLOYEE_COLUMNS = 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date, email'
 
 // Every employee who is employed on at least one day of the month — active and probation staff,
 // AND anyone whose last working day falls inside it or later, whatever their status says — less

@@ -186,10 +186,14 @@ History: #s570-stale-draft-and-fetch-helpers, #s600-leaver-proration-and-departe
   Reopen to draft (`bonus_finalized`; the guard freezes `amount`, `tds`, `employee_id`, `bs_year` and
   `bs_month`, so other columns such as `tds_overridden` or the note can change with it); a period
   with finalized payroll (`period_has_finalized_payroll`); and a period delete needs admin or Owner.
-- **The operator (`is_admin()`) passes the payslip, run-delete and bonus guards** so an
-  Export/Import restore can write history. `period_has_finalized_payroll` refuses the operator too
-  (restore deletes only an empty seed period). A guard's own stamp must sit above that seam, never
-  behind it (the 20260914220000 lesson).
+- **The operator (`is_admin()`) passes the HR money guards on INSERT only** (S798 3a, H3): a restore
+  into an empty client only inserts, and every later edit or delete takes the managers' path, so a
+  stale operator screen cannot rewrite a finalized run, bonus, loan, claim or settlement. Write a new
+  money guard's seam as `current_user NOT IN ('anon','authenticated') OR (TG_OP = 'INSERT' AND
+  COALESCE(is_admin(), false))`. `hr_advances_guard` (no INSERT event) has no operator pass, and an
+  operator's hand repayment is an INSERT, so Advances re-reads what is owed first.
+  `period_has_finalized_payroll` refuses the operator too (restore deletes only an empty seed period).
+  A guard's own stamp must sit above that seam, never behind it (the 20260914220000 lesson).
 - **Reopen refuses over a write-off:** an advance the run recovered from that is now `written_off`
   blocks `reopen_payroll_run` (`payroll_reopen_written_off`) until Advances & Loans → Reactivate. The
   page refuses first (`writtenOffAdvancesForRun`).
@@ -620,6 +624,12 @@ History: #s660-status-colours-and-labour-band, #s692-labor-forecast, #s693-labou
   Withdrawing your own pending leave stays allowed. Pages test with `useIsOwnEmployee`
   (`ownRecord.js`, Owner exempt; TADA keeps `isOwnClaim`, operator-only) and render `OwnRecordNote`;
   a batch leaves own rows out.
+- **Your own pay, and a run that pays you, are the Owner's** (S798 3a, H2). `hr_employees_guard_own_pay`
+  (basic, pay basis, bank, SSF, premiums, and email, the link that makes a record yours) and
+  `hr_salary_components_guard_own` refuse `hr_own_pay`. `hr_bonus_rows_guard` (into or out of
+  finalized), `finalize_payroll_run` and `reopen_payroll_run` refuse `hr_own_run` for a run holding
+  your row or payslip. Own attendance is listed rather than refused: `hr_own_attendance_changes(period)`
+  reads `audit_logs` (a removed mark counts) for Payroll Run's Finalize confirm.
 - **HR-role logins read `monthly_periods`** (per-command write policies replaced S430's FOR ALL
   `no_hr_role_staff`). **When a check reads a table an HR login cannot see, it is not a check for
   that login.**
@@ -712,8 +722,8 @@ History: #s614-bs-day-labels, #s660-status-colours-and-labour-band, #s768-critiq
 - `RESTORE_ORDER` restores `hr_advance_repayments` / `hr_tada_claims` AFTER the payroll runs and
   settlements they reference. Danger Zone deletes repayments before runs, and salary payments before
   runs and employees (all NO ACTION FKs).
-- The operator seam (`is_admin()`) is how a restore writes history past the HR guards; see Finalize,
-  Reopen and the database locks.
+- The operator seam (`is_admin()`, INSERT only since S798 3a) is how a restore writes history past
+  the HR guards; see Finalize, Reopen and the database locks.
 
 Why: an FK with NO ACTION refuses the delete or insert in the wrong order.
 

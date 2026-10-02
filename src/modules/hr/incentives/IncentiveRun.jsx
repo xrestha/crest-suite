@@ -19,6 +19,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import IncentiveConfigs from './IncentiveConfigs'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useIsOwnEmployee } from '../ownRecord'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 
@@ -40,7 +41,7 @@ const amberBanner = {
 
 // Every employee, not just today's active list (S751): a stored run names people who have since
 // left, and eligibility is decided against the PAY month, which the query cannot know.
-const EMP_COLS = 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, end_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium'
+const EMP_COLS = 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, end_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium, email'
 
 // The bonus name is typed; committing it per keystroke let the empty load for a half-typed name
 // land last and offer Generate over a real run (S751). Commit after a pause, on blur or on Enter.
@@ -212,6 +213,7 @@ export default function IncentiveRun() {
   // ── Derived ────────────────────────────────────────────────────────────────────────────────
   const employees = base?.employees || NONE
   const empMap    = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees])
+  const isOwnEmployee = useIsOwnEmployee(useMemo(() => Object.fromEntries(empMap), [empMap]))
   // Settled leavers of their current employment, marked on their row (S798 H33). A leaver can be owed
   // an incentive for their last months, so they stay in the run; the mark says their tax is worked out
   // apart from the settlement, as Festival Allowance marks its settled leavers.
@@ -219,6 +221,9 @@ export default function IncentiveRun() {
   const compsIdx  = useMemo(() => groupByEmployee(base?.components || NONE), [base])
   const shown     = !!run && run.year === bsYear && run.label === runLabel
   const rows      = useMemo(() => (shown && run.label ? run.yearRows.filter(r => r.run_label === run.label) : NONE), [run, shown])
+  // A run holding your own row is finalized and reopened by the Owner (S798 3a, H2): the database
+  // refuses it (hr_own_run), so Finalize and Reopen say so instead of failing part-way.
+  const ownRow    = rows.find(r => isOwnEmployee(r.employee_id))
 
   // One run, one pay month — unless an older write left the rows split. Shown month = the most common.
   const monthCounts = useMemo(() => {
@@ -418,7 +423,8 @@ export default function IncentiveRun() {
   }
 
   async function inlineWrite(row, patch, what) {
-    const { data, error } = await scopedUpdate(TABLE, patch).eq('id', row.id).select('id')
+    // Draft rows only (S798 3a): a run finalized in another tab — by the Owner, say — is not rewritten.
+    const { data, error } = await scopedUpdate(TABLE, patch).eq('id', row.id).eq('status', 'draft').select('id')
     if (error || !data?.length) {
       setMsg(`error:${what} for ${nameOf(row.employee_id)} was not saved — the register shows what is stored. ` + (error ? errorLine(error) : 'The run may have been finalized or changed in another tab.'))
       await reloadRun()
@@ -542,6 +548,7 @@ export default function IncentiveRun() {
   }
 
   function setStatus(status) {
+    if (ownRow) return
     const toFinal = status === 'finalized'
     if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || !(total > 0) || staleTax.length)) return
     const ids = rows.filter(r => r.status === (toFinal ? 'draft' : 'finalized')).map(r => r.id)
@@ -623,7 +630,7 @@ export default function IncentiveRun() {
   const loading   = !loadError && !ready
   const taxBlocks = staleTax.length > 0
   const allZero   = rows.length > 0 && !(total > 0)
-  const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !allZero
+  const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !allZero && !ownRow
   const statusChip = g => (g.finalized === g.count ? { label: 'Finalized', cls: 'badge-green' } : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
 
   return (
@@ -816,6 +823,11 @@ export default function IncentiveRun() {
             </div>
           )}
 
+          {ownRow && (
+            <div role="status" className="note-banner">
+              <strong>This run pays you.</strong> {nameOf(ownRow.employee_id)} is in it, so {finalized ? 'only the Owner can reopen it.' : 'the Owner finalizes it. You can still prepare the amounts.'}
+            </div>
+          )}
           <div className="card no-print" style={{ marginBottom: 14, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportRegister} disabled={busy}>⬇ Register</button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
@@ -825,7 +837,7 @@ export default function IncentiveRun() {
             {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
                 the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
                 isAdmin made a client contact support to reopen their own finalized run. */}
-            {anyFinalized && hasHrAccess('manager') && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setStatus('draft')} disabled={busy || typing}>Reopen</button>}
+            {anyFinalized && hasHrAccess('manager') && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setStatus('draft')} disabled={busy || typing || !!ownRow}>Reopen</button>}
           </div>
 
           <div className="card" style={{ padding: 0 }}>

@@ -17,6 +17,7 @@ import {
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useIsOwnEmployee } from '../ownRecord'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 
@@ -40,7 +41,7 @@ const amberBanner = {
 // who have since left, and a leaver still on the payroll in the pay month is owed a share — so the
 // eligibility test runs here, against the pay month, rather than in the query. `end_date` is
 // load-bearing: it is how a leaver is recognised at all.
-const EMP_COLS = 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, end_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium'
+const EMP_COLS = 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, end_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium, email'
 
 // The name is typed, and every committed change re-reads the year. Committing per keystroke let
 // the empty result for "Tih" land after the real one and offer Generate over a finalized "Tihar"
@@ -207,9 +208,13 @@ export default function FestivalAllowance() {
   // ── Derived ────────────────────────────────────────────────────────────────────────────────
   const employees = base?.employees || NONE
   const empMap    = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees])
+  const isOwnEmployee = useIsOwnEmployee(useMemo(() => Object.fromEntries(empMap), [empMap]))
   const compsIdx  = useMemo(() => groupByEmployee(base?.components || NONE), [base])
   const shown     = !!run && run.year === bsYear && run.name === festival
   const rows      = useMemo(() => (shown ? run.yearRows.filter(r => r.festival_name === run.name) : NONE), [run, shown])
+  // A run holding your own row is finalized and reopened by the Owner (S798 3a, H2): the database
+  // refuses it (hr_own_run), so Finalize and Reopen say so instead of failing part-way.
+  const ownRow    = rows.find(r => isOwnEmployee(r.employee_id))
 
   // Every row of a run carries the same pay month — unless an older write left them split. The
   // month shown is the one most rows carry, never simply rows[0]'s.
@@ -414,7 +419,8 @@ export default function FestivalAllowance() {
   // Inline edits are optimistic; a refused write — an error, or an RLS refusal that returns 0 rows
   // with no error — reloads so the register shows what is actually stored.
   async function inlineWrite(row, patch, what) {
-    const { data, error } = await scopedUpdate(TABLE, patch).eq('id', row.id).select('id')
+    // Draft rows only (S798 3a): a run finalized in another tab — by the Owner, say — is not rewritten.
+    const { data, error } = await scopedUpdate(TABLE, patch).eq('id', row.id).eq('status', 'draft').select('id')
     if (error || !data?.length) {
       setMsg(`error:${what} for ${nameOf(row.employee_id)} was not saved — the register shows what is stored. ` + (error ? errorLine(error) : 'The run may have been finalized or changed in another tab.'))
       await reloadRun()
@@ -543,6 +549,7 @@ export default function FestivalAllowance() {
   }
 
   function setStatus(status) {
+    if (ownRow) return
     const toFinal = status === 'finalized'
     if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || staleTax.length)) return
     const ids = rows.filter(r => r.status === (toFinal ? 'draft' : 'finalized')).map(r => r.id)
@@ -649,7 +656,7 @@ export default function FestivalAllowance() {
   const loadError = baseError || runError
   const loading   = !loadError && !ready
   const taxBlocks = staleTax.length > 0
-  const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks
+  const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !ownRow
   const statusChip = g => (g.finalized === g.count ? { label: 'Finalized', cls: 'badge-green' } : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
 
   return (
@@ -826,6 +833,11 @@ export default function FestivalAllowance() {
             </div>
           )}
 
+          {ownRow && (
+            <div role="status" className="note-banner">
+              <strong>This run pays you.</strong> {nameOf(ownRow.employee_id)} is in it, so {finalized ? 'only the Owner can reopen it.' : 'the Owner finalizes it. You can still prepare the amounts.'}
+            </div>
+          )}
           {/* Action bar */}
           <div className="card no-print" style={{ marginBottom: 14, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button className="btn btn-ghost" onClick={exportRegister} disabled={busy}>⬇ Register</button>
@@ -836,7 +848,7 @@ export default function FestivalAllowance() {
             {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
                 the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
                 isAdmin made a client contact support to reopen their own finalized run. */}
-            {anyFinalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setStatus('draft')} disabled={busy || typing}>Reopen</button>}
+            {anyFinalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setStatus('draft')} disabled={busy || typing || !!ownRow}>Reopen</button>}
           </div>
 
           {/* Table */}

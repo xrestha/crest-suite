@@ -31,6 +31,8 @@ import { fetchMonthDepositExtras } from './monthDeposit'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { errorText, errorLine } from '../../../shared/errorText'
+import { useIsOwnEmployee } from '../ownRecord'
+import { groupOwnChanges } from './ownAttendanceChanges'
 
 const fmt = nprInt
 const num = v => parseFloat(v) || 0
@@ -174,6 +176,10 @@ export default function PayrollRun() {
     [employees, settled, extraEmps],
   )
   const nameOf = id => empMap[id]?.full_name || '(employee record not found)'
+  // A run holding your own payslip is finalized and reopened by the Owner (S798 3a, H2): the database
+  // refuses it (hr_own_run), so the page says whose it is rather than offering the button.
+  const isOwnEmployee = useIsOwnEmployee(empMap)
+  const ownSlip = payslips.find(p => isOwnEmployee(p.employee_id))
 
   useEffect(() => {
     if (!clientId) return
@@ -405,6 +411,18 @@ export default function PayrollRun() {
     try { rows = buildPayrollRows({ runId, period: p, ...inputs.data }) } catch (e) {
       setMsg('error:The run was not recomputed — its payslips are unchanged. The payslips could not be calculated. ' + errorLine(e)); setBusy(false); return
     }
+    // S798 3a (H3): the run's status is read again right before the delete. A run finalized in another
+    // tab since this page loaded is left alone and the page reloads; the database refuses the delete
+    // as well (hr_run_finalized), for the Crest operator too since S798 3a.
+    const { data: fresh, error: statusErr } = await scopedFrom('hr_payroll_runs', 'status').eq('id', runId).maybeSingle()
+    if (statusErr || !fresh || fresh.status !== 'draft') {
+      await loadAll(p)
+      setMsg('error:The run was not recomputed — its payslips are unchanged. ' + (statusErr
+        ? 'Could not check that it is still a draft. ' + errorLine(statusErr)
+        : fresh ? 'It was finalized somewhere else after this page loaded; the page has been reloaded to show it.'
+          : 'It no longer exists — it may have been deleted in another tab.'))
+      setBusy(false); return
+    }
     // Delete-then-insert: once the delete has landed the run has NO payslips until the insert does,
     // so each half names the state it leaves behind (S682). A run finalized in another tab is refused
     // by the database (hr_run_finalized) — reload, so this tab stops offering a draft's buttons on it.
@@ -516,15 +534,19 @@ export default function PayrollRun() {
     const token = ++pendingReq.current
     setPending({ loading: true })
     const { start, end } = periodAdBounds(p)
-    const [leave, ot] = await Promise.all([
+    const [leave, ot, own] = await Promise.all([
       scopedFrom('hr_leave_requests', 'id', { count: 'exact', head: true })
         .eq('status', 'pending').lte('start_date', end).gte('end_date', start),
       scopedFrom('hr_overtime_entries', 'id', { count: 'exact', head: true })
         .eq('status', 'pending').eq('bs_year', p.bs_year).eq('bs_month', p.bs_month),
+      // S798 3a (LEAVE-OT-HOLIDAYS-5, H2): marks made, changed or removed on their own row this month.
+      supabase.rpc('hr_own_attendance_changes', { p_period_id: p.id }),
     ])
     if (token !== pendingReq.current) return
     const failed = !!(leave.error || ot.error || leave.count == null || ot.count == null)
-    setPending({ loading: false, failed, leave: leave.count || 0, ot: ot.count || 0 })
+    if (own.error) console.error('hr_own_attendance_changes', own.error)
+    setPending({ loading: false, failed, leave: leave.count || 0, ot: ot.count || 0,
+      ownFailed: !!own.error, own: own.error ? [] : groupOwnChanges(own.data) })
   }
 
   // The ask half of Finalize. When the draft is not finalizable the refusal is stated at once;
@@ -532,6 +554,7 @@ export default function PayrollRun() {
   // which checks everything again against freshly read data before its first write.
   function requestFinalize() {
     if (!run || !period || busy || loading) return
+    if (ownSlip) { setMsg(`error:Not finalized. This payroll pays you (${nameOf(ownSlip.employee_id)}), so the Owner finalizes it.`); return }
     if (!freshness.ok) {
       const lines = [
         'Not finalized. ' + (freshness.reason || 'This draft no longer matches current salary, attendance, overtime and TADA data.'),
@@ -622,6 +645,7 @@ export default function PayrollRun() {
   // the run's repayment grows the write-off by what the run took, and nobody decided that. The database
   // refuses too (reopen_payroll_run); this says so first, by name, before the confirm.
   function requestReopen() {
+    if (ownSlip) { setMsg(`error:Not reopened. This payroll pays you (${nameOf(ownSlip.employee_id)}), so the Owner reopens it.`); return }
     const wo = writtenOffAdvancesForRun(advances, repayments, run?.id)
     if (wo.length > 0) {
       const { advance: a, recoveredHere } = wo[0]
@@ -881,15 +905,21 @@ export default function PayrollRun() {
                   </Tip>
                 )}
                 {!finalized && !freshness.empty && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy}>↻ Regenerate</button>}
-                {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy}>Finalize</button>}
+                {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy || !!ownSlip}>Finalize</button>}
                 {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform OPERATOR, while
                     the tenant's own Owner is `isOwner`; both resolve hrRole to 'manager' (S620). */}
-                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={requestReopen} disabled={busy}>Reopen</button>}
+                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={requestReopen} disabled={busy || !!ownSlip}>Reopen</button>}
               </div>
             )}
             {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
           </div>
         </div>
+
+        {showActions && ownSlip && (
+          <div role="status" className="note-banner no-print">
+            <strong>This payroll pays you.</strong> {nameOf(ownSlip.employee_id)} has a payslip in it, so {finalized ? 'only the Owner can reopen it.' : 'the Owner finalizes it. You can still prepare it: attendance, Regenerate and income tax work as usual.'}
+          </div>
+        )}
 
         {!loading && !loadError && period && (
           <PayrollMonthStatus
@@ -1364,6 +1394,23 @@ export default function PayrollRun() {
               )}
               {pending && !pending.loading && !pending.failed && pending.ot > 0 && (
                 <li style={{ color: 'var(--theme-amber-text)' }}><strong>{pending.ot}</strong> overtime entr{pending.ot === 1 ? 'y' : 'ies'} for {monthName} {pending.ot === 1 ? 'is' : 'are'} still pending and will not be paid by this run.</li>
+              )}
+              {pending && !pending.loading && pending.ownFailed && (
+                <li style={{ color: 'var(--theme-amber-text)' }}>Could not check whether anyone marked their own attendance for {monthName} — look in the Attendance Sheet before finalizing.</li>
+              )}
+              {pending && !pending.loading && pending.own?.length > 0 && (
+                <li style={{ color: 'var(--theme-amber-text)' }}>
+                  <Tip text="Attendance a login marked, changed or removed on its own employee row this month. Nobody below the Owner may approve their own leave or overtime, so check these days before paying them. A removed mark counts: payroll pays a blank day as worked." width={300}>
+                    <strong>Marked on their own row</strong>
+                  </Tip>{' '}this month — check these before you finalize:
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, color: 'var(--theme-text2)' }}>
+                    {pending.own.map(g => (
+                      <li key={g.employeeId}>
+                        <strong style={{ color: 'var(--theme-text1)' }}>{g.name}</strong> (by {g.markedBy.join(', ')}): {g.lines.slice(0, 6).join('; ')}{g.lines.length > 6 ? `; and ${g.lines.length - 6} more` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
               )}
               {pending && !pending.loading && !pending.failed && pending.leave === 0 && pending.ot === 0 && (
                 <li>No leave or overtime requests for {monthName} are waiting for a decision.</li>

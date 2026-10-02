@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
@@ -8,6 +8,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useIsOwnEmployee } from '../ownRecord'
 import { formatAd } from '../../../utils/bsCalendar'
 import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, endsBeforeJoining, rehireNeedsNewJoinDate, staleRehireEndDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
 
@@ -86,6 +87,10 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const isEdit = !!employee
+  // Your own record's email is the Owner's to change (S798 3a, H2): it is one of the two links that
+  // make the record yours, so changing it would lift the own-pay rule (hr_own_pay refuses it).
+  const isOwnEmployee = useIsOwnEmployee(useMemo(() => (employee ? { [employee.id]: employee } : {}), [employee]))
+  const isOwnRecord = isEdit && isOwnEmployee(employee.id)
   const [tab, setTab]         = useState('personal')
   // Only the fields this form owns are copied in — see EMPTY above. `?? ''` keeps a NULL column a
   // controlled input instead of flipping it to uncontrolled.
@@ -407,8 +412,12 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               <input id="emp-phone" className="form-input" placeholder="98XXXXXXXX" value={form.phone} onChange={e => set('phone', e.target.value)} />
             </div>
             <div style={col}>
-              <label style={lbl} htmlFor="emp-email">Email</label>
-              <input id="emp-email" type="email" className="form-input" placeholder="employee@email.com" value={form.email} onChange={e => set('email', e.target.value)} />
+              <label style={lbl} htmlFor="emp-email">
+                {isOwnRecord
+                  ? <Tip text="This is your own record. Its email is what links your login to it, so only the Owner can change it." width={260}>Email</Tip>
+                  : 'Email'}
+              </label>
+              <input id="emp-email" type="email" className="form-input" placeholder="employee@email.com" value={form.email} onChange={e => set('email', e.target.value)} disabled={isOwnRecord} />
             </div>
             <div style={row}>
               <div style={col}>

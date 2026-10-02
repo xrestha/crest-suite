@@ -309,3 +309,24 @@ describe('IMS database guard refusals (S756/S792)', () => {
     expect(errorText({ code: '42501', message: 'new row violates row-level security policy for table "x"' }, 'operator')).toMatch(GENERIC)
   })
 })
+
+// S798 3a (owner decision H2, H13): your own pay and a run that pays you are the Owner's; a decided
+// travel claim goes back to pending at HR manager rank. Each raises P0001 with the code first.
+describe('own pay, own run and claim undo refusals (S798 3a)', () => {
+  const raised = name => ({ code: 'P0001', message: `${name}: …` })
+
+  it('your own pay names the Owner and says nothing was saved', () => {
+    const text = errorText(raised('hr_own_pay'), 'operator')
+    expect(text).toMatch(/Owner/)
+    expect(text).toMatch(/nothing was saved/i)
+  })
+
+  it('a run that pays you is the Owner\'s to finalize', () => {
+    expect(errorText(raised('hr_own_run'), 'operator')).toMatch(/Owner finalizes/)
+    expect(errorText(raised('hr_own_run'), 'staff')).toMatch(/Owner finalizes/)
+  })
+
+  it('undoing a claim decision names who can', () => {
+    expect(errorText(raised('tada_undo_rank'), 'operator')).toMatch(/HR manager or the Owner/)
+  })
+})

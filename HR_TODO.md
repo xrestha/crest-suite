@@ -364,6 +364,9 @@ manager on NPR 70,000 a month has about NPR 840 a year too much taken, someone o
 
 **Decided 2026-09-30 (as recommended): (a), once your accountant confirms it for FY 2083/84.** You cannot see other income anyway.
 
+**Changed 2026-10-02, after the accountant: (c), leave it off.** ENGINE-2 is closed with no code change, and
+the answer is filed in both CROSS-REPO.md ledgers for hss, which asks the same question.
+
 **H18. Should the Dashain allowance, incentives and a leaver's final pay count as labour cost?** Unblocks
 LABOUR-FIGURES-1.
 Example: a 12-staff cafe pays NPR 2,07,600 of Dashain allowance in Ashwin. Every labour figure outside HR
@@ -581,13 +584,30 @@ catalog:** trigger events on runs and payslips, the settlement bodies, RPC colum
 
 Every H is answered (2026-09-30, all as recommended), so each group can be built.
 
+**Slices, one short chat and at most one migration each** (owner approved 2026-10-02; this replaces the single
+`hr_decisions_s798` below). 3a goes first: it closes own-pay edits, and 3b rebuilds some of the same guards
+from 3a's live bodies. 3c should land before Asoj closes, so that month's Owner Report freezes on the new labour
+definition.
+
+1. **3a Own-row and operator guards — DONE 2026-10-02** (crest-v375, migration live): GAP-OPERATOR-1 (with the restore test), PEOPLE-ACCESS-2,
+   BONUS-LEDGERS-5, LEAVE-OT-HOLIDAYS-5, BONUS-LEDGERS-2. Migration `hr_guards_s798`.
+2. **3b Settlements:** SETTLEMENT-1, -2, -6, GAP-PAY-STATE-2, -4, BONUS-LEDGERS-3, PEOPLE-ACCESS-4. Migration
+   `hr_settlements2_s798`; rebuild `finalize_final_settlement` from its live body.
+3. **3c Labour figures:** LABOUR-FIGURES-1, -3. Migration `hr_labour2_s798` (group SQL); Owner Report schema bump.
+4. **3d Attendance and roster:** ATTENDANCE-2, -4, -5, ROSTER-1, -3. Migration `hr_roster2_s798` (swap functions).
+5. **3e Payroll Run and reports:** REPORTS-1, PAYROLL-1, DOCS-6. Probably no migration; confirm when planning.
+6. **3f Logins across outlets:** SISTER-2, GAP-OUTLETS-1, -3. Migration for `profile_employee_links`;
+   admin-user-ops.
+
+ENGINE-2 is closed: H17 changed to (c) on 2026-10-02.
+
 | H | ID | What to change | Status |
 | --- | --- | --- | --- |
 | H1 | REPORTS-1 | Read `fetchRunPayments`; Paid and Still to pay per row; sheet and exports carry only what is owed and name who was left off; a failed read disables export. | 🔴 |
-| H2 | BONUS-LEDGERS-5 | `hr_bonus_rows_guard`: a non-exempt caller cannot finalize or reopen their own row; Finalize says "The Owner finalizes a run that pays you". | 🔴 |
-| H2 | PEOPLE-ACCESS-2 | Triggers refuse own changes to pay, bank, SSF and premium columns on `hr_employees` and own rows in `hr_salary_components` below the Owner; PayForm opens your own row read-only. | 🔴 |
-| H2 | LEAVE-OT-HOLIDAYS-5 | (a): Payroll Run shows the Owner every own-row attendance change this month before Finalize (`audit_logs` or a `marked_by` column). (b) needs bulk writes to skip own rows first. | 🔴 |
-| H3 | GAP-OPERATOR-1 | Operator exemption only on INSERT in the payslip, bonus, repayment (+ledger), run-delete, TADA (+items), settlement and salary-payment guards and the leave overlap test; none in `hr_advances_guard`. Re-read the advance before repay/delete; `.eq('status','draft')` on writeTds and inlineWrite; Regenerate re-reads status. Reword hr-payroll.md:646; test a restore. H3(b) adds `<Outlet key={clientId} />`. | 🔴 |
+| H2 | BONUS-LEDGERS-5 | `hr_bonus_rows_guard`: a non-exempt caller cannot finalize or reopen their own row; Finalize says "The Owner finalizes a run that pays you". | ✅ S798 stage 3a (crest-v375), migration `20261002140000_hr_guards_s798`, applied live 2026-10-02 after a 64-check rolled-back dry run. Also `finalize_payroll_run` / `reopen_payroll_run` for a run holding your own payslip (H2 (a) covers monthly payroll too). |
+| H2 | PEOPLE-ACCESS-2 | Triggers refuse own changes to pay, bank, SSF and premium columns on `hr_employees` and own rows in `hr_salary_components` below the Owner; PayForm opens your own row read-only. | ✅ S798 stage 3a (crest-v375), migration `20261002140000_hr_guards_s798`, applied live 2026-10-02 after a 64-check rolled-back dry run. Email is in the protected list too (it is one of the two own-record links); EmployeeForm locks it on your own record. |
+| H2 | LEAVE-OT-HOLIDAYS-5 | (a): Payroll Run shows the Owner every own-row attendance change this month before Finalize (`audit_logs` or a `marked_by` column). (b) needs bulk writes to skip own rows first. | ✅ S798 stage 3a (crest-v375), migration `20261002140000_hr_guards_s798`, applied live 2026-10-02 after a 64-check rolled-back dry run. (a) via `hr_own_attendance_changes(period)` from `audit_logs` (no write-path change; a removed mark counts), in Payroll Run's Finalize confirm. |
+| H3 | GAP-OPERATOR-1 | Operator exemption only on INSERT in the payslip, bonus, repayment (+ledger), run-delete, TADA (+items), settlement and salary-payment guards and the leave overlap test; none in `hr_advances_guard`. Re-read the advance before repay/delete; `.eq('status','draft')` on writeTds and inlineWrite; Regenerate re-reads status. Reword hr-payroll.md:646; test a restore. H3(b) adds `<Outlet key={clientId} />`. | ✅ S798 stage 3a (crest-v375), migration `20261002140000_hr_guards_s798`, applied live 2026-10-02 after a 64-check rolled-back dry run. Also `hr_payslips_guard_net` and `hr_payroll_runs_guard_settled` (same seam, added in Stage 2). A payslip has no status, so writeTds is covered by the guard rather than a filter. Restore tested by replaying its inserts in RESTORE_ORDER as the operator; H3(b) shipped in 2c. |
 | H4 | SETTLEMENT-1 | When `paid_amount` ≠ `net_payout`, show still-to-pay or overpaid on the statement, print, history and Tracker; a top-up function or `hr_settlement_payments`; refuse deleting a paid draft (`settlement_paid_record`, every option). After GAP-OPERATOR-3. | 🔴 |
 | H5 | GAP-PAY-STATE-4 | Reopen names finalized payroll months that skipped the person; EmployeeForm names them on reactivation; no delete of such a reopened draft; PayrollMonthStatus flags "employed, no payslip, no settlement". | 🔴 |
 | H6 | SISTER-2 | admin-user-ops `link_hr_employee` (Owner/admin; shares DATABASE-1's code); HR Staff Linked column, Link button and an unlinked warning. Interim Help: put the login's email on the record. | 🔴 |
@@ -599,10 +619,10 @@ Every H is answered (2026-09-30, all as recommended), so each group can be built
 | H11 | GAP-PAY-STATE-2 | Settlement lists pending leave and OT and blocks Finalize until decided; a saved draft compares its leave days with the balance; finalize refuses `settlement_pending_requests`. | 🔴 |
 | H11 | BONUS-LEDGERS-3 | Same for pending claims (`settlement_pending_tada`); TADA Claims says "Left — not paid by payroll; Mark Paid when handed over". | 🔴 |
 | H12 | ROSTER-1 | An hours edit with past ungenerated days asks "from which day?" and splits the type. Interim, no decision: refuse it, "add a new shift type". Recalculate Hours when times change. | 🔴 |
-| H13 | BONUS-LEDGERS-2 | `hr_tada_claims_guard` allows approved/rejected → pending at manager rank, clearing the stamp; "Undo approval" naming any draft run holding it. | 🔴 |
+| H13 | BONUS-LEDGERS-2 | `hr_tada_claims_guard` allows approved/rejected → pending at manager rank, clearing the stamp; "Undo approval" naming any draft run holding it. | ✅ S798 stage 3a (crest-v375), migration `20261002140000_hr_guards_s798`, applied live 2026-10-02 after a 64-check rolled-back dry run. Plus Undo rejection; the confirm also names a draft Final Settlement holding the claim. |
 | H14 | ATTENDANCE-4 | Review lists "Present, no punch, rostered" with an off-by-default Absent tick; reword the Tip; word no-time Present differently. | 🔴 |
 | H15 | SETTLEMENT-2 | At the confirm, name a draft or missing earlier FY month; finalize refuses `settlement_prior_month_open` (a reopened run counts). Optional: Payroll's Reopen names leavers with draft settlements. | 🔴 |
-| H17 | ENGINE-2 | After the accountant: `annualTaxFor(…, isFemale)` = slabs × 0.9 in monthly, final-month and both bonus TDS paths; add `gender` to the employee reads; show the rebate line. | 🔴 |
+| H17 | ENGINE-2 | After the accountant: `annualTaxFor(…, isFemale)` = slabs × 0.9 in monthly, final-month and both bonus TDS paths; add `gender` to the employee reads; show the rebate line. | ✅ Closed 2026-10-02, no code change: H17 changed to (c) after the accountant. Answer filed in both CROSS-REPO.md ledgers. |
 | H18 | LABOUR-FIGURES-1 | One "other labour paid" read (festival and incentive by pay month; settlements by settle month, gratuity per H18) in every labour reader, the Owner Report (schema bump) and the group SQL rebuilt from live bodies; name it on tiles; drop the Labor tab's bonus hint. Old runs read bs_month 6. | 🔴 |
 | H19 | LABOUR-FIGURES-3 | (A): labour = gross − absence + OT + employer SSF on every reader and the group SQL; Owner Report line; dashboards.md and `labourSource.test.js`. | 🔴 |
 | H20 | SETTLEMENT-6 | Finalize refuses `settlement_manager_login` for a non-exempt caller; `settlement_linked_logins` returns the rank for the confirm. | 🔴 |
@@ -755,12 +775,12 @@ filed in hss-suite's `docs/CROSS-REPO.md`.
 - SELF-SERVICE-1 — hss `SelfServiceHome.jsx:426-429` has the identical unchecked sign-out.
 - SELF-SERVICE-5 — hss `webPush.js:66` has the same upsert.
 - ENGINE-2 — hss keeps the women's rebate as an open accountant question (BUILD-LOG 10031, 10908); share
-  H17's answer.
+  H17's answer. Filed 2026-10-02: Crest leaves it off (H17 (c)).
 - SISTER-1 — hss #4/#43 (72faa01) was never filed in either ledger. Crest ports #43; crest's own-cancel
   refusal (H8) is new and hss has none: file both ways.
 
 **Record in crest's `docs/CROSS-REPO.md` as ported from hss when they ship:** BONUS-LEDGERS-2 (hss
-approved → pending, 20260925000010); ROSTER-3 (hss active-coworker check, 20260926000003:1781); SISTER-2
+approved → pending, 20260925000010; filed with the 3a row 2026-10-02); ROSTER-3 (hss active-coworker check, 20260926000003:1781); SISTER-2
 (hss #9 `linked_employee_id`); PEOPLE-ACCESS-1 (hss pay-rate guard, 72faa01 D2); PAYROLL-3/-4 (hss #8b);
 BONUS-LEDGERS-1 (hss #8c–d); PAYROLL-2 = REPORTS-2 (hss #26).
 

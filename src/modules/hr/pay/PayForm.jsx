@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
@@ -12,6 +12,7 @@ import {
 } from '../payrollConstants'
 import { isSsfContributor } from '../payroll/payrollCompute'
 import { NOT_SAVED_RLS } from '../employees/employeeFormData'
+import { useIsOwnEmployee } from '../ownRecord'
 
 const CIT_CHIP = 'CIT / Provident Fund'
 const QUICK_EARNINGS   = ['Housing Allowance', 'Transport', 'Medical Allowance', 'Food Allowance', 'Grade Pay']
@@ -76,6 +77,10 @@ export default function PayForm({ employee, onSave, onClose }) {
   const [compsError, setCompsError] = useState('')
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
+  // Your own pay is the Owner's to set (S798 3a, H2): the database refuses it (hr_own_pay), so the
+  // form opens read-only rather than offering a Save it would refuse. The Owner and operator are exempt.
+  const isOwnEmployee = useIsOwnEmployee(useMemo(() => ({ [employee.id]: employee }), [employee]))
+  const isOwn = isOwnEmployee(employee.id)
 
   useEffect(() => {
     let live = true
@@ -108,6 +113,7 @@ export default function PayForm({ employee, onSave, onClose }) {
   }
 
   async function handleSave() {
+    if (isOwn) return
     if (compsState !== 'ok') {
       setError(compsState === 'loading'
         ? 'Still loading this employee\'s allowances — wait a moment, then Save.'
@@ -212,8 +218,13 @@ export default function PayForm({ employee, onSave, onClose }) {
           <Tabs idBase="pay-form" label="Pay setup sections" tabs={TABS} active={tab} onChange={setTab} style={{ marginBottom: 0 }} />
         </div>
 
-        {/* Body */}
-        <div>
+        {/* Body. A fieldset so your own record's inputs, chips and remove buttons go read-only together. */}
+        <fieldset disabled={isOwn} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+          {isOwn && (
+            <div role="status" className="note-banner" style={{ margin: '16px 24px 0' }}>
+              <strong>This is your own pay.</strong> The Owner sets your own pay, bank and SSF details, so you can read them here but not change them.
+            </div>
+          )}
           {tab === 'salary' && (
             <div style={{ display: 'grid', gridTemplateColumns: basic > 0 ? '1fr 1fr' : '1fr', gap: 0 }}>
 
@@ -576,13 +587,13 @@ export default function PayForm({ employee, onSave, onClose }) {
               </div>
             </div>
           )}
-        </div>
+        </fieldset>
 
         {/* Footer */}
         <div style={{ padding: '16px 24px', borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
           {error && <span role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginRight: 'auto' }}>{error}</span>}
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || compsState !== 'ok'}>{saving ? 'Saving…' : compsState === 'loading' ? 'Loading…' : 'Save'}</button>
+          <button className="btn btn-ghost" onClick={onClose}>{isOwn ? 'Close' : 'Cancel'}</button>
+          {!isOwn && <button className="btn btn-primary" onClick={handleSave} disabled={saving || compsState !== 'ok'}>{saving ? 'Saving…' : compsState === 'loading' ? 'Loading…' : 'Save'}</button>}
         </div>
 
       </div>

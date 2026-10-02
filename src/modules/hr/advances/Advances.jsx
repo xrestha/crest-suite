@@ -334,6 +334,27 @@ export default function Advances() {
     setFieldErr(fe)
     if (Object.keys(fe).length) return
     setError(''); setSaving(true)
+    // S798 3a (H3): what is owed is read again right before the write. The database checks it for
+    // every client login (repayment_exceeds_outstanding), but the Crest operator's INSERT passes that
+    // guard — a restore writes history — so this read is what stops a recovery that payroll recorded
+    // after this page loaded from being repaid a second time.
+    const [advNow, repsNow] = await Promise.all([
+      scopedFrom('hr_advances', 'amount, status').eq('id', adv.id).maybeSingle(),
+      scopedFrom('hr_advance_repayments', 'amount').eq('advance_id', adv.id),
+    ])
+    if (advNow.error || repsNow.error || !advNow.data) {
+      setSaving(false)
+      setError('Nothing was recorded: what is still owed could not be checked again. ' + (advNow.error || repsNow.error ? errorLine(advNow.error || repsNow.error) : 'The advance may have been deleted in another tab.'))
+      load(); return
+    }
+    const owedNow = round2((parseFloat(advNow.data.amount) || 0) - (repsNow.data || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0))
+    if (advNow.data.status !== 'active' || amt > owedNow + OWED_EPS) {
+      setSaving(false)
+      setError(advNow.data.status !== 'active'
+        ? `Nothing was recorded: this ${adv.type === 'loan' ? 'loan' : 'advance'} is ${advNow.data.status === 'written_off' ? 'written off' : advNow.data.status} now (changed after this page loaded). The page has been reloaded.`
+        : `Nothing was recorded: only NPR ${fmt(Math.max(0, owedNow))} is still owed now — a repayment was recorded after this page loaded, by payroll or in another tab. The page has been reloaded.`)
+      load(); return
+    }
     const { error: err } = await scopedInsert('hr_advance_repayments', {
       advance_id:  selected,
       employee_id: adv.employee_id,

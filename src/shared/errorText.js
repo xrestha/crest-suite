@@ -747,6 +747,23 @@ const rules = [
     // deleting your own advance, and recording a repayment on it.
     operator: 'This is your own record, so someone else — another manager or the Owner — has to decide, change or cancel it. Nothing was changed.',
   },
+  // S798 3a (20261002140000, owner decision H2): your own pay is the Owner's to set, and a run that pays
+  // you is the Owner's to finalize and reopen.
+  {
+    test: e => /hr_own_pay/i.test(e.message || ''),
+    staff: 'That is your own pay, so the Owner changes it. Nothing was saved.',
+    operator: 'This is your own employee record, so the Owner sets its pay, bank, SSF and email details. Nothing was saved.',
+  },
+  {
+    test: e => /hr_own_run/i.test(e.message || ''),
+    staff: 'That run pays you, so the Owner finalizes it. Nothing was changed.',
+    operator: 'This run pays you, so the Owner finalizes and reopens it. Nothing was changed — ask the Owner to press it.',
+  },
+  {
+    test: e => /tada_undo_rank/i.test(e.message || ''),
+    staff: 'Only an HR manager or the Owner can put a decided claim back to pending. Nothing was changed.',
+    operator: 'Putting a decided claim back to pending needs an HR manager or the Owner, so nothing was changed.',
+  },
   // S798 (20260930120000): a decided leave request keeps its employee, type, dates and day type, and
   // only a pending one can be deleted.
   {
