@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, Navigate } from 'react-router-dom'
+import { useNavigate, Navigate, Link } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -32,7 +32,7 @@ function printedOn() {
 }
 
 export default function ReorderReport() {
-  const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
+  const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess, suitePlan } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -473,6 +473,15 @@ export default function ReorderReport() {
         <div>
           <h1 className="page-title">Reorder Report</h1>
           <p className="page-subtitle">Items below par level — auto purchase list</p>
+          {/* S800 (owner decision): the forecast's buying list stays a Crest Suite page, and this is
+              how a Suite client finds it — this list looks back at par, that one forward at the
+              sales forecast. Offered only where Suite is on, so nobody is sent to an upsell. */}
+          {(isAdmin || suitePlan === 'pro') && (
+            <p className="page-subtitle" style={{ marginTop: 2 }}>
+              Buying for the days ahead? <Link to="/demand-forecast" className="dash-tile-link" style={{ marginTop: 0 }}>Demand Forecast's buying list →</Link>
+              {' '}covers forecast sales and keeps your par.
+            </p>
+          )}
           <div className="page-scope-row">
             <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
           </div>

@@ -189,6 +189,11 @@ Why: access and staffing are not what the group is billed for.
 
 History: docs/rules-archive/dashboards.md#s617-group-console-admin-sections
 
+## Same item, different price (S800)
+
+- `GroupItemPrices.jsx` reads `get_group_item_prices` (migration `20261002120000`): Owner/admin, Suite Pro outlets only, raw sums per linked item and outlet; `groupItemPriceMath.js` derives the per-unit price and "Above the lowest". Its own read and states, mounted under the page-level error only, so it loads beside the month's other reads.
+- The same item is `COALESCE(master_id, id)`, never a name match (owner decision). Prices are before VAT, after the bill's discount share, never `get_group_pnl`'s cost basis. Units that differ are listed and never compared; a zero-value line is not a price.
+
 ## MRR is never computed on a dashboard
 
 - Never re-derive a client's monthly value here. `clientMRR` / `clientMrrBreakdown` live in `src/shared/clientMrr.js` (pure over `(client, planPrices)`), shared by `AdminDashboardOverview.jsx` and Admin → Clients (S643), and `clientMrr.test.js` pins every rule. Reasoning: `.claude/rules/access-control.md`, the billed-axis section.

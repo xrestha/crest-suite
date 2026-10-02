@@ -10,6 +10,7 @@ import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { errorText } from '../../shared/errorText'
 import OutletAccessPanel from './OutletAccessPanel'
 import MasterPushPanel from './MasterPushPanel'
+import GroupItemPrices from './GroupItemPrices'
 import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 import { useSettings } from '../../context/SettingsContext'
 import { fcBand } from '../../shared/imsFormulas'
@@ -466,6 +467,10 @@ export default function GroupDashboard() {
                 )}
               </table>
             </div>}
+
+            {/* S800: its own read, started with the month's other reads rather than after them, so
+                it waits only on the page-level error (one failure card, not two). */}
+            {!error && <GroupItemPrices bsYear={bsYear} bsMonth={bsMonth} />}
 
             {/* Rendered from `rows`, not from AuthContext's `outlets`: this matrix must list every
                 outlet in the group, including ones excluded from the figures above for want of

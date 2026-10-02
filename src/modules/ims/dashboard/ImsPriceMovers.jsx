@@ -11,6 +11,16 @@ import { previousExistingPeriod } from '../../../pages/periods/closePeriod'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import { priceMovers } from './priceMovers'
+import { unitRateParts } from '../../../shared/unitRate'
+
+// "1,180.00 → 1,260.00/KG": the rate in the unit it is bought in (per KG / LTR for a gram or
+// millilitre item, the S797 rule), with the precision a moving price needs (Price Tracker's).
+function rateMove(r) {
+  const before = unitRateParts(r.rateBefore, r.uom, { precise: true })
+  const now = unitRateParts(r.rateNow, r.uom, { precise: true })
+  if (!before || !now) return ''
+  return `${before.primary.value} → ${now.primary.value}${now.primary.unit ? `/${now.primary.unit}` : ''}`
+}
 
 // The Inventory Dashboard's "price movers" card (S800 stage F): the five purchase items whose price
 // change cost the most this month, in rupees. The arithmetic is priceMovers.js. The card is the
@@ -61,7 +71,7 @@ export default function ImsPriceMovers({ activePeriod }) {
         </Tip>
       </h3>
       {state === null
-        ? <span className="skeleton" style={{ display: 'inline-block', width: '70%', height: '1.2em' }} />
+        ? <div><span className="skeleton" style={{ display: 'inline-block', width: '70%', height: '1.2em' }} /></div>
         : state.error
           ? <ReportLoadError error={state.error} />
           : state.rows.length === 0
@@ -77,7 +87,7 @@ export default function ImsPriceMovers({ activePeriod }) {
                       <li key={r.item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                         <span style={{ color: 'var(--theme-text1)', minWidth: 0 }}>
                           {r.name}
-                          <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}> · {npr(Math.round(r.rateBefore))} → {npr(Math.round(r.rateNow))}{r.uom ? `/${r.uom}` : ''}</span>
+                          <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}> · {rateMove(r)}</span>
                         </span>
                         {/* A rise costs money, so it is the red direction here; the arrow stays the fact. */}
                         <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: up ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>

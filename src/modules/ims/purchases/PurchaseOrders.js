@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -8,7 +8,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import Fab from '../../../components/Fab'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
-import { Navigate, Link } from 'react-router-dom'
+import { Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -99,6 +99,17 @@ export default function PurchaseOrders() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [printPo,      setPrintPo]      = useState(null)
 
+  // A purchase order started from the Demand Forecast buying list (S800): the supplier and its lines
+  // arrive as router state and open the New PO form filled in, for the user to check and save — this
+  // page still does every write. Taken into a ref and cleared from the history entry at once, so a
+  // reload or Back never replays it (the Reservations → till hand-off's shape, PosOrders.jsx).
+  const location = useLocation()
+  const navigate = useNavigate()
+  const prefillRef = useRef(location.state?.poPrefill || null)
+  useEffect(() => {
+    if (location.state?.poPrefill) navigate(location.pathname, { replace: true, state: null })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
   useEffect(() => {
@@ -137,6 +148,40 @@ export default function PurchaseOrders() {
       await loadPos(start.id)
     }
     setLoading(false)
+    applyPrefill(start, v || [], i || [])
+  }
+
+  // Opens the New PO form from the buying list's hand-off, once. The pickers hold active vendors and
+  // items only, so anything the list named that is no longer offered is left off and said so, rather
+  // than saved under an id the dropdown cannot show (the reason the edit path fetches named records).
+  function applyPrefill(period, activeVendors, activeItems) {
+    const pre = prefillRef.current
+    prefillRef.current = null
+    if (!pre) return
+    if (!period) { setListError('There is no month to raise this order into yet.'); return }
+    if (!canEditClosedPeriods && period.status === 'closed') {
+      setListError(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} is closed, so an order cannot be raised into it. Open the new month first, then start the order again from the buying list.`)
+      return
+    }
+    if (!activeVendors.some(v => v.id === pre.vendorId)) {
+      setListError('That supplier is hidden in Vendors, so the order was not started. Unhide it, or pick another supplier with + New PO.')
+      return
+    }
+    const itemById = Object.fromEntries(activeItems.map(it => [it.id, it]))
+    const kept = (pre.lines || []).filter(l => itemById[l.item_id] && Number(l.qty_ordered) > 0)
+    const dropped = (pre.lines || []).length - kept.length
+    setEditingPo(null)
+    setPoForm({ vendor_id: pre.vendorId, period_id: period.id, notes: pre.note || '', expected_date: '' })
+    setPoItems(kept.length
+      ? kept.map((l, k) => {
+        const it = itemById[l.item_id]
+        return { _key: Date.now() + k, item_id: l.item_id, qty_ordered: String(l.qty_ordered), unit_price: it.per_uom_rate ? String(it.per_uom_rate) : '' }
+      })
+      : [{ _key: Date.now(), item_id: '', qty_ordered: '', unit_price: '' }])
+    setFormError(dropped > 0
+      ? `${dropped} item${dropped === 1 ? '' : 's'} from the buying list ${dropped === 1 ? 'is' : 'are'} hidden in Item Master, so ${dropped === 1 ? 'it was' : 'they were'} left off this order.`
+      : '')
+    setView('form')
   }
 
   async function loadPos(periodId) {

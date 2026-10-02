@@ -3,6 +3,7 @@
 import {
   buildDailyHistory, buildManualDailyHistory, periodsInLookback, weightedMean, forecastByWeekday,
   platesOf, splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList,
+  scaleForecastDays, usualSupplierByItem,
   SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD,
 } from './demandForecastMath'
 import { computeOrderAmounts } from './posBillingMath'
@@ -207,18 +208,55 @@ describe('ingredientBuyList (S756, D21)', () => {
   it('to buy is forecast use less what is in store, never below zero', () => {
     const rows = ingredientBuyList({ rice: 5000, oil: 200, salt: 10 }, { rice: 1200, oil: 900 })
     expect(rows).toEqual([
-      { id: 'rice', use: 5000, inStore: 1200, toBuy: 3800 },
-      { id: 'oil', use: 200, inStore: 900, toBuy: 0 },
-      { id: 'salt', use: 10, inStore: 0, toBuy: 10 },
+      { id: 'rice', use: 5000, par: 0, inStore: 1200, toBuy: 3800 },
+      { id: 'oil', use: 200, par: 0, inStore: 900, toBuy: 0 },
+      { id: 'salt', use: 10, par: 0, inStore: 0, toBuy: 10 },
     ])
   })
 
   it('an unreadable shelf is unknown, not empty — nothing is told to buy everything', () => {
-    expect(ingredientBuyList({ rice: 5000 }, null)).toEqual([{ id: 'rice', use: 5000, inStore: null, toBuy: null }])
+    expect(ingredientBuyList({ rice: 5000 }, null)).toEqual([{ id: 'rice', use: 5000, par: 0, inStore: null, toBuy: null }])
   })
 
   it('negative theoretical stock counts as none in store, and float residue is not a purchase', () => {
     expect(ingredientBuyList({ a: 3 }, { a: -2 })[0].toBuy).toBe(3)
     expect(ingredientBuyList({ a: 0.1 + 0.2 }, { a: 0.3 })[0].toBuy).toBe(0)
+  })
+
+  it('S800: safety stock — buys enough to cover the forecast AND keep the par on the shelf', () => {
+    const [r] = ingredientBuyList({ rice: 5000 }, { rice: 1200 }, { rice: 2000 })
+    expect(r).toEqual({ id: 'rice', use: 5000, par: 2000, inStore: 1200, toBuy: 5800 })
+    // plenty on the shelf, par included: nothing to buy
+    expect(ingredientBuyList({ oil: 200 }, { oil: 900 }, { oil: 500 })[0].toBuy).toBe(0)
+    // a par with an unreadable shelf is still unknown, never "buy the par"
+    expect(ingredientBuyList({ oil: 200 }, null, { oil: 500 })[0].toBuy).toBeNull()
+  })
+})
+
+describe('scaleForecastDays (S800, rain)', () => {
+  const days = [
+    { bs: { year: 2083, month: 6, day: 17 }, forecastQtyByRecipe: { momo: 40, tea: 10 } },
+    { bs: { year: 2083, month: 6, day: 18 }, forecastQtyByRecipe: { momo: 50 } },
+  ]
+  it('scales only the rainy days and marks them', () => {
+    const out = scaleForecastDays(days, d => (d.bs.day === 18 ? 0.7 : 1))
+    expect(out[0]).toBe(days[0])
+    expect(out[1].forecastQtyByRecipe.momo).toBeCloseTo(35)
+    expect(out[1].rainFactor).toBe(0.7)
+    expect(days[1].forecastQtyByRecipe.momo).toBe(50) // the input is not changed
+  })
+})
+
+describe('usualSupplierByItem (S800)', () => {
+  it('takes the vendor on the most recent line — later period, then later day, then later write', () => {
+    const rank = { p1: 1, p2: 2 }
+    const map = usualSupplierByItem([
+      { item_id: 'rice', vendor_id: 'old', period_id: 'p1', bs_day: 30, created_at: '2026-09-01T00:00:00Z' },
+      { item_id: 'rice', vendor_id: 'new', period_id: 'p2', bs_day: 2, created_at: '2026-09-20T00:00:00Z' },
+      { item_id: 'oil', vendor_id: 'a', period_id: 'p2', bs_day: 5, created_at: '2026-09-21T08:00:00Z' },
+      { item_id: 'oil', vendor_id: 'b', period_id: 'p2', bs_day: 5, created_at: '2026-09-21T09:00:00Z' },
+      { item_id: 'salt', vendor_id: null, period_id: 'p2', bs_day: 9, created_at: '2026-09-25T00:00:00Z' },
+    ], rank)
+    expect(map).toEqual({ rice: 'new', oil: 'b' })
   })
 })

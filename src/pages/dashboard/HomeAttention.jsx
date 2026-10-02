@@ -116,7 +116,7 @@ export default function HomeAttention({
       {loading && !anyShown
         ? <span className="skeleton" style={{ display: 'inline-block', width: '60%', height: '1.2em' }} />
         : anyShown
-          ? <ul className="home-attention">{items.map(i => <Row key={i.key} {...i} />)}</ul>
+          ? <ul className="home-attention">{items.map(({ key, ...item }) => <Row key={key} {...item} />)}</ul>
           : <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green-text)' }}>✓</span> Nothing is waiting on you right now.</p>}
     </section>
   )

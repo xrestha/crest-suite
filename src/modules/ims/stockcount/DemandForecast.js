@@ -1,5 +1,5 @@
 import { nprOrDash, npr } from '../../../shared/nepalMoney'
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -8,19 +8,23 @@ import { firstError } from '../../../shared/queryError'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { nepalBs, nepalBsLong } from '../../../shared/nepalTime'
+import { nepalBs, nepalBsLong, nepalCivilDate } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, bsToAd, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, getBsToday, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
-import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
+import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, usualSupplierByItem, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
+import { packsFor, packText } from './reorderPacks'
+import { useSettings } from '../../../context/SettingsContext'
+import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
+import { rainFactorForMonth, rainPctValue } from '../../dashboard/weatherEffect'
 import { buildStockRows } from './stockReportCalc'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorText } from '../../../shared/errorText'
 import SuiteGate from '../../../components/SuiteGate'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { FilterChips } from '../../../components/Tabs'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -62,9 +66,9 @@ async function loadOnHand(scopedFrom, items) {
     .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
   if (pErr) throw pErr
   const period = (periods || []).find(p => p.status === 'open') || (periods || [])[0]
-  if (!period) return { onHandById: null, period: null }
+  if (!period) return { onHandById: null, period: null, parById: null, periods: periods || [] }
   const itemIds = items.map(i => i.id)
-  if (itemIds.length === 0) return { onHandById: {}, period }
+  if (itemIds.length === 0) return { onHandById: {}, period, parById: {}, periods }
   // Per-item tables narrowed to the forecast's ingredients (chunked: the id list is a URL, and
   // each is one row per item per period or more). Sales stay whole-period and paged, because
   // usage of these items can come from any dish sold, not only the forecast ones.
@@ -81,10 +85,12 @@ async function loadOnHand(scopedFrom, items) {
     // bs_day + source feed the POS-supersedes-manual rule inside buildStockRows; ingredient_deltas
     // because a customized plate also consumes its options' stock lines (S758).
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
+    // Safety stock (S800): each item's par — one row per item per client, so chunked by item.
+    fetchAllRowsChunked(itemIds, ids => scopedFrom('par_levels', 'id, item_id, par_qty').in('item_id', ids).order('id')),
   ])
   const failed = firstError(results)
   if (failed) throw failed
-  const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }] = results
+  const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }, { data: pars }] = results
   const soldIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
   // Both walks throw on a failed read, which the caller already turns into its own notice (S758).
   const [breakdown, explosion] = await Promise.all([
@@ -95,7 +101,34 @@ async function loadOnHand(scopedFrom, items) {
   return {
     onHandById: Object.fromEntries(rows.map(r => [r.item.id, r.onHand])),
     period,
+    periods,
     countedIds: new Set(rows.filter(r => r.stockSource === 'closing').map(r => r.item.id)),
+    parById: Object.fromEntries((pars || []).map(p => [p.item_id, Number(p.par_qty) || 0])),
+  }
+}
+
+// Who each item is usually bought from (S800): the vendor on its latest purchase line over the last
+// SUPPLIER_LOOKBACK periods. purchase_entries is period-scoped, so it is read through the client's
+// own period ids. Throws on a failed read; the caller shows the list ungrouped and says why.
+const SUPPLIER_LOOKBACK = 6
+async function loadUsualSuppliers(scopedFrom, itemIds, periods) {
+  const ordinal = p => p.bs_year * 100 + p.bs_month
+  const recent = [...(periods || [])].sort((a, b) => ordinal(b) - ordinal(a)).slice(0, SUPPLIER_LOOKBACK)
+  if (recent.length === 0 || itemIds.length === 0) return { byItem: {}, names: {} }
+  const rankById = Object.fromEntries(recent.map(p => [p.id, ordinal(p)]))
+  const recentIds = recent.map(p => p.id)
+  const [linesRes, vendorsRes] = await Promise.all([
+    fetchAllRowsChunked(itemIds, ids => supabase.from('purchase_entries')
+      .select('id, item_id, vendor_id, period_id, bs_day, created_at')
+      .in('period_id', recentIds).in('item_id', ids).not('vendor_id', 'is', null).order('id')),
+    fetchAllRows(() => scopedFrom('vendors', 'id, name, is_active').order('id')),
+  ])
+  const failed = firstError([linesRes, vendorsRes])
+  if (failed) throw failed
+  return {
+    byItem: usualSupplierByItem(linesRes.data, rankById),
+    names: Object.fromEntries((vendorsRes.data || []).map(v => [v.id, v.name])),
+    active: new Set((vendorsRes.data || []).filter(v => v.is_active !== false).map(v => v.id)),
   }
 }
 
@@ -109,7 +142,9 @@ function evidenceText(f) {
 }
 
 export default function DemandForecast() {
-  const { clientId, hasImsAccess, clientModules } = useAuth()
+  const { clientId, hasImsAccess, clientModules, hasFeature } = useAuth()
+  const { settings } = useSettings()
+  const navigate = useNavigate()
   const { scopedFrom } = useScopedDb()
   const horizonReq = useLatestRequest()
   const [horizon, setHorizon] = useState(7)
@@ -135,7 +170,11 @@ export default function DemandForecast() {
   // recipe walk never holds the forecast itself hostage, and its failure is its own message.
   // `stockError`/`stockPeriod` are the in-store half (S756, D21), which fails on its own too: a
   // shelf that could not be read leaves forecast use on screen and blanks only In store / To buy.
-  const [ingredients, setIngredients] = useState({ loading: false, error: null, rows: [], totalValue: null, unpriced: 0, stockError: null, stockPeriod: null })
+  // S800: the loaded pieces, not the finished list. The list is derived below from these and the
+  // forecast scaled for rain, so the weather arriving after the reads re-works it instead of re-reading.
+  const EMPTY_ING = { loading: false, error: null, exploded: {}, items: [], stock: null, stockError: null, suppliers: null, supplierError: null }
+  const [ingredients, setIngredients] = useState(EMPTY_ING)
+  const [showCovered, setShowCovered] = useState(false)
 
   // Covers exist only where POS does: manual Sales Entries carry none. Keyed on the viewed
   // client's real subscription, not the session's `posEnabled`, which is true for every admin
@@ -145,18 +184,17 @@ export default function DemandForecast() {
   const loadIngredients = useCallback(async (list, reqKey) => {
     const totals = totalQtyByRecipe(list)
     const recipeIds = Object.keys(totals).filter(id => totals[id] > 0)
-    if (recipeIds.length === 0) { setIngredients({ loading: false, error: null, rows: [], totalValue: null, unpriced: 0, stockError: null, stockPeriod: null }); return }
+    if (recipeIds.length === 0) { setIngredients(EMPTY_ING); return }
     setIngredients(s => ({ ...s, loading: true, error: null }))
     try {
       // Same walk the Reorder Report uses for theoretical usage: leaf items only, sub-recipes
       // resolved through their yield, item yield_pct applied.
       const exploded = await explodeRecipeIngredients(supabase, recipeIds)
-      const byItem = aggregateIngredientDemand(totals, exploded)
-      const itemIds = Object.keys(byItem)
+      const itemIds = Object.keys(aggregateIngredientDemand(totals, exploded))
       let items = []
       if (itemIds.length > 0) {
         const { data, error } = await fetchAllRowsChunked(itemIds, ids =>
-          scopedFrom('items', 'id, name, uom, per_uom_rate, is_active, categories(name)').in('id', ids).order('id'))
+          scopedFrom('items', 'id, name, uom, per_uom_rate, is_active, purchase_unit, conversion_factor, categories(name)').in('id', ids).order('id'))
         if (error) throw error
         items = data || []
       }
@@ -164,39 +202,34 @@ export default function DemandForecast() {
 
       // In store (S756, D21). Its own try: a failed stock read must not take forecast use with it,
       // and must not read as an empty shelf either — ingredientBuyList carries it as unknown.
-      let stock = { onHandById: null, period: null, countedIds: new Set() }
+      let stock = { onHandById: null, period: null, periods: [], countedIds: new Set(), parById: null }
       let stockError = null
       try {
         stock = await loadOnHand(scopedFrom, items)
       } catch (err) {
         stockError = err
       }
-      if (!horizonReq.isCurrent(reqKey)) return
-
-      const itemById = Object.fromEntries(items.map(i => [i.id, i]))
-      const known = stock.onHandById != null
-      let unpriced = 0
-      const rows = ingredientBuyList(byItem, stock.onHandById).map(b => {
-        const item = itemById[b.id]
-        const rate = parseFloat(item?.per_uom_rate) || 0
-        if (!rate) unpriced += 1
-        return {
-          id: b.id, name: item?.name || 'Unknown item', uom: item?.uom || '', category: item?.categories?.name || 'Uncategorised',
-          inactive: item ? item.is_active === false : false,
-          qty: b.use, inStore: b.inStore, toBuy: b.toBuy, counted: stock.countedIds?.has(b.id) || false,
-          // Value of what there is TO BUY — the money the list asks for. Unknown when the shelf is.
-          rate, value: known && rate ? b.toBuy * rate : null,
+      // Usual suppliers (S800), likewise on their own: without them the list is one ungrouped table.
+      let suppliers = null
+      let supplierError = null
+      try {
+        let periods = stock.periods
+        if (!periods?.length) {
+          const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+          if (error) throw error
+          periods = data || []
         }
-      }).sort((a, b) => (b.value ?? 0) - (a.value ?? 0) || (b.toBuy ?? b.qty) - (a.toBuy ?? a.qty) || a.name.localeCompare(b.name))
-      setIngredients({
-        loading: false, error: null, rows, unpriced, stockError, stockPeriod: stock.period,
-        totalValue: known ? rows.reduce((s, r) => s + (r.value || 0), 0) : null,
-      })
+        suppliers = await loadUsualSuppliers(scopedFrom, items.map(i => i.id), periods)
+      } catch (err) {
+        supplierError = err
+      }
+      if (!horizonReq.isCurrent(reqKey)) return
+      setIngredients({ loading: false, error: null, exploded, items, stock, stockError, suppliers, supplierError })
     } catch (err) {
       if (!horizonReq.isCurrent(reqKey)) return
-      setIngredients({ loading: false, error: err, rows: [], totalValue: null, unpriced: 0, stockError: null, stockPeriod: null })
+      setIngredients({ ...EMPTY_ING, error: err })
     }
-  }, [scopedFrom, horizonReq])
+  }, [scopedFrom, horizonReq]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadStored = useCallback(async () => {
     if (!clientId) return
@@ -262,6 +295,89 @@ export default function DemandForecast() {
 
   useEffect(() => { loadStored() }, [loadStored])
 
+  // Rainy days (S800, owner decision): the dashboard's own rule — the Growth weather feature, the
+  // Owner's rain percentage, rain forecast within the next seven days (rainFactorForMonth). A day it
+  // touches has its expected dishes scaled before the list is worked out.
+  const weatherFeature = hasFeature('weather_forecast')
+  const { weather, weatherByAd, own: weatherOwn } = useWeatherStrip({})
+  const rainPct = weatherOwn ? rainPctValue(settings?.rain_sales_pct) : null
+  const rainByMonth = useMemo(() => {
+    if (!weatherFeature || !weatherByAd || rainPct == null || forecast.length === 0) return null
+    const todayAd = weather?.today || formatAd(nepalCivilDate(Date.now()))
+    const forecastAd = weather?.fetched_at ? formatAd(nepalCivilDate(weather.fetched_at)) : null
+    const out = {}
+    for (const d of forecast) {
+      const key = `${d.bs.year}:${d.bs.month}`
+      if (key in out) continue
+      out[key] = rainFactorForMonth({ rainPct, weatherByAd, todayAd, forecastAd, bsYear: d.bs.year, bsMonth: d.bs.month, monthEndDay: daysInBsMonth(d.bs.year, d.bs.month) })
+    }
+    return out
+  }, [weatherFeature, weatherByAd, rainPct, forecast, weather])
+  const listForecast = useMemo(() => scaleForecastDays(forecast, d => rainByMonth?.[`${d.bs.year}:${d.bs.month}`]?.factorOf(d.bs.day) ?? 1), [forecast, rainByMonth])
+  const rainDays = listForecast.filter(d => d.rainFactor)
+
+  // The buying list, derived (S800): forecast use (rain applied) + the par to keep − in store,
+  // rounded up to the pack it is bought in, grouped by the supplier it is usually bought from.
+  const buy = useMemo(() => {
+    const ing = ingredients
+    const known = ing.stock?.onHandById != null
+    const byItem = aggregateIngredientDemand(totalQtyByRecipe(listForecast), ing.exploded || {})
+    const itemById = Object.fromEntries((ing.items || []).map(i => [i.id, i]))
+    let unpriced = 0
+    const rows = ingredientBuyList(byItem, ing.stock?.onHandById ?? null, ing.stock?.parById ?? null).map(b => {
+      const item = itemById[b.id]
+      const rate = parseFloat(item?.per_uom_rate) || 0
+      if (!rate) unpriced += 1
+      const pack = item && b.toBuy > 0 ? packsFor(b.toBuy, item) : null
+      // What will actually arrive: whole packs where the item has a pack size, else the exact need.
+      // Nobody orders 14.37 eggs or 1,057.8 g of honey: with no pack size the need is rounded up to a
+      // whole base unit, so the Order column, the value and the purchase order all carry one figure.
+      const buyQty = b.toBuy == null ? null : pack ? pack.packedQty : (b.toBuy > 0 ? Math.ceil(b.toBuy - 1e-9) : 0)
+      const supplierId = ing.suppliers?.byItem?.[b.id] || null
+      return {
+        id: b.id, item, name: item?.name || 'Unknown item', uom: item?.uom || '', category: item?.categories?.name || 'Uncategorised',
+        inactive: item ? item.is_active === false : false,
+        qty: b.use, par: b.par, inStore: b.inStore, toBuy: b.toBuy, buyQty, pack,
+        packLabel: item && b.toBuy > 0 ? packText(b.toBuy, item) : '',
+        orderLabel: b.toBuy > 0 ? (item && packText(b.toBuy, item)) || `${fmtQty(Math.ceil(b.toBuy - 1e-9))} ${item?.uom || ''}`.trim() : '',
+        counted: ing.stock?.countedIds?.has(b.id) || false,
+        rate, value: known && rate && buyQty != null ? buyQty * rate : null,
+        supplierId, supplierName: supplierId ? (ing.suppliers?.names?.[supplierId] || 'Supplier') : null,
+      }
+    }).sort((a, b) => (b.value ?? 0) - (a.value ?? 0) || (b.toBuy ?? b.qty) - (a.toBuy ?? a.qty) || a.name.localeCompare(b.name))
+    // One group per usual supplier, biggest spend first; items with no supplier on record last.
+    const groupMap = new Map()
+    // Items the shelf already covers go in one group of their own at the end, so each supplier's
+    // group holds only what to order from it. An unknown shelf keeps every row in its supplier group.
+    const covered = rows.filter(r => r.toBuy === 0)
+    for (const r of rows) {
+      if (r.toBuy === 0) continue
+      const key = r.supplierId || '__none__'
+      const g = groupMap.get(key) || { key, supplierId: r.supplierId, name: r.supplierName || 'No supplier on record', rows: [], value: 0, active: !!r.supplierId && !!ing.suppliers?.active?.has(r.supplierId) }
+      g.rows.push(r)
+      g.value += r.value || 0
+      groupMap.set(key, g)
+    }
+    const groups = [...groupMap.values()].sort((a, b) => (a.supplierId ? 0 : 1) - (b.supplierId ? 0 : 1) || b.value - a.value || a.name.localeCompare(b.name))
+    return {
+      rows, groups, covered, unpriced,
+      totalValue: known ? rows.reduce((t, r) => t + (r.value || 0), 0) : null,
+      stockError: ing.stockError, stockPeriod: ing.stock?.period || null,
+      hasPars: rows.some(r => r.par > 0),
+    }
+  }, [ingredients, listForecast])
+
+  // A purchase order per supplier (S800): Purchase Orders opens its New PO form pre-filled with this
+  // supplier's lines — the quantity that will arrive and the Item Master rate — and the user reviews
+  // and saves it there. Nothing is written from here.
+  const canRaisePo = hasFeature('purchase_orders') && hasImsAccess('supervisor')
+  function raisePo(group) {
+    const lines = group.rows.filter(r => r.buyQty > 0 && r.item && r.item.is_active !== false)
+      .map(r => ({ item_id: r.id, qty_ordered: Math.round(r.buyQty * 1000) / 1000, unit_price: r.rate || '' }))
+    if (!group.supplierId || lines.length === 0) return
+    navigate('/purchase-orders', { state: { poPrefill: { vendorId: group.supplierId, lines, note: `From the Demand Forecast buying list (${horizonLabel.toLowerCase()})` } } })
+  }
+
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const horizonLabel = horizon === 7 ? 'Next 7 Days' : 'Next 30 Days'
@@ -269,10 +385,10 @@ export default function DemandForecast() {
   // unnamed when it succeeded without it.
   const dishName = id => recipeNames[id] || (namesError ? 'Dish name unavailable' : 'Unnamed dish')
   const lastRunLabel = lastRun ? (nepalBsLong(lastRun.run_at) || new Date(lastRun.run_at).toLocaleString()) : null
-  const stockPeriodLabel = ingredients.stockPeriod
-    ? `${BS_MONTHS[ingredients.stockPeriod.bs_month - 1]} ${ingredients.stockPeriod.bs_year}${ingredients.stockPeriod.status === 'open' ? '' : ' (closed)'}`
+  const stockPeriodLabel = buy.stockPeriod
+    ? `${BS_MONTHS[buy.stockPeriod.bs_month - 1]} ${buy.stockPeriod.bs_year}${buy.stockPeriod.status === 'open' ? '' : ' (closed)'}`
     : null
-  const inStoreKnown = !ingredients.stockError && !!ingredients.stockPeriod
+  const inStoreKnown = !buy.stockError && !!buy.stockPeriod
   // What a printed or exported copy covers, in one line (the S594 scope rule).
   const scopeLine = forecast.length > 0
     ? `${horizonLabel} · ${bsLabel(forecast[0])} – ${bsLabel(forecast[forecast.length - 1])} (${forecast.length} day${forecast.length === 1 ? '' : 's'})`
@@ -304,24 +420,29 @@ export default function DemandForecast() {
     const wb = XLSX.utils.book_new()
     // Letterhead + scope line on both sheets (S756) — a bare json_to_sheet named no client, no date
     // range and no run, so a mailed copy could not be matched to anything a week later.
-    const ingRows = ingredients.rows.map(r => ({
+    const ingRows = buy.groups.flatMap(g => g.rows.map(r => ({
+      'Supplier': g.supplierId ? g.name : 'No supplier on record',
       'Item': r.name, 'Category': r.category, 'Unit': r.uom,
       [`Forecast use (${horizonLabel.toLowerCase()})`]: parseFloat(r.qty.toFixed(3)),
       'In store': r.inStore == null ? '' : parseFloat(r.inStore.toFixed(3)),
+      'Keep on shelf (par)': r.par ? parseFloat(r.par.toFixed(3)) : '',
       'To buy': r.toBuy == null ? '' : parseFloat(r.toBuy.toFixed(3)),
+      'Order': r.orderLabel,
+      'Will arrive': r.buyQty == null ? '' : parseFloat(r.buyQty.toFixed(3)),
       'Unit Rate (NPR)': r.rate || '',
-      'To-buy value (NPR)': r.value == null ? '' : Math.round(r.value),
+      'Value (NPR)': r.value == null ? '' : Math.round(r.value),
       'Status': r.inactive ? 'Inactive item' : '',
-    }))
+    })))
     const wsIng = sheetWithLetterhead(XLSX, {
       title: 'Demand Forecast — Ingredients to buy', biz, scopeLine, rows: ingRows,
       notes: [
         inStoreKnown
-          ? `In store is the Stock Report on-hand figure for ${stockPeriodLabel}: the closing count where entered, otherwise opening + net purchases − usage − wastage − staff meals. To buy = forecast use − in store, never below zero.`
+          ? `In store is the Stock Report on-hand figure for ${stockPeriodLabel}: the closing count where entered, otherwise opening + net purchases − usage − wastage − staff meals. To buy = forecast use + the par to keep − in store, never below zero; Will arrive rounds it up to whole packs, and the value is of what will arrive.`
           : 'In store could not be worked out, so In store, To buy and the value are blank — this sheet is forecast use only.',
+        ...(rainDays.length ? [`Rain forecast lowered expected sales on ${rainDays.map(bsLabel).join(', ')} (× ${Math.round(rainDays[0].rainFactor * 100)}%, your rainy-day setting).`] : []),
       ],
     })
-    wsIng['!cols'] = [26, 16, 8, 18, 12, 12, 14, 16, 14].map(w => ({ wch: w }))
+    wsIng['!cols'] = [22, 26, 16, 8, 18, 12, 14, 12, 24, 12, 14, 12, 14].map(w => ({ wch: w }))
     XLSX.utils.book_append_sheet(wb, wsIng, 'Ingredients')
     const dishRows = []
     for (const f of forecast) {
@@ -549,24 +670,34 @@ export default function DemandForecast() {
         <div style={{ marginTop: 32 }}>
           <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>
             Ingredients to buy — {horizonLabel.toLowerCase()}{' '}
-            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. In store is the same on-hand figure Stock Report and Reorder Report show; To buy is what the forecast will use beyond that." width={340}>ⓘ</Tip>
+            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. In store is the same on-hand figure Stock Report and Reorder Report show; Keep is the item's par level from the Reorder Report, the minimum you want left on the shelf; To buy covers the forecast and keeps that par." width={340}>ⓘ</Tip>
           </h2>
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
-            In each item's base unit. To buy = forecast use − in store, never below zero, valued at the Item Master rate. Occasional dishes are included at their average, so a rarely-sold dish still puts a little of its ingredients on the list.
+            In each item's base unit. To buy = forecast use + the par to keep − in store, never below zero, rounded up to whole packs where the item has a pack size, and grouped by the supplier you last bought it from. The value is of what will arrive, at the Item Master rate. Occasional dishes are included at their average, so a rarely-sold dish still puts a little of its ingredients on the list.
             {!ingredients.loading && !ingredients.error && inStoreKnown && ` In store is as at ${stockPeriodLabel}.`}
           </p>
-          {!ingredients.loading && !ingredients.error && ingredients.rows.length > 0 && !inStoreKnown && (
+          {rainDays.length > 0 && (
+            <p className="note-banner" role="status" style={{ margin: '0 0 12px', fontSize: 12 }}>
+              <strong>Rain lowered the list.</strong> Rain is forecast on {rainDays.map(d => `${WEEKDAYS[dayOf(d)]} ${d.bs.day} ${BS_MONTHS[d.bs.month - 1]}`).join(', ')}, so expected sales on {rainDays.length === 1 ? 'that day are' : 'those days are'} taken at {Math.round(rainDays[0].rainFactor * 100)}% — your rainy-day setting. The dish table above still shows the usual numbers.
+            </p>
+          )}
+          {!ingredients.loading && !ingredients.error && buy.rows.length > 0 && !inStoreKnown && (
             <p role="alert" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-              {ingredients.stockError
+              {buy.stockError
                 ? 'What is in store could not be read, so In store and To buy are blank rather than assuming the shelf is empty. Forecast use below is unaffected. Reload the page to try again.'
                 : 'There is no stock period yet, so what is in store cannot be worked out — In store and To buy are blank. Forecast use below is unaffected.'}
+            </p>
+          )}
+          {!ingredients.loading && !ingredients.error && ingredients.supplierError && (
+            <p role="status" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
+              Who you usually buy each item from could not be read, so the list is not grouped by supplier and no purchase order can be started from it. The quantities are unaffected. Reload the page to try again.
             </p>
           )}
           {ingredients.loading ? (
             <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Working out ingredients…</p></div>
           ) : ingredients.error ? (
             <ReportLoadError error={ingredients.error} />
-          ) : ingredients.rows.length === 0 ? (
+          ) : buy.rows.length === 0 ? (
             <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               None of the forecast dishes has ingredients in Recipe Costing yet, so there is nothing to explode.
             </div>
@@ -576,36 +707,91 @@ export default function DemandForecast() {
                 <thead>
                   <tr>
                     <th>Item</th><th>Category</th>
-                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the item's base unit.`}>Forecast use</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the item's base unit${rainDays.length ? ', lowered on the rainy days named above' : ''}.`}>Forecast use</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text={`What is on the shelf now — the same figure as Stock Report's On-hand${stockPeriodLabel ? ` for ${stockPeriodLabel}` : ''}: the closing count where one is entered, otherwise opening + net purchases − usage − wastage − staff meals. A dash means it could not be worked out.`} width={300}>In store</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Forecast use − In store, never below zero. Zero means what is on the shelf already covers the forecast." width={240}>To buy</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="The item's par level — the least you want left on the shelf — set on the Reorder Report. The list buys enough to keep it. A dash means no par is set." width={260}>Keep</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Forecast use + Keep − In store, never below zero. Zero means what is on the shelf already covers the forecast and the par." width={240}>To buy</Tip></th>
+                    <th><Tip text="What to order: whole packs where Item Master has a pack size (for example a 25 kg sack), otherwise To buy rounded up to a whole unit. This is what a purchase order started from here asks for, and what the value is worked out on." width={280}>Order</Tip></th>
                     <th>Unit</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="To buy × the item's current per-unit rate from Item Master. A dash means the item has no rate yet, or what is in store is unknown." width={260}>≈ Value</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="What will arrive (the whole packs, or To buy where there is no pack size) × the item's current per-unit rate from Item Master. A dash means the item has no rate yet, or what is in store is unknown." width={280}>≈ Value</Tip></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ingredients.rows.map(r => (
-                    <tr key={r.id}>
-                      <td style={{ color: 'var(--theme-text1)' }}>
-                        <span style={{ whiteSpace: 'nowrap' }}>{r.name}</span>
-                        {r.inactive && <Tip text="This item is inactive in Item Master but a forecast dish still uses it — reactivate it or update the recipe."><span className="badge badge-amber" style={{ marginLeft: 6 }}>inactive</span></Tip>}
-                      </td>
-                      <td style={{ color: 'var(--theme-text2)' }}>{r.category}</td>
-                      <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtQty(r.inStore)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtQty(r.toBuy)}</td>
-                      <td style={{ color: 'var(--theme-text2)' }}>{r.uom}</td>
-                      <td style={{ textAlign: 'right' }}>{r.value != null ? npr(r.value) : '—'}</td>
-                    </tr>
+                  {buy.groups.map(g => (
+                    <Fragment key={g.key}>
+                      <tr className="row-tinted">
+                        <td colSpan={8} style={{ fontWeight: 700, color: 'var(--theme-text1)' }}>
+                          {g.supplierId ? g.name : (ingredients.supplierError ? 'All items' : 'No supplier on record')}
+                          {!g.supplierId && !ingredients.supplierError && (
+                            <span style={{ fontWeight: 400, color: 'var(--theme-text3)', fontSize: 12 }}> · never bought with a supplier named in the last {SUPPLIER_LOOKBACK} months</span>
+                          )}
+                          {canRaisePo && g.supplierId && g.active && g.rows.some(r => r.buyQty > 0) && (
+                            <Tip text={`Opens a new purchase order for ${g.name} with these items and quantities filled in. You check it and save it on Purchase Orders — nothing is ordered from here.`} width={280}>
+                              <button type="button" className="btn btn-ghost btn-sm no-print" style={{ marginLeft: 12 }} onClick={() => raisePo(g)}>
+                                Create purchase order
+                              </button>
+                            </Tip>
+                          )}
+                          {canRaisePo && g.supplierId && !g.active && (
+                            <span style={{ fontWeight: 400, color: 'var(--theme-text3)', fontSize: 12 }}> · this supplier is hidden in Vendors, so no purchase order can be started for it</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{g.value ? npr(g.value) : '—'}</td>
+                      </tr>
+                      {g.rows.map(r => (
+                        <tr key={r.id}>
+                          <td style={{ color: 'var(--theme-text1)' }}>
+                            <span style={{ whiteSpace: 'nowrap' }}>{r.name}</span>
+                            {r.inactive && <Tip text="This item is inactive in Item Master but a forecast dish still uses it — reactivate it or update the recipe."><span className="badge badge-amber" style={{ marginLeft: 6 }}>inactive</span></Tip>}
+                          </td>
+                          <td style={{ color: 'var(--theme-text2)' }}>{r.category}</td>
+                          <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtQty(r.inStore)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.par > 0 ? fmtQty(r.par) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtQty(r.toBuy)}</td>
+                          <td style={{ color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{r.orderLabel || '—'}</td>
+                          <td style={{ color: 'var(--theme-text2)' }}>{r.uom}</td>
+                          <td style={{ textAlign: 'right' }}>{r.value != null ? npr(r.value) : '—'}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
+                  {buy.covered.length > 0 && (
+                    <>
+                      <tr className="row-tinted">
+                        <td colSpan={9} style={{ color: 'var(--theme-text1)' }}>
+                          <strong>Already covered by what is in store</strong>
+                          <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}> · {buy.covered.length} item{buy.covered.length === 1 ? '' : 's'}, nothing to buy</span>
+                          <button type="button" className="btn btn-ghost btn-sm no-print" style={{ marginLeft: 12 }}
+                            aria-expanded={showCovered} onClick={() => setShowCovered(v => !v)}>
+                            {showCovered ? 'Hide' : 'Show'}
+                          </button>
+                        </td>
+                      </tr>
+                      {showCovered && buy.covered.map(r => (
+                        <tr key={r.id}>
+                          <td style={{ color: 'var(--theme-text1)' }}><span style={{ whiteSpace: 'nowrap' }}>{r.name}</span></td>
+                          <td style={{ color: 'var(--theme-text2)' }}>{r.category}</td>
+                          <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtQty(r.inStore)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.par > 0 ? fmtQty(r.par) : '—'}</td>
+                          <td style={{ textAlign: 'right' }}>0</td>
+                          <td style={{ color: 'var(--theme-text2)' }}>—</td>
+                          <td style={{ color: 'var(--theme-text2)' }}>{r.uom}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>—</td>
+                        </tr>
+                      ))}
+                    </>
+                  )}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={6} style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                      {ingredients.rows.length} item{ingredients.rows.length === 1 ? '' : 's'}
-                      {ingredients.unpriced > 0 && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · {ingredients.unpriced} without a rate, not in the total</span>}
+                    <td colSpan={8} style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      {buy.rows.length - buy.covered.length} item{buy.rows.length - buy.covered.length === 1 ? '' : 's'} to buy
+                      {buy.covered.length > 0 && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · {buy.covered.length} already covered</span>}
+                      {buy.unpriced > 0 && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · {buy.unpriced} without a rate, not in the total</span>}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{ingredients.totalValue != null ? npr(ingredients.totalValue) : '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{buy.totalValue != null ? npr(buy.totalValue) : '—'}</td>
                   </tr>
                 </tfoot>
               </table>

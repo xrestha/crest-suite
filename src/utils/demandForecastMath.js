@@ -219,12 +219,47 @@ export function aggregateIngredientDemand(totalsByRecipe, explodedByRecipe) {
 // is empty, buy all of it". An item the stock read has no row for is 0 in store — buildStockRows
 // returns a row for every item it is handed, so an absent one genuinely has nothing recorded.
 // To buy never goes negative: surplus stock is not a purchase.
-export function ingredientBuyList(demandByItem, onHandById) {
+//
+// Safety stock (S800, owner decision): `parById` is each item's par level — the minimum the owner
+// wants left on the shelf — and the list buys enough to cover the forecast AND keep it, so the days
+// ahead do not end on an empty shelf. No par (or null) is 0, which is the list as it was.
+export function ingredientBuyList(demandByItem, onHandById, parById = null) {
   const known = onHandById != null
   return Object.entries(demandByItem || {}).map(([id, use]) => {
-    if (!known) return { id, use, inStore: null, toBuy: null }
+    const par = parById ? Math.max(0, Number(parById[id]) || 0) : 0
+    if (!known) return { id, use, par, inStore: null, toBuy: null }
     const inStore = Math.max(0, Number(onHandById[id]) || 0)
-    const gap = use - inStore
-    return { id, use, inStore, toBuy: gap > 1e-9 ? gap : 0 }
+    const gap = use + par - inStore
+    return { id, use, par, inStore, toBuy: gap > 1e-9 ? gap : 0 }
   })
+}
+
+// Rainy days (S800, owner decision): each forecast day's dishes scaled by `factorOfDay(day)` — the
+// Owner's rain percentage on a day with rain forecast, 1 otherwise (rainFactorForMonth decides
+// which, the rule the dashboard's sales forecast uses). A scaled day carries `rainFactor` so the
+// page can say which days it lowered. Days at 1 are returned as they were.
+export function scaleForecastDays(days, factorOfDay) {
+  return (days || []).map(d => {
+    const f = factorOfDay(d)
+    if (!(f > 0) || f === 1) return d
+    const scaled = {}
+    for (const [id, q] of Object.entries(d.forecastQtyByRecipe || {})) scaled[id] = q * f
+    return { ...d, forecastQtyByRecipe: scaled, rainFactor: f }
+  })
+}
+
+// Who each item is usually bought from (S800): the vendor on its most recent purchase line that
+// names one. Items carry no supplier of their own — a supplier exists in Crest only on a purchase
+// line — so "most recent" is ordered by the period (`periodRankById`, higher = later), then the
+// day, then when the line was written. An item never bought with a vendor is absent.
+export function usualSupplierByItem(entries, periodRankById) {
+  const best = {}
+  const later = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+  for (const e of entries || []) {
+    if (!e.item_id || !e.vendor_id) continue
+    const key = [periodRankById?.[e.period_id] ?? -1, Number(e.bs_day) || 0, Date.parse(e.created_at) || 0]
+    const cur = best[e.item_id]
+    if (!cur || later(key, cur.key) > 0) best[e.item_id] = { key, vendorId: e.vendor_id }
+  }
+  return Object.fromEntries(Object.entries(best).map(([id, v]) => [id, v.vendorId]))
 }
