@@ -195,7 +195,7 @@ export default function PosStaff() {
         const outcomes = await Promise.all(list.map(async p => {
           const level = levelOf(p)
           const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-            body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: p.pos_job_title },
+            body: { action: 'update_pos_role', client_id: clientId, userId: p.id, pos_role: level, pos_job_title: p.pos_job_title },
           })
           if (!error && !data?.error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
           return { p, failed: !!(error || data?.error) }
@@ -253,7 +253,7 @@ export default function PosStaff() {
     // manager waits on the slowest rather than on the sum.
     const outcomes = await Promise.all(affected.map(async p => {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-        body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: changedLabel },
+        body: { action: 'update_pos_role', client_id: clientId, userId: p.id, pos_role: level, pos_job_title: changedLabel },
       })
       // S754: admin-user-ops can answer 2xx with `{ error }` in the body; only `error` was checked,
       // so a refused move still showed the new level on the row.
@@ -355,7 +355,7 @@ export default function PosStaff() {
       run: async () => {
         setMsg('')
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-          body: { action: 'delete_pos_staff', userId: p.id },
+          body: { action: 'delete_pos_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
           const why = await edgeRefusal(error, data)
@@ -379,7 +379,7 @@ export default function PosStaff() {
     if (!pinValid(newPin)) { setPinMsg('PIN must be 4–6 digits.'); return }
     setResetting(true); setPinMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'reset_pos_pin', userId: pinTarget.id, pin: newPin },
+      body: { action: 'reset_pos_pin', client_id: clientId, userId: pinTarget.id, pin: newPin },
     })
     if (error || data?.error) {
       setPinMsg((await edgeRefusal(error, data)) || 'The PIN was not changed.'); setResetting(false); return
@@ -398,6 +398,7 @@ export default function PosStaff() {
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
         action:        'update_pos_role',
+        client_id:     clientId,
         userId:        profileId,
         pos_role:      role?.level || null,
         pos_job_title: jobTitle || null,
@@ -418,7 +419,7 @@ export default function PosStaff() {
   async function updateTeam(profileId, team) {
     setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'update_pos_role', userId: profileId, pos_team: team },
+      body: { action: 'update_pos_role', client_id: clientId, userId: profileId, pos_team: team },
     })
     if (error || data?.error) {
       setMsg('The team was not changed. ' + (await edgeRefusal(error, data)))
@@ -443,7 +444,7 @@ export default function PosStaff() {
     }
     setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'update_pos_role', userId: profileId, pos_discount_limit: limit },
+      body: { action: 'update_pos_role', client_id: clientId, userId: profileId, pos_discount_limit: limit },
     })
     if (error || data?.error) {
       setMsg('The discount limit was not changed. ' + (await edgeRefusal(error, data)))
@@ -458,7 +459,7 @@ export default function PosStaff() {
   async function updateAllowVoid(profileId, allow) {
     setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'update_pos_role', userId: profileId, pos_allow_void: allow },
+      body: { action: 'update_pos_role', client_id: clientId, userId: profileId, pos_allow_void: allow },
     })
     if (error || data?.error) {
       setMsg('Void permission was not changed. ' + (await edgeRefusal(error, data)))

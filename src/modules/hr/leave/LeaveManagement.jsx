@@ -16,6 +16,7 @@ import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
 import { useIsOwnEmployee } from '../ownRecord'
+import { NOTHING_CHANGED, changedNothing } from '../nothingChanged'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -367,21 +368,22 @@ export default function LeaveManagement() {
     if (before.error) return { ok: false, text: 'Could not read the attendance days this leave covers, so nothing was changed — try again. ' + errorLine(before.error) }
     const { missing, error: syncErr } = await syncAttendance(req, status)
     if (syncErr) return { ok: false, text: 'The leave days could not be marked on the attendance sheet, so the request was NOT approved. Try again. ' + errorLine(syncErr) }
-    const { error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
-    if (apprErr) {
+    const { data: apprRows, error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id).select('id')
+    if (apprErr || changedNothing(apprRows, apprErr)) {
       // The days are written and the request did not move — unless the update landed and only its
       // answer was lost. Ask before undoing anything: putting the days back under an approved
-      // request would pay an unpaid leave.
+      // request would pay an unpaid leave. A 0-row update (S798) takes the same path.
+      const reason = apprErr ? errorText(apprErr, 'operator') : NOTHING_CHANGED
       const { data: after, error: afterErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
       if (!afterErr && after?.status === 'approved') return { ok: true, missing }
       if (afterErr) {
-        return { ok: false, reload: true, text: 'The leave days were marked on the attendance sheet, but whether the approval went through could not be checked. Reload: if this request still shows Pending, approve it again — if it is refused again, its days are put back. ' + errorText(apprErr, 'operator') }
+        return { ok: false, reload: true, text: 'The leave days were marked on the attendance sheet, but whether the approval went through could not be checked. Reload: if this request still shows Pending, approve it again — if it is refused again, its days are put back. ' + reason }
       }
       const putErr = await putLeaveDaysBack(req, before)
       if (putErr) {
-        return { ok: false, reload: true, text: `This request could not be approved, and the leave already marked on the attendance sheet for ${bsLabel(req.start_date)} → ${bsLabel(req.end_date)} could not be put back. Correct those days on the Attendance Sheet, or approve again once the reason below is dealt with. ` + errorText(apprErr, 'operator') + ' ' + errorLine(putErr) }
+        return { ok: false, reload: true, text: `This request could not be approved, and the leave already marked on the attendance sheet for ${bsLabel(req.start_date)} → ${bsLabel(req.end_date)} could not be put back. Correct those days on the Attendance Sheet, or approve again once the reason below is dealt with. ` + reason + ' ' + errorLine(putErr) }
       }
-      return { ok: false, reload: true, text: 'This request could not be approved, so its days on the attendance sheet were put back as they were. ' + errorText(apprErr, 'operator') }
+      return { ok: false, reload: true, text: 'This request could not be approved, so its days on the attendance sheet were put back as they were. ' + reason }
     }
     return { ok: true, missing }
   }
@@ -505,10 +507,17 @@ export default function LeaveManagement() {
       const revErr = await revertAttendance(req)
       if (revErr) { setMsg(`error:The attendance days could not be reverted, so the request was not ${verb.toLowerCase()}ed — it is still approved. Try again. ` + errorLine(revErr)); setBusy(false); return }
     }
-    const { error: decErr } = await scopedUpdate('hr_leave_requests', { status: newStatus, decided_at: new Date().toISOString() }).eq('id', req.id)
+    const { data: decRows, error: decErr } = await scopedUpdate('hr_leave_requests', { status: newStatus, decided_at: new Date().toISOString() }).eq('id', req.id).select('id')
     if (decErr) {
       await load()
       setMsg(`error:${fresh?.status === 'approved' ? 'The attendance days were reverted, but ' : ''}the request still shows ${fresh?.status || 'its previous status'} — ${verb.toLowerCase()} it again. ` + errorText(decErr, 'operator'))
+      setBusy(false)
+      return
+    }
+    // Matched nothing (S798): no retry offered, since the same window gets the same answer.
+    if (changedNothing(decRows, decErr)) {
+      await load()
+      setMsg(`error:${fresh?.status === 'approved' ? 'The attendance days were reverted, but the request was not ' : 'The request was not '}${verb.toLowerCase()}ed. ` + NOTHING_CHANGED)
       setBusy(false)
       return
     }
@@ -563,10 +572,15 @@ export default function LeaveManagement() {
       setMsg(`error:Someone else changed this request first — it now shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status}, so it was not reopened.`)
       setBusy(false); return
     }
-    const { error } = await scopedUpdate('hr_leave_requests', { status: 'pending', decided_at: null }).eq('id', req.id)
+    const { data: reopened, error } = await scopedUpdate('hr_leave_requests', { status: 'pending', decided_at: null }).eq('id', req.id).select('id')
     if (error) {
       await load()
       setMsg(`error:The request still shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status} — reopen it again. ` + errorText(error, 'operator'))
+      setBusy(false); return
+    }
+    if (changedNothing(reopened, error)) {
+      await load()
+      setMsg('error:The request was not reopened. ' + NOTHING_CHANGED)
       setBusy(false); return
     }
     await load(); setMsg('ok:Reopened — approve it to mark the attendance days'); setBusy(false)
@@ -603,10 +617,11 @@ export default function LeaveManagement() {
   // ── Leave types editing ───────────────────────────────────────────────────
   async function updateType(id, patch) {
     setTypes(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t))
-    const { error } = await scopedUpdate('hr_leave_types', patch).eq('id', id)
+    const { data: saved, error } = await scopedUpdate('hr_leave_types', patch).eq('id', id).select('id')
     // Optimistic; a refused write reloads the stored value and says so — a quota or paid flag
     // that looks saved and is not changes what payroll pays.
     if (error) { setMsg('error:That leave-type change was not saved — the table shows what is stored. ' + errorLine(error)); await load() }
+    else if (changedNothing(saved, error)) { setMsg('error:That leave-type change was not saved. ' + NOTHING_CHANGED); await load() }
   }
   async function addType() {
     if (!clientId) { setMsg('error:No client selected'); return }

@@ -1,7 +1,9 @@
 import { isStationTeam, posPathReachable } from '../shared/posTeamAccess'
-import { createContext, useContext, useEffect, useState, useMemo } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
+import { withTimeout } from '../utils/withTimeout'
+import { accountOutlet, outletMovedElsewhere, announceOutletSwitch, listenForOutletSwitch } from '../shared/outletWatch'
 import { signOutThisDevice } from '../shared/deviceSignOut'
 import { getAccessState, suiteLive } from '../utils/subscription'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
@@ -153,6 +155,16 @@ export function AuthProvider({ children }) {
   // single-outlet client. Read from profile_outlet_access, whose SELECT policy allows your own
   // rows — so this is what the account itself is permitted to know, not a copy of the matrix.
   const [allowedOutletIds, setAllowedOutletIds] = useState([])
+  // Set when this window found its login had changed outlet elsewhere and moved itself (S798
+  // GAP-OUTLETS-2); Layout goes to the dashboard and says so. `{ id, name }`, id so a second move
+  // re-fires the effect.
+  const [outletMoved, setOutletMoved] = useState(null)
+  // switchingRef: this tab's own switch is in flight, so a wake or page change mid-switch must not
+  // read the half-done state as a move made elsewhere. outletCheckRef: the latest check, called from
+  // listeners registered once.
+  const switchingRef = useRef(false)
+  const outletCheckingRef = useRef(false)
+  const outletCheckRef = useRef(null)
 
   useEffect(() => {
     let mounted = true
@@ -219,7 +231,8 @@ export function AuthProvider({ children }) {
     // Top the access token up whenever the tab wakes (S458). auth-js's own refresh ticker only
     // runs while the tab is awake, so screens where a human types for an hour before pressing
     // Save — Sales Entry, Stock Count, Purchases — otherwise reach Save with a dead 1-hour token.
-    const stopKeepAlive = startSessionKeepAlive(supabase)
+    // The same wake then asks whether the login changed outlet while this window was away.
+    const stopKeepAlive = startSessionKeepAlive(supabase, { afterRefresh: () => outletCheckRef.current?.() })
 
     return () => { mounted = false; subscription.unsubscribe(); stopKeepAlive() }
   }, [])
@@ -354,6 +367,8 @@ export function AuthProvider({ children }) {
         // Fire-and-forget presence ping — .then() required to trigger Supabase lazy execution
         supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId).then(() => {})
       }
+      // Only checkOutletStillCurrent reads this: it must not announce a move it failed to load.
+      return true
     } catch (err) {
       console.error('Profile error:', err)
     } finally {
@@ -375,6 +390,7 @@ export function AuthProvider({ children }) {
   // straight to onClick passes an event, which is why `to` is read defensively.
   async function signOut(opts) {
     const to = typeof opts?.to === 'string' ? opts.to : '/login'
+    setOutletMoved(null)
     setProfile(null)
     setFeatureFlags({})
     setAdminViewClientId(null)
@@ -490,14 +506,64 @@ export function AuthProvider({ children }) {
     } catch {
       // No offline store on this device: nothing queued, nothing to protect.
     }
-    const { error } = await supabase.rpc('set_active_outlet', { p_client_id: targetClientId || null })
-    if (error) return { error }
-    // sessionStorage caches are namespaced per clientId, but clearing is cheaper than reasoning
-    // about which page cached what against the outlet we are leaving.
-    try { sessionStorage.clear() } catch { /* private mode */ }
-    if (session?.user?.id) await fetchProfile(session.user.id)
-    return {}
+    switchingRef.current = true
+    try {
+      const { error } = await supabase.rpc('set_active_outlet', { p_client_id: targetClientId || null })
+      if (error) return { error }
+      // sessionStorage caches are namespaced per clientId, but clearing is cheaper than reasoning
+      // about which page cached what against the outlet we are leaving.
+      try { sessionStorage.clear() } catch { /* private mode */ }
+      if (session?.user?.id) {
+        await fetchProfile(session.user.id)
+        // Every other tab of this browser is now filtering by the outlet we left (S798).
+        announceOutletSwitch(session.user.id)
+      }
+      return {}
+    } finally {
+      switchingRef.current = false
+    }
   }
+
+  // Did this login change outlet in another window, another tab or on another device, or lose the
+  // outlet this window shows (a revoke clears active_client_id)? If so, move this window to where
+  // the account now is, as a switch here would: clear the page caches, reload the profile, and let
+  // Layout take the reader to the dashboard with a notice (S798 GAP-OUTLETS-2).
+  //
+  // Only a login whose client is in a group can change outlet, so everyone else returns before any
+  // request: no client has a group today, and this costs them nothing. For a grouped login it is one
+  // two-column read of the caller's own row — never fetchProfile on every wake, which was the S463
+  // slow-load cause; the full reload runs only when the outlet really moved. Best effort: a failed
+  // or slow read leaves the window as it is, and the next wake or page change asks again.
+  async function checkOutletStillCurrent() {
+    const userId = session?.user?.id
+    if (!userId || isAdmin || !profile || outlets.length < 2) return
+    if (switchingRef.current || outletCheckingRef.current) return
+    outletCheckingRef.current = true
+    try {
+      const { data, error } = await withTimeout(
+        supabase.from('profiles').select('active_client_id, client_id').eq('id', userId).single(),
+        15000, 'Outlet check'
+      )
+      if (error || !data || switchingRef.current) return
+      if (!outletMovedElsewhere(clientId, data)) return
+      try { sessionStorage.clear() } catch { /* private mode */ }
+      if (!(await fetchProfile(userId))) return
+      const now = accountOutlet(data)
+      setOutletMoved({ id: Date.now(), name: outlets.find(o => o.id === now)?.name || null })
+    } catch (err) {
+      console.warn('Outlet check skipped:', err?.message || err)
+    } finally {
+      outletCheckingRef.current = false
+    }
+  }
+  outletCheckRef.current = checkOutletStillCurrent
+  // Stable for consumers (Layout's page-change effect); always runs the latest closure.
+  const checkOutlet = useCallback(() => outletCheckRef.current?.(), [])
+  const dismissOutletMoved = useCallback(() => setOutletMoved(null), [])
+
+  // Another tab of this browser switched outlet: ask the database, never the message.
+  const sessionUserId = session?.user?.id || null
+  useEffect(() => listenForOutletSwitch(sessionUserId, () => outletCheckRef.current?.()), [sessionUserId])
 
   const POS_RANK = { staff: 1, supervisor: 2, manager: 3 }
   function hasPosAccess(minLevel) {
@@ -678,6 +744,7 @@ export function AuthProvider({ children }) {
       // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
       // degrades to today's single-outlet behavior without a special case.
       outlets, switchableOutlets, allowedOutletIds, canSwitchOutlet, switchOutlet,
+      outletMoved, dismissOutletMoved, checkOutlet,
       groupId: profile?.clients?.group_id || null,
       imsEnabled,
       hrEnabled,

@@ -13,6 +13,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
 import { useIsOwnEmployee } from '../ownRecord'
+import { NOTHING_CHANGED, changedNothing } from '../nothingChanged'
 
 // One ladder for all five HR approval queues (S660) — Pending was brass here and on Leave, grey on
 // TADA and amber on the dashboard and in the employee app, for the same word. `tint` already
@@ -229,10 +230,12 @@ export default function Overtime() {
       reason: form.reason.trim() || null,
       status: 'pending',
     }
-    const { error } = form.editing
-      ? await scopedUpdate('hr_overtime_entries', { ...payload, status: form.editing.status }).eq('id', form.editing.id)
+    const { data: savedRows, error } = form.editing
+      ? await scopedUpdate('hr_overtime_entries', { ...payload, status: form.editing.status }).eq('id', form.editing.id).select('id')
       : await scopedInsert('hr_overtime_entries', payload)
     if (error) { setMsg('error:This overtime entry may not have saved. ' + errorLine(error)); setBusy(false); return }
+    // An insert RLS refuses is an error; an edit it refuses is 0 rows (S798).
+    if (form.editing && changedNothing(savedRows, error)) { setMsg('error:This overtime entry was not saved. ' + NOTHING_CHANGED); setBusy(false); return }
     // Reload the month ON SCREEN, not the month saved to. Loading the saved month used to put
     // Kartik's entries under the period picker still reading Ashwin — list, counts and cost all
     // labelled with the wrong month (S749).
@@ -256,8 +259,13 @@ export default function Overtime() {
   async function setStatus(id, status) {
     if (refuseIfLocked()) return
     setMsg('')
-    const { error } = await scopedUpdate('hr_overtime_entries', { status }).eq('id', id)
+    const { data: marked, error } = await scopedUpdate('hr_overtime_entries', { status }).eq('id', id).select('id')
     if (error) { setMsg(`error:The entry was not marked ${status} — it still shows its previous status. ` + errorLine(error)); return }
+    if (changedNothing(marked, error)) {
+      await loadEntries(period?.bs_year, period?.bs_month)
+      setMsg(`error:The entry was not marked ${status}. ` + NOTHING_CHANGED)
+      return
+    }
     await loadEntries(period?.bs_year, period?.bs_month)
   }
 
@@ -312,8 +320,13 @@ export default function Overtime() {
       ),
       run: async () => {
         setMsg('')
-        const { error } = await scopedDelete('hr_overtime_entries').eq('id', entry.id)
+        const { data: deleted, error } = await scopedDelete('hr_overtime_entries').eq('id', entry.id).select('id')
         if (error) { setMsg('error:This entry was not deleted — it is still recorded. ' + errorLine(error)); return }
+        if (changedNothing(deleted, error)) {
+          await loadEntries(period?.bs_year, period?.bs_month)
+          setMsg('error:This entry was not deleted. ' + NOTHING_CHANGED)
+          return
+        }
         await loadEntries(period?.bs_year, period?.bs_month)
       },
     })

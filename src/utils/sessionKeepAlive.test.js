@@ -78,6 +78,49 @@ describe('startSessionKeepAlive', () => {
     warn.mockRestore()
   })
 
+  test('afterRefresh runs on the same wake, only after the refresh has finished', async () => {
+    setVisibility('visible')
+    const order = []
+    let release
+    const stop = startSessionKeepAlive(null, {
+      ensure: () => { order.push('ensure'); return new Promise(r => { release = r }) },
+      afterRefresh: session => { order.push(`after:${session}`) },
+    })
+
+    window.dispatchEvent(new Event('focus'))
+    await Promise.resolve()
+    expect(order).toEqual(['ensure']) // the read must not race a token that is still refreshing
+
+    release('fresh')
+    await Promise.resolve(); await Promise.resolve()
+    expect(order).toEqual(['ensure', 'after:fresh'])
+    stop()
+  })
+
+  test('afterRefresh is skipped when the refresh failed, and its own failure never throws', async () => {
+    setVisibility('visible')
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    let afterCalls = 0
+    const stopFailed = startSessionKeepAlive(null, {
+      ensure: async () => { throw new Error('offline') },
+      afterRefresh: () => { afterCalls++ },
+    })
+    window.dispatchEvent(new Event('focus'))
+    await new Promise(r => setTimeout(r, 0))
+    expect(afterCalls).toBe(0)
+    stopFailed()
+
+    const stopThrowing = startSessionKeepAlive(null, {
+      ensure: async () => 'fresh',
+      afterRefresh: async () => { throw new Error('profile read failed') },
+    })
+    expect(() => window.dispatchEvent(new Event('focus'))).not.toThrow()
+    await new Promise(r => setTimeout(r, 0))
+    expect(warn).toHaveBeenCalledWith('Session keep-alive skipped:', 'profile read failed')
+    stopThrowing()
+    warn.mockRestore()
+  })
+
   test('stop() unsubscribes every listener', async () => {
     setVisibility('visible')
     let calls = 0

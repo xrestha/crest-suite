@@ -37,7 +37,12 @@ export async function ensureFreshSession(supabase, { marginSec = REFRESH_MARGIN_
 }
 
 // Wire up the wake-up triggers. Returns an unsubscribe function.
-export function startSessionKeepAlive(supabase, { ensure = () => ensureFreshSession(supabase) } = {}) {
+//
+// `afterRefresh` runs on the same wake once the token is fresh, never before: anything it reads
+// would otherwise pay the synchronous refresh this module exists to avoid. AuthContext uses it to
+// ask whether this login changed outlet in another window while this one was away (S798
+// GAP-OUTLETS-2). It is skipped when the refresh itself failed.
+export function startSessionKeepAlive(supabase, { ensure = () => ensureFreshSession(supabase), afterRefresh = null } = {}) {
   let running = false
   const wake = () => {
     if (running) return // one in flight is enough; these events often fire together
@@ -47,6 +52,7 @@ export function startSessionKeepAlive(supabase, { ensure = () => ensureFreshSess
     // failure here must never surface as an error. A genuinely dead session still gets reported
     // by whatever real request the user makes next.
     Promise.resolve(ensure())
+      .then(session => (afterRefresh ? afterRefresh(session) : undefined))
       .catch(err => console.warn('Session keep-alive skipped:', err?.message || err))
       .finally(() => { running = false })
   }

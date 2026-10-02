@@ -188,6 +188,7 @@ export const SUITE_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Switching outlets is BLOCKED while the offline queue is non-empty — both the stock queue and the POS order queue, since stock operations write against the current tenant just as orders do.',
+          'The selected outlet is ONE value on the login, so switching on one device moves every window that login has open. A window left on the old outlet would read every page as empty and "save" edits that change nothing (S798). It now follows: when it wakes, on every page change, and at once when another tab of the same browser switches, it re-reads the login\'s outlet and, if it moved, goes to the dashboard and says which outlet it shows. The staff pages also send the outlet they show, and admin-user-ops refuses a mismatch with "Reload the page" rather than creating a login in the other outlet. Ungrouped logins skip the check entirely.',
           'clients_select is the one policy that had to widen: it was "my client or admin", so an Owner could not read that a sibling outlet existed at all.',
           'Being in a group is never permission on its own. Group figures and group actions are Owner or admin only, checked in the database: get_group_summary, get_group_pnl and push_master_data each refuse anyone else, and set_active_outlet only switches a person into an outlet they may reach. Each owner page also sends non-owners back to the dashboard.',
           'Every client-scoped security policy calls my_client_id() — never a copy of its old body. A copied body ignores the selected outlet, so after switching, that table would quietly read as empty with no error. And no client has a group_id yet, so none of this has run on real data: test with a real group before relying on it.',
@@ -237,6 +238,7 @@ export const SUITE_GUIDE_GROUPS = [
           'A matrix of who may switch into which outlet. An Owner reaches every outlet in the group; anyone else reaches their home outlet plus whatever they are allowlisted into — at the same rank they already hold.',
         workflow: [
           'Tick an outlet to let a person work there; untick to take it away. Ticks are only a draft until you press the Save button at the end of THAT person\'s row — each row saves on its own, through set_outlet_access, which replaces that person\'s whole list in one go. Leaving the page before Save keeps nothing.',
+          'Unticking moves the person back to their home outlet at once (set_outlet_access clears their selection). It does not sign them out: a window they have open on the removed outlet can no longer read or write it, and moves itself home the next time they return to it or open another page.',
           'Owners have no checkboxes: they reach every outlet in the group already.',
         ],
         fields: [

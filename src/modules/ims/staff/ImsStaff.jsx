@@ -192,7 +192,7 @@ export default function ImsStaff() {
         const outcomes = await Promise.all(list.map(async p => {
           const level = levelOf(p)
           const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-            body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: p.ims_job_title },
+            body: { action: 'update_ims_role', client_id: clientId, userId: p.id, ims_role: level, ims_job_title: p.ims_job_title },
           })
           return { p, level, failed: !!(error || data?.error), detail: data?.error || error?.message }
         }))
@@ -263,7 +263,7 @@ export default function ImsStaff() {
     const affected = staff.filter(p => !p.has_pin && p.ims_job_title === changedLabel && p.ims_role !== level)
     const outcomes = await Promise.all(affected.map(async p => {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-        body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: changedLabel },
+        body: { action: 'update_ims_role', client_id: clientId, userId: p.id, ims_role: level, ims_job_title: changedLabel },
       })
       return { p, failed: !!(error || data?.error), detail: data?.error || error?.message }
     }))
@@ -342,6 +342,7 @@ export default function ImsStaff() {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: {
           action:        'update_ims_role',
+          client_id:     clientId,
           userId:        addForm.existing_user_id,
           ims_role:      role.level,
           ims_job_title: addForm.job_title,
@@ -424,7 +425,7 @@ export default function ImsStaff() {
       run: async () => {
         setMsg(''); setNotice('')
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-          body: { action: 'delete_ims_staff', userId: p.id },
+          body: { action: 'delete_ims_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
           setMsg(`${p.full_name}'s login was not deleted — it still works. ${await invokeDetail(data, error, '')}`); return
@@ -451,8 +452,8 @@ export default function ImsStaff() {
     setResetting(true); setPwMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: isPin
-        ? { action: 'reset_ims_pin', userId: pwTarget.id, pin: newPassword }
-        : { action: 'reset_ims_password', userId: pwTarget.id, password: newPassword },
+        ? { action: 'reset_ims_pin', client_id: clientId, userId: pwTarget.id, pin: newPassword }
+        : { action: 'reset_ims_password', client_id: clientId, userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
       setPwMsg(await invokeDetail(data, error, isPin
@@ -480,6 +481,7 @@ export default function ImsStaff() {
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
         action:        'update_ims_role',
+        client_id:     clientId,
         userId:        profileId,
         ims_role:      role?.level || null,
         ims_job_title: jobTitle || null,

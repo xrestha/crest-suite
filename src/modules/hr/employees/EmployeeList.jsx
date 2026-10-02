@@ -215,7 +215,7 @@ export default function EmployeeList() {
       run: async () => {
         setSsRemoving(emp.id); setSsRemoveErr('')
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-          body: { action: 'delete_hr_self_service_login', userId },
+          body: { action: 'delete_hr_self_service_login', client_id: effectiveClientId, userId },
         })
         if (error || data?.error) {
           let detail = data?.error || error?.message || 'Failed to remove self-service access'

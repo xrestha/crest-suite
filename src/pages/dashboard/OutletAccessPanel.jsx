@@ -190,7 +190,9 @@ export default function OutletAccessPanel({ outlets }) {
       )}
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
-        Removing an outlet also signs that person out of it if they are working there right now.
+        Removing an outlet moves that person back to their own outlet straight away. A window they have
+        open on the removed outlet shows nothing from it, and moves itself back the next time they
+        return to it or open another page.
       </p>
     </div>
   )

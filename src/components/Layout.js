@@ -14,6 +14,7 @@ import QuickCalculator from './Calculator'
 import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
+import { outletMovedText } from '../shared/outletWatch'
 import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
 import ArrivalAlert from './ArrivalAlert'
 import SetupStepStrip from './SetupStepStrip'
@@ -386,6 +387,7 @@ export default function Layout() {
           isTrial, trialPending, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
+          outletMoved, dismissOutletMoved, checkOutlet,
           hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
           imsCountOnly,
           suitePlan } = useAuth()
@@ -489,6 +491,22 @@ export default function Layout() {
     setOpenMenu(null)
     navigate('/dashboard')
   }
+
+  // A window left open after this login changed outlet elsewhere (S798 GAP-OUTLETS-2). Every page
+  // change asks; AuthContext returns before any request unless the login's client is in a group.
+  // The wake and other-tab triggers live in AuthContext itself.
+  useEffect(() => { checkOutlet() }, [location.pathname, checkOutlet])
+
+  // The window has moved itself to the outlet the account is in now: leave the page that was open,
+  // exactly as a switch from the top bar does, since its data and any half-typed form belong to the
+  // outlet it was showing.
+  const outletMovedId = outletMoved?.id
+  useEffect(() => {
+    if (!outletMovedId) return
+    setOutletDropdownOpen(false)
+    setOpenMenu(null)
+    navigate('/dashboard')
+  }, [outletMovedId, navigate])
 
   // Suite ENTITLEMENT only — the reachability half (`suiteVisible`) needs `unlockedItems` and is
   // derived further down. Declared here because the panel-routing effect above reads it, and it
@@ -2046,6 +2064,15 @@ export default function Layout() {
       </div>
 
       <main id="main-content" tabIndex={-1} className="main-content">
+        {/* This window followed its login to another outlet (S798 GAP-OUTLETS-2). A plain fact, so the
+            neutral note banner: nothing failed, and the reader has nothing to fix. */}
+        {outletMoved && (
+          <div role="status" className="note-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <span>{outletMovedText(outletMoved.name)}</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={dismissOutletMoved}>Dismiss</button>
+          </div>
+        )}
+
         {/* Grace period — the subscription end date has passed but access is not cut yet. This is
             the only warning a paying client gets before SubscriptionLock replaces the whole app,
             so it states the exact date access stops rather than just "expired". */}

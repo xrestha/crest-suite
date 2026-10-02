@@ -609,7 +609,8 @@ History: #s660-status-colours-and-labour-band, #s692-labor-forecast, #s693-labou
   need manager (`hr_employees_write_rank_*`) while reads stay open to supervisors (S798). **A new HR table a page
   writes gets the same three policies.** Self-Service writes through SECURITY DEFINER RPCs.
 - **A refused RLS write returns 0 rows and no error**, so a write that matters adds `.select('id')` and
-  checks the count. The three employee writers say `NOT_SAVED_RLS` (`employeeFormData.js`).
+  checks the count. The three employee writers say `NOT_SAVED_RLS` (`employeeFormData.js`); Leave,
+  Overtime and the Holiday Calendar say `NOTHING_CHANGED` (`nothingChanged.js`, S798 2f).
 - **Nobody below the Owner decides their own record:** `hr_leave_requests_guard_decision` (stamps
   `decided_by`), `hr_overtime_guard_own` and `hr_advances_guard_own` refuse `hr_own_request`;
   `hr_self_decision_exempt()` is admin OR Owner. A new approval queue gets the same trigger.

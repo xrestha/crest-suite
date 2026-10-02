@@ -698,6 +698,18 @@ Deno.serve(async (req) => {
     // for acceptance reads the switched outlet's ledger.
     const callerClientId     = profile?.active_client_id || profile?.client_id
 
+    // A window left on one outlet after the same login switched outlet elsewhere (another tab, the
+    // phone) or lost that outlet: the page still sends the outlet it shows, while this function acts
+    // for the outlet the account is in now, so a create landed in the other outlet and the page said
+    // "created" (S798 GAP-OUTLETS-2). A non-admin request that names a client must name this one.
+    // Admin is exempt: for an operator client_id IS the target, chosen in Admin → Clients.
+    if (!isCallerAdmin && params?.client_id && params.client_id !== callerClientId) {
+      return json({
+        error: 'This window is showing a different outlet from the one your account is now working in. Reload the page.',
+        code: 'outlet_mismatch',
+      }, 409)
+    }
+
     // ── Legal acceptance, recorded server-side ───────────────────────────────
     // Both actions below exist for one reason: the address, the identity and the timestamp on an
     // acceptance row have to be OBSERVED, not supplied. A browser cannot know its own public IP,

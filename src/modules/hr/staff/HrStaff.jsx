@@ -214,7 +214,7 @@ export default function HrStaff() {
     const outcomes = await Promise.all(list.map(async p => {
       const level = levelOf(p)
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-        body: { action: 'update_hr_role', userId: p.id, hr_role: level, hr_job_title: p.hr_job_title },
+        body: { action: 'update_hr_role', client_id: clientId, userId: p.id, hr_role: level, hr_job_title: p.hr_job_title },
       })
       return { p, level, failed: !!(error || data?.error), detail: data?.error || error?.message }
     }))
@@ -355,6 +355,7 @@ export default function HrStaff() {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: {
           action:       'update_hr_role',
+          client_id:    clientId,
           userId:       addForm.existing_user_id,
           hr_role:      role.level,
           hr_job_title: addForm.job_title,
@@ -412,7 +413,7 @@ export default function HrStaff() {
       run: async () => {
         setMsg(''); setNotice('')
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-          body: { action: 'delete_hr_staff', userId: p.id },
+          body: { action: 'delete_hr_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
           setMsg(`${p.full_name}'s login was not deleted — it still works. ${await invokeDetail(data, error, '')}`); return
@@ -431,7 +432,7 @@ export default function HrStaff() {
     if (pwProblem) { setPwMsg(pwProblem); return }
     setResetting(true); setPwMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'reset_hr_password', userId: pwTarget.id, password: newPassword },
+      body: { action: 'reset_hr_password', client_id: clientId, userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
       setPwMsg(await invokeDetail(data, error, 'The password was not changed — the old one still works.'))
@@ -453,6 +454,7 @@ export default function HrStaff() {
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
         action:       'update_hr_role',
+        client_id:    clientId,
         userId:       p.id,
         hr_role:      role.level,
         hr_job_title: jobTitle,

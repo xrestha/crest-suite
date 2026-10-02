@@ -9,6 +9,7 @@ import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { SIGHTED_HOLIDAYS, resolveYear, planSeed } from './holidayData'
 import { fiscalYearOf } from '../payroll/tds'
+import { NOTHING_CHANGED, changedNothing } from '../nothingChanged'
 
 function fyLabel(fy) {
   return `FY ${fy}/${(fy + 1).toString().slice(2)}`
@@ -116,12 +117,15 @@ export default function HolidayCalendar() {
     // on the same day under the same name — which the unique index would refuse anyway.
     const removedTwin = !form.editing && fyRemoved.find(h =>
       h.bs_year === bs_year && h.bs_month === bs_month && h.bs_day === bs_day && h.name === payload.name)
-    const { error } = form.editing
-      ? await scopedUpdate('hr_holiday_calendar', payload).eq('id', form.editing.id)
+    const isUpdate = !!(form.editing || removedTwin)
+    const { data: savedRows, error } = form.editing
+      ? await scopedUpdate('hr_holiday_calendar', payload).eq('id', form.editing.id).select('id')
       : removedTwin
-        ? await scopedUpdate('hr_holiday_calendar', { ...payload, removed_at: null }).eq('id', removedTwin.id)
+        ? await scopedUpdate('hr_holiday_calendar', { ...payload, removed_at: null }).eq('id', removedTwin.id).select('id')
         : await scopedInsert('hr_holiday_calendar', payload)
     if (error) { setMsg('error:This holiday was not saved. ' + errorLine(error)); setBusy(false); return }
+    // An insert RLS refuses is an error; an update it refuses is 0 rows (S798).
+    if (isUpdate && changedNothing(savedRows, error)) { setMsg('error:This holiday was not saved. ' + NOTHING_CHANGED); setBusy(false); return }
     await load(); closeForm(); setMsg('ok:Saved'); setBusy(false)
   }
 
@@ -149,8 +153,9 @@ export default function HolidayCalendar() {
       ),
       run: async () => {
         setMsg('')
-        const { error } = await scopedUpdate('hr_holiday_calendar', { removed_at: new Date().toISOString() }).eq('id', h.id)
+        const { data: removed, error } = await scopedUpdate('hr_holiday_calendar', { removed_at: new Date().toISOString() }).eq('id', h.id).select('id')
         if (error) { setMsg('error:This holiday was not removed — it is still in the calendar. ' + errorLine(error)); return }
+        if (changedNothing(removed, error)) { await load(); setMsg('error:This holiday was not removed. ' + NOTHING_CHANGED); return }
         await load()
       },
     })
@@ -159,8 +164,9 @@ export default function HolidayCalendar() {
   async function putBack(h) {
     if (busy) return
     setBusy(true); setMsg('')
-    const { error } = await scopedUpdate('hr_holiday_calendar', { removed_at: null }).eq('id', h.id)
+    const { data: restored, error } = await scopedUpdate('hr_holiday_calendar', { removed_at: null }).eq('id', h.id).select('id')
     if (error) { setMsg('error:' + h.name + ' was not put back — it is still removed. ' + errorLine(error)); setBusy(false); return }
+    if (changedNothing(restored, error)) { await load(); setMsg('error:' + h.name + ' was not put back. ' + NOTHING_CHANGED); setBusy(false); return }
     // A Seed report still on screen says this one was "not added back, because you removed it" —
     // stale the moment it is put back, and it sat right beside the "is back" confirmation.
     setSeedReport(r => r && r.keptRemoved.includes(h.name) ? { ...r, keptRemoved: r.keptRemoved.filter(n => n !== h.name) } : r)
@@ -182,8 +188,9 @@ export default function HolidayCalendar() {
       ),
       run: async () => {
         setMsg('')
-        const { error } = await scopedDelete('hr_holiday_calendar').eq('id', h.id)
+        const { data: deleted, error } = await scopedDelete('hr_holiday_calendar').eq('id', h.id).select('id')
         if (error) { setMsg('error:' + h.name + ' was not deleted — it is still in the Removed list. ' + errorLine(error)); return }
+        if (changedNothing(deleted, error)) { await load(); setMsg('error:' + h.name + ' was not deleted. ' + NOTHING_CHANGED); return }
         await load()
       },
     })
@@ -216,8 +223,13 @@ export default function HolidayCalendar() {
       if (error) { setMsg('error:' + errorText(error, 'operator')); setBusy(false); return }
     }
     for (const c of corrections) {
-      const { error } = await scopedUpdate('hr_holiday_calendar', c.patch).eq('id', c.id)
+      const { data: fixed, error } = await scopedUpdate('hr_holiday_calendar', c.patch).eq('id', c.id).select('id')
       if (error) { setMsg('error:' + errorText(error, 'operator')); setBusy(false); return }
+      if (changedNothing(fixed, error)) {
+        await load()
+        setMsg(`error:${toInsert.length ? `${toInsert.length} added, but ` : ''}${c.name} was not moved from ${c.from} to ${c.to}. ` + NOTHING_CHANGED)
+        setBusy(false); return
+      }
     }
 
     await load()
