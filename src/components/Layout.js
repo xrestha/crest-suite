@@ -24,12 +24,13 @@ import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
 import { APP_VERSION } from '../shared/appVersion'
 import { imsCountPathReachable, IMS_COUNT_LOGIN, IMS_COUNT_IDLE_LOCK_MS } from '../shared/imsCountAccess'
+import { dashboardModules, isOverviewHome, IMS_DASHBOARD_PATH } from '../shared/dashboardHome'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
   Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
   Blend, CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
-  FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, LifeBuoy,
+  FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, House, LifeBuoy,
   History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart, ListPlus,
   LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree,
   ListChecks, ListTodo, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
@@ -154,6 +155,13 @@ const IMS_GROUPS = [
   ]},
 ]
 const HR_DASHBOARD = { to: '/hr/dashboard', label: 'HR Dashboard', icon: LayoutDashboard, minHrRole: 'supervisor' }
+// The page the IMS tab opens once /dashboard is a Home of two or more modules (S800): the main
+// Dashboard in IMS scope. LayoutDashboard is shared with Dashboard and HR Dashboard on purpose — one
+// concept per module, which navigation.md exempts from the one-icon-per-route rule.
+const IMS_DASHBOARD = { to: IMS_DASHBOARD_PATH, label: 'Inventory Dashboard', icon: LayoutDashboard, minImsRole: 'staff' }
+// The page the POS tab opens (S800 stage B). minPosRole + canReachPosPath (isItemVisible) keep a
+// kitchen/bar station team off it, as ModuleGate does on the route.
+const POS_DASHBOARD = { to: '/pos/dashboard', label: 'POS Dashboard', icon: LayoutDashboard, minPosRole: 'staff' }
 
 // Till Devices (/pos, named POS Setup until S776) lives in the Admin group with POS Staff, not as a bare pill of its own (S763, owner
 // decision). Both are manager-only configuration reached a handful of times per outlet — a standing
@@ -254,6 +262,8 @@ const ALL_NAV_PATHS = [...new Set([
   ...CUSTOMIZATION_GROUPS.flatMap(g => g.items.map(i => i.to)),
   ...SUITE_NAV.map(i => i.to),
   HR_DASHBOARD.to,
+  IMS_DASHBOARD.to,
+  POS_DASHBOARD.to,
 ])]
 const NAV_PARENT_PATHS = new Set(
   ALL_NAV_PATHS.filter(to => ALL_NAV_PATHS.some(p => p !== to && p.startsWith(to + '/'))))
@@ -485,6 +495,11 @@ export default function Layout() {
   // needs nothing but `useAuth`. Admin counts as entitled because SuiteGate exempts admin outright,
   // which is also why the group's PRO badge has always been `isAdmin || suitePlan === 'pro'`.
   const suiteEntitled = isAdmin || suitePlan === 'pro'
+  // Is /dashboard a Home of two or more modules (S800)? The same answer ClientDashboard reads to
+  // decide which sections to draw, from one definition, so the Home tab exists exactly when the
+  // page it opens is a cross-module Home. Admin's own overview (no client selected) is never one.
+  const dashMods = dashboardModules({ clientModules, hasImsAccess, hasHrAccess, hasPosAccess })
+  const homeIsOverview = (!isAdmin || !!adminViewClientId) && isOverviewHome(dashMods)
   // Where the upsell lives for everyone else: unchanged, inside each module panel.
   const suiteUpsellInPanels = !suiteEntitled
 
@@ -517,6 +532,10 @@ export default function Layout() {
   const [activePanel, setActivePanel] = useState(null) // resolved against module visibility below
   useEffect(() => {
     const p = location.pathname
+    // Home lights the Home tab and no module tab (S800); while /dashboard is one module's own
+    // dashboard it stays that module's, through the NAV match below.
+    if (p === '/dashboard' && homeIsOverview) { setActivePanel('home'); return }
+    if (p === IMS_DASHBOARD_PATH) { setActivePanel('ims'); return }
     if (p === '/menu-pricing') { setActivePanel(prev => (prev === 'pos' || prev === 'customization') ? prev : 'ims'); return } // shared IMS/POS/Customization route — don't yank the user to another panel
     // A Suite destination selects the Suite panel — but only for a client that HAS the tab. Without
     // it these pages are still reachable (the gate is per page), and switching to a panel with no
@@ -531,7 +550,7 @@ export default function Layout() {
       setActivePanel(prev => (prev === 'admin' && (p === '/periods' || p === '/settings')) ? 'admin' : 'ims')
     }
     // any other route (/help, /pricing, …) keeps the current panel
-  }, [location.pathname, suiteEntitled])
+  }, [location.pathname, suiteEntitled, homeIsOverview])
 
   // Every top-bar disclosure closes on navigation. Without this, clicking a link inside a panel
   // leaves that panel open over the page it just opened — the drawer has had the equivalent
@@ -871,6 +890,7 @@ export default function Layout() {
     && CUSTOMIZATION_GROUPS.some(g => g.items.some(isItemVisible))
   const panelOrder = [
     isAdmin && 'admin',
+    homeIsOverview && 'home',
     imsVisible && 'ims',
     hrVisible && 'hr',
     posVisible && 'pos',
@@ -878,7 +898,7 @@ export default function Layout() {
     suiteVisible && 'suite',
   ].filter(Boolean)
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
-  const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization', suite: 'Crest Suite' }
+  const PANEL_TITLES = { admin: 'Admin', home: 'Home', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization', suite: 'Crest Suite' }
   const { hrPending, posPending, posRequests, posNew } = useNavBadgeCounts(hrVisible, posVisible)
 
   // A guest QR order arriving is the loudest thing this shell has to say (S763). It used to be
@@ -922,12 +942,13 @@ export default function Layout() {
   // sees "Admin Dashboard"; a real client with 2-3 modules sees generic "Dashboard"; a client with
   // exactly one module sees that module's own title) so the sidebar link never promises a
   // different page than the one it actually opens.
-  const dashModuleCount = [clientModules.ims, clientModules.hr, clientModules.pos].filter(Boolean).length
-  const dashLabel = isAdmin ? 'Admin Dashboard'
-    : dashModuleCount > 1 ? 'Dashboard'
-    : clientModules.ims ? 'Inventory Dashboard'
-    : clientModules.hr  ? 'HR Overview'
-    : clientModules.pos ? 'POS Dashboard'
+  // S800: a Home of two or more modules is "Home", the word on its tab and on the page; the labels
+  // below it read dashMods (the viewer's own rank per module), as the page's title does.
+  const dashLabel = homeIsOverview ? 'Home'
+    : isAdmin ? 'Admin Dashboard'
+    : dashMods.ims ? 'Inventory Dashboard'
+    : dashMods.hr  ? 'HR Overview'
+    : dashMods.pos ? 'POS Overview'
     : 'Dashboard'
   const dashNavItem = { ...NAV[0], label: dashLabel }
 
@@ -959,11 +980,12 @@ export default function Layout() {
       // the page per S601, so nothing leaked — but the product was advertising destinations the
       // sidebar deliberately withholds). Profit & Loss was missing from the palette outright.
       ...tag('Suite', suiteNavItems.map(i => (i.longLabel ? { ...i, label: i.longLabel } : i))),
+      ...(homeIsOverview ? tag('IMS', [IMS_DASHBOARD]) : []),
       ...tag('IMS', NAV.slice(1)),
       ...tag('IMS', REPORTS),
       ...tag('IMS', IMS_GROUPS.find(g => g.key === 'ims-admin').items),
       ...(hrVisible ? tag('HR', [HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)]) : []),
-      ...(posVisible ? tag('POS', POS_GROUPS.flatMap(g => g.items)) : []),
+      ...(posVisible ? tag('POS', [POS_DASHBOARD, ...POS_GROUPS.flatMap(g => g.items)]) : []),
       ...(customizationVisible ? tag('Customization', CUSTOMIZATION_GROUPS.flatMap(g => g.items)) : []),
       ...(isAdmin ? tag('Admin', [
         { to: '/admin/clients', label: 'Clients', icon: Building2 },
@@ -977,7 +999,7 @@ export default function Layout() {
   // isOwner and outlets gate the Suite block above; suitePlan is deliberately absent, because the
   // palette lists Suite destinations regardless of entitlement, exactly as the sidebar does.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hrVisible, posVisible, customizationVisible, isAdmin, isOwner, outlets, plan, dashLabel])
+  }, [hrVisible, posVisible, customizationVisible, isAdmin, isOwner, outlets, plan, dashLabel, homeIsOverview])
 
   const [calcOpen, setCalcOpen] = useState(false)
 
@@ -1022,9 +1044,38 @@ export default function Layout() {
     )
   }
 
+  // ── A module tab OPENS its module (S800) ─────────────────────────────────────────────────────
+  // Until S800 a tab only swapped the row of links under it and left the page where it was, so a
+  // click on HR kept the cross-module Dashboard on screen with Dashboard still lit beside a lit HR
+  // tab: two "you are here" answers at once (NN/g: a tab control that mixes navigating tabs with
+  // in-page tabs disorients). Every suite the S800 research examined lands on the chosen module's
+  // home. So the tab navigates, and the row follows the route through the effect above.
+  //
+  // A module's home is the first page in this list THIS login can open — the rank gates are the
+  // nav items' own, through isItemVisible, so an HR staff login lands on Holiday Calendar rather
+  // than on an HR Dashboard that would bounce it, and a kitchen team lands on the KDS.
+  const firstReachable = items => items.find(isItemVisible) || null
+  const MODULE_HOMES = {
+    home: () => ({ to: '/dashboard' }),
+    admin: () => ({ to: '/admin/clients' }),
+    // While /dashboard is IMS's own dashboard (no Home), the IMS tab opens it.
+    ims: () => firstReachable([homeIsOverview ? IMS_DASHBOARD : dashNavItem, ...IMS_GROUPS.flatMap(g => g.items)]),
+    hr: () => firstReachable([HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)]),
+    pos: () => firstReachable([POS_DASHBOARD, ...POS_GROUPS.flatMap(g => g.items)]),
+    customization: () => firstReachable([...CUSTOMIZATION_GROUPS.flatMap(g => g.items)].reverse()),
+    // A group owner's first question is the group, so Group Console leads when it is offered.
+    suite: () => firstReachable([...suiteNavItems.filter(i => i.needsGroup), ...suiteNavItems]),
+  }
+  const moduleHome = key => MODULE_HOMES[key]?.() || null
+
   function openPanel(key) {
     setActivePanel(key)
     setOpenMenu(null)
+    // Pressing the tab you are on returns to its home too, as an app's name does in Shopify's
+    // admin. A module with nothing reachable keeps the old behaviour: the row switches, the page
+    // stays.
+    const home = moduleHome(key)
+    if (home) navigate(home.to)
   }
 
   // ── Tenant / outlet switching, said once ─────────────────────────────────────────────────────
@@ -1157,6 +1208,9 @@ export default function Layout() {
     dot: approvalCount > 0 || pendingTrialCount > 0 ? 'var(--theme-red)' : newTrialCount > 0 ? 'var(--theme-amber)' : null,
   }
   const moduleTabs = [
+    // Home first (S800, owner decision): the cross-module page every login lands on, reached from
+    // here and from the logo. It exists only while /dashboard is a Home of two or more modules.
+    homeIsOverview && { key: 'home', label: 'Home', icon: House, tip: 'Home — every module at a glance', dot: null },
     imsVisible && { key: 'ims', label: 'IMS', icon: Warehouse, tip: 'Crest IMS', dot: null },
     hrVisible && {
       key: 'hr', label: 'HR', icon: Users2, dot: hrPending > 0 ? 'var(--theme-amber)' : null,
@@ -1184,6 +1238,8 @@ export default function Layout() {
     suiteVisible && { key: 'suite', label: 'Suite', icon: Crown, tip: 'Crest Suite', dot: null },
   ].filter(Boolean)
   const totalTabCount = (adminTab ? 1 : 0) + moduleTabs.length
+  // Home's own row: each module's home, so Home is one click from every module dashboard.
+  const homeLinks = moduleTabs.filter(t => t.key !== 'home').map(t => moduleHome(t.key)).filter(Boolean)
 
   function renderModuleTab(t) {
     return (
@@ -1551,9 +1607,18 @@ export default function Layout() {
             </>
           )}
 
+          {panel === 'home' && homeIsOverview && (
+            <>
+              {homeLinks.map(i => renderNavItem(i, { pinnable: false }))}
+              {renderPinnedGroup()}
+            </>
+          )}
+
           {panel === 'ims' && imsVisible && (
             <>
-              {renderDashboardRow()}
+              {homeIsOverview
+                ? isItemVisible(IMS_DASHBOARD) && renderNavItem(IMS_DASHBOARD, { pinnable: false })
+                : renderDashboardRow()}
               {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {IMS_GROUPS.map(renderGroup)}
@@ -1570,17 +1635,18 @@ export default function Layout() {
 
           {panel === 'hr' && hrVisible && (
             <>
-              {renderDashboardRow()}
+              {!homeIsOverview && renderDashboardRow()}
+              {isItemVisible(HR_DASHBOARD) && renderNavItem(HR_DASHBOARD)}
               {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
-              {isItemVisible(HR_DASHBOARD) && renderNavItem(HR_DASHBOARD)}
               {HR_GROUPS.map(renderGroup)}
             </>
           )}
 
           {panel === 'pos' && posVisible && (
             <>
-              {renderDashboardRow()}
+              {!homeIsOverview && renderDashboardRow()}
+              {isItemVisible(POS_DASHBOARD) && renderNavItem(POS_DASHBOARD, { pinnable: false })}
               {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {POS_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
@@ -1589,7 +1655,7 @@ export default function Layout() {
 
           {panel === 'customization' && customizationVisible && (
             <>
-              {renderDashboardRow()}
+              {!homeIsOverview && renderDashboardRow()}
               {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {CUSTOMIZATION_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
@@ -1600,7 +1666,7 @@ export default function Layout() {
               label repeats the tab above it. The bar panel does the same with flat pills. */}
           {panel === 'suite' && suiteVisible && (
             <>
-              {renderDashboardRow()}
+              {!homeIsOverview && renderDashboardRow()}
               {renderPinnedGroup()}
               {unlockedItems(suiteNavItems).map(i => renderNavItem(i))}
             </>
@@ -1850,7 +1916,13 @@ export default function Layout() {
         </div>
 
         <nav aria-label={`${PANEL_TITLES[panel] || 'Crest'} pages`} className="topbar-nav">
-          {renderBarPill(dashNavItem, { label: dashLabel })}
+          {/* Each row opens on its module's own dashboard (S800). The cross-module page stays first
+              only where it IS the module's dashboard (one module, no Home) and on the admin row. */}
+          {(!homeIsOverview || panel === 'admin') && renderBarPill(dashNavItem, { label: dashLabel })}
+          {panel === 'home' && homeIsOverview && homeLinks.map(i => renderBarPill(i))}
+          {panel === 'ims' && homeIsOverview && imsVisible && isItemVisible(IMS_DASHBOARD) && renderBarPill(IMS_DASHBOARD)}
+          {panel === 'hr' && hrVisible && isItemVisible(HR_DASHBOARD) && renderBarPill(HR_DASHBOARD)}
+          {panel === 'pos' && posVisible && isItemVisible(POS_DASHBOARD) && renderBarPill(POS_DASHBOARD)}
           {pinnedItems.length > 0 && renderBarGroup({ key: 'pinned', label: 'Pinned', items: pinnedItems })}
 
           {panel === 'admin' && isAdmin && (
@@ -1897,7 +1969,6 @@ export default function Layout() {
           {panel === 'hr' && hrVisible && (
             <>
               {suiteUpsellInPanels && renderBarGroup(suiteGroup())}
-              {isItemVisible(HR_DASHBOARD) && renderBarPill(HR_DASHBOARD)}
               {HR_GROUPS.map(renderBarGroup)}
             </>
           )}

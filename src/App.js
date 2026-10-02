@@ -19,6 +19,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Signup = lazy(() => import('./pages/Signup'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
+const ClientDashboard = lazy(() => import('./pages/dashboard/ClientDashboard'))
 const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
 const GroupDashboard = lazy(() => import('./pages/dashboard/GroupDashboard'))
 const MonthlyOwnerReport = lazy(() => import('./pages/dashboard/MonthlyOwnerReport'))
@@ -105,6 +106,7 @@ const PosExceptionReport = lazy(() => import('./modules/pos/reports/PosException
 const PosShifts = lazy(() => import('./modules/pos/shifts/PosShifts'))
 const CreditNotes = lazy(() => import('./modules/pos/creditnotes/CreditNotes'))
 const SalesReport = lazy(() => import('./modules/pos/reports/SalesReport'))
+const PosDashboard = lazy(() => import('./modules/pos/dashboard/PosDashboard'))
 const KotLog = lazy(() => import('./modules/pos/reports/KotLog'))
 const CoversReport = lazy(() => import('./modules/pos/reports/CoversReport'))
 const PurchaseOneLakhAboveReport = lazy(() => import('./modules/ims/reports/PurchaseOneLakhAboveReport'))
@@ -284,6 +286,10 @@ export default function App() {
               <Route path="/theoretical-variance"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="theoretical_variance" minPlan="pro"><TheoreticalVariance /></PremiumGate></ModuleGate>} />
               <Route path="/ims/staff" element={<ModuleGate module="ims"><ImsStaff /></ModuleGate>} />
+              {/* S800: the page the IMS tab opens — the main Dashboard in IMS scope, holding the IMS
+                  charts a multi-module Home no longer carries. The page itself sends a login without
+                  IMS rank Home; ModuleGate checks only the module. */}
+              <Route path="/ims/dashboard" element={<ModuleGate module="ims"><ClientDashboard scope="ims" /></ModuleGate>} />
 
               {/* Crest HR — gated on hr_enabled */}
               <Route path="/hr/dashboard" element={<ModuleGate module="hr"><HrDashboard /></ModuleGate>} />
@@ -321,6 +327,9 @@ export default function App() {
               <Route path="/pos/exceptions" element={<ModuleGate module="pos"><PosExceptionReport /></ModuleGate>} />
               <Route path="/pos/credit-notes" element={<ModuleGate module="pos"><CreditNotes /></ModuleGate>} />
               <Route path="/pos/sales-report" element={<ModuleGate module="pos"><SalesReport /></ModuleGate>} />
+              {/* S800: the page the POS tab opens. ModuleGate sends a kitchen/bar team to its KDS; the page
+                  shows its sales band from supervisor up. */}
+              <Route path="/pos/dashboard" element={<ModuleGate module="pos"><PosDashboard /></ModuleGate>} />
               <Route path="/pos/kot-log" element={<ModuleGate module="pos"><KotLog /></ModuleGate>} />
               <Route path="/pos/covers-report" element={<ModuleGate module="pos"><CoversReport /></ModuleGate>} />
               <Route path="/pos/kds" element={<ModuleGate module="pos"><KitchenDisplay /></ModuleGate>} />

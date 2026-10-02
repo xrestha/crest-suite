@@ -145,3 +145,59 @@ export function withOptionCosts(optionRows, toItems, rateByItem) {
     return { ...o, costPerPick: cost }
   })
 }
+
+/**
+ * The lines of one set of bills, and only their choices (S800). The page reads the chosen range and
+ * the equal range before it in one pass, then slices each out, so the comparison and the trend cost
+ * no second round of reads. Lines carry `order_id`; a choice belongs to the line it was picked on.
+ */
+export function sliceByOrders(lines, snapshots, orderIds) {
+  const ids = orderIds instanceof Set ? orderIds : new Set(orderIds)
+  const sliced = (lines || []).filter(l => ids.has(l.order_id))
+  const lineIds = new Set(sliced.map(l => l.id))
+  return { lines: sliced, snapshots: (snapshots || []).filter(s => lineIds.has(s.order_item_id)) }
+}
+
+// A dish's weekly share counts only from this many plates — a week of three plates swings 33 points
+// on one guest, which is noise, not a trend.
+export const TREND_MIN_PLATES = 5
+// A fall this large, week on week, is flagged (percentage points).
+export const TREND_DROP_POINTS = 10
+
+/**
+ * The weekly share of plates customized, for the `topN` dishes with the most plates over the whole
+ * range (S800). `weekOfOrder` maps an order id to its week index (0 = oldest); `weekCount` is how
+ * many weeks there are. Which dishes are customizable is decided over the WHOLE range (attached
+ * today, or sold with a choice anywhere in it), so a quiet week cannot flip a dish in and out.
+ * A week under TREND_MIN_PLATES for a dish is null for it, drawn as a gap, never as 0%.
+ *
+ * `drops` names the dishes whose last week fell by TREND_DROP_POINTS or more against the week
+ * before — the flag the owner acts on.
+ */
+export function weeklyDishShares({ lines, snapshots, weekOfOrder, weekCount, attachedRecipeIds, topN = 5 }) {
+  const attached = new Set([...(attachedRecipeIds || []), ...(lines || []).filter(l => l.selection_key).map(l => l.recipe_id)])
+  const whole = buildCustomizationReport({ lines, snapshots, attachedRecipeIds: attached })
+  const top = whole.dishes.slice(0, topN).map(d => ({ recipe_id: d.recipe_id, name: d.name }))
+  const weeks = Array.from({ length: weekCount }, () => new Set())
+  for (const [orderId, w] of weekOfOrder) if (w >= 0 && w < weekCount) weeks[w].add(orderId)
+  const rows = weeks.map((ids, w) => {
+    const s = sliceByOrders(lines, snapshots, ids)
+    const rep = buildCustomizationReport({ lines: s.lines, snapshots: s.snapshots, attachedRecipeIds: attached })
+    const byDish = new Map(rep.dishes.map(d => [d.recipe_id, d]))
+    const row = { week: w }
+    for (const d of top) {
+      const x = byDish.get(d.recipe_id)
+      row[d.recipe_id] = x && x.plates >= TREND_MIN_PLATES ? Math.round(x.share * 1000) / 10 : null
+    }
+    return row
+  })
+  const drops = []
+  if (rows.length >= 2) {
+    const last = rows[rows.length - 1], prev = rows[rows.length - 2]
+    for (const d of top) {
+      const a = prev[d.recipe_id], b = last[d.recipe_id]
+      if (a != null && b != null && a - b >= TREND_DROP_POINTS) drops.push({ ...d, from: a, to: b })
+    }
+  }
+  return { dishes: top, rows, drops }
+}

@@ -42,6 +42,13 @@ promoting an upsell into the row that answers "where am I" advertises to every u
 forever. Same question for the next add-on: does this belong to a panel, or does it keep having to be
 copied into all of them?
 
+### A module tab opens its module; Home is a tab of its own (S800)
+
+- **A tab click navigates** (`openPanel` → `moduleHome(key)` in `Layout.js`): IMS → Inventory Dashboard (`/ims/dashboard`), HR → HR Dashboard, POS → POS Dashboard (`/pos/dashboard`, `PosDashboard.jsx`; a POS-only client's `/dashboard` is "POS Overview" so the two never share a name), Custom → Customization Report, Suite → Owner Dashboard (Group Console first for a group owner), Admin → Clients. The home is the first page in that list the login can open (`isItemVisible`), so a rank never lands on a page that bounces it. Pressing the current tab returns to its home. Before S800 a tab only swapped the row, so the old page stayed on screen with Dashboard lit beside a lit module tab.
+- **The highlighted tab follows the URL** (the route→panel effect), never only the last click.
+- **Home** is a tab first in the row plus the logo (owner decision), and exists exactly when `/dashboard` is a cross-module Home: `isOverviewHome(dashboardModules(...))` in `src/shared/dashboardHome.js`, the same test `ClientDashboard` uses to pick its sections. Home's row is the module homes (`homeLinks`) and the pins. With one module there is no Home: `/dashboard` is that module's dashboard and leads its row, as before.
+- Each row leads with its own module's dashboard; the cross-module `dashNavItem` leads only the admin row and a single-module client's row.
+
 ### The top bar wraps between 768 and 1280px, and one page has one name (S776, S790)
 
 - Below 1280px `.topbar-primary` and `.topbar-nav` WRAP (Layout.css, `max-width: 1279px`; it was 1119px until S790): account actions top-right, the context on its own line, pills on a second row. At 820 the context had collapsed to 2px and three nav menus sat past the edge of a scrollbar-less row. A new top-bar element must be checked at 820, 1024 and just above the wrap line by `scrollWidth`, not by eye.

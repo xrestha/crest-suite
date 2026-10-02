@@ -1,6 +1,6 @@
 import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
@@ -147,7 +147,10 @@ export default function Roster() {
   const { scopedFrom, scopedInsert, scopedUpsert, scopedDelete } = useScopedDb()
   const today = getBsToday()
 
-  const [tab,        setTab]        = useState('board')
+  // ?tab=labor (S800): the HR Dashboard's labour tile opens the Labor Forecast directly. Only a
+  // known tab is honoured; anything else is the board.
+  const [searchParams] = useSearchParams()
+  const [tab,        setTab]        = useState(() => (['board', 'shifts', 'labor', 'swaps'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'board'))
   const [viewMode,   setViewMode]   = useState('weekly')
   const [weekStart,  setWeekStart]  = useState(() => weekSunday(new Date()))
   const [bsYear,     setBsYear]     = useState(today.year)

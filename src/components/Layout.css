@@ -3316,6 +3316,46 @@ textarea::placeholder {
 .dash-section:last-child,
 .dash-row:last-child { margin-bottom: 0; }
 
+/* S800 — the pieces the module dashboards share, as classes rather than a fourth inline copy.
+   .dash-heading is a section's heading ("On the floor now"): HrDashboard's SectionLabel and
+   ClientDashboard's moduleHeader each typed it inline, at two different weights and greys.
+   .dash-card-title is ChartCard's DEFAULT_TITLE_STYLE for a plain card that is not a chart.
+   .dash-card-grid lays two or three such cards side by side and lets them wrap on a phone.
+   .dash-tile-link is a KPI tile's way to the page behind it: a real link inside the card, because
+   a card that holds a control takes no role="button" (S653). */
+.dash-heading {
+  font-size: 11px; font-weight: 700; margin: 0 0 8px;
+  color: var(--theme-text2); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.dash-card-title {
+  font-size: 12px; font-weight: 600; margin: 0 0 8px;
+  color: var(--theme-text2); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.dash-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.dash-tile-link {
+  display: inline-block; margin-top: 6px; font-size: 12px;
+  color: var(--theme-accent-ink); text-decoration: none;
+}
+.dash-tile-link:hover { text-decoration: underline; }
+
+/* Home's Needs-attention list (S800, HomeAttention.jsx): count, sentence, the link that clears it.
+   One ruled line per item, the count in a fixed-width badge so the sentences start on one edge. */
+.home-attention { list-style: none; margin: 0; padding: 0; }
+.home-attention__row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 0; border-top: 1px solid var(--theme-border);
+}
+.home-attention__row:first-child { border-top: none; padding-top: 0; }
+.home-attention__text { flex: 1 1 240px; min-width: 0; font-size: 13px; color: var(--theme-text1); }
+.dash-tile-link:focus-visible {
+  outline: 2px solid var(--theme-focus-outline); outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--theme-focus-ring);
+}
+
 @media (max-width: 768px) {
   /* .main-content drops 32 -> 16 here, so a 28px group gap would separate sections by nearly
      twice the page's own margin, on the screen with the least vertical room to give. The 2x

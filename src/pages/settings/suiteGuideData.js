@@ -204,6 +204,7 @@ export const SUITE_GUIDE_GROUPS = [
         workflow: [
           'Pick a BS month and year — the figures reload on their own as soon as either one changes. The Refresh button beside them only re-reads the same month. The outlet you are currently viewing is marked in the table, and another outlet\'s name is a link that switches you into it.',
           'Read the coverage banner FIRST — it is deliberately above the figures, not a footnote.',
+          'S800 — each outlet\'s revenue carries "▲/▼ N% vs <last month>" from a second get_group_summary call for the month before (compareFigures; within 5% or NPR 1,000 it is ≈; a failed read says "couldn\'t check" and costs nothing else). With three or more outlets carrying a figure, the Food Cost / Spend % and Labour % columns mark the Lowest and Highest outlet with a neutral chip (never across two bases). No prime-cost column: outlets in one month can stand on different bases (counted COGS vs spend so far). The same-item price comparison across outlets needs a new group RPC (a migration) and waits for a group client to exist.',
         ],
         fields: [
           { label: 'Coverage is stated before the totals', desc: 'Outlets without Suite Pro are named and excluded; outlets with no period open for that month are named and count as zero. A group total that silently omits an outlet is worse than no total.' },

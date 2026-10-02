@@ -74,6 +74,11 @@ export const RESERVATION_STATUS_BADGE = {
 // means "food in the pass, run it") and never a strip colour. A served ticket leaves the Kitchen
 // Display, and on the floor it stops counting as ready.
 export const KOT_STATUS_LABEL = { new: 'Sent', in_progress: 'Started', ready: 'Ready', served: 'Served' }
+// When a ticket still being made is flagged going late / late. One definition (S800): the Kitchen
+// Display, the kitchen team's dashboard cards and the POS Dashboard's floor band all read these,
+// so a ticket can never be late on one screen and on time on another.
+export const KDS_WARN_MS = 8 * 60 * 1000
+export const KDS_LATE_MS = 15 * 60 * 1000
 export const KOT_STATUS_BADGE = { new: 'badge-gray', in_progress: 'badge-yellow', ready: 'badge-green', served: 'badge-gray' }
 // Lower = less done. When a table has several open tickets at different stages, the floor badge
 // shows the least-advanced one still in the kitchen's hands — that is the one needing attention.

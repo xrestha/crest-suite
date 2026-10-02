@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
-import { BS_MONTHS, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { BS_MONTHS, formatBsDay, bsDayOrdinal, getBsToday } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
 import { SSF_DEPOSIT_DAY } from '../payrollConstants'
 import PayrollMonthStatus from '../payroll/PayrollMonthStatus'
@@ -13,6 +13,7 @@ import { ssfDeadline } from '../payroll/monthStatus'
 import { fetchMonthDepositExtras, monthDeposit } from '../payroll/monthDeposit'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
 import WeatherHeaderSlot from '../../../pages/dashboard/WeatherHeaderSlot'
+import HrLabourPanel from './HrLabourPanel'
 
 const fmt = nprInt
 const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
@@ -39,6 +40,12 @@ function ssfDeadlineState(bs_year, bs_month) {
   // Same month as the deadline, on or before the due day: it is now the live task.
   if (d.dueThisMonth) return { alert: true }
   return {}
+}
+
+// Days left to the SSF deposit while it is the live task (the due month, on or before the due day).
+function ssfDaysLeftText(today = getBsToday()) {
+  const left = SSF_DEPOSIT_DAY - today.day
+  return left <= 0 ? 'due today' : `${left} day${left === 1 ? '' : 's'} left`
 }
 
 // Clickable KPI card — role/tabIndex/onKeyDown + .interactive-card give keyboard users the same
@@ -467,7 +474,11 @@ export default function HrDashboard() {
                     ? 'no staff or leavers in SSF this period'
                     : deadline.overdue
                       ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
-                      : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
+                      // The countdown (S800): only in the month it falls due, and never "missed" —
+                      // deposits are not recorded, so a passed date is not proof of anything.
+                      : deadline.alert
+                        ? `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)} — ${ssfDaysLeftText()}`
+                        : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
                   tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}: the payslips plus the final month of anyone whose Final Settlement was in ${payInfo.periodLabel}${settledSsf ? ` (${payInfo.ssfSettled.join(', ')})` : ''}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
                   onClick={() => navigate(`/hr/reports?tab=ssf${payInfo.periodId ? `&period=${payInfo.periodId}` : ''}`)}
                   {...deadline}
@@ -484,6 +495,11 @@ export default function HrDashboard() {
           No finalized payroll yet. Generate and finalize a payroll run to see net pay and SSF summary here.
         </div>
       )}
+
+      {/* Labour against sales (S800): the hospitality half of an HR home — what each finalized month
+          of labour cost, and what share of that month's sales it was. Below the queues' summary
+          rows, above the queues themselves. */}
+      <HrLabourPanel />
 
       {/* ── Pending queues ───────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>

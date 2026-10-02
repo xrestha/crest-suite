@@ -18,7 +18,7 @@ import {
 } from '../../modules/dashboard/weatherEffect'
 import { useWeatherStrip } from '../../modules/dashboard/useWeatherStrip'
 import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText } from '../../modules/dashboard/labourSource'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
   LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
@@ -26,7 +26,7 @@ import {
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
 import { TOOLTIP_CHROME } from '../../shared/tooltipChrome'
-import { ArrowDown, Lock, TriangleAlert, Clock, LayoutGrid, ChevronDown } from 'lucide-react'
+import { ArrowDown, Lock, TriangleAlert, Clock, LayoutGrid, ArrowRight } from 'lucide-react'
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
@@ -50,9 +50,14 @@ import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import SetupGuideCard from '../../components/SetupGuideCard'
+import HomeAttention from './HomeAttention'
+import ImsPriceMovers from '../../modules/ims/dashboard/ImsPriceMovers'
 import SupportContactLine from '../../components/SupportContactLine'
 import WeatherHeaderSlot from './WeatherHeaderSlot'
 import { CHART_COLORS, COST_BREAKDOWN_COLORS, costSliceColor } from '../../shared/chartColors'
+import { dashboardModules, IMS_DASHBOARD_PATH } from '../../shared/dashboardHome'
+import { npr } from '../../shared/nepalMoney'
+import { KDS_LATE_MS } from '../../modules/pos/posSignals'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -263,7 +268,13 @@ async function loadForecastHistory(scopedFrom, period) {
   return { periods, sales: results[0].data || [], purchases: results[1].data || [], returns: results[2].data || [], error: null }
 }
 
-export default function ClientDashboard() {
+// `scope` (S800): 'home' is /dashboard, every module's headline cards; 'ims' is /ims/dashboard, the
+// Inventory Dashboard, which is this same page with the HR and POS sections switched off. The IMS
+// charts, reference cards and manual sales table moved there for a client with two or more
+// modules, so each module tab opens a dashboard of its own. One component, so no card or chart has
+// a second copy to drift.
+export default function ClientDashboard({ scope = 'home' }) {
+  const imsScope = scope === 'ims'
   const { profile, clientId, isAdmin, isOwner, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
   // 'kitchen'/'bar' pos_team accounts (S431) get kitchen-ops KPIs (open/late tickets, prep time)
   // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
@@ -305,6 +316,10 @@ export default function ClientDashboard() {
   const [salesDayLog, setSalesDayLog] = useState(() => readDashboardCache('salesDayLog', effectiveClientId) ?? [])
   const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
   const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
+  // Every item below par, not just the five the panel lists — Home's Needs-attention row counts it (S800).
+  const [reorderCount, setReorderCount]   = useState(() => readDashboardCache('reorderCount', effectiveClientId) ?? null)
+  // Σ stock value over the same rows (S800 stage F): the Stock Report's figure for active items.
+  const [stockOnHand, setStockOnHand]     = useState(() => readDashboardCache('stockOnHand', effectiveClientId) ?? null)
   // A closed month cached before S792 carries a purchases ÷ sales figure; it is dropped rather than
   // drawn as a Food Cost % (D30) until the reload underneath repaints it on the used basis.
   const [fcTrend, setFcTrend]             = useState(() => (readDashboardCache('fcTrend', effectiveClientId) ?? []).filter(p => p.open || p.basis === 'cogs'))
@@ -317,17 +332,9 @@ export default function ClientDashboard() {
   // Same treatment for the merged Revenue vs Cost Breakdown / Sales Mix card below (S557) — plain
   // UI state, not persisted, resets to 'cost' on remount.
   const [costCardView, setCostCardView]   = useState('cost') // 'cost' | 'mix'
-  // Progressive disclosure, IMS's reference-card row only (dashboard density critique,
-  // 2026-08-14, P1) — Active Period/Items/Vendors/Recipes/Menu Health/Fixed Costs% are genuinely
-  // low-frequency reference data (S439 already treated them as a secondary tier below the "money"
-  // row). HR and POS's cards are NOT behind this: headcount, covers, avg check and tables occupied
-  // are exactly what a mid-shift glance needs, so hiding them would defeat the dashboard's own
-  // purpose — reversed after checking that against real dashboard UX guidance (a KPI dashboard's
-  // job is a 5-second read of business state; hiding daily-checked numbers is the most common way
-  // progressive disclosure breaks that). Plain UI state, same treatment as spendView/costCardView
-  // above — resets closed on remount.
-  const [openDetails, setOpenDetails] = useState({ ims: false })
-  const toggleDetails = (key) => setOpenDetails(prev => ({ ...prev, [key]: !prev[key] }))
+  // The "Show 6 more" disclosure over IMS's reference cards went in S800: those cards, the charts
+  // and the manual sales table now live on the Inventory Dashboard, where they render in full, so
+  // a multi-module Home has nothing left to fold away.
   // Wraps a normal setState call to also persist the same value to the cache above, under the
   // given section key. Only ever called from inside loadStats/loadHrStats/loadPosStats/
   // loadKitchenPosStats/loadFcTrend, all of which already check `loadIdRef.current !== myId`
@@ -380,10 +387,11 @@ export default function ClientDashboard() {
     const myId = ++loadIdRef.current
     // Load only the modules the displayed client actually subscribes to (clientModules from
     // AuthContext already resolves real-client vs admin "view as client").
+    // The Inventory Dashboard shows no HR or POS section, so it reads neither.
     if (clientModules.ims) loadStats(myId); else setLoading(false)
-    if (clientModules.hr) loadHrStats(myId); else setHrStats(null)
-    if (clientModules.pos) { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) } else setPosStats(null)
-  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, payrollFenced, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (clientModules.hr && !imsScope) loadHrStats(myId); else setHrStats(null)
+    if (clientModules.pos && !imsScope) { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) } else setPosStats(null)
+  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, payrollFenced, location.key, imsScope]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A close's outcome sentence names one outlet's month; it must not follow an outlet switch.
   useEffect(() => { setPeriodCloseNotice(null) }, [effectiveClientId])
@@ -891,10 +899,12 @@ export default function ClientDashboard() {
     // so the tile could say 3 and the report 7). Gated on canReorder (Growth+); see Menu Health
     // comment above for why this needs a data gate, not just a render gate.
     if (canReorder) {
-      const reorderRows = buildStockRows({
+      const stockRows = buildStockRows({
         items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
         sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
       })
+      setAndCache(setStockOnHand, 'stockOnHand', Math.round(stockRows.reduce((t, r) => t + r.stockValue, 0)))
+      const reorderRows = stockRows
         .filter(r => r.needsReorder)
         .map(r => ({
           name: r.item.name, uom: r.item.uom, currentStock: Math.round(r.onHand * 100) / 100,
@@ -903,10 +913,13 @@ export default function ClientDashboard() {
           source: r.stockSource === 'closing' ? 'Physical' : "Calc'd"
         }))
         .sort((a, b) => b.estValue - a.estValue)
-        .slice(0, 5)
+      setAndCache(setReorderCount, 'reorderCount', reorderRows.length)
+      reorderRows.splice(5)
       setAndCache(setReorderItems, 'reorderItems', reorderRows)
     } else {
       setAndCache(setReorderItems, 'reorderItems', [])
+      setAndCache(setReorderCount, 'reorderCount', null)
+      setAndCache(setStockOnHand, 'stockOnHand', null)
     }
 
     // Two shapes of the same figure, deliberately: `overheadTotal` is every bucket combined (what
@@ -1058,7 +1071,7 @@ export default function ClientDashboard() {
 
     const rows = data || []
     const nowMs = Date.now()
-    const LATE_MS = 15 * 60 * 1000 // matches KitchenDisplay.jsx's own convention
+    const LATE_MS = KDS_LATE_MS // the Kitchen Display's own line (posSignals.js)
     const READY_WAITING_MS = 20 * 60 * 1000 // "ready & still waiting for pickup", not all-day ready count
 
     const openNow = rows.filter(r => r.status === 'new' || r.status === 'in_progress').length
@@ -1631,27 +1644,6 @@ export default function ClientDashboard() {
       onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
     } : {})
   })
-  // The "N more" disclosure button — currently only IMS's reference-card row uses this (see the
-  // openDetails note above for why HR/POS don't), kept generic on (key, count, panelId) in case a
-  // genuinely reference-only row shows up in another section later.
-  const detailsToggle = (key, count, panelId) => (
-    <button
-      type="button"
-      onClick={() => toggleDetails(key)}
-      aria-expanded={openDetails[key]}
-      aria-controls={panelId}
-      className="btn btn-ghost"
-      // No margins and no padding: .btn already supplies 8px 16px, inline-flex, centring and a
-      // 6px icon gap. The space ABOVE this button belongs to the section that contains it and
-      // the space below to the .dash-row it sits in — it had a 10px top margin and nothing at
-      // all below, so collapsed it sat flush against the chart row beneath it (0px), and
-      // expanded it got 14. The gap under a control should not depend on what the control says.
-      style={{ fontSize: 11 }}
-    >
-      {openDetails[key] ? 'Hide details' : `Show ${count} more`}
-      <ChevronDown size={12} aria-hidden="true" style={{ transform: openDetails[key] ? 'rotate(180deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }} />
-    </button>
-  )
   // Shared KPI text styles — single source of truth for label/value/subtext sizing across every
   // KPI grid section (IMS Row 1/2, HR, POS), so a future re-tune is a 3-line edit, not a sweep of
   // 15+ inline style objects. kpiValueStyle keeps the hero (bigger/bolder) vs secondary two-tier
@@ -1696,22 +1688,29 @@ export default function ClientDashboard() {
   // Also requires the viewer's own ims_role grant (hasImsAccess) — every IMS page redirects
   // an ims_role-less staffer (POS-only/HR-only login) here on denial, so this fallback must not
   // itself leak the Food Cost%/margin/spend data those pages are gated to protect.
-  const showIms = clientModules.ims && hasImsAccess('staff')
-  const showHr  = clientModules.hr && hasHrAccess('staff')
   // POS the same way (S750 browser check): an HR-only login's pos_orders read comes back
   // RLS-empty, and the section rendered it as Revenue NPR 0 / 0 bills / 0 tables beside the
-  // Owner's real NPR 1,680 — a zero nobody computed, not a quiet day.
-  const showPos = clientModules.pos && hasPosAccess('staff')
+  // Owner's real NPR 1,680 — a zero nobody computed, not a quiet day. The test lives in
+  // shared/dashboardHome.js since S800, because Layout reads the same answer to decide whether
+  // the top bar carries a Home tab.
+  const dashMods = dashboardModules({ clientModules, hasImsAccess, hasHrAccess, hasPosAccess })
+  const showIms = dashMods.ims
+  const showHr  = dashMods.hr && !imsScope
+  const showPos = dashMods.pos && !imsScope
   const moduleCount = [showIms, showHr, showPos].filter(Boolean).length
-  const dashTitle = isAdmin
-    ? 'Admin Dashboard'
-    : moduleCount > 1 ? 'Dashboard'
+  const showStockOnHand = showIms && canReorder && hasFeature('stock_report') && hasImsAccess('supervisor')
+  const showPriceMovers = showIms && !!activePeriod && hasFeature('price_tracker') && hasImsAccess('manager')
+  // A Home of two or more modules is called Home, the word on its tab — admin included, since the
+  // subtitle names the client being viewed. Admin's own overview is AdminDashboardOverview.
+  const dashTitle = imsScope ? 'Inventory Dashboard'
+    : moduleCount > 1 ? 'Home'
+    : isAdmin ? 'Admin Dashboard'
     : showIms ? 'Inventory Dashboard'
     // Not 'HR Dashboard' — that's the title of the real, richer page at /hr/dashboard
     // (HrDashboard.jsx: headcount, leave/OT queues, SSF, advances). This is a lighter summary
     // on the universal route; an identical title on two different pages was confusing.
     : showHr  ? 'HR Overview'
-    : showPos ? 'POS Dashboard'
+    : showPos ? 'POS Overview' // the POS Dashboard is /pos/dashboard (S800); one name per page
     : 'Dashboard'
   const showModuleHeaders = moduleCount >= 2
   // A real <h2> (not a styled div) so screen-reader users can navigate the page's module
@@ -2909,6 +2908,10 @@ export default function ClientDashboard() {
     </>
   )
 
+  // The Inventory Dashboard is IMS's own page, so a login without IMS goes Home rather than
+  // seeing an empty IMS page. After every hook; ProtectedRoute has already resolved the profile.
+  if (imsScope && !showIms) return <Navigate to="/dashboard" replace />
+
   return (
     <div>
       {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton
@@ -2959,7 +2962,8 @@ export default function ClientDashboard() {
         </div>
       ))}
 
-      {!isAdmin && (() => {
+      {/* Home's, not the Inventory Dashboard's: a renewal reminder on every dashboard is a nag. */}
+      {!isAdmin && !imsScope && (() => {
         const s = getSubStatus(profile?.clients)
         if (!s.label || s.days === null || s.days > 7) return null
         const isExpired = s.days < 0
@@ -3001,7 +3005,7 @@ export default function ClientDashboard() {
           client's Owner or email-login manager, in its first weeks, for whichever modules the client
           has — so it sits here unconditionally, including for POS-only and HR-only clients, which
           GettingStartedCard (gated on showIms) never reached. Rules: src/shared/onboarding/. */}
-      <SetupGuideCard surface="dashboard" />
+      {!imsScope && <SetupGuideCard surface="dashboard" />}
 
       {periodExpired && !loading && (
         <div className="card dash-row" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
@@ -3101,12 +3105,37 @@ export default function ClientDashboard() {
         </div>
       )}
 
+      {/* Home's first answer is what needs a person (S800 stage C), then each module's headline cards. */}
+      {!imsScope && showModuleHeaders && (
+        <HomeAttention
+          clientId={effectiveClientId}
+          showIms={showIms} showHr={showHr} showPos={showPos} posIsStationTeam={posIsStationTeam}
+          // Posting POS bills into Inventory is done from Periods, which opens for these (Periods.js).
+          canSeeImsPosting={isAdmin || isOwner || hasImsAccess('supervisor')}
+          canHrApprove={hasHrAccess('supervisor')}
+          hrApprovals={hrApprovals}
+          reorderCount={reorderCount} canReorder={canReorder}
+          bookingRequests={posStats && !posStats.kitchen ? (posStats.requestsPending ?? 0) : 0}
+        />
+      )}
+
       {/* dash-section so the module block keeps the page's rhythm below it whether it renders as
           the 2/3-column grid or, for a single-module client, one plain full-width block. */}
       <div className={`dash-section ${dashColsClass}`.trim()}>
       {/* ── IMS KPIs ── */}
       {showIms && <div>
       {moduleHeader('Inventory')}
+      {/* The Inventory Dashboard opens on what needs doing (S800 stage F), as Home does. */}
+      {!showModuleHeaders && activePeriod && (
+        <HomeAttention
+          mode="ims"
+          clientId={effectiveClientId}
+          showIms={showIms} showHr={false} showPos={dashMods.pos} posIsStationTeam={posIsStationTeam}
+          canSeeImsPosting={isAdmin || isOwner || hasImsAccess('supervisor')}
+          reorderCount={reorderCount} canReorder={canReorder}
+          activePeriod={activePeriod} periodExpired={periodExpired}
+        />
+      )}
       {showModuleHeaders ? (
         /* Trimmed top-pill row — card count matched to HR/POS (5, vs their 4) — the "money"
            numbers. Food Cost % spans 2 columns as this row's headline tile (dashboard density
@@ -3126,6 +3155,26 @@ export default function ClientDashboard() {
           <div className="stat-grid stat-grid--compact dash-row">
             {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{wastageCard}
           </div>
+          {/* "What changed" (S800 stage F): what is on the shelf, and which prices moved. Each carries
+              the gate of the report it summarises — Stock Report (Growth, supervisor) and Price
+              Tracker (Pro, manager) — so the tile never shows what its own report would refuse. */}
+          {(showStockOnHand || showPriceMovers) && (
+            <div className="dash-card-grid dash-row">
+              {showStockOnHand && (
+                <div className="card card--compact">
+                  <h3 className="dash-card-title">
+                    <Tip text="What the stock on your shelves is worth now, at each item's current rate: the closing count where one has been entered, otherwise opening + purchases − what recipes used − wastage and staff meals. Active items only — the Stock Report adds any item hidden this month that still had stock." width={300}>
+                      Stock on hand — active items
+                    </Tip>
+                  </h3>
+                  <div className="stat-value">{stockOnHand == null ? '—' : npr(stockOnHand)}</div>
+                  <div className="stat-sub">{periodLabel}, estimated until the closing count</div>
+                  <Link to="/stock-report" className="dash-tile-link">Stock Report →</Link>
+                </div>
+              )}
+              {showPriceMovers && <ImsPriceMovers activePeriod={activePeriod} />}
+            </div>
+          )}
           {imsChartsAndTables}
           {/* No top margin of its own: the block above carries the gap, and .dash-row:last-child
               means that block carries it only while something actually follows it. */}
@@ -3184,47 +3233,28 @@ export default function ClientDashboard() {
           {/* POS-sourced sales pivot — kitchen/bar station accounts have no use for a revenue
               breakdown (they get kitchen-ops KPIs above instead), so this is front-of-house only.
               Single-module (POS-only) clients keep it right here, unchanged; once 2+ modules
-              share the page it moves into the shared Sales Breakdown section below instead, so it
-              can sit next to the manual-sales pivot rather than fight IMS for column space. */}
+              share the page it lives on the POS Dashboard instead (S800), with the rest of POS. */}
           {!showModuleHeaders && !posIsStationTeam && <div><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
         </div>
       )}
       </div>
 
-      {/* ── IMS details (2+ modules only) — reference cards + charts + tables, full-width below
-          the equal-width pill grid instead of squeezed into IMS's own narrower column. The
-          reference-card row is behind a disclosure (dashboard density critique, 2026-08-14, P1)
-          — it's status/master-data, not a daily figure, so it doesn't need to cost default
-          scroll length; charts stay visible, they already have their own ChartCard compact/
-          expand pattern for progressive disclosure at the individual-chart level. ── */}
-      {showIms && showModuleHeaders && (
-        <div className="dash-section">
-          {/* The toggle gets its gap from a row wrapper rather than from its own margins, so the
-              space under it is the same 16 whether the panel below is open or shut. */}
-          <div className="dash-row">{detailsToggle('ims', 6, 'ims-details-panel')}</div>
-          {openDetails.ims && (
-            <div id="ims-details-panel" className="stat-grid stat-grid--compact dash-row">
-              {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{fixedCostsCard}
-            </div>
-          )}
-          {imsChartsAndTables}
-        </div>
-      )}
-
-      {/* ── Sales Breakdown (2+ modules only) — manual + POS pivots side by side (never mutually
-          exclusive — a client can carry real revenue on both). The Food/Beverage split used to
-          share this row as a third card; S557 folded it into a tab on Revenue vs Cost Breakdown
-          above instead, so the pivot table(s) here now get the whole row to themselves — with one
-          fewer card competing for width, the same auto-fit grid gives each pivot more room on its
-          own, which is what actually widens "Manual Sales by Category" now that it's not sharing
-          the row three ways. ── */}
-      {showModuleHeaders && ((showIms && canSales) || (showPos && !posIsStationTeam)) && (
-        <div className="dash-section">
-          {moduleHeader('Sales Breakdown')}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-            {showIms && canSales && <SalesPivot activePeriod={activePeriod} posEnabled={false} title="Manual Sales by Category" />}
-            {showPos && !posIsStationTeam && <SalesPivot activePeriod={activePeriod} posEnabled={true} title="POS Sales by Category" />}
-          </div>
+      {/* ── Where each module's charts went (Home of 2+ modules, S800). The IMS reference cards, every
+          IMS chart and the manual sales table are on the Inventory Dashboard; the POS sales table and
+          today-vs-last-week figures are on the POS Dashboard. Each module tab opens its own, so Home
+          stays a one-screen read of every module's headline cards. A plain-fact banner, not a card:
+          it points somewhere, it is not a figure. ── */}
+      {showModuleHeaders && (showIms || (showPos && !posIsStationTeam)) && (
+        <div className="note-banner dash-section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span>
+            <strong>Charts and tables are on each module's own dashboard</strong>
+            {showIms && <> — Daily Purchases vs Sales, the food-cost trend and spend by category on the Inventory Dashboard</>}
+            {showPos && !posIsStationTeam && <>{showIms ? ';' : ' —'} sales by hour and the POS sales table on the POS Dashboard</>}.
+          </span>
+          <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {showIms && <Link to={IMS_DASHBOARD_PATH} className="btn btn-ghost btn-sm">Inventory Dashboard <ArrowRight size={13} aria-hidden="true" /></Link>}
+            {showPos && !posIsStationTeam && <Link to="/pos/dashboard" className="btn btn-ghost btn-sm">POS Dashboard <ArrowRight size={13} aria-hidden="true" /></Link>}
+          </span>
         </div>
       )}
     </div>

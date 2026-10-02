@@ -1,4 +1,4 @@
-import { buildCustomizationReport, withOptionCosts, mostAddedOf } from './customizationReportCalc'
+import { buildCustomizationReport, withOptionCosts, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES } from './customizationReportCalc'
 import { bsMonthRangeIso, shiftBsMonth } from '../pos/reports/reportRange'
 
 const MOMO = 'r-momo'
@@ -133,5 +133,34 @@ describe('bsMonthRangeIso', () => {
     const r = bsMonthRangeIso(-2, 0, today)
     expect(r.to).toBe('2026-09-15')
     expect(r.from).toBe('2026-06-15')        // 1 Ashadh 2083
+  })
+})
+
+describe('the period comparison and the weekly trend (S800)', () => {
+  // Two orders a week for three weeks; order oN carries one Bowl line of 5 plates.
+  const line = (id, order_id, customized) => ({ id, order_id, recipe_id: 'bowl', name: 'Bowl', qty: 5, comped: false, selection_key: customized ? 'x' : '' })
+  const snap = (order_item_id) => ({ order_item_id, option_id: 'x', group_name: 'Top', option_name: 'Nuts', is_removal: false, price_delta: 20 })
+  const lines = [line('l1', 'o1', true), line('l2', 'o2', true), line('l3', 'o3', true), line('l4', 'o4', false), line('l5', 'o5', false), line('l6', 'o6', false)]
+  const snapshots = [snap('l1'), snap('l2'), snap('l3')]
+
+  test('sliceByOrders keeps a set of bills\' lines and only their choices', () => {
+    const s = sliceByOrders(lines, snapshots, new Set(['o1', 'o4']))
+    expect(s.lines.map(l => l.id)).toEqual(['l1', 'l4'])
+    expect(s.snapshots.map(x => x.order_item_id)).toEqual(['l1'])
+  })
+
+  test('weekly shares per top dish, and a fall of 10 points or more is flagged', () => {
+    const weekOfOrder = new Map([['o1', 0], ['o2', 0], ['o3', 1], ['o4', 1], ['o5', 2], ['o6', 2]])
+    const t = weeklyDishShares({ lines, snapshots, weekOfOrder, weekCount: 3, attachedRecipeIds: new Set(['bowl']) })
+    expect(t.dishes).toEqual([{ recipe_id: 'bowl', name: 'Bowl' }])
+    expect(t.rows.map(r => r.bowl)).toEqual([100, 50, 0])
+    expect(t.drops).toEqual([{ recipe_id: 'bowl', name: 'Bowl', from: 50, to: 0 }])
+  })
+
+  test(`a week under ${TREND_MIN_PLATES} plates of a dish is a gap, never 0%`, () => {
+    const small = [{ ...lines[0], qty: 2 }]
+    const t = weeklyDishShares({ lines: small, snapshots: [snapshots[0]], weekOfOrder: new Map([['o1', 1]]), weekCount: 2, attachedRecipeIds: new Set(['bowl']) })
+    expect(t.rows.map(r => r.bowl)).toEqual([null, null])
+    expect(t.drops).toEqual([])
   })
 })

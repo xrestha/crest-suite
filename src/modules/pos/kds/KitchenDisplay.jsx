@@ -7,7 +7,7 @@ import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import EstimateTimeModal from './EstimateTimeModal'
-import { ticketStripColor } from '../posSignals'
+import { ticketStripColor, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
 import { playGuestAlert } from '../posChime'
 import ArrivalAlert from '../../../components/ArrivalAlert'
 import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
@@ -109,8 +109,8 @@ function attachRemovals(tickets, removals) {
 const READY_VISIBLE_MS = 10 * 60 * 1000
 // Elapsed-time flag thresholds, matching the "flag the outlier" pattern used elsewhere in POS
 // (Sales Exceptions, KOT Reconciliation) — a ticket sitting too long gets visually called out.
-const WARN_MS = 8 * 60 * 1000
-const LATE_MS = 15 * 60 * 1000
+const WARN_MS = KDS_WARN_MS
+const LATE_MS = KDS_LATE_MS
 
 // The column dot is the module's shared three-stage progression — inert → working → done, the
 // same grey/brass/green KOT_STATUS_BADGE puts on a floor tile. It deliberately does not reuse the

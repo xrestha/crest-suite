@@ -19,6 +19,7 @@ import {
   FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, FOOD_COST_TIP, SPEND_SO_FAR_TIP,
 } from '../../modules/ims/reports/foodCostBasis'
 import { groupOutletLabour, groupLabourRatio } from '../../modules/dashboard/labourSource'
+import { compareFigures } from '../../shared/compareFigures'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
 //
@@ -128,7 +129,13 @@ export default function GroupDashboard() {
     // Both RPCs for the same (bs_year, bs_month), side by side under the one monthReq key, so a
     // stale month can win neither. get_group_pnl carries each outlet's period status and its COGS
     // components (S792, D30); it checks the same Owner/admin rule get_group_summary does.
-    const [summary, pnl, hrFlags] = await Promise.all([
+    // S800: last month's summary too, for each outlet's revenue against it. Best-effort: a failure
+    // here costs the comparison only, and the cells say so, never the page.
+    const prevY = bsMonth === 1 ? bsYear - 1 : bsYear
+    const prevM = bsMonth === 1 ? 12 : bsMonth - 1
+    const prevStart = bsToAd(prevY, prevM, 1)
+    const prevEnd = bsToAd(prevY, prevM, daysInBsMonth(prevY, prevM))
+    const [summary, pnl, hrFlags, prevSummary] = await Promise.all([
       supabase.rpc('get_group_summary', {
         p_bs_year: bsYear,
         p_bs_month: bsMonth,
@@ -139,6 +146,7 @@ export default function GroupDashboard() {
       // Which outlets run Crest HR: "no finalized payroll" means "not finalized" there and "none
       // entered" on an IMS-only outlet. `clients` is read raw (clients_select allows same-group rows).
       supabase.from('clients').select('id, hr_enabled').eq('group_id', groupId),
+      supabase.rpc('get_group_summary', { p_bs_year: prevY, p_bs_month: prevM, p_ad_start: iso(prevStart), p_ad_end: iso(prevEnd) }),
     ])
     if (!monthReq.isCurrent(key)) return
     // A failure of EITHER read is the page's error. Without get_group_pnl a closed month has no
@@ -153,11 +161,15 @@ export default function GroupDashboard() {
       // own warning, for the same rows: such a month's COGS counts the whole shelf as used.
       const pnlById = new Map((pnl.data || []).map(p => [p.client_id, p]))
       const hrById = new Map((hrFlags.data || []).map(c => [c.id, !!c.hr_enabled]))
+      // undefined = the comparison read failed; null = that outlet had no month to compare.
+      const prevById = prevSummary.error ? null
+        : new Map((prevSummary.data || []).map(p => [p.client_id, p.is_included && p.has_period !== false ? Number(p.revenue) || 0 : null]))
       setRows(withGroupCogs(summary.data || [], pnl.data || [])
         .map(r => ({
           ...r,
           has_closing: pnlById.get(r.client_id)?.has_closing ?? null,
           labour: r.is_included ? groupOutletLabour(pnlById.get(r.client_id), hrById.get(r.client_id)) : null,
+          prevRevenue: prevById ? (prevById.get(r.client_id) ?? null) : undefined,
         })))
     }
     setLoading(false)
@@ -213,6 +225,20 @@ export default function GroupDashboard() {
   const shownBases = new Set(included.filter(r => r.has_period !== false).map(r => fcBasisOf(r.period_status)))
   const mixedBases = shownBases.size > 1
   const columnBasis = mixedBases ? 'mixed' : (shownBases.has('cogs') ? 'cogs' : 'spend')
+  // Lowest / highest marks (S800): the outlet to learn from and the one to look at, per ratio
+  // column — MarginEdge's "your own best outlet as the benchmark". Only with three or more outlets
+  // carrying a figure, and never across two bases (a Spend % beside a Food Cost % is not a ranking).
+  const prevLabel = `${BS_MONTHS[(bsMonth === 1 ? 12 : bsMonth - 1) - 1]}`
+  const labPctOf = r => { const rev = Number(r.revenue) || 0; return r.labour?.hasFigure && rev > 0 ? (r.labour.amount / rev) * 100 : null }
+  const extremes = values => {
+    const xs = values.filter(v => v.pct != null)
+    if (xs.length < 3) return {}
+    const sorted = [...xs].sort((a, b) => a.pct - b.pct)
+    return sorted[0].pct === sorted[sorted.length - 1].pct ? {} : { low: sorted[0].id, high: sorted[sorted.length - 1].id }
+  }
+  const costMarks = mixedBases ? {} : extremes(included.filter(r => r.has_period !== false).map(r => ({ id: r.client_id, pct: ratioOf(r)?.pct ?? null })))
+  const labourMarks = extremes(included.filter(r => r.has_period !== false).map(r => ({ id: r.client_id, pct: labPctOf(r) })))
+  const markOf = (marks, id) => marks.low === id ? 'Lowest' : marks.high === id ? 'Highest' : null
   const columnLabel = columnBasis === 'mixed' ? `${FOOD_COST_LABEL} / ${SPEND_SO_FAR_LABEL}`
     : columnBasis === 'cogs' ? FOOD_COST_LABEL : SPEND_SO_FAR_LABEL
   const columnTip = columnBasis === 'mixed'
@@ -240,6 +266,10 @@ export default function GroupDashboard() {
       children: <>{c.children}<div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{ratio.label}</div></>,
     }
   }
+  // A neutral chip under the figure: the band already carries the verdict, this only ranks.
+  const withMark = (cell, mark) => (mark
+    ? { ...cell, children: <>{cell.children}<div><span className="badge-gray" style={{ fontSize: 10 }}>{mark}</span></div></> }
+    : cell)
   const groupCogs = groupRatio.basis === 'cogs'
     ? included.filter(r => r.has_period !== false).reduce((t, r) => t + (Number(r.cogs) || 0), 0)
     : null
@@ -395,16 +425,25 @@ export default function GroupDashboard() {
                             </Tip>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.revenue) : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {r.is_included ? fmtNpr(r.revenue) : '—'}
+                          {r.is_included && r.has_period !== false && (() => {
+                            if (r.prevRevenue === undefined) return <div style={{ fontSize: 11, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>vs {prevLabel}: couldn&apos;t check</div>
+                            const cmp = compareFigures(Number(r.revenue) || 0, r.prevRevenue, { floor: 1000 })
+                            if (!cmp) return null
+                            const color = cmp.good == null ? 'var(--theme-text3)' : cmp.good ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
+                            return <div style={{ fontSize: 11, fontWeight: 400, whiteSpace: 'nowrap', color }}>{cmp.glyph} {Math.round(cmp.gapPct)}% vs {prevLabel}</div>
+                          })()}
+                        </td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.net_purchases) : '—'}</td>
-                        <td {...ratioCell(fcRatio, r.cogs)} />
+                        <td {...withMark(ratioCell(fcRatio, r.cogs), markOf(costMarks, r.client_id))} />
                         <td style={{ textAlign: 'right' }}>
                           {!r.is_included || r.has_period === false ? '—' : r.labour?.hasFigure ? fmtNpr(r.labour.amount) : '—'}
                           {r.is_included && r.has_period !== false && r.labour?.note && (
                             <div style={{ fontSize: 11, fontWeight: 400, color: r.labour.hasFigure ? 'var(--theme-text2)' : 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>{r.labour.note}</div>
                           )}
                         </td>
-                        <td {...bandCell(lab, lcBand)} />
+                        <td {...withMark(bandCell(lab, lcBand), markOf(labourMarks, r.client_id))} />
                         <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-IN') : '—'}</td>
                       </tr>
                     )

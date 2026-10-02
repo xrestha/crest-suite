@@ -78,6 +78,39 @@ export const POS_GUIDE_GROUPS = [
     label: 'Floor',
     sections: [
       {
+        id: 'pos-dashboard',
+        title: 'POS Dashboard',
+        route: '/pos/dashboard',
+        plan: 'Staff+ for the floor band · Supervisor+ for the sales band',
+        summary:
+          'The page the POS tab opens (S800). Two bands: what needs a person right now — open bills, tables in use, QR orders waiting, kitchen tickets running late, the cash drawer shift — and how today is going against the same weekday last week UP TO THE SAME CLOCK TIME, with sales by hour, how bills were paid, dine-in/takeaway/delivery, and the top five dishes. Below them, the month\'s POS sales by category (moved here from Home). Every tile links to the page that acts on it or the report behind it. It refreshes itself every minute while the tab is open.',
+        workflow: [
+          'The floor band is for anyone on POS: a waiter sees what is open, waiting and late. The sales band, the cash drawer tile and the money on open bills are for Supervisor and above, the rank that may already take payment; the reports the tiles link to stay Manager-only.',
+          'The comparison cuts last week at this moment\'s time of day: at 1 PM today is compared with last week\'s sales up to 1 PM, never with last week\'s whole day, which would read every lunchtime as a collapse.',
+          'A failed refresh keeps the last good figures on screen with a line saying when they are from; it never blanks them. A failed FIRST load shows the could-not-load card and no figures.',
+        ],
+        fields: [
+          { label: 'Open bills', desc: 'pos_orders with status open. The oldest one\'s age, and (Supervisor+) the value on them: Σ qty × unit price over non-comped lines, before discount and VAT.' },
+          { label: 'QR orders waiting', desc: 'pos_guest_order_requests still pending — guest orders nobody has accepted, which the kitchen has not seen.' },
+          { label: 'Kitchen tickets', desc: 'Today\'s pos_kot_log tickets still new or in progress; late = past KDS_LATE_MS (15 min) since sent, the Kitchen Display\'s own line from posSignals.js.' },
+          { label: 'Sales', desc: 'Σ paid_amount of today\'s paid bills (VAT included, as Home\'s POS Revenue card), a since-credit-noted bill left out — the same basis as Home.' },
+          { label: 'Discounts', desc: 'Σ discount_amount on today\'s paid bills. Its verdict colour is inverted: a rise reads red.' },
+          { label: 'Voids · complimentary', desc: 'Bills closed today as void / as complimentary (close_type writeoff).' },
+          { label: 'Payments today', desc: 'Cash, Wallet / QR (eSewa, Khalti, FonePay together), Card, Credit (billed, unpaid), Loyalty points. A Split bill is shared across its payment legs by amount (paymentSharesOf, the Sales Report\'s rule).' },
+          { label: 'Where sales came from', desc: 'Delivery = a delivery partner on the bill; Takeaway = no table; everything else Dine-in. There is no channel column, so a guest QR order counts as dine-in at its table.' },
+        ],
+        formulas: [
+          'Comparison window: today from Nepal midnight to now; last week from that day\'s Nepal midnight to now − 7 days.',
+          'Verdict: ▲/▼ is the direction; green/red whether that direction is good for the figure; ≈ in grey inside 5% or a small floor (NPR 100 on money, 1 on counts).',
+        ],
+        gotchas: [
+          'A kitchen or bar station team never reaches this page — ModuleGate sends it to its Kitchen Display, as for every POS page it is not allowlisted for.',
+          'A POS-only client\'s main Dashboard is now called "POS Overview", so the two pages do not share a name.',
+          'The arithmetic is posDashboardMath.js, pinned by posDashboardMath.test.js; change it there, not in the page.',
+        ],
+        connections: 'Reads pos_orders, pos_order_items, pos_order_payments, pos_tables, pos_guest_order_requests, pos_kot_log, pos_shifts and the open monthly period (for the sales-by-category table). Links to Orders, Billing, Kitchen Display, Shifts, Sales Report, Covers Report and Exceptions.',
+      },
+      {
         id: 'orders',
         title: 'Orders & Billing',
         route: '/pos/orders',

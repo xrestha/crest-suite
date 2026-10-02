@@ -17,7 +17,13 @@ import RangePresets from '../pos/reports/RangePresets'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { loadDeltaExplosion, deltaItems } from '../../utils/orderLineIngredients'
 import { loadOptionCatalog } from './customizationData'
-import { buildCustomizationReport, withOptionCosts, mostAddedOf } from './customizationReportCalc'
+import { buildCustomizationReport, withOptionCosts, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS } from './customizationReportCalc'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer } from 'recharts'
+import ChartCard from '../../components/ChartCard'
+import { compareFigures } from '../../shared/compareFigures'
+import { chartMotion } from '../../shared/chartMotion'
+import { TOOLTIP_CHROME } from '../../shared/tooltipChrome'
+import { CHART_COLORS } from '../../shared/chartColors'
 
 // Crest Customization Report (S758 stage 8). Four questions an owner asks of their choices:
 // which are picked, how often guests customize at all, what the "No …" requests are, and — with
@@ -48,6 +54,24 @@ const DEFAULT_SORT = {
 }
 
 const pct = v => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
+// AD ISO date arithmetic in UTC, so no runtime timezone can shift a day (S800).
+const isoMs = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) }
+const shiftIso = (iso, days) => new Date(isoMs(iso) + days * 86400000).toISOString().slice(0, 10)
+const MUTED = '#6b7280' // chart-tick, for Recharts SVG props only
+
+// "vs the period before" under a tile (S800): the shared verdict, its arrow the direction and its
+// colour whether that direction is good. Nothing to compare against says so rather than a 100% rise.
+function VsBefore({ now, then, label, format, opts }) {
+  const cmp = compareFigures(now, then, opts)
+  if (!cmp) return <div className="stat-sub">Nothing in {label} to compare</div>
+  const color = cmp.good == null ? 'var(--theme-text3)' : cmp.good ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
+  return (
+    <div className="stat-sub">
+      <span style={{ color, fontWeight: 600 }}>{cmp.glyph} {cmp.gapPct < 1 ? cmp.gapPct.toFixed(1) : Math.round(cmp.gapPct)}%</span>
+      {' '}vs {label} ({format(then)})
+    </div>
+  )
+}
 const signed = n => {
   const r = Math.round(Number(n) || 0)
   return r === 0 ? 'NPR 0' : `${r > 0 ? '+' : '−'}${npr(Math.abs(r))}`
@@ -139,6 +163,9 @@ export default function CustomizationReport() {
   const [costError, setCostError] = useState(null)
   const rangeReq = useLatestRequest()
 
+  // The equal-length range just before the chosen one (S800), for "vs the period before".
+  const rangeDays = Math.max(1, Math.round((isoMs(toIso) - isoMs(fromIso)) / 86400000) + 1)
+  const prevFromIso = shiftIso(fromIso, -rangeDays)
   const load = useCallback(async () => {
     if (!clientId) return
     const key = rangeReq.begin(`${clientId}:${fromIso}:${toIso}`)
@@ -147,9 +174,11 @@ export default function CustomizationReport() {
       const [ordersRes, attachRes, catalog] = await Promise.all([
         // Paged: a month of bills passes 1000 at any real volume, and every share on this page
         // divides by a count taken from it.
-        fetchAllRows(() => scopedFrom('pos_orders', 'id')
+        // S800: the chosen range AND the equal range before it, in one read, so the tiles can say
+        // how this period compares and the trend costs no second round of reads.
+        fetchAllRows(() => scopedFrom('pos_orders', 'id, closed_at')
           .eq('close_type', 'paid')
-          .gte('closed_at', nepalDayStartTs(fromIso)).lte('closed_at', nepalDayEndTs(toIso))
+          .gte('closed_at', nepalDayStartTs(prevFromIso)).lte('closed_at', nepalDayEndTs(toIso))
           .order('id')),
         fetchAllRows(() => scopedFrom('pos_recipe_option_groups', 'id, recipe_id').order('id')),
         // Today's catalog: which group a choice belongs to (a size is not an add-on) and its list
@@ -173,13 +202,33 @@ export default function CustomizationReport() {
       ])
       const err2 = firstError([linesRes, snapRes])
       if (err2) throw err2
+      const attachedRecipeIds = new Set((attachRes.data || []).map(a => a.recipe_id))
+      const curStartMs = Date.parse(nepalDayStartTs(fromIso))
+      const curOrders = (ordersRes.data || []).filter(o => Date.parse(o.closed_at) >= curStartMs)
+      const prevIds = new Set((ordersRes.data || []).filter(o => Date.parse(o.closed_at) < curStartMs).map(o => o.id))
+      const cur = sliceByOrders(linesRes.data, snapRes.data, new Set(curOrders.map(o => o.id)))
+      const prev = sliceByOrders(linesRes.data, snapRes.data, prevIds)
       const report = buildCustomizationReport({
-        lines: linesRes.data || [],
-        snapshots: snapRes.data || [],
-        attachedRecipeIds: new Set((attachRes.data || []).map(a => a.recipe_id)),
+        lines: cur.lines,
+        snapshots: cur.snapshots,
+        attachedRecipeIds,
         kindByOptionId,
         listPriceByOptionId,
       })
+      const prevReport = buildCustomizationReport({ lines: prev.lines, snapshots: prev.snapshots, attachedRecipeIds, kindByOptionId, listPriceByOptionId })
+      // The weekly trend: whole weeks counted back from the range's last day, for a range of two
+      // weeks or more. Days before the earliest whole week stay in the tiles, not in the trend.
+      const weekCount = Math.floor(rangeDays / 7)
+      let weekly = null
+      if (weekCount >= 2) {
+        const endMs = Date.parse(nepalDayEndTs(toIso))
+        const weekOfOrder = new Map()
+        for (const o of curOrders) weekOfOrder.set(o.id, weekCount - 1 - Math.floor((endMs - Date.parse(o.closed_at)) / (7 * 86400000)))
+        weekly = {
+          ...weeklyDishShares({ lines: cur.lines, snapshots: cur.snapshots, weekOfOrder, weekCount, attachedRecipeIds }),
+          weekEnds: Array.from({ length: weekCount }, (_, k) => shiftIso(toIso, -7 * (weekCount - 1 - k))),
+        }
+      }
 
       // Choice cost needs IMS (stock lines and item rates). A failure here costs the Margin tab
       // only, and says so there — the three sales tabs stand on their own reads.
@@ -199,7 +248,7 @@ export default function CustomizationReport() {
         }
       }
       if (!rangeReq.isCurrent(key)) return
-      setData({ report, costed })
+      setData({ report, costed, prevReport, weekly })
     } catch (e) {
       if (!rangeReq.isCurrent(key)) return
       setLoadError(e)
@@ -207,7 +256,7 @@ export default function CustomizationReport() {
     } finally {
       if (rangeReq.isCurrent(key)) setLoading(false)
     }
-  }, [clientId, fromIso, toIso, scopedFrom, rangeReq, imsOn])
+  }, [clientId, fromIso, toIso, prevFromIso, rangeDays, scopedFrom, rangeReq, imsOn])
 
   useEffect(() => { load() }, [load])
 
@@ -338,6 +387,7 @@ export default function CustomizationReport() {
         </div>
       )}
       stats={report && (
+        <>
         <div className="stat-grid">
           <div className="stat-card">
             <div className="stat-label"><Tip text="Plates of dishes that have choices, on paid bills in the range. A line of 3 is three plates.">Plates of customizable dishes</Tip></div>
@@ -347,10 +397,14 @@ export default function CustomizationReport() {
             <div className="stat-label"><Tip text="Of those plates, how many carried at least one choice — a pre-selected size counts, so a dish whose size is always chosen will read as 100%.">With a choice picked</Tip></div>
             <div className="stat-value">{pct(report.customizedShare)}</div>
             <div className="stat-sub">{nprInt(report.customizedPlates)} plates</div>
+            <VsBefore now={report.customizedShare} then={data.prevReport?.customizedShare} label={`the ${rangeDays} days before`}
+              format={pct} opts={{ floor: 0.02 }} />
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="What paid add-ons added to bills, ex-VAT and before bill discounts. Comped plates add nothing.">Extras earned</Tip></div>
             <div className="stat-value">{npr(Math.round(report.extrasEarned))}</div>
+            <VsBefore now={report.extrasEarned} then={data.prevReport?.extrasEarned} label={`the ${rangeDays} days before`}
+              format={v => npr(Math.round(v))} opts={{ floor: 100 }} />
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="What sizes priced below the dish took off bills — a Half at −NPR 100 counts here, never against extras. Ex-VAT, before bill discounts.">Size adjustments</Tip></div>
@@ -362,7 +416,50 @@ export default function CustomizationReport() {
             {top && <div className="stat-sub">{nprInt(top.picks)} plates</div>}
             {onlySizes && <div className="stat-sub">Only sizes were picked</div>}
           </div>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="The 'No …' request guests made most — a removal on the plate, which the kitchen has to remember. The Removals tab has it dish by dish.">Most removed</Tip></div>
+            <div className="stat-value" style={{ fontSize: 18 }}>{report.removals[0] ? report.removals[0].option_name : '—'}</div>
+            {report.removals[0] && <div className="stat-sub">{nprInt(report.removals[0].picks)} plates</div>}
+          </div>
         </div>
+        {data.weekly && data.weekly.dishes.length > 0 && (
+          <div className="dash-row" style={{ marginTop: 16 }}>
+            <ChartCard
+              title="Share customized, week by week — top dishes"
+              legend={<span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
+                {data.weekly.dishes.map((d, i) => <span key={d.recipe_id} style={{ marginRight: 10 }}><span style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}>━</span> {d.name}</span>)}
+              </span>}
+              footer={<div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 8 }}>
+                {data.weekly.drops.length > 0
+                  ? data.weekly.drops.map(d => (
+                    <div key={d.recipe_id} role="status"><span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>▼ {d.name}</span> fell from {d.from}% to {d.to}% of plates customized last week — check the choice is still offered and the staff are asking.</div>
+                  ))
+                  : <>No top dish fell by {TREND_DROP_POINTS} points or more last week.</>}
+                <div style={{ color: 'var(--theme-text3)', marginTop: 4 }}>Weeks end on the date shown. A week with fewer than {TREND_MIN_PLATES} plates of a dish leaves a gap rather than a figure.</div>
+              </div>}
+              renderChart={h => (
+                <ResponsiveContainer width="100%" height={h}>
+                  <LineChart data={data.weekly.rows.map((r, k) => ({ ...r, label: bsSlash(data.weekly.weekEnds[k]) }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={MUTED} strokeOpacity={0.2} vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: MUTED, fontSize: 11 }} />
+                    <YAxis domain={[0, 100]} tick={{ fill: MUTED, fontSize: 11 }} width={40} tickFormatter={v => `${v}%`} />
+                    <RTooltip
+                      contentStyle={{ ...TOOLTIP_CHROME, fontSize: 12, color: 'var(--theme-text1)' }}
+                      labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
+                      labelFormatter={l => `Week ending ${l}`}
+                      formatter={(v, name) => [v == null ? 'too few plates' : `${v}%`, name]}
+                    />
+                    {data.weekly.dishes.map((d, i) => (
+                      <Line key={d.recipe_id} dataKey={d.recipe_id} name={d.name} type="monotone" stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                        strokeWidth={2} dot={{ r: 3 }} connectNulls={false} {...chartMotion()} />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            />
+          </div>
+        )}
+        </>
       )}
       footnote={<p className="page-subtitle" style={{ margin: '12px 0 0' }}>{scopeLine}.</p>}
     >
