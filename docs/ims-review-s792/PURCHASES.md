@@ -72,6 +72,9 @@ Vendor Report and VAT pages (other reviewers).
 - Fix: when VAT flips on a line with a typed Total, re-derive the rate from that Total (the paper figure stays authoritative);
   same in the header toggle. Owner question 2.
 - Confidence: Confirmed (code); only caught at save if the optional D13 invoice total is typed.
+- Later: fixed in S792 stage 2 as D34 (a typed Total is after VAT on a ticked line). S801 added a
+  bill-level Before VAT reading beside it, because IRD-layout tax invoices print line amounts before
+  VAT, and D34's single reading took 13% out of every VAT line on them (a Big Mart bill, 2026-10-02).
 
 ### PURCHASES-5 [P2] Editing an old bill (or filing a missed one into a closed month) offers — pre-ticked — to roll Item Master back to that month's prices
 - Where: `PurchaseBillPage.jsx:219-235` (`handleBillSaved` runs `detectRateChanges` for edits and closed-month bills alike),

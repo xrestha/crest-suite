@@ -286,3 +286,13 @@ recipes and COGS share one basis with the purchases (`lineCost`, `ims-figures.md
 rate box stays ex-VAT and compares against master ÷ 1.13. Items bought before the switch are listed
 by `VatCostPriceBanner` (`vatCostPriceReview.js`), which also reverses the 13% after the outlet
 registers for VAT. Never gross up a master price anywhere else.
+
+## A Total copied off paper means what the PAPER means (S801)
+
+A purchase bill line's typed Total has two readings, chosen per bill above the line table: After VAT
+(D34, the default) and Before VAT. IRD-layout tax invoices, which supermarkets use, print each line
+before VAT and add VAT once at the foot. With only D34's reading, copying those amounts took 13% out
+of every VAT line. Any path that turns a typed line total into a rate goes through
+`rateFromLineTotal(qty, total, vatInclusive, basis)` in `billLineVat.js`. The choice is never stored:
+`purchase_entries` holds the ex-VAT rate either way. It rides in the form header (`totals_basis`) for
+draft restore only, and After VAT writes no key, so a pre-S801 edit draft still matches its baseline.
