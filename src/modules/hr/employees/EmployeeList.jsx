@@ -106,6 +106,9 @@ export default function EmployeeList() {
   // reads as "nobody has a login" — see the row action, which would then offer Enable to someone
   // who already has one. A failed read is not an empty result (S594).
   const [loadErr, setLoadErr] = useState('')
+  // What a save did beyond the record itself (S798 3b: a rehire's staff logins unblocked, or not).
+  // { tone: 'ok' | 'warn', text } or null.
+  const [saveNotice, setSaveNotice] = useState(null)
   const [ssStatusErr, setSsStatusErr] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
 
@@ -375,6 +378,15 @@ export default function EmployeeList() {
         </AlertCard>
       )}
 
+      {saveNotice && (
+        <div role="status" className="note-banner" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 12, color: saveNotice.tone === 'warn' ? 'var(--theme-amber-text)' : undefined }}>
+            {saveNotice.tone === 'warn' ? '△ ' : ''}{saveNotice.text}
+          </span>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={() => setSaveNotice(null)} aria-label="Dismiss">×</button>
+        </div>
+      )}
+
       {ssStatusErr && (
         <AlertCard onDismiss={() => setSsStatusErr('')}>
           Couldn't check who has Self-Service, so that column is showing "?" rather than guessing: {ssStatusErr}
@@ -639,7 +651,7 @@ export default function EmployeeList() {
         <EmployeeForm
           clientId={effectiveClientId}
           employee={editing}
-          onSave={() => { closeDrawer(); fetchEmployees() }}
+          onSave={notice => { closeDrawer(); fetchEmployees(); setSaveNotice(notice || null) }}
           onClose={closeDrawer}
         />
       )}

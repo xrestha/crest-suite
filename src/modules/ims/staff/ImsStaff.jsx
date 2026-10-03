@@ -598,6 +598,12 @@ export default function ImsStaff() {
                   <tr key={p.id}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}{isSelf && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> (you)</span>}</div>
+                      {/* S798 3b (PEOPLE-ACCESS-4): as POS Staff shows it, so a refused sign-in has a visible reason. */}
+                      {p.settlement_blocked === true && (
+                        <Tip text="This person's Final Settlement blocked their logins, so this one no longer signs in. It is kept so everything they recorded keeps their name. Taking them back in Employees with a new join date unblocks it.">
+                          <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Blocked at settlement</span>
+                        </Tip>
+                      )}
                       {p.hr_employee_id && (
                         <Tip text="This IMS login is linked to an HR employee record — name stays in sync with HR.">
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>

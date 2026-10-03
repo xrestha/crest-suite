@@ -9,7 +9,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useIsOwnEmployee } from '../ownRecord'
-import { formatAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, endsBeforeJoining, rehireNeedsNewJoinDate, staleRehireEndDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
 
 // The fields THIS form owns. Pay basis, basic salary, bank and SSF are not here on purpose: Pay
@@ -105,6 +105,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   // settled leaver back onto payroll asks for a new join date. undefined = not read yet; an
   // { error } refuses that one move rather than letting it through unchecked.
   const [settledLastDay, setSettledLastDay] = useState(undefined)
+  // A Final Settlement reopened as a draft, and the finalized payroll months that left this person out
+  // because it was paying them (S798 3b, H5). null = none to report; { months } or { error }.
+  const [reopenedSkip, setReopenedSkip] = useState(null)
   // Keyed by field, not one string for the whole form. This form already KNEW which field had
   // failed — it switched tab to reveal it — and then reported the fact as prose the box itself
   // never carried, so a screen-reader user was told a save failed and never told by what (S603).
@@ -142,6 +145,48 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       })
     return () => { live = false }
   }, [isEdit, employee?.id, scopedFrom])
+
+  // Reopening a settlement leaves the person marked as left. Set back on payroll, they are paid from
+  // the next payroll on, but a month already finalized without them stays unpaid until that payroll
+  // is reopened and regenerated (S798 3b, GAP-PAY-STATE-4).
+  useEffect(() => {
+    if (!isEdit || !employee?.id) return
+    let live = true
+    ;(async () => {
+      const { data, error: readErr } = await scopedFrom('hr_final_settlements', 'id, last_working_date')
+        .eq('employee_id', employee.id).eq('status', 'draft').not('reopened_at', 'is', null)
+        .order('last_working_date', { ascending: false }).limit(1)
+      if (!live) return
+      if (readErr) { setReopenedSkip({ error: readErr }); return }
+      const row = data?.[0]
+      if (!row) { setReopenedSkip(null); return }
+      const res = await supabase.rpc('settlement_skipped_payroll_months', { p_employee_id: employee.id, p_last_working_date: row.last_working_date })
+      if (!live) return
+      setReopenedSkip(res.error ? { error: res.error } : { months: res.data || [] })
+    })()
+    return () => { live = false }
+  }, [isEdit, employee?.id, scopedFrom])
+
+  // A settled leaver taken back gets the staff logins their settlement blocked (S798 3b, H21), on every
+  // save that leaves them on payroll after the settled last day, so a failed call is retried by saving
+  // again. Returns { tone, text } for the list, or null when there was nothing to unblock.
+  async function unblockRehiredLogins(savedStatus, savedJoin) {
+    if (!isEdit || typeof settledLastDay !== 'string') return null
+    if (!['active', 'probation'].includes(savedStatus) || !savedJoin || savedJoin <= settledLastDay) return null
+    const { data, error: rpcErr } = await supabase.rpc('hr_unblock_rehired_logins', { p_employee_id: employee.id })
+    const who = employee.full_name || 'This employee'
+    if (rpcErr) {
+      return { tone: 'warn', text: `${who} was saved, but the staff logins their Final Settlement blocked could not be unblocked, so they still cannot sign in. Open the record and save it again to retry. ${errorLine(rpcErr)}` }
+    }
+    const done = (data || []).filter(l => l.unblocked)
+    const kept = (data || []).filter(l => !l.unblocked)
+    if (done.length === 0 && kept.length === 0) return null
+    const names = list => list.map(l => `${l.full_name} (${l.modules})`).join(', ')
+    const parts = []
+    if (done.length) parts.push(`${names(done)} ${done.length === 1 ? 'was' : 'were'} blocked when ${who} left and can sign in again.`)
+    if (kept.length) parts.push(`${names(kept)} ${kept.length === 1 ? 'is an HR Manager login, which stays' : 'are HR Manager logins, which stay'} blocked until the Owner saves this record.`)
+    return { tone: kept.length ? 'warn' : 'ok', text: parts.join(' ') }
+  }
 
   // Taking a settled leaver back onto payroll is a rehire (S791). Returns the message to show, or ''.
   // Checked only when the move is being made — status becoming Active/Probation, or the join date
@@ -220,8 +265,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       if (err) { setError('The employee was not added. ' + errorLine(err)); setSaving(false); return }
     }
 
+    const notice = await unblockRehiredLogins(toSave.status, toSave.join_date)
     setSaving(false)
-    onSave()
+    onSave(notice)
   }
 
   // Deactivate takes someone off every payroll picker, and that is the consequence the old
@@ -260,7 +306,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     const { data: savedRows, error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id).select('id')
     if (err) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + errorLine(err)); return }
     if (!savedRows?.length) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + NOT_SAVED_RLS); return }
-    onSave()
+    onSave(await unblockRehiredLogins('active', employee.join_date))
   }
 
   // Most HR tables cascade from hr_employees, but three deliberately do not: hr_tada_claims,
@@ -480,6 +526,18 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               <div role="status" className="note-banner" style={{ fontSize: 12, lineHeight: 1.5 }}>
                 <strong>Saving clears the End Date ({staleEnd}).</strong> It is the last day of {form.full_name.trim() || 'this employee'}'s earlier
                 employment, from their Final Settlement. Kept, payroll would leave them out of every month from the new Join Date.
+              </div>
+            )}
+            {['active', 'probation'].includes(form.status) && reopenedSkip?.months?.length > 0 && (
+              <div role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', padding: '8px 12px', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)' }}>
+                △ Payroll for {reopenedSkip.months.map(m => `${BS_MONTHS[m.bs_month - 1]} ${m.bs_year}`).join(', ')} was finalized without {form.full_name.trim() || 'this employee'},
+                {' '}because their reopened Final Settlement was paying it. Putting them back on payroll does not pay that month: reopen that payroll
+                {' '}and Regenerate so they are paid there. If they are leaving after all, finalize the settlement again instead.
+              </div>
+            )}
+            {['active', 'probation'].includes(form.status) && reopenedSkip?.error && (
+              <div role="status" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)' }}>
+                △ Could not check whether a reopened Final Settlement left a payroll month unpaid. {errorLine(reopenedSkip.error)}
               </div>
             )}
             {!staleEnd && endDateHasPassed(form.end_date, form.status, formatAd(new Date())) && (

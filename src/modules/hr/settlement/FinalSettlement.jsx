@@ -1,6 +1,6 @@
 import { nprInt, npr2, nprPaisa } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -9,7 +9,7 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs, BS_YEAR_MIN, BS_YEAR_MAX } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs, formatBsDay, BS_YEAR_MIN, BS_YEAR_MAX } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 import { printWithTitle } from '../../../utils/printTitle'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -21,8 +21,115 @@ import { firstError } from '../../../shared/queryError'
 import { errorLine } from '../../../shared/errorText'
 import { nepalDateAd } from '../../../shared/nepalTime'
 import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
+import { settlementAdjustments, settlementPaymentState } from './settlementPayment'
 
 const fmt = nprInt
+
+// "15 Poush" for an AD date string, parsed as a local date (a bare YYYY-MM-DD parses as UTC midnight).
+function bsDayOf(ad) {
+  if (!ad) return '—'
+  const [y, m, d] = String(ad).slice(0, 10).split('-').map(Number)
+  const bs = adToBs(new Date(y, m - 1, d))
+  return formatBsDay(bs.day, bs.month)
+}
+const bsMonthLabel = r => `${BS_MONTHS[r.bs_month - 1]} ${r.bs_year}`
+const PRIOR_STATE = { draft: 'still a draft', not_run: 'not run yet', missing: 'finalized without them' }
+
+// How a settlement was paid, in words: the first payment, then each recorded top-up or money handed
+// back (S798 3b). paid_amount already includes the adjustments, so the first payment is the remainder.
+function paidLine(row) {
+  const pay = settlementPaymentState(row)
+  if (!pay.recorded) return ''
+  const adj = settlementAdjustments(row)
+  const first = Math.round((pay.paid - adj.reduce((s, a) => s + a.amount, 0)) * 100) / 100
+  const parts = [`Paid NPR ${fmt(first)} by ${String(row.paid_method || '').toLowerCase()} on ${nepalDateAd(row.paid_at)}`]
+  for (const a of adj) {
+    parts.push(a.amount >= 0
+      ? `NPR ${fmt(a.amount)} more by ${a.method.toLowerCase()}${a.at ? ` on ${nepalDateAd(a.at)}` : ''}`
+      : `NPR ${fmt(-a.amount)} handed back (${a.method.toLowerCase()})${a.at ? ` on ${nepalDateAd(a.at)}` : ''}`)
+  }
+  return parts.join('; ')
+}
+
+// The still-to-pay / overpaid sentence for a finalized settlement whose net moved after it was paid.
+function differenceLine(row) {
+  const pay = settlementPaymentState(row)
+  if (pay.state === 'short') return `NPR ${fmt(pay.due)} still to pay — it was finalized again at NPR ${fmt(pay.net)} after NPR ${fmt(pay.paid)} had been paid.`
+  if (pay.state === 'over') return `NPR ${fmt(-pay.due)} overpaid — it was finalized again at NPR ${fmt(pay.net)} after NPR ${fmt(pay.paid)} had been paid.`
+  return ''
+}
+
+// One chip for where a settlement's money stands, on the statement and in the history (S798 3b).
+// Amber: something is still required of someone. Brass: decided, money not moved. Green: closed.
+function PaymentBadge({ row }) {
+  const pay = settlementPaymentState(row)
+  if (pay.state === 'short') return <span className="badge-amber">△ NPR {fmt(pay.due)} still to pay</span>
+  if (pay.state === 'over') return <span className="badge-amber">△ NPR {fmt(-pay.due)} overpaid</span>
+  if (pay.state === 'paid') return <span className="badge-green">Paid</span>
+  if (pay.state === 'unpaid') return <span className="badge-yellow">Finalized</span>
+  return <span className="badge-gray">Draft{row?.reopened_at ? ' · reopened' : ''}</span>
+}
+
+// What finalize_final_settlement would refuse, said before the button is pressed (S798 3b): each with
+// what it would cost and where it is fixed. The database checks every one again at Finalize.
+function FinalizeBlockers({ name, lastDate, pendingLeave, pendingOt, pendingTada, priorOpen, managerLogins, checkFailures, checks, onRecheck, busy }) {
+  const month = BS_MONTHS[lastDate.month - 1]
+  const failed = { leave: 'pending leave', ot: 'pending overtime', tada: 'pending travel claims', prior: 'earlier payroll months', logins: 'staff logins' }
+  return (
+    <div role="status" className="card" style={{ ...amberBanner, marginBottom: 12 }}>
+      <strong style={{ color: 'var(--theme-amber-text)' }}>Before this settlement can be finalized</strong>
+      <ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>
+        {pendingLeave.length > 0 && (
+          <li>
+            {pendingLeave.length} leave request{pendingLeave.length === 1 ? '' : 's'} still waiting for a decision
+            {' '}({pendingLeave.map(r => r.end_date && r.end_date !== r.start_date ? `${bsDayOf(r.start_date)} – ${bsDayOf(r.end_date)}` : bsDayOf(r.start_date)).join(', ')}).
+            {' '}Undecided, those days are paid as worked and paid out again as unused leave, and once the settlement is
+            {' '}finalized they can no longer be approved. Approve or reject {pendingLeave.length === 1 ? 'it' : 'each'} in <Link to="/hr/leave">Leave</Link>.
+          </li>
+        )}
+        {pendingOt.length > 0 && (
+          <li>
+            {pendingOt.length} overtime entr{pendingOt.length === 1 ? 'y' : 'ies'} in {month} still waiting for a decision
+            {' '}({pendingOt.map(o => o.bs_day ? formatBsDay(o.bs_day, lastDate.month) : month).join(', ')}).
+            {' '}Payroll never includes a leaver again, so overtime approved after the settlement is paid by nobody.
+            {' '}Decide {pendingOt.length === 1 ? 'it' : 'each'} in <Link to="/hr/overtime">Overtime</Link>.
+          </li>
+        )}
+        {pendingTada.length > 0 && (
+          <li>
+            {pendingTada.length} travel claim{pendingTada.length === 1 ? '' : 's'} still waiting for a decision
+            {' '}(NPR {fmt(pendingTada.reduce((s, c) => s + (parseFloat(c.total_amount) || 0), 0))}:
+            {' '}{pendingTada.map(c => c.trip_purpose || c.destination || 'trip').join(', ')}).
+            {' '}The settlement pays approved claims only, so one approved afterwards is paid by nobody.
+            {' '}Decide {pendingTada.length === 1 ? 'it' : 'each'} in <Link to="/hr/tada">TADA Claims</Link>.
+          </li>
+        )}
+        {priorOpen.length > 0 && (
+          <li>
+            Payroll for {priorOpen.map(r => `${bsMonthLabel(r)} (${PRIOR_STATE[r.state] || r.state})`).join(', ')} is not final.
+            {' '}The settlement works out the year's tax and the gratuity from finalized months only, so that month would be
+            {' '}taxed apart and its gratuity paid twice. Finalize it in <Link to="/hr/payroll">Payroll</Link> first — a month
+            {' '}finalized without {name} needs Reopen and Regenerate.
+          </li>
+        )}
+        {managerLogins.length > 0 && (
+          <li>
+            {managerLogins.map(l => l.full_name).join(', ')} {managerLogins.length === 1 ? 'is an HR Manager login' : 'are HR Manager logins'}, and
+            {' '}finalizing blocks {managerLogins.length === 1 ? 'it' : 'them'}. Only the Owner changes an HR manager's login, so only the
+            {' '}Owner can finalize this settlement: save the draft and ask them.
+          </li>
+        )}
+        {checkFailures.length > 0 && (
+          <li>
+            Could not check {checkFailures.map(k => failed[k]).join(', ')}, so Finalize waits until it can
+            {' '}({errorLine(checks[checkFailures[0]].error)}).
+          </li>
+        )}
+      </ul>
+      <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onRecheck}>Check again and recalculate</button>
+    </div>
+  )
+}
 const EMPLOYEE_COLUMNS = 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked'
 const STATUS_AFTER = { resignation: 'resigned', mutual: 'resigned', termination: 'terminated', retirement: 'inactive' }
 
@@ -153,7 +260,7 @@ function statementOf(row, { advances = null, tadaClaims = null } = {}) {
 const today = getBsToday()
 
 export default function FinalSettlement() {
-  const { clientId, hasHrAccess } = useAuth()
+  const { clientId, hasHrAccess, isOwner, isAdmin } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
   const [employees,  setEmployees]  = useState([])
@@ -180,9 +287,14 @@ export default function FinalSettlement() {
   const [busy,     setBusy]     = useState(false)
   const [msg,      setMsg]      = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  // The leaver's HR / IMS / POS staff logins Finalize will block (S753). null = still reading, and
-  // { error } when the read failed — the dialog says so rather than implying there are none.
-  const [linkedLogins, setLinkedLogins] = useState(null)
+  // What Finalize would refuse, read before the button is pressed and again when the confirm opens
+  // (S798 3b): leave, overtime and travel claims still waiting for a decision (H11), earlier payroll
+  // months that are not final (H15), and the leaver's HR / IMS / POS staff logins Finalize will block
+  // (S753), with whether one is an HR Manager login (H20). Each part is its rows or { error }.
+  const [checks, setChecks] = useState({ key: null })
+  // Finalized payroll months that left this person out because the settlement was paying them (S798
+  // 3b, H5), for the Reopen dialog and a reopened draft. { key, months } or { key, error }.
+  const [skipped, setSkipped] = useState({ key: null })
   // Salary payments recorded for the last month or a later one (S791): the settlement pays that
   // month itself, so Finalize refuses while one stands. null = checking, { error } = could not check.
   const [paidMonths, setPaidMonths] = useState(null)
@@ -424,15 +536,78 @@ export default function FinalSettlement() {
   // travel claims, payroll for the month and any other finalized settlement, refuses if anything
   // moved since this screen calculated, and writes every ledger — or nothing.
   const confirmEmpId = confirmOpen ? liveRow?.employee_id : null
+
+  // S798 3b: what finalize_final_settlement would refuse, read up front so the button can say so, and
+  // read again when the confirm opens or after a recalculation. finalize checks every one again.
+  const checkKey = !stored && currentKey && emp ? `${currentKey}:${lastDate.day}` : null
   useEffect(() => {
-    if (!confirmEmpId) { setLinkedLogins(null); return }
+    if (!checkKey) { setChecks({ key: null }); return }
     let live = true
-    setLinkedLogins(null)
-    supabase.rpc('settlement_linked_logins', { p_employee_id: confirmEmpId }).then(({ data, error }) => {
-      if (live) setLinkedLogins(error ? { error } : (data || []))
-    })
+    setChecks({ key: checkKey, loading: true })
+    const lastAd = formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day))
+    const joinDate = emp?.join_date || null
+    ;(async () => {
+      const [leave, ot, tada, prior, logins] = await Promise.all([
+        scopedFrom('hr_leave_requests', 'id, start_date, end_date, days, day_type')
+          .eq('employee_id', empId).eq('status', 'pending').lte('start_date', lastAd).order('start_date'),
+        scopedFrom('hr_overtime_entries', 'id, bs_day, ot_hours, ot_type')
+          .eq('employee_id', empId).eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).eq('status', 'pending').order('bs_day'),
+        scopedFrom('hr_tada_claims', 'id, total_amount, trip_purpose, destination, start_date')
+          .eq('employee_id', empId).eq('status', 'pending').order('start_date'),
+        supabase.rpc('settlement_open_prior_months', { p_employee_id: empId, p_last_working_date: lastAd }),
+        supabase.rpc('settlement_linked_logins', { p_employee_id: empId }),
+      ])
+      if (!live) return
+      setChecks({
+        key: checkKey, loading: false,
+        // An earlier employment's request is not this one's (the database bounds it the same way).
+        leave: leave.error ? { error: leave.error } : (leave.data || []).filter(r => !joinDate || !r.end_date || r.end_date >= joinDate),
+        ot: ot.error ? { error: ot.error } : (ot.data || []).filter(o => o.bs_day == null || o.bs_day <= lastDate.day),
+        tada: tada.error ? { error: tada.error } : (tada.data || []),
+        prior: prior.error ? { error: prior.error } : (prior.data || []),
+        logins: logins.error ? { error: logins.error } : (logins.data || []),
+      })
+    })()
     return () => { live = false }
-  }, [confirmEmpId])
+  }, [checkKey, reloadTick, confirmOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // S798 3b (H5): the payroll months finalized without this person, for the Reopen dialog (a finalized
+  // settlement) and a reopened draft. Never for an earlier employment, which cannot be reopened.
+  const skipRow = reopenTarget || (current?.status === 'draft' && current.reopened_at && !earlierSpell ? current : null)
+  const skipKey = skipRow ? `${skipRow.id}:${skipRow.last_working_date}:${reloadTick}` : null
+  useEffect(() => {
+    if (!skipKey) { setSkipped({ key: null }); return }
+    let live = true
+    setSkipped({ key: skipKey, loading: true })
+    supabase.rpc('settlement_skipped_payroll_months', { p_employee_id: skipRow.employee_id, p_last_working_date: skipRow.last_working_date })
+      .then(({ data, error }) => {
+        if (live) setSkipped(error ? { key: skipKey, error } : { key: skipKey, months: data || [] })
+      })
+    return () => { live = false }
+  }, [skipKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const skippedMonths = skipped.key === skipKey && Array.isArray(skipped.months) ? skipped.months : []
+  const skippedText = skippedMonths.map(bsMonthLabel).join(', ')
+
+  // The parts of the checks, once they are in for the employee and day on screen.
+  const checksIn = !!checkKey && checks.key === checkKey && !checks.loading
+  const listOf = part => (checksIn && Array.isArray(checks[part]) ? checks[part] : [])
+  const pendingLeave = listOf('leave')
+  const pendingOt = listOf('ot')
+  const pendingTada = listOf('tada')
+  const priorOpen = listOf('prior')
+  const checkFailures = checksIn ? ['leave', 'ot', 'tada', 'prior', 'logins'].filter(k => checks[k]?.error) : []
+  const linkedLogins = !checksIn ? null : checks.logins?.error ? { error: checks.logins.error } : listOf('logins')
+  const exempt = isOwner || isAdmin
+  const managerLogins = Array.isArray(linkedLogins) ? linkedLogins.filter(l => l.hr_manager) : []
+  const managerBlock = managerLogins.length > 0 && !exempt
+  const finalizeBlockers = !checksIn ? ['the checks that are still loading'] : [
+    pendingLeave.length > 0 && 'leave waiting for a decision',
+    pendingOt.length > 0 && 'overtime waiting for a decision',
+    pendingTada.length > 0 && 'a travel claim waiting for a decision',
+    priorOpen.length > 0 && 'an earlier payroll month that is not final',
+    managerBlock && 'an HR Manager login, which only the Owner can settle',
+    checkFailures.length > 0 && 'a check that could not be read',
+  ].filter(Boolean)
 
   // S791: a salary payment for the last month or later is refused by finalize_final_settlement
   // (settlement_salary_paid). Said here first, by month, so the owner undoes it before pressing.
@@ -520,7 +695,7 @@ export default function FinalSettlement() {
     setCurrent(data)
     await loadClientData(clientId)
     setReloadTick(t => t + 1)
-    setMsg('ok:Settlement reopened as a draft — its advance recoveries and travel-claim payments were undone. ' + (data.employee_name || 'The employee') + ' is still marked as left; change their status in Employees if they are not leaving after all.')
+    setMsg('ok:Settlement reopened as a draft — its advance recoveries and travel-claim payments were undone. ' + (data.employee_name || 'The employee') + ' is still marked as left; change their status in Employees if they are not leaving after all, and check any payroll month named above that was finalized without them.')
   }
 
   async function deleteDraft(row) {
@@ -546,6 +721,22 @@ export default function FinalSettlement() {
     setCurrent(data[0])
     await loadClientData(clientId)
     setMsg('ok:Marked as paid by ' + method.toLowerCase() + '.')
+  }
+
+  // S798 3b (H4): a settlement paid, reopened and finalized again at a different net. The database works
+  // out the amount (net less what was paid) and keeps the entry beside the first payment.
+  async function recordDifference(row, method) {
+    setBusy(true); setMsg('')
+    const { data, error } = await supabase.rpc('record_settlement_difference', { p_settlement_id: row.id, p_method: method })
+    setBusy(false)
+    if (error) { setMsg('error:' + errorLine(error)); return }
+    setCurrent(data)
+    await loadClientData(clientId)
+    const last = settlementAdjustments(data).slice(-1)[0]
+    setMsg('ok:' + (last && last.amount < 0
+      ? `Recorded NPR ${fmt(-last.amount)} handed back by ${method.toLowerCase()}.`
+      : `Recorded the NPR ${fmt(last?.amount)} top-up paid by ${method.toLowerCase()}.`)
+      + ' What was paid now matches the settlement.')
   }
 
   async function openSettlement(row) {
@@ -683,7 +874,12 @@ export default function FinalSettlement() {
                 {' '}Carry-forward from earlier years is not included — the app does not track it.
                 {(parseFloat(leaveDays) || 0) > leaveBal.remaining + 0.01 && (
                   <span role="alert" style={{ display: 'block', marginTop: 4, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
-                    △ {parseFloat(leaveDays)} days is more than the {leaveBal.remaining} earned — the extra is paid only if you leave it. Keep it only for carry-forward you are sure of; a draft saved earlier keeps the figure it was saved with.
+                    {current?.status === 'draft' && Math.abs((parseFloat(current.leave_days_encashed) || 0) - (parseFloat(leaveDays) || 0)) < 0.01
+                      // S798 3b (GAP-PAY-STATE-2): a saved draft keeps its days, and leave approved since it was
+                      // saved would otherwise be paid out as well as taken.
+                      ? <>△ This draft was saved paying out {parseFloat(leaveDays)} days, and the balance is now {leaveBal.remaining} — leave was taken or paid out since it was saved. </>
+                      : <>△ {parseFloat(leaveDays)} days is more than the {leaveBal.remaining} earned — the extra is paid only if you leave it. Keep it only for carry-forward you are sure of. </>}
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLeaveDays(String(leaveBal.remaining))}>Use {leaveBal.remaining} days</button>
                   </span>
                 )}
               </p>
@@ -773,7 +969,17 @@ export default function FinalSettlement() {
           {current?.reopened_at && current.status === 'draft' && (
             <div className="card no-print" style={amberBanner}>
               <strong style={{ color: 'var(--theme-amber-text)' }}>Reopened {nepalDateAd(current.reopened_at)}</strong>
-              <div>Reason: {current.reopen_reason}. {current.paid_at ? `It had been recorded as paid (NPR ${fmt(current.paid_amount)} by ${String(current.paid_method || '').toLowerCase()}) — that record is kept.` : ''}</div>
+              <div>Reason: {current.reopen_reason}. {current.paid_at ? `${paidLine(current)} — that record is kept, so this draft cannot be deleted, and once it is finalized again any difference shows as still to pay or overpaid.` : ''}</div>
+              {skippedMonths.length > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  △ Payroll for {skippedText} was finalized without {current.employee_name}, because this settlement was paying {skippedMonths.length === 1 ? 'it' : 'them'}.
+                  {' '}If they are staying, reopen that payroll and Regenerate so they are paid there; if they are leaving, finalize this settlement again.
+                  {' '}Until one of the two is done, this draft cannot be deleted.
+                </div>
+              )}
+              {skipped.key === skipKey && skipped.error && (
+                <div style={{ marginTop: 4 }}>△ Could not check which payroll months were finalized without them — {errorLine(skipped.error)}</div>
+              )}
             </div>
           )}
 
@@ -790,7 +996,7 @@ export default function FinalSettlement() {
             </div>
             <div style={{ fontSize: 12, marginTop: 2 }}>
               {frozen
-                ? `Finalized ${nepalDateAd(frozen.finalized_at)}${frozen.paid_at ? ` · Paid NPR ${fmt(frozen.paid_amount ?? frozen.net_payout)} by ${String(frozen.paid_method || '').toLowerCase()} on ${nepalDateAd(frozen.paid_at)}` : ' · Not yet paid'}`
+                ? `Finalized ${nepalDateAd(frozen.finalized_at)}${frozen.paid_at ? ` · ${paidLine(frozen)}${differenceLine(frozen) ? ` · ${differenceLine(frozen)}` : ''}` : ' · Not yet paid'}`
                 : current ? 'Draft — not finalized. These figures are not a payment record.' : 'Not saved — a calculation only.'}
             </div>
           </div>
@@ -809,7 +1015,7 @@ export default function FinalSettlement() {
             <div>
               <span style={{ color: 'var(--theme-text2)' }}>Status: </span>
               {frozen
-                ? (frozen.paid_at ? <span className="badge-green">Paid</span> : <span className="badge-yellow">Finalized</span>)
+                ? <PaymentBadge row={frozen} />
                 : current ? <span className="badge-gray">Draft</span> : <span className="badge-gray">Not saved</span>}
             </div>
           </div>
@@ -857,10 +1063,16 @@ export default function FinalSettlement() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
                   Finalized {nepalDateAd(frozen.finalized_at)}.{' '}
-                  {frozen.paid_at
-                    ? <>Paid NPR {fmt(frozen.paid_amount ?? frozen.net_payout)} by {String(frozen.paid_method || '').toLowerCase()} on {nepalDateAd(frozen.paid_at)}.</>
-                    : <>Not yet recorded as paid.</>}
+                  {frozen.paid_at ? <>{paidLine(frozen)}.</> : <>Not yet recorded as paid.</>}
                   {parseFloat(frozen.advance_recovered) > 0 && <> NPR {fmt(frozen.advance_recovered)} of advances recovered.</>}
+                  {differenceLine(frozen) && (
+                    <div role="status" style={{ marginTop: 4, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+                      △ {differenceLine(frozen)}{' '}
+                      <Tip text="Reopen keeps the first payment, so a correction that changed the net leaves a difference. Record it when the money is handed over (or handed back) — the amount is worked out for you, and both payments stay on the record." width={300}>
+                        <span>What is this?</span>
+                      </Tip>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {!frozen.paid_at && (
@@ -869,6 +1081,17 @@ export default function FinalSettlement() {
                       <button className="btn btn-ghost" disabled={busy} onClick={() => markPaid(frozen, 'Bank')}>Mark paid — Bank</button>
                     </>
                   )}
+                  {(() => {
+                    const pay = settlementPaymentState(frozen)
+                    if (pay.state !== 'short' && pay.state !== 'over') return null
+                    const verb = pay.state === 'short' ? `Record NPR ${fmt(pay.due)} paid` : `Record NPR ${fmt(-pay.due)} returned`
+                    return (
+                      <>
+                        <button className="btn btn-ghost" disabled={busy} onClick={() => recordDifference(frozen, 'Cash')}>{verb} — Cash</button>
+                        <button className="btn btn-ghost" disabled={busy} onClick={() => recordDifference(frozen, 'Bank')}>{verb} — Bank</button>
+                      </>
+                    )
+                  })()}
                   {!earlierSpell && (
                     <button className="btn btn-danger" disabled={busy} onClick={() => { setReopenReason(''); setReopenTarget(frozen) }}>Reopen</button>
                   )}
@@ -889,12 +1112,30 @@ export default function FinalSettlement() {
                   Finalizing records this settlement and, in one step: recovers the outstanding advances, marks the travel claims paid,
                   marks {shownRow.employee_name} as {STATUS_AFTER[reason]} with their last working date, turns off their Crest Staff app access, and blocks any HR, IMS or POS staff login linked to them.
                 </p>
+                {checksIn && finalizeBlockers.length > 0 && (
+                  <FinalizeBlockers
+                    name={shownRow.employee_name} lastDate={lastDate}
+                    pendingLeave={pendingLeave} pendingOt={pendingOt} pendingTada={pendingTada} priorOpen={priorOpen}
+                    managerLogins={managerBlock ? managerLogins : []} checkFailures={checkFailures} checks={checks}
+                    onRecheck={recalculate} busy={busy}
+                  />
+                )}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn btn-ghost" disabled={busy || inputsBlocked || !liveRow} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
-                  <button className="btn btn-primary" disabled={busy || inputsBlocked || !liveRow} onClick={() => setConfirmOpen(true)}>
+                  {/* A precondition is aria-disabled plus a press that says what is missing, never disabled alone. */}
+                  <button className="btn btn-primary" disabled={busy || inputsBlocked || !liveRow}
+                    aria-disabled={finalizeBlockers.length > 0}
+                    onClick={() => {
+                      if (!checksIn) { setMsg('error:Still checking for pending requests and open payroll months — try again in a moment.'); return }
+                      if (finalizeBlockers.length > 0) {
+                        setMsg('error:Finalize is waiting on ' + finalizeBlockers.join(', ') + ' — see the list above the buttons.')
+                        return
+                      }
+                      setConfirmOpen(true)
+                    }}>
                     {busy ? 'Working…' : 'Finalize settlement'}
                   </button>
-                  {current?.status === 'draft' && (
+                  {current?.status === 'draft' && !current.paid_at && skippedMonths.length === 0 && (
                     <button className="btn btn-ghost" disabled={busy} onClick={() => deleteDraft(current)}>Delete draft</button>
                   )}
                 </div>
@@ -939,11 +1180,7 @@ export default function FinalSettlement() {
                     <td className="num" style={{ whiteSpace: 'nowrap' }}>{x.last_working_date}</td>
                     <td style={{ textTransform: 'capitalize' }}>{x.separation_reason}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }} className="num">{fmt(x.net_payout)}</td>
-                    <td>
-                      {x.status === 'finalized'
-                        ? (x.paid_at ? <span className="badge-green">Paid</span> : <span className="badge-yellow">Finalized</span>)
-                        : <span className="badge-gray">Draft{x.reopened_at ? ' · reopened' : ''}</span>}
-                    </td>
+                    <td><PaymentBadge row={x} /></td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => openSettlement(x)}>Open</button>
                     </td>
@@ -984,7 +1221,7 @@ export default function FinalSettlement() {
                   ? 'Could not check for an HR, IMS or POS staff login — any linked to this employee are still blocked.'
                   : linkedLogins.length === 0
                     ? 'No HR, IMS or POS staff login is linked to this employee. A login created without linking it to their employee record is not found — check the Staff pages.'
-                    : <>Their staff login{linkedLogins.length === 1 ? '' : 's'} {linkedLogins.map(l => `${l.full_name} (${l.modules})`).join(', ')} {linkedLogins.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {linkedLogins.length === 1 ? 'it' : 'them'}.</>}
+                    : <>Their staff login{linkedLogins.length === 1 ? '' : 's'} {linkedLogins.map(l => `${l.full_name} (${l.modules}${l.hr_manager ? ', HR Manager' : ''})`).join(', ')} {linkedLogins.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {linkedLogins.length === 1 ? 'it' : 'them'}, and so does taking them back later with a new join date.</>}
             </li>
             {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}
             {paidMonths?.error && (
@@ -1007,7 +1244,7 @@ export default function FinalSettlement() {
                         <button type="button" className="btn btn-ghost btn-sm" onClick={recalculate}>Recalculate now</button></span>
                     : `The attendance sheet for ${BS_MONTHS[lastDate.month - 1]} matches what this settlement pays.`}
             </li>
-            <li>If anything changed since this screen calculated — attendance, an advance, a claim, overtime, a festival allowance, a salary payment, payroll for the month — nothing is finalized and you are told what.</li>
+            <li>If anything changed since this screen calculated — attendance, an advance, a claim, overtime, a festival allowance, a salary payment, payroll for this month or an earlier one, a request still waiting for a decision — nothing is finalized and you are told what.</li>
           </ul>
         </ConfirmModal>
       )}
@@ -1019,7 +1256,15 @@ export default function FinalSettlement() {
             <li>The travel claims it paid go back to Approved.</li>
             <li>{reopenTarget.employee_name} stays marked as left. If they are not leaving after all, change their status in Employees.</li>
             {(reopenTarget.blocked_logins || []).length > 0 && <li>The staff login{reopenTarget.blocked_logins.length === 1 ? '' : 's'} it blocked ({reopenTarget.blocked_logins.join(', ')}) can sign in again.</li>}
-            {reopenTarget.paid_at && <li>It was recorded as paid (NPR {fmt(reopenTarget.paid_amount ?? reopenTarget.net_payout)}); that record is kept.</li>}
+            {reopenTarget.paid_at && <li>{paidLine(reopenTarget)}. That record is kept: once it is finalized again, any change to the net shows as still to pay or overpaid, and while reopened it cannot be deleted.</li>}
+            {skipped.key === skipKey && skipped.loading && <li>Checking which payroll months were finalized without them…</li>}
+            {skipped.key === skipKey && skipped.error && <li style={{ color: 'var(--theme-amber-text)' }}>△ Could not check which payroll months were finalized without them ({errorLine(skipped.error)}).</li>}
+            {skippedMonths.length > 0 && (
+              <li style={{ color: 'var(--theme-amber-text)' }}>
+                △ Payroll for {skippedText} was finalized without {reopenTarget.employee_name}, because this settlement was paying {skippedMonths.length === 1 ? 'it' : 'them'}.
+                {' '}If they are not leaving after all, that pay is owed by nobody until you reopen that payroll and Regenerate. If they are leaving, finalize this settlement again.
+              </li>
+            )}
             <li>The settlement becomes a draft. A printed copy no longer matches it until it is finalized again.</li>
           </ul>
           <label htmlFor="settle-reopen-reason" style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>Why is it being reopened? (kept on the record)</label>

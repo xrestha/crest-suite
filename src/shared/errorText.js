@@ -890,6 +890,42 @@ const rules = [
     staff: "That employee's salary for the last month is already recorded as paid. Nothing was finalized.",
     operator: "Nothing was finalized: this employee's salary for the last month (or a later one) is recorded as paid, and the settlement pays that month itself, so it would be paid twice. Undo that payment on the Payroll page first (Undo payment, with a reason), then finalize — the settlement then pays the month.",
   },
+  // S798 stage 3b. Every finalize refusal is raised inside the one transaction, before any write.
+  {
+    test: e => /settlement_prior_month_open/i.test(e.message || ''),
+    staff: "An earlier month's payroll is not finished for that employee. Nothing was finalized.",
+    operator: "Nothing was finalized: payroll for an earlier month (named below) is still a draft, has not been run, or was finalized without this employee. The settlement works out the year's tax and the gratuity from finalized months only, so that month would be taxed apart and its gratuity paid twice. Finalize that payroll first (reopen and Regenerate a month that left them out), then press Recalculate and finalize the settlement.",
+  },
+  {
+    test: e => /settlement_pending_requests/i.test(e.message || ''),
+    staff: 'That employee has leave or overtime still waiting for a decision. Nothing was finalized.',
+    operator: 'Nothing was finalized: this employee has leave or overtime up to their last working day still waiting for a decision (counted below). Pending leave would be paid as worked and paid out again, pending overtime would be paid by nobody, and neither can be approved once the settlement locks the month. Approve or reject each in Leave and Overtime, press Recalculate, then finalize.',
+  },
+  {
+    test: e => /settlement_pending_tada/i.test(e.message || ''),
+    staff: 'That employee has a travel claim still waiting for a decision. Nothing was finalized.',
+    operator: 'Nothing was finalized: this employee has a travel claim still waiting for a decision (counted below). The settlement pays approved claims only and no payroll will include them again, so a claim approved afterwards would be paid by nobody. Approve or reject it in TADA Claims, press Recalculate, then finalize.',
+  },
+  {
+    test: e => /settlement_manager_login/i.test(e.message || ''),
+    staff: 'Only the Owner can finalize that settlement. Nothing was finalized.',
+    operator: 'Nothing was finalized: this employee holds an HR Manager login (named below), and finalizing blocks it. Only the Owner changes an HR manager\'s login, so only the Owner can finalize this settlement. The draft is saved; ask the Owner to finalize it.',
+  },
+  {
+    test: e => /settlement_paid_record/i.test(e.message || ''),
+    staff: 'That settlement was paid before it was reopened, so it cannot be deleted. Nothing was deleted.',
+    operator: 'Nothing was deleted: this settlement was paid before it was reopened, and it is the only record of that payment. Correct it and finalize it again; any difference then shows as still to pay or overpaid.',
+  },
+  {
+    test: e => /settlement_payroll_skipped/i.test(e.message || ''),
+    staff: 'Payroll left that employee out because this settlement was paying them. Nothing was deleted.',
+    operator: 'Nothing was deleted: payroll for the months named below was finalized without this employee because this settlement was paying them, so deleting it would leave that pay to nobody. Finalize the settlement again, or reopen that payroll and Regenerate so they are paid there, then delete the draft.',
+  },
+  {
+    test: e => /settlement_no_difference/i.test(e.message || ''),
+    staff: 'There is nothing to record on that settlement. Nothing was changed.',
+    operator: 'Nothing was recorded: this settlement has no difference between what it pays and what was paid, or is not finalized and paid yet (the detail below says which). Reload the page to see where it stands.',
+  },
   {
     test: e => /settlement_stale/i.test(e.message || ''),
     staff: 'That settlement needs to be opened and saved again first. Nothing was finalized.',

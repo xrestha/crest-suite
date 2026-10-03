@@ -12,6 +12,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import { GRATUITY_VESTING_MONTHS } from '../payrollConstants'
 import { formatAd } from '../../../utils/bsCalendar'
+import { settlementPaymentState, settlementStillOwed } from '../settlement/settlementPayment'
 
 const fmt = nprInt
 const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -57,8 +58,10 @@ export default function GratuityTracker() {
         .in('status', ['active', 'probation'])
         .order('full_name'),
       fetchSsfContributions(scopedFrom),
-      scopedFrom('hr_final_settlements', 'id, employee_name, gratuity, last_working_date')
-        .eq('status', 'finalized').is('paid_at', null),
+      // Finalized and not fully paid: never recorded as paid, or paid and then finalized again at a
+      // higher net (S798 3b, SETTLEMENT-1) — filtered in settlementStillOwed, one row per leaver.
+      scopedFrom('hr_final_settlements', 'id, employee_name, gratuity, last_working_date, status, net_payout, paid_at, paid_amount')
+        .eq('status', 'finalized'),
     ])
     if (!clientReq.isCurrent(forClient)) return
     // The SSF read failing is a failed report, not "no SSF offset": the page would otherwise show every
@@ -68,7 +71,7 @@ export default function GratuityTracker() {
     setLoadError(null)
     setEmployees(emps.data || [])
     setSsfRows(ssf.data || {})
-    setUnpaidSettlements(unpaid.data || [])
+    setUnpaidSettlements((unpaid.data || []).filter(settlementStillOwed))
     setLoading(false)
   }
 
@@ -108,7 +111,7 @@ export default function GratuityTracker() {
   const nonMonthly = useMemo(
     () => employees.filter(e => (e.pay_basis || 'monthly') !== 'monthly').length, [employees])
   const unpaidGratuity = useMemo(
-    () => unpaidSettlements.reduce((a, s) => a + (parseFloat(s.gratuity) || 0), 0), [unpaidSettlements])
+    () => unpaidSettlements.filter(s => !s.paid_at).reduce((a, s) => a + (parseFloat(s.gratuity) || 0), 0), [unpaidSettlements])
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -207,7 +210,19 @@ export default function GratuityTracker() {
 
           {unpaidSettlements.length > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
-              ⚠ Not in the figures above: {unpaidSettlements.length} finalized Final Settlement{unpaidSettlements.length === 1 ? '' : 's'} not yet recorded as paid, carrying NPR {fmt(unpaidGratuity)} of gratuity ({unpaidSettlements.map(s => s.employee_name || 'a leaver').join(', ')}). Mark {unpaidSettlements.length === 1 ? 'it' : 'them'} paid on Final Settlement once the money has gone.
+              {(() => {
+                const never = unpaidSettlements.filter(s => !s.paid_at)
+                const short = unpaidSettlements.filter(s => s.paid_at)
+                const shortDue = short.reduce((a, s) => a + settlementPaymentState(s).due, 0)
+                return (
+                  <>
+                    ⚠ Not in the figures above: {unpaidSettlements.length} finalized Final Settlement{unpaidSettlements.length === 1 ? '' : 's'} not yet fully paid.
+                    {never.length > 0 && <> {never.length} {never.length === 1 ? 'is' : 'are'} not recorded as paid, carrying NPR {fmt(unpaidGratuity)} of gratuity ({never.map(s => s.employee_name || 'a leaver').join(', ')}).</>}
+                    {short.length > 0 && <> {short.length} {short.length === 1 ? 'was' : 'were'} corrected after being paid and NPR {fmt(shortDue)} is still to pay ({short.map(s => s.employee_name || 'a leaver').join(', ')}).</>}
+                    {' '}Record the payment on Final Settlement once the money has gone.
+                  </>
+                )
+              })()}
             </div>
           )}
 

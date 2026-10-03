@@ -68,6 +68,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       const runRow = runRes.error ? null : (runRes.data || null)
       let ssf = null
       let paid = null
+      let leftOut = null
       if (runRow?.status === 'finalized') {
         const ownPayments = payments !== undefined
         const [slips, pays, extras] = await Promise.all([
@@ -76,6 +77,14 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
           fetchMonthDepositExtras(scopedFrom, period),
         ])
         if (!live) return
+        // S798 3b (GAP-PAY-STATE-4): someone this month's payroll covers who has no payslip in the
+        // finalized run. The list already leaves out anyone a finalized Final Settlement pays, so this is
+        // a settlement reopened after the run left them out, or someone added since — paid by nobody
+        // until the run is reopened and regenerated. Not judged on a failed read.
+        if (!who.error && !slips.error) {
+          const slipIds = new Set((slips.data || []).map(p => p.employee_id))
+          leftOut = (who.data.employees || []).filter(e => !slipIds.has(e.id)).map(e => e.full_name || 'an employee')
+        }
         // A failed settlements read is "could not read the amount", never the payslips-only figure.
         ssf = slips.error || extras.error ? { error: slips.error || extras.error } : monthDeposit({ payslips: slips.data, ...extras.data }).ssf
         // Kept only when read here; the page's own payments are summarised at render, so a Mark paid
@@ -91,6 +100,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
         run: runRes.error ? { error: runRes.error } : { status: runRow?.status || 'none' },
         ssf,
         paid,
+        leftOut,
       })
     })()
     return () => { live = false }
@@ -133,6 +143,10 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
     const r = state.run
     const payrollLink = onPayrollPage ? null : ['/hr/payroll', 'Open Payroll']
     steps.push(r.error ? { name: 'Payroll', tone: 'none', mark: '—', text: 'Could not check', link: payrollLink }
+      : r.status === 'finalized' && state.leftOut?.length > 0 ? {
+        name: 'Payroll', tone: 'open', mark: '△', link: payrollLink,
+        text: `Finalized, but ${state.leftOut.join(', ')} ${state.leftOut.length === 1 ? 'is' : 'are'} employed this month with no payslip and no Final Settlement paying it — reopen and Regenerate`,
+      }
       : r.status === 'finalized' ? { name: 'Payroll', tone: 'done', mark: '✓', text: 'Finalized', link: payrollLink }
       : r.status === 'draft' ? { name: 'Payroll', tone: 'open', mark: '△', text: runStale ? 'Draft — out of date, Regenerate before finalizing' : 'Draft — not finalized yet', link: payrollLink }
       : { name: 'Payroll', tone: 'none', mark: '—', text: 'Not generated yet', link: payrollLink && ['/hr/payroll', 'Generate'] })

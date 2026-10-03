@@ -288,7 +288,13 @@ History: #tada-has-no-period, #s600-final-settlement-writes, #s620-payroll-data-
 - **`hr_final_settlements_guard`:** insert as draft only; a draft cannot become finalized by UPDATE;
   a finalized row cannot be deleted or edited, only marked paid once (`paid_amount := net_payout`).
   A paid mark always stores `paid_amount`, the operator's too. One finalized settlement per spell is
-  a unique index.
+  a unique index. A draft paid before it was reopened cannot be deleted (`settlement_paid_record`),
+  nor a reopened draft while payroll skipped its leaver (`settlement_payroll_skipped`) (S798 3b).
+- **A paid settlement keeps its payment through Reopen** (S798 3b, H4). Finalized again at another
+  net it is still to pay or overpaid (`settlementPaymentState`, `settlementPayment.js`) until
+  `record_settlement_difference` records the difference: DEFINER, the amount is net − paid and never a
+  parameter, appended to `paid_adjustments`, which nothing else writes (the guard clears it on insert
+  and keeps it on a draft update).
 - **`finalize_final_settlement` re-checks before writing any ledger** and refuses on: outstanding
   advances, the approved TADA id set and finalized payslips for the month or later
   (`settlement_stale*`, `settlement_month_paid`); an overlapping finalized settlement
@@ -298,8 +304,16 @@ History: #tada-has-no-period, #s600-final-settlement-writes, #s620-payroll-data-
   (`settlement_stale_attendance`, tallied by `hr_attendance_on_file` the way `computePayslip` does).
   **A change to the engine's tally (a new status, a new weight) changes `hr_attendance_on_file` and
   this check in the same commit.** The confirm re-reads the sheet (`attendanceSignature`).
+  Since S798 3b also: an earlier month of the fiscal year (and always the month before) whose payroll
+  is a draft, not run, or finalized without the leaver (`settlement_prior_month_open`, one copy in
+  `settlement_open_prior_months`, which the page calls too); pending leave or overtime up to the last
+  day (`settlement_pending_requests`) and any pending claim (`settlement_pending_tada`); and, below the
+  Owner, a leaver with an HR Manager login (`settlement_manager_login`). The page lists every one
+  above Finalize, and a check it could not read keeps Finalize waiting.
 - **`reopen_final_settlement` needs a reason** and puts back only what its own `final_settlement_id`
-  rows name. Nobody below the Owner finalizes or reopens their own settlement.
+  rows name. Nobody below the Owner finalizes or reopens their own settlement. The Reopen dialog and a
+  reopened draft name the finalized payroll months that skipped the person
+  (`settlement_skipped_payroll_months`, S798 3b), and Payroll's month strip flags them.
 - **Recovery is capped at the payout.** A settlement that nets negative leaves those advances
   `active`; there is no receivable ledger.
 - **Notice is basic ÷ 30 per calendar day, and its direction follows the reason**
@@ -322,7 +336,8 @@ History: #tada-has-no-period, #s600-final-settlement-writes, #s620-payroll-data-
 - **Rehire:** Employees refuses Active/Probation for a settled leaver until the join date moves past
   the settled last day (`rehireNeedsNewJoinDate`). A rehire clears the old End Date in the same save
   and says so first (H27, `staleRehireEndDate`); an End Date before the Join Date is refused
-  (`endsBeforeJoining`).
+  (`endsBeforeJoining`). The save calls `hr_unblock_rehired_logins` (S798 3b, H21), which clears the
+  stamps an earlier employment's settlement left; an HR Manager login only for the Owner.
 - **A leaver's staff logins are BLOCKED at Finalize, never deleted**: every `profiles` FK from bills,
   KOTs, shifts and cash movements is `ON DELETE SET NULL`. Finalize bans the auth user, revokes its
   sessions, stamps `profiles.settlement_blocked_by` and lists the names in `blocked_logins`; Reopen
@@ -734,7 +749,8 @@ History: #s752-settlement-decisions, #s782-salary-payments
 - Migrations: S749 `20260914170000` (rank fences, finalized-month locks, swaps) and `20260914180000`
   (holidays inside leave); S751 `20260914210000`; S752 `20260914230000`; S753 `20260915090000`; S782
   `20260923100000`; S791 `20260928100000` (advances), `20260928110000` (leavers), `20260928130000`
-  (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`.
+  (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`,
+  3b `20261002160000`.
 - Engine tests: `payrollS751.test.js`, `settlementCompute.test.js`, `gratuityCompute.test.js`,
   `holidayData.test.js`. The S798 findings and stage plans: `HR_TODO.md` (S798.2, S798.3).
 - The S770 moves (S682's per-ledger Finalize/Reopen messages, the S628 row-cap sweep, the S628

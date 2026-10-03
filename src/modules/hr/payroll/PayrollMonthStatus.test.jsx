@@ -121,6 +121,21 @@ describe('PayrollMonthStatus', () => {
     renderStrip({ employees: [], attendance: [], run: { id: 'r', status: 'finalized' }, payslips })
     expect((await screen.findAllByText(/NPR 3,100 was due by 25 Ashwin/)).length).toBe(1)
   })
+
+  // S798 3b (GAP-PAY-STATE-4): a Final Settlement reopened after the run left its leaver out, and the
+  // leaving then cancelled — the month is paid by nobody, and a finalized run must not read as done.
+  it('flags someone employed this month with no payslip in the finalized run', async () => {
+    const employees = [{ id: 'a', full_name: 'Ram', pay_basis: 'monthly' }, { id: 'b', full_name: 'Sita', pay_basis: 'monthly' }]
+    renderStrip({ employees, attendance: [], run: { id: 'r', status: 'finalized' }, payslips: [{ employee_id: 'a', net_pay: 26000 }], payments: [] })
+    expect(await within(step('Payroll')).findByText(/Finalized, but Sita is employed this month with no payslip and no Final Settlement paying it/)).toBeInTheDocument()
+    expect(within(step('Payroll')).queryByText('✓')).toBeNull()
+  })
+
+  it('reads a finalized run with everyone on it as done', async () => {
+    const employees = [{ id: 'a', full_name: 'Ram', pay_basis: 'monthly' }]
+    renderStrip({ employees, attendance: [], run: { id: 'r', status: 'finalized' }, payslips: [{ employee_id: 'a', net_pay: 26000 }], payments: [] })
+    expect(await within(step('Payroll')).findByText('Finalized')).toBeInTheDocument()
+  })
 })
 
 // S798 REPORTS-2: the SSF step is the month's deposit — a leaver settled in the month is not on the

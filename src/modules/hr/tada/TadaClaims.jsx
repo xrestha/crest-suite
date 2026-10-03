@@ -103,6 +103,9 @@ export default function TadaClaims() {
   // known (not read yet, or the read failed) — which must render as no chip, never as "not in one".
   const [draftByClaim, setDraftByClaim] = useState(null)
   const [payrollError, setPayrollError] = useState(null)
+  // Finalized Final Settlements (employee, last working day), so an approved claim of someone who has
+  // left says payroll will not pay it (S798 3b, BONUS-LEDGERS-3). null = not known: no chip at all.
+  const [settledRows, setSettledRows] = useState(null)
 
   const [filterStatus, setFilterStatus] = useState('pending') // pending | approved | rejected | paid | all
   // hr_tada_claims has no bs_year/bs_month of its own — it's a standalone ledger of plain AD
@@ -163,7 +166,7 @@ export default function TadaClaims() {
     const key = loadReq.begin(clientId)
     setLoading(true)
     const results = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, status, email').order('full_name'),
+      scopedFrom('hr_employees', 'id, full_name, employee_code, status, email, join_date').order('full_name'),
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
       // Paged (S682): every claim the client has ever filed, so the silent 1000-row cap would
       // drop the OLDEST claims from the list with no error. `.order('id')` is the tiebreaker.
@@ -184,11 +187,12 @@ export default function TadaClaims() {
     // hr_tada_claim_items has no client_id column of its own — scoped via claim_id against this
     // client's already-scoped claim ids, same parent-scoped pattern as recipe_ingredients.
     // Chunked: an .in() list of every claim id is a URL as well as a row count (S629).
-    const [itemsRes, payrollRes] = await Promise.all([
+    const [itemsRes, payrollRes, settledRes] = await Promise.all([
       claimIds.length > 0
         ? fetchAllRowsChunked(claimIds, ids => supabase.from('hr_tada_claim_items').select('*').in('claim_id', ids).order('id'))
         : Promise.resolve({ data: [], error: null }),
       readPayrollDrafts(),
+      scopedFrom('hr_final_settlements', 'employee_id, last_working_date').eq('status', 'finalized'),
     ])
     if (!loadReq.isCurrent(key)) return null
     if (itemsRes.error) { setLoadError(asActionError(itemsRes.error, 'operator')); setLoading(false); return null }
@@ -200,7 +204,8 @@ export default function TadaClaims() {
     // Fail SOFT: the payroll standing is a hint beside the claim, not the claim. A failed read shows
     // no chip at all and says so in a banner — never a confident "will be paid by the next payroll".
     setDraftByClaim(payrollRes.error ? null : payrollRes.data)
-    setPayrollError(payrollRes.error ? asActionError(payrollRes.error, 'operator') : null)
+    setSettledRows(settledRes.error ? null : (settledRes.data || []))
+    setPayrollError(payrollRes.error || settledRes.error ? asActionError(payrollRes.error || settledRes.error, 'operator') : null)
     setVehicleRates({ '2w': null, '4w': null, ev: null, ...(settingsRow?.tada_vehicle_rates || {}) })
     setPurposeOptions(settingsRow?.tada_purpose_options?.length ? settingsRow.tada_purpose_options : DEFAULT_PURPOSE_OPTIONS)
     setStartPoints(settingsRow?.tada_start_points?.length ? settingsRow.tada_start_points : DEFAULT_START_POINTS)
@@ -214,7 +219,7 @@ export default function TadaClaims() {
   // can be acted on while it arrives.
   useEffect(() => {
     setClaims([]); setItems([]); setEmployees([]); setVendors([])
-    setDraftByClaim(null); setPayrollError(null); setLoadError(null); setActionError(null)
+    setDraftByClaim(null); setSettledRows(null); setPayrollError(null); setLoadError(null); setActionError(null)
     setSelected(null); setPayTarget(null); setRejectTarget(null); setShowAdd(false); setShowSettings(false)
     setMonthFilter('all')
   }, [clientId])
@@ -244,6 +249,17 @@ export default function TadaClaims() {
   // keystroke while filing a claim re-ran all of it — including a BS conversion per claim in
   // monthClaims and four more scans for the KPI strip.
   const empMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
+  // Who has left in a finalized settlement of their CURRENT employment: a rehire (a join date after the
+  // settled last day) is on payroll again, and payroll pays their claims.
+  const settledIds = useMemo(() => {
+    if (!settledRows) return null
+    const ids = new Set()
+    for (const s of settledRows) {
+      const join = empMap[s.employee_id]?.join_date
+      if (!join || s.last_working_date >= join) ids.add(s.employee_id)
+    }
+    return ids
+  }, [settledRows, empMap])
   const itemsByClaimId = useMemo(() => {
     const m = {}
     items.forEach(i => { (m[i.claim_id] = m[i.claim_id] || []).push(i) })
@@ -583,7 +599,16 @@ export default function TadaClaims() {
   // read — the banner above says why — because "will be paid by the next payroll" over an unread
   // draft is exactly the confident wrong answer that leads to paying a claim twice.
   function payrollStanding(c) {
-    if (c.status !== 'approved' || !draftByClaim) return null
+    if (c.status !== 'approved' || !draftByClaim || !settledIds) return null
+    // S798 3b: Final Settlement pays approved claims at Finalize, and payroll never includes a leaver
+    // again, so a claim approved after the settlement is paid only by hand.
+    if (settledIds.has(c.employee_id)) return (
+      <div style={quietNote}>
+        <Tip text="This person has left: their Final Settlement is finalized, so no payroll will include them again. Hand the money over, then press Mark Paid with how it was paid.">
+          <span>Left — not paid by payroll; Mark Paid when handed over</span>
+        </Tip>
+      </div>
+    )
     const draft = draftByClaim[c.id]
     if (draft) return (
       <div style={quietNote}>
