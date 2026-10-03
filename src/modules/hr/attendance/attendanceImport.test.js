@@ -300,6 +300,26 @@ describe('planImport', () => {
     const plan = planImport({ ...base, today: { year: 2083, month: 5, day: 3 }, records: {}, rosterByKey: { 'e-sarita:3': 'morning' } })
     expect(find(plan, 'e-sarita:3')).toBeUndefined()
   })
+
+  // S798 (ATTENDANCE-4, H14 (a)): after Generate or All Present every rostered day reads Present, so
+  // a missed day can only be found here. Offered as Absent, applied only if ticked; still "kept".
+  it('offers a Present day with no punch on a rostered working day as Absent, and counts it kept', () => {
+    const records = {
+      'e-sarita:10': { employee_id: 'e-sarita', bs_day: 10, status: 'present', note: 'generated' },
+      'e-sarita:3': { employee_id: 'e-sarita', bs_day: 3, status: 'present' },  // rostered Day Off
+      'e-sarita:15': { employee_id: 'e-sarita', bs_day: 15, status: 'present' }, // not rostered
+    }
+    const plan = run(records, { 'e-sarita:10': 'morning', 'e-sarita:3': 'dayoff' })
+    const c = find(plan, 'e-sarita:10')
+    expect(c.kind).toBe('noPunch')
+    expect(c.before).toBe(records['e-sarita:10'])
+    expect(c.cell).toEqual({ employee_id: 'e-sarita', bs_day: 10, status: 'absent', note: 'generated', start_time: '', end_time: '', break_minutes: '', hours_worked: '', ot_hours: '' })
+    expect(c.machine).toBe('no punch')
+    expect(find(plan, 'e-sarita:3')).toBeUndefined()
+    expect(find(plan, 'e-sarita:15')).toBeUndefined()
+    expect(plan.byEmployee['e-sarita'].kept).toBeGreaterThanOrEqual(3)
+    expect(plan.byEmployee['e-sarita'].absent).toBe(0)
+  })
 })
 
 describe('stillIncomplete', () => {

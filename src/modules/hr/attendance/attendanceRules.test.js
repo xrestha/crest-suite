@@ -1,4 +1,5 @@
-import { NON_WORKING_STATUSES, withStatus, fillBlankCells, attendanceRowFor, cellSignature, unsavedKeys, carryUnsavedEdits, splitCellKey, splitFirstMarks, firstMarksKeptOut, keysOutsideList } from './attendanceRules'
+import { NON_WORKING_STATUSES, withStatus, fillBlankCells, attendanceRowFor, cellSignature, unsavedKeys, carryUnsavedEdits, splitCellKey, splitFirstMarks, firstMarksKeptOut, keysOutsideList, bsOrdinal, bsOrdinalOfAd, employmentBounds, dayBlock, describeBlocked } from './attendanceRules'
+import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 
 const valid = s => !s || /^\d{1,2}:\d{2}$/.test(s)
 
@@ -38,6 +39,43 @@ describe('fillBlankCells', () => {
     expect(next['e2:4']).toEqual({ employee_id: 'e2', bs_day: 4, status: 'present' })
     expect([filled, kept]).toEqual([1, 1])
     expect(records['e2:4']).toBeUndefined() // the input is not mutated
+  })
+
+  // S798 (ATTENDANCE-5): a blank cell outside the employment, or after today, stays blank.
+  it('leaves a blocked blank cell blank and counts it by reason', () => {
+    const records = { 'e1:4': { employee_id: 'e1', bs_day: 4, status: 'paid_leave' } }
+    const cells = [4, 5, 6, 7].map(day => ({ key: `e1:${day}`, employeeId: 'e1', day }))
+    const block = { 4: 'future', 5: 'after_leaving', 6: 'future' }
+    const { next, filled, kept, skipped } = fillBlankCells(records, cells, 'present', c => block[c.day] || null)
+    expect(Object.keys(next).sort()).toEqual(['e1:4', 'e1:7'])
+    expect([filled, kept]).toEqual([1, 1]) // an already-marked cell is "kept" before it is "blocked"
+    expect(skipped).toEqual({ before_joining: 0, after_leaving: 1, future: 1 })
+  })
+})
+
+describe('employment bounds and dayBlock', () => {
+  const iso = (y, m, d) => formatAd(bsToAd(y, m, d))
+
+  it('reads an AD join and end date as BS ordinals, and null where unset', () => {
+    expect(employmentBounds({ join_date: iso(2083, 7, 10), end_date: iso(2083, 7, 15) })).toEqual({ joined: 20830710, left: 20830715 })
+    expect(employmentBounds({ join_date: null, end_date: '' })).toEqual({ joined: null, left: null })
+    expect(bsOrdinalOfAd(iso(2083, 1, 1))).toBe(20830101)
+  })
+
+  it('blocks days before joining, after leaving and after today, and nothing else', () => {
+    const bounds = { joined: 20830710, left: 20830715 }
+    const today = bsOrdinal({ year: 2083, month: 7, day: 12 })
+    expect(dayBlock(bounds, 20830709, today)).toBe('before_joining')
+    expect(dayBlock(bounds, 20830710, today)).toBe(null)
+    expect(dayBlock(bounds, 20830712, today)).toBe(null)
+    expect(dayBlock(bounds, 20830713, today)).toBe('future')
+    expect(dayBlock(bounds, 20830716, today)).toBe('after_leaving')
+    expect(dayBlock({ joined: null, left: null }, 20830716)).toBe(null) // no today: employment only
+  })
+
+  it('says what a bulk fill left alone', () => {
+    expect(describeBlocked({ before_joining: 2, after_leaving: 0, future: 1 })).toBe('2 days before someone joined · 1 day after today')
+    expect(describeBlocked({ before_joining: 0, after_leaving: 0, future: 0 })).toBe('')
   })
 })
 

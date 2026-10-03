@@ -384,6 +384,9 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
 - **Bulk marks fill blanks only** (`fillBlankCells`). Save writes a cell that was blank at load ON
   CONFLICT DO NOTHING and names the days kept (S798, `splitFirstMarks`). Generate writes with
   `ignoreDuplicates` and counts the days it kept.
+- **Bulk marks and Generate never reach a day outside the employment or after today in Nepal**
+  (S798 3d, H7 (a)): one test, `dayBlock(employmentBounds(emp), ordinal, todayOrdinal)`
+  (`attendanceRules.js`), which Import's own rule shares. Count what was skipped; grey, never lock.
 - **Attendance saves every unsaved cell, not the day on screen** (S768). Unsaved work is `records`
   compared with `savedRecords` by `cellSignature()` (what a cell SAVES as). One `saveChanges()`
   upserts all of them from either tab. **Every reload after a write passes `{ carry: true }`** and
@@ -409,6 +412,15 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
   holiday; everything else (an off name, no name, any other name) is Off (S749). Only a "holiday" name
   may create a paid day. Generate and the board's assign-over-leave ask through `ConfirmModal`, naming
   what will be written.
+- **A working shift with unknown hours (`hasUnknownHours`) is an ordinary 8-hour day in Attendance**
+  (S798 3d, H10 (a)): `planAttendanceFromRoster` writes Present 8h / 0 OT and counts it apart, and
+  `assignedHoursFor` measures typed or imported times against 8, never 0. Never route it through
+  `zeroHourStatus`.
+- **What a rostered day becomes is `rosterDayShape(shift)`** (`attendanceFromRoster.js`). An edit that
+  moves it while earlier days are ungenerated (`shift_type_days_to_generate`) asks from which day, and
+  `split_shift_type` (INVOKER, one transaction) keeps the old type for the days before (renamed,
+  inactive, `replaced_by` / `replaced_from`). A new writer of `hr_roster.shift_type_id` that copies
+  rows follows `replaced_by` (Copy to Next Week's `shiftForDay`).
 - **Import from machine** (S775): `attendanceImport.js` reads the file, `planImport`
   (`attendanceImportPlan.js`) alone decides what each day becomes, `AttendanceImportModal.jsx` is the
   dialog.
@@ -416,8 +428,9 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
     give the dialog its own write.
   - People are confirmed on every import; no machine ID is stored.
   - Blank + full punch → Present with the sheet's own `autoHoursFor`; Present → machine times,
-    untickable; any other status is never touched. No punch follows the roster (working → Absent,
-    off → `zeroHourStatus`, unrostered → blank). One punch, or a span under 60 min or over 16 h →
+    untickable; any other status is never touched. Present with no punch on an on-duty roster day →
+    a `noPunch` change, applied only when ticked (S798 3d, H14 (a)). No punch follows the roster
+    (working → Absent, off → `zeroHourStatus`, unrostered → blank). One punch, or a span under 60 min or over 16 h →
     Present with hours blank, amber until `stillIncomplete` is false.
   - The roster rule never reaches an unlived day: nothing after today, nothing with no punch today,
     nothing outside `join_date`–`end_date`. An unread roster refuses the import.
@@ -544,9 +557,15 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
   `shift_type_id`. Different days → trade `employee_id`, and a Day Off trades the other way
   (`hr_shift_kind`: off / leave / work). Only a working shift or leave on the other day refuses
   (`swap_day_taken`, raised at request time too), and the traded rows must both be working shifts.
-- **`request_shift_swap` refuses** a past day, an unpublished day, and a shift already in an open swap
-  (`swap_day_past` / `swap_day_unpublished` / `swap_already_requested`). The Staff app's picker hides
-  past days and any day whose `shift_kind` is not work.
+- **`request_shift_swap` refuses** a past day, an unpublished day, a shift already in an open swap
+  (`swap_day_past` / `swap_day_unpublished` / `swap_already_requested`; an open request with a day
+  gone no longer counts), and a coworker who could never answer: not active/probation, blocked, or
+  no Crest Staff login (`swap_coworker_unavailable`, S798 3d, H23 (a)); `get_coworker_roster` lists
+  only the coworkers it accepts. The Staff app's picker hides past days and any day whose
+  `shift_kind` is not work.
+- **Every open swap has a way out** (S798 3d): the requester's `cancel_my_swap_request`, the manager's
+  Reject on `pending_target` too, and `respond_shift_swap` refuses to accept a lapsed day (decline
+  still closes it).
 - **A swap decision reloads the Board** (`SwapRequestsPanel`'s `onDecided`), and **Clear deletes on id
   AND the employee and day the cell shows**, then counts what went (S798, ROSTER-2): an approved swap
   moves a row to the coworker, so a delete by id alone off a stale board took the coworker's shift.
@@ -750,7 +769,7 @@ History: #s752-settlement-decisions, #s782-salary-payments
   (holidays inside leave); S751 `20260914210000`; S752 `20260914230000`; S753 `20260915090000`; S782
   `20260923100000`; S791 `20260928100000` (advances), `20260928110000` (leavers), `20260928130000`
   (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`,
-  3b `20261002160000`.
+  3b `20261002160000`, 3d `20261003140000` (shift splits, swap ways out).
 - Engine tests: `payrollS751.test.js`, `settlementCompute.test.js`, `gratuityCompute.test.js`,
   `holidayData.test.js`. The S798 findings and stage plans: `HR_TODO.md` (S798.2, S798.3).
 - The S770 moves (S682's per-ledger Finalize/Reopen messages, the S628 row-cap sweep, the S628

@@ -8,13 +8,14 @@ import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
-import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay, bsDayOrdinal, formatAdAsBs } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
-import { buildAttendanceFromRoster } from './attendanceFromRoster'
-import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor, unsavedKeys, carryUnsavedEdits, splitCellKey, splitFirstMarks, firstMarksKeptOut, keysOutsideList } from './attendanceRules'
+import { planAttendanceFromRoster } from './attendanceFromRoster'
+import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor, unsavedKeys, carryUnsavedEdits, splitCellKey, splitFirstMarks, firstMarksKeptOut, keysOutsideList, bsOrdinal, employmentBounds, dayBlock, describeBlocked } from './attendanceRules'
 import { stillIncomplete } from './attendanceImportPlan'
 import AttendanceImportModal from './AttendanceImportModal'
-import { calcHours, shiftHours, shiftRegularHours } from '../roster/laborForecast'
+import { calcHours, shiftHours, shiftRegularHours, hasUnknownHours } from '../roster/laborForecast'
+import { nepalBs } from '../../../shared/nepalTime'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const STATUS_MAP = Object.fromEntries(ATTENDANCE_STATUSES.map(s => [s.key, s]))
@@ -187,9 +188,47 @@ export default function AttendanceSheet() {
     const shiftTypeId = rosterByKey[`${empId}:${day}`]
     return shiftTypeId ? shiftTypesById[shiftTypeId] : null
   }
+  // The length a day is measured against. A working shift nobody gave a length to (the ready-made
+  // "Split": no hours, no times) is an ordinary day, like a day with no roster entry (S798,
+  // ATTENDANCE-2, H10 (a)): measured against 0 hours, every hour worked became overtime.
   function assignedHoursFor(empId, day) {
     const shiftTypeId = rosterByKey[`${empId}:${day}`]
-    return shiftTypeId ? shiftHours(shiftTypesById[shiftTypeId]) : STANDARD_HOURS_PER_DAY
+    if (!shiftTypeId) return STANDARD_HOURS_PER_DAY
+    const shift = shiftTypesById[shiftTypeId]
+    return hasUnknownHours(shift) ? STANDARD_HOURS_PER_DAY : shiftHours(shift)
+  }
+  // The working shifts rostered this month with no hours set, and on how many days — named in a
+  // banner, since every such day is measured against the 8-hour stand-in above.
+  const unknownHourShifts = useMemo(() => {
+    const byId = {}
+    rosterRows.forEach(r => {
+      const s = shiftTypesById[r.shift_type_id]
+      if (s && hasUnknownHours(s)) (byId[r.shift_type_id] ||= { name: s.name, days: 0 }).days += 1
+    })
+    return Object.values(byId)
+  }, [rosterRows, shiftTypesById])
+
+  // Who was employed on which day, as BS ordinals: once per staff list, not once per cell.
+  const boundsByEmp = useMemo(() => Object.fromEntries(employees.map(e => [e.id, employmentBounds(e)])), [employees])
+  // Before joining or after leaving (S798, ATTENDANCE-5): greyed on both tabs, never filled in bulk.
+  function employmentBlock(empId, day) {
+    if (!period) return null
+    return dayBlock(boundsByEmp[empId], bsOrdinal({ year: period.bs_year, month: period.bs_month, day }))
+  }
+  // The words under a greyed day: "Before joining (10 Kartik 2083)", or null inside the employment.
+  function outsideLabel(emp, day) {
+    const block = emp ? employmentBlock(emp.id, day) : null
+    if (block === 'before_joining') return `Before joining (${formatAdAsBs(emp.join_date)})`
+    if (block === 'after_leaving') return `After leaving (${formatAdAsBs(emp.end_date)})`
+    return null
+  }
+  // What a bulk fill may not mark: outside the employment, or after today in Nepal (H7 (a)). Read at
+  // the moment of the click, so a sheet left open overnight does not fill tomorrow.
+  function bulkBlocker() {
+    if (!period) return () => null
+    const today = nepalBs(new Date()) || getBsToday()
+    const todayOrd = bsOrdinal(today)
+    return (empId, day) => dayBlock(boundsByEmp[empId], bsOrdinal({ year: period.bs_year, month: period.bs_month, day }), todayOrd)
   }
   // Two ways to measure a punched day, chosen by the day's shift (S742):
   //   • the shift has Normal hours → CLOCK time. OT is the Start-to-End span beyond those normal
@@ -483,14 +522,21 @@ export default function AttendanceSheet() {
   // Bulk marks fill BLANK cells only (decided 2026-09-14): they used to overwrite every cell, so
   // "All Present" after a leave approval turned the approved leave days into Present on save.
   // Computed off `records` (not inside the setter) so the message can say what was left alone.
+  // Since S798 (ATTENDANCE-5, H7 (a)) a bulk mark also leaves blank a day before someone joined,
+  // after they left, or after today: mark such a day one at a time if it really is one.
   function bulkMark(cells, status, scope) {
     if (refuseIfLocked()) return
-    const { next, filled, kept } = fillBlankCells(records, cells, status)
+    const blockOf = bulkBlocker()
+    const { next, filled, kept, skipped } = fillBlankCells(records, cells, status, c => blockOf(c.employeeId, c.day))
     setRecords(next)
     const label = STATUS_MAP[status]?.label || status
+    const left = describeBlocked(skipped)
+    const leftNote = left ? ` · left blank: ${left}` : ''
     setSavedMsg(filled === 0
-      ? `ok:Nothing marked — every ${scope} already has a mark. Change a day one at a time to override it.`
-      : `ok:${filled} blank ${filled === 1 ? scope : scope + 's'} marked ${label}${kept ? ` · ${kept} already marked left as they were` : ''}. Save to keep them.`)
+      ? (left
+        ? `ok:Nothing marked — left blank: ${left}${kept ? ` · ${kept} already marked` : ''}. Mark a day one at a time if it really needs one.`
+        : `ok:Nothing marked — every ${scope} already has a mark. Change a day one at a time to override it.`)
+      : `ok:${filled} blank ${filled === 1 ? scope : scope + 's'} marked ${label}${kept ? ` · ${kept} already marked left as they were` : ''}${leftNote}. Save to keep them.`)
   }
   // All employees, one day (Mark Attendance tab's bulk buttons).
   function markAll(status) {
@@ -690,19 +736,23 @@ export default function AttendanceSheet() {
     setSavedMsg('')
     // Reuses the shiftTypesById/rosterRows state already loaded for the Start/End OT auto-calc
     // above — same period, same shift types, no need to re-fetch.
-    const rows = buildAttendanceFromRoster({
+    const plan = planAttendanceFromRoster({
       rosterRows,
       shiftTypesById,
       employeeIds: employees.map(e => e.id),
       existingDayKeys: new Set(Object.keys(records)),
       days,
       periodId: period.id,
+      blockOf: bulkBlocker(),
     })
-    if (rows.length === 0) {
-      setSavedMsg('ok:Nothing to generate — every day already has an entry, or no employees are on the roster this month.')
+    if (plan.rows.length === 0) {
+      const left = describeBlocked(plan.skipped)
+      setSavedMsg(left
+        ? `ok:Nothing to generate — the rostered days still blank are ${left}, and Generate leaves those blank.`
+        : 'ok:Nothing to generate — every day already has an entry, or no employees are on the roster this month.')
       return
     }
-    setPendingGenerate({ rows, who: `all ${employees.length} listed staff`, kept: Object.keys(records).length })
+    setPendingGenerate({ ...plan, who: `all ${employees.length} listed staff`, kept: Object.keys(records).length })
   }
 
   async function runGenerate() {
@@ -796,19 +846,23 @@ export default function AttendanceSheet() {
     if (!period || !empId || refuseIfLocked() || refuseIfRosterUnread()) return
     setSavedMsg('')
     const existing = Object.keys(records).filter(k => k.startsWith(`${empId}:`))
-    const rows = buildAttendanceFromRoster({
+    const plan = planAttendanceFromRoster({
       rosterRows,
       shiftTypesById,
       employeeIds: [empId],
       existingDayKeys: new Set(existing),
       days,
       periodId: period.id,
+      blockOf: bulkBlocker(),
     })
-    if (rows.length === 0) {
-      setSavedMsg('ok:Nothing to generate — every day already has an entry, or this employee isn\'t on the roster this month.')
+    if (plan.rows.length === 0) {
+      const left = describeBlocked(plan.skipped)
+      setSavedMsg(left
+        ? `ok:Nothing to generate — the rostered days still blank are ${left}, and Generate leaves those blank.`
+        : 'ok:Nothing to generate — every day already has an entry, or this employee isn\'t on the roster this month.')
       return
     }
-    setPendingGenerate({ rows, who: employees.find(e => e.id === empId)?.full_name || 'this employee', kept: existing.length })
+    setPendingGenerate({ ...plan, who: employees.find(e => e.id === empId)?.full_name || 'this employee', kept: existing.length })
   }
 
   // ── Month summary aggregation ──────────────────────────────────────────────
@@ -972,6 +1026,18 @@ export default function AttendanceSheet() {
           </div>
         </div>
       )}
+      {/* S798 (ATTENDANCE-2): a working shift with no length is measured as an ordinary day, which is
+          a stand-in, so the sheet says which shift needs its hours rather than let the figure pass. */}
+      {!loading && period && !locked && !rosterReadError && unknownHourShifts.length > 0 && (
+        <div className="card" style={amberBanner}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>
+            △ {unknownHourShifts.map(s => `${s.name} (${s.days} day${s.days === 1 ? '' : 's'})`).join(', ')} {unknownHourShifts.length === 1 ? 'has' : 'have'} no hours set
+          </strong>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, lineHeight: 1.6 }}>
+            Those days count as an ordinary {STANDARD_HOURS_PER_DAY}-hour day: typed or imported times put only the hours beyond {STANDARD_HOURS_PER_DAY} into OT, and Generate from Roster marks them Present for {STANDARD_HOURS_PER_DAY} hours. Set the shift&apos;s hours on Staff Roster → Shift Types so each day is measured against the real shift.
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
@@ -1076,7 +1142,7 @@ export default function AttendanceSheet() {
 
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
             Only the days you actually mark are saved — an untouched day stays blank and is never assumed Present or Off. For daily- and hourly-paid staff a blank day pays nothing, so mark every day of the month (Present/Off/Holiday/Leave) before payroll runs.{' '}
-            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift, and any hours beyond the shift's Normal hours filled in as OT. A zero-hour roster entry is read by its name: 'PAID LEAVE' becomes Paid Leave, any other 'LEAVE' becomes Unpaid Leave, a 'Holiday' becomes Holiday, and 'OFF DAY' becomes Off. Days with no roster entry at all are left blank for manual entry. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
+            <Tip text="Fills blank days up to today from Staff Roster shift assignments — marked Present, with hours from the shift, and any hours beyond the shift's Normal hours filled in as OT. A working shift with no hours set counts as an ordinary 8-hour day. A zero-hour roster entry is read by its name: 'PAID LEAVE' becomes Paid Leave, any other 'LEAVE' becomes Unpaid Leave, a 'Holiday' becomes Holiday, and 'OFF DAY' becomes Off. Days after today, before someone joined or after they left, and days with no roster entry are left blank. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
               ⚡ Generate from Roster
             </Tip>{' '}pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
           </div>
@@ -1116,13 +1182,17 @@ export default function AttendanceSheet() {
                     // off rather than silently discarded on save, so what is on screen is what pays.
                     const noClock = locked || isNonWorking(status)
                     const clockTitle = !locked && isNonWorking(status) ? `${sc?.label || 'This status'} is not a working day, so it takes no hours or overtime` : undefined
+                    // Greyed by the name's colour and weight, never row opacity (page-layout.md). Still
+                    // editable: the bulk buttons and Generate are what skip it (S798, ATTENDANCE-5).
+                    const outside = outsideLabel(emp, selectedDay)
                     return (
                       <tr key={emp.id}>
                         <td>
-                          <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
+                          <div style={{ fontWeight: outside ? 400 : 600, color: outside ? 'var(--theme-text3)' : 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                           <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                             {emp.employee_code || ''}{emp.pay_basis && emp.pay_basis !== 'monthly' ? ` · ${emp.pay_basis}` : ''}
                           </div>
+                          {outside && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{outside}</div>}
                           {unsavedSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
                           {openFlagSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>△ Check · machine: {importFlags[`${emp.id}:${selectedDay}`]}</div>}
                         </td>
@@ -1316,10 +1386,12 @@ export default function AttendanceSheet() {
                       const sc = STATUS_MAP[status]
                       const noClock = locked || isNonWorking(status)
                       const clockTitle = !locked && isNonWorking(status) ? `${sc?.label || 'This status'} is not a working day, so it takes no hours or overtime` : undefined
+                      const outside = outsideLabel(emp, d)
                       return (
                         <tr key={d}>
-                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600, fontSize: 13 }}>
+                          <td style={{ color: outside ? 'var(--theme-text3)' : 'var(--theme-text1)', fontWeight: outside ? 400 : 600, fontSize: 13 }}>
                             {d} · {weekdayOf(period, d)}
+                            {outside && <div style={{ fontSize: 11 }}>{outside}</div>}
                             {unsavedSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
                             {openFlagSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-amber-text)' }}>△ Check · machine: {importFlags[`${selectedEmployeeId}:${d}`]}</div>}
                           </td>
@@ -1579,8 +1651,10 @@ export default function AttendanceSheet() {
       {pendingGenerate && (() => {
         const n = pendingGenerate.rows.length
         const count = st => pendingGenerate.rows.filter(r => r.status === st).length
-        const present = count('present'), ot = pendingGenerate.rows.filter(r => (r.ot_hours || 0) > 0).length
-        const other = n - present
+        const unknown = pendingGenerate.unknownHours || 0
+        const present = count('present') - unknown, ot = pendingGenerate.rows.filter(r => (r.ot_hours || 0) > 0).length
+        const other = n - present - unknown
+        const left = describeBlocked(pendingGenerate.skipped)
         return (
           <ConfirmModal
             title={`Fill ${n} blank day${n === 1 ? '' : 's'} from the roster?`}
@@ -1594,6 +1668,16 @@ export default function AttendanceSheet() {
               {ot > 0 ? <> (<strong>{ot}</strong> of them carrying overtime beyond the shift&apos;s Normal hours, which payroll pays at 1.5×)</> : null}
               {other > 0 ? <>, and <strong>{other}</strong> zero-hour roster day{other === 1 ? '' : 's'} marked by the shift&apos;s name — Off, Holiday, or Paid / Unpaid Leave</> : null}.
             </p>
+            {unknown > 0 && (
+              <p style={{ margin: '0 0 10px', color: 'var(--theme-amber-text)' }}>
+                △ <strong>{unknown}</strong> day{unknown === 1 ? ' is' : 's are'} on a working shift with no hours set ({unknownHourShifts.map(s => s.name).join(', ')}), marked Present for an ordinary {STANDARD_HOURS_PER_DAY}-hour day with no overtime. Set the shift&apos;s hours on Staff Roster → Shift Types if that is not right.
+              </p>
+            )}
+            {left && (
+              <p style={{ margin: '0 0 10px' }}>
+                Left blank: {left}. Generate fills only days someone was employed, up to today; mark a later day one at a time if it really needs a mark now.
+              </p>
+            )}
             <p style={{ margin: 0 }}>
               Only blank days are filled — {pendingGenerate.kept} day{pendingGenerate.kept === 1 ? '' : 's'} already marked stay{pendingGenerate.kept === 1 ? 's' : ''} exactly as {pendingGenerate.kept === 1 ? 'it is' : 'they are'}, and a day with no roster entry stays blank. The filled days are saved straight away.
             </p>

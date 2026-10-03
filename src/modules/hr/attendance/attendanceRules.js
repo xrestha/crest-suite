@@ -2,6 +2,47 @@
 //
 // Three decisions made with Aashish on 2026-09-14 live here so the sheet's two tabs, its save
 // path and the Leave page's approval write cannot each hold their own copy.
+import { adToBs } from '../../../utils/bsCalendar'
+
+/** A BS date as one comparable number: 2083-07-15 → 20830715. */
+export const bsOrdinal = ({ year, month, day }) => year * 10000 + month * 100 + day
+
+// An AD 'YYYY-MM-DD' column as a comparable BS number, built from its parts: `new Date('YYYY-MM-DD')`
+// is UTC midnight, which lands on the previous day at Nepal's +05:45.
+export function bsOrdinalOfAd(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  return bsOrdinal(adToBs(new Date(+m[1], +m[2] - 1, +m[3])))
+}
+
+/** An employee's first and last day as BS ordinals, null where the date is not set. Once per person, not per cell. */
+export function employmentBounds(emp) {
+  return { joined: bsOrdinalOfAd(emp?.join_date), left: bsOrdinalOfAd(emp?.end_date) }
+}
+
+/**
+ * Why a day may not be filled in bulk, or null (S798, ATTENDANCE-5): 'before_joining',
+ * 'after_leaving' or 'future'. Generate from Roster and All Present used to mark every day of the
+ * month, so a leaver still on the roster was paid for the days after their last one, and a day not
+ * yet lived was paid in advance (daily and hourly staff are paid per row). Import from machine
+ * already refused all three. `todayOrdinal` is today in Nepal; leave it out to test employment only.
+ */
+export function dayBlock(bounds, ordinal, todayOrdinal) {
+  if (bounds?.joined && ordinal < bounds.joined) return 'before_joining'
+  if (bounds?.left && ordinal > bounds.left) return 'after_leaving'
+  if (todayOrdinal && ordinal > todayOrdinal) return 'future'
+  return null
+}
+
+/** "2 before someone joined · 1 after today" — the days a bulk fill left alone, or ''. */
+export function describeBlocked(skipped) {
+  const n = (k, one, many) => (skipped?.[k] ? `${skipped[k]} ${skipped[k] === 1 ? one : many}` : null)
+  return [
+    n('before_joining', 'day before someone joined', 'days before someone joined'),
+    n('after_leaving', 'day after someone left', 'days after someone left'),
+    n('future', 'day after today', 'days after today'),
+  ].filter(Boolean).join(' · ')
+}
 
 // A day on one of these statuses was not worked, so it carries no clock times, no hours and no
 // overtime. `tallyAttendance` adds `ot_hours` from EVERY row whatever its status, and the hourly
@@ -28,19 +69,25 @@ export function withStatus(rec, status) {
  * then stopped deducting while the Leave page still read Approved. It fills blanks now, and the
  * counts come back so the sheet can say what it left alone.
  *
+ * A blank cell that `blockOf(cell)` names (see dayBlock) is left blank too, and counted by reason.
+ *
  * @param {Object} records  `${employee_id}:${bs_day}` → cell
  * @param {Array<{key: string, employeeId: string, day: number}>} cells
- * @returns {{ next: Object, filled: number, kept: number }}
+ * @param {Function} [blockOf]  cell → 'before_joining' | 'after_leaving' | 'future' | null
+ * @returns {{ next: Object, filled: number, kept: number, skipped: Object }}
  */
-export function fillBlankCells(records, cells, status) {
+export function fillBlankCells(records, cells, status, blockOf) {
   const next = { ...records }
   let filled = 0, kept = 0
+  const skipped = { before_joining: 0, after_leaving: 0, future: 0 }
   for (const c of cells) {
     if (next[c.key]) { kept += 1; continue }
+    const block = blockOf ? blockOf(c) : null
+    if (block) { skipped[block] += 1; continue }
     next[c.key] = withStatus({ employee_id: c.employeeId, bs_day: c.day }, status)
     filled += 1
   }
-  return { next, filled, kept }
+  return { next, filled, kept, skipped }
 }
 
 /**

@@ -1,4 +1,4 @@
-import { todayView, nextShift, pendingSwapsForMe, rowKind } from './todayView'
+import { todayView, nextShift, pendingSwapsForMe, swapLapsed, rowKind } from './todayView'
 
 // Bhadra 2082, days 4–10 — one ordinary week, all in one BS month.
 const week = [4, 5, 6, 7, 8, 9, 10].map(day => ({ bsYear: 2082, bsMonth: 5, bsDay: day }))
@@ -139,6 +139,18 @@ describe('pendingSwapsForMe', () => {
 
   it('excludes a swap already accepted and waiting on the manager', () => {
     expect(pendingSwapsForMe(rows, ME).some(r => r.status === 'pending_admin')).toBe(false)
+  })
+
+  // S798 3d (ROSTER-3): a request with a day already gone cannot be accepted, so it is not counted.
+  it('leaves out a request whose earlier day has passed', () => {
+    const dated = [
+      { id: 'past', target_employee_id: ME, status: 'pending_target', bs_year: 2082, bs_month: 5, requester_bs_day: 9, target_bs_day: 5 },
+      { id: 'today', target_employee_id: ME, status: 'pending_target', bs_year: 2082, bs_month: 5, requester_bs_day: 6, target_bs_day: 8 },
+    ]
+    expect(pendingSwapsForMe(dated, ME, TODAY).map(r => r.id)).toEqual(['today'])
+    expect(swapLapsed(dated[0], TODAY)).toBe(true)
+    expect(swapLapsed(dated[1], TODAY)).toBe(false)
+    expect(pendingSwapsForMe(dated, ME).map(r => r.id)).toEqual(['past', 'today']) // no date: as before
   })
 
   it('is safe with nothing loaded, or with no linked employee record', () => {

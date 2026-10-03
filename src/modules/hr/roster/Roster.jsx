@@ -788,6 +788,19 @@ export default function Roster() {
   const [copyBusy,  setCopyBusy]  = useState(false)
   const [copyError, setCopyError] = useState('')
 
+  // A shift type whose hours changed part-way hands its name to a newer type from `replaced_from`
+  // (S798, ROSTER-1, split_shift_type). A week copied from before that day onto a day on or after it
+  // takes the newer type, or the copy would bring the old hours back. Followed through a chain.
+  function shiftForDay(shiftTypeId, adIso) {
+    let id = shiftTypeId
+    for (let i = 0; i < 10; i += 1) {
+      const s = shiftMap[id]
+      if (!s?.replaced_by || !s.replaced_from || adIso < s.replaced_from || !shiftMap[s.replaced_by]) break
+      id = s.replaced_by
+    }
+    return id
+  }
+
   const weekShiftCount = useMemo(() => viewMode === 'weekly'
     ? columns.reduce((n, col) => n + filteredEmps.filter(e => roster[rKey(col.bsYear, col.bsMonth, col.bsDay, e.id)]).length, 0)
     : 0, [viewMode, columns, filteredEmps, roster])
@@ -800,7 +813,7 @@ export default function Roster() {
       const pairs = weekDays(weekStart).map(d => {
         const t = new Date(d)
         t.setDate(t.getDate() + 7)
-        return { from: adToBs(d), to: adToBs(t) }
+        return { from: adToBs(d), to: adToBs(t), toIso: formatAd(t) }
       })
 
       const writes = []
@@ -809,7 +822,7 @@ export default function Roster() {
         for (const p of pairs) {
           targetKeys.add(rKey(p.to.year, p.to.month, p.to.day, emp.id))
           const row = roster[rKey(p.from.year, p.from.month, p.from.day, emp.id)]
-          if (row?.shift_type_id) writes.push({ empId: emp.id, to: p.to, shiftTypeId: row.shift_type_id })
+          if (row?.shift_type_id) writes.push({ empId: emp.id, to: p.to, shiftTypeId: shiftForDay(row.shift_type_id, p.toIso) })
         }
       }
 
@@ -1300,6 +1313,7 @@ export default function Roster() {
       {tab === 'shifts' && (
         <ShiftSettingsPanel
           clientId={clientId} shiftTypes={shiftTypes} setShiftTypes={setShiftTypes}
+          onRosterChanged={loadRoster}
         />
       )}
 

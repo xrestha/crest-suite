@@ -1,10 +1,16 @@
 import { useState } from 'react'
+import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ConfirmModal from '../../../components/ConfirmModal'
-import { calcHours } from './laborForecast'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import { calcHours, hasUnknownHours } from './laborForecast'
 import { fmtTime } from './rosterHelpers'
+import { rosterDayShape } from '../attendance/attendanceFromRoster'
+import { BS_MONTHS, adToBs, formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
+import { nepalCivilDate } from '../../../shared/nepalTime'
+import { STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 
 const EMPTY_FORM = { name: '', color: '#6B7280', start_time: '', end_time: '', hours: '', regular_hours: '' }
 
@@ -15,7 +21,28 @@ function resolveRegular(val) {
   return Number.isFinite(n) && n >= 0 ? n : null
 }
 
-export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes }) {
+// An AD 'YYYY-MM-DD' as its BS date, built from its parts (`new Date('YYYY-MM-DD')` is UTC midnight,
+// the previous day at Nepal's +05:45). `offsetDays` moves it first: -1 is the day before.
+function bsOfIso(iso, offsetDays = 0) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? adToBs(new Date(+m[1], +m[2] - 1, +m[3] + offsetDays)) : null
+}
+const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '—')
+
+// Typed times move a stored Hours that was simply the old times' length (S798, ROSTER-1). The editor
+// preloads the stored figure, so changing only the times used to move nothing: the panel then showed
+// 10:00–21:00 beside 12h. A length typed apart from the times (a split shift's break) is kept.
+function withTimes(prev, patch) {
+  const next = { ...prev, ...patch }
+  const typed = prev.hours === '' || prev.hours == null ? null : parseFloat(prev.hours)
+  const oldLength = calcHours(prev.start_time || null, prev.end_time || null)
+  if (typed != null && oldLength != null && Math.abs(typed - oldLength) < 0.05) {
+    next.hours = calcHours(next.start_time || null, next.end_time || null) ?? ''
+  }
+  return next
+}
+
+export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes, onRosterChanged }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [editing, setEditing] = useState(null)
   const [adding,  setAdding]  = useState(false)
@@ -26,6 +53,10 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
   // roster does not use (S749) — see deleteShift.
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmBusy,    setConfirmBusy]    = useState(false)
+  // An edit that changes pay on days not yet generated, waiting on "from which day?" (S798, ROSTER-1):
+  // { shift, payload, days, firstDay, lastDay, fromIso }.
+  const [split,     setSplit]     = useState(null)
+  const [splitBusy, setSplitBusy] = useState(false)
 
   function resolveHours(startT, endT, hoursVal) {
     if (hoursVal !== '' && hoursVal != null) return parseFloat(hoursVal)
@@ -35,22 +66,86 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
   // S682: each write used to be `const { data } = …; if (data) …` and then closed the editor
   // regardless, so a refused write looked exactly like a saved one. On error the editor now stays
   // open with the values the manager typed, and the failure is shown.
+  //
+  // S798 (ROSTER-1, H12 (a)): hr_roster stores only the shift type, and Generate from Roster reads the
+  // type as it is when it runs. So an edit that changes what a rostered day becomes (rosterDayShape:
+  // its hours, Normal hrs, or what a zero-hour name means) used to re-price every earlier day of the
+  // month not yet generated: shortening Full Day on the 15th paid the 1st–14th an hour short. Such an
+  // edit now asks from which day it applies whenever earlier days are still to be generated, and
+  // split_shift_type keeps the old values for the days before it. Any other edit saves as before.
   async function saveEdit() {
     if (!editing?.name?.trim()) return
-    setSaving(true)
-    setError(null)
-    const { data, error: err } = await scopedUpdate('hr_shift_types', {
+    const orig = shiftTypes.find(s => s.id === editing.id)
+    const payload = {
       name:       editing.name.trim(),
       color:      editing.color,
       start_time: editing.start_time || null,
       end_time:   editing.end_time   || null,
       hours:      resolveHours(editing.start_time, editing.end_time, editing.hours),
       regular_hours: resolveRegular(editing.regular_hours),
-    }).eq('id', editing.id).select().single()
+    }
+    setSaving(true)
+    setError(null)
+    if (orig && rosterDayShape(orig) !== rosterDayShape({ ...orig, ...payload })) {
+      const { data: counted, error: countErr } = await supabase.rpc('shift_type_days_to_generate', { p_shift_type_id: orig.id })
+      if (countErr) {
+        setSaving(false)
+        const a = asActionError(countErr, 'operator')
+        setError({ text: `Could not check whether "${orig.name}" has earlier days still to be put in Attendance, so nothing was saved. Reload to try again. ` + a.text, detail: a.detail })
+        return
+      }
+      const row = Array.isArray(counted) ? counted[0] : counted
+      if (row?.days > 0) {
+        setSaving(false)
+        const today = nepalCivilDate(new Date())
+        setSplit({ shift: orig, payload, days: row.days, firstDay: row.first_day, lastDay: row.last_day, fromIso: today ? formatAd(today) : row.last_day })
+        return
+      }
+    }
+    const { data, error: err } = await scopedUpdate('hr_shift_types', payload).eq('id', editing.id).select().single()
     setSaving(false)
     if (err) { setError(asActionError(err, 'operator')); return }
     if (data) setShiftTypes(prev => prev.map(s => s.id === data.id ? data : s))
     setEditing(null)
+  }
+
+  // The name the old values keep for the days before the chosen one: "Full Day (until 14 Kartik 2083)",
+  // made unique against the other shift types (the name is unique per client, case-insensitive).
+  function archiveName(s, fromIso) {
+    const base = `${s.name} (until ${bsLabel(bsOfIso(fromIso, -1))})`
+    const taken = new Set(shiftTypes.filter(x => x.id !== s.id).map(x => String(x.name).trim().toLowerCase()))
+    let name = base
+    for (let i = 2; taken.has(name.toLowerCase()); i += 1) name = `${base} ${i}`
+    return name
+  }
+
+  async function runSplit() {
+    if (!split) return
+    const from = bsOfIso(split.fromIso)
+    if (!from) { setError('Pick the day the new values start from.'); return }
+    const { shift, payload } = split
+    setSplitBusy(true)
+    setError(null)
+    const { error: err } = await supabase.rpc('split_shift_type', {
+      p_shift_type_id: shift.id, p_from_year: from.year, p_from_month: from.month, p_from_day: from.day,
+      p_old_name: archiveName(shift, split.fromIso), p_name: payload.name, p_color: payload.color,
+      p_start_time: payload.start_time, p_end_time: payload.end_time,
+      p_hours: payload.hours, p_regular_hours: payload.regular_hours,
+    })
+    setSplitBusy(false)
+    setSplit(null)
+    // One transaction: on a refusal the shift type and the roster are exactly as they were.
+    if (err) { setError(asActionError(err, 'operator')); return }
+    setEditing(null)
+    // Re-read: the split may have renamed one type and added another, and moved roster days.
+    const { data, error: readErr } = await scopedFrom('hr_shift_types').order('sort_order')
+    if (readErr) {
+      const a = asActionError(readErr, 'operator')
+      setError({ text: 'The change was saved, but the shift list could not be re-read. Reload the page to see it. ' + a.text, detail: a.detail })
+    } else {
+      setShiftTypes(data || [])
+    }
+    if (onRosterChanged) onRosterChanged()
   }
 
   async function saveNew() {
@@ -193,11 +288,11 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                       </td>
                       <td>
                         <input type="time" id={`shift-start-${s.id}`} aria-label="Shift start time" className="form-input" style={{ width: 112 }} value={editing.start_time || ''}
-                          onChange={e => setEditing(p => ({ ...p, start_time: e.target.value }))} />
+                          onChange={e => setEditing(p => withTimes(p, { start_time: e.target.value }))} />
                       </td>
                       <td>
                         <input type="time" id={`shift-end-${s.id}`} aria-label="Shift end time" className="form-input" style={{ width: 112 }} value={editing.end_time || ''}
-                          onChange={e => setEditing(p => ({ ...p, end_time: e.target.value }))} />
+                          onChange={e => setEditing(p => withTimes(p, { end_time: e.target.value }))} />
                       </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
@@ -236,10 +331,24 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                           immediately to the left, so the name doesn't need to repeat it — and
                           repeating it put an arbitrary user-picked colour on plain card as 13px
                           type, which no palette can guarantee reads. */}
-                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{s.name}</td>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                        {s.name}
+                        {/* The old values of a shift whose hours changed part-way (S798, ROSTER-1). */}
+                        {s.replaced_by && (
+                          <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)' }}>
+                            Earlier days only — from {formatAdAsBs(s.replaced_from)} the roster uses {shiftTypes.find(x => x.id === s.replaced_by)?.name || 'its replacement'}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{s.start_time ? fmtTime(s.start_time) : '—'}</td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{s.end_time   ? fmtTime(s.end_time)   : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{dispH != null ? `${dispH}h` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
+                        {hasUnknownHours(s) ? (
+                          <Tip text={`A working shift with no hours or times set. Attendance counts each of its days as an ordinary ${STANDARD_HOURS_PER_DAY}-hour day, with overtime only past ${STANDARD_HOURS_PER_DAY} hours. Set its hours, or its start and end, so each day is measured against the real shift.`} width={260}>
+                            <span style={{ color: 'var(--theme-amber-text)' }}>△ not set</span>
+                          </Tip>
+                        ) : dispH != null ? `${dispH}h` : '—'}
+                      </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                         {s.regular_hours != null ? (
                           <>
@@ -333,7 +442,42 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
         Leave Hours blank to auto-calculate from start/end times. Overnight shifts (e.g. Night 21:00–07:00) wrap past midnight automatically.
         Normal hrs splits a long shift into normal time and overtime (e.g. 12h with 9 normal = 3h OT); blank means the whole shift is normal time.
         Attendance → Generate from Roster reads a zero-hour shift by its name: "PAID LEAVE" becomes Paid Leave, any other "LEAVE" becomes Unpaid Leave, "Holiday" becomes Holiday, and "OFF DAY" becomes Off.
+        Changing a shift&apos;s hours, Normal hrs or what its name means, while earlier days on it are not yet in Attendance, asks from which day the change applies; the days before it keep the old values.
       </p>
+
+      {split && (() => {
+        const fromBs = bsOfIso(split.fromIso)
+        const fromLabel = bsLabel(fromBs)
+        const oldName = archiveName(split.shift, split.fromIso)
+        const firstLabel = formatAdAsBs(split.firstDay)
+        return (
+          <ConfirmModal
+            title={`Change "${split.shift.name}" from which day?`}
+            confirmLabel={fromBs ? `Apply from ${fromLabel}` : 'Apply'}
+            busy={splitBusy} busyLabel="Applying…"
+            onConfirm={runSplit}
+            onCancel={() => setSplit(null)}
+          >
+            <p style={{ margin: '0 0 10px' }}>
+              &ldquo;{split.shift.name}&rdquo; is on the roster for <strong>{split.days}</strong> day{split.days === 1 ? '' : 's'} up to today that {split.days === 1 ? 'is' : 'are'} not in Attendance yet
+              ({split.days === 1 ? firstLabel : `${firstLabel} to ${formatAdAsBs(split.lastDay)}`}). Generate from Roster fills those days with the shift as it is when it runs, so this change would alter their pay too.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+              <label htmlFor="shift-split-from" style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text1)' }}>New values start on</label>
+              <BsCalendarPicker id="shift-split-from" value={split.fromIso} onChange={v => setSplit(p => ({ ...p, fromIso: v }))} />
+              {split.firstDay && split.fromIso !== split.firstDay && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSplit(p => ({ ...p, fromIso: p.firstDay }))}>
+                  From {firstLabel} (fixes a mistake on every one of them)
+                </button>
+              )}
+            </div>
+            <p style={{ margin: 0 }}>
+              Days before {fromLabel} keep the current values, under the name &ldquo;{oldName}&rdquo;, which leaves the shift picker.
+              From {fromLabel} on, the roster uses &ldquo;{split.payload.name}&rdquo; with the new values. Days already in Attendance do not change either way.
+            </p>
+          </ConfirmModal>
+        )
+      })()}
 
       {pendingConfirm && (
         <ConfirmModal

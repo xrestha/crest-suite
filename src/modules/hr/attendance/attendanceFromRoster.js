@@ -6,7 +6,8 @@
 // grey out an employee's own off days (shift_kind / `shiftKind`, S798). Generate keys on HOURS, so a
 // shift with hours is Present whatever its name; `shiftKind` agrees, except that a leave-named
 // shift with hours set is leave there.
-import { shiftHours, shiftOvertimeHours } from '../roster/laborForecast'
+import { shiftHours, shiftOvertimeHours, shiftRegularHours, hasUnknownHours, isOnDutyShift } from '../roster/laborForecast'
+import { STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 
 // The attendance status a zero-hour roster marker stands for. Before S742 every name containing
 // "leave" became 'weekly_off' — so a rostered "LEAVE" (unpaid) paid a monthly employee in full and
@@ -35,12 +36,18 @@ export function zeroHourStatus(name) {
 // employeeIds: ids of active employees to consider
 // existingDayKeys: Set of `${employee_id}:${bs_day}` already present in hr_attendance for this period
 // days: array of bs_day numbers in the period (1..daysInBsMonth)
-// Returns hr_attendance row objects ready for scopedUpsert — never overlaps existingDayKeys.
-export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employeeIds, existingDayKeys, days, periodId }) {
+// blockOf: optional (employeeId, day) → 'before_joining' | 'after_leaving' | 'future' | null
+//   (attendanceRules' dayBlock). A blocked day is left blank and counted (S798, ATTENDANCE-5, H7 (a)).
+// Returns { rows, skipped, unknownHours }: hr_attendance row objects ready for scopedUpsert (never
+// overlapping existingDayKeys), the rostered blank days left alone by reason, and how many rows are
+// on a working shift with no hours set (ATTENDANCE-2), which the confirm names on their own line.
+export function planAttendanceFromRoster({ rosterRows, shiftTypesById, employeeIds, existingDayKeys, days, periodId, blockOf }) {
   const rosterByKey = {}
   rosterRows.forEach(r => { rosterByKey[`${r.employee_id}:${r.bs_day}`] = r })
 
   const rows = []
+  const skipped = { before_joining: 0, after_leaving: 0, future: 0 }
+  let unknownHours = 0
   employeeIds.forEach(empId => {
     days.forEach(day => {
       const key = `${empId}:${day}`
@@ -49,10 +56,31 @@ export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employee
       const rosterRow = rosterByKey[key]
       if (!rosterRow) return // no roster signal at all — leave it for manual entry, nothing to infer
 
+      const block = blockOf ? blockOf(empId, day) : null
+      if (block) { skipped[block] += 1; return }
+
+      const shiftType = shiftTypesById[rosterRow.shift_type_id]
+      // A working shift nobody gave a length to (the ready-made "Split": no hours, no times) is a
+      // day worked, not a day off (H10 (a)): an ordinary 8-hour day with no overtime, the way a day
+      // with no roster entry is measured. It used to fall to the zero-hour branch below and become
+      // Off, so a daily-wage worker rostered Split was paid nothing for the day.
+      if (hasUnknownHours(shiftType)) {
+        unknownHours += 1
+        rows.push({
+          employee_id:  empId,
+          period_id:    periodId,
+          bs_day:       day,
+          status:       'present',
+          hours_worked: STANDARD_HOURS_PER_DAY,
+          ot_hours:     0,
+          note:         null,
+        })
+        return
+      }
+
       // Some clients create custom zero-hour shift types (e.g. "OFF DAY", "LEAVE", "Public
       // Holiday") purely to mark exceptions on the roster board visually — those aren't real
       // work, so a roster row only counts as "present" when it resolves to actual hours.
-      const shiftType = shiftTypesById[rosterRow.shift_type_id]
       const hours = shiftHours(shiftType)
       if (hours > 0) {
         rows.push({
@@ -78,5 +106,25 @@ export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employee
       }
     })
   })
-  return rows
+  return { rows, skipped, unknownHours }
+}
+
+// The rows alone, for a caller that needs no counts.
+export function buildAttendanceFromRoster(args) {
+  return planAttendanceFromRoster(args).rows
+}
+
+// What a rostered day on this shift type becomes in Attendance, as one comparable string: the row
+// Generate writes, the length typed or imported times are measured against, and whether a no-show is
+// Absent. Shift Types compares the shape before and after an edit; when it moves, the edit changes pay
+// on every rostered day not yet generated, so it asks from which day (S798, ROSTER-1, H12 (a)).
+// A rename that changes nothing here (a working shift, or "Day Off" → "OFF DAY") does not ask.
+export function rosterDayShape(shift) {
+  if (!shift) return 'none'
+  const regular = shiftRegularHours(shift) ?? ''
+  if (hasUnknownHours(shift)) return `present|${STANDARD_HOURS_PER_DAY}|0|${regular}|duty`
+  const hours = shiftHours(shift)
+  const duty = isOnDutyShift(shift) ? 'duty' : 'off'
+  if (hours > 0) return `present|${hours}|${shiftOvertimeHours(shift)}|${regular}|${duty}`
+  return `marker|${zeroHourStatus(shift.name)}|${duty}`
 }

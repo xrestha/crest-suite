@@ -991,6 +991,33 @@ const rules = [
     staff: "That day's roster hasn't been published yet, so it cannot be swapped. Nothing was sent.",
     operator: 'That day of the roster has not been published, so the swap was not requested.',
   },
+  // S798 3d (20261003140000, ROSTER-3, H23 (a)): a request to someone who could never answer it.
+  {
+    test: e => /swap_coworker_unavailable/i.test(e.message || ''),
+    staff: "That coworker can't answer a swap in the Staff app, so it wasn't sent. Ask your manager to swap you on the roster instead.",
+    operator: 'That coworker has no Crest Staff login, has left, or is blocked, so they could never answer the request. Nothing was sent. Swap them on the Roster board instead.',
+  },
+  // S798 3d (ROSTER-1, H12 (a)): split_shift_type — the shift type and the roster are unchanged on every one.
+  {
+    test: e => /shift_split_replaced/i.test(e.message || ''),
+    staff: 'That shift was already changed from a later day. Reload and edit the current one.',
+    operator: 'That shift type already hands its name over to a newer one, so it was not changed. Reload the page and edit the current shift type instead. Nothing was changed.',
+  },
+  {
+    test: e => /shift_split_bad_day/i.test(e.message || ''),
+    staff: "That day isn't in the calendar.",
+    operator: 'That day is outside the calendar Crest knows, so the shift was not changed. Pick another day. Nothing was changed.',
+  },
+  {
+    test: e => /shift_split_name/i.test(e.message || ''),
+    staff: 'Both shifts need a name.',
+    operator: 'The shift and its earlier version both need a name, so nothing was changed.',
+  },
+  {
+    test: e => /shift_split_not_permitted|shift_split_not_found/i.test(e.message || ''),
+    staff: "You're not allowed to do that.",
+    operator: 'This account could not change the shift type or move its roster days (that needs HR supervisor rank or above), or the shift type was deleted meanwhile. Nothing was changed.',
+  },
   {
     test: e => /swap_already_requested/i.test(e.message || ''),
     staff: 'One of those shifts already has a swap waiting. Wait for it to be decided, or withdraw it first. Nothing was sent.',

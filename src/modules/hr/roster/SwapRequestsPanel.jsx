@@ -68,19 +68,27 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
     () => ({ ...extraNames, ...Object.fromEntries(employees.map(e => [e.id, e.full_name])) }),
     [employees, extraNames])
 
+  // Requests the coworker has not answered yet (S798 3d, ROSTER-3). They never reached this tab, so one
+  // sent to someone who never answers (or had left) could not be rejected, and it blocked every other
+  // swap of both shifts. Listed with Reject only: the coworker has not agreed, so there is nothing to
+  // approve. They do not count on the tab's badge, which stays "waiting on you".
+  const [awaitingCoworker, setAwaitingCoworker] = useState([])
+
   const load = useCallback(async () => {
-    const [{ data: pending, error: e1 }, { data: hist, error: e2 }] = await Promise.all([
+    const [{ data: pending, error: e1 }, { data: hist, error: e2 }, { data: awaiting, error: e3 }] = await Promise.all([
       scopedFrom('hr_shift_swap_requests').eq('status', 'pending_admin').order('created_at'),
       scopedFrom('hr_shift_swap_requests')
         .in('status', HISTORY_STATUSES).order('created_at', { ascending: false }).limit(50),
+      scopedFrom('hr_shift_swap_requests').eq('status', 'pending_target').order('created_at'),
     ])
     // A failed read is not an empty queue: "nothing waiting" over a dropped connection tells a
     // manager there is nothing to approve when there may be three, and swaps are time-bound.
-    const err = e1 || e2
+    const err = e1 || e2 || e3
     setLoadErr(err || null)
     if (!err) {
       setRequests(pending || [])
       setHistory(hist || [])
+      setAwaitingCoworker(awaiting || [])
       onPendingCount?.((pending || []).length)
     }
     setLoading(false)
@@ -90,7 +98,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
 
   useEffect(() => {
     const known = new Set(employees.map(e => e.id))
-    const missing = [...new Set([...requests, ...history]
+    const missing = [...new Set([...requests, ...history, ...awaitingCoworker]
       .flatMap(r => [r.requester_employee_id, r.target_employee_id]))]
       .filter(id => id && !known.has(id) && !attemptedRef.current.has(id))
     if (missing.length === 0) return
@@ -98,7 +106,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
     scopedFrom('hr_employees', 'id, full_name').in('id', missing).then(({ data }) => {
       if (data?.length) setExtraNames(p => ({ ...p, ...Object.fromEntries(data.map(e => [e.id, e.full_name])) }))
     })
-  }, [requests, history, employees, scopedFrom])
+  }, [requests, history, awaitingCoworker, employees, scopedFrom])
 
   // admin_decided_by is a profiles.id, not an hr_employees.id like requester/target — profiles
   // RLS only ever returns the caller's own row on a raw query, so resolving another admin/HR
@@ -142,9 +150,10 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
     setBusyId(swap.id); setMsg('')
     // Conditional on still waiting, with the matched row asked back: a request withdrawn or decided
     // in the meantime matches nothing, which is otherwise indistinguishable from success (S738).
+    // Waiting on either the manager or, since S798 3d, the coworker.
     const { data, error } = await scopedUpdate('hr_shift_swap_requests', {
       status: 'rejected_by_admin', admin_decided_by: profile?.id, admin_decided_at: new Date().toISOString(),
-    }).eq('id', swap.id).eq('status', 'pending_admin').select('id')
+    }).eq('id', swap.id).in('status', ['pending_target', 'pending_admin']).select('id')
     setBusyId(null)
     if (error) { setMsg('That swap may not have been rejected — the list has been refreshed. ' + errorLine(error)); load(); return }
     if (!data?.length) { setMsg('That swap is no longer waiting for approval — it was withdrawn, or someone else decided it first. The list has been refreshed.'); load(); return }
@@ -248,6 +257,50 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
           </div>
         )}
       </div>
+
+      {/* ── Asked, but the coworker has not answered (S798 3d) ── */}
+      {awaitingCoworker.length > 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>⏳ Waiting on the coworker</span>
+            <span className="badge-gray" style={{ fontSize: 10 }}>{awaitingCoworker.length}</span>
+            <Tip
+              text="Asked in Crest Staff, not yet accepted or declined by the coworker. Nothing to approve yet. Reject one that is stuck — for example the coworker is away — because while it waits, neither shift can be offered in another swap."
+              width={260}
+            >
+              <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Why reject one?</span>
+            </Tip>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {awaitingCoworker.map(r => (
+              <div
+                key={r.id}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 12,
+                  paddingBottom: 10, borderBottom: '1px solid var(--theme-border-lt)',
+                }}
+              >
+                <div style={{ color: 'var(--theme-text2)' }}>
+                  <b style={{ color: 'var(--theme-text1)' }}>{nameById[r.requester_employee_id] || '—'}</b>
+                  {' '}({bsDayOrdinal(r.requester_bs_day)}, {shiftMap[r.requester_shift_type_id]?.name || '—'})
+                  {' ⇄ '}
+                  <b style={{ color: 'var(--theme-text1)' }}>{nameById[r.target_employee_id] || '—'}</b>
+                  {' '}({bsDayOrdinal(r.target_bs_day)}, {shiftMap[r.target_shift_type_id]?.name || '—'})
+                  {' — '}{BS_MONTHS[r.bs_month - 1]} {r.bs_year}
+                  {r.note && <span style={{ color: 'var(--theme-text3)' }}> · "{r.note}"</span>}
+                </div>
+                <button
+                  type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
+                  disabled={busyId === r.id} onClick={() => reject(r)}
+                  aria-label={`Reject the swap between ${nameById[r.requester_employee_id] || 'the requester'} and ${nameById[r.target_employee_id] || 'the coworker'}`}
+                >
+                  Reject
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Everything already decided ── */}
       <div className="card" style={{ padding: 16 }}>

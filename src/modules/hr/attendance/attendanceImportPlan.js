@@ -8,12 +8,12 @@
 //   3. An incomplete day (one punch, or in and out under an hour apart) comes in as Present with
 //      the times the machine has, hours left blank, and is flagged for the reader to fix.
 //   4. A day already on the sheet is never overwritten, except that a Present day takes the
-//      machine's in and out times — each such change listed, and can be unticked.
+//      machine's in and out times — each such change listed, and can be unticked. A Present day
+//      with no punch on a rostered working day is listed too, ticked off: Absent only if ticked (S798).
 // Two more guard the roster rule from marking days that have not happened: nothing is marked
 // after today, and a day with no punch yet TODAY is left alone. Days before an employee joined or
 // after they left are not marked either.
-import { adToBs } from '../../../utils/bsCalendar'
-import { withStatus, isNonWorking } from './attendanceRules'
+import { withStatus, isNonWorking, employmentBounds } from './attendanceRules'
 import { zeroHourStatus } from './attendanceFromRoster'
 import { isOnDutyShift, shiftHours } from '../roster/laborForecast'
 import { NIGHT_CUTOFF_MIN } from './attendanceImport'
@@ -83,15 +83,6 @@ export function suspectReason(day, shift) {
   return null
 }
 
-// An AD 'YYYY-MM-DD' column as a comparable BS number, built from its parts: `new Date('YYYY-MM-DD')`
-// is UTC midnight, which lands on the previous day at Nepal's +05:45.
-function bsOrdinal(iso) {
-  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!m) return null
-  const bs = adToBs(new Date(+m[1], +m[2] - 1, +m[3]))
-  return bs.year * 10000 + bs.month * 100 + bs.day
-}
-
 /**
  * The changes an import makes, and a count of everything it did not.
  *
@@ -106,7 +97,8 @@ function bsOrdinal(iso) {
  *                        — the sheet's own auto-calc, so an imported day measures OT exactly as a typed one
  * @param today           { year, month, day } in BS
  * @returns {{
- *   changes: Array<{ key, employeeId, day, kind: 'worked'|'updated'|'flagged'|'marked'|'absent'|'off', cell, before, machine }>,
+ *   changes: Array<{ key, employeeId, day, kind: 'worked'|'updated'|'flagged'|'marked'|'absent'|'off'|'noPunch', cell, before, machine }>,
+ *            — 'updated' applies unless unticked, 'noPunch' only when ticked,
  *   conflicts: Array<{ key, employeeId, day, status, machine }>,
  *   byEmployee: { [employeeId]: counts },
  *   skipped: { future, notEmployed },
@@ -125,7 +117,7 @@ export function planImport({ people, coverage, matches, employees, records, peri
     const emp = employeeId && employeeId !== SKIP ? empById.get(employeeId) : null
     if (!emp) continue
     const counts = byEmployee[emp.id] ||= { worked: 0, updated: 0, flagged: 0, marked: 0, absent: 0, off: 0, blank: 0, kept: 0 }
-    const joined = bsOrdinal(emp.join_date), left = bsOrdinal(emp.end_date)
+    const { joined, left } = employmentBounds(emp)
 
     for (const day of coverage) {
       const ordinal = period.bs_year * 10000 + period.bs_month * 100 + day
@@ -187,8 +179,19 @@ export function planImport({ people, coverage, matches, employees, records, peri
         continue
       }
 
-      // No punch: the roster decides (decision 2).
-      if (existing) { counts.kept += 1; continue }
+      // No punch: the roster decides (decision 2). A marked day stays as marked, except that a Present
+      // day the roster had them working, with nothing on the machine, is offered as Absent (S798,
+      // ATTENDANCE-4, H14 (a)). A sheet filled by Generate or All Present reads Present on every
+      // rostered day, so this is the only way an import finds a missed day. The reader ticks it (off
+      // by default, kind 'noPunch'); until then it counts as Already marked.
+      if (existing) {
+        const rostered = key in rosterByKey ? shiftTypesById[rosterByKey[key]] : null
+        if (existingStatus === 'present' && rostered && isOnDutyShift(rostered)) {
+          changes.push({ key, employeeId: emp.id, day, kind: 'noPunch', cell: withStatus(existing, 'absent'), before: existing, machine })
+        }
+        counts.kept += 1
+        continue
+      }
       if (!(key in rosterByKey)) { counts.blank += 1; continue }
       // A working shift with no punch is Absent, whatever its name (S798, ATTENDANCE-7): "Coffee Bar"
       // and a timed "Holiday Duty" are shifts. Only a day-off marker or a leave shift becomes its

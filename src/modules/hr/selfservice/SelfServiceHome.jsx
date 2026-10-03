@@ -15,7 +15,7 @@ import PayslipBody from '../payroll/PayslipBody'
 import SelfServiceShell, { TABS } from './SelfServiceShell'
 import SelfServiceToday from './SelfServiceToday'
 import RosterWeek from './RosterWeek'
-import { todayView, nextShift, pendingSwapsForMe, rowKind } from './todayView'
+import { todayView, nextShift, pendingSwapsForMe, swapLapsed, rowKind } from './todayView'
 import { useBsToday } from './useBsToday'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { employeeErrorText } from './employeeError'
@@ -434,6 +434,15 @@ export default function SelfServiceHome() {
     loadSwapRequests()
   }
 
+  // Your own request, while it still waits on your coworker or the manager (S798 3d, ROSTER-3). There
+  // was no way out of one before: an unanswered request blocked both shifts until the day passed.
+  async function withdrawSwap(requestId) {
+    const { error } = await supabase.rpc('cancel_my_swap_request', { p_request_id: requestId })
+    if (error) { setErrFor('swaps', employeeErrorText(error)); return }
+    setDone('Swap request withdrawn.')
+    loadSwapRequests()
+  }
+
   // ── Leave ──────────────────────────────────────────────────────────────────────────────────
   const isSingleDay = startDate && endDate && startDate === endDate
   const workingDays = startDate && endDate ? workingDaysInRange(startDate, endDate) : []
@@ -543,7 +552,7 @@ export default function SelfServiceHome() {
     return <div style={{ padding: 40, color: 'var(--theme-text3)', textAlign: 'center' }}>Loading…</div>
   }
 
-  const swapsForMe = pendingSwapsForMe(swapRequests, profile.hr_employee_id)
+  const swapsForMe = pendingSwapsForMe(swapRequests, profile.hr_employee_id, today)
   const todayState = todayView({ days: homeDays, roster, publishedDays, today })
   const next = nextShift({ days: homeDays, roster, publishedDays, today })
 
@@ -629,22 +638,32 @@ export default function SelfServiceHome() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {swapRequests.map(r => {
                     const iAmTarget = r.target_employee_id === profile.hr_employee_id
+                    const iAsked = r.requester_employee_id === profile.hr_employee_id
+                    const waiting = r.status === 'pending_target' || r.status === 'pending_admin'
+                    // A day already gone: it can no longer be accepted (S798 3d), so no Accept, and it
+                    // reads Lapsed rather than waiting. The asker can still withdraw it to tidy up.
+                    const lapsed = waiting && swapLapsed(r, today)
                     return (
-                      <div key={r.id} className={`card${iAmTarget && r.status === 'pending_target' ? ' ss-attention' : ''}`} style={{ padding: 14 }}>
+                      <div key={r.id} className={`card${iAmTarget && r.status === 'pending_target' && !lapsed ? ' ss-attention' : ''}`} style={{ padding: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                           <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
                             <b style={{ color: 'var(--theme-text1)' }}>{r.requester_name}</b> ({bsDayOrdinal(r.requester_bs_day)}, {r.requester_shift_name || '—'})
                             {' ⇄ '}
                             <b style={{ color: 'var(--theme-text1)' }}>{r.target_name}</b> ({bsDayOrdinal(r.target_bs_day)}, {r.target_shift_name || '—'})
                           </div>
-                          <span className={`${SWAP_STATUS_BADGE[r.status] || 'badge-gray'} badge-sentence`} style={{ whiteSpace: 'nowrap' }}>
-                            {SWAP_STATUS_LABEL[r.status] || r.status.replace(/_/g, ' ')}
+                          <span className={`${lapsed ? 'badge-gray' : (SWAP_STATUS_BADGE[r.status] || 'badge-gray')} badge-sentence`} style={{ whiteSpace: 'nowrap' }}>
+                            {lapsed ? 'Lapsed — the day has passed' : (SWAP_STATUS_LABEL[r.status] || r.status.replace(/_/g, ' '))}
                           </span>
                         </div>
-                        {iAmTarget && r.status === 'pending_target' && (
+                        {iAmTarget && r.status === 'pending_target' && !lapsed && (
                           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                             <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => respondSwap(r.id, false)}>Decline</button>
                             <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => respondSwap(r.id, true)}>Accept</button>
+                          </div>
+                        )}
+                        {iAsked && waiting && (
+                          <div style={{ display: 'flex', marginTop: 12 }}>
+                            <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => withdrawSwap(r.id)}>Withdraw request</button>
                           </div>
                         )}
                       </div>
@@ -965,7 +984,7 @@ export default function SelfServiceHome() {
             {coworkerLoading ? (
               <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Loading colleagues…</p>
             ) : coworkerNames.length === 0 ? (
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>No colleague has a published shift this month yet.</p>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>No colleague on the Staff app has a published shift this month yet. To swap with someone who doesn&apos;t use the app, ask your manager.</p>
             ) : (
               <div className="ss-field">
                 <label htmlFor="ss-swap-with">Swap with</label>
@@ -974,6 +993,7 @@ export default function SelfServiceHome() {
                   <option value="">Choose a colleague…</option>
                   {coworkerNames.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                 </select>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>Only colleagues on the Staff app are listed, because they have to accept. For anyone else, ask your manager.</p>
               </div>
             )}
             {swapTargetEmpId && (

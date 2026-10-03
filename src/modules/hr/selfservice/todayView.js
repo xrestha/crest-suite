@@ -82,7 +82,19 @@ export function nextShift({ days, roster, publishedDays, today }) {
  * a leave request is waiting on a manager. Neither is an action for me, and putting them under a
  * heading that says something needs doing is how a badge stops meaning anything.
  */
-export function pendingSwapsForMe(swapRequests, myEmployeeId) {
+export function pendingSwapsForMe(swapRequests, myEmployeeId, today) {
   if (!swapRequests || !myEmployeeId) return []
-  return swapRequests.filter(r => r.target_employee_id === myEmployeeId && r.status === 'pending_target')
+  return swapRequests.filter(r => r.target_employee_id === myEmployeeId && r.status === 'pending_target'
+    && !(today && swapLapsed(r, today)))
+}
+
+/**
+ * Whether a swap request can no longer be accepted because one of its two days has gone (S798 3d,
+ * ROSTER-3): respond_shift_swap refuses it, so it is not an action, and the badge does not count it.
+ * `today` is { year, month, day } in BS.
+ */
+export function swapLapsed(r, today) {
+  if (!r || !today) return false
+  const first = Math.min(r.requester_bs_day, r.target_bs_day)
+  return r.bs_year * 10000 + r.bs_month * 100 + first < today.year * 10000 + today.month * 100 + today.day
 }

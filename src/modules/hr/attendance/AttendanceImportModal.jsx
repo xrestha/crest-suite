@@ -3,6 +3,7 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import ActionError from '../../../components/ActionError'
 import { BS_MONTHS, formatBsDay, getBsToday } from '../../../utils/bsCalendar'
+import { nepalBs } from '../../../shared/nepalTime'
 import { ATTENDANCE_STATUSES } from '../payrollConstants'
 import { detectMapping, readAttendance, guessMatches, HEADER_SCAN_ROWS } from './attendanceImport'
 import { planImport, SKIP } from './attendanceImportPlan'
@@ -67,7 +68,10 @@ export default function AttendanceImportModal({
   const [matches, setMatches] = useState({})
   const [breakMin, setBreakMin] = useState(defaultBreak)
   const [kept, setKept] = useState(() => new Set()) // `updated` changes the reader unticked
-  const [today] = useState(getBsToday)
+  const [absentTicks, setAbsentTicks] = useState(() => new Set()) // `noPunch` days the reader ticked
+  // Today in Nepal, not on this computer's clock (S798): a reader abroad would otherwise mark a day
+  // that has not happened yet at the outlet.
+  const [today] = useState(() => nepalBs(new Date()) || getBsToday())
 
   const rows = file?.sheets[sheetIndex]?.rows || []
   const empById = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees])
@@ -138,8 +142,13 @@ export default function AttendanceImportModal({
       rosterByKey, shiftTypesById, autoHours, breakMinutes: breakMin, today,
     })
   }, [result, step, matches, employees, records, period, rosterByKey, shiftTypesById, autoHours, breakMin, today])
-  const toApply = plan ? plan.changes.filter(c => !(c.kind === 'updated' && kept.has(c.key))) : []
+  // Opposite defaults, on purpose: new times for a Present day go in unless unticked, while a
+  // Present day with no punch turns Absent only if ticked (S798, H14 (a)) — nothing marked changes
+  // to cost someone a day's pay without the reader saying so.
+  const toApply = plan ? plan.changes.filter(c =>
+    !(c.kind === 'updated' && kept.has(c.key)) && !(c.kind === 'noPunch' && !absentTicks.has(c.key))) : []
   const updates = plan ? plan.changes.filter(c => c.kind === 'updated') : []
+  const noPunch = plan ? plan.changes.filter(c => c.kind === 'noPunch') : []
   // A count cannot show a night read the wrong way round, so shifts read as ending after midnight
   // and the days sent to check are listed with their times (S798, ATTENDANCE-3).
   const overnight = plan ? plan.changes.filter(c => (c.kind === 'worked' || c.kind === 'updated') && clockMinutes(c.cell.end_time) < clockMinutes(c.cell.start_time)) : []
@@ -153,6 +162,13 @@ export default function AttendanceImportModal({
   function toggleKept(key) {
     setKept(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
   }
+  function toggleAbsent(key) {
+    setAbsentTicks(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
+  }
+  // How the sheet's Present reads, so a bulk or generated fill is told apart from times someone typed.
+  const presentAsMarked = before => (before?.start_time || before?.end_time
+    ? `Present ${before.start_time || '—'}–${before.end_time || '—'} typed on the sheet`
+    : 'Present, no times (filled in bulk or from the roster)')
 
   // ── Columns form ────────────────────────────────────────────────────────────
   const headerCells = mapping && mapping.headerRow >= 0 ? (rows[mapping.headerRow] || []) : (rows[0] || [])
@@ -385,7 +401,7 @@ export default function AttendanceImportModal({
                     <th style={{ textAlign: 'right' }}><Tip text="No punch on a day the roster had them off — marked Off, or the leave or holiday the roster shift is named for." width={240}>Off / leave</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Days the file marks with a letter or word instead of times, such as P, A, Off or Leave. A leave that does not say paid is marked Unpaid Leave." width={240}>Marked</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="No punch, and not on the roster that day, so nothing is marked. Mark these yourself — for daily- and hourly-paid staff a blank day pays nothing." width={260}>Left blank</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Days already on the sheet — leave, off days, anything you marked — which stay exactly as they are." width={220}>Already marked</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Days already on the sheet — leave, off days, anything you marked — which stay exactly as they are. A Present day with no punch on a day the roster had them working is counted here too, and listed below: tick it to mark it Absent." width={260}>Already marked</Tip></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -422,6 +438,28 @@ export default function AttendanceImportModal({
                       <span>
                         <strong style={{ color: 'var(--theme-text1)' }}>{empById.get(u.employeeId)?.full_name}</strong> · {formatBsDay(u.day, period.bs_month)} ·{' '}
                         {u.before?.start_time || u.before?.end_time ? `${u.before.start_time || '—'}–${u.before.end_time || '—'}` : 'no times'} → {u.machine}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {noPunch.length > 0 && (
+              <details open={noPunch.length <= 12}>
+                <summary style={{ cursor: 'pointer', color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+                  △ {noPunch.length} {noPunch.length === 1 ? 'day is' : 'days are'} marked Present with no punch in the file, on a day the roster had them working — tick any to mark Absent
+                </summary>
+                <p style={{ margin: '6px 0 0', fontSize: 12 }}>
+                  Nothing changes unless you tick it. A missed punch on a day someone did work should stay Present.
+                </p>
+                <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+                  {noPunch.map(u => (
+                    <label key={u.key} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                      <input type="checkbox" checked={absentTicks.has(u.key)} onChange={() => toggleAbsent(u.key)} />
+                      <span>
+                        <strong style={{ color: 'var(--theme-text1)' }}>{empById.get(u.employeeId)?.full_name}</strong> · {formatBsDay(u.day, period.bs_month)} ·{' '}
+                        {presentAsMarked(u.before)} → {absentTicks.has(u.key) ? 'Absent' : 'stays Present'}
                       </span>
                     </label>
                   ))}

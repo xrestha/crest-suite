@@ -1,4 +1,4 @@
-import { buildAttendanceFromRoster, zeroHourStatus } from './attendanceFromRoster'
+import { buildAttendanceFromRoster, planAttendanceFromRoster, rosterDayShape, zeroHourStatus } from './attendanceFromRoster'
 
 describe('buildAttendanceFromRoster', () => {
   const shiftTypesById = {
@@ -131,6 +131,46 @@ describe('buildAttendanceFromRoster', () => {
     ])
   })
 
+  // S798 (ATTENDANCE-2, H10 (a)): the shipped "Split" has no hours and no times. It is a day worked,
+  // measured as an ordinary 8-hour day, not a zero-hour marker turned into Off.
+  test('a working shift with no hours set (the shipped Split) is Present for 8 hours, counted apart', () => {
+    const plan = planAttendanceFromRoster({
+      rosterRows: [
+        { employee_id: 'e1', shift_type_id: 'shippedSplit', bs_day: 5 },
+        { employee_id: 'e1', shift_type_id: 'morning', bs_day: 6 },
+      ],
+      shiftTypesById: { ...shiftTypesById, shippedSplit: { name: 'Split', hours: null, start_time: null, end_time: null } },
+      employeeIds: ['e1'],
+      existingDayKeys: new Set(),
+      days: [5, 6],
+      periodId: 'p1',
+    })
+    expect(plan.rows[0]).toEqual({ employee_id: 'e1', period_id: 'p1', bs_day: 5, status: 'present', hours_worked: 8, ot_hours: 0, note: null })
+    expect(plan.unknownHours).toBe(1)
+  })
+
+  test('an explicit zero-hour shift is still a marker, not an unknown-hours day', () => {
+    const plan = planAttendanceFromRoster({
+      rosterRows: [{ employee_id: 'e1', shift_type_id: 'custom', bs_day: 5 }],
+      shiftTypesById, employeeIds: ['e1'], existingDayKeys: new Set(), days: [5], periodId: 'p1',
+    })
+    expect(plan.rows[0].status).toBe('weekly_off')
+    expect(plan.unknownHours).toBe(0)
+  })
+
+  // S798 (ATTENDANCE-5, H7 (a)): days before joining, after leaving and after today stay blank.
+  test('leaves a blocked rostered day blank and counts it by reason', () => {
+    const blocks = { 1: 'before_joining', 2: 'after_leaving', 3: 'future' }
+    const plan = planAttendanceFromRoster({
+      rosterRows: [1, 2, 3, 4].map(d => ({ employee_id: 'e1', shift_type_id: 'morning', bs_day: d })),
+      shiftTypesById, employeeIds: ['e1'], existingDayKeys: new Set(), days: [1, 2, 3, 4, 5], periodId: 'p1',
+      blockOf: (empId, day) => blocks[day] || null,
+    })
+    expect(plan.rows.map(r => r.bs_day)).toEqual([4])
+    // Day 5 has no roster row, so it is not counted as skipped: Generate would not have filled it.
+    expect(plan.skipped).toEqual({ before_joining: 1, after_leaving: 1, future: 1 })
+  })
+
   test('a blank Normal hours keeps the whole shift as normal time (no OT), as before', () => {
     const rows = buildAttendanceFromRoster({
       rosterRows: [{ employee_id: 'e1', shift_type_id: 'long', bs_day: 5 }],
@@ -141,6 +181,32 @@ describe('buildAttendanceFromRoster', () => {
       periodId: 'p1',
     })
     expect(rows[0].ot_hours).toBe(0)
+  })
+})
+
+// S798 (ROSTER-1): the edit to a shift type that changes pay on days not yet generated, and only that.
+describe('rosterDayShape', () => {
+  const full = { name: 'Full Day', hours: 12, start_time: '10:00', end_time: '22:00', regular_hours: 9 }
+  test.each([
+    ['shorter hours', { hours: 11 }, true],
+    ['Normal hrs filled in for the first time', { regular_hours: 12 - 4 }, true],
+    ['new times with the stored Hours kept', { end_time: '21:00' }, false],
+    ['a rename of a working shift', { name: 'Long Day' }, false],
+    ['a colour', { color: '#000' }, false],
+  ])('%s', (_, patch, changes) => {
+    expect(rosterDayShape(full) !== rosterDayShape({ ...full, ...patch })).toBe(changes)
+  })
+
+  test('renaming a zero-hour marker changes it when the name means another status', () => {
+    const leave = { name: 'LEAVE', hours: 0 }
+    expect(rosterDayShape(leave)).not.toBe(rosterDayShape({ ...leave, name: 'Paid Leave' }))
+    expect(rosterDayShape({ name: 'Day Off', hours: 0 })).toBe(rosterDayShape({ name: 'OFF DAY', hours: 0 }))
+  })
+
+  test('giving the shipped Split hours, or making it 0, changes it', () => {
+    const split = { name: 'Split', hours: null, start_time: null, end_time: null }
+    expect(rosterDayShape(split)).not.toBe(rosterDayShape({ ...split, hours: 9 }))
+    expect(rosterDayShape(split)).not.toBe(rosterDayShape({ ...split, hours: 0 }))
   })
 })
 
