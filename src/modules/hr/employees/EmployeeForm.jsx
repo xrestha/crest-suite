@@ -281,12 +281,20 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            They come off Payroll Run, Payroll Calculation, Final Settlement, the Roster and Attendance. Their record and
-            pay history are kept, and Activate brings them back.
+            They come off Final Settlement, the Roster and Attendance{employee.end_date ? ', and off payroll after their End Date' : ''}. Their
+            record and pay history are kept, and Activate brings them back.
           </p>
           <p style={{ margin: '0 0 8px' }}>
             <strong>If they are leaving, run Final Settlement first</strong> — once inactive they no longer appear there.
           </p>
+          {/* S798 3e (PAYROLL-1, H9 (a)): with no End Date nothing says how far to pay them, so Payroll
+              stops and names them rather than paying their days in this month to nobody. */}
+          {!employee.end_date && (
+            <p style={{ margin: '0 0 8px' }}>
+              <strong>They have no End Date.</strong> If they worked any part of this month, Edit and enter their last working day
+              first: payroll pays them up to it. Without one, Payroll names them and will not finalize until it is entered.
+            </p>
+          )}
           <p style={{ margin: 0 }}>This does not block their Self-Service login; use Deactivate (block login) on the Employees list for that.</p>
         </>
       ),
@@ -510,7 +518,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                   hide on any other type while the value stayed saved, and payroll pays a monthly
                   employee nothing after end_date — so a contract hire switched to Permanent kept a
                   date nobody could see or clear, and their pay stopped at it (S748). */}
-              {(form.employment_type === 'contract' || form.employment_type === 'part_time' || !!form.end_date) && (
+              {/* Also for every off-payroll status (S798 3e, H9 (a)): a leaver's last working day is how payroll
+                  knows how far to pay them, and the box used to be hidden for a permanent employee with none. */}
+              {(form.employment_type === 'contract' || form.employment_type === 'part_time' || !!form.end_date || OFF_PAYROLL_STATUSES.has(form.status)) && (
                 <div style={col}>
                   <label style={lbl} htmlFor="emp-end-date">
                     <Tip text="The last day this employee is paid for. Payroll pays nothing for days after it. Final Settlement sets it when someone leaves; clear it if they are still working." width={280}>
@@ -519,6 +529,11 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                   </label>
                   <BsCalendarPicker id="emp-end-date" value={form.end_date} onChange={v => set('end_date', v)} placeholder="Pick end date" clearable invalid={fieldErr.end_date} />
                   <FieldError id="emp-end-date" message={fieldErr.end_date} />
+                  {OFF_PAYROLL_STATUSES.has(form.status) && !form.end_date && !fieldErr.end_date && (
+                    <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4, lineHeight: 1.5 }}>
+                      △ Enter the last day they worked. Payroll pays them up to it; left blank, Payroll names them and waits.
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -556,7 +571,8 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </select>
               {OFF_PAYROLL_STATUSES.has(form.status) && form.status !== (employee?.status ?? 'active') && (
                 <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4, lineHeight: 1.5 }}>
-                  Saving takes {form.full_name.trim() || 'this employee'} off Payroll Run and Final Settlement. If they are leaving, run Final Settlement first — it sets this for you.
+                  Saving takes {form.full_name.trim() || 'this employee'} off Final Settlement{form.end_date ? ', and off payroll after the End Date' : ''}. If they are leaving, run Final Settlement first — it sets this and the End Date for you.
+                  {!form.end_date && ' Otherwise enter their last working day as the End Date, so payroll pays the days they worked.'}
                 </span>
               )}
             </div>

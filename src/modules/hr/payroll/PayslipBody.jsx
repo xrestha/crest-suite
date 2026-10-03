@@ -74,9 +74,10 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
       )}
 
       {/* Letterhead — a payslip with no employer identity on it is missing the single most
-          basic thing a pay document is expected to have. bizInfo is best-effort: an client that
-          hasn't filled in Settings → Property Address/PAN just gets a shorter header, not a
-          broken one. */}
+          basic thing a pay document is expected to have. bizInfo is best-effort: a client whose
+          address or PAN Crest has not entered yet (the operator's Settings → Property; the Owner
+          cannot see that tab, so Help says "ask Crest support", S798 DOCS-6) just gets a shorter
+          header, not a broken one. */}
       {bizInfo?.name && (
         <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: `2px solid ${forPrint ? '#000' : 'var(--theme-accent)'}` }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: c2 }}>{bizInfo.name}</div>

@@ -29,7 +29,7 @@ import { fetchMonthDepositExtras, monthDeposit } from './monthDeposit'
 // "Staff paid" (S782) sits between the run and the SSF deposit: Finalize pays nobody. The Payroll page
 // passes its own `payments`/`paymentsError`, so the step always agrees with the Paid column; without
 // them the step reads the run's payments itself.
-export default function PayrollMonthStatus({ period: givenPeriod, auto = false, employees, attendance, run, payslips, payments, paymentsError, runStale, onPayrollPage = false, refreshKey }) {
+export default function PayrollMonthStatus({ period: givenPeriod, auto = false, employees, attendance, run, payslips, payments, paymentsError, runStale, runHeld = false, onPayrollPage = false, refreshKey }) {
   const { clientId } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [state, setState] = useState({ loading: true })
@@ -148,7 +148,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
         text: `Finalized, but ${state.leftOut.join(', ')} ${state.leftOut.length === 1 ? 'is' : 'are'} employed this month with no payslip and no Final Settlement paying it — reopen and Regenerate`,
       }
       : r.status === 'finalized' ? { name: 'Payroll', tone: 'done', mark: '✓', text: 'Finalized', link: payrollLink }
-      : r.status === 'draft' ? { name: 'Payroll', tone: 'open', mark: '△', text: runStale ? 'Draft — out of date, Regenerate before finalizing' : 'Draft — not finalized yet', link: payrollLink }
+      : r.status === 'draft' ? { name: 'Payroll', tone: 'open', mark: '△', text: runStale ? 'Draft — out of date, Regenerate before finalizing' : runHeld ? 'Draft — waiting on a leaver\'s last working day' : 'Draft — not finalized yet', link: payrollLink }
       : { name: 'Payroll', tone: 'none', mark: '—', text: 'Not generated yet', link: payrollLink && ['/hr/payroll', 'Generate'] })
 
     // Staff paid (S782). "Not paid" is never inferred from a failed read.

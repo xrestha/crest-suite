@@ -15,7 +15,7 @@ import { nepalBs, nepalCivilDate, nepalBsLong, nepalDateLong } from '../../../sh
 import {
   fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds, dueAdvances,
   fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments, payrollCashCost,
-  writtenOffAdvancesForRun,
+  writtenOffAdvancesForRun, unendedLeavers,
 } from './payrollData'
 import PayslipBody from './PayslipBody'
 import PayrollApprovalSheet from './PayrollApprovalSheet'
@@ -46,13 +46,26 @@ const isRunFinalizedError = err => /hr_run_finalized/i.test(typeof err === 'stri
 const listNames = (ids, nameOf, max = 4) =>
   ids.slice(0, max).map(nameOf).join(', ') + (ids.length > max ? `, +${ids.length - max} more` : '')
 
-const FRESH = { live: null, stale: [], missing: [], departed: [], overridden: [], ok: true, reason: null, empty: false }
+const FRESH = { live: null, stale: [], missing: [], departed: [], held: [], overridden: [], ok: true, reason: null, empty: false }
+
+// Someone set off payroll with no last working day who worked this month (S798 3e, PAYROLL-1, H9 (a)),
+// in the owner's words: their status and what shows they worked. `prevName` is last month's name.
+const STATUS_WORD = { inactive: 'Inactive', resigned: 'Resigned', terminated: 'Terminated' }
+function describeHeld(r, prevName) {
+  const why = [
+    r.markedDays ? `${r.markedDays} day${r.markedDays === 1 ? '' : 's'} marked` : '',
+    r.otDays ? `overtime on ${r.otDays} day${r.otDays === 1 ? '' : 's'}` : '',
+    r.inRun ? 'a payslip in this draft, which Regenerate would remove' : '',
+    r.paidLastMonth ? `on the ${prevName} payroll` : '',
+  ].filter(Boolean).join(', ')
+  return `${r.employee.full_name} (${STATUS_WORD[r.employee.status] || r.employee.status}${why ? ` — ${why}` : ''})`
+}
 
 // Draft vs live — the ONE assessment (S751). The amber banner, the Finalize button and finalize()'s
 // own re-check all go through it; finalize() runs it over data re-read at the moment of committing,
 // because the page's copy can be minutes old and Finalize locks whatever it is shown.
 //
-// Four ways a draft is not finalizable, and every one of them blocks:
+// Five ways a draft is not finalizable, and every one of them blocks:
 //   stale     — a computed input moved since Generate (payslipDrift — inputs, never net_pay)
 //   missing   — someone on this month's payroll list has no payslip. A run with NO payslips (Generate's
 //               payslip insert failed) counts everyone as missing, so it can never be finalized empty.
@@ -61,10 +74,14 @@ const FRESH = { live: null, stale: [], missing: [], departed: [], overridden: []
 //               because Regenerate used to destroy a leaver's legitimate payslip. It cannot any more —
 //               fetchPayrollEmployees keeps a leaver on the list to their last day — so what is left
 //               in this bucket is exactly the payslips this run must not pay, and Regenerate removes them.
+//               Someone in `held` with a payslip here is in this bucket too; the page names them once, as held.
+//   held      — someone set Inactive, Resigned or Terminated with NO End Date who worked this month
+//               (unendedLeavers, S798 3e, PAYROLL-1, H9 (a)). Not on the list, so nothing pays their days;
+//               Finalize waits until an End Date is entered (it puts them on the list) or they are settled.
 //   reason    — the comparison itself could not run. A check that could not run has not passed; it
 //               used to `catch { return ok: true }`.
-function assessDraft(storedSlips, buildLive) {
-  const out = { live: null, stale: [], missing: [], departed: [], overridden: [], ok: false, reason: null }
+function assessDraft(storedSlips, buildLive, held = []) {
+  const out = { live: null, stale: [], missing: [], departed: [], held: held.map(r => r.employee.id), overridden: [], ok: false, reason: null }
   try {
     out.live = buildLive() || []
   } catch (e) {
@@ -93,7 +110,7 @@ function assessDraft(storedSlips, buildLive) {
   })
   const liveIds = new Set(out.live.map(r => r.payslip.employee_id))
   out.departed = stored.filter(s => !liveIds.has(s.employee_id)).map(s => s.employee_id)
-  out.ok = out.stale.length === 0 && out.missing.length === 0 && out.departed.length === 0
+  out.ok = out.stale.length === 0 && out.missing.length === 0 && out.departed.length === 0 && out.held.length === 0
   return out
 }
 
@@ -121,6 +138,10 @@ export default function PayrollRun() {
   const [employees,  setEmployees]  = useState([])
   // Left out of this month because a finalized Final Settlement already paid it — named on screen.
   const [settled,    setSettled]    = useState([])
+  // Off payroll with no End Date (S798 3e): fetchPayrollEmployees' `unended`, and who had a payslip last
+  // month. `held` below picks out the ones who worked this month.
+  const [unended,    setUnended]    = useState([])
+  const [paidLastMonth, setPaidLastMonth] = useState([])
   // People a stored payslip belongs to who are on neither list above (settled since, or not employed
   // this month) — read by id so a banner, a row, a payslip or the workbook never says "Unknown".
   const [extraEmps,  setExtraEmps]  = useState([])
@@ -172,8 +193,8 @@ export default function PayrollRun() {
   const [bizInfoFailed, setBizInfoFailed] = useState(false)
 
   const empMap = useMemo(
-    () => Object.fromEntries([...extraEmps, ...settled, ...employees].map(e => [e.id, e])),
-    [employees, settled, extraEmps],
+    () => Object.fromEntries([...extraEmps, ...unended, ...settled, ...employees].map(e => [e.id, e])),
+    [employees, settled, unended, extraEmps],
   )
   const nameOf = id => empMap[id]?.full_name || '(employee record not found)'
   // A run holding your own payslip is finalized and reopened by the Owner (S798 3a, H2): the database
@@ -213,6 +234,7 @@ export default function PayrollRun() {
       setLoading(true); setMsg(''); setLoadError(null); setRun(null); setPayslips([])
       setPayments([]); setPaymentsError(null); setMarkPaid(null); setUndoPay(null)
       setPeriods([]); setPeriod(null); setEmployees([]); setSettled([]); setExtraEmps([]); setConfirmAction(null)
+      setUnended([]); setPaidLastMonth([])
       const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       if (!periodReq.isCurrent(claim)) return
@@ -235,7 +257,8 @@ export default function PayrollRun() {
     const results = await Promise.all([
       // Who this month covers (decisions 4 and 14): active/probation plus anyone whose last day falls
       // in or after it, minus anyone already paid by a finalized Final Settlement (returned as `settled`).
-      fetchPayrollEmployees(scopedFrom, p),
+      // heldEvidence: also last month's payslips, for naming who left with no last day (S798 3e).
+      fetchPayrollEmployees(scopedFrom, p, { heldEvidence: true }),
       // Paged: a few rows per employee, so a large staff crosses the 1000-row cap, and a truncated read
       // silently drops allowances and deductions from pay.
       fetchAllRows(() => scopedFrom('hr_salary_components').order('id')),
@@ -263,6 +286,7 @@ export default function PayrollRun() {
     return {
       data: {
         employees: emps.data.employees, settled: emps.data.settled,
+        unended: emps.data.unended, paidLastMonth: emps.data.paidLastMonth,
         components: comps.data || [], attendance: att.data || [], otEntries: ot.data || [],
         advances: advs.data || [], repayments: reps.data || [],
         ytdMap: ytd.data || {}, tadaMap: tada.data || {},
@@ -292,7 +316,7 @@ export default function PayrollRun() {
       if (slipRes.error) error = slipRes.error
       else {
         slips = slipRes.data || []
-        const known = new Set([...inputs.data.employees, ...inputs.data.settled].map(e => e.id))
+        const known = new Set([...inputs.data.employees, ...inputs.data.settled, ...inputs.data.unended].map(e => e.id))
         // Payments too (S788): someone paid and then regenerated out of the month has no payslip, and
         // their row must carry a name rather than "(employee record not found)".
         const wanted = [...new Set([...slips, ...pays].map(r => r.employee_id))]
@@ -308,12 +332,14 @@ export default function PayrollRun() {
     if (error) {
       setLoadError(error)
       setRun(null); setPayslips([]); setEmployees([]); setSettled([]); setExtraEmps([])
+      setUnended([]); setPaidLastMonth([])
       setPayments([]); setPaymentsError(null)
       return
     }
     const d = inputs.data
     setLoadError(null)
     setEmployees(d.employees); setSettled(d.settled); setExtraEmps(extra)
+    setUnended(d.unended); setPaidLastMonth(d.paidLastMonth)
     setComponents(d.components); setAttendance(d.attendance); setOtEntries(d.otEntries)
     setAdvances(d.advances); setRepayments(d.repayments)
     setYtdMap(d.ytdMap); setTadaMap(d.tadaMap)
@@ -352,10 +378,24 @@ export default function PayrollRun() {
   // Live-vs-stored freshness. The draft is a snapshot taken at Generate time, so approving overtime,
   // editing attendance or approving a TADA claim afterwards leaves it quietly wrong — and Finalize
   // locks whatever is on screen. Only a draft has anything to be stale against.
+  // Who worked this month but is off payroll with no End Date (S798 3e, H9 (a)). Named before Generate
+  // and on a draft; a finalized month is history, so nobody is held there (a payslip someone was paid
+  // in it would otherwise read as evidence).
+  const held = useMemo(() => {
+    if (loading || loadError || !period || run?.status === 'finalized') return []
+    return unendedLeavers({ unended, attendance, otEntries, payslips: run ? payslips : [], paidLastMonth })
+  }, [loading, loadError, period, run, unended, attendance, otEntries, payslips, paidLastMonth])
+
   const freshness = useMemo(() => {
     if (loading || loadError || !run || run.status === 'finalized') return FRESH
-    return assessDraft(payslips, () => { if (liveRows.error) throw liveRows.error; return liveRows.rows })
-  }, [loading, loadError, run, payslips, liveRows])
+    return assessDraft(payslips, () => { if (liveRows.error) throw liveRows.error; return liveRows.rows }, held)
+  }, [loading, loadError, run, payslips, liveRows, held])
+  // What Regenerate fixes, apart from `held`, which only an End Date or a settlement fixes. A held
+  // person's own payslip here is in `departed` too, so it is taken out before deciding.
+  const heldIds = new Set(freshness.held)
+  const departedOnly = freshness.departed.filter(id => !heldIds.has(id))
+  const needsRegenerate = !!freshness.reason || freshness.stale.length > 0
+    || (freshness.missing.length > 0 && payslips.length > 0) || departedOnly.length > 0
 
   async function generate() {
     if (!period || busy) return
@@ -557,11 +597,12 @@ export default function PayrollRun() {
     if (ownSlip) { setMsg(`error:Not finalized. This payroll pays you (${nameOf(ownSlip.employee_id)}), so the Owner finalizes it.`); return }
     if (!freshness.ok) {
       const lines = [
-        'Not finalized. ' + (freshness.reason || 'This draft no longer matches current salary, attendance, overtime and TADA data.'),
+        'Not finalized. ' + (freshness.reason || (needsRegenerate ? 'This draft no longer matches current salary, attendance, overtime and TADA data.' : `Someone who worked in ${monthName} is not on this payroll.`)),
         freshness.stale.length ? `${freshness.stale.length} changed since Generate` : '',
         freshness.missing.length && payslips.length ? `${freshness.missing.length} with no payslip` : '',
-        freshness.departed.length ? `${freshness.departed.length} who should not be paid by this run` : '',
-        freshness.live && !freshness.empty ? 'Press Regenerate, then Finalize.' : '',
+        departedOnly.length ? `${departedOnly.length} who should not be paid by this run` : '',
+        freshness.held.length ? `${freshness.held.length} who worked in ${monthName} but ${freshness.held.length === 1 ? 'is' : 'are'} off payroll with no last working day: enter it on their employee record, or settle them` : '',
+        freshness.live && !freshness.empty && needsRegenerate ? 'Press Regenerate, then Finalize.' : '',
       ].filter(Boolean)
       setMsg('error:' + lines.join(' · '))
       return
@@ -593,19 +634,25 @@ export default function PayrollRun() {
 
     const fresh = inputs.data
     const slips = slipRes.data || []
-    const freshNames = new Map([...fresh.employees, ...fresh.settled].map(e => [e.id, e.full_name]))
+    const freshNames = new Map([...fresh.employees, ...fresh.settled, ...fresh.unended].map(e => [e.id, e.full_name]))
     const nameFresh = id => freshNames.get(id) || nameOf(id)
-    const check = assessDraft(slips, () => buildPayrollRows({ runId, period: p, ...fresh }))
+    // Who worked the month but is off payroll with no End Date, judged on the data just re-read (S798 3e).
+    const heldFresh = unendedLeavers({ unended: fresh.unended, attendance: fresh.attendance, otEntries: fresh.otEntries, payslips: slips, paidLastMonth: fresh.paidLastMonth })
+    const check = assessDraft(slips, () => buildPayrollRows({ runId, period: p, ...fresh }), heldFresh)
     if (!check.ok) {
+      const heldNow = new Set(check.held)
+      const departedNow = check.departed.filter(id => !heldNow.has(id))
       const parts = [
         check.stale.length ? `changed since Generate: ${listNames(check.stale, nameFresh)}` : '',
         check.missing.length && slips.length ? `no payslip: ${listNames(check.missing, nameFresh)}` : '',
-        check.departed.length ? `should not be paid by this run: ${listNames(check.departed, nameFresh)}` : '',
+        departedNow.length ? `should not be paid by this run: ${listNames(departedNow, nameFresh)}` : '',
+        check.held.length ? `worked in ${BS_MONTHS[p.bs_month - 1]} but off payroll with no last working day (enter it on their employee record, or settle them): ${listNames(check.held, nameFresh)}` : '',
       ].filter(Boolean)
+      const regen = check.stale.length > 0 || (check.missing.length > 0 && slips.length > 0) || departedNow.length > 0
       await stop('Payroll was NOT finalized — nothing has changed. '
-        + (check.reason || 'Checked against current data just now, this draft is out of date.')
+        + (check.reason || (regen ? 'Checked against current data just now, this draft is out of date.' : 'Checked against current data just now, someone who worked this month is not on it.'))
         + (parts.length ? ' ' + parts.join(' · ') + '.' : '')
-        + (check.live && !check.empty ? ' Press Regenerate, then Finalize.' : ''))
+        + (check.live && !check.empty && regen ? ' Press Regenerate, then Finalize.' : ''))
       return
     }
 
@@ -682,6 +729,24 @@ export default function PayrollRun() {
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
   const monthName = period ? BS_MONTHS[period.bs_month - 1] : 'this month'
   const finalized = run?.status === 'finalized'
+  const prevMonthName = period ? BS_MONTHS[(period.bs_month + 10) % 12] : 'last month'
+  // A payslip this run must not pay, by reason (S798 3e): the copy used to call all of them "already paid
+  // by a Final Settlement, or not employed", which told a manager to delete the payslip of someone who
+  // had simply been set Resigned with no last day. Held people are named apart, below.
+  const settledIdSet = new Set(settled.map(e => e.id))
+  const departedSettled = departedOnly.filter(id => settledIdSet.has(id))
+  const departedOutside = departedOnly.filter(id => !settledIdSet.has(id))
+  const heldText = held.length > 0 && (
+    <>
+      <strong style={{ color: 'var(--theme-text1)' }}>{held.length}</strong>{' '}
+      {held.length === 1 ? 'person who worked' : 'people who worked'} in {monthName} {held.length === 1 ? 'is' : 'are'} set
+      {' '}Inactive, Resigned or Terminated with no last working day:{' '}
+      {held.slice(0, 6).map(r => describeHeld(r, prevMonthName)).join('; ')}{held.length > 6 ? `; +${held.length - 6} more` : ''}.
+      {' '}Nothing pays their days in {monthName} until you enter the End Date on their record in{' '}
+      <Link className="month-status__link" to="/hr/employees">Employees</Link> (payroll then pays them up to it), or set them back to
+      {' '}Active and run Final Settlement. {run ? 'Finalize waits until then.' : 'You can generate now; Finalize waits until then.'}
+    </>
+  )
 
   // Who has been paid (S782). One summary from the page's own payslips and payments, so the Paid
   // column, "Mark everyone paid", the status strip and the Reopen warning cannot disagree.
@@ -806,7 +871,8 @@ export default function PayrollRun() {
     if (!run || busy || loading || payslips.length === 0) return
     if (!finalized && !freshness.ok) {
       setMsg('error:The approval sheet was not printed — this draft cannot be finalized as it stands, so the Owner would be signing figures that are about to change. '
-        + (freshness.reason || 'Press Regenerate, then print it.'))
+        + (freshness.reason || (needsRegenerate ? 'Press Regenerate, then print it.'
+          : `Someone who worked in ${monthName} is off payroll with no last working day: enter it on their employee record, or settle them, then print it.`)))
       return
     }
     // The month's deposit is more than this run (S798 PAYROLL-2): a leaver's Final Settlement and a
@@ -925,7 +991,7 @@ export default function PayrollRun() {
           <PayrollMonthStatus
             period={period} employees={employees} attendance={attendance} run={run} payslips={payslips}
             payments={payments} paymentsError={paymentsError}
-            runStale={!!run && !finalized && !freshness.ok} onPayrollPage
+            runStale={!!run && !finalized && needsRegenerate} runHeld={!!run && !finalized && held.length > 0} onPayrollPage
             refreshKey={`${run?.id || ''}:${run?.status || ''}:${payslips.length}:${attendance.length}`}
           />
         )}
@@ -936,7 +1002,13 @@ export default function PayrollRun() {
         {!loading && !loadError && period && finalized && (
           <div className="card" role="note" style={{ marginBottom: 12, padding: '10px 16px', display: 'flex', gap: '6px 18px', flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
             <strong style={{ color: 'var(--theme-text1)' }}>Next for {monthName}:</strong>
-            <Link className="month-status__link" to={`/hr/reports?tab=bank&period=${period.id}`}>Pay staff — bank transfer sheet</Link>
+            {/* The sheet lists only what is still owed (S798 3e, H1 (a)), so the link says so once anyone is
+                paid, and goes once nobody is left to pay. */}
+            {(paymentsError || paySummary.toPay.length > 0) && (
+              <Link className="month-status__link" to={`/hr/reports?tab=bank&period=${period.id}`}>
+                {!paymentsError && paySummary.paidTotal > 0 ? `Pay what is still owed (${paySummary.toPay.length}) — bank transfer sheet` : 'Pay staff — bank transfer sheet'}
+              </Link>
+            )}
             {/* Then record it (S782). Finalize pays nobody; this is the record that the money went out. */}
             {paymentsError ? (
               <span style={{ color: 'var(--theme-amber-text)' }}>△ Salary payments could not be read — reload before marking anyone paid.</span>
@@ -971,7 +1043,9 @@ export default function PayrollRun() {
             <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
               {freshness.empty
                 ? `⚠ Nobody is on the ${monthName} payroll`
-                : freshness.live ? '⚠ This draft is out of date — Regenerate before finalizing' : '⚠ This draft could not be checked, so it cannot be finalized'}
+                : !freshness.live ? '⚠ This draft could not be checked, so it cannot be finalized'
+                : needsRegenerate ? '⚠ This draft is out of date — Regenerate before finalizing'
+                : `⚠ Someone who worked in ${monthName} is not on this payroll`}
             </p>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
               {freshness.reason && <>{freshness.reason}{' '}</>}
@@ -988,13 +1062,17 @@ export default function PayrollRun() {
                   {' '}({listNames(freshness.missing, nameOf)}).{' '}
                 </>
               )}
-              {freshness.departed.length > 0 && (
-                <><strong style={{ color: 'var(--theme-text1)' }}>{freshness.departed.length}</strong>{' '}
-                  payslip{freshness.departed.length === 1 ? ' here belongs to someone who' : 's here belong to people who'} should not be paid by this run
-                  {' '}({listNames(freshness.departed, nameOf)}) — already paid by a Final Settlement, or not employed in {monthName}. Regenerate removes {freshness.departed.length === 1 ? 'it' : 'them'}.{' '}
+              {departedOnly.length > 0 && (
+                <><strong style={{ color: 'var(--theme-text1)' }}>{departedOnly.length}</strong>{' '}
+                  payslip{departedOnly.length === 1 ? ' here belongs to someone' : 's here belong to people'} this run must not pay:{' '}
+                  {[
+                    departedSettled.length ? `${listNames(departedSettled, nameOf)} (already paid by a Final Settlement)` : '',
+                    departedOutside.length ? `${listNames(departedOutside, nameOf)} (not employed in ${monthName}: the join or end date falls outside it)` : '',
+                  ].filter(Boolean).join('; ')}. Regenerate removes {departedOnly.length === 1 ? 'it' : 'them'}.{' '}
                 </>
               )}
-              {freshness.live && !freshness.empty && 'Regenerate rebuilds the draft from current data; income tax typed by hand is reset.'}
+              {heldText && <>{heldText}{' '}</>}
+              {freshness.live && !freshness.empty && needsRegenerate && 'Regenerate rebuilds the draft from current data; income tax typed by hand is reset.'}
             </p>
             {freshness.empty && (
               <button className="btn btn-danger btn-sm" style={{ marginTop: 8 }} onClick={requestDeleteEmptyRun} disabled={busy}>
@@ -1012,6 +1090,15 @@ export default function PayrollRun() {
               <strong style={{ color: 'var(--theme-text1)' }}>Left out — already paid by Final Settlement:</strong>
             </Tip>{' '}
             {settled.map(e => e.full_name).join(', ')}
+          </div>
+        )}
+
+        {/* Before Generate (S798 3e, H9 (a)): someone who worked this month but is off payroll with no
+            last working day is not in the count below, and nothing would pay their days. */}
+        {!loading && !loadError && period && !run && held.length > 0 && (
+          <div role="alert" className="card" style={{ marginBottom: 12, padding: '12px 16px', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>⚠ Someone who worked in {monthName} is not on this payroll</p>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>{heldText}</p>
           </div>
         )}
 
@@ -1322,10 +1409,13 @@ export default function PayrollRun() {
       )}
 
       {confirmAction === 'regenerate' && (() => {
-        // Regenerate rebuilds from this month's payroll list, so a payslip for someone not on it —
-        // already paid by a Final Settlement, or not employed this month — is deleted and not
-        // re-inserted. That is the right outcome now (S751), and the modal still names them.
-        const departedNames = freshness.departed.map(nameOf)
+        // Regenerate rebuilds from this month's payroll list, so a payslip for someone not on it is
+        // deleted and not re-inserted. That is right for a settled leaver or someone employed outside
+        // the month (S751). For someone off payroll with no last day it is not the fix, so the modal says
+        // what is (S798 3e): it used to call them "not employed this month", and the manager agreed.
+        const settledNames = departedSettled.map(nameOf)
+        const outsideNames = departedOutside.map(nameOf)
+        const heldInRun = held.filter(r => r.inRun).map(r => r.employee.full_name)
         return (
           <ConfirmModal
             title="Regenerate this payroll draft?"
@@ -1340,12 +1430,23 @@ export default function PayrollRun() {
               claims that are Approved with the trip over by the end of {monthName}. Nothing is
               finalized by this step.
             </p>
-            {departedNames.length > 0 && (
+            {departedOnly.length > 0 && (
               <p style={{ margin: '10px 0 0' }}>
-                {departedNames.slice(0, 8).join(', ')}{departedNames.length > 8 ? `, +${departedNames.length - 8} more` : ''}{' '}
-                {departedNames.length === 1 ? 'has a payslip' : 'have payslips'} in this run but{' '}
-                {departedNames.length === 1 ? 'is' : 'are'} not on the {monthName} payroll (already paid by a Final Settlement, or not employed this month) —{' '}
-                {departedNames.length === 1 ? 'that payslip' : 'those payslips'} will be removed.
+                {[
+                  settledNames.length ? `${settledNames.slice(0, 8).join(', ')}${settledNames.length > 8 ? `, +${settledNames.length - 8} more` : ''} (already paid by a Final Settlement)` : '',
+                  outsideNames.length ? `${outsideNames.slice(0, 8).join(', ')}${outsideNames.length > 8 ? `, +${outsideNames.length - 8} more` : ''} (not employed in ${monthName}: the join or end date falls outside it)` : '',
+                ].filter(Boolean).join('; ')}{' '}
+                {departedOnly.length === 1 ? 'has a payslip' : 'have payslips'} in this run but{' '}
+                {departedOnly.length === 1 ? 'is' : 'are'} not on the {monthName} payroll —{' '}
+                {departedOnly.length === 1 ? 'that payslip' : 'those payslips'} will be removed.
+              </p>
+            )}
+            {heldInRun.length > 0 && (
+              <p style={{ margin: '10px 0 0' }}>
+                <strong>{heldInRun.join(', ')}</strong> {heldInRun.length === 1 ? 'is' : 'are'} set Inactive, Resigned or Terminated with no
+                {' '}last working day. {heldInRun.length === 1 ? 'That payslip' : 'Those payslips'} will be removed too, and the days worked in
+                {' '}{monthName} stay unpaid until you enter the End Date on {heldInRun.length === 1 ? 'their record' : 'each record'} (payroll then
+                {' '}pays up to it) or settle {heldInRun.length === 1 ? 'them' : 'each one'}. Finalize waits until then.
               </p>
             )}
           </ConfirmModal>

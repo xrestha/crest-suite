@@ -17,6 +17,8 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
+import { errorLine } from '../../../shared/errorText'
+import { bankTransferPlan, fetchRunPayments } from '../payroll/salaryPayments'
 
 const fmt = nprInt
 // A date-only string parsed as LOCAL midnight — `new Date('YYYY-MM-DD')` is UTC midnight, a day early
@@ -78,6 +80,11 @@ export default function HrReports() {
   // not on that month's payroll, so their final month's SSF and tax — and the tax on their exit
   // payments — reached no filing sheet at all.
   const [monthSettlements, setMonthSettlements] = useState([])
+  // Salary payments recorded against the run (S798 3e, REPORTS-1). The Bank Transfer sheet lists only
+  // what is still owed, so a failed read is its own state: the sheet then cannot be downloaded, never
+  // falls back to full net pay. It does not take the filing sheets down with it.
+  const [payments,  setPayments]  = useState([])
+  const [paymentsError, setPaymentsError] = useState(null)
   const [loading,   setLoading]   = useState(true)
   // S612 silent-zero rule: a failed read must render as a failure, never as "no payroll run" or
   // a challan of zeros — these are figures an accountant files on.
@@ -111,6 +118,7 @@ export default function HrReports() {
       setLoadError(null)
       // A switch to a client with no periods must not keep the previous client's payroll on screen.
       setPeriod(null); setRun(null); setPayslips([]); setYtdTds({}); setMonthBonuses([]); setMonthSettlements([])
+      setPayments([]); setPaymentsError(null)
       setCertEmpId(''); setCertSlips([]); setCertBonuses([]); setCertSettlements([])
       const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
@@ -219,16 +227,20 @@ export default function HrReports() {
     if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }   // superseded by a newer period selection
     // S612 silent-zero rule: a failed read here would wear the "no payroll run this period"
     // empty state — and the challan/TDS sheets on this page are figures an accountant files on.
-    if (runErr || settleErr) { setLoadError(runErr || settleErr); setRun(null); setPayslips([]); setMonthSettlements([]); await ytdPromise; return }
+    if (runErr || settleErr) { setLoadError(runErr || settleErr); setRun(null); setPayslips([]); setMonthSettlements([]); setPayments([]); setPaymentsError(null); await ytdPromise; return }
     setMonthSettlements(settled || [])
     setRun(runRow || null)
     if (runRow) {
-      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      const [{ data: slips, error: slipErr }, payRes] = await Promise.all([
+        scopedFrom('hr_payslips').eq('run_id', runRow.id),
+        fetchRunPayments(scopedFrom, runRow.id),
+      ])
       if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }
+      setPayments(payRes.error ? [] : (payRes.data || [])); setPaymentsError(payRes.error || null)
       if (slipErr) { setLoadError(slipErr); setPayslips([]); await ytdPromise; return }
       setPayslips(slips || [])
     } else {
-      setPayslips([])
+      setPayslips([]); setPayments([]); setPaymentsError(null)
     }
     await ytdPromise
   }
@@ -308,6 +320,9 @@ export default function HrReports() {
 
   // ── Derived rows ────────────────────────────────────────────────────────────
   const rows = payslips.map(s => ({ s, emp: empMap[s.employee_id] || {} }))
+  // The Bank Transfer sheet: still owed only (S798 3e, H1 (a)). Built from the run's payslips and its
+  // recorded payments, so a sheet reused after a Reopen or a cash payment can never pay anyone twice.
+  const bankPlan = bankTransferPlan(payslips, payments)
   // Who is on the challan is decided by what was DEDUCTED, not by today's employee record (S752): a
   // number added in Magh put a zero-contribution row on Kartik's challan, and unticking the flag
   // dropped a worker whose 11% had been withheld. A finalized settlement's final month joins it.
@@ -323,9 +338,9 @@ export default function HrReports() {
   const runState = run ? (finalized ? 'FINALIZED' : 'DRAFT — figures may change') : 'no payroll run'
   // Every export states what it covers, including whether the run was a draft: a bank file or a
   // challan exported from a draft used to be indistinguishable from a finalized one (S752).
-  async function downloadSheet(data, sheet, ext = 'xlsx', { scoped = true } = {}) {
+  async function downloadSheet(data, sheet, ext = 'xlsx', { scoped = true, note = '' } = {}) {
     const XLSX = await import('xlsx')
-    const scope = `${clientName || 'Payroll'} — ${sheet} — ${scoped ? `${periodLabel} — payroll ${runState}` : `as of ${fmtDate(new Date().toISOString().slice(0, 10))}`}`
+    const scope = `${clientName || 'Payroll'} — ${sheet} — ${scoped ? `${periodLabel} — payroll ${runState}` : `as of ${fmtDate(new Date().toISOString().slice(0, 10))}`}${note ? ` — ${note}` : ''}`
     const ws = ext === 'csv' ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([[scope], []])
     if (ext !== 'csv') XLSX.utils.sheet_add_json(ws, data, { origin: 'A3' })
     const wb = XLSX.utils.book_new()
@@ -698,43 +713,101 @@ export default function HrReports() {
             </div>
           )}
 
-          {/* ── BANK TRANSFER ── */}
-          {tab === 'bank' && (
+          {/* ── BANK TRANSFER ──
+              Still owed only (S798 3e, REPORTS-1, H1 (a)): the sheet and both downloads carry what each
+              person has NOT yet been paid, and whoever was left off is named above the table. It used to
+              list every payslip at full net pay whatever had been paid, so reusing it after a Reopen or a
+              cash payment paid staff twice. With the payments unread there is no safe sheet, so neither
+              download is offered. */}
+          {tab === 'bank' && (() => {
+            const who = id => nameById[id] || '(employee no longer on file)'
+            const leftOff = [
+              bankPlan.paid.length ? `already paid: ${bankPlan.paid.map(l => who(l.s.employee_id)).join(', ')}` : '',
+              bankPlan.over.length ? `paid too much: ${bankPlan.over.map(l => who(l.s.employee_id)).join(', ')}` : '',
+              bankPlan.noPayslip.length ? `paid, no payslip now: ${bankPlan.noPayslip.map(r => who(r.employee_id)).join(', ')}` : '',
+            ].filter(Boolean)
+            const bankNote = `amounts still owed after the salary payments recorded in Crest${leftOff.length ? ` — left off: ${leftOff.join('; ')}` : ''}`
+            const canDownload = !paymentsError && bankPlan.toPay.length > 0
+            return (
             <div className="card" style={{ padding: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--theme-border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--theme-border)', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Salary Disbursement — {periodLabel}</span>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Total: <strong style={{ color: 'var(--theme-green-text)' }}>NPR {fmt(tot.net)}</strong></div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
+                    {paymentsError
+                      ? <>Net pay NPR {fmt(bankPlan.netTotal)} · what is still owed could not be checked</>
+                      : <>{bankPlan.toPay.length === 0
+                            ? 'Nothing still to pay'
+                            : <>Still to pay: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(bankPlan.dueTotal)}</strong> to {bankPlan.toPay.length} {bankPlan.toPay.length === 1 ? 'person' : 'people'}</>}
+                          {bankPlan.paidTotal > 0 && <> · NPR {fmt(bankPlan.paidTotal)} already marked paid</>}</>}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }} className="no-print">
-                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => downloadSheet(bankData(), 'Bank Transfer')}>⬇ Excel</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => downloadSheet(bankData(), 'Bank Transfer', 'csv')}>⬇ CSV</button>
+                  <Tip text="Only the people still owed, at what they are still owed. Anyone already marked paid on Payroll is left off, so the file can be uploaded to the bank without paying anyone twice. The CSV has no heading line, so a bank can read it." width={280}>
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={!canDownload} onClick={() => downloadSheet(bankData(), 'Bank Transfer', 'xlsx', { note: bankNote })}>⬇ Excel</button>
+                  </Tip>
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={!canDownload} onClick={() => downloadSheet(bankData(), 'Bank Transfer', 'csv')}>⬇ CSV</button>
                 </div>
               </div>
+              {paymentsError && (
+                <div role="alert" style={{ padding: '10px 18px', fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderBottom: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)' }}>
+                  △ The salary payments for {periodLabel} could not be read, so this sheet cannot tell who is already paid. Downloading is switched off: a sheet at full net pay could pay someone twice. Reload the page. {errorLine(paymentsError)}
+                </div>
+              )}
+              {!paymentsError && (bankPlan.paid.length > 0 || bankPlan.over.length > 0 || bankPlan.noPayslip.length > 0) && (
+                <div role="note" className="note-banner" style={{ margin: 0, border: 'none', borderBottom: '1px solid var(--theme-border)', borderRadius: 0, fontSize: 12 }}>
+                  <strong>Left off this sheet.</strong>
+                  {bankPlan.paid.length > 0 && <> Already paid: {bankPlan.paid.map(l => who(l.s.employee_id)).join(', ')}.</>}
+                  {bankPlan.over.length > 0 && <> Paid more than their payslip now says: {bankPlan.over.map(l => `${who(l.s.employee_id)} (NPR ${fmt(-l.st.due)} too much)`).join(', ')} — the month was reopened and their pay went down; get it back by hand.</>}
+                  {bankPlan.noPayslip.length > 0 && <> Paid in this run but no longer on it: {bankPlan.noPayslip.map(r => `${who(r.employee_id)} (NPR ${fmt(r.st.paid)})`).join(', ')} — see Payroll.</>}
+                </div>
+              )}
+              {!paymentsError && bankPlan.lines.length > 0 && bankPlan.toPay.length === 0 && (
+                <div role="status" style={{ padding: '10px 18px', fontSize: 12, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)' }}>
+                  Everyone on this payroll is marked paid — there is nothing left to transfer.
+                </div>
+              )}
               <div className="table-wrap">
                 <table className="data-table">
-                  <thead><tr><th>Employee</th><th>Bank</th><th>Account No</th><th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Net Pay</th></tr></thead>
+                  <thead><tr>
+                    <th>Employee</th><th>Bank</th><th>Account No</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="All figures in NPR. Net pay is the payslip's take-home, travel claims included." width={240}>Net Pay</Tip></th>
+                    {!paymentsError && <th style={{ textAlign: 'right' }}><Tip text="Salary payments recorded on Payroll with Mark paid. An undone mark is not counted." width={240}>Paid</Tip></th>}
+                    {!paymentsError && <th style={{ textAlign: 'right' }}><Tip text="Net pay less what has been paid. This is the amount the downloads carry; someone fully paid is left off them." width={240}>Still to pay</Tip></th>}
+                  </tr></thead>
                   <tbody>
-                    {rows.map(({ s, emp }) => {
+                    {bankPlan.lines.map(({ s, st }) => {
+                      const emp = empMap[s.employee_id] || {}
                       const missing = !emp.bank_name || !emp.bank_account_no
                       return (
                         <tr key={s.id}>
-                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name}</td>
-                          <td style={{ color: missing ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{emp.bank_name || '⚠ missing'}</td>
-                          <td style={{ color: missing ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{emp.bank_account_no || '⚠ missing'}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 600 }}>{fmt(s.net_pay)}</td>
+                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name || '(employee no longer on file)'}</td>
+                          <td style={{ color: missing ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{emp.bank_name || '△ missing'}</td>
+                          <td style={{ color: missing ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{emp.bank_account_no || '△ missing'}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.net_pay)}</td>
+                          {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{st.paid > 0 ? fmt(st.paid) : '—'}</td>}
+                          {!paymentsError && (
+                            <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: st.state === 'over' ? 'var(--theme-amber-text)' : st.state === 'paid' || st.state === 'none' ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+                              {st.state === 'unpaid' || st.state === 'short' ? fmt(st.due)
+                                : st.state === 'over' ? `△ ${fmt(-st.due)} too much`
+                                : st.state === 'paid' ? 'Paid' : '—'}
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
                   </tbody>
-                  <tfoot><tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmt(tot.net)}</td>
+                  <tfoot><tr>
+                    <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {bankPlan.lines.length}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(bankPlan.netTotal)}</td>
+                    {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(bankPlan.linesPaid)}</td>}
+                    {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(bankPlan.dueTotal)}</td>}
                   </tr></tfoot>
                 </table>
               </div>
             </div>
-          )}
+            )
+          })()}
 
           {/* ── TDS ── */}
           {tab === 'tds' && (
@@ -827,8 +900,13 @@ export default function HrReports() {
     </div>
   )
 
+  // Still owed only (S798 3e, H1 (a)): one line per person owed money, at what is still owed — never
+  // full net pay, which paid twice anyone already paid. The CSV keeps these four columns for the bank.
   function bankData() {
-    return rows.map(({ s, emp }) => ({ Name: emp.full_name, Bank: emp.bank_name || '', 'Account No': emp.bank_account_no || '', Amount: s.net_pay }))
+    return bankPlan.toPay.map(({ s, st }) => {
+      const emp = empMap[s.employee_id] || {}
+      return { Name: emp.full_name || '', Bank: emp.bank_name || '', 'Account No': emp.bank_account_no || '', Amount: st.due }
+    })
   }
 }
 

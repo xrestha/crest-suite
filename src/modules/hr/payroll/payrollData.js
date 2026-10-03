@@ -415,38 +415,82 @@ export const PAYROLL_EMPLOYEE_COLUMNS = 'id, full_name, employee_code, pay_basis
 // settlement pays the final month's part-salary itself, so a draft payslip for the same person
 // used to be finalized on top of it and the month was paid twice.
 //
-// Returns { data: { employees, settled }, error } — `settled` lists who was left out for a
-// settlement, so the page can say so by name.
+// Returns { data: { employees, settled, unended, paidLastMonth }, error } — `settled` lists who was
+// left out for a settlement, so the page can say so by name.
+//
+// S798 3e (PAYROLL-1, decision H9 (a)): `unended` is everyone set Inactive, Resigned or Terminated with
+// NO End Date who joined by the month's end and is not settled. They are not on the list — nothing says
+// how far to pay them — and before S798 they dropped out without a word, so a waiter who walked out on
+// 18 Bhadra and was set Resigned was paid nothing for those 18 days. unendedLeavers() picks out the ones
+// with evidence they worked the month; Payroll names them and holds Finalize until a last working day is
+// entered or they are settled. `paidLastMonth` (employee ids with a payslip in the previous BS month's
+// run) is that evidence for monthly staff, whose blank days are paid without a mark; it is read only
+// with { heldEvidence: true }, so the HR Dashboard's month strip does not pay for a read it never uses.
 //
 // S791: a settlement leaves someone out of their last month AND every later month, in the CURRENT
 // employment only — the same rule as the database's refusal (hr_run_settled_employee_names). It
 // used to match only a last working day inside this month, so a leaver set back to Active with the
 // end date cleared was rebuilt into every later payslip and Finalize refused it with no way out. A
 // rehire (a join date after the settled last day) is a new employment and is paid.
-export async function fetchPayrollEmployees(scopedFrom, period) {
+const ON_PAYROLL_STATUSES = new Set(['active', 'probation'])
+
+export async function fetchPayrollEmployees(scopedFrom, period, { heldEvidence = false } = {}) {
   const { start, end } = periodAdBounds(period)
-  const [emps, settlements] = await Promise.all([
+  const prev = period.bs_month === 1 ? { y: period.bs_year - 1, m: 12 } : { y: period.bs_year, m: period.bs_month - 1 }
+  const [emps, settlements, lastMonth] = await Promise.all([
+    // `end_date.is.null` brings in the off-payroll staff with no End Date (S798 3e), split off below.
     scopedFrom('hr_employees', PAYROLL_EMPLOYEE_COLUMNS)
-      .or(`status.in.(active,probation),end_date.gte.${start}`)
+      .or(`status.in.(active,probation),end_date.gte.${start},end_date.is.null`)
       .order('full_name'),
     scopedFrom('hr_final_settlements', 'employee_id, last_working_date')
       .eq('status', 'finalized')
       .lte('last_working_date', end),
+    // One run per month, its payslips embedded: one per employee, well under any row cap.
+    heldEvidence
+      ? scopedFrom('hr_payroll_runs', 'id, monthly_periods!inner(bs_year, bs_month), hr_payslips(employee_id)')
+        .eq('monthly_periods.bs_year', prev.y).eq('monthly_periods.bs_month', prev.m)
+      : Promise.resolve({ data: [], error: null }),
   ])
   if (emps.error) return { data: null, error: emps.error }
   if (settlements.error) return { data: null, error: settlements.error }
+  if (lastMonth.error) return { data: null, error: lastMonth.error }
   const joinOf = new Map((emps.data || []).map(e => [e.id, e.join_date ? String(e.join_date).slice(0, 10) : null]))
   const settledIds = new Set((settlements.data || [])
     .filter(s => { const j = joinOf.get(s.employee_id); return !j || String(s.last_working_date).slice(0, 10) >= j })
     .map(s => s.employee_id))
-  const inMonth = (emps.data || []).filter(e => employedInPeriod(e, start, end))
+  const onList = e => ON_PAYROLL_STATUSES.has(e.status) || !!e.end_date
+  const inMonth = (emps.data || []).filter(e => onList(e) && employedInPeriod(e, start, end))
   return {
     data: {
       employees: inMonth.filter(e => !settledIds.has(e.id)),
       settled:   inMonth.filter(e => settledIds.has(e.id)),
+      unended:   (emps.data || []).filter(e => !onList(e) && employedInPeriod(e, start, end) && !settledIds.has(e.id)),
+      paidLastMonth: [...new Set((lastMonth.data || []).flatMap(r => (r.hr_payslips || []).map(p => p.employee_id)))],
     },
     error: null,
   }
+}
+
+// Who, of fetchPayrollEmployees' `unended`, worked this month (S798 3e, PAYROLL-1, H9 (a)): any day
+// marked on the attendance sheet, any approved overtime, a payslip in this month's run (set off payroll
+// after Generate), or a payslip last month (a monthly worker's blank days are paid, so an outlet that
+// marks only absences leaves no mark at all). Nothing is guessed: Payroll names each one and holds
+// Finalize until an End Date is entered, which puts them on the list paid to that day, or they are
+// settled. Someone off payroll for months has none of this and is never named.
+export function unendedLeavers({ unended, attendance, otEntries, payslips, paidLastMonth }) {
+  const marks = groupByEmployee(attendance)
+  const ot = groupByEmployee(otEntries)
+  const inRun = new Set((payslips || []).map(s => s.employee_id))
+  const last = new Set(paidLastMonth || [])
+  return (unended || [])
+    .map(employee => ({
+      employee,
+      markedDays: new Set((marks.get(employee.id) || []).map(r => r.bs_day)).size,
+      otDays: new Set((ot.get(employee.id) || []).map(r => r.bs_day)).size,
+      inRun: inRun.has(employee.id),
+      paidLastMonth: last.has(employee.id),
+    }))
+    .filter(r => r.markedDays > 0 || r.otDays > 0 || r.inRun || r.paidLastMonth)
 }
 
 // Names for employees a stored run mentions but the payroll list no longer carries (a leaver since

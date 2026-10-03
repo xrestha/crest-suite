@@ -124,6 +124,11 @@ History: #s748-employees-pay-setup-holiday-calendar, #s751-payroll-decisions, #s
   current employment from the month of `last_working_date` (`hr_run_settled_employee_names`). A join
   date after the settled last day is a rehire and is paid. Never key this on `settle_bs_*`. A stored
   payslip for someone NOT on the list must not be finalized.
+- **Off payroll with no End Date is never silently left out** (S798 3e, H9 (a)). `fetchPayrollEmployees`
+  returns them as `unended`; `unendedLeavers` names those who worked the month (marks, approved OT, a
+  payslip in this run, or one last month, since a monthly worker's blank days are paid unmarked), and
+  `assessDraft`'s `held` bucket blocks Finalize until an End Date is entered or they are settled. Never
+  guess a last day. Employees shows End Date for every off-payroll status.
 - **Payroll Run refuses to finalize a stale draft.** It recomputes live through `buildPayrollRows` on
   every load and compares each employee with `payslipDrift(stored, live)` (`payrollData.js`), the one
   comparison: `'moved' | 'overridden' | null`. It compares inputs, never `net_pay`: the
@@ -224,13 +229,16 @@ History: #s613-finalize-gates, #s620-reopen-rank, #s682-finalize-and-reopen-poin
   required reason, never a delete.
 - **A failed payments read is its own state** ("not checked", Mark paid hidden), never "not paid",
   and it does not take the register down. The Staff app swallows its read and shows nothing.
+- **The Bank Transfer sheet carries only what is still owed** (`bankTransferPlan`, S798 3e, H1 (a)),
+  draft or finalized, and names who was left off. A failed payments read disables its downloads; it
+  never falls back to full net pay. A new pay-out sheet reads payments the same way.
 - **`runPaymentSummary()` walks payslips AND payments** (S788). Someone paid and then regenerated out
   of the month counts in `over` and `paidTotal` (not `owed`/`paid`), is listed in `noPayslip`, and
   gets their own row on Payroll Run so the Undo stays reachable.
 
 Why: a paid mark on a payslip would be wiped by the next Regenerate.
 
-History: #s782-salary-payments
+History: #s782-salary-payments; S798 3e is in the CHANGELOG
 
 ## Advances and TADA
 

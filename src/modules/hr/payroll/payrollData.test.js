@@ -1,4 +1,4 @@
-import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost, ytdFromPayslips, payslipDrift, payslipNetGap } from './payrollData'
+import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost, ytdFromPayslips, payslipDrift, payslipNetGap, unendedLeavers } from './payrollData'
 import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 
 // `buildRows` in PayrollRun.jsx and `rows` in PayrollCalculation.jsx replaced a per-employee
@@ -263,5 +263,39 @@ describe('payslipNetGap / payslipDrift — net pay must be its parts', () => {
 
   it('keeps a typed TDS an override, because writing it rewrites net with the identity', () => {
     expect(payslipDrift({ ...slip, tds: 900, net_pay: net - 450, tds_overridden: true }, slip)).toBe('overridden')
+  })
+})
+
+// S798 3e (PAYROLL-1, H9 (a)): someone set off payroll with no End Date after working part of the month
+// is named, never dropped; someone off payroll for months is never named.
+describe('unendedLeavers', () => {
+  const ram  = { id: 'ram',  full_name: 'Ram',  status: 'resigned', end_date: null }
+  const sita = { id: 'sita', full_name: 'Sita', status: 'inactive', end_date: null }
+  const old  = { id: 'old',  full_name: 'Hari', status: 'inactive', end_date: null }
+  const hem  = { id: 'hem',  full_name: 'Hem',  status: 'terminated', end_date: null }
+  const days = (id, n) => Array.from({ length: n }, (_, i) => ({ employee_id: id, bs_day: i + 1 }))
+
+  it('names whoever has marks, overtime, a payslip in this run or one last month', () => {
+    const held = unendedLeavers({
+      unended: [ram, sita, old, hem],
+      attendance: [...days('ram', 18), { employee_id: 'ram', bs_day: 3 }],   // a duplicate day counts once
+      otEntries: [{ employee_id: 'hem', bs_day: 4 }],
+      payslips: [],
+      paidLastMonth: ['sita'],
+    })
+    expect(held.map(r => r.employee.id)).toEqual(['ram', 'sita', 'hem'])
+    expect(held[0]).toMatchObject({ markedDays: 18, otDays: 0, inRun: false, paidLastMonth: false })
+    expect(held[1]).toMatchObject({ markedDays: 0, paidLastMonth: true })
+    expect(held[2]).toMatchObject({ otDays: 1 })
+  })
+
+  it('names someone set off payroll after Generate, by their payslip in this run', () => {
+    const held = unendedLeavers({ unended: [ram], attendance: [], otEntries: [], payslips: [{ employee_id: 'ram' }], paidLastMonth: [] })
+    expect(held).toEqual([expect.objectContaining({ inRun: true })])
+  })
+
+  it('names nobody long gone, and nobody when nothing is off payroll', () => {
+    expect(unendedLeavers({ unended: [old], attendance: days('ram', 3), otEntries: [], payslips: [], paidLastMonth: [] })).toEqual([])
+    expect(unendedLeavers({ unended: [], attendance: days('ram', 3) })).toEqual([])
   })
 })

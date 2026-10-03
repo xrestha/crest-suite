@@ -91,6 +91,34 @@ export function runPaymentSummary(payslips, payments) {
   return out
 }
 
+// The Bank Transfer sheet once payments exist (S798 3e, REPORTS-1, decision H1 (a)): only what each
+// person is STILL owed, never full net pay. Reopen stays allowed after payment, so a sheet built from
+// payslips alone listed the whole month again after a Reopen, or a helper already paid in cash, and
+// uploading it paid them twice. A draft is treated the same way: a reopened month is a draft that
+// still holds its payments, and a draft never finalized has none, so nothing changes for it.
+//   lines     — every payslip with its paymentState (the on-screen table: Net, Paid, Still to pay)
+//   toPay     — the lines owed money (unpaid, or short after a Reopen): the sheet, at `st.due`
+//   paid      — fully paid, left off the sheet, named above it
+//   over      — paid more than this payslip now nets, left off and named: recovering it is by hand
+//   noPayslip — people paid in this run who have no payslip in it any more (runPaymentSummary), with
+//               their paymentState; their money is in paidTotal but not in linesPaid
+export function bankTransferPlan(payslips, payments) {
+  const summary = runPaymentSummary(payslips, payments)
+  const lines = (payslips || []).map(s => ({ s, st: summary.byEmployee.get(s.employee_id) }))
+  const toPay = lines.filter(l => l.st.state === 'unpaid' || l.st.state === 'short')
+  return {
+    lines,
+    toPay,
+    paid: lines.filter(l => l.st.state === 'paid'),
+    over: lines.filter(l => l.st.state === 'over'),
+    noPayslip: summary.noPayslip.map(id => ({ employee_id: id, st: summary.byEmployee.get(id) })),
+    dueTotal: r2(toPay.reduce((t, l) => t + l.st.due, 0)),
+    netTotal: r2(lines.reduce((t, l) => t + l.st.net, 0)),
+    linesPaid: r2(lines.reduce((t, l) => t + l.st.paid, 0)),   // the table's own Paid column
+    paidTotal: summary.paidTotal,                              // all of the run's payments, noPayslip included
+  }
+}
+
 // Every payment row for one run, undone ones included (the page shows them as history). One run's
 // rows are a few per employee at most, so no paging.
 export function fetchRunPayments(scopedFrom, runId) {
