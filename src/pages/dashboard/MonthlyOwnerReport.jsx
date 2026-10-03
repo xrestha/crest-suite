@@ -324,6 +324,8 @@ export default function MonthlyOwnerReport() {
   const basisOf = s => (s?.combined?.foodCostBasis === 'cogs' ? 'cogs' : 'purchases')
   // Since v12 (S798 2e, LABOUR-FIGURES-4) Net Margin also subtracts Tax & Fees.
   const taxFeesInNet = s => s?.combined?.netMarginTaxFees === true
+  // Since v13 (S798 3c) labour is pay earned plus festival, incentive and final-settlement pay.
+  const earnedLabour = s => s?.combined?.labourBasis === 'earned'
   const netMarginTip = (() => {
     const food = cogsBasis ? 'food used (COGS)' : 'net purchases'
     if (taxFeesInNet(snapshot)) {
@@ -607,9 +609,31 @@ export default function MonthlyOwnerReport() {
                 <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 ? 8 : 0 }}>
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Gross Payroll" value={fmt(snapshot.hr.payroll?.gross)} />
+                    {/* v13 (S798 3c, H19): what was earned — the payroll sheet's Cost to business.
+                        An estimate has no unpaid-day figure (null), so the row is not shown. */}
+                    {snapshot.hr.payroll?.absenceDeduction != null && (
+                      <Row label="Less unpaid days" value={`− ${fmt(snapshot.hr.payroll.absenceDeduction)}`}
+                        tip="Unpaid leave and absent days, and the days before a joiner started or after a leaver's last day, which the payroll did not pay. Taken off so labour is what was earned, as on the payroll sheet's Cost to business." />
+                    )}
                     <Row label="Overtime" value={`${num(snapshot.hr.payroll?.ot?.hours)} hrs — ${fmt(snapshot.hr.payroll?.ot?.amount)}`} />
                     <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)} />
-                    <Row label="Total Payroll Cost" value={fmt(snapshot.hr.payroll?.total)} color="var(--theme-accent-ink)" />
+                    {/* v13 (H18): pay finalized outside the monthly run, in the month it was paid. */}
+                    {snapshot.hr.payroll?.other?.festival > 0 && (
+                      <Row label={snapshot.hr.payroll.other.festivalName ? `${snapshot.hr.payroll.other.festivalName} Allowance` : 'Festival Allowance'}
+                        value={fmt(snapshot.hr.payroll.other.festival)}
+                        tip="Festival allowance finalized for this month on the Festival Allowance page, counted in full in the month it is paid." />
+                    )}
+                    {snapshot.hr.payroll?.other?.incentive > 0 && (
+                      <Row label="Incentives" value={fmt(snapshot.hr.payroll.other.incentive)} tip="Incentive runs finalized for this month." />
+                    )}
+                    {snapshot.hr.payroll?.other?.settlement > 0 && (
+                      <Row label="Leavers' Final Pay" value={fmt(snapshot.hr.payroll.other.settlement)}
+                        tip="Final Settlements finalized this month: the leaver's last part-month (earned pay and overtime), employer SSF, leave encashment, festival share, notice pay and gratuity, less any notice deduction. Travel claims are not labour." />
+                    )}
+                    <Row label={earnedLabour(snapshot) ? 'Total Labour Cost' : 'Total Payroll Cost'} value={fmt(snapshot.hr.payroll?.total)} color="var(--theme-accent-ink)"
+                      tip={earnedLabour(snapshot)
+                        ? 'Pay earned (gross less unpaid days) + overtime + employer SSF, plus festival allowance, incentives and leavers\' final pay finalized this month — the figure Labor Cost % divides by revenue.'
+                        : 'Gross pay + overtime + employer SSF — the rule this report was generated under. Unpaid days were not taken off and festival, incentive and final-settlement pay was not counted; Regenerate Snapshot to apply the current rule.'} />
                     <Row label="Active Headcount" value={num(snapshot.hr.headcount?.active)} />
                     <Row label="New Hires / Terminations" value={`${num(snapshot.hr.headcount?.newHires)} / ${num(snapshot.hr.headcount?.terminations)}`} />
                     <Row label="Attendance Rate" value={snapshot.hr.attendance ? pct(snapshot.hr.attendance.rate) : 'N/A'}
@@ -1016,6 +1040,16 @@ export default function MonthlyOwnerReport() {
                         <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Net Margin is not compared: {taxFeesInNet(snapshot) ? 'this report' : priorLabel} subtracts Tax &amp; Fees
                           and {taxFeesInNet(snapshot) ? priorLabel : 'this report'} was made before it did.
+                          To compare them, regenerate {priorLabel}'s snapshot and then this one.
+                        </p>
+                      )}
+                      {/* S798 3c: across the v12 → v13 line labour changed meaning (buildDeltas
+                          leaves Labor, Prime and Net Margin blank). */}
+                      {t?.available && snapshot.hr && earnedLabour(snapshot) !== earnedLabour(t.snapshot) && (
+                        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                          Labor Cost, Prime Cost and Net Margin are not compared: {earnedLabour(snapshot) ? 'this report' : priorLabel} counts
+                          labour as pay earned (unpaid days taken off) plus festival, incentive and final-settlement pay,
+                          and {earnedLabour(snapshot) ? priorLabel : 'this report'} was made before it did.
                           To compare them, regenerate {priorLabel}'s snapshot and then this one.
                         </p>
                       )}

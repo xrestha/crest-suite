@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourNotJudgedText } from '../../dashboard/labourSource'
+import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourNotJudgedText, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../dashboard/labourSource'
+import { loadMonthOtherLabour } from '../../dashboard/loadOtherLabourPay'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -73,6 +74,13 @@ const BUCKET_CONFIG = {
       'Accountant Fees':  'e.g. Monthly bookkeeping or CA fees',
     }
   }
+}
+
+// On an HR client the festival allowance comes from HR (Festival Allowance, finalized) and counts with
+// payroll (S798 3c), so the Labor tab stops teaching an entry that payroll then supersedes. An
+// IMS-only client keeps the hint: the Labor tab is the only place its bonuses can go.
+const LABOR_PLACEHOLDERS_HR = {
+  'Benefits & Bonuses': 'e.g. Provident fund — festival allowance is counted from HR',
 }
 
 const emptyRow = (category = '') => ({ id: null, category, description: '', amount: '', _dirty: true })
@@ -289,6 +297,11 @@ export default function Overheads() {
       // dashboards.md). Only asked for when HR is on AND this login can read payroll at all;
       // `{ data: [] }` keeps the tuple shape.
       hrOn && !payrollFenced ? scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', pid).eq('status', 'finalized') : { data: [] },
+      // Festival, incentive and final-settlement pay of the month (S798 3c, H18), which joins
+      // finalized payroll. Same fence as the run read; `error` makes it fail the page like it.
+      hrOn && !payrollFenced && periodObj
+        ? loadMonthOtherLabour((t, c) => scopedFrom(t, c), periodObj.bs_year, periodObj.bs_month)
+        : { other: null },
     ])
     if (!periodReq.isCurrent(pid)) return
     // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612).
@@ -299,12 +312,12 @@ export default function Overheads() {
       { data: returns },
       { data: salesData },
       { data: recipes },
-      { data: runs }
+      { data: runs },
+      { other: labourOther },
     ] = results
 
-    // Finalized payroll for this period — gross + overtime + employer SSF, the same definition
-    // get_group_summary and ConsolidatedPnl use, so the three never disagree about what labour
-    // costs. A finalized run whose payslips cannot be read must REFUSE rather than fall through
+    // Finalized payroll for this period — pay earned + overtime + employer SSF (payrollLabourTotal),
+    // the definition every labour reader shares. A finalized run whose payslips cannot be read must REFUSE rather than fall through
     // to the Overheads bucket: that would quietly substitute a different labour source for the
     // one the page says it used.
     let labourPayroll = null
@@ -314,7 +327,7 @@ export default function Overheads() {
       // silent truncation past 1000 payslips — a wage bill short by the rows past the cut, under a
       // label that says it came from payroll.
       const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
-        scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', chunk).order('id'))
+        scopedFrom('hr_payslips', PAYSLIP_LABOUR_COLUMNS).in('run_id', chunk).order('id'))
       if (!periodReq.isCurrent(pid)) return
       if (slipErr) { setLoadError(slipErr); setPeriodData(null); return }
       labourPayroll = payrollLabourTotal(slips || [])
@@ -348,7 +361,7 @@ export default function Overheads() {
     // and the count so avg dish price divides like with like.
     const dishes  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)
 
-    setPeriodData({ revenue, foodCost, dishes, labourPayroll })
+    setPeriodData({ revenue, foodCost, dishes, labourPayroll, labourOther: labourOther || null })
 
     const memo = await deprPromise
     if (!periodReq.isCurrent(pid)) return
@@ -484,6 +497,9 @@ export default function Overheads() {
   // does not know that no run exists, only that it cannot see one. A failed payroll READ never
   // reaches here: it blocks the whole page through loadError instead.
   const labourPayroll  = periodData?.labourPayroll ?? null
+  // S798 3c: festival, incentive and final-settlement pay of the month joins finalized payroll and
+  // is named either way (otherLabourLine): "includes …", or "Not included: … paid through HR".
+  const labour = resolveLabour({ labourBucket: totals.labor, payroll: labourPayroll, hrOn, fenced: payrollFenced, otherPay: periodData?.labourOther ?? null })
   const {
     amount: labourEffective,
     source: labourSource,
@@ -491,7 +507,9 @@ export default function Overheads() {
     // Named on screen with its amount rather than silently dropped, so the two figures can be
     // reconciled by whoever notices they differ.
     ignoredBucket: ignoredLabourBucket,
-  } = resolveLabour({ labourBucket: totals.labor, payroll: labourPayroll, hrOn, fenced: payrollFenced })
+    other: labourOtherCounted,
+  } = labour
+  const labourOtherNote = otherLabourLine(labour)
 
   const totalFixed = totals.overhead + labourEffective + totals.tax_fees
   const netProfit = revenue > 0 ? revenue - foodCost - totalFixed : null
@@ -573,7 +591,8 @@ export default function Overheads() {
     { key: 'food',   label: 'Purchases',  amount: entered.food  ? foodCost         : null, target: fcThresholds(settings).warn, color: COST_BREAKDOWN_COLORS['Food Cost'], textColor: 'var(--theme-text1)',
       note: 'bought, not stock used' },
     { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: LABOR_WARN, color: COST_BREAKDOWN_COLORS['Labor'], textColor: 'var(--theme-text1)',
-      note: labourSource === 'payroll' ? 'from finalized payroll'
+      note: labourSource === 'payroll' ? `from finalized payroll${labourOtherNote ? `; ${labourOtherNote}` : ''}`
+          : labourOtherNote && labourSource === 'overheads' ? `from Overheads entry. ${labourOtherNote}`
           : labourSource === 'unreadable' ? (totals.labor > 0 ? 'payroll cannot be read on this login — Labor tab only' : 'payroll cannot be read on this login')
           : labourSource === 'overheads' ? 'from Overheads entry' : hrOn ? 'no finalized payroll run, and nothing on the Labor tab' : 'nothing on the Labor tab' },
     { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: COST_BREAKDOWN_COLORS['Overheads'], textColor: 'var(--theme-text1)' },
@@ -635,9 +654,16 @@ export default function Overheads() {
       lines.push({
         bucket: 'labor',
         category: 'Payroll',
-        description: 'Finalized HR payroll run — gross pay + overtime + employer SSF',
+        description: 'Finalized HR payroll run — pay earned + overtime + employer SSF',
         amount: labourPayroll,
       })
+    }
+    // Its own lines, so the table still totals to the statement above (S798 3c).
+    if (labourOtherCounted) {
+      const o = labourOtherCounted
+      if (o.festival) lines.push({ bucket: 'labor', category: 'Festival allowance', description: o.festivalName ? `${o.festivalName} — finalized in HR` : 'Finalized in HR', amount: o.festival })
+      if (o.incentive) lines.push({ bucket: 'labor', category: 'Incentives', description: 'Finalized in HR', amount: o.incentive })
+      if (o.settlement) lines.push({ bucket: 'labor', category: 'Final settlements', description: 'Leavers\' final month, leave, notice pay and gratuity', amount: o.settlement })
     }
     return lines
       .map(l => ({
@@ -646,7 +672,7 @@ export default function Overheads() {
         pctOfRev:   revenue    > 0 ? (l.amount / revenue)    * 100 : null,
       }))
       .sort((a, b) => b.amount - a.amount)
-  }, [rows, totalFixed, revenue, labourPayroll])
+  }, [rows, totalFixed, revenue, labourPayroll, labourOtherCounted])
 
   // Break-even
   const avgDishPrice = dishes > 0 ? revenue / dishes : 0
@@ -772,11 +798,11 @@ export default function Overheads() {
             label: 'Labor Costs', value: entered.labor ? fmt(labourEffective) : '—',
             sub: labourSource === 'unreadable' && !entered.labor ? 'Payroll cannot be read on this login'
                : !entered.labor ? (hrOn ? 'No finalized payroll run, nothing entered' : 'Not entered yet')
-               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} ${ofRevenue}${labourSource === 'payroll' ? ' · payroll' : ''}` : 'No sales data',
+               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} ${ofRevenue}${labourSource === 'payroll' ? ' · payroll' : ''}${labourOtherCounted ? ' + bonus/final pay' : ''}` : 'No sales data',
             color: 'var(--theme-text1)',
             tip: labourSource === 'payroll'
-              ? 'Your finalized HR payroll run for this period — gross pay plus overtime plus employer SSF. It supersedes whatever is typed on the Labor tab; the two are never added together. Industry target: ~30% of revenue.'
-              : 'Salaries, wages, and benefits, as entered on the Labor tab. Industry target: ~30% of revenue.'
+              ? `Your finalized HR payroll run for this period — pay earned (salary less unpaid days and days before joining) plus overtime plus employer SSF, the payroll sheet's Cost to business — plus any festival allowance, incentives and leavers' final settlements finalized for this month.${labourOtherNote ? ` This month it ${labourOtherNote}.` : ''} It supersedes whatever is typed on the Labor tab; the two are never added together. Industry target: ~30% of revenue.`
+              : `Salaries, wages, and benefits, as entered on the Labor tab.${labourOtherNote ? ` ${labourOtherNote}.` : ''} Industry target: ~30% of revenue.`
           },
           {
             label: 'Tax & Fees', value: entered.tax ? fmt(totals.tax_fees) : '—',
@@ -883,7 +909,7 @@ export default function Overheads() {
                       value={row.description || ''}
                       onChange={e => updateRow(activeBucket, idx, 'description', e.target.value)}
                       disabled={isLocked}
-                      placeholder={cfg.placeholders[row.category] || 'Description…'}
+                      placeholder={(activeBucket === 'labor' && hrOn && LABOR_PLACEHOLDERS_HR[row.category]) || cfg.placeholders[row.category] || 'Description…'}
                       style={disabledStyle({ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }, isLocked)}
                     />
                   </td>
@@ -1138,7 +1164,7 @@ export default function Overheads() {
                       the statement above. */}
                   {key === 'labor' && labourPayroll != null && (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px', lineHeight: 1.5 }}>
-                      Superseded by finalized payroll ({fmt(labourPayroll)}) in the P&amp;L above.
+                      Superseded by finalized payroll ({fmt(labourEffective)}) in the P&amp;L above.
                     </p>
                   )}
                   {total === 0 ? (

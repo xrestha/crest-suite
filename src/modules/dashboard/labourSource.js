@@ -16,8 +16,11 @@
  * pages would come to disagree again, so the Dashboard reads it from here and Overheads can adopt
  * it (it computes the identical answer today — see labourSource.test.js).
  *
- * Pure: no Supabase client, no React. The caller does the reads.
+ * Pure: no Supabase client, no React. The caller does the reads (`loadOtherLabourPay.js` holds the
+ * other-labour one, S798 3c).
  */
+
+import { npr } from '../../shared/nepalMoney'
 
 /**
  * Whether payroll is fenced from this login.
@@ -32,19 +35,123 @@ export function isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole }) {
 }
 
 /**
- * A finalized run's labour cost: gross pay + OVERTIME + employer SSF, summed over its payslips — the
- * definition every labour-cost reader shares (Overheads.js, ClientDashboard, ConsolidatedPnl, the Owner
- * Dashboard, the Monthly Owner Report, and `get_group_summary` / `get_group_pnl` since migration
- * 20260918170000), so no page disagrees about what labour costs. `hr_payslips.gross` is basic +
- * allowances only; overtime lives in `ot_amount`. Until S756 (owner decision, 2026-09-15) the first
- * group left overtime out, so a busy month's labour read low exactly when overtime was highest.
- * Absence deductions are NOT subtracted: this is the cost of labour, not cash paid (payrollCashCost). Returns null when there are no payslips to sum, which the caller should only pass
- * when no finalized run exists (a run with zero payslips is still a real zero — pass `[]` for that).
+ * A finalized run's labour cost: pay EARNED (gross less the absence deduction) + OVERTIME + employer
+ * SSF, summed over its payslips — the definition every labour-cost reader shares (Overheads.js,
+ * ClientDashboard, ConsolidatedPnl, the Owner Dashboard, the Monthly Owner Report, HR Dashboard's
+ * labour panel, and `get_group_pnl` since migration 20261003120000), so no page disagrees about what
+ * labour costs. It is the payroll sheet's own "Cost to business" (`payrollCashCost().total`,
+ * payrollData.js; labourSource.test.js pins the two together).
+ *
+ * `hr_payslips.gross` is basic + allowances only; overtime lives in `ot_amount` (S756, owner decision
+ * 2026-09-15: before it, a busy month's labour read low exactly when overtime was highest). Until S798
+ * stage 3c the absence deduction was NOT subtracted, so a waiter who joined on the 16th counted a whole
+ * month here and half a month on the payroll sheet the Owner signs; unpaid days counted for monthly
+ * staff and not for daily staff, whose gross is already days paid (LABOUR-FIGURES-3, owner decision
+ * H19 (A): only what was earned). The deduction also carries the days before joining and after leaving.
+ *
+ * Returns null when there are no payslips to sum, which the caller should only pass when no finalized
+ * run exists (a run with zero payslips is still a real zero — pass `[]` for that). Every payslip read
+ * feeding it must select `absence_deduction`.
  */
+export const PAYSLIP_LABOUR_COLUMNS = 'gross, absence_deduction, ot_amount, ssf_employer'
+
 export function payrollLabourTotal(slips) {
   if (slips == null) return null
   return slips.reduce((s, ps) =>
-    s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ot_amount) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+    s + (parseFloat(ps.gross) || 0) - (parseFloat(ps.absence_deduction) || 0)
+      + (parseFloat(ps.ot_amount) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+}
+
+/**
+ * Labour paid in a month OUTSIDE the monthly payroll run (S798 stage 3c, LABOUR-FIGURES-1, owner
+ * decision H18 (A)): finalized festival allowance and incentives, by the month they are paid in
+ * (`bs_year`, `bs_month`), and finalized Final Settlements, by the month they were settled in
+ * (`settle_bs_year`, `settle_bs_month`). Before it, a 12-staff cafe's Ashwin read NPR 2,90,000 (24%,
+ * green) on every labour figure when the month cost NPR 4,97,600 with the Dashain allowance (41%, red).
+ *
+ * A settlement is the leaver's final month, which payroll leaves them out of (S751), plus the lump
+ * sum: part-month salary (`partial_salary` is already gross − unpaid days + overtime), employer SSF,
+ * leave encashment, festival share, notice pay and gratuity (H18: in the month paid), less the notice
+ * deduction the business keeps. Travel claims are reimbursement, outside labour as on every page.
+ * A settlement saved before S752 has no settle month and is counted in no month.
+ *
+ * It rides WITH payroll (or the Owner Dashboard's / Owner Report's HR estimate), never on top of the
+ * Overheads Labor tab: the owner may have typed the same bonus there. `resolveLabour` names it as not
+ * counted when the Labor tab is the source.
+ */
+export const FESTIVAL_LABOUR_COLUMNS = 'id, festival_name, amount'
+export const INCENTIVE_LABOUR_COLUMNS = 'id, amount'
+export const SETTLEMENT_LABOUR_COLUMNS = 'id, partial_salary, month_ssf_employer, leave_encashment, festival_pro, notice_pay, gratuity, notice_deduction'
+
+const num = v => parseFloat(v) || 0
+const paisa = v => Math.round(v * 100) / 100
+
+/** One Final Settlement's labour cost. */
+export function settlementLabourCost(s) {
+  if (!s) return 0
+  return num(s.partial_salary) + num(s.month_ssf_employer) + num(s.leave_encashment) + num(s.festival_pro)
+    + num(s.notice_pay) + num(s.gratuity) - num(s.notice_deduction)
+}
+
+/**
+ * A month's other labour, from its finalized rows. `festivalName` is the one festival every row
+ * names (for "includes Dashain allowance"), or null when there are none or several.
+ */
+export function otherLabourTotals({ festival, incentives, settlements } = {}) {
+  const fest = festival || [], inc = incentives || [], set = settlements || []
+  const names = [...new Set(fest.map(r => String(r.festival_name || '').trim()).filter(Boolean))]
+  const f = paisa(fest.reduce((t, r) => t + num(r.amount), 0))
+  const i = paisa(inc.reduce((t, r) => t + num(r.amount), 0))
+  const s = paisa(set.reduce((t, r) => t + settlementLabourCost(r), 0))
+  return {
+    festival: f, festivalName: names.length === 1 ? names[0] : null,
+    incentive: i, settlement: s, settlementCount: set.length,
+    total: paisa(f + i + s),
+  }
+}
+
+export const NO_OTHER_LABOUR = Object.freeze(otherLabourTotals())
+
+/** The same shape from a `get_group_pnl` row's three columns (migration 20261003120000). */
+export function otherLabourFromGroupRow(row) {
+  const f = paisa(num(row?.labour_festival)), i = paisa(num(row?.labour_incentive)), s = paisa(num(row?.labour_settlement))
+  return { festival: f, festivalName: null, incentive: i, settlement: s, settlementCount: null, total: paisa(f + i + s) }
+}
+
+/** "Dashain allowance", or "festival allowance" when no single name. A name that says what it is stays. */
+function festivalLabel(name) {
+  if (!name) return 'festival allowance'
+  return /allowance|bonus/i.test(name) ? name : `${name} allowance`
+}
+
+/**
+ * The parts of other labour, in words: "Dashain allowance NPR 2,07,600 · incentives NPR 12,000 ·
+ * final pay of leavers NPR 23,705". '' when there is none.
+ */
+export function otherLabourParts(other) {
+  if (!other || !(other.total > 0 || other.total < 0)) return ''
+  const parts = []
+  if (other.festival) parts.push(`${festivalLabel(other.festivalName)} ${npr(other.festival)}`)
+  if (other.incentive) parts.push(`incentives ${npr(other.incentive)}`)
+  if (other.settlement) parts.push(`final pay of leavers ${npr(other.settlement)}`)
+  return parts.join(' · ')
+}
+
+/**
+ * The line a labour figure carries about other labour (H18: name it on the tile). Counted: "includes
+ * Dashain allowance NPR 2,07,600". Paid through HR but not counted because the Labor tab is the
+ * labour figure: "Not included: Dashain allowance NPR 2,07,600 paid through HR". '' otherwise.
+ */
+export function otherLabourLine({ other, otherNotCounted } = {}) {
+  if (other) {
+    const parts = otherLabourParts(other)
+    return parts ? `includes ${parts}` : ''
+  }
+  if (otherNotCounted) {
+    const parts = otherLabourParts(otherNotCounted)
+    return parts ? `Not included: ${parts} paid through HR` : ''
+  }
+  return ''
 }
 
 /**
@@ -56,14 +163,22 @@ export function payrollLabourTotal(slips) {
  *                                  when there is none (or payroll was not asked for).
  * @param {boolean} a.hrOn          The client has Crest HR.
  * @param {boolean} a.fenced        isPayrollFenced() for this viewer.
- * @param {boolean} [a.readFailed]  A payroll read was attempted and returned an error.
+ * @param {boolean} [a.readFailed]  A payroll read was attempted and returned an error (the
+ *                                  other-labour read included).
+ * @param {?object} [a.otherPay]    otherLabourTotals() of the month (S798 3c), or null.
  *
  * @returns {{
  *   source: 'payroll'|'overheads'|'none'|'unreadable'|'failed',
  *   amount: number,           // the labour figure to put in fixed costs and net margin
  *   ignoredBucket: number,    // typed Labor rows superseded by payroll — name them, never drop silently
  *   verdictWithheld: boolean, // true when labour may be missing and the figure must not be judged
+ *   other: ?object,           // other labour counted in `amount` (with payroll), or null
+ *   otherNotCounted: ?object, // other labour paid through HR that `amount` leaves out, or null
  * }}
+ *
+ * Other labour (festival, incentives, final settlements) joins finalized payroll and nothing else.
+ * Beside the Labor tab, or with no labour figure yet, it is carried as `otherNotCounted` so the page
+ * names it (`otherLabourLine`) instead of adding a bonus the owner may have typed there already.
  *
  * `unreadable` (fenced) and `failed` both keep the typed bucket in `amount` — it is real money the
  * client entered — but withhold the verdict, because the real wage bill may be absent from it. That
@@ -76,19 +191,23 @@ export function payrollLabourTotal(slips) {
  * empty Labor tab is still judged: nothing else will ever supply its labour, and the page already
  * names the missing line.
  */
-export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed = false }) {
+export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed = false, otherPay = null }) {
   const bucket = Number.isFinite(labourBucket) ? labourBucket : 0
+  const other = otherPay && otherPay.total ? otherPay : null
   if (readFailed) {
-    return { source: 'failed', amount: bucket, ignoredBucket: 0, verdictWithheld: true }
+    return { source: 'failed', amount: bucket, ignoredBucket: 0, verdictWithheld: true, other: null, otherNotCounted: null }
   }
   if (payroll != null && !fenced) {
-    return { source: 'payroll', amount: payroll, ignoredBucket: bucket > 0 ? bucket : 0, verdictWithheld: false }
+    return {
+      source: 'payroll', amount: payroll + (other ? other.total : 0), ignoredBucket: bucket > 0 ? bucket : 0,
+      verdictWithheld: false, other, otherNotCounted: null,
+    }
   }
   if (hrOn && fenced) {
-    return { source: 'unreadable', amount: bucket, ignoredBucket: 0, verdictWithheld: true }
+    return { source: 'unreadable', amount: bucket, ignoredBucket: 0, verdictWithheld: true, other: null, otherNotCounted: null }
   }
   const source = bucket > 0 ? 'overheads' : 'none'
-  return { source, amount: bucket, ignoredBucket: 0, verdictWithheld: source === 'none' && !!hrOn }
+  return { source, amount: bucket, ignoredBucket: 0, verdictWithheld: source === 'none' && !!hrOn, other: null, otherNotCounted: other }
 }
 
 /**
@@ -124,22 +243,28 @@ export const finalizedPayrollCost = payrollLabourTotal
  * @param {object}  a
  * @param {?number} a.payroll             finalizedPayrollCost() of the period's finalized run(s), or
  *                                        null when none exists.
- * @param {boolean} [a.payrollReadFailed] The run or payslip read errored. We then do not know
- *                                        whether a run exists, so the estimate must NOT stand in.
+ * @param {boolean} [a.payrollReadFailed] The run, payslip or other-labour read errored. We then do
+ *                                        not know whether a run exists, so the estimate must NOT
+ *                                        stand in.
  * @param {?number} a.estimate            The prorated estimate, or null when not computed.
  * @param {boolean} [a.estimateReadFailed] An input to the estimate errored.
- * @returns {{ source: 'payroll'|'estimate'|'failed', amount: ?number, verdictWithheld: boolean }}
+ * @param {?object} [a.otherPay]          otherLabourTotals() of the month (S798 3c). Added to the
+ *                                        run or to the estimate: festival, incentive and settlement
+ *                                        pay is money that has left, whichever measures the wages.
+ * @returns {{ source: 'payroll'|'estimate'|'failed', amount: ?number, verdictWithheld: boolean, other: ?object }}
  *
  * `failed` carries amount null, so every ratio built on it is null and `bandFigure` renders a dash
  * with no colour and no mark — a labour cost of 0 painted ✓ green is the most flattering possible
  * reading of "we could not read payroll".
  */
-export function resolveOwnerLabour({ payroll, payrollReadFailed = false, estimate, estimateReadFailed = false }) {
-  const failed = { source: 'failed', amount: null, verdictWithheld: true }
+export function resolveOwnerLabour({ payroll, payrollReadFailed = false, estimate, estimateReadFailed = false, otherPay = null }) {
+  const failed = { source: 'failed', amount: null, verdictWithheld: true, other: null }
+  const other = otherPay && otherPay.total ? otherPay : null
+  const plusOther = v => v + (other ? other.total : 0)
   if (payrollReadFailed) return failed
-  if (payroll != null) return { source: 'payroll', amount: payroll, verdictWithheld: false }
+  if (payroll != null) return { source: 'payroll', amount: plusOther(payroll), verdictWithheld: false, other }
   if (estimateReadFailed || estimate == null || !Number.isFinite(estimate)) return failed
-  return { source: 'estimate', amount: estimate, verdictWithheld: false }
+  return { source: 'estimate', amount: plusOther(estimate), verdictWithheld: false, other }
 }
 
 /** The Owner Dashboard's inline basis note, worded to match the Monthly Owner Report's HR header. */
@@ -188,17 +313,25 @@ export function splitNonLabourOverheads(rows) {
  * finalized") and for an IMS-only one ("none entered") alike: `get_group_summary` returned NPR 0 for
  * "no run", and the Group Dashboard banded that 0.0% ✓ on every outlet of the running month.
  *
+ * Since S798 3c the row carries the month's other labour (`labour_festival`, `labour_incentive`,
+ * `labour_settlement`), which joins payroll exactly as on one outlet.
+ *
  * @returns {{ source, amount: ?number, hasFigure: boolean, verdictWithheld: boolean,
- *             ignoredBucket: number, note: string }}
+ *             ignoredBucket: number, note: string, other: ?object, otherNotCounted: ?object }}
  */
 export function groupOutletLabour(pnlRow, hrOn) {
   const payroll = pnlRow?.labour_payroll != null ? parseFloat(pnlRow.labour_payroll) : null
-  const r = resolveLabour({ labourBucket: parseFloat(pnlRow?.labour_bucket) || 0, payroll, hrOn: !!hrOn, fenced: false })
+  const r = resolveLabour({
+    labourBucket: parseFloat(pnlRow?.labour_bucket) || 0, payroll, hrOn: !!hrOn, fenced: false,
+    otherPay: otherLabourFromGroupRow(pnlRow),
+  })
   const hasFigure = r.source === 'payroll' || r.source === 'overheads'
   const note = r.source === 'overheads' ? 'Labor tab'
     : r.source === 'none' ? (hrOn ? 'not finalized' : 'none entered')
+    : r.other ? 'incl. bonus / final pay'
     : ''
-  return { ...r, amount: hasFigure ? r.amount : null, hasFigure, note }
+  // The whole sentence, for a hover or a footnote beside the short note.
+  return { ...r, amount: hasFigure ? r.amount : null, hasFigure, note, otherText: otherLabourLine(r) }
 }
 
 /**

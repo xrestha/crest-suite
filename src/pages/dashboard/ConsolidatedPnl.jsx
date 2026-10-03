@@ -14,7 +14,7 @@
 //              D29 — hiding an item never takes it out of a past month). Stock Count includes
 //              prep, this page does not, and the on-page note names the difference like S575's
 //              disclosures do. get_group_pnl repeats both rules in SQL for the group view.
-//   Labour   — finalized HR payroll (gross + overtime + employer SSF, get_group_summary's definition) when a
+//   Labour   — finalized HR payroll (pay earned + overtime + employer SSF, plus the month's festival, incentive and settlement pay, S798 3c) when a
 //              finalized run exists; otherwise the overheads 'labor' bucket. NEVER both — the two
 //              labour sources are never meant to be summed (see .claude/rules/dashboards.md), and
 //              when both exist the ignored one is named on screen rather than silently dropped.
@@ -34,7 +34,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import { periodRevenue, periodStockMaps, valuePeriodItems } from '../../modules/ims/reports/periodCost'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
@@ -46,7 +46,8 @@ import ReportPage from '../../components/ReportPage'
 import { printWithTitle } from '../../utils/printTitle'
 import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
 import { BS_MONTHS } from '../../utils/bsCalendar'
-import { payrollLabourTotal, groupOutletLabour } from '../../modules/dashboard/labourSource'
+import { payrollLabourTotal, groupOutletLabour, resolveLabour, otherLabourFromGroupRow, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
+import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
 
 const pctOf = (part, whole) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '—')
 
@@ -63,7 +64,7 @@ const LINES = [
   { key: 'staffMealsVal', label: 'Staff Meals', cost: true,
     tip: 'Food consumed by staff, valued at cost — spent stock that earned no revenue, shown as its own line.' },
   { key: 'labour', label: 'Labour', cost: true,
-    tip: 'Finalized HR payroll for this period (gross pay + overtime + employer SSF) when a run exists; otherwise the manually-entered Labour bucket from Overheads. Never both — that would double-count.' },
+    tip: "Finalized HR payroll for this period when a run exists — pay earned (salary less unpaid days and days before joining) + overtime + employer SSF, the payroll sheet's Cost to business — plus festival allowance, incentives and leavers' final settlements finalized for the month; otherwise the manually-entered Labour bucket from Overheads. Never both — that would double-count." },
   { key: 'overheads', label: 'Overheads', cost: true,
     tip: "The Overheads page's 'overhead' bucket — rent, utilities, and other fixed costs. Labour and Tax & Fees buckets are their own lines." },
   { key: 'taxFees', label: 'Tax & Fees', cost: true,
@@ -78,15 +79,19 @@ function buildStatement(raw) {
     opening: raw.openingVal, purchases: raw.purchasesVal, returns: raw.returnsVal,
     wastage: raw.wastageVal, staffMeals: raw.staffMealsVal, closing: raw.closingVal,
   })
-  const labour = raw.labourPayroll != null ? raw.labourPayroll : raw.labourBucket
+  // The shared rule (labourSource.js): payroll XOR the Labor tab, and since S798 3c the month's
+  // festival / incentive / settlement pay joins payroll. Was an inline copy of the first half.
+  const lab = resolveLabour({ labourBucket: raw.labourBucket, payroll: raw.labourPayroll, hrOn: false, fenced: false, otherPay: raw.labourOther || null })
+  const labour = lab.amount
   const grossProfit = raw.revenue - cogs
   const netProfit = grossProfit - raw.wastageVal - raw.staffMealsVal - labour - raw.overheads - raw.taxFees
   return {
     revenue: raw.revenue, cogs, grossProfit,
     wastageVal: raw.wastageVal, staffMealsVal: raw.staffMealsVal,
     labour, overheads: raw.overheads, taxFees: raw.taxFees, netProfit,
-    labourSource: raw.labourPayroll != null ? 'payroll' : raw.labourBucket > 0 ? 'overheads' : 'none',
-    ignoredLabourBucket: raw.labourPayroll != null && raw.labourBucket > 0 ? raw.labourBucket : 0,
+    labourSource: lab.source,
+    ignoredLabourBucket: lab.ignoredBucket,
+    labourOther: lab.other, labourOtherNotCounted: lab.otherNotCounted,
     hasClosing: raw.hasClosing,
   }
 }
@@ -163,7 +168,7 @@ export default function ConsolidatedPnl() {
 
   async function loadPeriod(period) {
     if (grouped) return loadGroup(period)
-    return loadSingle(period.id)
+    return loadSingle(period.id, period)
   }
 
   /* ── Grouped: one RPC, raw aggregates per outlet, derived here ─────────────────────────── */
@@ -201,6 +206,7 @@ export default function ConsolidatedPnl() {
         closingVal: parseFloat(r.closing_val) || 0,
         labourPayroll: r.labour_payroll != null ? parseFloat(r.labour_payroll) : null,
         labourBucket: parseFloat(r.labour_bucket) || 0,
+        labourOther: otherLabourFromGroupRow(r),
         overheads: parseFloat(r.overheads_val) || 0,
         taxFees: parseFloat(r.tax_fees_val) || 0,
         hasClosing: !!r.has_closing,
@@ -209,7 +215,7 @@ export default function ConsolidatedPnl() {
   }
 
   /* ── Single outlet: the same conventions, fetched from the browser ─────────────────────── */
-  async function loadSingle(periodId) {
+  async function loadSingle(periodId, period) {
     setLoadError(null)
     const results = await Promise.all([
       // MonthlySummary's exact reads, so this statement's COGS ties to that page: every item,
@@ -235,6 +241,8 @@ export default function ConsolidatedPnl() {
       scopedFrom('recipes', 'id, selling_price'),
       supabase.from('overheads').select('bucket, amount').eq('period_id', periodId),
       scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized'),
+      // The month's festival, incentive and final-settlement pay (S798 3c), which joins payroll.
+      period ? loadMonthOtherLabour((t, c) => scopedFrom(t, c), period.bs_year, period.bs_month) : { other: null },
     ])
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
@@ -248,6 +256,7 @@ export default function ConsolidatedPnl() {
       { data: items }, { data: opening }, { data: closing },
       { data: purchases }, { data: returns }, { data: wastages }, { data: staffMealsData },
       { data: salesData }, { data: recipes }, { data: overheadRows }, { data: runs },
+      { other: labourOther },
     ] = results
 
     // Revenue and COGS inputs through periodCost.js, the same calls MonthlySummary makes on the
@@ -272,13 +281,14 @@ export default function ConsolidatedPnl() {
       buckets[b] += parseFloat(r.amount) || 0
     })
 
-    // Labour — finalized payroll (gross + overtime + employer SSF, the same definition get_group_summary
-    // uses) when a finalized run exists for this period.
+    // Labour — finalized payroll (pay earned + overtime + employer SSF, payrollLabourTotal, the same
+    // definition get_group_pnl uses) when a finalized run exists for this period. Paged: one row per
+    // employee per run.
     let labourPayroll = null
     const runIds = (runs || []).map(r => r.id)
     if (runIds.length > 0) {
-      const { data: slips, error: slipErr } = await supabase.from('hr_payslips')
-        .select('gross, ot_amount, ssf_employer').in('run_id', runIds)
+      const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
+        supabase.from('hr_payslips').select(PAYSLIP_LABOUR_COLUMNS).in('run_id', chunk).order('id'))
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // A finalized run exists but its payslips could not be read — falling through to the
       // Overheads bucket here would quietly substitute a DIFFERENT labour source for the one this
@@ -301,7 +311,7 @@ export default function ConsolidatedPnl() {
 
     setPnl(buildStatement({
       revenue, openingVal, purchasesVal, returnsVal, wastageVal, staffMealsVal, closingVal,
-      labourPayroll, labourBucket: buckets.labor, overheads: buckets.overhead, taxFees: buckets.tax_fees,
+      labourPayroll, labourBucket: buckets.labor, labourOther, overheads: buckets.overhead, taxFees: buckets.tax_fees,
       hasClosing: (closing || []).length > 0,
     }))
   }
@@ -330,6 +340,11 @@ export default function ConsolidatedPnl() {
   // consolidated one — is printed without a verdict colour (resolveLabour's verdictWithheld, the
   // S796 rule the Dashboard applies). Named under the statement either way.
   const noPayrollCols = grouped ? cols.filter(c => c.hasPeriod && c.hrOn && c.stmt.labourSource !== 'payroll') : []
+  // S798 3c (H18): festival, incentive and final-settlement pay is named — counted with payroll, or
+  // "not included" beside a Labor tab. One sentence per outlet in a group.
+  const otherLabourNotes = (grouped ? cols.map(c => ({ name: c.name, stmt: c.stmt })) : (pnl ? [{ name: null, stmt: pnl }] : []))
+    .map(({ name, stmt }) => ({ name, counted: !!stmt.labourOther, source: stmt.labourSource, text: otherLabourLine({ other: stmt.labourOther, otherNotCounted: stmt.labourOtherNotCounted }) }))
+    .filter(n => n.text)
   const labourWithheld = grouped
     ? cols.some(c => c.hasPeriod && c.labour?.verdictWithheld)
     : (hrOn && pnl?.labourSource === 'none')
@@ -501,6 +516,15 @@ export default function ConsolidatedPnl() {
           {labourWithheld && ' Net Profit has no wage bill in it there, so it is shown without a colour until payroll is finalized.'}
         </p>
       )}
+      {otherLabourNotes.map(n => (
+        <p key={n.name || 'single'} style={{ fontSize: 12, color: n.counted ? 'var(--theme-text2)' : 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
+          {n.counted
+            ? `Labour${n.name ? ` at ${n.name}` : ''} ${n.text}, finalized in HR for ${periodLabel} and counted in the month it was paid.`
+            : n.source === 'overheads'
+              ? `${n.text}${n.name ? ` at ${n.name}` : ''}: its Labour is the Overheads Labor tab, which may already hold it.`
+              : `${n.text}${n.name ? ` at ${n.name}` : ''}: it is counted with payroll once ${periodLabel}'s payroll is finalized.`}
+        </p>
+      ))}
       {missingClosing.length > 0 && !anyOpen && (
         <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
           {grouped
@@ -633,7 +657,7 @@ export default function ConsolidatedPnl() {
                       {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
                       {l.key === 'labour' && (
                         <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text3)' }}>
-                          {pnl.labourSource === 'payroll' ? 'from finalized payroll'
+                          {pnl.labourSource === 'payroll' ? `from finalized payroll${pnl.labourOther ? ' + bonus/final pay' : ''}`
                             : pnl.labourSource === 'overheads' ? 'from Overheads entry'
                             : hrOn ? 'no finalized payroll run'
                             // HR off and no Labour bucket in Overheads: the figure is NPR 0

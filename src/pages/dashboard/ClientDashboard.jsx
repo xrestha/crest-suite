@@ -17,7 +17,8 @@ import {
   WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
 } from '../../modules/dashboard/weatherEffect'
 import { useWeatherStrip } from '../../modules/dashboard/useWeatherStrip'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText } from '../../modules/dashboard/labourSource'
+import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
+import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
@@ -528,6 +529,11 @@ export default function ClientDashboard({ scope = 'home' }) {
       period && hrOn && !payrollFenced
         ? fetchAllRows(() => scopedFrom('hr_payroll_runs', 'id').eq('period_id', period.id).eq('status', 'finalized').order('id'))
         : { data: [] },
+      // The month's festival, incentive and final-settlement pay (S798 3c, H18), which joins the
+      // finalized run. Same fence; a failed read is a failed payroll read.
+      period && hrOn && !payrollFenced
+        ? loadMonthOtherLabour((t, c) => scopedFrom(t, c), period.bs_year, period.bs_month)
+        : { other: null },
     ])
 
     const independentResults = await independentPromise
@@ -570,7 +576,8 @@ export default function ClientDashboard({ scope = 'home' }) {
       { data: overheadsData },
       { data: wastagesData },
       { data: staffMealsData },
-      { data: payrollRuns, error: payrollRunsErr }
+      { data: payrollRuns, error: payrollRunsErr },
+      { other: labourOther, error: labourOtherErr },
     ] = dependentResults
 
     // What customized plates used beyond their recipes (S758). Throws on a failed read, like the
@@ -579,16 +586,16 @@ export default function ClientDashboard({ scope = 'home' }) {
       .catch(err => { console.error('Dashboard: option stock-line walk failed', err); return null })
     if (loadIdRef.current !== myId) return // superseded during the option stock-line read
 
-    // The run's payslips — gross + overtime + employer SSF, the definition Overheads, ConsolidatedPnl and
-    // get_group_summary share. One row per employee per run; paged and chunked all the same. A
+    // The run's payslips — pay earned + overtime + employer SSF (payrollLabourTotal), the definition
+    // every labour reader shares. One row per employee per run; paged and chunked all the same. A
     // failed read is carried as `labourReadFailed` and must NOT fall through to the typed Labor
     // bucket: that would quietly substitute a different labour source for the one the tile names.
     let labourPayroll = null
-    let labourReadFailed = !!payrollRunsErr
+    let labourReadFailed = !!payrollRunsErr || !!labourOtherErr
     const payrollRunIds = (payrollRuns || []).map(r => r.id)
     if (!labourReadFailed && payrollRunIds.length > 0) {
       const { data: slips, error: slipErr } = await fetchAllRowsChunked(payrollRunIds, ids =>
-        scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', ids).order('id'))
+        scopedFrom('hr_payslips', PAYSLIP_LABOUR_COLUMNS).in('run_id', ids).order('id'))
       if (loadIdRef.current !== myId) return // superseded during the payslip read
       if (slipErr) labourReadFailed = true
       else labourPayroll = payrollLabourTotal(slips || [])
@@ -943,7 +950,9 @@ export default function ClientDashboard({ scope = 'home' }) {
     // `overheadTotal` stays the raw all-bucket sum of what was TYPED; the labour actually counted is
     // resolved at render (resolveLabour) from `overheadBuckets.labor`, `labourPayroll` and the
     // viewer's fence, so a cached stats object from before S756 still renders (payroll unknown).
-    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, labourPayroll, labourReadFailed, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
+    // `labourOther` (S798 3c) is the month's festival / incentive / settlement pay; absent on an older
+    // cached object, which then reads as payroll alone until the reload lands.
+    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, labourPayroll, labourOther: labourOther || null, labourReadFailed, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
     setLoading(false)
   }
 
@@ -1371,10 +1380,14 @@ export default function ClientDashboard({ scope = 'home' }) {
     hrOn,
     fenced: payrollFenced,
     readFailed: !!stats?.labourReadFailed,
+    otherPay: stats?.labourOther ?? null,
   })
   // Named on both ratio tiles when there are two possible sources (HR on), or when there is none at
   // all; an IMS-only client with a filled Labor tab has one source and nothing to disambiguate.
-  const labourLabel = hrOn || labour.source === 'none' ? labourSourceLabel(labour, hrOn) : ''
+  // S798 3c: other labour is named beside it, counted ("includes Dashain allowance NPR …") or not.
+  const labourLabel = hrOn || labour.source === 'none'
+    ? [labourSourceLabel(labour, hrOn), otherLabourLine(labour)].filter(Boolean).join(' · ')
+    : ''
   const fixedCostTotal = ohBuckets
     ? (ohBuckets.overhead || 0) + labour.amount + (ohBuckets.tax_fees || 0)
     : (stats?.overheadTotal || 0)

@@ -30,7 +30,8 @@ import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/report
 import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
-import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote, NON_LABOUR_OVERHEADS, splitNonLabourOverheads } from '../../modules/dashboard/labourSource'
+import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote, NON_LABOUR_OVERHEADS, splitNonLabourOverheads, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
+import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
 import { parseAdDateLocal } from '../../shared/nepalTime'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
@@ -370,8 +371,8 @@ export default function OwnerDashboard() {
   // standard day/hours every elapsed calendar day rather than looking up real attendance; refined
   // once Payroll Run is finalized for the month. ──
   //
-  // S756 (owner decision 2026-09-15): once that run IS finalized, it is the figure — gross + OT +
-  // employer SSF from its payslips, the Monthly Owner Report's own finalized-run definition — and
+  // S756 (owner decision 2026-09-15): once that run IS finalized, it is the figure — pay earned + OT +
+  // employer SSF from its payslips (S798 3c: less the absence deduction), the Monthly Owner Report's own finalized-run definition — and
   // the estimate below is not used. Never both, and never the Overheads Labor bucket (see
   // loadImsFigures). A failed run or payslip read does NOT fall back to the estimate: we would not
   // know whether a run exists, and an estimate standing in for an unread payroll is a different
@@ -390,18 +391,22 @@ export default function OwnerDashboard() {
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
         .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
       scopedFrom('hr_payroll_runs', 'id').eq('period_id', period.id).eq('status', 'finalized'),
+      // S798 3c (H18): festival, incentive and final-settlement pay finalized for this month. Added to
+      // the run or the estimate alike — it has been paid whichever measures the wages. A failed read is
+      // a failed payroll read: dashes, never a figure without it.
+      loadMonthOtherLabour((t, c) => scopedFrom(t, c), period.bs_year, period.bs_month),
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
-    const [{ data: employees }, { data: components }, { data: otEntries }, runsRes] = results
+    const [{ data: employees }, { data: components }, { data: otEntries }, runsRes, otherRes] = results
     const estimateReadFailed = results.slice(0, 3).some(r => r.error)
 
     let payroll = null
-    let payrollReadFailed = !!runsRes.error
+    let payrollReadFailed = !!runsRes.error || !!otherRes.error
     const runIds = (runsRes.data || []).map(r => r.id)
     if (!payrollReadFailed && runIds.length > 0) {
       // One row per employee per run — paged and chunked, with a unique tiebreaker.
       const slipRes = await fetchAllRowsChunked(runIds, chunk =>
-        scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', chunk).order('id'))
+        scopedFrom('hr_payslips', PAYSLIP_LABOUR_COLUMNS).in('run_id', chunk).order('id'))
       if (loadIdRef.current !== myId) return // superseded again after the payslip read
       if (slipRes.error) payrollReadFailed = true
       else payroll = finalizedPayrollCost(slipRes.data || [])
@@ -412,6 +417,7 @@ export default function OwnerDashboard() {
       payrollReadFailed,
       estimate: estimateReadFailed ? null : estimateLaborCost({ employees, components, otEntries, period, monthDays, elapsedDays }),
       estimateReadFailed,
+      otherPay: otherRes.other,
     })
     setLoadErrors(prev => ({
       ...prev,
@@ -543,6 +549,12 @@ export default function OwnerDashboard() {
   // (payroll is normally finalized after the month ends), but then the verdict is withheld on all
   // three labour-bearing tiles until the month is complete.
   const payrollAheadOfRevenue = labour?.source === 'payroll' && isCurrentPeriod && dayOfPeriod < periodDays
+  // S798 3c: festival, incentive and final-settlement pay is a lump paid on one day, not accrued
+  // with revenue, so while the month runs it sits over part of the month's sales the same way.
+  const lumpAheadOfRevenue = !!labour?.other && isCurrentPeriod && dayOfPeriod < periodDays
+  const labourAheadOfRevenue = payrollAheadOfRevenue || lumpAheadOfRevenue
+  // "includes Dashain allowance NPR 2,07,600" — named on the Labour tile (H18).
+  const labourOtherText = otherLabourLine(labour || {})
   const labourNote = ownerLabourNote(labour?.source)
   // '' before a load or with no open period, so no tile prints a dangling "· labour".
   const labourSuffix = labourNote ? ` · labour ${labourNote}` : ''
@@ -555,9 +567,9 @@ export default function OwnerDashboard() {
     if (withhold) return { color: 'var(--theme-text1)', title: undefined, text: `${pct.toFixed(1)}%` }
     return { color: f.style.color, title: f.title, text: f.text }
   }
-  const labourFigure = settledFigure(laborPct, lcBand, payrollAheadOfRevenue)
-  const primeFigure = settledFigure(primeCostPct, pcBand, periodTooEarly || payrollAheadOfRevenue)
-  const marginFigure = settledFigure(netMarginPct, nmBand, periodTooEarly || payrollAheadOfRevenue)
+  const labourFigure = settledFigure(laborPct, lcBand, labourAheadOfRevenue)
+  const primeFigure = settledFigure(primeCostPct, pcBand, periodTooEarly || labourAheadOfRevenue)
+  const marginFigure = settledFigure(netMarginPct, nmBand, periodTooEarly || labourAheadOfRevenue)
 
   const trendChartData = trendReports.map(r => {
     const c = r.snapshot?.combined || {}
@@ -706,7 +718,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>
             <div style={kpiLabelStyle}>
-              <Tip text="Gross pay + overtime + employer SSF, as a % of revenue. When this month's Payroll Run is finalized, it is that run's figure — the same one the Monthly Owner Report uses. Until then it is an estimate: each employee's pay (and employer SSF for staff enrolled with an SSF number) scaled to the days elapsed, plus approved overtime. Never both, and never the Labor tab on Overheads. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
+              <Tip text="Pay earned + overtime + employer SSF, as a % of revenue. When this month's Payroll Run is finalized, it is that run's Cost to business (salary less unpaid days and days before joining) — the same figure the Monthly Owner Report uses. Until then it is an estimate: each employee's pay (and employer SSF for staff enrolled with an SSF number) scaled to the days elapsed, plus approved overtime. Never both, and never the Labor tab on Overheads. Festival allowance, incentives and leavers' final settlements finalized for this month are added in full in the month they are paid, and named under the figure; while the month is still running that lump carries no verdict. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
             </div>
             {/* Banded through `lcBand`, not an inline ternary. The thresholds were already the
                 Monthly Owner Report's 30/37 — but written out a second time here, and WITHOUT the
@@ -721,8 +733,10 @@ export default function OwnerDashboard() {
             <div style={kpiSubtextStyle}>
               {loading ? 'Target 25-30%'
                 : payrollAheadOfRevenue ? `Full month's payroll · Day ${dayOfPeriod} of ${periodDays} of revenue`
+                : lumpAheadOfRevenue ? `Lump-sum pay counted · Day ${dayOfPeriod} of ${periodDays} of revenue`
                 : `Target 25-30%${labourNote ? ` · ${labourNote}` : ''} →`}
             </div>
+            {!loading && labourOtherText && <div style={kpiSubtextStyle}>{labourOtherText}</div>}
           </div>
 
           <div {...kpiCard()}>

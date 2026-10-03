@@ -13,7 +13,8 @@ import { chartMotion } from '../../../shared/chartMotion'
 import { TOOLTIP_CHROME } from '../../../shared/tooltipChrome'
 import { CHART_COLORS } from '../../../shared/chartColors'
 import { BS_MONTHS_SHORT, BS_MONTHS, bsToAd, formatAd, daysInBsMonth, getBsToday } from '../../../utils/bsCalendar'
-import { isPayrollFenced, payrollLabourTotal } from '../../dashboard/labourSource'
+import { isPayrollFenced, payrollLabourTotal, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../dashboard/labourSource'
+import { loadOtherLabourPay, otherLabourFor } from '../../dashboard/loadOtherLabourPay'
 import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
@@ -22,14 +23,15 @@ import Tip from '../../../components/Tip'
 // was, for each of the last six FINALIZED payroll months — the half of a hospitality HR home every
 // tool the S800 research examined carries (sales against labour) and this page had none of.
 //
-// Deliberately the settled figure only. Labour is gross + overtime + employer SSF
-// (`payrollLabourTotal`, the definition every labour reader shares) over the month's sales, read
+// Deliberately the settled figure only. Labour is pay earned + overtime + employer SSF
+// (`payrollLabourTotal`, the definition every labour reader shares), plus the month's festival,
+// incentive and final-settlement pay (S798 3c, `loadOtherLabourPay`), over the month's sales, read
 // through `hr_labour_actuals` because an HR login cannot read sales_entries itself. The running
 // month is the Roster's Labor Forecast, which knows attendance and the roster; a third estimate
 // here would be a third definition of one ratio, so the tile links there instead.
 
 const MONTHS_SHOWN = 6
-const PAY_HEX = CHART_COLORS[0], OT_HEX = CHART_COLORS[2], SSF_HEX = CHART_COLORS[1]
+const PAY_HEX = CHART_COLORS[0], OT_HEX = CHART_COLORS[2], SSF_HEX = CHART_COLORS[1], OTHER_HEX = CHART_COLORS[4]
 const MUTED = '#6b7280' // chart-tick, for Recharts SVG props only
 
 export default function HrLabourPanel() {
@@ -37,7 +39,7 @@ export default function HrLabourPanel() {
   const { scopedFrom } = useScopedDb()
   const latest = useLatestRequest()
   const fenced = isPayrollFenced({ hrOn: !!clientModules?.hr, isAdmin, isOwner, imsRole: profile?.ims_role })
-  const [months, setMonths] = useState(null)   // [{ key, label, pay, ot, ssf, total, revenue, bulk }]
+  const [months, setMonths] = useState(null)   // [{ key, label, pay, ot, ssf, other, otherInfo, total, revenue, bulk }]
   const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
@@ -62,18 +64,21 @@ export default function HrLabourPanel() {
       if (picked.length === 0) { if (latest.isCurrent(id)) setMonths([]); return }
 
       const first = picked[0], last = picked[picked.length - 1]
-      const [slipsRes, salesRes] = await withTimeout(Promise.all([
+      const [slipsRes, salesRes, otherRes] = await withTimeout(Promise.all([
         // One payslip per employee per run — paged and chunked like the Owner Dashboard's read.
         fetchAllRowsChunked(picked.map(m => m.runId), ids =>
-          scopedFrom('hr_payslips', 'id, run_id, gross, ot_amount, ssf_employer').in('run_id', ids).order('id')),
+          scopedFrom('hr_payslips', `id, run_id, ${PAYSLIP_LABOUR_COLUMNS}`).in('run_id', ids).order('id')),
         supabase.rpc('hr_labour_actuals', {
           p_client_id: clientId,
           p_from: formatAd(bsToAd(first.bsYear, first.bsMonth, 1)),
           p_to: formatAd(bsToAd(last.bsYear, last.bsMonth, daysInBsMonth(last.bsYear, last.bsMonth))),
         }),
+        // Festival, incentive and final-settlement pay of the same months (S798 3c, H18).
+        loadOtherLabourPay((t, c) => scopedFrom(t, c), picked.map(m => ({ bsYear: m.bsYear, bsMonth: m.bsMonth }))),
       ]), 25000, 'Labour cost')
       if (slipsRes.error) throw slipsRes.error
       if (salesRes.error) throw salesRes.error
+      if (otherRes.error) throw otherRes.error
       if (!latest.isCurrent(id)) return
 
       const slipsByRun = new Map()
@@ -98,11 +103,14 @@ export default function HrLabourPanel() {
         // so its share of sales is not judged rather than overstated.
         const running = m.key >= nowKey
         const revenue = sales && sales.known && !sales.bulk && !running ? sales.revenue : null
-        const total = payrollLabourTotal(slips)
+        const otherInfo = otherLabourFor(otherRes.byKey, m.bsYear, m.bsMonth)
+        const total = payrollLabourTotal(slips) + otherInfo.total
         return {
           key: m.key, label: `${BS_MONTHS_SHORT[m.bsMonth - 1]} ${String(m.bsYear).slice(-2)}`,
           longLabel: `${BS_MONTHS[m.bsMonth - 1]} ${m.bsYear}`,
-          pay: Math.round(sum(slips, 'gross')), ot: Math.round(sum(slips, 'ot_amount')), ssf: Math.round(sum(slips, 'ssf_employer')),
+          // Pay is what was EARNED: gross less the absence deduction (unpaid days, days before joining).
+          pay: Math.round(sum(slips, 'gross') - sum(slips, 'absence_deduction')), ot: Math.round(sum(slips, 'ot_amount')), ssf: Math.round(sum(slips, 'ssf_employer')),
+          other: Math.round(otherInfo.total), otherInfo,
           total, revenue, bulk: !!sales?.bulk, running,
           pct: revenue > 0 ? (total / revenue) * 100 : null,
         }
@@ -135,7 +143,7 @@ export default function HrLabourPanel() {
       <div className="stat-grid stat-grid--compact dash-row">
         <div className="stat-card stat-card--compact">
           <div className="stat-label">
-            <Tip text="Pay (basic and allowances) plus overtime plus the employer's 20% SSF, from the finalized payroll, divided by that month's sales before VAT. Healthy is up to 30%; above 37% is high. The month you are in is on the Roster's Labor Forecast." width={300}>
+            <Tip text="Pay earned (basic and allowances, less unpaid days and days before joining) plus overtime plus the employer's 20% SSF, from the finalized payroll — the payroll sheet's Cost to business — plus any festival allowance, incentives and leavers' final settlements finalized for that month, divided by that month's sales before VAT. Healthy is up to 30%; above 37% is high. The month you are in is on the Roster's Labor Forecast." width={300}>
               Labour % — {latestMonth.longLabel}
             </Tip>
           </div>
@@ -153,7 +161,8 @@ export default function HrLabourPanel() {
         <div className="stat-card stat-card--compact">
           <div className="stat-label">Labour cost — {latestMonth.longLabel}</div>
           <div className="stat-value">{npr(latestMonth.total)}</div>
-          <div className="stat-sub">pay {npr(latestMonth.pay)} · overtime {npr(latestMonth.ot)} · employer SSF {npr(latestMonth.ssf)}</div>
+          <div className="stat-sub">pay {npr(latestMonth.pay)} · overtime {npr(latestMonth.ot)} · employer SSF {npr(latestMonth.ssf)}{latestMonth.other ? ` · bonus & final pay ${npr(latestMonth.other)}` : ''}</div>
+          {latestMonth.other !== 0 && <div className="stat-sub">{otherLabourLine({ other: latestMonth.otherInfo })}</div>}
         </div>
       </div>
       {months.length > 1 && (
@@ -162,6 +171,7 @@ export default function HrLabourPanel() {
             title={`Labour cost by month — last ${months.length} finalized`}
             legend={<span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
               <span style={{ color: PAY_HEX }}>■</span> Pay · <span style={{ color: OT_HEX }}>■</span> Overtime · <span style={{ color: SSF_HEX }}>■</span> Employer SSF
+              {months.some(m => m.other) && <> · <span style={{ color: OTHER_HEX }}>■</span> Bonus &amp; final pay</>}
             </span>}
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
@@ -182,6 +192,7 @@ export default function HrLabourPanel() {
                   <Bar dataKey="pay" name="Pay" stackId="l" fill={PAY_HEX} {...chartMotion()} />
                   <Bar dataKey="ot" name="Overtime" stackId="l" fill={OT_HEX} {...chartMotion()} />
                   <Bar dataKey="ssf" name="Employer SSF" stackId="l" fill={SSF_HEX} {...chartMotion()} />
+                  {months.some(m => m.other) && <Bar dataKey="other" name="Bonus & final pay" stackId="l" fill={OTHER_HEX} {...chartMotion()} />}
                 </BarChart>
               </ResponsiveContainer>
             )}

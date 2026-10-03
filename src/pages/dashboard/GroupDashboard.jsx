@@ -359,7 +359,7 @@ export default function GroupDashboard() {
                 <div className="stat-value" style={{ color: loading ? undefined : fcBandOf(groupFc).color }} title={loading ? undefined : bandFigure(groupFc, fcBandOf).title}>{loading ? <StatSkeleton /> : bandFigure(groupFc, fcBandOf).text}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text="All outlets' labour ÷ all outlets' revenue. Each outlet's labour is its finalized payroll (gross + overtime + employer SSF), or, with none, what was typed on its Overheads Labor tab — the rule Consolidated P&L uses. Shown only when every outlet has a labour figure: an outlet whose payroll is not finalized yet would otherwise count as zero and make the group look cheaper to staff than it is. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use." width={300}>Group Labour %</Tip></div>
+                <div className="stat-label"><Tip text="All outlets' labour ÷ all outlets' revenue. Each outlet's labour is its finalized payroll (pay earned + overtime + employer SSF, plus festival allowance, incentives and final settlements finalized for the month), or, with none, what was typed on its Overheads Labor tab — the rule Consolidated P&L uses. Shown only when every outlet has a labour figure: an outlet whose payroll is not finalized yet would otherwise count as zero and make the group look cheaper to staff than it is. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use." width={300}>Group Labour %</Tip></div>
                 <div className="stat-value" style={{ color: loading ? undefined : lcBand(groupLabour).color }} title={loading ? undefined : bandFigure(groupLabour, lcBand).title}>{loading ? <StatSkeleton /> : bandFigure(groupLabour, lcBand).text}</div>
                 {!loading && groupLabourMissing.length > 0 && (
                   <div className="stat-sub">No labour figure yet: {groupLabourMissing.join(', ')}</div>
@@ -386,7 +386,7 @@ export default function GroupDashboard() {
                     <th style={{ textAlign: 'right' }}>Net Purchases</th>
                     {/* Neutral while loading: `rows` still holds the previous month, whose outlets may stand differently. */}
                     <th style={{ textAlign: 'right' }}><Tip text={columnTip} width={300}>{loading ? 'Food Cost / Spend %' : columnLabel}</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="This outlet's labour for the month: its finalized payroll (gross + overtime + employer SSF), or, with none, what was typed on its Overheads Labor tab, marked as such. “Not finalized” means the outlet runs Crest HR and its payroll for this month is not finalized yet; “none entered” means an outlet without Crest HR has nothing on its Labor tab." width={300}>Labour</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="This outlet's labour for the month: its finalized payroll (pay earned + overtime + employer SSF), plus festival allowance, incentives and leavers' final settlements finalized for the month (“incl. bonus / final pay”, hover for the amounts), or, with none, what was typed on its Overheads Labor tab, marked as such. “Not finalized” means the outlet runs Crest HR and its payroll for this month is not finalized yet; “none entered” means an outlet without Crest HR has nothing on its Labor tab." width={300}>Labour</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Labour ÷ revenue for this outlet alone. No band while the outlet has no labour figure.">Labour %</Tip></th>
                     <th style={{ textAlign: 'right' }}>Covers</th>
                   </tr>
@@ -441,7 +441,10 @@ export default function GroupDashboard() {
                         <td style={{ textAlign: 'right' }}>
                           {!r.is_included || r.has_period === false ? '—' : r.labour?.hasFigure ? fmtNpr(r.labour.amount) : '—'}
                           {r.is_included && r.has_period !== false && r.labour?.note && (
-                            <div style={{ fontSize: 11, fontWeight: 400, color: r.labour.hasFigure ? 'var(--theme-text2)' : 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>{r.labour.note}</div>
+                            <div style={{ fontSize: 11, fontWeight: 400, color: r.labour.hasFigure ? 'var(--theme-text2)' : 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>
+                              {/* S798 3c: the short note inline, the amounts in the Tip ("includes Dashain allowance NPR …"). */}
+                              {r.labour.otherText ? <Tip text={`${r.labour.otherText[0].toUpperCase()}${r.labour.otherText.slice(1)}.`} width={260}>{r.labour.note}</Tip> : r.labour.note}
+                            </div>
                           )}
                         </td>
                         <td {...withMark(bandCell(lab, lcBand), markOf(labourMarks, r.client_id))} />

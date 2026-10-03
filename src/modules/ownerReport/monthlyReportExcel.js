@@ -75,9 +75,18 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     const hr = snapshot.hr
     const hrRows = [{
       'Payroll Source': hr.payrollSource === 'finalized' ? 'Finalized Payroll Run' : 'Estimated (no payroll finalized)',
-      'Gross Payroll (NPR)': round2(hr.payroll?.gross), 'OT Hours': round2(hr.payroll?.ot?.hours),
+      'Gross Payroll (NPR)': round2(hr.payroll?.gross),
+      // v13 only (S798 3c): an older snapshot froze no unpaid-day or other-pay figure, and a blank
+      // there would read as zero. An estimate has no unpaid-day figure either (null).
+      ...(hr.payroll?.absenceDeduction != null ? { 'Less Unpaid Days (NPR)': round2(hr.payroll.absenceDeduction) } : {}),
+      'OT Hours': round2(hr.payroll?.ot?.hours),
       'OT Amount (NPR)': round2(hr.payroll?.ot?.amount), 'Employer SSF (NPR)': round2(hr.payroll?.ssfEmployer),
-      'Total Payroll Cost (NPR)': round2(hr.payroll?.total),
+      ...(hr.payroll?.other ? {
+        'Festival Allowance (NPR)': round2(hr.payroll.other.festival),
+        'Incentives (NPR)': round2(hr.payroll.other.incentive),
+        "Leavers' Final Pay (NPR)": round2(hr.payroll.other.settlement),
+        'Total Labour Cost (NPR)': round2(hr.payroll?.total),
+      } : { 'Total Payroll Cost (NPR)': round2(hr.payroll?.total) }),
       'Active Employees': hr.headcount?.active ?? 0, 'New Hires': hr.headcount?.newHires ?? 0,
       'Terminations': hr.headcount?.terminations ?? 0,
       'Attendance Rate %': hr.attendance ? pct(hr.attendance.rate) : 'N/A',

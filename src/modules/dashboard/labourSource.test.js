@@ -4,7 +4,10 @@ import {
   isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText,
   finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote,
   NON_LABOUR_OVERHEADS, splitNonLabourOverheads, groupOutletLabour, groupLabourRatio,
+  PAYSLIP_LABOUR_COLUMNS, settlementLabourCost, otherLabourTotals, otherLabourFromGroupRow, otherLabourParts,
+  otherLabourLine, NO_OTHER_LABOUR,
 } from './labourSource'
+import { payrollCashCost } from '../hr/payroll/payrollData'
 
 const readSource = (...parts) => fs.readFileSync(path.join(__dirname, '..', '..', ...parts), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
@@ -33,7 +36,7 @@ describe('OwnerDashboard uses finalized payroll when it exists', () => {
   const src = readSource('pages', 'dashboard', 'OwnerDashboard.jsx')
   test('reads the finalized run and pages its payslips, OT included', () => {
     expect(src).toMatch(/scopedFrom\('hr_payroll_runs', 'id'\)\.eq\('period_id', period\.id\)\.eq\('status', 'finalized'\)/)
-    expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}'gross, ot_amount, ssf_employer'\)\.in\('run_id', chunk\)\.order\('id'\)/)
+    expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}PAYSLIP_LABOUR_COLUMNS\)\.in\('run_id', chunk\)\.order\('id'\)/)
     expect(src).toMatch(/resolveOwnerLabour\(\{/)
   })
   // S798 2e (LABOUR-FIGURES-4): every bucket but labor — Tax & Fees and NULL-bucket rows came in.
@@ -82,8 +85,25 @@ describe('payrollLabourTotal', () => {
   test('gross + employer SSF, tolerant of strings and nulls', () => {
     expect(payrollLabourTotal([{ gross: '30000', ssf_employer: '2000' }, { gross: 10000, ssf_employer: null }])).toBe(42000)
   })
-  test('S756 owner decision: overtime is included, absence is not subtracted', () => {
-    expect(payrollLabourTotal([{ gross: '92000', ot_amount: '7323', ssf_employer: '0', absence_deduction: '500' }])).toBe(99323)
+  test('S756 owner decision: overtime is included', () => {
+    expect(payrollLabourTotal([{ gross: '92000', ot_amount: '7323', ssf_employer: '0' }])).toBe(99323)
+  })
+  // S798 3c (H19 (A)): only what was earned. The finding's own month: two waiters on 18,000 + 2,000
+  // join on 16 Bhadra (31 days); each slip stores gross 20,000 and absence 9,677 for the 15 days.
+  test('H19: the absence deduction comes off — a mid-month joiner counts what they earned', () => {
+    const joiner = { gross: '20000', absence_deduction: '9677', ot_amount: '0', ssf_employer: '0' }
+    expect(payrollLabourTotal([joiner, joiner])).toBe(20646)
+  })
+  test('it is the payroll sheet\'s Cost to business, payslip for payslip', () => {
+    const slips = [
+      { gross: '30000', absence_deduction: '1935.48', ot_amount: '1500', ssf_employer: '6000', tada_amount: '800' },
+      { gross: 12000, absence_deduction: null, ot_amount: null, ssf_employer: null },
+      { gross: '20000', absence_deduction: '9677', ot_amount: '250.5', ssf_employer: '0' },
+    ]
+    expect(payrollLabourTotal(slips)).toBeCloseTo(payrollCashCost(slips).total, 2)
+  })
+  test('every payslip read selects the absence deduction', () => {
+    expect(PAYSLIP_LABOUR_COLUMNS.split(', ').sort()).toEqual(['absence_deduction', 'gross', 'ot_amount', 'ssf_employer'])
   })
   test('null means no run; [] is a real zero', () => {
     expect(payrollLabourTotal(null)).toBeNull()
@@ -94,7 +114,7 @@ describe('payrollLabourTotal', () => {
 describe('resolveLabour — payroll XOR the Labor bucket, never the sum', () => {
   test('D22: finalized payroll with an empty Labor tab counts the payroll', () => {
     const r = resolveLabour({ labourBucket: 0, payroll: 400000, hrOn: true, fenced: false })
-    expect(r).toEqual({ source: 'payroll', amount: 400000, ignoredBucket: 0, verdictWithheld: false })
+    expect(r).toEqual({ source: 'payroll', amount: 400000, ignoredBucket: 0, verdictWithheld: false, other: null, otherNotCounted: null })
   })
   test('payroll supersedes a typed bucket, which is named, not added', () => {
     const r = resolveLabour({ labourBucket: 150000, payroll: 400000, hrOn: true, fenced: false })
@@ -103,7 +123,7 @@ describe('resolveLabour — payroll XOR the Labor bucket, never the sum', () => 
   })
   test('no finalized run falls back to the typed bucket', () => {
     expect(resolveLabour({ labourBucket: 150000, payroll: null, hrOn: true, fenced: false }))
-      .toEqual({ source: 'overheads', amount: 150000, ignoredBucket: 0, verdictWithheld: false })
+      .toEqual({ source: 'overheads', amount: 150000, ignoredBucket: 0, verdictWithheld: false, other: null, otherNotCounted: null })
   })
   test('nothing anywhere is "none", not a judged zero-labour month', () => {
     const r = resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false })
@@ -161,15 +181,15 @@ describe('finalizedPayrollCost — the Monthly Owner Report\'s finalized-run fig
 describe('resolveOwnerLabour — payroll XOR estimate, never a fallback over a failed read', () => {
   test('a finalized run supersedes the estimate', () => {
     expect(resolveOwnerLabour({ payroll: 400000, estimate: 380000 }))
-      .toEqual({ source: 'payroll', amount: 400000, verdictWithheld: false })
+      .toEqual({ source: 'payroll', amount: 400000, verdictWithheld: false, other: null })
   })
   test('no run: the estimate', () => {
     expect(resolveOwnerLabour({ payroll: null, estimate: 380000 }))
-      .toEqual({ source: 'estimate', amount: 380000, verdictWithheld: false })
+      .toEqual({ source: 'estimate', amount: 380000, verdictWithheld: false, other: null })
   })
   test('a failed payroll read does NOT fall back to the estimate', () => {
     expect(resolveOwnerLabour({ payroll: null, payrollReadFailed: true, estimate: 380000 }))
-      .toEqual({ source: 'failed', amount: null, verdictWithheld: true })
+      .toEqual({ source: 'failed', amount: null, verdictWithheld: true, other: null })
   })
   test('a run that was read stands even when the estimate inputs failed', () => {
     expect(resolveOwnerLabour({ payroll: 400000, estimate: null, estimateReadFailed: true }).source).toBe('payroll')
@@ -256,5 +276,114 @@ describe('the group screens read labour through the shared rule (S798 2e)', () =
   test('Consolidated P&L: the group columns carry the rule and Net Profit can lose its colour', () => {
     expect(pnl).toMatch(/groupOutletLabour\(r, hrById\.get\(r\.client_id\)\)/)
     expect(pnl).toMatch(/lineColor\(l, consolidated\[l\.key\], labourWithheld\)/)
+  })
+})
+
+// S798 stage 3c (LABOUR-FIGURES-1, owner decision H18 (A)): festival allowance, incentives and a
+// leaver's final settlement are labour in the month paid, named, and ride with payroll.
+describe('other labour paid (H18)', () => {
+  const settlement = {
+    partial_salary: '12903.23', month_ssf_employer: '2580.65', leave_encashment: '4000',
+    festival_pro: '5000', notice_pay: '0', gratuity: '8330', notice_deduction: '1500',
+  }
+
+  test('a settlement is its final month, SSF and lump sum, less the notice deduction', () => {
+    expect(settlementLabourCost(settlement)).toBeCloseTo(31313.88, 2)
+    expect(settlementLabourCost(null)).toBe(0)
+  })
+
+  test('the finding\'s Dashain: 12 staff on NPR 17,300 is NPR 2,07,600 of allowance', () => {
+    const festival = Array.from({ length: 12 }, () => ({ festival_name: 'Dashain', amount: '17300' }))
+    const o = otherLabourTotals({ festival })
+    expect(o).toMatchObject({ festival: 207600, festivalName: 'Dashain', incentive: 0, settlement: 0, total: 207600 })
+    expect(otherLabourParts(o)).toBe('Dashain allowance NPR 2,07,600')
+    expect(otherLabourLine({ other: o })).toBe('includes Dashain allowance NPR 2,07,600')
+  })
+
+  test('two festival names in one month are a "festival allowance"; every part is named', () => {
+    const o = otherLabourTotals({
+      festival: [{ festival_name: 'Dashain', amount: 10000 }, { festival_name: 'Tihar Bonus', amount: 5000 }],
+      incentives: [{ amount: '12000' }],
+      settlements: [settlement],
+    })
+    expect(o.festivalName).toBeNull()
+    expect(o.total).toBeCloseTo(15000 + 12000 + 31313.88, 2)
+    expect(otherLabourParts(o)).toBe('festival allowance NPR 15,000 · incentives NPR 12,000 · final pay of leavers NPR 31,314')
+    // A name that already says what it is stays as typed.
+    expect(otherLabourParts(otherLabourTotals({ festival: [{ festival_name: 'Tihar Bonus', amount: 5000 }] }))).toBe('Tihar Bonus NPR 5,000')
+  })
+
+  test('nothing paid is nothing said', () => {
+    expect(NO_OTHER_LABOUR.total).toBe(0)
+    expect(otherLabourParts(NO_OTHER_LABOUR)).toBe('')
+    expect(otherLabourLine({})).toBe('')
+    expect(otherLabourLine({ other: null, otherNotCounted: null })).toBe('')
+  })
+
+  test('it joins finalized payroll, and is counted', () => {
+    const otherPay = otherLabourTotals({ festival: [{ festival_name: 'Dashain', amount: 207600 }] })
+    const r = resolveLabour({ labourBucket: 0, payroll: 290000, hrOn: true, fenced: false, otherPay })
+    // The finding: NPR 2,90,000 (24%) read when the month cost NPR 4,97,600 (41%).
+    expect(r).toMatchObject({ source: 'payroll', amount: 497600, verdictWithheld: false, otherNotCounted: null })
+    expect(r.other.total).toBe(207600)
+    expect(otherLabourLine(r)).toBe('includes Dashain allowance NPR 2,07,600')
+  })
+
+  test('beside the Labor tab it is named, never added (the owner may have typed it there)', () => {
+    const otherPay = otherLabourTotals({ festival: [{ festival_name: 'Dashain', amount: 207600 }] })
+    const r = resolveLabour({ labourBucket: 300000, payroll: null, hrOn: true, fenced: false, otherPay })
+    expect(r).toMatchObject({ source: 'overheads', amount: 300000, other: null })
+    expect(otherLabourLine(r)).toBe('Not included: Dashain allowance NPR 2,07,600 paid through HR')
+    // No labour at all yet: still named, still not counted, still not judged.
+    const none = resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false, otherPay })
+    expect(none).toMatchObject({ source: 'none', amount: 0, verdictWithheld: true, other: null })
+    expect(none.otherNotCounted.total).toBe(207600)
+  })
+
+  test('a fenced or failed read says nothing about it', () => {
+    const otherPay = otherLabourTotals({ incentives: [{ amount: 5000 }] })
+    expect(resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: true, otherPay }))
+      .toMatchObject({ source: 'unreadable', other: null, otherNotCounted: null })
+    expect(resolveLabour({ labourBucket: 0, payroll: 1, hrOn: true, fenced: false, readFailed: true, otherPay }))
+      .toMatchObject({ source: 'failed', other: null, otherNotCounted: null })
+  })
+
+  test('the Owner Dashboard adds it to the run or to the estimate alike', () => {
+    const otherPay = otherLabourTotals({ settlements: [settlement] })
+    expect(resolveOwnerLabour({ payroll: 100000, estimate: 1, otherPay }).amount).toBeCloseTo(131313.88, 2)
+    expect(resolveOwnerLabour({ payroll: null, estimate: 90000, otherPay }).amount).toBeCloseTo(121313.88, 2)
+    expect(resolveOwnerLabour({ payroll: null, payrollReadFailed: true, estimate: 90000, otherPay }).amount).toBeNull()
+  })
+
+  test('a group outlet adds get_group_pnl\'s three columns to its payroll, and says so', () => {
+    const row = { labour_payroll: '300000', labour_bucket: '0', labour_festival: '50000', labour_incentive: null, labour_settlement: '10000' }
+    expect(otherLabourFromGroupRow(row)).toMatchObject({ festival: 50000, incentive: 0, settlement: 10000, total: 60000 })
+    const l = groupOutletLabour(row, true)
+    expect(l).toMatchObject({ source: 'payroll', amount: 360000, hasFigure: true, note: 'incl. bonus / final pay' })
+    expect(l.otherText).toBe('includes festival allowance NPR 50,000 · final pay of leavers NPR 10,000')
+    // A Labor-tab outlet keeps its own note, and the bonus is not added.
+    const tab = groupOutletLabour({ ...row, labour_payroll: null, labour_bucket: '200000' }, true)
+    expect(tab).toMatchObject({ source: 'overheads', amount: 200000, note: 'Labor tab' })
+    expect(tab.otherText).toMatch(/^Not included: /)
+    // A row from before the migration has no such columns and reads as nothing paid.
+    expect(groupOutletLabour({ labour_payroll: '300000', labour_bucket: 0 }, true)).toMatchObject({ amount: 300000, other: null, note: '' })
+  })
+})
+
+// The readers all ask the same three questions the same way (S798 3c).
+describe('every labour reader reads payslips with the absence deduction and the other labour', () => {
+  const files = {
+    Overheads: ['modules', 'ims', 'reports', 'Overheads.js'],
+    ClientDashboard: ['pages', 'dashboard', 'ClientDashboard.jsx'],
+    OwnerDashboard: ['pages', 'dashboard', 'OwnerDashboard.jsx'],
+    ConsolidatedPnl: ['pages', 'dashboard', 'ConsolidatedPnl.jsx'],
+    HrLabourPanel: ['modules', 'hr', 'dashboard', 'HrLabourPanel.jsx'],
+    computeMonthlyReport: ['modules', 'ownerReport', 'computeMonthlyReport.js'],
+  }
+  test.each(Object.keys(files))('%s', name => {
+    const src = readSource(...files[name])
+    expect(src).not.toMatch(/'gross, ot_amount, ssf_employer'/)
+    expect(src).toMatch(/PAYSLIP_LABOUR_COLUMNS|absence_deduction/)
+    expect(src).toMatch(/loadMonthOtherLabour\(|loadOtherLabourPay\(/)
   })
 })

@@ -21,6 +21,7 @@ import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
 import { computeInventoryDepthSection } from './computeInventoryDepthSection'
 import { NON_LABOUR_OVERHEADS, splitNonLabourOverheads } from '../dashboard/labourSource'
+import { loadMonthOtherLabour } from '../dashboard/loadOtherLabourPay'
 import { parseAdDateLocal } from '../../shared/nepalTime'
 
 // ── Net purchases (pure) ─────────────────────────────────────────────────────
@@ -296,12 +297,21 @@ async function computeHrSection(clientId, period) {
     fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id).order('id')),
     scopedFrom('hr_leave_types', clientId, 'id, name'),
     scopedFrom('hr_payroll_runs', clientId, 'id').eq('period_id', period.id).eq('status', 'finalized').maybeSingle(),
+    // Festival allowance, incentives and final settlements finalized for this month (S798 3c, H18):
+    // labour in the month paid, on top of the run or the estimate. A failed read fails the section.
+    loadMonthOtherLabour((t, c) => scopedFrom(t, clientId, c), period.bs_year, period.bs_month),
   ])
   throwFirstError(results)
   const [
     { data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests },
-    { data: attendanceRows }, { data: leaveTypes }, { data: finalizedRun },
+    { data: attendanceRows }, { data: leaveTypes }, { data: finalizedRun }, { other: otherLabour },
   ] = results
+  // Frozen as plain figures, the festival name resolved now (the S435 rule for a frozen artifact).
+  const other = {
+    festival: otherLabour.festival, festivalName: otherLabour.festivalName,
+    incentive: otherLabour.incentive, settlement: otherLabour.settlement,
+    settlementCount: otherLabour.settlementCount, total: otherLabour.total,
+  }
   const leaveTypeNameMap = Object.fromEntries((leaveTypes || []).map(lt => [lt.id, lt.name]))
   const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
 
@@ -333,17 +343,21 @@ async function computeHrSection(clientId, period) {
   // finalized yet) — matches Owner Dashboard's live MTD estimate for the still-open case.
   let payroll, payrollSource
   if (finalizedRun?.id) {
-    const payslipRes = await scopedFrom('hr_payslips', clientId, 'gross, ot_hours, ot_amount, ssf_employer')
-      .eq('run_id', finalizedRun.id)
+    // Paged: one row per employee per run.
+    const payslipRes = await fetchAllRows(() => scopedFrom('hr_payslips', clientId, 'id, gross, absence_deduction, ot_hours, ot_amount, ssf_employer')
+      .eq('run_id', finalizedRun.id).order('id'))
     // A finalized run whose payslips cannot be read must fail the section, not freeze a payroll
     // of NPR 0 under payrollSource:'finalized' — the label would vouch for the wrong figure.
     throwFirstError([payslipRes])
     const { data: payslips } = payslipRes
     const gross = (payslips || []).reduce((s, p) => s + (parseFloat(p.gross) || 0), 0)
+    // S798 3c (H19): only what was earned — unpaid days and days before joining or after leaving
+    // come off, as on the payroll sheet's Cost to business (payrollLabourTotal).
+    const absenceDeduction = (payslips || []).reduce((s, p) => s + (parseFloat(p.absence_deduction) || 0), 0)
     const otHours = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_hours) || 0), 0)
     const otAmount = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_amount) || 0), 0)
     const ssfEmployer = (payslips || []).reduce((s, p) => s + (parseFloat(p.ssf_employer) || 0), 0)
-    payroll = { gross, ot: { hours: otHours, amount: otAmount }, ssfEmployer, total: gross + otAmount + ssfEmployer }
+    payroll = { gross, absenceDeduction, ot: { hours: otHours, amount: otAmount }, ssfEmployer, other, total: gross - absenceDeduction + otAmount + ssfEmployer + other.total }
     payrollSource = 'finalized'
   } else {
     const { gross: accruedGross, ssfEmployer: accruedSsfEmployer } = estimatePayrollAccrual({ employees, components, period })
@@ -359,7 +373,8 @@ async function computeHrSection(clientId, period) {
       otHoursTotal += hours
     })
 
-    payroll = { gross: accruedGross, ot: { hours: otHoursTotal, amount: otTotal }, ssfEmployer: accruedSsfEmployer, total: accruedGross + otTotal + accruedSsfEmployer }
+    // The estimate prorates joiners and leavers already; it has no unpaid-day figure to subtract.
+    payroll = { gross: accruedGross, absenceDeduction: null, ot: { hours: otHoursTotal, amount: otTotal }, ssfEmployer: accruedSsfEmployer, other, total: accruedGross + otTotal + accruedSsfEmployer + other.total }
     payrollSource = 'estimated'
   }
 
@@ -516,6 +531,11 @@ async function computePosSection(clientId, period) {
 // Consolidated P&L's Net Profit subtracts COGS for the same month. `foodCostBasis` names the basis
 // so a reader, and the Trend section comparing against older snapshots, can tell.
 //
+// Since schema v13 (S798 3c, LABOUR-FIGURES-1/-3) labour is pay EARNED (gross less the absence
+// deduction) + overtime + employer SSF, plus festival allowance, incentives and final settlements
+// finalized for the month. `labourBasis: 'earned'` marks it; Labor, Prime and Net Margin get no
+// Trend delta across the line.
+//
 // Since schema v12 (S798 2e, LABOUR-FIGURES-4) Net Margin also subtracts Tax & Fees, as Overheads,
 // the Dashboard and Consolidated P&L do. `netMarginTaxFees: true` marks it; a v11 margin without it
 // read higher by that month's card and bank fees, accountant and licences.
@@ -528,7 +548,7 @@ export function computeCombinedMetrics({ ims, hr }) {
   const netMarginPct = hr && revenueTotal > 0
     ? ((revenueTotal - ims.cogsTotal - hr.payroll.total - ims.overheadTotal - (ims.taxFeesTotal || 0)) / revenueTotal) * 100
     : null
-  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis, netMarginTaxFees: true }
+  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis, netMarginTaxFees: true, labourBasis: LABOUR_BASIS }
 }
 
 // ── Trend section ────────────────────────────────────────────────────────────
@@ -564,6 +584,11 @@ export const foodCostBasisOf = snapshot => snapshot?.combined?.foodCostBasis || 
 // Whether a snapshot's Net Margin % subtracts Tax & Fees. Absent before schema v12, when it did not.
 export const netMarginTaxFeesOf = snapshot => snapshot?.combined?.netMarginTaxFees === true
 
+// The labour definition a snapshot froze. Absent before schema v13: gross + overtime + employer SSF,
+// no unpaid days taken off, and no festival, incentive or settlement pay.
+export const LABOUR_BASIS = 'earned'
+export const labourBasisOf = snapshot => snapshot?.combined?.labourBasis || 'gross'
+
 export function buildDeltas(current, prior) {
   if (!prior) return null
   const pctDelta = (curVal, priorVal) => (curVal == null || priorVal == null) ? null : curVal - priorVal // percentage-point delta
@@ -579,14 +604,18 @@ export function buildDeltas(current, prior) {
   const sameBasis = foodCostBasisOf(current) === foodCostBasisOf(prior)
   // The same for Net Margin across the v11→v12 line, where it started subtracting Tax & Fees.
   const sameNetBasis = sameBasis && netMarginTaxFeesOf(current) === netMarginTaxFeesOf(prior)
+  // And for the three labour-bearing ratios across v12→v13, where labour started taking off unpaid
+  // days and counting festival, incentive and settlement pay (S798 3c).
+  const sameLabour = labourBasisOf(current) === labourBasisOf(prior)
   return {
     foodCostBasisChanged: !sameBasis,
     netMarginBasisChanged: sameBasis && !sameNetBasis,
+    labourBasisChanged: !sameLabour,
     revenueTotal: moneyDelta(current.combined?.revenueTotal, prior.combined?.revenueTotal),
     foodCostPct: sameBasis ? pctDelta(current.combined?.foodCostPct, prior.combined?.foodCostPct) : null,
-    laborCostPct: pctDelta(current.combined?.laborCostPct, prior.combined?.laborCostPct),
-    primeCostPct: sameBasis ? pctDelta(current.combined?.primeCostPct, prior.combined?.primeCostPct) : null,
-    netMarginPct: sameNetBasis ? pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct) : null,
+    laborCostPct: sameLabour ? pctDelta(current.combined?.laborCostPct, prior.combined?.laborCostPct) : null,
+    primeCostPct: sameBasis && sameLabour ? pctDelta(current.combined?.primeCostPct, prior.combined?.primeCostPct) : null,
+    netMarginPct: sameNetBasis && sameLabour ? pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct) : null,
     posNetSales: moneyDelta(current.pos?.totalNetSales, prior.pos?.totalNetSales),
     otHours: moneyDelta(current.hr?.payroll?.ot?.hours, prior.hr?.payroll?.ot?.hours),
     otAmount: moneyDelta(current.hr?.payroll?.ot?.amount, prior.hr?.payroll?.ot?.amount),
@@ -614,6 +643,8 @@ export function trendSnapshotOf(snapshot) {
       ...(c.foodCostBasis ? { foodCostBasis: c.foodCostBasis } : {}),
       // Absent before v12 on purpose: its absence says Net Margin left Tax & Fees out.
       ...(c.netMarginTaxFees ? { netMarginTaxFees: true } : {}),
+      // Absent before v13 on purpose: its absence says labour was gross + OT + SSF (labourBasisOf).
+      ...(c.labourBasis ? { labourBasis: c.labourBasis } : {}),
     },
     pos: snapshot.pos ? { totalNetSales: snapshot.pos.totalNetSales ?? null } : null,
   }
@@ -736,7 +767,18 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   - LABOUR-FIGURES-7 (H31): `laborAnalytics` gains `workingDays` and `workingDaysWithoutHours`, and
 //     `hoursWithheld` with Schedule Variance and Sales per Labour Hour null when more than half the
 //     working days carry no clock times.
-export const CURRENT_SCHEMA_VERSION = 12
+// 13 (S798 stage 3c): labour.
+//   - LABOUR-FIGURES-3 (H19 (A)): a finalized run's labour is gross − absence deduction + overtime +
+//     employer SSF, the payroll sheet's Cost to business. `hr.payroll.absenceDeduction` is new (null
+//     on an estimate). A v13 labour is lower than a v12 one by the month's unpaid days and the days
+//     before joiners started.
+//   - LABOUR-FIGURES-1 (H18 (A)): `hr.payroll.other` = { festival, festivalName, incentive,
+//     settlement, settlementCount, total }, the month's finalized festival allowance, incentives and
+//     Final Settlements (by settle month, gratuity included), added to `hr.payroll.total` on both
+//     the finalized and the estimated path.
+//   - `combined.labourBasis: 'earned'` marks both; Trend gives no Labor / Prime / Net Margin delta
+//     across the line (`deltas.labourBasisChanged`).
+export const CURRENT_SCHEMA_VERSION = 13
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

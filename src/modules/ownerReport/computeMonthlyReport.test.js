@@ -12,7 +12,7 @@ jest.mock('../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 // eslint-disable-next-line import/first
 import {
   netPurchaseFigures, estimatePayrollAccrual, CURRENT_SCHEMA_VERSION,
-  computeCombinedMetrics, buildDeltas, foodCostBasisOf, trendSnapshotOf, netMarginTaxFeesOf,
+  computeCombinedMetrics, buildDeltas, foodCostBasisOf, trendSnapshotOf, netMarginTaxFeesOf, labourBasisOf,
 } from './computeMonthlyReport'
 // eslint-disable-next-line import/first
 import { hoursCoverage } from './computeLaborAnalyticsSection'
@@ -386,5 +386,36 @@ describe('Labor Analytics withholds the hour figures when most worked days have 
   test('the attendance read selects the status it counts by', () => {
     const src = fs.readFileSync(path.join(__dirname, 'computeLaborAnalyticsSection.js'), 'utf8')
     expect(src).toContain("scopedFrom('hr_attendance', clientId, 'status, hours_worked')")
+  })
+})
+
+describe('labour is pay earned plus other labour paid from schema v13 (S798 3c)', () => {
+  test('the combined figures carry the basis, and an older snapshot reads as gross', () => {
+    const c = computeCombinedMetrics({ ims: { revenueTotal: 100, cogsTotal: 30, overheadTotal: 10, foodCostPct: 30, foodCostBasis: 'cogs' }, hr: { payroll: { total: 25 } } })
+    expect(c.labourBasis).toBe('earned')
+    expect(labourBasisOf({ combined: c })).toBe('earned')
+    expect(labourBasisOf({ combined: { laborCostPct: 26 } })).toBe('gross')
+  })
+
+  test('Trend gives no Labor / Prime / Net Margin change across the v12 → v13 line', () => {
+    const v13 = { combined: { revenueTotal: 110, foodCostPct: 35, laborCostPct: 41, primeCostPct: 76, netMarginPct: 9, foodCostBasis: 'cogs', netMarginTaxFees: true, labourBasis: 'earned' } }
+    const v12 = { combined: { revenueTotal: 100, foodCostPct: 34, laborCostPct: 24, primeCostPct: 58, netMarginPct: 26, foodCostBasis: 'cogs', netMarginTaxFees: true } }
+    const d = buildDeltas(v13, v12)
+    expect(d).toMatchObject({ labourBasisChanged: true, laborCostPct: null, primeCostPct: null, netMarginPct: null })
+    expect(d.foodCostPct).toBeCloseTo(1, 9)
+    expect(d.revenueTotal.absoluteChange).toBeCloseTo(10, 9)
+    // The trimmed copy Trend stores keeps the basis, so two v13 snapshots compare as usual.
+    const prior = trendSnapshotOf({ combined: { ...v13.combined, laborCostPct: 30, primeCostPct: 65, netMarginPct: 15 } })
+    expect(prior.combined.labourBasis).toBe('earned')
+    const same = buildDeltas(v13, prior)
+    expect(same.labourBasisChanged).toBe(false)
+    expect(same.laborCostPct).toBeCloseTo(11, 9)
+  })
+
+  const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8').replace(/\s+/g, ' ')
+  test('the finalized run takes off the absence deduction and both paths add other labour', () => {
+    expect(flat).toMatch(/total: gross - absenceDeduction \+ otAmount \+ ssfEmployer \+ other\.total/)
+    expect(flat).toMatch(/total: accruedGross \+ otTotal \+ accruedSsfEmployer \+ other\.total/)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(13)
   })
 })
