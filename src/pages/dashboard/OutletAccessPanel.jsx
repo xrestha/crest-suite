@@ -192,7 +192,13 @@ export default function OutletAccessPanel({ outlets }) {
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
         Removing an outlet moves that person back to their own outlet straight away. A window they have
         open on the removed outlet shows nothing from it, and moves itself back the next time they
-        return to it or open another page.
+        return to it or open another page. It also removes their link to an employee record there.
+      </p>
+      {/* S798 3f-1 (GAP-OUTLETS-1): a tick reaches the outlet; only a link makes its record theirs. */}
+      <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+        If someone you tick is also on that outlet's payroll, open that outlet's HR Staff page and link their login to
+        their employee record there. Until you do, Crest does not know the record is theirs, so they could approve their
+        own leave, claims and overtime at that outlet.
       </p>
     </div>
   )

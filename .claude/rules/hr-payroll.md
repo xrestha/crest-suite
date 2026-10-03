@@ -660,6 +660,11 @@ History: #s660-status-colours-and-labour-band, #s692-labor-forecast, #s693-labou
 - **Nobody below the Owner decides their own record:** `hr_leave_requests_guard_decision` (stamps
   `decided_by`), `hr_overtime_guard_own` and `hr_advances_guard_own` refuse `hr_own_request`;
   `hr_self_decision_exempt()` is admin OR Owner. A new approval queue gets the same trigger.
+- **"Own" is `hr_is_own_employee`, three tests** (S798 3f-1): `profiles.hr_employee_id`, a
+  `profile_employee_links` row (the login's record at an outlet it reaches through Outlet Access), or
+  the record's email. Never test ownership inline; a JS copy reads all three (`useIsOwnEmployee`,
+  `useMyOutletLinks`). Only the Owner links (`link_hr_login`): a manager moving a link could lift the
+  rule off their own record. A link exists only where the outlet tick does.
 - **"Your own" covers more than Approve/Reject** (S798 1b), OLD or NEW employee: your own advance
   (delete, move, write-off, amount, instalment, issue date, type) and any repayment on it; your own
   approved overtime (employee, hours, type, day); your own APPROVED leave (no cancel, no reopen, H8).
@@ -777,7 +782,8 @@ History: #s752-settlement-decisions, #s782-salary-payments
   (holidays inside leave); S751 `20260914210000`; S752 `20260914230000`; S753 `20260915090000`; S782
   `20260923100000`; S791 `20260928100000` (advances), `20260928110000` (leavers), `20260928130000`
   (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`,
-  3b `20261002160000`, 3d `20261003140000` (shift splits, swap ways out).
+  3b `20261002160000`, 3d `20261003140000` (shift splits, swap ways out), 3f-1 `20261003160000`
+  (login links).
 - Engine tests: `payrollS751.test.js`, `settlementCompute.test.js`, `gratuityCompute.test.js`,
   `holidayData.test.js`. The S798 findings and stage plans: `HR_TODO.md` (S798.2, S798.3).
 - The S770 moves (S682's per-ledger Finalize/Reopen messages, the S628 row-cap sweep, the S628

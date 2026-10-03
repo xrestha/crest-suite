@@ -36,7 +36,7 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '' }
+const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '', link_employee_id: '' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
 function emailValid(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) }
@@ -91,6 +91,15 @@ export default function HrStaff() {
   const [resetting,   setResetting]   = useState(false)
   const [pwMsg,       setPwMsg]       = useState('')
 
+  // S798 3f-1 (H6): which employee record each login belongs to. Logins from other outlets that can open
+  // this one come from get_outlet_reaching_logins; a failed read is said in their section, never "none".
+  const [reaching,      setReaching]      = useState([])
+  const [reachingError, setReachingError] = useState(null)
+  const [linkTarget,    setLinkTarget]    = useState(null)   // { id, full_name, outlet: boolean }
+  const [linkEmployee,  setLinkEmployee]  = useState('')
+  const [linking,       setLinking]       = useState(false)
+  const [linkMsg,       setLinkMsg]       = useState('')
+
   const selfId = session?.user?.id || null
   const businessName = profile?.clients?.name || adminViewClientName || ''
   // The Owner and a Crest admin may grant Manager rank, act on a manager's login, and turn an
@@ -98,10 +107,18 @@ export default function HrStaff() {
   const privileged = isAdmin || isOwner
 
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
-  const linkedEmployeeIds = useMemo(
-    () => new Set(staff.map(p => p.hr_employee_id).filter(Boolean)), [staff])
+  // A record already tied to an HR login, here or from another outlet, takes no second one
+  // (link_hr_login's one-HR-login-per-record rule, create_hr_staff's before it).
+  const linkedEmployeeIds = useMemo(() => new Set([
+    ...staff.map(p => p.hr_employee_id),
+    ...reaching.map(r => r.linked_employee_id),
+  ].filter(Boolean)), [staff, reaching])
   const unlinkedEmployees = useMemo(
     () => employees.filter(e => !linkedEmployeeIds.has(e.id)), [employees, linkedEmployeeIds])
+  // Supervisor and manager logins Crest cannot tie to a person: the own-record rule does not reach them
+  // and Final Settlement does not find them. An email tie covers the first half only, so it counts here.
+  const unlinkedRanked = useMemo(
+    () => staff.filter(p => !p.hr_employee_id && (p.hr_role === 'supervisor' || p.hr_role === 'manager')), [staff])
 
   // One filter pass per keystroke, not two that can disagree about what "no matches" means.
   const visibleStaff = useMemo(() => {
@@ -128,13 +145,14 @@ export default function HrStaff() {
     if (!clientId) return
     loadedClientRef.current = clientId
     setStaff([]); setEmployees([]); setEligibleUsers([]); setCustomRoles([])
+    setReaching([]); setReachingError(null)
     setLoadError(null); setPartialWarn(''); setMsg(''); setNotice('')
     init(clientId)
   }, [clientId]) // eslint-disable-line
 
   async function init(forClient) {
     setLoading(true)
-    const [staffRes, settingsRes, empRes, eligibleRes] = await Promise.all([
+    const [staffRes, settingsRes, empRes, eligibleRes, reachRes] = await Promise.all([
       supabase.rpc('get_hr_role_staff_list', { p_client_id: forClient }),
       // maybeSingle: a client with no settings row yet is not a failed read.
       supabase.from('settings').select('hr_custom_roles').eq('client_id', forClient).maybeSingle(),
@@ -142,8 +160,11 @@ export default function HrStaff() {
       privileged
         ? supabase.rpc('get_hr_role_eligible_users', { p_client_id: forClient })
         : Promise.resolve({ data: [], error: null }),
+      supabase.rpc('get_outlet_reaching_logins', { p_client_id: forClient }),
     ])
     if (loadedClientRef.current !== forClient) return
+    setReaching(reachRes.error ? [] : (reachRes.data || []))
+    setReachingError(reachRes.error || null)
 
     // A failed read is not an empty team: "No staff yet — add your first account" invites the
     // manager to re-create logins that exist, and the role scheme builds every dropdown here.
@@ -168,13 +189,17 @@ export default function HrStaff() {
 
   async function load() {
     const forClient = clientId
-    const [staffRes, eligibleRes] = await Promise.all([
+    const [staffRes, eligibleRes, reachRes] = await Promise.all([
       supabase.rpc('get_hr_role_staff_list', { p_client_id: forClient }),
       privileged
         ? supabase.rpc('get_hr_role_eligible_users', { p_client_id: forClient })
         : Promise.resolve({ data: [], error: null }),
+      supabase.rpc('get_outlet_reaching_logins', { p_client_id: forClient }),
     ])
     if (loadedClientRef.current !== forClient) return
+    // As with the staff list: a failed re-read keeps the last good rows and says so in that section.
+    if (reachRes.error) setReachingError(reachRes.error)
+    else { setReaching(reachRes.data || []); setReachingError(null) }
     // A failed re-read after a successful delete must not empty the table — that reads as "you
     // just deleted everyone". Keep the last good list and say so.
     if (staffRes.error) {
@@ -366,7 +391,22 @@ export default function HrStaff() {
         setAdding(false); return
       }
       const who = eligibleUsers.find(u => u.id === addForm.existing_user_id)
-      setNotice(`${who?.full_name || who?.email || 'The login'} now has HR access as ${addForm.job_title}.`)
+      const whoName = who?.full_name || who?.email || 'The login'
+      setNotice(`${whoName} now has HR access as ${addForm.job_title}.`)
+      // The link is a second call: the role has landed whatever it says, so a refusal is reported
+      // beside the notice and the row offers Link… again (S798 3f-1).
+      if (addForm.link_employee_id) {
+        const emp = employees.find(e => e.id === addForm.link_employee_id)
+        const { error: linkErr } = await supabase.rpc('link_hr_login', {
+          p_profile_id: addForm.existing_user_id, p_employee_id: addForm.link_employee_id,
+        })
+        if (linkErr) {
+          const e = asActionError(linkErr)
+          setMsg({ text: `${whoName} has HR access, but the login was not linked to ${emp?.full_name || 'that employee record'}. ${e.text} Press Link… on their row to try again.`, detail: e.detail })
+        } else {
+          setNotice(`${whoName} now has HR access as ${addForm.job_title}, linked to ${emp?.full_name || 'their employee record'}.`)
+        }
+      }
       setAddModal(false); setAdding(false); load()
       return
     }
@@ -468,10 +508,85 @@ export default function HrStaff() {
     setSaving(s => ({ ...s, [p.id]: false }))
   }
 
+  // ── Link a login to its employee record (S798 3f-1, H6) ────────────────────
+  // Owner or operator only (link_hr_login refuses anyone else). A login whose home is this outlet
+  // links through profiles.hr_employee_id; one from another outlet through its link row here.
+  function openLink(p, outlet) {
+    setLinkTarget({ id: p.id ?? p.profile_id, full_name: p.full_name || p.email || 'This login', outlet })
+    setLinkEmployee(''); setLinkMsg('')
+  }
+
+  async function saveLink() {
+    if (!linkEmployee) { setLinkMsg('Pick whose employee record this login belongs to.'); return }
+    setLinking(true); setLinkMsg('')
+    const { error } = await supabase.rpc('link_hr_login', { p_profile_id: linkTarget.id, p_employee_id: linkEmployee })
+    setLinking(false)
+    if (error) { setLinkMsg(asActionError(error)); return }
+    const emp = employees.find(e => e.id === linkEmployee)
+    setMsg('')
+    setNotice(`${linkTarget.full_name}'s login is now linked to ${emp?.full_name || 'that employee record'}.`)
+    setLinkTarget(null)
+    load()
+  }
+
+  function unlink(p, outlet) {
+    const loginName = p.full_name || p.email || 'This login'
+    const empName = (outlet ? p.linked_employee_name : p.employee_name) || 'their employee record'
+    askConfirm({
+      title: `Unlink ${loginName}'s login from ${empName}?`,
+      confirmLabel: 'Unlink', busyLabel: 'Unlinking…',
+      body: (
+        <p style={{ margin: 0 }}>
+          Crest will no longer know this login is {empName}'s. It could then approve {empName}'s own leave, travel claims and
+          overtime{outlet ? ' at this outlet' : ''}, and Final Settlement would not block it when they leave. The login and the
+          employee record are otherwise untouched.
+        </p>
+      ),
+      run: async () => {
+        setMsg(''); setNotice('')
+        const { error } = await supabase.rpc('unlink_hr_login', { p_profile_id: p.id ?? p.profile_id, p_client_id: clientId })
+        if (error) {
+          const e = asActionError(error)
+          setMsg({ text: `${loginName}'s login is still linked to ${empName}. ${e.text}`, detail: e.detail }); return
+        }
+        setNotice(`${loginName}'s login is no longer linked to ${empName}.`)
+        load()
+      },
+    })
+  }
+
+  // Remove this outlet from a login of another outlet. Outlet Access (the Group Console) sits behind Suite
+  // Pro, and switching outlets does not, so this is the way to take a grant away when Suite has lapsed.
+  function removeAccess(r) {
+    const loginName = r.full_name || 'This login'
+    askConfirm({
+      title: `Remove ${loginName}'s access to this outlet?`,
+      confirmLabel: 'Remove Access', danger: true, busyLabel: 'Removing…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {loginName} can no longer switch into this outlet, and a window they have open here moves back to their own outlet
+          ({r.home_client_name || 'their home outlet'}).{r.linked_employee_name ? ` Their link to ${r.linked_employee_name}'s record here goes too.` : ''} Their
+          own outlet and their login are untouched. Outlet Access on the Group Console can give it back.
+        </p>
+      ),
+      run: async () => {
+        setMsg(''); setNotice('')
+        const { error } = await supabase.rpc('revoke_outlet_access', { p_profile_id: r.profile_id, p_client_id: clientId })
+        if (error) {
+          const e = asActionError(error)
+          setMsg({ text: `${loginName} can still open this outlet. ${e.text}`, detail: e.detail }); return
+        }
+        setNotice(`${loginName} can no longer open this outlet.`)
+        load()
+      },
+    })
+  }
+
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
   const managerOptionNote = privileged ? '' : ' — owner only'
+  const reachErr = reachingError ? asActionError(reachingError) : null
 
   return (
     <div>
@@ -535,6 +650,19 @@ export default function HrStaff() {
         </div>
       )}
 
+      {/* S798 3f-1 (SISTER-2): a supervisor or manager login Crest cannot tie to a person. */}
+      {!loading && !loadError && unlinkedRanked.length > 0 && (
+        <div className="note-banner" style={{ marginBottom: 16 }}>
+          <strong>△ {unlinkedRanked.length} supervisor or manager login{unlinkedRanked.length === 1 ? ' is' : 's are'} not linked to an employee record:</strong>{' '}
+          {unlinkedRanked.map(p => p.full_name || p.email).join(', ')}. If one of them is on your payroll, Crest does not know
+          it is theirs: they could approve their own leave, travel claims and overtime, and Final Settlement would not block
+          the login when they leave. {privileged
+            ? <>Press <strong>Link…</strong> on their row and pick their record.</>
+            : <>Ask the Owner to link them — only the Owner links logins.</>}{' '}
+          Someone who is not on your payroll (an outside accountant) can stay unlinked.
+        </div>
+      )}
+
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
       ) : loadError ? (
@@ -583,11 +711,19 @@ export default function HrStaff() {
                           <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Blocked at settlement</span>
                         </Tip>
                       )}
-                      {p.hr_employee_id && (
-                        <Tip text="This HR staff login is linked to an HR employee record — name stays in sync with HR.">
-                          <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
+                      {p.hr_employee_id ? (
+                        <Tip text={`This login belongs to ${p.employee_name || 'this employee'}. Crest never lets it decide their own leave, travel claims, overtime, advances, pay or settlement, and Final Settlement blocks it when they leave.`}>
+                          <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 {p.employee_name || 'HR'}{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
                         </Tip>
-                      )}
+                      ) : p.email_employee_name ? (
+                        <Tip text={`${p.email_employee_name}'s record carries this login's email, so Crest stops it deciding their own leave, claims and overtime. Final Settlement does not look at emails, though, so it would not block this login when they leave. Link it to cover both.`}>
+                          <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>△ Email only · {p.email_employee_name}</span>
+                        </Tip>
+                      ) : (p.hr_role === 'supervisor' || p.hr_role === 'manager') ? (
+                        <Tip text="Crest does not know whose login this is. If they are on your payroll, they could approve their own leave, travel claims and overtime, and Final Settlement would not block the login when they leave. The Owner links it to their employee record.">
+                          <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>△ Not linked</span>
+                        </Tip>
+                      ) : null}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{p.email || '—'}</td>
                     <td>
@@ -637,10 +773,21 @@ export default function HrStaff() {
                           <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{isSelf ? 'your login' : 'owner only'}</span>
                         </Tip>
                       ) : (
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
                             Reset Password
                           </button>
+                          {privileged && (p.hr_employee_id ? (
+                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => unlink(p, false)}
+                              aria-label={`Unlink ${p.full_name || 'this login'} from ${p.employee_name || 'their employee record'}`}>
+                              Unlink
+                            </button>
+                          ) : (
+                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openLink(p, false)}
+                              aria-label={`Link ${p.full_name || 'this login'} to their employee record`}>
+                              Link…
+                            </button>
+                          ))}
                           {!isSelf && (
                             <button
                               className="btn btn-ghost"
@@ -659,6 +806,125 @@ export default function HrStaff() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* ── Logins from other outlets that can open this one (S798 3f-1, GAP-OUTLETS-1/-3) ────────── */}
+      {!loading && !loadError && (reaching.length > 0 || reachingError) && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px', color: 'var(--theme-text1)' }}>
+            Logins from your other outlets that can open this one
+          </h2>
+          <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
+            They reach this outlet through Outlet Access, at the rank they hold at home. If one of them is also on this
+            outlet's payroll, link their login to their record here, so they can never decide their own leave, claims or pay
+            here. {privileged ? 'Remove access takes this outlet away from them; their own outlet is untouched.' : 'The Owner links logins and removes access.'}
+          </p>
+          {reachingError ? (
+            <ActionError error={{ text: 'Could not check which logins from other outlets can open this one, so none are listed here. ' + reachErr.text, detail: reachErr.detail }} />
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Home outlet</th>
+                    <th><Tip text="The rank they hold, which is the rank they work at here too.">Access</Tip></th>
+                    <th><Tip text="The employee record at this outlet that this login belongs to, if any.">Linked here</Tip></th>
+                    {privileged && <th style={{ width: 200 }}>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reaching.map(r => {
+                    const ranks = [r.hr_role && `HR ${r.hr_role}`, r.ims_role && `IMS ${r.ims_role}`, r.pos_role && `POS ${r.pos_role}`].filter(Boolean).join(' · ') || '—'
+                    return (
+                      <tr key={r.profile_id}>
+                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.full_name || '—'}</td>
+                        <td>{r.home_client_name || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{ranks}</td>
+                        <td style={{ fontSize: 12 }}>
+                          {r.linked_employee_id ? (
+                            <span>🔗 {r.linked_employee_name}{r.linked_employee_code ? ` · ${r.linked_employee_code}` : ''}</span>
+                          ) : r.email_employee_name ? (
+                            <Tip text={`${r.email_employee_name}'s record here carries this login's email, so Crest stops it deciding their own leave, claims and overtime here. Link it so Final Settlement finds it too.`}>
+                              <span style={{ color: 'var(--theme-amber-text)' }}>△ Email only · {r.email_employee_name}</span>
+                            </Tip>
+                          ) : r.hr_role ? (
+                            <Tip text="Not linked to anyone here. If this person is also on this outlet's payroll, Crest does not know which record is theirs, so they could decide their own leave, claims and overtime here.">
+                              <span style={{ color: 'var(--theme-amber-text)' }}>△ Not linked</span>
+                            </Tip>
+                          ) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                        </td>
+                        {privileged && (
+                          <td>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {r.hr_role && (r.linked_employee_id ? (
+                                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => unlink(r, true)}
+                                  aria-label={`Unlink ${r.full_name || 'this login'} from ${r.linked_employee_name}`}>
+                                  Unlink
+                                </button>
+                              ) : (
+                                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openLink(r, true)}
+                                  aria-label={`Link ${r.full_name || 'this login'} to their employee record here`}>
+                                  Link…
+                                </button>
+                              ))}
+                              <button
+                                className="btn btn-ghost"
+                                style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
+                                onClick={() => removeAccess(r)}
+                                aria-label={`Remove ${r.full_name || 'this login'}'s access to this outlet`}
+                              >
+                                Remove access
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Link login modal (S798 3f-1) ─────────────────────────────────────── */}
+      {linkTarget && (
+        <Modal onClose={() => { if (!linking) setLinkTarget(null) }} title={`Link ${linkTarget.full_name}'s login`} maxWidth={420}>
+          <div>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--theme-text2)' }}>
+              Pick the employee record {linkTarget.outlet ? 'at this outlet ' : ''}that belongs to the person who signs in with
+              this login. Crest will then never let it decide that person's own leave, travel claims, overtime, advances, pay or
+              settlement{linkTarget.outlet ? ' here' : ', and Final Settlement blocks it when they leave'}.
+            </p>
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle} htmlFor="hrstaff-link-employee">
+                <Tip text="Active and probation employees of this outlet whose record has no HR login linked yet.">Employee record</Tip>
+              </label>
+              {unlinkedEmployees.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>
+                  Every active employee here already has an HR login linked. Unlink the other login first, or add the person in
+                  Employees.
+                </p>
+              ) : (
+                <SearchableSelect
+                  id="hrstaff-link-employee"
+                  options={unlinkedEmployees.map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))}
+                  value={linkEmployee} onChange={setLinkEmployee}
+                  placeholder="Select employee…"
+                />
+              )}
+            </div>
+            {linkMsg && <ActionError error={linkMsg} />}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setLinkTarget(null)} disabled={linking}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveLink} disabled={linking || unlinkedEmployees.length === 0}>
+                {linking ? 'Linking…' : 'Link'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* ── Manage Roles modal ───────────────────────────────────────────────── */}
@@ -790,7 +1056,7 @@ export default function HrStaff() {
             {addMode === 'hr' && (
               <div style={{ marginBottom: 14 }}>
                 <label style={labelStyle} htmlFor="hrstaff-add-employee">
-                  <Tip text="Links this HR staff login to an existing HR employee record — their name stays in sync with HR.">HR Employee</Tip>
+                  <Tip text="Creates the login already linked to this person's employee record, with the name from the record. Crest then never lets it decide their own leave, travel claims, overtime, advances, pay or settlement, and Final Settlement blocks it when they leave.">HR Employee</Tip>
                 </label>
                 {unlinkedEmployees.length === 0 ? (
                   <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>
@@ -827,6 +1093,21 @@ export default function HrStaff() {
               </div>
             )}
 
+            {addMode === 'existing' && eligibleUsers.length > 0 && unlinkedEmployees.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle} htmlFor="hrstaff-add-link-employee">
+                  <Tip text="If this person is on your payroll, pick their employee record. Crest then never lets this login decide their own leave, travel claims, overtime, advances, pay or settlement, and Final Settlement blocks it when they leave. Leave it empty for someone not on your payroll.">Their employee record (optional)</Tip>
+                </label>
+                <SearchableSelect
+                  id="hrstaff-add-link-employee"
+                  options={[{ value: '', label: 'Not on our payroll' },
+                    ...unlinkedEmployees.map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))]}
+                  value={addForm.link_employee_id} onChange={v => setAddForm(f => ({ ...f, link_employee_id: v }))}
+                  placeholder="Select employee…"
+                />
+              </div>
+            )}
+
             {addMode === 'manual' && (
               <div style={{ marginBottom: 14 }}>
                 <label style={labelStyle} htmlFor="hrstaff-add-full-name">Full Name</label>
@@ -838,6 +1119,11 @@ export default function HrStaff() {
                   onChange={e => setAddForm(f => ({ ...f, full_name: e.target.value }))}
                   autoFocus
                 />
+                {unlinkedEmployees.length > 0 && (
+                  <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                    On your payroll? Use the <strong>HR Employee</strong> tab instead, so Crest knows this login is theirs.
+                  </p>
+                )}
               </div>
             )}
 

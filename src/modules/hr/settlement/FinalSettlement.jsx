@@ -1220,7 +1220,7 @@ export default function FinalSettlement() {
                 : linkedLogins.error
                   ? 'Could not check for an HR, IMS or POS staff login — any linked to this employee are still blocked.'
                   : linkedLogins.length === 0
-                    ? 'No HR, IMS or POS staff login is linked to this employee. A login created without linking it to their employee record is not found — check the Staff pages.'
+                    ? 'No HR, IMS or POS staff login is linked to this employee, so none is blocked. If they have one that is not linked, link it on HR Staff (the Owner presses Link…) before finalizing, or delete it there.'
                     : <>Their staff login{linkedLogins.length === 1 ? '' : 's'} {linkedLogins.map(l => `${l.full_name} (${l.modules}${l.hr_manager ? ', HR Manager' : ''})`).join(', ')} {linkedLogins.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {linkedLogins.length === 1 ? 'it' : 'them'}, and so does taking them back later with a new join date.</>}
             </li>
             {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}

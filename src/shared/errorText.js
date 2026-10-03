@@ -400,6 +400,46 @@ const rules = [
     operator: 'Finalizing or reopening a Final Settlement needs the Owner or an HR manager, so nothing was changed.',
   },
 
+  // ── A login tied to its owner's employee record (S798 3f-1, migration 20261003160000, H6) ──────────
+  // link_hr_login / unlink_hr_login raise every one of these before they write, in one function call,
+  // so "nothing was changed" is true. login_link_rank and login_link_outlet carry 42501, so they sit
+  // above the generic 42501 rule.
+  {
+    test: e => /login_link_rank/i.test(e.message || ''),
+    staff: 'Only the Owner links a login to an employee record. Nothing was changed.',
+    operator: 'Only the Owner links or unlinks a login, because the link decides whose leave, claims and pay that login may never decide. Nothing was changed.',
+  },
+  {
+    test: e => /login_link_outlet/i.test(e.message || ''),
+    staff: 'That employee belongs to another outlet. Nothing was changed.',
+    operator: 'That employee record belongs to another outlet. Switch to that outlet, then link the login there. Nothing was changed.',
+  },
+  {
+    test: e => /login_link_not_hr/i.test(e.message || ''),
+    staff: 'Only an HR staff login can be linked here. Nothing was changed.',
+    operator: 'Only an HR staff login is linked from HR Staff. Nothing was changed.',
+  },
+  {
+    test: e => /login_link_employee_taken/i.test(e.message || ''),
+    staff: 'That employee already has an HR login linked. Nothing was changed.',
+    operator: 'That employee record already has another HR login linked (named in the line below). One person has one HR login: unlink the other one first. Nothing was changed.',
+  },
+  {
+    test: e => /login_link_taken/i.test(e.message || ''),
+    staff: 'That login is already linked to someone else here. Nothing was changed.',
+    operator: 'This login is already linked to another employee record at this outlet. Unlink it first, then link it to the right record. Nothing was changed.',
+  },
+  {
+    test: e => /login_link_no_access/i.test(e.message || ''),
+    staff: 'That login cannot open this outlet. Nothing was changed.',
+    operator: 'This login cannot open this outlet, so it cannot be linked to a record here. Tick this outlet for them in Outlet Access on the Group Console first. Nothing was changed.',
+  },
+  {
+    test: e => /login_link_missing/i.test(e.message || ''),
+    staff: 'That login or employee record no longer exists. Reload the page. Nothing was changed.',
+    operator: 'That login or employee record no longer exists — someone may have deleted it. Reload the page. Nothing was changed.',
+  },
+
   // ── The IMS guards (S756, migration 20260918100000) ───────────────────────────────────────────
   // Each is raised by a BEFORE trigger on the row it names, so the statement that carried it did
   // not change that row — but a page that writes several tables in a row (a bill, then its

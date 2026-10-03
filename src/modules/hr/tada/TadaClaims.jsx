@@ -24,6 +24,7 @@ import {
   EMPTY_TADA_ITEM, recomputeTadaAmount, tadaLineAmount, tadaItemsTotal, acceptTadaAmount, tadaDatesError, findLookAlikeClaim,
 } from './tadaShared'
 import { TADA_REQUEST_STATUS } from '../payrollConstants'
+import { useMyOutletLinks } from '../ownRecord'
 
 const fmt = nprInt
 const pad2 = n => String(n).padStart(2, '0')
@@ -306,16 +307,19 @@ export default function TadaClaims() {
     return { pendingCount, pendingTotal, approvedCount, approvedTotal, paidTotal }
   }, [claims, monthClaims])
 
-  // "Your own claim": the signed-in login's linked employee, or an employee record carrying this
-  // login's email — the same two tests hr_is_own_employee() makes. The operator is exempt there
-  // too. The database decides regardless; this only avoids offering a button it will refuse.
+  // "Your own claim": the signed-in login's linked employee, its linked record at an outlet it reaches
+  // (S798 3f-1), or an employee record carrying this login's email — the same three tests
+  // hr_is_own_employee() makes. The operator is exempt there too. The database decides regardless;
+  // this only avoids offering a button it will refuse.
   const myEmail = (session?.user?.email || '').trim().toLowerCase()
+  const myOutletLinks = useMyOutletLinks(isAdmin)
   const isOwnClaim = useCallback(c => {
     if (isAdmin) return false
     if (profile?.hr_employee_id && profile.hr_employee_id === c.employee_id) return true
+    if (myOutletLinks.includes(c.employee_id)) return true
     const e = empMap[c.employee_id]
     return !!(myEmail && e?.email && e.email.trim().toLowerCase() === myEmail)
-  }, [isAdmin, profile, empMap, myEmail])
+  }, [isAdmin, profile, empMap, myEmail, myOutletLinks])
 
   function setAdd(f, v) { setAddForm(p => ({ ...p, [f]: v })) }
   function setItem(idx, f, v) {

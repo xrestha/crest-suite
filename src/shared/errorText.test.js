@@ -330,3 +330,26 @@ describe('own pay, own run and claim undo refusals (S798 3a)', () => {
     expect(errorText(raised('tada_undo_rank'), 'operator')).toMatch(/HR manager or the Owner/)
   })
 })
+
+describe('login link refusals (S798 3f-1)', () => {
+  const raised = (name, code = 'P0001') => ({ code, message: `${name}: …` })
+
+  it('the two 42501 refusals name who can, ahead of the generic permission rule', () => {
+    expect(errorText(raised('login_link_rank', '42501'), 'operator')).toMatch(/Only the Owner links or unlinks/)
+    expect(errorText(raised('login_link_outlet', '42501'), 'operator')).toMatch(/Switch to that outlet/)
+  })
+
+  it('each refusal says what to do and that nothing changed', () => {
+    for (const [name, says] of [
+      ['login_link_not_hr', /HR staff login/],
+      ['login_link_taken', /Unlink it first/],
+      ['login_link_employee_taken', /unlink the other one first/],
+      ['login_link_no_access', /Outlet Access/],
+      ['login_link_missing', /Reload the page/],
+    ]) {
+      const text = errorText(raised(name), 'operator')
+      expect(text).toMatch(says)
+      expect(text).toMatch(/Nothing was changed/)
+    }
+  })
+})

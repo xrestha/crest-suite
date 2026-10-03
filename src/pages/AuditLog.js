@@ -63,6 +63,9 @@ const TABLE_LABELS = {
   assets_tax_pool_openings: 'Tax Pool Opening',
   // User & client management
   profiles:               'User',
+  // audited since S798 3f-1 — a login's employee record at another outlet decides whose requests it
+  // may never decide
+  profile_employee_links: 'Login Link',
   staff_pin_vault:        'Staff PIN',
   clients:                'Client Account',
   feature_flags:          'Feature Flags',
