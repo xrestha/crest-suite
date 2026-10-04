@@ -598,7 +598,7 @@ export default function PosStaff() {
                         </Tip>
                       )}
                       {p.hr_employee_id && (
-                        <Tip text="This POS login is linked to an HR employee record — name stays in sync with HR.">
+                        <Tip text="This POS login belongs to an HR employee. Its name was copied from HR when the login was made, and does not change if the employee is renamed later. When this person leaves through Final Settlement, this login is blocked with their others.">
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
                         </Tip>
                       )}
@@ -831,7 +831,7 @@ export default function PosStaff() {
             {addMode === 'hr' ? (
               <div style={{ marginBottom: 14 }}>
                 <label style={labelStyle} htmlFor="pos-staff-hr-employee">
-                  <Tip text="Links this POS login to an existing HR employee record — their name stays in sync with HR, and payroll/attendance can be matched to the same person.">HR Employee</Tip>
+                  <Tip text="Makes this POS login for an existing HR employee, under the name they have in HR. The name is copied once: renaming the employee later does not rename the login. Because it is linked, Final Settlement blocks this login when they leave, and taking them back in Employees unblocks it.">HR Employee</Tip>
                 </label>
                 {empWarn ? (
                   <p role="alert" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: 0 }}>{empWarn}</p>

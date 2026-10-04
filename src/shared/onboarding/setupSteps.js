@@ -67,13 +67,13 @@ export const STEPS = [
     label: 'Add the things you buy',
     hint: 'Start with your 10 most-used. Choose the unit you cook with: Chicken in GM, Cooking oil in ML, Eggs in PCS. Only know the pack price? Use the "Bought a pack?" line and Crest works out the price per unit.',
     note: "An item's unit can't be changed once it has been bought or counted, so pick it carefully.",
-    strip: 'Press + Add Item (bottom right). Give it a name, a unit and a price, then save.' },
+    strip: 'Press + Add Item (top right; bottom right on a phone). Give it a name, a unit and a price, then save.' },
   { key: 'ims.vendors', group: 'ims', phase: 'setup', tick: 'data', signal: 'vendors', module: 'ims',
     access: { ims: 'supervisor' }, route: '/vendors', where: 'IMS → Operations → Vendors',
     label: 'Add your suppliers',
     hint: 'The shops and wholesalers you buy from, e.g. your chicken supplier. Add their PAN if they give you VAT bills.',
     note: REASSURE,
-    strip: "Press + Add Vendor (bottom right), type the supplier's name and save." },
+    strip: "Press + Add Vendor (top right; bottom right on a phone), type the supplier's name and save." },
   { key: 'ims.opening', group: 'ims', phase: 'setup', tick: 'data', signal: 'openingStock', module: 'ims',
     access: { ims: 'staff' }, route: '/stock', where: 'IMS → Operations → Stock Count',
     label: "Count what's in your store today",
@@ -86,7 +86,7 @@ export const STEPS = [
     label: 'Enter your first supplier bill',
     hint: "Type in a bill you were given today: pick the supplier and the date, then add each item with its quantity and price. Quantities are in each item's own unit (GM, ML, PCS).",
     note: REASSURE,
-    strip: 'Press + Add Purchase (bottom right), fill in the bill and save.' },
+    strip: 'Press + Add Purchase (top right; bottom right on a phone), fill in the bill and save.' },
   // A client with POS has this step under Till & bills (pos.menu) — except for an IMS manager, who
   // has no POS menu to reach it from, so theirs stays here under IMS → Costing (S790 review).
   { key: 'ims.menu', group: 'ims', phase: 'next', tick: 'data', signal: 'menuPriced', module: 'ims',
@@ -115,7 +115,7 @@ export const STEPS = [
     label: 'Cost your 5 best-selling dishes',
     hint: 'Tell Crest what goes into one plate — e.g. Chicken Momo: 120 GM chicken, 80 GM flour — and it works out what that plate costs you.',
     note: REASSURE,
-    strip: 'Press + New Recipe (bottom right), then add each ingredient and how much one plate uses.' },
+    strip: 'Press + New Recipe (top right; bottom right on a phone), then add each ingredient and how much one plate uses.' },
 
   // ── Till & bills ──
   { key: 'pos.menu', group: 'pos', phase: 'setup', tick: 'data', signal: 'menuPriced', module: 'pos',
@@ -175,7 +175,7 @@ export const STEPS = [
     label: 'Add your staff',
     hint: 'Everyone you pay, e.g. Sita, cook, joined 1 Baisakh. Start with the name and joining date; the rest can wait.',
     note: REASSURE,
-    strip: 'Press + Add Employee (bottom right). Name and joining date are enough to start.' },
+    strip: 'Press + Add Employee (top right; bottom right on a phone). Name and joining date are enough to start.' },
   { key: 'hr.pay', group: 'hr', phase: 'setup', tick: 'data', signal: 'paySet', module: 'hr',
     access: { hr: 'manager' }, route: '/hr/pay-setup', where: 'HR → People → Pay Setup',
     label: "Set each person's pay",
@@ -222,8 +222,8 @@ export const STEPS = [
   { key: 'monthend.payroll', group: 'monthend', phase: 'monthend', tick: 'data', signal: 'payrollFinalized', module: 'hr',
     access: { hr: 'manager' }, route: '/hr/payroll', where: 'HR → Payroll → Payroll',
     label: 'Run your first payroll',
-    hint: 'Check the month\'s attendance, then generate the payroll, look it over and finalize it. Payslips go to the Crest Staff app.',
-    strip: 'Press Generate Payroll, check each person, then press Finalize.' },
+    hint: 'Check the month\'s attendance, then generate the payroll, look it over and finalize it. Payslips go to the Crest Staff app. Finalizing pays nobody: once the money has gone out, Mark everyone paid records it.',
+    strip: 'Press Generate Payroll, check each person, then press Finalize. Then press Mark everyone paid once the money has gone out.' },
 ]
 
 export const STEP_BY_KEY = Object.fromEntries(STEPS.map(s => [s.key, s]))

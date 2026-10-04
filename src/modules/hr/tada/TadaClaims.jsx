@@ -126,7 +126,7 @@ export default function TadaClaims() {
   // Vehicle-type rates (NPR/km) — a single rate wasn't enough since a 2-wheeler, 4-wheeler, and
   // EV genuinely cost different amounts per km. Keyed object, not a fully-editable named list like
   // settings.pos_delivery_partners — the three categories are fixed, only their rates vary.
-  // Managed from TadaSettingsModal (admin/owner-only), not inline here.
+  // Managed from TadaSettingsModal (the Owner or an HR manager, canManageSettings), not inline here.
   const [vehicleRates,   setVehicleRates]   = useState({ '2w': null, '4w': null, ev: null })
   const [purposeOptions, setPurposeOptions] = useState(DEFAULT_PURPOSE_OPTIONS)
   const [startPoints,    setStartPoints]    = useState(DEFAULT_START_POINTS)
@@ -965,7 +965,7 @@ export default function TadaClaims() {
                           placeholder="Distance (km)" value={it.distanceKm} onChange={e => setItemDistance(idx, e.target.value)}
                         />
                         {vehicleRates[it.vehicle] == null ? (
-                          <span style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>No rate set — ask an owner/admin, or enter Amount manually</span>
+                          <span style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>No rate set — ask the Owner or an HR manager, or type the Amount</span>
                         ) : (
                           <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>× NPR {vehicleRates[it.vehicle]}/km → Amount</span>
                         )}

@@ -353,9 +353,9 @@ export default function HrDashboard() {
         </div>
       )}
 
-      {/* Where the live payroll month stands, as linked steps (S768). Managers only: the run and
-          payslip tables are manager-rank in the database, so a supervisor's read of them is empty
-          and the strip would report "not generated" over a finalized month. */}
+      {/* Where the live payroll month stands, as linked steps (S768). Managers only, because every
+          step links to a manager page. Not a read fence: manager rank fences payroll WRITES, and a
+          supervisor reads runs and payslips by the S750 decision (REPORTS-10). */}
       {hasHrAccess('manager') && <PayrollMonthStatus auto />}
 
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}

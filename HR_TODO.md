@@ -661,10 +661,30 @@ readers, dashboards.md; `SelfServiceHome.jsx`, `SwapRequestsPanel.jsx`, `todayVi
 
 ## S798.5 Stage 4 — docs, copy and polish
 
+**Slices, one short chat and at most one migration each** (owner approved 2026-10-04; this replaces the single
+`hr_polish_s798` below). Each slice is planned first in its own chat. 4b should land before the next month close,
+because LABOUR-FIGURES-8 changes the estimate that the Owner Report freezes when a month closes before payroll is
+finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a "deploy".
+
+1. ✅ **4a Words only** (done 2026-10-04, crest-v384; no logic, no migration): DOCS-1, -2, -3, -4, -5, -8, -9, REPORTS-4, the rest of REPORTS-10,
+   the `Help.js:500` / `:505` and `hrGuideData.js:663` rewords below, and the four ImsStaff/PosStaff tips that
+   say a linked login's "name stays in sync with HR" (no such sync exists). REPORTS-4 is the largest: it rewrites
+   the SSF/challan section from the code.
+2. **4b Dashboards and labour figures** (no migration; Owner Report schema bump for LABOUR-FIGURES-8): REPORTS-5,
+   -6, -7, -8, -9, LABOUR-FIGURES-8, -9, -10.
+3. **4c Payroll, settlements and records** (no migration): PAYROLL-7, PAYROLL-8's payroll half, SETTLEMENT-7,
+   BONUS-LEDGERS-6, DATABASE-4, and HR Staff's Last Seen in BS (carried from IMS_TODO.md, S798.7).
+4. **4d Attendance, roster and leave** (no migration): ATTENDANCE-8, -9, ROSTER-10, PAYROLL-8's Roster half
+   (Copy Week and publish share ROSTER-10's handler), LEAVE-OT-HOLIDAYS-6, -7.
+5. **4e Crest Staff** (migration: DROP/CREATE `get_my_hr_payslips`): SELF-SERVICE-7, -8, DOCS-7.
+6. **4f PIN logins** (migration: `release_hr_pin_attempt`; deploys: hr-selfservice-login, pos-staff-login,
+   ims-staff-login): SELF-SERVICE-6. At planning, check whether the POS and IMS logins need release functions
+   of their own.
+
 | ID | What to change | Status |
 | --- | --- | --- |
-| DOCS-1 | `Help.js:362`: "A day stays blank until you mark it. Payroll pays monthly staff for a blank day but daily and hourly staff nothing, so mark every day they worked. All Present fills the blanks." | 🔴 |
-| REPORTS-4 | Rewrite `hrGuideData.js:565-572` from the code (challan incl. settlements; add the SSF number; SSF Basic matches SOSYS; deductions and employer cost as coded); Help: six tabs; two Tips gain exit tax and settlements. | 🔴 |
+| DOCS-1 | `Help.js:362`: "A day stays blank until you mark it. Payroll pays monthly staff for a blank day but daily and hourly staff nothing, so mark every day they worked. All Present fills the blanks." | ✅ S798 stage 4a (crest-v384). Help's Attendance guide (now line 364) says a day stays blank until marked. |
+| REPORTS-4 | Rewrite `hrGuideData.js:565-572` from the code (challan incl. settlements; add the SSF number; SSF Basic matches SOSYS; deductions and employer cost as coded); Help: six tabs; two Tips gain exit tax and settlements. | ✅ S798 stage 4a (crest-v384). The guide entry was rewritten from `HrReports.jsx`. Employer cost was already right (S798 3c), so only Total deductions, the challan row rule and the two gotchas changed. Help says six tabs, and the challan tip and both TDS tips (Help and the page Tips) carry settlements and exit tax. |
 | PAYROLL-7 | `nprPaisa` on the approval sheet, MarkPaidDialog, the short/over text and the strip. | 🔴 |
 | PAYROLL-8 | `withTimeout` on payments, finalize/reopen, generate/regenerate (and Roster's Copy Week, publish); on timeout "could not confirm — reload". | 🔴 |
 | BONUS-LEDGERS-6 | For a non-active employee: "Left — no payroll will cut this; record a cash repayment or write it off", also in the Reactivate copy. | 🔴 |
@@ -683,23 +703,29 @@ readers, dashboards.md; `SelfServiceHome.jsx`, `SwapRequestsPanel.jsx`, `todayVi
 | REPORTS-7 | `useNavBadgeCounts` keeps the last good value on a failed count (HR and `posPending`). | 🔴 |
 | REPORTS-8 | Disable the .xlsx exports while `clientInfoError` is set, with a notice. | 🔴 |
 | REPORTS-9 | "monthly-paid staff, basic only"; BS dates in the leave queue. | 🔴 |
-| REPORTS-10 | Reword hr-payroll.md (S768, S751), component-library.md:28, `hrGuideData.js:49`, the HrDashboard comment: rank fences writes; supervisors read pay (S750). | 🟡 The two rules files reworded in S799 (hr-payroll.md's rank and `PayrollMonthStatus` bullets, component-library.md's row). `hrGuideData.js:49` and the `HrDashboard.jsx` comment are open. |
+| REPORTS-10 | Reword hr-payroll.md (S768, S751), component-library.md:28, `hrGuideData.js:49`, the HrDashboard comment: rank fences writes; supervisors read pay (S750). | ✅ The two rules files were reworded in S799; `hrGuideData.js:49` and the `HrDashboard.jsx` comment in S798 stage 4a (crest-v384). |
 | LABOUR-FIGURES-8 | Employer SSF on min(basic × days worked ÷ month days, cap) in both estimates. | 🔴 |
 | LABOUR-FIGURES-9 | Tick the pay step only when no active employee has basic 0; say how many; optional Payroll Run warning. | 🔴 |
 | LABOUR-FIGURES-10 | Show every failed close stage's sentence (Periods.js, ClientDashboard.jsx). | 🔴 |
-| DOCS-2 | Add "pay staff, then Mark everyone paid" to the workflow, setup step 5, the monthend strip, tip :460 and `hrGuideData.js:49`. | 🔴 |
-| DOCS-3 | `Help.js:481`: no daily/hourly gratuity yet, here or in Final Settlement; `:480` "active and probation". | 🔴 |
-| DOCS-4 | Delete tip 402's POS sentence; tip 411 describes the fallback rule. | 🔴 |
-| DOCS-5 | "The Owner or an HR manager" in `Help.js:491`, `TadaClaims.jsx:883` and `:125`; drop the Rate/KM tip. | 🔴 |
+| DOCS-2 | Add "pay staff, then Mark everyone paid" to the workflow, setup step 5, the monthend strip, tip :460 and `hrGuideData.js:49`. | ✅ S798 stage 4a (crest-v384). The workflow gained step 6 "Pay staff, then record it" (7 steps now). The `monthend.payroll` hint and strip changed too; its tick still fires at Finalize (`payrollFinalized`). |
+| DOCS-3 | `Help.js:481`: no daily/hourly gratuity yet, here or in Final Settlement; `:480` "active and probation". | ✅ S798 stage 4a (crest-v384). |
+| DOCS-4 | Delete tip 402's POS sentence; tip 411 describes the fallback rule. | ✅ S798 stage 4a (crest-v384). Tip 402 is now line 409, and tip 411 is line 418. |
+| DOCS-5 | "The Owner or an HR manager" in `Help.js:491`, `TadaClaims.jsx:883` and `:125`; drop the Rate/KM tip. | ✅ S798 stage 4a (crest-v384). The "No rate set" advice moved into the Transport tip; `TadaClaims.jsx:968` and the :129 comment. |
 | DOCS-7 | Busy state and reload-on-error on Accept/Decline; errorText rules for the uncoded swap refusals (or raise the existing codes). | 🔴 |
-| DOCS-8 | `hrGuideData.js` :395-396, :438, :467, :90, :329, :39, :673, :216 as the DOCS-8 fix says; also :633 (passed on by ATTENDANCE). | 🔴 |
-| DOCS-9 | "+ Add Employee (top right; bottom right on a phone)" at `setupSteps.js:178` and the four IMS strips. | 🔴 |
+| DOCS-8 | `hrGuideData.js` :395-396, :438, :467, :90, :329, :39, :673, :216 as the DOCS-8 fix says; also :633 (passed on by ATTENDANCE). | ✅ S798 stage 4a (crest-v384). (1) DAILY/HOURLY with holidays and (3) the :90 Payroll Run wording had already been fixed. The rest changed: the bonus tax base (Festival and Incentives), the settled leaver (line 343), one role per login (:39, :699), Generate reads every roster row (:223), the finalized-month lock (:656), and :686 says manager rank fences writes. |
+| DOCS-9 | "+ Add Employee (top right; bottom right on a phone)" at `setupSteps.js:178` and the four IMS strips. | ✅ S798 stage 4a (crest-v384). Employee, Item, Vendor, Purchase and Recipe strips. |
 
 After Stages 1–3, reword `Help.js:505` and `hrGuideData.js:663` ("payroll money records are Manager-only")
-and `Help.js:500` ("an employee can only ever see their own data"), which DOCS flagged.
+and `Help.js:500` ("an employee can only ever see their own data"), which DOCS flagged. ✅ S798 stage 4a
+(crest-v384): Help's HR Staff guide says only a Manager or the Owner can change pay and employee records,
+a Supervisor still sees pay figures, and a Staff login sees none. Help's Self-Service guide names the one
+exception: coworkers' names and published shifts in the swap picker. `hrGuideData.js` (now :686) says
+manager rank fences writes. The four ImsStaff/PosStaff "stays in sync" tips now say the name is copied
+once, when the login is made, and that Final Settlement blocks the login.
 
-**Migration `hr_polish_s798`:** new service-role `release_hr_pin_attempt` (SELF-SERVICE-6); DROP/CREATE
-`get_my_hr_payslips` (SELF-SERVICE-7). **Apply live on "apply"; verify return columns and grants.**
+**Migrations (split across 4e and 4f, see the slices above):** new service-role `release_hr_pin_attempt`
+(SELF-SERVICE-6, 4f); DROP/CREATE `get_my_hr_payslips` (SELF-SERVICE-7, 4e). **Apply live on "apply"; verify
+return columns and grants.**
 **Edge Functions:** hr-selfservice-login, pos-staff-login, ims-staff-login.
 
 **Files:** `Help.js`, `hrGuideData.js`, `setupSteps.js`, `setupSignals.js`; `PayrollApprovalSheet.jsx`,

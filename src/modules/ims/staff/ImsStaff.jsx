@@ -605,7 +605,7 @@ export default function ImsStaff() {
                         </Tip>
                       )}
                       {p.hr_employee_id && (
-                        <Tip text="This IMS login is linked to an HR employee record — name stays in sync with HR.">
+                        <Tip text="This IMS login belongs to an HR employee. Its name was copied from HR when the login was made, and does not change if the employee is renamed later. When this person leaves through Final Settlement, this login is blocked with their others.">
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
                         </Tip>
                       )}
@@ -821,7 +821,7 @@ export default function ImsStaff() {
             {addMode === 'hr' && (
               <div style={{ marginBottom: 14 }}>
                 <label style={labelStyle} htmlFor="ims-staff-hr-employee">
-                  <Tip text="Links this IMS login to an existing HR employee record — their name stays in sync with HR, and payroll/attendance can be matched to the same person.">HR Employee</Tip>
+                  <Tip text="Makes this IMS login for an existing HR employee, under the name they have in HR. The name is copied once: renaming the employee later does not rename the login. Because it is linked, Final Settlement blocks this login when they leave, and taking them back in Employees unblocks it.">HR Employee</Tip>
                 </label>
                 {unlinkedEmployees.length === 0 ? (
                   <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>
