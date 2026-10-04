@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
-import { ArrowUp, ArrowDown } from 'lucide-react'
+import { ArrowUp, ArrowDown, Pencil } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
@@ -7,7 +7,7 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { useTheme, PRESETS, SYSTEM_KEY } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_INK, DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
-import { assignMissingProductCodes, SUB_RECIPE_CATEGORY } from '../shared/productCode'
+import { assignMissingProductCodes, productCodePrefix, SUB_RECIPE_CATEGORY } from '../shared/productCode'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { Navigate, Link } from 'react-router-dom'
 import SupportContactLine from '../components/SupportContactLine'
@@ -15,6 +15,7 @@ import ActionError, { asActionError } from '../components/ActionError'
 import FieldError, { fieldAria } from '../components/FieldError'
 import { fcThresholds, varianceFlagPct } from '../shared/imsFormulas'
 import { fetchAllRows } from '../shared/fetchAllRows'
+import { withTimeout, isTimeout } from '../utils/withTimeout'
 import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupportContact, supportPhone } from '../shared/supportContact'
 import { NEPAL_CITIES } from '../shared/nepalCities'
 import { cityPatch } from '../modules/dashboard/weatherSettings'
@@ -167,7 +168,7 @@ export default function Settings() {
   const { settings, saveSettings, recipeCategories, platformSupport, savePlatformSupport,
           planPrices, savePlatformPlanPrices, settingsLoadError, platformLoadError, platformLoaded } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
-  const { clientId, isAdmin, isOwner, adminViewClientName, hasFeature, hasWeather, hasImsAccess } = useAuth()
+  const { clientId, isAdmin, isOwner, profile, posEnabled, adminViewClientName, hasFeature, hasWeather, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
   const ADMIN_TABS = new Set(['Branding', 'Property', 'Weather', 'Support', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
@@ -222,6 +223,9 @@ export default function Settings() {
   const [newCat, setNewCat] = useState('')
   const [catSaving, setCatSaving] = useState(false)
   const [catMsg, setCatMsg] = useState('')
+  // S802: the category being renamed ({ from, value }), and a rename that failed part-way.
+  const [renaming, setRenaming] = useState(null)
+  const [renameErr, setRenameErr] = useState(null)
   // Settings → Support, upper section (S683): the platform row's contact, edited here and saved
   // through savePlatformSupport() — NOT through save(), which targets whichever client's row is
   // being viewed. Seeded from the loaded value; the defaults fill any slot the row never had.
@@ -388,6 +392,118 @@ export default function Settings() {
         </>
       ),
       run: async () => doRemove(),
+    })
+  }
+
+  // S802: a rename changes the name everywhere it is stored as text: the list, every recipe filed
+  // under it, and the bar-ticket routing. Before this it took add, retag each recipe by hand, remove.
+  // It saves at once, so it refuses while the list has unsaved changes: the re-read after the save
+  // reseeds `cats` and would throw them away.
+  const catsDirty = cats.length !== recipeCategories.length || cats.some((c, i) => c !== recipeCategories[i])
+  // pos_bot_categories is fenced to the Owner or a POS manager (settings_guard_staff_roles), so an
+  // IMS manager's rename leaves it alone rather than having the whole list save refused.
+  const canWriteBot = isOwner || profile?.pos_role === 'manager'
+
+  function startRename(cat) {
+    if (catsDirty) { setCatMsg('error:Press Save Categories first. A rename is saved straight away, so it cannot wait alongside other unsaved changes to the list.'); return }
+    setRenaming({ from: cat, value: cat }); setCatMsg(''); setRenameErr(null)
+  }
+
+  function submitRename() {
+    if (!renaming) return
+    const from = renaming.from
+    const to = renaming.value.trim()
+    if (!to || to === from) { setRenaming(null); return }
+    if (to.toLowerCase() === SUB_RECIPE_CATEGORY.toLowerCase()) { setCatMsg('error:Sub-Recipe is managed by the app and cannot be used as a category name.'); return }
+    if (cats.some(c => c !== from && c.toLowerCase() === to.toLowerCase())) { setCatMsg(`error:"${to}" is already in the list. Pick another name.`); return }
+    setCatMsg('')
+    const n = catUsage?.[from]
+    const joining = catUsage?.[to] || 0
+    // What the till routes to the bar today: a missing or empty list means ['Beverage'] there.
+    const bot = settings?.pos_bot_categories?.length ? settings.pos_bot_categories : ['Beverage']
+    const onBot = posEnabled && bot.includes(from)
+    const oldPrefix = productCodePrefix(from)
+    const newPrefix = productCodePrefix(to)
+    askConfirm({
+      title: `Rename "${from}" to "${to}"?`,
+      confirmLabel: 'Rename', busyLabel: 'Renaming…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            {n == null ? <>Every recipe filed under "{from}" moves to "{to}".</>
+              : n === 0 ? <>No recipe is filed under "{from}" yet.</>
+              : <><strong>{n} recipe{n === 1 ? '' : 's'}</strong> filed under "{from}" move{n === 1 ? 's' : ''} to "{to}".</>}
+            {joining > 0 && <> {joining} recipe{joining === 1 ? '' : 's'} already say "{to}" and join them.</>}
+            {' '}Its place in the list, and on the guest menu, stays the same.
+          </p>
+          {onBot && (
+            <p style={{ margin: '0 0 8px' }}>
+              {canWriteBot
+                ? <>"{from}" dishes print on the bar ticket, and "{to}" takes its place there.</>
+                : <>"{from}" dishes print on the bar ticket. Only the Owner or a POS manager can change that, so ask one of them to tick "{to}" in POS Setup → Ticket Routing, or these dishes will print on the kitchen ticket.</>}
+            </p>
+          )}
+          {oldPrefix !== newPrefix && (
+            <p style={{ margin: '0 0 8px' }}>
+              Product codes already given ({oldPrefix}-…) stay as they are. New dishes in "{to}" get {newPrefix}- codes.
+            </p>
+          )}
+          {posEnabled && (
+            <p style={{ margin: '0 0 8px' }}>Bills already rung up on the till keep "{from}" in the POS Sales Report.</p>
+          )}
+          <p style={{ margin: 0 }}>This is saved straight away.</p>
+        </>
+      ),
+      run: async () => {
+        setRenameErr(null)
+        try {
+          // Read the routing list fresh: the context's copy is from page load, and POS Setup may have
+          // changed it since. Read before any write, so a failed read changes nothing.
+          let botPatch = null
+          if (posEnabled && canWriteBot) {
+            const { data: row, error: botErr } = await withTimeout(
+              supabase.from('settings').select('pos_bot_categories').eq('client_id', clientId).maybeSingle(),
+              20000, 'Reading ticket routing')
+            if (botErr) {
+              setRenameErr({ text: `Nothing was renamed. The bar-ticket routing could not be read, and renaming without it could send "${from}" dishes to the kitchen ticket.`, detail: asActionError(botErr).detail })
+              return
+            }
+            const live = row?.pos_bot_categories?.length ? row.pos_bot_categories : ['Beverage']
+            if (live.includes(from)) botPatch = { pos_bot_categories: [...new Set(live.map(c => (c === from ? to : c)))] }
+          }
+          // Recipes first. If the list save then fails, the recipes already carry the new name, it shows
+          // under "Still on recipes", and renaming again finishes the job. The other order would leave
+          // the old name on the recipes and nothing on the list to rename.
+          const { data: moved, error: recErr } = await withTimeout(
+            scopedUpdate('recipes', { category: to }).eq('category', from).select('id'), 20000, 'Renaming')
+          if (recErr) {
+            setRenameErr({ text: `Nothing was renamed. "${from}" is unchanged on the list and on its recipes.`, detail: asActionError(recErr).detail })
+            return
+          }
+          const count = moved?.length ?? 0
+          try {
+            await withTimeout(saveSettings({ recipe_categories: recipeCategories.map(c => (c === from ? to : c)), ...botPatch }), 20000, 'Saving the list')
+          } catch (e) {
+            if (isTimeout(e)) throw e
+            setRenameErr({ text: `${count} recipe${count === 1 ? '' : 's'} now say "${to}", but the list${botPatch ? ' and the bar-ticket routing' : ''} still say "${from}". Rename "${from}" to "${to}" again to finish; the recipes are already done.`, detail: asActionError(e).detail })
+            return
+          }
+          setCatUsage(prev => {
+            if (!prev) return prev
+            const next = { ...prev }
+            delete next[from]
+            next[to] = (prev[to] || 0) + count
+            return next
+          })
+          setRenaming(null)
+          setCatMsg(`ok:Renamed "${from}" to "${to}"${count ? ` on ${count} recipe${count === 1 ? '' : 's'}` : ''}.`)
+        } catch (e) {
+          // withTimeout gave up, but the write may still land, so never say it failed.
+          setRenameErr(isTimeout(e)
+            ? { text: 'No answer from the server, so the rename may or may not have landed. Reload the page to see which name your recipes have before trying again.', detail: e.message }
+            : asActionError(e))
+        }
+      },
     })
   }
 
@@ -1406,12 +1522,37 @@ export default function Settings() {
               const n = catUsage?.[cat]
               return (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', background: 'var(--theme-bg)' }}>
+                  {renaming?.from === cat ? (
+                    <>
+                      <input aria-label={`New name for "${cat}"`} className="form-input" autoFocus
+                        value={renaming.value}
+                        onChange={e => { setRenaming(r => ({ ...r, value: e.target.value })); if (catMsg.startsWith('error')) setCatMsg('') }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); submitRename() }
+                          if (e.key === 'Escape') { e.preventDefault(); setRenaming(null) }
+                        }}
+                        style={{ flex: 1 }}
+                      />
+                      <button type="button" className="btn btn-primary btn-sm" onClick={submitRename}>Rename</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRenaming(null)}>Cancel</button>
+                    </>
+                  ) : (
+                  <>
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--theme-text1)' }}>{cat}</span>
                   {catUsage && (
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                       {n ? `${n} recipe${n === 1 ? '' : 's'}` : 'unused'}
                     </span>
                   )}
+                  {/* aria-disabled, not disabled: a press while the list has unsaved changes says why. */}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    onClick={() => startRename(cat)}
+                    aria-disabled={catsDirty ? 'true' : undefined}
+                    aria-label={`Rename "${cat}"`}
+                    title={`Rename "${cat}"`}
+                  ><Pencil aria-hidden="true" /></button>
                   <button
                     type="button"
                     className="btn btn-ghost btn-icon"
@@ -1437,6 +1578,8 @@ export default function Settings() {
                     aria-label={`Remove the "${cat}" category`}
                     title={`Remove the "${cat}" category`}
                   >×</button>
+                  </>
+                  )}
                 </div>
               )
             })}
@@ -1475,7 +1618,10 @@ export default function Settings() {
 
           <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 20px' }}>
             Nothing changes until you press Save Categories. Removing a category never retags a recipe.
+            Renaming one (✎) is the exception: it saves straight away and moves every recipe filed under the old name.
           </p>
+
+          <ActionError error={renameErr} />
 
           <button className="btn btn-primary" onClick={saveCategories} aria-busy={catSaving ? 'true' : undefined} disabled={cats.length === 0}>
             {catSaving ? 'Saving…' : 'Save Categories'}

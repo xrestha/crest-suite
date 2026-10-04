@@ -242,3 +242,14 @@ signed-in account of any client overwrite or delete any object, including `admin
 login-page mark. Only admins upload logos (Settings → Branding, ClientDrawer). **A storage bucket's
 policies live in `storage.objects` and were never in a migration** — read `pg_policies` live before
 trusting a bucket, the way `multi-outlet.md` says to audit table policies.
+
+## A recipe category is a NAME stored in three places, so a rename must reach all three (S802)
+
+`settings.recipe_categories` (the list), `recipes.category` (each dish, plain text, no FK) and
+`settings.pos_bot_categories` (what the till prints on the bar ticket; missing or empty means
+`['Beverage']` there). Settings → Recipe Categories' ✎ Rename (`submitRename` in `Settings.js`)
+updates all three: routing read fresh first, recipes second, then one patch for the list and the
+routing, so a failed second write leaves the new name under "Still on recipes" and a re-run
+finishes it. **A new column or table that keys on a recipe category's name must join that
+rename**, or renaming silently cuts it off. `pos_order_items.category` is a snapshot and stays as
+billed on purpose.
