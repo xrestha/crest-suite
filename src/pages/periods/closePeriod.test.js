@@ -22,7 +22,7 @@ import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerR
 import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
 import {
   closingCountPreflight,
-  performPeriodClose, closeFailureText, payrollNote, nextBsMonth,
+  performPeriodClose, closeFailureText, closeFailuresText, payrollNote, nextBsMonth,
   nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
   closerMakesReport, deferredReportNote,
 } from './closePeriod'
@@ -442,6 +442,41 @@ describe('closeFailureText', () => {
     expect(t).not.toMatch(/try(ing)? again/i)
     // Not the generic "may not have closed" — the guarded update PROVES this press wrote nothing.
     expect(t).not.toMatch(/may not/)
+  })
+})
+
+// S798 4b, LABOUR-FIGURES-10: both close screens showed failures[0] alone.
+describe('closeFailuresText', () => {
+  test('a clean close says nothing', () => {
+    expect(closeFailuresText({ failures: [], period: PERIOD })).toBeNull()
+  })
+
+  test('carry-forward AND leave back-fill failing: both sentences, in order', () => {
+    const cf = { message: 'cf dropped' }
+    const r = closeFailuresText({ failures: [
+      { stage: 'carry_forward', error: cf },
+      { stage: 'leave_backfill', error: { message: 'lb dropped' } },
+    ], period: PERIOD })
+    expect(r.text).toContain(closeFailureText({ stage: 'carry_forward', period: PERIOD }))
+    expect(r.text).toContain(closeFailureText({ stage: 'leave_backfill', period: PERIOD }))
+    expect(r.text.indexOf('opening stock')).toBeLessThan(r.text.indexOf('leave already approved'))
+    expect(r.error).toBe(cf)
+    expect(r.neutral).toBe(false)
+  })
+
+  test('a stage that failed twice is said once', () => {
+    const r = closeFailuresText({ failures: [{ stage: 'report', error: null }, { stage: 'report', error: null }], period: PERIOD })
+    expect(r.text).toBe(closeFailureText({ stage: 'report', period: PERIOD }))
+  })
+
+  test('already_closed alone is neutral; anything else with it is not', () => {
+    expect(closeFailuresText({ failures: [{ stage: 'already_closed', error: null }], period: PERIOD }).neutral).toBe(true)
+    expect(closeFailuresText({ failures: [{ stage: 'close', error: {} }], period: PERIOD }).neutral).toBe(false)
+  })
+
+  test('isAdmin reaches each sentence', () => {
+    const r = closeFailuresText({ failures: [{ stage: 'open_next', error: {} }], period: PERIOD, isAdmin: true })
+    expect(r.text).toMatch(/Create Period/)
   })
 })
 

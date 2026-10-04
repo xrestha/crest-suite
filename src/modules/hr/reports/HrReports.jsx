@@ -336,9 +336,13 @@ export default function HrReports() {
   const noSsfCount = rows.filter(({ s, emp }) => emp.ssf_enrolled && !isSsfContributor(emp) && num(s.ssf_employee) === 0).length
 
   const runState = run ? (finalized ? 'FINALIZED' : 'DRAFT — figures may change') : 'no payroll run'
+  const xlsxBlocked = !!clientInfoError
   // Every export states what it covers, including whether the run was a draft: a bank file or a
   // challan exported from a draft used to be indistinguishable from a finalized one (S752).
   async function downloadSheet(data, sheet, ext = 'xlsx', { scoped = true, note = '' } = {}) {
+    // A workbook is headed with the company name; without it the sheet would say "Payroll" where
+    // the company belongs (S798 REPORTS-8). The buttons are off as well — this is the backstop.
+    if (ext !== 'csv' && xlsxBlocked) return
     const XLSX = await import('xlsx')
     const scope = `${clientName || 'Payroll'} — ${sheet} — ${scoped ? `${periodLabel} — payroll ${runState}` : `as of ${fmtDate(new Date().toISOString().slice(0, 10))}`}${note ? ` — ${note}` : ''}`
     const ws = ext === 'csv' ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([[scope], []])
@@ -483,6 +487,13 @@ export default function HrReports() {
           <Tabs idBase="hr-reports" label="HR reports" className="no-print" style={{ marginBottom: 18 }}
             tabs={TABS.map(t => ({ key: t.id, label: t.label }))} active={tab} onChange={setTab} />
 
+          {/* The certificate tab says this itself, as a load error. */}
+          {xlsxBlocked && tab !== 'cert' && (
+            <div role="alert" className="note-banner no-print" style={{ marginBottom: 16 }}>
+              <strong>Excel downloads are off.</strong> The company name could not be read, and every workbook is headed with it. Reload the page to try again. The bank CSV still downloads, because it has no heading line.
+            </div>
+          )}
+
           {/* ── TDS CERTIFICATE (independent of any period/run) ── */}
           {tab === 'cert' && (
             <div>
@@ -539,7 +550,7 @@ export default function HrReports() {
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} className="no-print">
                   <button type="button" className={`tab-btn${rosterRetiringOnly ? ' tab-btn--active' : ''}`} aria-pressed={rosterRetiringOnly} onClick={() => setRosterRetiringOnly(v => !v)}>Retiring soon</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => downloadSheet(
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={xlsxBlocked} onClick={() => downloadSheet(
                     rosterRows.map(e => ({
                       Code: e.employee_code || '', Name: e.full_name, Department: e.department || '', Designation: e.designation || '',
                       Supervisor: e.supervisor_id ? (nameById[e.supervisor_id] || '') : '',
@@ -629,7 +640,7 @@ export default function HrReports() {
               <div className="card" style={{ padding: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--theme-border)' }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>By Department</span>
-                  <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} onClick={() => downloadSheet(
+                  <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} disabled={xlsxBlocked} onClick={() => downloadSheet(
                     depts.map(d => ({ Department: d.dept, Headcount: d.count, 'Earned (NPR)': Math.round(d.gross), 'Deductions (NPR)': Math.round(d.ded), 'Net (NPR)': Math.round(d.net) })),
                     'Payroll Summary')}>⬇ Export</button>
                 </div>
@@ -672,7 +683,7 @@ export default function HrReports() {
                     {noSsfCount > 0 && <span> · {noSsfCount} enrolled employee{noSsfCount > 1 ? 's' : ''} with no SSF number, so nothing was deducted</span>}
                   </div>
                 </div>
-                <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} onClick={() => downloadSheet(
+                <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} disabled={xlsxBlocked} onClick={() => downloadSheet(
                   ssfRows.map(r => ({ 'SSF No': r.ssfNo, Employee: r.name, 'Paid through': r.settlement ? 'Final settlement' : 'Payroll', 'SSF Basic': ssfBaseOf(r.employee, r.employer), 'Employee 11%': r.employee, 'Employer 20%': r.employer, 'Total 31%': r.employee + r.employer })),
                   'SSF Challan')}>⬇ Export</button>
               </div>
@@ -744,7 +755,7 @@ export default function HrReports() {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }} className="no-print">
                   <Tip text="Only the people still owed, at what they are still owed. Anyone already marked paid on Payroll is left off, so the file can be uploaded to the bank without paying anyone twice. The CSV has no heading line, so a bank can read it." width={280}>
-                    <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={!canDownload} onClick={() => downloadSheet(bankData(), 'Bank Transfer', 'xlsx', { note: bankNote })}>⬇ Excel</button>
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={!canDownload || xlsxBlocked} onClick={() => downloadSheet(bankData(), 'Bank Transfer', 'xlsx', { note: bankNote })}>⬇ Excel</button>
                   </Tip>
                   <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={!canDownload} onClick={() => downloadSheet(bankData(), 'Bank Transfer', 'csv')}>⬇ CSV</button>
                 </div>
@@ -821,7 +832,7 @@ export default function HrReports() {
                     {hasMonthSettlements && <span> · includes NPR {fmt(tdsTotals.exitTds)} withheld from final settlement exit payments</span>}
                   </div>
                 </div>
-                <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} onClick={() => downloadSheet(
+                <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} disabled={xlsxBlocked} onClick={() => downloadSheet(
                   tdsRows.map(r => ({
                     Employee: r.name, PAN: r.pan,
                     'Taxable salary (month)': r.taxable === null ? '' : Math.round(r.taxable),

@@ -36,6 +36,8 @@ import { groupOwnChanges } from './ownAttendanceChanges'
 
 const fmt = nprInt
 const num = v => parseFloat(v) || 0
+// The register's amber flag chip ("SSF no. missing", "No pay set"): one shape, so the two cannot drift.
+const AMBER_FLAG = { fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }
 
 // The error OBJECT of the first failed result, not firstError()'s message string — errorText's table
 // matches on the Postgres code as well as the message, and the code is what a string loses.
@@ -1217,7 +1219,14 @@ export default function PayrollRun() {
                                   otherwise looks identical to a correctly-contributing employee. */}
                               {emp.ssf_enrolled && !String(emp.ssf_no || '').trim() && (
                                 <Tip text="This employee is marked SSF-enrolled but has no SSF registration number, so no 11% contribution is being deducted — a contribution with no number can't be filed on the SSF challan. Add the number in Pay Setup, then Regenerate." width={290}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>⚠ SSF no. missing</span>
+                                  <span style={AMBER_FLAG}>⚠ SSF no. missing</span>
+                                </Tip>
+                              )}
+                              {/* A payslip built on no pay (S798 4b, LABOUR-FIGURES-9): a warning, never a
+                                  block — Generate builds it without a word otherwise. */}
+                              {!(num(s.basic) > 0) && (
+                                <Tip text={`No ${isMonthly ? 'salary' : 'rate'} is set for this person, so this payslip pays nothing for the month. Set their pay in Pay Setup, then Regenerate.`} width={280}>
+                                  <span style={AMBER_FLAG}>⚠ No pay set</span>
                                 </Tip>
                               )}
                               {supersededHrs > 0 && (

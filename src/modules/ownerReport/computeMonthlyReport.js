@@ -8,7 +8,7 @@ import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
-import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
+import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
@@ -20,7 +20,7 @@ import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
 import { computeInventoryDepthSection } from './computeInventoryDepthSection'
-import { NON_LABOUR_OVERHEADS, splitNonLabourOverheads } from '../dashboard/labourSource'
+import { NON_LABOUR_OVERHEADS, splitNonLabourOverheads, estimatedEmployerSsf } from '../dashboard/labourSource'
 import { loadMonthOtherLabour } from '../dashboard/loadOtherLabourPay'
 import { parseAdDateLocal } from '../../shared/nepalTime'
 
@@ -219,7 +219,7 @@ async function computeImsSection(clientId, period) {
 // ── Payroll estimate (pure) ──────────────────────────────────────────────────
 // The fallback used when a closed period has no finalized payroll run: each active/probation
 // employee (or one whose end_date falls inside the period) accrues monthly-equivalent gross for
-// the days between join and end date, plus employer SSF on the capped base. `employees` must
+// the days between join and end date, plus employer SSF on capped basic. `employees` must
 // carry `ssf_no` as well as `ssf_enrolled` (isSsfContributor needs both). Stored dates are read as
 // LOCAL dates (parseAdDateLocal): `new Date('YYYY-MM-DD')` is 05:45 in Nepal, later than bsToAd's
 // local midnight, so a leaver whose last day was the month's last day fell out of the estimate and
@@ -260,9 +260,9 @@ export function estimatePayrollAccrual({ employees, components, period }) {
     // Employer SSF only for a real contributor — enrolled AND carrying an SSF number — the gate
     // computePayslip applies (isSsfContributor). The flag alone added 20% for staff payroll
     // never contributes for, so an estimated snapshot ran above the finalized run it stands in for.
+    // On basic only, through the helper the Owner Dashboard shares (schema 14, LABOUR-FIGURES-8).
     if (isSsfContributor(emp)) {
-      const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
-      accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
+      accruedSsfEmployer += estimatedEmployerSsf({ basis, basic, monthlyEquivGross, daysWorked, monthDays })
     }
   })
   return { gross: accruedGross, ssfEmployer: accruedSsfEmployer }
@@ -778,7 +778,12 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //     the finalized and the estimated path.
 //   - `combined.labourBasis: 'earned'` marks both; Trend gives no Labor / Prime / Net Margin delta
 //     across the line (`deltas.labourBasisChanged`).
-export const CURRENT_SCHEMA_VERSION = 13
+// 14 (S798 stage 4b): LABOUR-FIGURES-8. The ESTIMATED payroll's employer SSF is on basic only, the
+//   way payroll charges it: min(basic × days employed ÷ month days, SSF cap) for monthly staff
+//   (`estimatedEmployerSsf`, labourSource.js, shared with the Owner Dashboard). v13 charged it on
+//   basic + allowances, so an estimated v14 labour is lower by 20% of the SSF staff's allowances.
+//   A finalized-run labour is unchanged. No Trend marker: an estimate corrected, as at v12.
+export const CURRENT_SCHEMA_VERSION = 14
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

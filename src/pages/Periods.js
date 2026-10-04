@@ -10,7 +10,7 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import ConfirmModal from '../components/ConfirmModal'
 import {
-  closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText,
+  closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText,
   carryForwardOpeningStock, createPeriodWithCarryForward, nextExistingPeriod, periodLabel, nextBsMonth,
   closerMakesReport, deferredReportNote,
 } from './periods/closePeriod'
@@ -198,11 +198,12 @@ export default function Periods() {
   }
 
   function surfaceCloseFailures(result, period) {
-    const first = result.failures[0]
-    // Someone else closed the month before this press arrived, and nothing was written (S792,
-    // STOCK-8) — a fact about a page that was out of date, not a failure, so it is not red.
-    if (first?.stage === 'already_closed') { ok(closeFailureText({ stage: first.stage, period, isAdmin })); return }
-    if (first) { fail(closeFailureText({ stage: first.stage, period, isAdmin }), first.error); return }
+    // Every failed stage is named, not only the first (S798 4b, LABOUR-FIGURES-10). Someone else
+    // closing the month before this press arrived wrote nothing (S792, STOCK-8) — a fact about a
+    // page that was out of date, not a failure, so it is not red.
+    const failed = closeFailuresText({ failures: result.failures, period, isAdmin })
+    if (failed?.neutral) { ok(failed.text); return }
+    if (failed) { fail(failed.text, failed.error); return }
     // A close that went cleanly says nothing, by design — except when opening the next month
     // wrote attendance days that had been waiting for it to exist (S741). Those are real rows on
     // a sheet payroll reads, so the one moment they are written is the one moment to say so.

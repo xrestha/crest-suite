@@ -5,7 +5,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
-import { BS_MONTHS, formatBsDay, bsDayOrdinal, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, formatBsDay, bsDayOrdinal, getBsToday, adToBsSafe } from '../../../utils/bsCalendar'
+import { parseAdDateLocal } from '../../../shared/nepalTime'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
 import { SSF_DEPOSIT_DAY } from '../payrollConstants'
 import PayrollMonthStatus from '../payroll/PayrollMonthStatus'
@@ -16,7 +17,13 @@ import WeatherHeaderSlot from '../../../pages/dashboard/WeatherHeaderSlot'
 import HrLabourPanel from './HrLabourPanel'
 
 const fmt = nprInt
-const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
+// A leave day in BS, as the Leave page prints it — "17 Ashwin 2083" (S798 REPORTS-9; this queue
+// printed "3 Oct" while the page it links to said Ashwin). A stored date is read as a LOCAL day.
+function fmtBsDate(iso) {
+  if (!iso) return '—'
+  const bs = adToBsSafe(parseAdDateLocal(iso))
+  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(iso).slice(0, 10)} (AD)`
+}
 
 function nextMonthLabel(bs_year, bs_month) {
   if (!bs_year || !bs_month) return '—'
@@ -32,11 +39,14 @@ function nextMonthLabel(bs_year, bs_month) {
 // colour as one that had missed the deposit. Callers must also gate this on the deposit amount
 // being > 0 — a client with no SSF-enrolled staff has nothing to deposit, so a passed due day is not
 // a missed deadline, just an inapplicable one.
+// A passed date is `passed`, never red (S798 REPORTS-6): Crest does not record deposits, so a date
+// gone by proves nothing, and red here every month from the 26th taught the owner to ignore the
+// one card that could flag a missed deposit. The month strip says it the same way (S768).
 function ssfDeadlineState(bs_year, bs_month) {
   if (!bs_year || !bs_month) return {}
   // One definition of the deadline, shared with the payroll month strip (monthStatus.js, S768).
   const d = ssfDeadline(bs_year, bs_month)
-  if (d.overdue) return { overdue: true }
+  if (d.overdue) return { passed: true }
   // Same month as the deadline, on or before the due day: it is now the live task.
   if (d.dueThisMonth) return { alert: true }
   return {}
@@ -53,7 +63,6 @@ function ssfDaysLeftText(today = getBsToday()) {
 // `alert` means "needs attention", which in this design system is AMBER — red means overdue or
 // failed. Every pending-approval card passes it, and a queue waiting on a manager is not an error
 // state; painting them red alongside genuinely-late things trains the reader to discount red.
-// `overdue` is the escalation for something that has actually passed its date.
 // Every group on this page is announced by one of these, so the label and the 8px it holds above
 // the group it names are a single decision rather than seven copies of a six-property style
 // object. The page's cadence is 8px from a label to its own content, 28px from one group to the
@@ -69,7 +78,7 @@ function SectionLabel({ children }) {
   )
 }
 
-function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, alert, overdue }) {
+function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, alert }) {
   return (
     <div
       className={onClick ? 'stat-card interactive-card' : 'stat-card'}
@@ -85,7 +94,7 @@ function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, 
       <div className="stat-value" style={{ color, fontSize: typeof value === 'string' && value.length > 8 ? 16 : undefined }}>
         {value}
       </div>
-      {sub && <div className="stat-sub" style={overdue ? { color: 'var(--theme-red-text)' } : alert ? { color: 'var(--theme-amber-text)' } : undefined}>{sub}</div>}
+      {sub && <div className="stat-sub" style={alert ? { color: 'var(--theme-amber-text)' } : undefined}>{sub}</div>}
     </div>
   )
 }
@@ -105,6 +114,9 @@ export default function HrDashboard() {
   // the queue a manager most needs to open, telling them it is clear.
   const [listErrors,  setListErrors]  = useState({})
   const [payInfo,     setPayInfo]     = useState(null)
+  // The last-run read itself failed (S798 REPORTS-5) — not "no run yet", which is a claim about the
+  // client. The section shows its cards unread instead of the empty-state card.
+  const [payRunFailed, setPayRunFailed] = useState(false)
   const [advOutstanding, setAdvOutstanding] = useState(0)
   const [empMap,      setEmpMap]      = useState({})
   const [typeMap,     setTypeMap]     = useState({})
@@ -175,7 +187,7 @@ export default function HrDashboard() {
       { data: otPending, error: otErr },
       { data: tadaPending, error: tadaErr },
       { data: swapPending, error: swapErr },
-      { data: runs },
+      { data: runs, error: runsErr },
       { data: advs, error: advsErr },
       { data: reps, error: repsErr },
     ] = results
@@ -238,7 +250,9 @@ export default function HrDashboard() {
     setAdvOutstanding(advsErr || repsErr ? null : outstanding)
 
     // ── Last finalized payroll ─────────────────────────────────────────────────
-    const lastRun = runs?.[0]
+    setPayRunFailed(!!runsErr)
+    if (runsErr) setPayInfo(null)
+    const lastRun = runsErr ? null : runs?.[0]
     if (lastRun) {
       const mp = lastRun.monthly_periods
       // The SSF cards are the month's deposit (S798 REPORTS-2): a leaver settled in the month is not
@@ -405,9 +419,9 @@ export default function HrDashboard() {
         <KCard
           label="Basic Payroll / Month"
           value={empStats ? `NPR ${fmt(empStats.payrollBase)}` : '—'}
-          sub={empStats ? 'active + probation, basic only' : 'could not be read'}
+          sub={empStats ? 'monthly-paid staff, basic only' : 'could not be read'}
           color={empStats ? 'var(--theme-accent-ink)' : 'var(--theme-text2)'}
-          tip="Sum of basic salary for active and probation employees. Full payroll (allowances, SSF, TDS) is computed during the payroll run."
+          tip="Sum of basic salary for active and probation employees paid monthly. Daily and hourly staff are left out: their rate is not a month's pay. Full payroll (allowances, SSF, TDS) is computed during the payroll run."
           onClick={() => navigate('/hr/payroll')}
         />
         <KCard
@@ -472,16 +486,16 @@ export default function HrDashboard() {
                   value={ssfUnread ? '—' : `NPR ${fmt(ssfTotal)}`}
                   sub={ssfUnread ? `due by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)} — amount could not be read` : ssfTotal === 0
                     ? 'no staff or leavers in SSF this period'
-                    : deadline.overdue
-                      ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
+                    : deadline.passed
+                      ? `Was due by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
                       // The countdown (S800): only in the month it falls due, and never "missed" —
                       // deposits are not recorded, so a passed date is not proof of anything.
                       : deadline.alert
                         ? `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)} — ${ssfDaysLeftText()}`
                         : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
-                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}: the payslips plus the final month of anyone whose Final Settlement was in ${payInfo.periodLabel}${settledSsf ? ` (${payInfo.ssfSettled.join(', ')})` : ''}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
+                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}: the payslips plus the final month of anyone whose Final Settlement was in ${payInfo.periodLabel}${settledSsf ? ` (${payInfo.ssfSettled.join(', ')})` : ''}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest.${deadline.passed ? ' Crest does not record SSF deposits, so a date that has passed does not mean the deposit was missed.' : ''} Go to HR Reports → SSF Challan for the per-employee breakdown.`}
                   onClick={() => navigate(`/hr/reports?tab=ssf${payInfo.periodId ? `&period=${payInfo.periodId}` : ''}`)}
-                  {...deadline}
+                  alert={deadline.alert}
                 />
               )
             })()}
@@ -490,7 +504,18 @@ export default function HrDashboard() {
         )
       })()}
 
-      {!payInfo && (
+      {payRunFailed && (
+        <>
+          <SectionLabel>Last Finalized Payroll</SectionLabel>
+          <div className="stat-grid dash-section">
+            {['Net Payable', 'SSF — Employee (11%)', 'SSF — Employer (20%)', 'SSF Total to Deposit'].map(label => (
+              <KCard key={label} label={label} value="—" sub="last finalized payroll could not be read" color="var(--theme-text2)" />
+            ))}
+          </div>
+        </>
+      )}
+
+      {!payInfo && !payRunFailed && (
         <div className="card card--compact dash-section" style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
           No finalized payroll yet. Generate and finalize a payroll run to see net pay and SSF summary here.
         </div>
@@ -530,8 +555,8 @@ export default function HrDashboard() {
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[r.employee_id] || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{typeMap[r.leave_type_id] || '—'}</td>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{fmtD(r.start_date)}</td>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{fmtD(r.end_date)}</td>
+                      <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmtBsDate(r.start_date)}</td>
+                      <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmtBsDate(r.end_date)}</td>
                     </tr>
                   ))}
                 </tbody>

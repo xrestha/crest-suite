@@ -121,9 +121,10 @@ properties of the commit are load-bearing:
 - **It never throws; each stage records its failure and the later stages still run where they
   can.** A failed carry-forward must not stop the report; a failed report must never stop the
   close. The one exception is the close itself — if the status update fails, nothing else runs.
-- **`failures` is ordered by how much the reader has to do about it**, and callers surface
-  `failures[0]` through `closeFailureText()` — a consequence sentence (what state the month is in
-  now, and the repair), never `error.message`. The `close` stage says *"may not have closed"*: a
+- **`failures` is ordered by how much the reader has to do about it**, and callers surface EVERY
+  failed stage through `closeFailuresText()` — one `closeFailureText()` consequence sentence each
+  (what state the month is in now, and the repair), never `error.message`. Showing `failures[0]`
+  alone hid a failed leave back-fill behind a failed carry-forward (S798 4b). The `close` stage says *"may not have closed"*: a
   dead fetch does not prove the update did not land, and inviting a retry over a month that is
   already closed is worse than sending them to look.
 - **"Report is ready" renders only when `reportSaved` is true.** `Periods.js` used to show that

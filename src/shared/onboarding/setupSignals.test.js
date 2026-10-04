@@ -72,3 +72,48 @@ describe('menuPriced', () => {
     expect(log.some(l => l.table === 'recipes')).toBe(false)
   })
 })
+
+// S798 4b, LABOUR-FIGURES-9: one salary no longer ticks "Set each person's pay".
+describe('paySet', () => {
+  const runPay = () => loadSetupSignals({ needed: new Set(['paySet']), clientId: 'c1', scopedFrom, today: { year: 2083, month: 6 } })
+  const payAnswer = (staff, unset) => (table, calls) => (table !== 'hr_employees' ? { count: 0, error: null }
+    : calls.some(([m]) => m === 'or') ? unset : staff)
+
+  test('reads staff on payroll only, and counts a blank or zero salary as unset', async () => {
+    answer = payAnswer({ count: 12, error: null }, { count: 0, error: null })
+    await runPay()
+    const reads = log.filter(l => l.table === 'hr_employees').map(l => l.calls)
+    expect(reads).toHaveLength(2)
+    for (const calls of reads) expect(calls).toContainEqual(['in', 'status', ['active', 'probation']])
+    expect(reads.some(calls => calls.some(c => c[0] === 'or' && c[1] === 'basic_salary.is.null,basic_salary.lte.0'))).toBe(true)
+  })
+
+  test('eleven of twelve still at zero: not done, and it says how many', async () => {
+    answer = payAnswer({ count: 12, error: null }, { count: 11, error: null })
+    const { signals } = await runPay()
+    expect(signals.paySet).toBe(false)
+    expect(signals.payUnset).toBe(11)
+  })
+
+  test('everyone paid: done', async () => {
+    answer = payAnswer({ count: 12, error: null }, { count: 0, error: null })
+    const { signals } = await runPay()
+    expect(signals.paySet).toBe(true)
+    expect(signals.payUnset).toBe(0)
+  })
+
+  test('nobody on payroll yet is not done', async () => {
+    answer = payAnswer({ count: 0, error: null }, { count: 0, error: null })
+    const { signals } = await runPay()
+    expect(signals.paySet).toBe(false)
+  })
+
+  test('a failed count is "couldn\'t check", never a tick', async () => {
+    answer = payAnswer({ count: 12, error: null }, { count: null, error: { message: 'boom' } })
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const { signals } = await runPay()
+    spy.mockRestore()
+    expect(signals.paySet).toBeNull()
+    expect(signals.payUnset).toBeNull()
+  })
+})

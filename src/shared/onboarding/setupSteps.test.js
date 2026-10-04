@@ -274,3 +274,25 @@ describe('dashboardMode', () => {
     expect(dashboardMode({ ...base, viewer: admin })).toBe('slim')
   })
 })
+
+// S798 4b, LABOUR-FIGURES-9: the pay step carries how many people are left.
+describe('a step that counts what is left', () => {
+  const payStep = signals => buildSetupGuide({ viewer: owner, modules: ALL, hasFeature: growth, signals })
+    .groups.flatMap(g => g.steps).find(s => s.key === 'hr.pay')
+
+  test('the pay step reads payUnset', () => {
+    const step = payStep({ ...allSignals(), paySet: false, payUnset: 11 })
+    expect(step.status).toBe('todo')
+    expect(step.remainingCount).toBe(11)
+    expect(step.remaining.many).toMatch(/no salary or rate/)
+  })
+
+  test('an unread count is null, never zero', () => {
+    expect(payStep({ ...allSignals(), paySet: null, payUnset: null }).remainingCount).toBeNull()
+  })
+
+  test('a step without a count carries none', () => {
+    const steps = buildSetupGuide({ viewer: owner, modules: ALL, hasFeature: growth, signals: allSignals() }).groups.flatMap(g => g.steps)
+    expect(steps.find(s => s.key === 'hr.employees')).not.toHaveProperty('remainingCount')
+  })
+})

@@ -5,9 +5,11 @@ import {
   finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote,
   NON_LABOUR_OVERHEADS, splitNonLabourOverheads, groupOutletLabour, groupLabourRatio,
   PAYSLIP_LABOUR_COLUMNS, settlementLabourCost, otherLabourTotals, otherLabourFromGroupRow, otherLabourParts,
-  otherLabourLine, NO_OTHER_LABOUR,
+  otherLabourLine, NO_OTHER_LABOUR, estimatedEmployerSsf,
 } from './labourSource'
 import { payrollCashCost } from '../hr/payroll/payrollData'
+import { computePayslip } from '../hr/payroll/payrollCompute'
+import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
 
 const readSource = (...parts) => fs.readFileSync(path.join(__dirname, '..', '..', ...parts), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
@@ -385,5 +387,43 @@ describe('every labour reader reads payslips with the absence deduction and the 
     expect(src).not.toMatch(/'gross, ot_amount, ssf_employer'/)
     expect(src).toMatch(/PAYSLIP_LABOUR_COLUMNS|absence_deduction/)
     expect(src).toMatch(/loadMonthOtherLabour\(|loadOtherLabourPay\(/)
+  })
+})
+
+// S798 4b, LABOUR-FIGURES-8: the estimate's employer SSF is on basic, as payroll charges it.
+describe('estimatedEmployerSsf', () => {
+  const period = { bs_year: 2083, bs_month: 5 }
+  const monthDays = 31 // Bhadra 2083; the engine reads the real length, so the cross-check below holds either way
+
+  test('allowances never raise it: ten staff with NPR 3,000 each charge 20% of basic only', () => {
+    const one = estimatedEmployerSsf({ basis: 'monthly', basic: 20000, monthlyEquivGross: 23000, daysWorked: monthDays, monthDays })
+    expect(one).toBeCloseTo(20000 * SSF_EMPLOYER_PCT, 9)
+    expect(10 * estimatedEmployerSsf({ basis: 'monthly', basic: 20000, monthlyEquivGross: 23000, daysWorked: monthDays, monthDays })
+      - 10 * 23000 * SSF_EMPLOYER_PCT).toBeCloseTo(-6000, 9)
+  })
+
+  test('monthly: prorates basic first, then caps — the engine’s order', () => {
+    const half = estimatedEmployerSsf({ basis: 'monthly', basic: 150000, monthlyEquivGross: 150000, daysWorked: 15, monthDays: 30 })
+    expect(half).toBeCloseTo(Math.min(150000 * 0.5, SSF_CAP) * SSF_EMPLOYER_PCT, 9)
+    const full = estimatedEmployerSsf({ basis: 'monthly', basic: 150000, monthlyEquivGross: 150000, daysWorked: 30, monthDays: 30 })
+    expect(full).toBeCloseTo(SSF_CAP * SSF_EMPLOYER_PCT, 9)
+  })
+
+  test('matches computePayslip’s employer SSF for a full month with allowances', () => {
+    const emp = { id: 'e1', pay_basis: 'monthly', basic_salary: 40000, ssf_enrolled: true, ssf_no: '1234567890', join_date: null, end_date: null }
+    const slip = computePayslip(emp, [{ type: 'earning', calc_type: 'fixed', value: 3000 }], [], period)
+    const days = slip.breakdown.monthDays
+    expect(estimatedEmployerSsf({ basis: 'monthly', basic: 40000, monthlyEquivGross: 43000, daysWorked: days, monthDays: days }))
+      .toBeCloseTo(slip.ssf_employer, 2)
+  })
+
+  test('daily and hourly keep month-equivalent pay, capped, then prorated', () => {
+    expect(estimatedEmployerSsf({ basis: 'daily', basic: 1000, monthlyEquivGross: 30000, daysWorked: 10, monthDays: 30 }))
+      .toBeCloseTo(30000 * (10 / 30) * SSF_EMPLOYER_PCT, 9)
+  })
+
+  test('no days, no month: nothing', () => {
+    expect(estimatedEmployerSsf({ basis: 'monthly', basic: 40000, monthlyEquivGross: 40000, daysWorked: 0, monthDays: 30 })).toBe(0)
+    expect(estimatedEmployerSsf({ basis: 'monthly', basic: 40000, monthlyEquivGross: 40000, daysWorked: 5, monthDays: 0 })).toBe(0)
   })
 })

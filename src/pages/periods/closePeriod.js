@@ -383,3 +383,22 @@ export function closeFailureText({ stage, period, isAdmin = false }) {
       return `${m} may not have closed completely. Check Periods before continuing.`
   }
 }
+
+/**
+ * What a close's `failures` add up to, for both close screens (S798 4b, LABOUR-FIGURES-10): one
+ * sentence per failed stage, in the order the close ran them, each stage once. Both screens used to
+ * show `failures[0]` alone, and the carry-forward is pushed before the leave back-fill — so when the
+ * connection dropped after the new month opened, nothing said that approved leave in it was left
+ * unmarked, which payroll then pays for monthly staff. Returns null for a clean close, else
+ * `{ text, error, neutral }`: `error` is the first failure's (the detail line), and `neutral` only
+ * when all there is to say is `already_closed` (not this press's failure, STOCK-8).
+ */
+export function closeFailuresText({ failures, period, isAdmin = false }) {
+  const stages = [...new Set((failures || []).map(f => f.stage))]
+  if (!stages.length) return null
+  return {
+    text: stages.map(stage => closeFailureText({ stage, period, isAdmin })).join(' '),
+    error: failures[0].error,
+    neutral: stages.length === 1 && stages[0] === 'already_closed',
+  }
+}

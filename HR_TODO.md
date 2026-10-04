@@ -670,7 +670,7 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
    the `Help.js:500` / `:505` and `hrGuideData.js:663` rewords below, and the four ImsStaff/PosStaff tips that
    say a linked login's "name stays in sync with HR" (no such sync exists). REPORTS-4 is the largest: it rewrites
    the SSF/challan section from the code.
-2. **4b Dashboards and labour figures** (no migration; Owner Report schema bump for LABOUR-FIGURES-8): REPORTS-5,
+2. ✅ **4b Dashboards and labour figures** (done 2026-10-04, crest-v385; no migration; Owner Report schema 14): REPORTS-5,
    -6, -7, -8, -9, LABOUR-FIGURES-8, -9, -10.
 3. **4c Payroll, settlements and records** (no migration): PAYROLL-7, PAYROLL-8's payroll half, SETTLEMENT-7,
    BONUS-LEDGERS-6, DATABASE-4, and HR Staff's Last Seen in BS (carried from IMS_TODO.md, S798.7).
@@ -698,15 +698,15 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 | SELF-SERVICE-7 | DROP/CREATE `get_my_hr_payslips` with `unpaid_days`, `retirement_contribution`; assert first; REVOKE PUBLIC, GRANT authenticated. | 🔴 |
 | SELF-SERVICE-8 | `formatBsDay(day, r.bs_month)` on both sides of the swap list. | 🔴 |
 | DATABASE-4 | Drop `supervisor_id` from `ATTRIBUTION_EXTRA`; restore it in a second pass. | 🔴 |
-| REPORTS-5 | Keep the runs error: "—" and "could not be read", never "No finalized payroll yet". | 🔴 |
-| REPORTS-6 | Neutral "was due by …" once passed, as the strip. | 🔴 |
-| REPORTS-7 | `useNavBadgeCounts` keeps the last good value on a failed count (HR and `posPending`). | 🔴 |
-| REPORTS-8 | Disable the .xlsx exports while `clientInfoError` is set, with a notice. | 🔴 |
-| REPORTS-9 | "monthly-paid staff, basic only"; BS dates in the leave queue. | 🔴 |
+| REPORTS-5 | Keep the runs error: "—" and "could not be read", never "No finalized payroll yet". | ✅ S798 stage 4b (crest-v385). The four payroll cards read "—" / "last finalized payroll could not be read". |
+| REPORTS-6 | Neutral "was due by …" once passed, as the strip. | ✅ S798 stage 4b (crest-v385). "Was due by …" in plain text; the red branch and KCard's `overdue` prop are gone. hss-suite still red: filed in both ledgers. |
+| REPORTS-7 | `useNavBadgeCounts` keeps the last good value on a failed count (HR and `posPending`). | ✅ S798 stage 4b (crest-v385). Fixed in place (`useHrApprovalCounts` does not poll); both counts start from 0 on a client change. |
+| REPORTS-8 | Disable the .xlsx exports while `clientInfoError` is set, with a notice. | ✅ S798 stage 4b (crest-v385). Five Excel buttons off plus a `note-banner`; `downloadSheet` refuses Excel too. The bank CSV stays on. |
+| REPORTS-9 | "monthly-paid staff, basic only"; BS dates in the leave queue. | ✅ S798 stage 4b (crest-v385). Help's Basic Payroll tip too. |
 | REPORTS-10 | Reword hr-payroll.md (S768, S751), component-library.md:28, `hrGuideData.js:49`, the HrDashboard comment: rank fences writes; supervisors read pay (S750). | ✅ The two rules files were reworded in S799; `hrGuideData.js:49` and the `HrDashboard.jsx` comment in S798 stage 4a (crest-v384). |
-| LABOUR-FIGURES-8 | Employer SSF on min(basic × days worked ÷ month days, cap) in both estimates. | 🔴 |
-| LABOUR-FIGURES-9 | Tick the pay step only when no active employee has basic 0; say how many; optional Payroll Run warning. | 🔴 |
-| LABOUR-FIGURES-10 | Show every failed close stage's sentence (Periods.js, ClientDashboard.jsx). | 🔴 |
+| LABOUR-FIGURES-8 | Employer SSF on min(basic × days worked ÷ month days, cap) in both estimates. | ✅ S798 stage 4b (crest-v385). One helper, `estimatedEmployerSsf` (`labourSource.js`), tested against `computePayslip`. Owner Report schema 14; frozen reports keep their figures. |
+| LABOUR-FIGURES-9 | Tick the pay step only when no active employee has basic 0; say how many; optional Payroll Run warning. | ✅ S798 stage 4b (crest-v385). `paySet` needs staff on payroll and none at blank/0 basic; `payUnset` drives "N people … still have no salary or rate set". Payroll's "⚠ No pay set" chip warns, never blocks. |
+| LABOUR-FIGURES-10 | Show every failed close stage's sentence (Periods.js, ClientDashboard.jsx). | ✅ S798 stage 4b (crest-v385). `closeFailuresText` in `closePeriod.js`, one sentence per stage, used by both screens. |
 | DOCS-2 | Add "pay staff, then Mark everyone paid" to the workflow, setup step 5, the monthend strip, tip :460 and `hrGuideData.js:49`. | ✅ S798 stage 4a (crest-v384). The workflow gained step 6 "Pay staff, then record it" (7 steps now). The `monthend.payroll` hint and strip changed too; its tick still fires at Finalize (`payrollFinalized`). |
 | DOCS-3 | `Help.js:481`: no daily/hourly gratuity yet, here or in Final Settlement; `:480` "active and probation". | ✅ S798 stage 4a (crest-v384). |
 | DOCS-4 | Delete tip 402's POS sentence; tip 411 describes the fallback rule. | ✅ S798 stage 4a (crest-v384). Tip 402 is now line 409, and tip 411 is line 418. |

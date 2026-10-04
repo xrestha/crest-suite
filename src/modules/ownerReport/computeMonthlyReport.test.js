@@ -107,6 +107,18 @@ describe('estimatePayrollAccrual — employer SSF follows payroll’s own gate',
     })
     expect(ssfEmployer).toBe(0)
   })
+
+  // S798 4b, LABOUR-FIGURES-8 (schema 14): SSF is on basic, so an allowance raises gross and leaves
+  // employer SSF where payroll leaves it.
+  test('allowances are in gross but not in the employer SSF base', () => {
+    const { gross, ssfEmployer } = estimatePayrollAccrual({
+      employees: [{ ...base, id: 'e4', ssf_enrolled: true, ssf_no: '1234567890' }],
+      components: [{ employee_id: 'e4', type: 'earning', calc_type: 'fixed', value: 3000 }], period,
+    })
+    expect(gross).toBeCloseTo(43000, 6)
+    expect(ssfEmployer).toBeCloseTo(40000 * SSF_EMPLOYER_PCT, 6)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(14)
+  })
 })
 
 describe('computeMonthlyReport reads what the two helpers need', () => {

@@ -21,6 +21,7 @@
  */
 
 import { npr } from '../../shared/nepalMoney'
+import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
 
 /**
  * Whether payroll is fenced from this login.
@@ -238,6 +239,26 @@ export function labourNotJudgedText({ source, verdictWithheld }) {
  * a name so the Owner Dashboard reads as what it means.
  */
 export const finalizedPayrollCost = payrollLabourTotal
+
+/**
+ * Employer SSF in the prorated labour estimate (the Owner Dashboard's, and the frozen Owner Report's
+ * when a month closes before payroll is finalized), for an SSF contributor employed `daysWorked` of
+ * the month's `monthDays` days. The caller has already checked `isSsfContributor`.
+ *
+ * SSF is charged on BASIC salary, so a monthly employee's base is basic × days ÷ month days, then
+ * capped: the engine's own order (`computePayslip`: min(basic × paid fraction, cap)). Both estimates
+ * charged it on basic + allowances (S798 4b, LABOUR-FIGURES-8), so ten enrolled staff with NPR 3,000
+ * of allowances each put NPR 6,000 a month of employer SSF in the estimate that payroll never
+ * charges. Daily and hourly staff keep the month-equivalent pay, capped, then prorated.
+ */
+export function estimatedEmployerSsf({ basis, basic, monthlyEquivGross, daysWorked, monthDays }) {
+  if (!(monthDays > 0) || !(daysWorked > 0)) return 0
+  const fraction = daysWorked / monthDays
+  const base = (basis || 'monthly') === 'monthly'
+    ? Math.min((basic || 0) * fraction, SSF_CAP)
+    : Math.min(monthlyEquivGross || 0, SSF_CAP) * fraction
+  return base * SSF_EMPLOYER_PCT
+}
 
 /**
  * @param {object}  a

@@ -180,6 +180,9 @@ export const STEPS = [
     access: { hr: 'manager' }, route: '/hr/pay-setup', where: 'HR → People → Pay Setup',
     label: "Set each person's pay",
     hint: 'A monthly salary, or a daily or hourly rate, and SSF if they are enrolled. Payroll uses this every month.',
+    // Ticks only once nobody on payroll is still at no pay; until then the step says how many are
+    // left (S798 4b, LABOUR-FIGURES-9).
+    remaining: { signal: 'payUnset', one: 'person on payroll still has no salary or rate set', many: 'people on payroll still have no salary or rate set' },
     note: REASSURE,
     strip: "Click a person's row to set their pay, then save." },
   { key: 'hr.holidays', group: 'hr', phase: 'setup', tick: 'data', signal: 'holidays', module: 'hr',
@@ -335,7 +338,12 @@ export function eligibleFor({ clientRow, now, reopened }) {
  */
 export function buildSetupGuide({ viewer, modules, hasFeature, signals = {}, progress = {}, focus = null, monthEndOpen = false }) {
   const all = stepsForViewer({ viewer, modules, hasFeature })
-  const withStatus = all.map(s => ({ ...s, status: stepStatus(s, { signals, progress }) }))
+  const withStatus = all.map(s => ({
+    ...s,
+    status: stepStatus(s, { signals, progress }),
+    // How many are still to do, for a step that counts them (`remaining`); null when unread.
+    ...(s.remaining ? { remainingCount: typeof signals[s.remaining.signal] === 'number' ? signals[s.remaining.signal] : null } : {}),
+  }))
 
   const groups = []
   for (const g of GROUPS) {

@@ -188,6 +188,11 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
         {isOpen && (
           <div id={bodyId} className="setup-step__body">
             {hintText && <p className="setup-step__hint">{hintText}</p>}
+            {step.remainingCount > 0 && (status === 'todo' || status === 'started') && (
+              <p className="setup-step__note">
+                {step.remainingCount} {step.remainingCount === 1 ? step.remaining.one : step.remaining.many}.
+              </p>
+            )}
             {status === 'unknown' && (
               <p className="setup-step__note">We couldn't check this just now, so it isn't ticked or counted yet. It will update the next time you open the dashboard.</p>
             )}

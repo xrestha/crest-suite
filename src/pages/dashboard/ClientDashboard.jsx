@@ -32,7 +32,7 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
-import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText, closerMakesReport, deferredReportNote, nextBsMonth } from '../periods/closePeriod'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText, closerMakesReport, deferredReportNote, nextBsMonth } from '../periods/closePeriod'
 import { backfillLeaveText } from '../../modules/hr/leave/backfillApprovedLeave'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
@@ -1145,16 +1145,14 @@ export default function ClientDashboard({ scope = 'home' }) {
         // only be refused, and reported as a failure.
         makeReport: closerMakesReport({ isAdmin, isOwner }),
       })
-      const first = result.failures[0]
-      if (first) {
-        console.error('Period close:', first.stage, first.error)
-        // A consequence sentence, never err.message — what state the month is in now, and what to do.
-        // `already_closed` is not a failure of this press: someone else ended the month first and
-        // nothing was written, so it reads as information, not as an error (STOCK-8).
-        setPeriodCloseNotice({
-          text: closeFailureText({ stage: first.stage, period: activePeriod, isAdmin }),
-          neutral: first.stage === 'already_closed',
-        })
+      const failed = closeFailuresText({ failures: result.failures, period: activePeriod, isAdmin })
+      if (failed) {
+        result.failures.forEach(f => console.error('Period close:', f.stage, f.error))
+        // Consequence sentences, never err.message — what state the month is in now, and what to
+        // do — one for EVERY failed stage (S798 4b, LABOUR-FIGURES-10). `already_closed` is not a
+        // failure of this press: someone else ended the month first and nothing was written, so on
+        // its own it reads as information, not as an error (STOCK-8).
+        setPeriodCloseNotice({ text: failed.text, neutral: failed.neutral })
       } else if (result.leaveFill) {
         // A clean close says nothing — except that opening the next month marked leave approved
         // earlier for it (S741). Periods.js always said so; this close, the one IMS supervisors use,

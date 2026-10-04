@@ -25,14 +25,20 @@ async function settle(promise, label) {
   }
 }
 
-// A head-only count → true (some), false (none), null (could not tell).
-async function exists(query, label) {
+// A head-only count → the number, or null (could not tell).
+async function countOf(query, label) {
   const res = await settle(query, label)
   if (!res || res.error || typeof res.count !== 'number') {
     if (res?.error) console.error(`Setup guide: ${label} failed`, res.error)
     return null
   }
-  return res.count > 0
+  return res.count
+}
+
+// A head-only count → true (some), false (none), null (could not tell).
+async function exists(query, label) {
+  const n = await countOf(query, label)
+  return n == null ? null : n > 0
 }
 
 async function rpcHasRows(name, args, label, pick = () => true) {
@@ -136,7 +142,20 @@ export async function loadSetupSignals({ needed, clientId, scopedFrom, today, po
     devices: () => rpcHasRows('list_pos_devices', { p_client_id: clientId }, 'till devices', d => !d.revoked_at),
     posStaff: () => rpcHasRows('get_pos_staff_list', { p_client_id: clientId }, 'POS staff'),
     employees: () => exists(head('hr_employees'), 'employees'),
-    paySet: () => exists(head('hr_employees').gt('basic_salary', 0), 'pay setup'),
+    // Done only when there is staff on payroll and none of them is still at no pay (S798 4b,
+    // LABOUR-FIGURES-9). One salary used to tick it while eleven others sat at basic 0, which
+    // payroll then paid as NPR 0 payslips and the Owner Dashboard counted as no labour. How many
+    // are left rides along as `payUnset`, for the step to say (null when it could not be read).
+    paySet: async () => {
+      const onPayroll = () => head('hr_employees').in('status', ['active', 'probation'])
+      const [staff, unset] = await Promise.all([
+        countOf(onPayroll(), 'staff on payroll'),
+        countOf(onPayroll().or('basic_salary.is.null,basic_salary.lte.0'), 'pay setup'),
+      ])
+      signals.payUnset = unset
+      if (staff == null || unset == null) return null
+      return staff > 0 && unset === 0
+    },
     // This fiscal year's holidays only (Shrawan → Ashadh): last year's list does not pay this
     // year's holiday overtime, so a client who seeded 2082/83 still has 2083/84 to do.
     holidays: () => {

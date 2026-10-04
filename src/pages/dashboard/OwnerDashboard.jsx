@@ -21,7 +21,7 @@ import SuiteGate from '../../components/SuiteGate'
 import ChartCard from '../../components/ChartCard'
 import { calcAmount, hourlyRateOf, isSsfContributor } from '../../modules/hr/payroll/payrollCompute'
 import {
-  SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
+  OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
 } from '../../modules/hr/payrollConstants'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
@@ -30,7 +30,7 @@ import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/report
 import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
-import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote, NON_LABOUR_OVERHEADS, splitNonLabourOverheads, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
+import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote, NON_LABOUR_OVERHEADS, splitNonLabourOverheads, otherLabourLine, PAYSLIP_LABOUR_COLUMNS, estimatedEmployerSsf } from '../../modules/dashboard/labourSource'
 import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
 import { parseAdDateLocal } from '../../shared/nepalTime'
 
@@ -480,10 +480,10 @@ export default function OwnerDashboard() {
 
       // Employer SSF only for a real contributor — enrolled AND carrying an SSF number — exactly
       // as computePayslip decides it. The flag alone added 20% for staff payroll never contributes
-      // for, so this estimate ran above the payroll it says it "refines to" once finalized.
+      // for, so this estimate ran above the payroll it says it "refines to" once finalized. On basic
+      // only, through the helper the Owner Report shares (S798 4b, LABOUR-FIGURES-8).
       if (isSsfContributor(emp)) {
-        const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
-        accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
+        accruedSsfEmployer += estimatedEmployerSsf({ basis, basic, monthlyEquivGross, daysWorked, monthDays })
       }
     })
 

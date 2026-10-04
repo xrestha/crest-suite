@@ -158,7 +158,8 @@ History: #s748-employees-pay-setup-holiday-calendar, #s751-payroll-decisions, #s
   If Finalize changes them, a live recompute of a locked month reads the post-finalize state.
 - **Where a month stands is `PayrollMonthStatus`** (`monthStatus.js` for the arithmetic): unmarked
   days for daily/hourly staff only, approvals touching the month, the run, staff paid (S782), the SSF
-  deposit. It never calls a passed deposit date missed (deposits are not recorded). On the HR
+  deposit. Neither it nor the HR Dashboard's SSF card calls a passed date missed (deposits are not
+  recorded; the card says "Was due by", never red, S798 4b). On the HR
   Dashboard it is MANAGER-only because its steps link to manager pages, not because a supervisor's
   read would be empty (it is not; REPORTS-10). Its month is last month until that payroll is
   finalized, then the running month (H32), never a search back. HR Reports opens on `?tab=` and `?period=`.
