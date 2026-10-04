@@ -349,8 +349,14 @@ History: #tada-has-no-period, #s600-final-settlement-writes, #s620-payroll-data-
 - **A leaver's staff logins are BLOCKED at Finalize, never deleted**: every `profiles` FK from bills,
   KOTs, shifts and cash movements is `ON DELETE SET NULL`. Finalize bans the auth user, revokes its
   sessions, stamps `profiles.settlement_blocked_by` and lists the names in `blocked_logins`; Reopen
-  unbans exactly its own. Only logins linked through `hr_employee_id` are found;
-  `settlement_linked_logins(employee)` names them for the confirm.
+  unbans exactly its own. A login is found by `hr_employee_id` or a 3f-1 link.
+- **What Finalize does to each login is `settlement_login_plan`** (S798 3f-2, H22 (a)), which the
+  confirm (`settlement_linked_logins`) and Finalize both read: `block` (no other job in the group),
+  `move` (a home HR login linked to an active record at another group outlet: its home moves there,
+  third-outlet ticks are put back after `profiles_client_move_clears_outlet_state` drops them) or
+  `remove_access` (a linked login from another outlet loses this outlet only). Moves and removals go
+  in `login_changes`, which only finalize/reopen write; Reopen puts back only what still sits where
+  Finalize left it and keeps the rest with `not_undone`. Page copy: `settlementLogins.js`.
 - **`access_blocked` ends Self-Service access:** sessions are revoked by trigger, and the Staff-app
   RPCs call `hr_self_service_assert_active()` first. **A new Staff-app RPC must call it too**, or a
   blocked employee keeps using it for the life of their access token.
@@ -783,7 +789,7 @@ History: #s752-settlement-decisions, #s782-salary-payments
   `20260923100000`; S791 `20260928100000` (advances), `20260928110000` (leavers), `20260928130000`
   (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`,
   3b `20261002160000`, 3d `20261003140000` (shift splits, swap ways out), 3f-1 `20261003160000`
-  (login links).
+  (login links), 3f-2 `20261004120000` (settlement across outlets).
 - Engine tests: `payrollS751.test.js`, `settlementCompute.test.js`, `gratuityCompute.test.js`,
   `holidayData.test.js`. The S798 findings and stage plans: `HR_TODO.md` (S798.2, S798.3).
 - The S770 moves (S682's per-ledger Finalize/Reopen messages, the S628 row-cap sweep, the S628

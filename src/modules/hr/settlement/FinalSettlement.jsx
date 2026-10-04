@@ -22,6 +22,7 @@ import { errorLine } from '../../../shared/errorText'
 import { nepalDateAd } from '../../../shared/nepalTime'
 import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
 import { settlementAdjustments, settlementPaymentState } from './settlementPayment'
+import { splitPlan, loginLabel, moveLine, removeLine, finalizedLoginNote, reopenLoginLines, notUndoneLines } from './settlementLogins'
 
 const fmt = nprInt
 
@@ -260,7 +261,7 @@ function statementOf(row, { advances = null, tadaClaims = null } = {}) {
 const today = getBsToday()
 
 export default function FinalSettlement() {
-  const { clientId, hasHrAccess, isOwner, isAdmin } = useAuth()
+  const { clientId, hasHrAccess, isOwner, isAdmin, outlets } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
   const [employees,  setEmployees]  = useState([])
@@ -599,6 +600,9 @@ export default function FinalSettlement() {
   const linkedLogins = !checksIn ? null : checks.logins?.error ? { error: checks.logins.error } : listOf('logins')
   const exempt = isOwner || isAdmin
   const managerLogins = Array.isArray(linkedLogins) ? linkedLogins.filter(l => l.hr_manager) : []
+  // S798 3f-2 (H22): blocked, moved to the other outlet they work at, or losing this outlet only.
+  const loginPlan = splitPlan(Array.isArray(linkedLogins) ? linkedLogins : [])
+  const grouped = (outlets || []).length > 1
   const managerBlock = managerLogins.length > 0 && !exempt
   const finalizeBlockers = !checksIn ? ['the checks that are still loading'] : [
     pendingLeave.length > 0 && 'leave waiting for a decision',
@@ -681,7 +685,7 @@ export default function FinalSettlement() {
     setMsg('ok:Settlement finalized. ' + (data.employee_name || emp.full_name) + ' is now ' + (STATUS_AFTER[data.separation_reason] || 'resigned')
       + '; advances recovered: NPR ' + fmt(data.advance_recovered)
       + ((data.tada_claim_ids || []).length > 0 ? '; ' + data.tada_claim_ids.length + ' travel claim(s) marked paid' : '')
-      + ((data.blocked_logins || []).length > 0 ? '; staff login blocked: ' + data.blocked_logins.join(', ') : '') + '.')
+      + finalizedLoginNote(data) + '.')
   }
 
   async function reopen() {
@@ -695,7 +699,9 @@ export default function FinalSettlement() {
     setCurrent(data)
     await loadClientData(clientId)
     setReloadTick(t => t + 1)
-    setMsg('ok:Settlement reopened as a draft — its advance recoveries and travel-claim payments were undone. ' + (data.employee_name || 'The employee') + ' is still marked as left; change their status in Employees if they are not leaving after all, and check any payroll month named above that was finalized without them.')
+    const notBack = notUndoneLines(data)
+    setMsg('ok:Settlement reopened as a draft — its advance recoveries and travel-claim payments were undone. ' + (data.employee_name || 'The employee') + ' is still marked as left; change their status in Employees if they are not leaving after all, and check any payroll month named above that was finalized without them.'
+      + (notBack.length > 0 ? ' Not put back: ' + notBack.join(' ') : ''))
   }
 
   async function deleteDraft(row) {
@@ -980,6 +986,9 @@ export default function FinalSettlement() {
               {skipped.key === skipKey && skipped.error && (
                 <div style={{ marginTop: 4 }}>△ Could not check which payroll months were finalized without them — {errorLine(skipped.error)}</div>
               )}
+              {notUndoneLines(current).map(line => (
+                <div key={line} style={{ marginTop: 4 }}>△ Not put back by the reopen: {line}</div>
+              ))}
             </div>
           )}
 
@@ -1214,15 +1223,20 @@ export default function FinalSettlement() {
               {liveRow.employee_name} becomes <strong>{STATUS_AFTER[reason]}</strong> with an end date of {lastAdLabel}, and leaves every payroll, roster and attendance screen.
             </li>
             <li>Their Crest Staff app access is turned off, and a phone already signed in is signed out.</li>
-            <li>
-              {linkedLogins === null
-                ? 'Checking for an HR, IMS or POS staff login…'
-                : linkedLogins.error
-                  ? 'Could not check for an HR, IMS or POS staff login — any linked to this employee are still blocked.'
-                  : linkedLogins.length === 0
-                    ? 'No HR, IMS or POS staff login is linked to this employee, so none is blocked. If they have one that is not linked, link it on HR Staff (the Owner presses Link…) before finalizing, or delete it there.'
-                    : <>Their staff login{linkedLogins.length === 1 ? '' : 's'} {linkedLogins.map(l => `${l.full_name} (${l.modules}${l.hr_manager ? ', HR Manager' : ''})`).join(', ')} {linkedLogins.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {linkedLogins.length === 1 ? 'it' : 'them'}, and so does taking them back later with a new join date.</>}
-            </li>
+            {(!Array.isArray(linkedLogins) || linkedLogins.length === 0 || loginPlan.block.length > 0) && (
+              <li>
+                {linkedLogins === null
+                  ? 'Checking for an HR, IMS or POS staff login…'
+                  : linkedLogins.error
+                    ? 'Could not check for an HR, IMS or POS staff login — Finalize still deals with any linked to this employee: it blocks it, or moves it to another of your outlets they still work at.'
+                    : linkedLogins.length === 0
+                      ? 'No HR, IMS or POS staff login is linked to this employee, so none is blocked. If they have one that is not linked, link it on HR Staff (the Owner presses Link…) before finalizing, or delete it there.'
+                      : <>Their staff login{loginPlan.block.length === 1 ? '' : 's'} {loginPlan.block.map(loginLabel).join(', ')} {loginPlan.block.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {loginPlan.block.length === 1 ? 'it' : 'them'}, and so does taking them back later with a new join date.
+                          {grouped && ' If they still work at another of your outlets, link the login to their record there on HR Staff first, and it moves there instead of being blocked.'}</>}
+              </li>
+            )}
+            {loginPlan.move.map(l => <li key={'move:' + l.full_name}>{moveLine(l)}</li>)}
+            {loginPlan.remove.map(l => <li key={'remove:' + l.full_name}>{removeLine(l)}</li>)}
             {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}
             {paidMonths?.error && (
               <li style={{ color: 'var(--theme-amber-text)' }}>△ Could not check whether their salary for {BS_MONTHS[lastDate.month - 1]} is already recorded as paid — Finalize checks again and refuses if it is.</li>
@@ -1256,6 +1270,7 @@ export default function FinalSettlement() {
             <li>The travel claims it paid go back to Approved.</li>
             <li>{reopenTarget.employee_name} stays marked as left. If they are not leaving after all, change their status in Employees.</li>
             {(reopenTarget.blocked_logins || []).length > 0 && <li>The staff login{reopenTarget.blocked_logins.length === 1 ? '' : 's'} it blocked ({reopenTarget.blocked_logins.join(', ')}) can sign in again.</li>}
+            {reopenLoginLines(reopenTarget).map(line => <li key={line}>{line}</li>)}
             {reopenTarget.paid_at && <li>{paidLine(reopenTarget)}. That record is kept: once it is finalized again, any change to the net shows as still to pay or overpaid, and while reopened it cannot be deleted.</li>}
             {skipped.key === skipKey && skipped.loading && <li>Checking which payroll months were finalized without them…</li>}
             {skipped.key === skipKey && skipped.error && <li style={{ color: 'var(--theme-amber-text)' }}>△ Could not check which payroll months were finalized without them ({errorLine(skipped.error)}).</li>}

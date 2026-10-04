@@ -599,10 +599,14 @@ definition.
 6. **3f Logins across outlets**, split in two on 2026-10-03:
    - **3f-1 Login links — DONE 2026-10-03** (crest-v381, migration live): SISTER-2, GAP-OUTLETS-1, and GAP-OUTLETS-3's
      remove-access half. Migration `hr_login_links_s798`; in SQL, not admin-user-ops (no deploy).
-   - **3f-2 Settlement across outlets:** the rest of GAP-OUTLETS-3 (H22). `finalize_final_settlement`,
-     `reopen_final_settlement` and `settlement_linked_logins` rebuilt from live, reading the 3f-1 links. Open owner
-     question: a login whose HOME outlet is settled while it is linked to an active record at another outlet
-     (recommended: move its home there; `get_client_profile_names` must then still name it on the old outlet's records).
+   - **3f-2 Settlement across outlets — DONE 2026-10-04** (crest-v382, migration live): the rest of GAP-OUTLETS-3
+     (H22). Migration `hr_settlement_outlets_s798`: `settlement_login_plan` (block / move / remove_access), read by
+     the confirm and Finalize; `login_changes` for Reopen. The owner answered the open question on 2026-10-04 as
+     recommended: a login whose HOME outlet is settled while it is linked to an active record at another outlet
+     moves its home there, and `get_client_profile_names` names the group's logins so the old outlet's records
+     keep its name.
+
+Stage 3 is complete (all six slices).
 
 ENGINE-2 is closed: H17 changed to (c) on 2026-10-02.
 
@@ -632,7 +636,7 @@ ENGINE-2 is closed: H17 changed to (c) on 2026-10-02.
 | H19 | LABOUR-FIGURES-3 | (A): labour = gross − absence + OT + employer SSF on every reader and the group SQL; Owner Report line; dashboards.md and `labourSource.test.js`. | ✅ S798 stage 3c (crest-v378), migration `20261003120000_hr_labour2_s798`, applied live 2026-10-03 after a rolled-back dry run (CASA put into BLOOM's group inside the block; its real Ashadh/Shrawan absence and Bhadra settlement matched the page's JS to the paisa). `payrollLabourTotal` = gross − absence + OT + employer SSF, pinned equal to `payrollCashCost().total`; CASA's Ashadh labour reads NPR 69,284, not 94,628. |
 | H20 | SETTLEMENT-6 | Finalize refuses `settlement_manager_login` for a non-exempt caller; `settlement_linked_logins` returns the rank for the confirm. | ✅ S798 stage 3b (crest-v377), migration `20261002160000_hr_settlements2_s798`, applied live 2026-10-03 after a rolled-back dry run (22 checks as CASA logins). |
 | H21 | PEOPLE-ACCESS-4 | (a): DEFINER `hr_unblock_rehired_logins(employee)` clears the latest earlier settlement's stamps after a rehire save. Every option: the badge on IMS Staff and HR Staff. | ✅ S798 stage 3b (crest-v377), migration `20261002160000_hr_settlements2_s798`, applied live 2026-10-03 after a rolled-back dry run (22 checks as CASA logins). Called on every EmployeeForm save that leaves a settled leaver on payroll after the settled day (so saving again retries); an HR Manager login is unblocked only for the Owner (H20). Badge on IMS Staff and HR Staff. |
-| H22 | GAP-OUTLETS-3 | With per-outlet links: ban only at the home outlet with no other link, else remove that outlet's access and stamp it; Reopen restores what it stamped; the confirm says what happens. Move a "who can reach this outlet" list out of the Suite gate. | 🟡 Half done in S798 stage 3f-1 (crest-v381): the "who can reach this outlet" list and an Owner-only Remove access (`revoke_outlet_access`) are on HR Staff, outside the Suite gate. The settlement half is slice 3f-2. |
+| H22 | GAP-OUTLETS-3 | With per-outlet links: ban only at the home outlet with no other link, else remove that outlet's access and stamp it; Reopen restores what it stamped; the confirm says what happens. Move a "who can reach this outlet" list out of the Suite gate. | ✅ S798 stages 3f-1 (crest-v381) and 3f-2 (crest-v382). 3f-1: the "who can reach this outlet" list and an Owner-only Remove access (`revoke_outlet_access`) on HR Staff, outside the Suite gate. 3f-2: migration `20261004120000_hr_settlement_outlets_s798`, applied live 2026-10-04 after a rolled-back dry run (15 checks as CASA logins inside BLOOM's group). `settlement_login_plan` blocks a login with no other job in the group, moves a home HR login to the outlet it is linked to an active record at (owner, 2026-10-04: move the home, not keep or block), and removes this outlet from a linked login from another outlet; `login_changes` holds what Reopen puts back, only where nothing changed since. The confirm lists each. An HR Manager login linked from another outlet also needs the Owner (H20). |
 | H23 | ROSTER-3 | `cancel_my_swap_request` + Withdraw; the manager tab lists and rejects "waiting on coworker"; refuse inactive (and per (a) app-less) coworkers; `respond_shift_swap` refuses a past day; the badge ignores past rows. | ✅ S798 stage 3d (crest-v379), migration `20261003140000_hr_roster2_s798`, applied live 2026-10-03 after a rolled-back dry run (16 checks as CASA logins). A request with a day gone no longer blocks the shift (`swap_already_requested`); declining a lapsed request still closes it. Withdrawing sends no notification (no hr-push deploy). |
 | H25 | DOCS-6 | (A): `Help.js:461`, `:466` and the payslip-header tip say "ask Crest support". (B): show Property to the Owner. | ✅ S798 stage 3e (crest-v380). Both Help tips (now lines 469 and 474) say to ask Crest support, naming the PAN as the VAT/PAN number on the account; the `PayslipBody.jsx` comment too. No other Owner-facing pointer found. |
 
