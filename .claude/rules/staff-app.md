@@ -140,6 +140,16 @@ the one place two people have to agree on *which* day before either of them comm
 `formatBsDay(cd.bs_day, swapDay.bsMonth)` ("3rd Bhadra") where the month is not already on screen
 and `bsDayOrdinal(...)` where it is — both from `src/utils/bsCalendar.js`. Same helpers the roster
 and HR Dashboard use, so the two sides of a swap request can never describe the day differently.
+**The swap list is not a place where the month is on screen** (S798 4e, SELF-SERVICE-8): it holds
+every request ever made, so both sides print `formatBsDay(day, r.bs_month)`. S614 assumed otherwise.
+
+**A swap action is one call per tap, and its refusal is not the list's read error** (S798 4e,
+DOCS-7). Accept, Decline and Withdraw disable while one is in flight; a refusal shows on its own line
+above the list (`swapActionErr`) and the list is re-read. It used to go in `errs.swaps`, which
+replaced the whole list and was cleared by the next successful read. Every refusal the app can reach
+carries a code with a `'staff'` sentence; on `swap_coworker_shift_gone` / `swap_own_shift_gone` the
+sheet re-reads the coworker's days or your own week, which is what makes the sentence's "refreshed"
+true.
 
 ## The service worker and the two manifests (S731)
 

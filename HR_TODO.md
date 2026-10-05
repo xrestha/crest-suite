@@ -676,7 +676,7 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
    BONUS-LEDGERS-6, DATABASE-4, and HR Staff's Last Seen in BS (carried from IMS_TODO.md, S798.7).
 4. ✅ **4d Attendance, roster and leave** (done 2026-10-05, crest-v387; no migration): ATTENDANCE-8, -9, ROSTER-10, PAYROLL-8's Roster half
    (Copy Week and publish share ROSTER-10's handler), LEAVE-OT-HOLIDAYS-6, -7.
-5. **4e Crest Staff** (migration: DROP/CREATE `get_my_hr_payslips`): SELF-SERVICE-7, -8, DOCS-7.
+5. ✅ **4e Crest Staff** (done 2026-10-05, crest-v388; migration `20261005120000` live): SELF-SERVICE-7, -8, DOCS-7.
 6. **4f PIN logins** (migration: `release_hr_pin_attempt`; deploys: hr-selfservice-login, pos-staff-login,
    ims-staff-login): SELF-SERVICE-6. At planning, check whether the POS and IMS logins need release functions
    of their own.
@@ -695,8 +695,8 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 | LEAVE-OT-HOLIDAYS-6 | `approveCore` re-reads `monthly_periods` for missing months before writing. | ✅ S798 stage 4d (crest-v387). `monthsWithoutPeriod` (`leaveRules.js`); `approveCore` re-reads `monthly_periods` before the snapshot, the write and the put-back, and a failed re-read approves nothing. |
 | LEAVE-OT-HOLIDAYS-7 | Leave settled leavers out of `findApprovedLeaveGaps`; `fillUnmarked` names them. | ✅ S798 stage 4d (crest-v387). `findApprovedLeaveGaps` takes `settlements` and `employees` and leaves settled leavers out by the back-fill's own test (waiting months too); `fillUnmarked` names `settled` days. |
 | SELF-SERVICE-6 | Derive the password before reserving; count only `invalid_credentials`; else release (new `release_hr_pin_attempt`) and 503; fixed catch-all text. Same in pos- and ims-staff-login. | 🔴 |
-| SELF-SERVICE-7 | DROP/CREATE `get_my_hr_payslips` with `unpaid_days`, `retirement_contribution`; assert first; REVOKE PUBLIC, GRANT authenticated. | 🔴 |
-| SELF-SERVICE-8 | `formatBsDay(day, r.bs_month)` on both sides of the swap list. | 🔴 |
+| SELF-SERVICE-7 | DROP/CREATE `get_my_hr_payslips` with `unpaid_days`, `retirement_contribution`; assert first; REVOKE PUBLIC, GRANT authenticated. | ✅ S798 stage 4e (crest-v388, migration `20261005120000`). Re-created from the live body with both columns appended; grants as before (authenticated, service_role). `PayslipBody` prints them unchanged. |
+| SELF-SERVICE-8 | `formatBsDay(day, r.bs_month)` on both sides of the swap list. | ✅ S798 stage 4e (crest-v388). |
 | DATABASE-4 | Drop `supervisor_id` from `ATTRIBUTION_EXTRA`; restore it in a second pass. | ✅ S798 stage 4c (crest-v386). `DEFERRED_LINKS`, one update per supervisor (`runChunkedByIds`). Same edit: the restore drops every `<column>_name` annotation, so a set asset custodian no longer fails assets_register (the latent IMS case DATABASE noted). |
 | REPORTS-5 | Keep the runs error: "—" and "could not be read", never "No finalized payroll yet". | ✅ S798 stage 4b (crest-v385). The four payroll cards read "—" / "last finalized payroll could not be read". |
 | REPORTS-6 | Neutral "was due by …" once passed, as the strip. | ✅ S798 stage 4b (crest-v385). "Was due by …" in plain text; the red branch and KCard's `overdue` prop are gone. hss-suite still red: filed in both ledgers. |
@@ -711,7 +711,7 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 | DOCS-3 | `Help.js:481`: no daily/hourly gratuity yet, here or in Final Settlement; `:480` "active and probation". | ✅ S798 stage 4a (crest-v384). |
 | DOCS-4 | Delete tip 402's POS sentence; tip 411 describes the fallback rule. | ✅ S798 stage 4a (crest-v384). Tip 402 is now line 409, and tip 411 is line 418. |
 | DOCS-5 | "The Owner or an HR manager" in `Help.js:491`, `TadaClaims.jsx:883` and `:125`; drop the Rate/KM tip. | ✅ S798 stage 4a (crest-v384). The "No rate set" advice moved into the Transport tip; `TadaClaims.jsx:968` and the :129 comment. |
-| DOCS-7 | Busy state and reload-on-error on Accept/Decline; errorText rules for the uncoded swap refusals (or raise the existing codes). | 🔴 |
+| DOCS-7 | Busy state and reload-on-error on Accept/Decline; errorText rules for the uncoded swap refusals (or raise the existing codes). | ✅ S798 stage 4e (crest-v388, migration `20261005120000`). Both: the functions raise codes (`swap_not_found`, `swap_not_pending`, `swap_coworker_unavailable`, new `swap_own_shift_gone` / `swap_coworker_shift_gone`), and Accept, Decline and Withdraw are one call per tap with the refusal on its own line and the list re-read. A moved shift re-reads the coworker's days or the week behind the sheet. |
 | DOCS-8 | `hrGuideData.js` :395-396, :438, :467, :90, :329, :39, :673, :216 as the DOCS-8 fix says; also :633 (passed on by ATTENDANCE). | ✅ S798 stage 4a (crest-v384). (1) DAILY/HOURLY with holidays and (3) the :90 Payroll Run wording had already been fixed. The rest changed: the bonus tax base (Festival and Incentives), the settled leaver (line 343), one role per login (:39, :699), Generate reads every roster row (:223), the finalized-month lock (:656), and :686 says manager rank fences writes. |
 | DOCS-9 | "+ Add Employee (top right; bottom right on a phone)" at `setupSteps.js:178` and the four IMS strips. | ✅ S798 stage 4a (crest-v384). Employee, Item, Vendor, Purchase and Recipe strips. |
 

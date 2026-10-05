@@ -1037,6 +1037,19 @@ const rules = [
     staff: "That coworker can't answer a swap in the Staff app, so it wasn't sent. Ask your manager to swap you on the roster instead.",
     operator: 'That coworker has no Crest Staff login, has left, or is blocked, so they could never answer the request. Nothing was sent. Swap them on the Roster board instead.',
   },
+  // S798 4e (20261005120000, DOCS-7): the roster moved while the swap sheet was open. Both were plain
+  // text that read as "Try again", and sending again failed the same way. The page re-reads what
+  // changed, which is what makes the staff wording's "refreshed" true.
+  {
+    test: e => /swap_own_shift_gone/i.test(e.message || ''),
+    staff: 'Your shift on that day has changed since you opened this, so nothing was sent. Close this and check your roster.',
+    operator: 'The employee no longer has a working shift on that day, so the swap was not requested.',
+  },
+  {
+    test: e => /swap_coworker_shift_gone/i.test(e.message || ''),
+    staff: 'Their shift on that day has changed since you opened this, so nothing was sent. Their days have been refreshed — pick again.',
+    operator: 'The coworker no longer has a working shift on that day, so the swap was not requested.',
+  },
   // S798 3d (ROSTER-1, H12 (a)): split_shift_type — the shift type and the roster are unchanged on every one.
   {
     test: e => /shift_split_replaced/i.test(e.message || ''),

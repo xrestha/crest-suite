@@ -234,6 +234,27 @@ describe('errorText', () => {
         expect(errorText(raised(name), 'operator')).toMatch(/roster was not changed/i)
       }
     })
+
+    // S798 4e (DOCS-7): the exact texts the live functions raise. Each was plain text before and fell
+    // through to the fallback, whose "Try again" could never work.
+    it('a Crest Staff swap refusal has its own sentence, never the fallback', () => {
+      const fallback = errorText({ message: 'something nobody wrote a rule for' }, 'staff')
+      const cases = [
+        ['swap_not_found: request not found', /already been decided or withdrawn/i],
+        ['swap_not_pending: request is no longer pending', /already been decided or withdrawn/i],
+        ['swap_coworker_unavailable: coworker not found', /can't answer a swap/i],
+        ['swap_own_shift_gone: you have no shift on that day', /your shift on that day has changed/i],
+        ['swap_coworker_shift_gone: coworker has no shift on that day', /their days have been refreshed/i],
+      ]
+      for (const [message, wording] of cases) {
+        const text = errorText({ code: 'P0001', message }, 'staff')
+        expect(text).not.toBe(fallback)
+        expect(text).toMatch(wording)
+      }
+      for (const name of ['swap_own_shift_gone', 'swap_coworker_shift_gone']) {
+        expect(errorText(raised(name), 'staff')).toMatch(/nothing was sent/i)
+      }
+    })
   })
 })
 

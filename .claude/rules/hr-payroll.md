@@ -49,6 +49,8 @@ rule, the bullet states what holds now; the archive keeps both.
 - **The payslip's absence line prints `hr_payslips.unpaid_days`** (absences + unpaid leave + half
   days + pre-join days, migration `20260818120000`). `absent_days` stays literal absences, which
   Payroll Run's Excel export heads "Absent Days". Older payslips have no value and print no count.
+  The Staff app's copy prints it and the CIT note too since S798 4e: `get_my_hr_payslips` returns
+  `unpaid_days` and `retirement_contribution`. A payslip column `PayslipBody` reads joins that RPC.
 - **Every taxable-income sum over payslips is `earnedPay()`** (gross − `absence_deduction` + OT), in
   `fetchYtdMap` and `payslipYtdForFy` (S781). A query feeding either selects `absence_deduction`;
   `earnedPay` throws without it.
@@ -602,7 +604,10 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
   gone no longer counts), and a coworker who could never answer: not active/probation, blocked, or
   no Crest Staff login (`swap_coworker_unavailable`, S798 3d, H23 (a)); `get_coworker_roster` lists
   only the coworkers it accepts. The Staff app's picker hides past days and any day whose
-  `shift_kind` is not work.
+  `shift_kind` is not work. A shift moved while the sheet was open is `swap_own_shift_gone` /
+  `swap_coworker_shift_gone`, and `respond_shift_swap` says `swap_not_found` / `swap_not_pending`
+  (S798 4e). **A refusal the Staff app can reach raises a code**, never plain text, or the phone says
+  "Try again" to a retry that fails the same way.
 - **Every open swap has a way out** (S798 3d): the requester's `cancel_my_swap_request`, the manager's
   Reject on `pending_target` too, and `respond_shift_swap` refuses to accept a lapsed day (decline
   still closes it).
@@ -817,7 +822,8 @@ History: #s752-settlement-decisions, #s782-salary-payments
   `20260923100000`; S791 `20260928100000` (advances), `20260928110000` (leavers), `20260928130000`
   (swaps); S798 1b `20260930120000`, 2a `20261001120000`, 2b `20261001140000`, 2c `20261001160000`,
   3b `20261002160000`, 3d `20261003140000` (shift splits, swap ways out), 3f-1 `20261003160000`
-  (login links), 3f-2 `20261004120000` (settlement across outlets).
+  (login links), 3f-2 `20261004120000` (settlement across outlets), 4e `20261005120000` (Staff app
+  payslip columns, coded swap refusals).
 - Engine tests: `payrollS751.test.js`, `settlementCompute.test.js`, `gratuityCompute.test.js`,
   `holidayData.test.js`. The S798 findings and stage plans: `HR_TODO.md` (S798.2, S798.3).
 - The S770 moves (S682's per-ledger Finalize/Reopen messages, the S628 row-cap sweep, the S628

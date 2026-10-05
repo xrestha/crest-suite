@@ -6,7 +6,7 @@ import { useTheme } from '../../../context/ThemeContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { BS_MONTHS, adToBs, adToBsSafe, formatAd, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { BS_MONTHS, adToBs, adToBsSafe, formatAd, formatBsDay } from '../../../utils/bsCalendar'
 import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount, tadaItemsTotal, tadaLineAmount, acceptTadaAmount, tadaDatesError } from '../tada/tadaShared'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -222,6 +222,9 @@ export default function SelfServiceHome() {
   const [swapNote, setSwapNote] = useState('')
   const [swapSubmitting, setSwapSubmitting] = useState(false)
   const [swapMsg, setSwapMsg] = useState('')
+  // An Accept / Decline / Withdraw in flight (`<id>:<action>`), and the refusal of the last one.
+  const [swapBusy, setSwapBusy] = useState(null)
+  const [swapActionErr, setSwapActionErr] = useState('')
 
   useEffect(() => {
     if (!authLoading && (!session || !profile?.hr_self_service)) {
@@ -389,6 +392,10 @@ export default function SelfServiceHome() {
   // ── Swaps ──────────────────────────────────────────────────────────────────────────────────
   function openSwapRequest(day) {
     setSwapDay(day); setSwapTargetEmpId(''); setSwapTargetDay(''); setSwapNote(''); setSwapMsg('')
+    loadCoworkerRoster(day)
+  }
+
+  function loadCoworkerRoster(day) {
     // Clear stale data and show a loading state, or the picker renders holding only its
     // placeholder while the fetch is in flight and reads as "nobody is scheduled".
     setCoworkerRoster([]); setCoworkerLoading(true)
@@ -417,7 +424,15 @@ export default function SelfServiceHome() {
       p_my_bs_day: swapDay.bsDay, p_target_bs_day: parseInt(swapTargetDay, 10), p_note: swapNote,
     })
     setSwapSubmitting(false)
-    if (error) { setSwapMsg(employeeErrorText(error)); return }
+    if (error) {
+      setSwapMsg(employeeErrorText(error))
+      // The roster moved while the sheet was open (S798 4e, DOCS-7). Sending again from the same
+      // screen was refused the same way every time, so re-read what changed: their days here, or
+      // your own week behind the sheet.
+      if (/swap_coworker_shift_gone/.test(error.message || '')) { setSwapTargetDay(''); loadCoworkerRoster(swapDay) }
+      else if (/swap_own_shift_gone/.test(error.message || '')) loadRoster()
+      return
+    }
     supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_request', request_id: requestId } })
     setSwapDay(null)
     // The confirmation has to outlive the sheet that produced it, or it disappears with the thing
@@ -426,9 +441,16 @@ export default function SelfServiceHome() {
     loadSwapRequests()
   }
 
+  // One call per tap, and a refusal on its own line above the list (S798 4e, DOCS-7). A double tap, or
+  // the same request answered on a second phone, was refused as "no longer pending" and shown in the
+  // list's own error slot — in place of the list, with a Try again that could never work. The list is
+  // re-read either way, so the card shows where the request now stands.
   async function respondSwap(requestId, accept) {
+    if (swapBusy) return
+    setSwapBusy(`${requestId}:${accept ? 'accept' : 'decline'}`); setSwapActionErr(''); setDone('')
     const { error } = await supabase.rpc('respond_shift_swap', { p_request_id: requestId, p_accept: accept })
-    if (error) { setErrFor('swaps', employeeErrorText(error)); return }
+    setSwapBusy(null)
+    if (error) { setSwapActionErr(employeeErrorText(error)); loadSwapRequests(); return }
     supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_target_response', request_id: requestId } })
     setDone(accept ? 'Accepted — your manager still has to approve the swap.' : 'Declined.')
     loadSwapRequests()
@@ -437,8 +459,11 @@ export default function SelfServiceHome() {
   // Your own request, while it still waits on your coworker or the manager (S798 3d, ROSTER-3). There
   // was no way out of one before: an unanswered request blocked both shifts until the day passed.
   async function withdrawSwap(requestId) {
+    if (swapBusy) return
+    setSwapBusy(`${requestId}:withdraw`); setSwapActionErr(''); setDone('')
     const { error } = await supabase.rpc('cancel_my_swap_request', { p_request_id: requestId })
-    if (error) { setErrFor('swaps', employeeErrorText(error)); return }
+    setSwapBusy(null)
+    if (error) { setSwapActionErr(employeeErrorText(error)); loadSwapRequests(); return }
     setDone('Swap request withdrawn.')
     loadSwapRequests()
   }
@@ -631,6 +656,7 @@ export default function SelfServiceHome() {
 
           <section className="ss-section">
             <h2 className="ss-label">Swap requests</h2>
+            {swapActionErr && <p role="alert" style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.55, color: 'var(--theme-red-text)' }}>{swapActionErr}</p>}
             {errs.swaps ? <ErrorCard text={errs.swaps} onRetry={loadSwapRequests} />
               : swapRequests === null ? <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
               : swapRequests.length === 0 ? <Empty text="No swap requests yet." />
@@ -647,9 +673,11 @@ export default function SelfServiceHome() {
                       <div key={r.id} className={`card${iAmTarget && r.status === 'pending_target' && !lapsed ? ' ss-attention' : ''}`} style={{ padding: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                           <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
-                            <b style={{ color: 'var(--theme-text1)' }}>{r.requester_name}</b> ({bsDayOrdinal(r.requester_bs_day)}, {r.requester_shift_name || '—'})
+                            {/* The month on both sides (S798 4e, SELF-SERVICE-8): this list holds every
+                                request ever made, so a bare "3rd" could be next month's. */}
+                            <b style={{ color: 'var(--theme-text1)' }}>{r.requester_name}</b> ({formatBsDay(r.requester_bs_day, r.bs_month)}, {r.requester_shift_name || '—'})
                             {' ⇄ '}
-                            <b style={{ color: 'var(--theme-text1)' }}>{r.target_name}</b> ({bsDayOrdinal(r.target_bs_day)}, {r.target_shift_name || '—'})
+                            <b style={{ color: 'var(--theme-text1)' }}>{r.target_name}</b> ({formatBsDay(r.target_bs_day, r.bs_month)}, {r.target_shift_name || '—'})
                           </div>
                           <span className={`${lapsed ? 'badge-gray' : (SWAP_STATUS_BADGE[r.status] || 'badge-gray')} badge-sentence`} style={{ whiteSpace: 'nowrap' }}>
                             {lapsed ? 'Lapsed — the day has passed' : (SWAP_STATUS_LABEL[r.status] || r.status.replace(/_/g, ' '))}
@@ -657,13 +685,19 @@ export default function SelfServiceHome() {
                         </div>
                         {iAmTarget && r.status === 'pending_target' && !lapsed && (
                           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                            <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => respondSwap(r.id, false)}>Decline</button>
-                            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => respondSwap(r.id, true)}>Accept</button>
+                            <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} disabled={!!swapBusy} onClick={() => respondSwap(r.id, false)}>
+                              {swapBusy === `${r.id}:decline` ? 'Declining…' : 'Decline'}
+                            </button>
+                            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!!swapBusy} onClick={() => respondSwap(r.id, true)}>
+                              {swapBusy === `${r.id}:accept` ? 'Accepting…' : 'Accept'}
+                            </button>
                           </div>
                         )}
                         {iAsked && waiting && (
                           <div style={{ display: 'flex', marginTop: 12 }}>
-                            <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => withdrawSwap(r.id)}>Withdraw request</button>
+                            <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} disabled={!!swapBusy} onClick={() => withdrawSwap(r.id)}>
+                              {swapBusy === `${r.id}:withdraw` ? 'Withdrawing…' : 'Withdraw request'}
+                            </button>
                           </div>
                         )}
                       </div>
