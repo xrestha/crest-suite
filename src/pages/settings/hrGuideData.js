@@ -724,7 +724,7 @@ export const HR_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'PIN', desc: '4-6 digits. It is never the account\'s real password — the server verifies a peppered fingerprint of it, and the login completes server-side so the account\'s email never reaches the browser.' },
-          { label: 'Lockout', desc: 'Five failed attempts locks the PIN for a period, enforced entirely server-side inside the login call — so it cannot be skipped, and a fat-fingered employee is never double-counted.' },
+          { label: 'Lockout', desc: 'Five failed attempts locks the PIN for a period, enforced entirely server-side inside the login call — so it cannot be skipped, and a fat-fingered employee is never double-counted. Only a wrong PIN counts (S798): a sign-in the server could not complete is given back (release_hr_pin_attempt) and the phone says it could not reach the server, keeping the PIN.' },
         ],
         formulas: [],
         gotchas: [

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { derivePinPassword, getAppSecrets } from '../_shared/pinPassword.ts'
+import { releasePinAttempt, signInVerdict } from '../_shared/pinSignIn.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -45,7 +46,15 @@ const CORS = {
 // secret, verified below against client_secrets.ims_device_secret exactly as get_ims_count_staff
 // does. That secret reaches a tablet only by redeeming a short-lived enrolment token off the QR a
 // manager displays in Stock Count -> Settings.
-const ERR_UNAVAILABLE = 'Sign-in is unavailable right now. Try again in a minute.'
+//
+// 3. ONLY AN ANSWER ABOUT THE PIN STAYS COUNTED (S798, SELF-SERVICE-6). The sign-in error used to
+//    be dropped, so a 429 or 5xx from GoTrue stayed counted as a wrong PIN; five locked out a
+//    counter typing the correct one. The password is now derived before the reservation (no
+//    pepper → 503, nothing counted), and _shared/pinSignIn.ts's signInVerdict keeps the attempt
+//    counted only for invalid_credentials / user_banned. Anything else gives it back
+//    (release_ims_pin_attempt, migration 20261005140000) and answers 503. The catch-all sends fixed
+//    text, never err.message.
+const ERR_UNAVAILABLE ='Sign-in is unavailable right now. Try again in a minute.'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
@@ -112,6 +121,17 @@ Deno.serve(async (req) => {
     }
     if (!staff?.ims_email) return json({ error: 'Invalid credentials' }, 401)
 
+    // Derived BEFORE the reservation (S798, header point 3): an unreadable pepper is the server's
+    // fault, so it must not cost the counter an attempt.
+    let derived: string
+    try {
+      const { pepper } = await getAppSecrets(admin)
+      derived = await derivePinPassword(staff.ims_email, pin, pepper)
+    } catch (e) {
+      console.error('[ims-staff-login] could not derive the PIN password — refusing the sign-in, nothing counted:', e instanceof Error ? e.message : e)
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
+
     // Reserve the attempt BEFORE signing in (S791, header point 1). A locked account is refused here
     // without burning a real auth attempt, as the old check did.
     const lockedResponse = (lockedUntil: string | null) =>
@@ -146,15 +166,21 @@ Deno.serve(async (req) => {
 
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
 
-    const { pepper } = await getAppSecrets(admin)
-    const derived = await derivePinPassword(staff.ims_email, pin, pepper)
-    const { data: signInData } = await authClient.auth.signInWithPassword({
+    const { data: signInData, error: signInErr } = await authClient.auth.signInWithPassword({
       email: staff.ims_email, password: derived,
     })
 
-    const succeeded = !!signInData?.session
+    const verdict = signInVerdict(signInData, signInErr)
 
-    if (!succeeded) {
+    // GoTrue never judged the PIN (S798, header point 3): give the attempt back and say the server
+    // could not be reached. On the PGRST202 fallback nothing was counted yet, so nothing to give back.
+    if (verdict.kind === 'unavailable') {
+      console.error('[ims-staff-login] sign-in got no answer about the PIN — giving the attempt back:', verdict.detail)
+      if (reserved) await releasePinAttempt(admin, 'ims', staff_id, reservationLockedUntil, 'ims-staff-login')
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
+
+    if (verdict.kind === 'refused') {
       let after: { locked?: boolean, locked_until?: string | null } | undefined
       if (reserved) {
         // Counted by the reservation already, so no second write here.
@@ -181,10 +207,12 @@ Deno.serve(async (req) => {
     if (resetErr) console.error(`[ims-staff-login] record_ims_pin_attempt(success) FAILED — the failed-attempt counter was not reset${reserved ? ' and this sign-in still counts as a failure' : ''}:`, resetErr.message)
 
     return json({
-      access_token: signInData.session.access_token,
-      refresh_token: signInData.session.refresh_token,
+      access_token: signInData.session!.access_token,
+      refresh_token: signInData.session!.refresh_token,
     })
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Unexpected error' }, 500)
+    // Fixed text (S798): the message is for the log, never for a caller holding only a device key.
+    console.error('[ims-staff-login] unexpected error:', err instanceof Error ? err.message : err)
+    return json({ error: ERR_UNAVAILABLE }, 500)
   }
 })

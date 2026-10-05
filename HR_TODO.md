@@ -677,9 +677,11 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 4. ✅ **4d Attendance, roster and leave** (done 2026-10-05, crest-v387; no migration): ATTENDANCE-8, -9, ROSTER-10, PAYROLL-8's Roster half
    (Copy Week and publish share ROSTER-10's handler), LEAVE-OT-HOLIDAYS-6, -7.
 5. ✅ **4e Crest Staff** (done 2026-10-05, crest-v388; migration `20261005120000` live): SELF-SERVICE-7, -8, DOCS-7.
-6. **4f PIN logins** (migration: `release_hr_pin_attempt`; deploys: hr-selfservice-login, pos-staff-login,
-   ims-staff-login): SELF-SERVICE-6. At planning, check whether the POS and IMS logins need release functions
-   of their own.
+6. ✅ **4f PIN logins** (done 2026-10-05, crest-v389; migration `20261005140000` live; hr-selfservice-login,
+   pos-staff-login and ims-staff-login deployed): SELF-SERVICE-6. The POS and IMS logins did need release
+   functions of their own (separate counter columns), so there are three.
+
+**Stage 4 complete (2026-10-05).**
 
 | ID | What to change | Status |
 | --- | --- | --- |
@@ -694,7 +696,7 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 | ROSTER-10 | Copy to Next Week skips zero-hour leave and holiday markers, or lists them with a tick. | ✅ S798 stage 4d (crest-v387), owner-approved both ways: `datedMarkerStatus` (from `rosterDayShape`'s branches). This week's leave and holiday markers are not copied, and next week's are neither replaced nor cleared; the dialog counts both. A Day Off copies. |
 | LEAVE-OT-HOLIDAYS-6 | `approveCore` re-reads `monthly_periods` for missing months before writing. | ✅ S798 stage 4d (crest-v387). `monthsWithoutPeriod` (`leaveRules.js`); `approveCore` re-reads `monthly_periods` before the snapshot, the write and the put-back, and a failed re-read approves nothing. |
 | LEAVE-OT-HOLIDAYS-7 | Leave settled leavers out of `findApprovedLeaveGaps`; `fillUnmarked` names them. | ✅ S798 stage 4d (crest-v387). `findApprovedLeaveGaps` takes `settlements` and `employees` and leaves settled leavers out by the back-fill's own test (waiting months too); `fillUnmarked` names `settled` days. |
-| SELF-SERVICE-6 | Derive the password before reserving; count only `invalid_credentials`; else release (new `release_hr_pin_attempt`) and 503; fixed catch-all text. Same in pos- and ims-staff-login. | 🔴 |
+| SELF-SERVICE-6 | Derive the password before reserving; count only `invalid_credentials`; else release (new `release_hr_pin_attempt`) and 503; fixed catch-all text. Same in pos- and ims-staff-login. | ✅ S798 stage 4f (crest-v389, migration `20261005140000`, three logins deployed). `signInVerdict` (`_shared/pinSignIn.ts`) counts `invalid_credentials` and `user_banned`; anything else goes through `release_hr/pos/ims_pin_attempt` (−1, lifts only its own lock) and a 503. Password derived before reserving; lookup errors 503; fixed catch-all. Live: one wrong PIN on RONISH counted 0 → 1, released back to 0. Stock Count keeps the PIN on "couldn't reach the server" (owner). |
 | SELF-SERVICE-7 | DROP/CREATE `get_my_hr_payslips` with `unpaid_days`, `retirement_contribution`; assert first; REVOKE PUBLIC, GRANT authenticated. | ✅ S798 stage 4e (crest-v388, migration `20261005120000`). Re-created from the live body with both columns appended; grants as before (authenticated, service_role). `PayslipBody` prints them unchanged. |
 | SELF-SERVICE-8 | `formatBsDay(day, r.bs_month)` on both sides of the swap list. | ✅ S798 stage 4e (crest-v388). |
 | DATABASE-4 | Drop `supervisor_id` from `ATTRIBUTION_EXTRA`; restore it in a second pass. | ✅ S798 stage 4c (crest-v386). `DEFERRED_LINKS`, one update per supervisor (`runChunkedByIds`). Same edit: the restore drops every `<column>_name` annotation, so a set asset custodian no longer fails assets_register (the latent IMS case DATABASE noted). |
@@ -725,7 +727,8 @@ once, when the login is made, and that Final Settlement blocks the login.
 
 **Migrations (split across 4e and 4f, see the slices above):** new service-role `release_hr_pin_attempt`
 (SELF-SERVICE-6, 4f); DROP/CREATE `get_my_hr_payslips` (SELF-SERVICE-7, 4e). **Apply live on "apply"; verify
-return columns and grants.**
+return columns and grants.** ✅ Both live: `20261005120000` (4e) and `20261005140000` (4f, with POS and IMS
+twins).
 **Edge Functions:** hr-selfservice-login, pos-staff-login, ims-staff-login.
 
 **Files:** `Help.js`, `hrGuideData.js`, `setupSteps.js`, `setupSignals.js`; `PayrollApprovalSheet.jsx`,

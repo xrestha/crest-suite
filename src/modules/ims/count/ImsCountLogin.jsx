@@ -135,7 +135,8 @@ export default function ImsCountLogin() {
       if (err || !data?.access_token) {
         // Only a 401/423 from the function is an answer about the PIN. A dropped connection or a
         // 5xx used to say "Incorrect PIN" too, and clearing the pad over a network fault teaches a
-        // counter their PIN is wrong (S756).
+        // counter their PIN is wrong (S756). The PIN is kept on that branch (S798, as PosLogin and
+        // SelfServiceLogin do): the attempt was not counted, so the counter just presses again.
         const status = err?.context?.status
         let body = null
         try { body = await err?.context?.json() } catch (_) { /* no body */ }
@@ -150,6 +151,7 @@ export default function ImsCountLogin() {
           setError('Incorrect PIN. Try again.')
         } else {
           setError("Couldn't reach the server, so your PIN was not checked. Check this device's connection and try again.")
+          return
         }
         setPin('')
         return
@@ -162,9 +164,8 @@ export default function ImsCountLogin() {
       navigate(IMS_COUNT_HOME, { replace: true })
     } catch (e) {
       // The staff audience: a counter can only escalate, and a raw fetch error is not a sentence
-      // they can act on.
+      // they can act on. The connection, not the PIN, so the PIN is kept (S798, as PosLogin).
       setError(errorText(e, 'staff'))
-      setPin('')
     } finally {
       setSigningIn(false)
     }

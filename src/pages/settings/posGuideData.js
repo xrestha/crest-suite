@@ -52,7 +52,7 @@ export const POS_GUIDE_GROUPS = [
           'The till entrance: a picker of this client\'s POS staff (photos/names), then a 4-6 digit PIN on a numpad. Sign-in completes server-side — the browser never holds the account\'s real email or password.',
         workflow: [
           'Tap your name, enter your PIN (keyboard works too). On success you land on Orders (the floor).',
-          'Locked out? Five failed attempts locks the PIN for a period — any POS Manager resets it from POS Staff, and the lockout message says exactly that.',
+          'Locked out? Five failed attempts locks the PIN for a period — any POS Manager resets it from POS Staff, and the lockout message says exactly that. Only a wrong PIN counts (S798): a sign-in the server could not complete is given back and the till says it could not reach the server, keeping the PIN.',
         ],
         fields: [
           { label: 'PIN', desc: 'Never the account\'s real password: the server verifies a peppered fingerprint of it inside the login call, and lockout checks run in the same request — so they cannot be skipped from the browser, and failures are never double-counted.' },

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { derivePinPassword, getAppSecrets } from '../_shared/pinPassword.ts'
+import { releasePinAttempt, signInVerdict } from '../_shared/pinSignIn.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -66,6 +67,15 @@ const ERR_UNAVAILABLE = 'Sign-in is unavailable right now. Try again in a minute
 // whenever the database hiccups is the same gap again. The one exception is PGRST202 (the function
 // is not in the schema cache, i.e. this deployed ahead of the migration), which falls back to the
 // old check-then-record path, so a deploy-order slip does not lock every employee out.
+//
+// ── Only an answer about the PIN stays counted (S798, SELF-SERVICE-6) ────────────────────────────
+// The sign-in error used to be dropped, so a 429 or 5xx from GoTrue, or an unreadable pepper after
+// the reservation, stayed counted as a wrong PIN and said "Incorrect PIN": five of them locked out
+// an employee typing the correct one. Now the password is derived BEFORE the reservation (no pepper
+// → 503, nothing counted), and _shared/pinSignIn.ts's signInVerdict keeps the attempt counted only
+// for invalid_credentials / user_banned. Anything else gives it back (release_hr_pin_attempt,
+// migration 20261005140000) and answers 503, which SelfServiceLogin reads as "couldn't reach the
+// server". A failed lookup is a 503 too, and the catch-all sends fixed text, never err.message.
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -108,7 +118,13 @@ Deno.serve(async (req) => {
     // distinguish these paths via response shape/timing either). Deliberately does NOT count an
     // attempt for any of these — they return before the reservation below: there is no account to
     // lock, and counting would let anyone lock an arbitrary uuid's counter.
-    if (profileErr || !profile?.hr_self_service_email) {
+    // A failed read is not a wrong PIN (S798): it is a 503, which the phone reads as "couldn't reach
+    // the server" and keeps the PIN.
+    if (profileErr) {
+      console.error('[hr-selfservice-login] profile lookup FAILED — refusing the sign-in:', profileErr.code, profileErr.message)
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
+    if (!profile?.hr_self_service_email) {
       return json({ error: 'Invalid credentials' }, 401)
     }
     // `!profile.hr_employees` refuses a login whose employee record is gone. profiles.hr_employee_id
@@ -117,6 +133,25 @@ Deno.serve(async (req) => {
     // with nobody behind it. A login is only as valid as the employee it belongs to.
     if (!profile.hr_employees || profile.hr_employees.access_blocked) {
       return json({ error: 'Invalid credentials' }, 401)
+    }
+
+    // The PIN is no longer the stored password — see _shared/pinPassword.ts. This matters more
+    // here than anywhere else in the app: the header above notes that Supabase's own rate limits
+    // can't help because attempts arrive from this function's egress IP, and that the lockout was
+    // therefore the only control. But the lockout only ever governed THIS path — a caller could
+    // always skip it by pointing signInWithPassword straight at GoTrue, needing just an email and
+    // 10,000 guesses. With a peppered derivation that route stops working entirely, because the
+    // password can no longer be computed from the PIN off-server.
+    //
+    // Derived BEFORE the reservation (S798): an unreadable pepper is the server's fault, so it must
+    // not cost the employee an attempt.
+    let derived: string
+    try {
+      const { pepper } = await getAppSecrets(admin)
+      derived = await derivePinPassword(profile.hr_self_service_email, pin, pepper)
+    } catch (e) {
+      console.error('[hr-selfservice-login] could not derive the PIN password — refusing the sign-in, nothing counted:', e instanceof Error ? e.message : e)
+      return json({ error: ERR_UNAVAILABLE }, 503)
     }
 
     // Reserve the attempt BEFORE signing in (S791, header). A locked account is refused here without
@@ -156,16 +191,7 @@ Deno.serve(async (req) => {
     // argument never has to travel to the client first.
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
 
-    // The PIN is no longer the stored password — see _shared/pinPassword.ts. This matters more
-    // here than anywhere else in the app: the header above notes that Supabase's own rate limits
-    // can't help because attempts arrive from this function's egress IP, and that the lockout was
-    // therefore the only control. But the lockout only ever governed THIS path — a caller could
-    // always skip it by pointing signInWithPassword straight at GoTrue, needing just an email and
-    // 10,000 guesses. With a peppered derivation that route stops working entirely, because the
-    // password can no longer be computed from the PIN off-server.
-    const { pepper } = await getAppSecrets(admin)
-    const derived = await derivePinPassword(profile.hr_self_service_email, pin, pepper)
-    const { data: signInData } = await authClient.auth.signInWithPassword({
+    const { data: signInData, error: signInErr } = await authClient.auth.signInWithPassword({
       email: profile.hr_self_service_email, password: derived,
     })
     // The raw-PIN legacy fallback (lazy password upgrade + vault backfill) that used to live here
@@ -173,9 +199,17 @@ Deno.serve(async (req) => {
     // a raw-PIN password — every remaining account signs in with the derived value only, so the
     // direct-brute-force route this file's header describes is now closed for every account.
 
-    const succeeded = !!signInData?.session
+    const verdict = signInVerdict(signInData, signInErr)
 
-    if (!succeeded) {
+    // GoTrue never judged the PIN (S798, header): give the attempt back and say the server could not
+    // be reached. On the PGRST202 fallback nothing was counted yet, so there is nothing to give back.
+    if (verdict.kind === 'unavailable') {
+      console.error('[hr-selfservice-login] sign-in got no answer about the PIN — giving the attempt back:', verdict.detail)
+      if (reserved) await releasePinAttempt(admin, 'hr', staff_id, reservationLockedUntil, 'hr-selfservice-login')
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
+
+    if (verdict.kind === 'refused') {
       let after: { locked?: boolean, locked_until?: string | null } | undefined
       if (reserved) {
         // Counted by the reservation already, so no second write here.
@@ -202,10 +236,12 @@ Deno.serve(async (req) => {
     if (resetErr) console.error(`[hr-selfservice-login] record_hr_pin_attempt(success) FAILED — the failed-attempt counter was not reset${reserved ? ' and this sign-in still counts as a failure' : ''}:`, resetErr.message)
 
     return json({
-      access_token: signInData.session.access_token,
-      refresh_token: signInData.session.refresh_token,
+      access_token: signInData.session!.access_token,
+      refresh_token: signInData.session!.refresh_token,
     })
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Unexpected error' }, 500)
+    // Fixed text (S798): the message is for the log, never for an anonymous caller.
+    console.error('[hr-selfservice-login] unexpected error:', err instanceof Error ? err.message : err)
+    return json({ error: ERR_UNAVAILABLE }, 500)
   }
 })

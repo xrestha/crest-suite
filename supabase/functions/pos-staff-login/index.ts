@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { derivePinPassword, getAppSecrets } from '../_shared/pinPassword.ts'
+import { releasePinAttempt, signInVerdict } from '../_shared/pinSignIn.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -58,7 +59,15 @@ const CORS = {
 // resets through record_pos_pin_attempt(true); a wrong one needs no second write. The reservation
 // FAILS CLOSED with a 503, like the device gate, except on PGRST202 (deployed ahead of the
 // migration), which falls back to the old check-then-record path so tills keep working.
-const ERR_DEVICE = 'This device is not activated'
+//
+// ONLY AN ANSWER ABOUT THE PIN STAYS COUNTED (S798, SELF-SERVICE-6). The sign-in error used to be
+// dropped, so a 429 or 5xx from GoTrue at a busy shift change stayed counted as a wrong PIN and said
+// "Incorrect PIN"; five locked out a waiter typing the correct one. The password is now derived
+// before the reservation (no pepper → 503, nothing counted), and _shared/pinSignIn.ts's
+// signInVerdict keeps the attempt counted only for invalid_credentials / user_banned. Anything else
+// gives it back (release_pos_pin_attempt, migration 20261005140000) and answers 503. A failed staff
+// lookup is a 503 too, and the catch-all sends fixed text, never err.message.
+const ERR_DEVICE ='This device is not activated'
 const ERR_UNAVAILABLE = 'Sign-in is unavailable right now. Try again in a minute.'
 
 Deno.serve(async (req) => {
@@ -128,7 +137,7 @@ Deno.serve(async (req) => {
     // Same filter as get_pos_staff — a real PIN account (pos_role AND pos_email both set) that
     // belongs to THIS device's client, so a valid device secret for one client can't be pointed at
     // another client's staff_id.
-    const { data: staff } = await admin
+    const { data: staff, error: staffErr } = await admin
       .from('profiles').select('pos_email')
       .eq('id', staff_id).eq('client_id', client_id)
       .not('pos_role', 'is', null).not('pos_email', 'is', null)
@@ -137,7 +146,30 @@ Deno.serve(async (req) => {
     // Generic message shared with the wrong-PIN path below, and deliberately no counted attempt (this
     // returns before the reservation): there is no account to lock, and counting one would let
     // anyone drive an arbitrary uuid's counter.
+    // A failed read is not a wrong PIN (S798, as ims-staff-login since S792): PosLogin reads the 503
+    // as "couldn't reach the server" and keeps the PIN.
+    if (staffErr) {
+      console.error('[pos-staff-login] staff lookup FAILED — refusing the sign-in:', staffErr.code, staffErr.message)
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
     if (!staff?.pos_email) return json({ error: 'Invalid credentials' }, 401)
+
+    // The PIN is no longer the password — the stored value is HMAC(PIN_PEPPER, email + ':' + pin).
+    // That is what finally closes the hole described in point 1 of this file's header: an attacker
+    // who has the email and guesses the right PIN still cannot construct the string GoTrue expects,
+    // so hammering /token directly with the anon key is no longer a route to a session at all.
+    // Every path to a POS session now runs through this function, where the lockout is enforced.
+    //
+    // Derived BEFORE the reservation (S798): an unreadable pepper is the server's fault, so it must
+    // not cost the waiter an attempt.
+    let derived: string
+    try {
+      const { pepper } = await getAppSecrets(admin)
+      derived = await derivePinPassword(staff.pos_email, pin, pepper)
+    } catch (e) {
+      console.error('[pos-staff-login] could not derive the PIN password — refusing the sign-in, nothing counted:', e instanceof Error ? e.message : e)
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
 
     // Reserve the attempt BEFORE signing in (S791, header). A locked account is refused here without
     // burning a real auth attempt, as the old check did.
@@ -173,14 +205,7 @@ Deno.serve(async (req) => {
 
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
 
-    // The PIN is no longer the password — the stored value is HMAC(PIN_PEPPER, email + ':' + pin).
-    // That is what finally closes the hole described in point 1 of this file's header: an attacker
-    // who has the email and guesses the right PIN still cannot construct the string GoTrue expects,
-    // so hammering /token directly with the anon key is no longer a route to a session at all.
-    // Every path to a POS session now runs through this function, where the lockout is enforced.
-    const { pepper } = await getAppSecrets(admin)
-    const derived = await derivePinPassword(staff.pos_email, pin, pepper)
-    const { data: signInData } = await authClient.auth.signInWithPassword({
+    const { data: signInData, error: signInErr } = await authClient.auth.signInWithPassword({
       email: staff.pos_email, password: derived,
     })
     // The raw-PIN legacy fallback (lazy password upgrade + vault backfill) that used to live here
@@ -188,9 +213,17 @@ Deno.serve(async (req) => {
     // a raw-PIN password — every remaining account signs in with the derived value only, so the
     // direct-brute-force window that fallback documented is now fully closed.
 
-    const succeeded = !!signInData?.session
+    const verdict = signInVerdict(signInData, signInErr)
 
-    if (!succeeded) {
+    // GoTrue never judged the PIN (S798, header): give the attempt back and say the server could not
+    // be reached. On the PGRST202 fallback nothing was counted yet, so there is nothing to give back.
+    if (verdict.kind === 'unavailable') {
+      console.error('[pos-staff-login] sign-in got no answer about the PIN — giving the attempt back:', verdict.detail)
+      if (reserved) await releasePinAttempt(admin, 'pos', staff_id, reservationLockedUntil, 'pos-staff-login')
+      return json({ error: ERR_UNAVAILABLE }, 503)
+    }
+
+    if (verdict.kind === 'refused') {
       let after: { locked?: boolean, locked_until?: string | null } | undefined
       if (reserved) {
         // Counted by the reservation already, so no second write here.
@@ -217,10 +250,12 @@ Deno.serve(async (req) => {
     if (resetErr) console.error(`[pos-staff-login] record_pos_pin_attempt(success) FAILED — the failed-attempt counter was not reset${reserved ? ' and this sign-in still counts as a failure' : ''}:`, resetErr.message)
 
     return json({
-      access_token: signInData.session.access_token,
-      refresh_token: signInData.session.refresh_token,
+      access_token: signInData.session!.access_token,
+      refresh_token: signInData.session!.refresh_token,
     })
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Unexpected error' }, 500)
+    // Fixed text (S798): the message is for the log, never for a caller holding only a device key.
+    console.error('[pos-staff-login] unexpected error:', err instanceof Error ? err.message : err)
+    return json({ error: ERR_UNAVAILABLE }, 500)
   }
 })
