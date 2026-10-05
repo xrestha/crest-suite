@@ -100,3 +100,18 @@ test('a failed read of the month’s settlements prints "could not be read", nev
   expect(tax).toHaveTextContent('use HR Reports → TDS Report')
   expect(tax).not.toHaveTextContent('808')
 })
+
+// S798 PAYROLL-7: the register and the payslip print net pay and the advance cut to the paisa (S791),
+// and the sheet the Owner signs used to round them, so the signed total could differ from the register's.
+test('net pay and the advance cut print to the paisa, as the register does', () => {
+  const withPaisa = payslips.map(s => (s.id === 's2' ? { ...s, advance_deduction: 2499.5, net_pay: 17501.5 } : s))
+  const { container } = renderSheet({ payslips: withPaisa })
+  const row = [...container.querySelectorAll('tbody tr')].find(tr => tr.textContent.includes('SARITA BISHWOKARMA'))
+  expect(row).toHaveTextContent('−2,499.50')
+  expect(row.lastChild).toHaveTextContent('17,501.50')
+  expect(container.querySelector('tfoot tr').lastChild).toHaveTextContent('74,161.50')
+  expect(screen.getByText(/I have checked the Bhadra 2083 payroll above/)).toHaveTextContent('total net pay NPR 74,161.50')
+  expect(screen.getByText('Net pay to staff').parentElement.parentElement).toHaveTextContent('NPR 74,161.50')
+  // Whole-rupee figures are unchanged.
+  expect(row).toHaveTextContent('20,000')
+})

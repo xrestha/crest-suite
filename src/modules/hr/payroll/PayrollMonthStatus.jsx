@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { fetchPayrollEmployees, periodAdBounds } from './payrollData'
 import { attendanceGaps, pickStatusPeriod, ssfDeadline } from './monthStatus'
@@ -164,7 +164,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       : pd.over > 0 ? { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.over} paid more than their payslip — check Payroll`, link: payrollLink }
       : pd.owed === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: 'Nothing to pay' }
       : due === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: `All ${pd.owed} marked paid` }
-      : { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.paid} of ${pd.owed} marked paid — NPR ${nprInt(pd.dueTotal)} still to pay`, link: payrollLink })
+      : { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.paid} of ${pd.owed} marked paid — NPR ${nprPaisa(pd.dueTotal)} still to pay`, link: payrollLink })
 
     const s = state.ssf
     steps.push(r.status !== 'finalized' ? { name: 'SSF deposit', tone: 'none', mark: '—', text: `After Finalize — due by ${dueLabel}` }

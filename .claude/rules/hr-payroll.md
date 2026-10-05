@@ -210,6 +210,9 @@ History: #s570-stale-draft-and-fetch-helpers, #s600-leaver-proration-and-departe
 - **A check that could not run has not passed** (S613). A gate that reads data to decide (a refusal
   check, a freshness check, Reopen's read of its own tagged rows) refuses on a failed read and names
   the failure, and aborts before it touches anything.
+- **Every await Payroll Run and its payment dialogs block on is bounded** (S798 PAYROLL-8,
+  `settleWithin`). A timed-out read is a failed read; a timed-out WRITE says it could not confirm and
+  reloads, never "nothing has changed". A retry is safe because the database refuses the second one.
 
 Why: a browser sequence of writes can stop half-way, and a page check is skipped by any caller that
 goes straight to REST.
@@ -228,6 +231,8 @@ History: #s613-finalize-gates, #s620-reopen-rank, #s682-finalize-and-reopen-poin
   operator exempt for restore. The amount is never a parameter: Mark paid records net pay less active
   payments, and refuses someone already paid rather than skipping them. Undo is a void with a
   required reason, never a delete.
+- **Net pay, payments and what is still owed print through `nprPaisa()`** wherever they appear (S798
+  PAYROLL-7): the approval sheet, the dialogs, the Paid column, the strip, Bank Transfer.
 - **A failed payments read is its own state** ("not checked", Mark paid hidden), never "not paid",
   and it does not take the register down. The Staff app swallows its read and shows nothing.
 - **The Bank Transfer sheet carries only what is still owed** (`bankTransferPlan`, S798 3e, H1 (a)),

@@ -26,7 +26,7 @@ import PayrollMonthStatus from './PayrollMonthStatus'
 import { fetchRunPayments, runPaymentSummary, methodLabel } from './salaryPayments'
 import { MarkPaidDialog, UndoPaymentDialog } from './SalaryPaymentDialogs'
 import { printWithTitle } from '../../../utils/printTitle'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { fetchMonthDepositExtras } from './monthDeposit'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -35,6 +35,17 @@ import { useIsOwnEmployee } from '../ownRecord'
 import { groupOwnChanges } from './ownAttendanceChanges'
 
 const fmt = nprInt
+// Every await this page blocks on is bounded (S798 PAYROLL-8): a request that never answers used to
+// leave "Loading…" up, or every button disabled behind `busy`, until a reload. A load reads several
+// tables in stages, so it gets longer than one write. A WRITE that times out may still have landed,
+// so its message says it could not confirm and the page reloads to show what is stored — never
+// "nothing has changed". Retrying after the reload is safe: the database refuses a second finalize
+// (payroll_status_direct), a second payment (record_salary_payments) and a second run for the month.
+const LOAD_MS = 30000
+const WRITE_MS = 20000
+// A read before any write that did not answer. errorLine's timeout wording is for a write ("not known
+// whether this went through"), which contradicts the "nothing has changed" in front of it here.
+const readFailLine = err => (isTimeout(err) ? 'The server took too long to answer — check your connection and try again.' : errorLine(err))
 const num = v => parseFloat(v) || 0
 // The register's amber flag chip ("SSF no. missing", "No pay set"): one shape, so the two cannot drift.
 const AMBER_FLAG = { fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }
@@ -237,8 +248,8 @@ export default function PayrollRun() {
       setPayments([]); setPaymentsError(null); setMarkPaid(null); setUndoPay(null)
       setPeriods([]); setPeriod(null); setEmployees([]); setSettled([]); setExtraEmps([]); setConfirmAction(null)
       setUnended([]); setPaidLastMonth([])
-      const { data: p, error: pErr } = await scopedFrom('monthly_periods')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      const { data: p, error: pErr } = await settleWithin(scopedFrom('monthly_periods')
+        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), LOAD_MS, 'Loading payroll months')
       if (!periodReq.isCurrent(claim)) return
       if (pErr) { setPeriods([]); setPeriod(null); setLoadError(pErr); setLoading(false); return }
       setPeriods(p || [])
@@ -297,7 +308,8 @@ export default function PayrollRun() {
     }
   }
 
-  async function loadAll(p) {
+  // Everything the page shows for one month, as one { data, error }. loadAll bounds it.
+  async function readAll(p) {
     const [inputs, runRes] = await Promise.all([
       readInputs(p),
       scopedFrom('hr_payroll_runs').eq('period_id', p.id).maybeSingle(),
@@ -327,18 +339,26 @@ export default function PayrollRun() {
         else extra = names.data || []
       }
     }
+    if (error) return { data: null, error }
+    return { data: { inputs: inputs.data, runRow, slips, extra, pays, payErr }, error: null }
+  }
+
+  async function loadAll(p) {
+    // A timeout is a failed read like any other (S798 PAYROLL-8): the load-error card, not a page
+    // stuck on "Loading…" or behind a busy flag that never clears.
+    const res = await settleWithin(readAll(p), LOAD_MS, 'Loading payroll')
     if (!periodReq.isCurrent(p.id)) return   // superseded by a newer period selection
     // A failed read is not an empty month, and a failed PAYSLIP read under a saved run is not a run
     // with no payslips: either used to render as one — an empty register, a "No active employees"
     // card, or a stale-draft comparison run against nothing. All of it is refused as a whole.
-    if (error) {
-      setLoadError(error)
+    if (res.error) {
+      setLoadError(res.error)
       setRun(null); setPayslips([]); setEmployees([]); setSettled([]); setExtraEmps([])
       setUnended([]); setPaidLastMonth([])
       setPayments([]); setPaymentsError(null)
       return
     }
-    const d = inputs.data
+    const { inputs: d, runRow, slips, extra, pays, payErr } = res.data
     setLoadError(null)
     setEmployees(d.employees); setSettled(d.settled); setExtraEmps(extra)
     setUnended(d.unended); setPaidLastMonth(d.paidLastMonth)
@@ -405,8 +425,8 @@ export default function PayrollRun() {
     setBusy(true); setMsg('')
     // Read for this write, and checked BEFORE anything is written: these inputs decide every payslip
     // it inserts, and a failed YTD read persists under-withheld tax that nothing later recomputes.
-    const inputs = await readInputs(p)
-    if (inputs.error) { setMsg('error:The payroll run was not created — nothing has changed. The data it is built from could not be read. ' + errorLine(inputs.error)); setBusy(false); return }
+    const inputs = await settleWithin(readInputs(p), LOAD_MS, 'Reading payroll data')
+    if (inputs.error) { setMsg('error:The payroll run was not created — nothing has changed. The data it is built from could not be read. ' + readFailLine(inputs.error)); setBusy(false); return }
     if (inputs.data.employees.length === 0) {
       await loadAll(p)
       setMsg('error:The payroll run was not created — nobody is on the payroll for this month.'); setBusy(false); return
@@ -415,7 +435,12 @@ export default function PayrollRun() {
     try { rows = buildPayrollRows({ runId: null, period: p, ...inputs.data }) } catch (e) {
       setMsg('error:The payroll run was not created — the payslips could not be calculated. ' + errorLine(e)); setBusy(false); return
     }
-    const { data: runRow, error: rErr } = await scopedInsert('hr_payroll_runs', { period_id: p.id, status: 'draft' }, { single: true })
+    const { data: runRow, error: rErr } = await settleWithin(scopedInsert('hr_payroll_runs', { period_id: p.id, status: 'draft' }, { single: true }), WRITE_MS, 'Creating the payroll run')
+    if (isTimeout(rErr)) {
+      await loadAll(p)
+      setMsg('error:Could not confirm whether the payroll run was created — the server did not answer in time. The page has been reloaded to show what is stored: if the run is there with no payslips, press Regenerate to build them; if Generate Payroll is still offered, press it again.')
+      setBusy(false); return
+    }
     if (rErr) {
       // (client_id, period_id) is unique: another tab or another manager created this month's run
       // between this page loading and this click. Show that run — "nothing has changed" was false,
@@ -427,7 +452,12 @@ export default function PayrollRun() {
       }
       setMsg('error:The payroll run was not created — nothing has changed. ' + errorLine(rErr)); setBusy(false); return
     }
-    const { error: pErr } = await scopedInsert('hr_payslips', rows.map(r => ({ ...r.payslip, run_id: runRow.id })))
+    const { error: pErr } = await settleWithin(scopedInsert('hr_payslips', rows.map(r => ({ ...r.payslip, run_id: runRow.id }))), WRITE_MS, 'Saving the payslips')
+    if (isTimeout(pErr)) {
+      await loadAll(p)
+      setMsg('error:The run was created, but whether its payslips were saved could not be confirmed — the server did not answer in time. The page has been reloaded to show what is stored: if the run has no payslips, press Regenerate to build them.')
+      setBusy(false); return
+    }
     if (pErr) {
       // The run row is committed at this point; it has no payslips, which blocks Finalize until
       // Regenerate builds them.
@@ -447,8 +477,8 @@ export default function PayrollRun() {
     setBusy(true); setMsg('')
     // Read before the DELETE below, not after: a failed read reached after the delete would leave the
     // run rebuilt on empty YTD — or, if the insert then also failed, emptied outright.
-    const inputs = await readInputs(p)
-    if (inputs.error) { setMsg('error:The run was not recomputed — its payslips are unchanged. The data it is rebuilt from could not be read. ' + errorLine(inputs.error)); setBusy(false); return }
+    const inputs = await settleWithin(readInputs(p), LOAD_MS, 'Reading payroll data')
+    if (inputs.error) { setMsg('error:The run was not recomputed — its payslips are unchanged. The data it is rebuilt from could not be read. ' + readFailLine(inputs.error)); setBusy(false); return }
     let rows
     try { rows = buildPayrollRows({ runId, period: p, ...inputs.data }) } catch (e) {
       setMsg('error:The run was not recomputed — its payslips are unchanged. The payslips could not be calculated. ' + errorLine(e)); setBusy(false); return
@@ -456,11 +486,11 @@ export default function PayrollRun() {
     // S798 3a (H3): the run's status is read again right before the delete. A run finalized in another
     // tab since this page loaded is left alone and the page reloads; the database refuses the delete
     // as well (hr_run_finalized), for the Crest operator too since S798 3a.
-    const { data: fresh, error: statusErr } = await scopedFrom('hr_payroll_runs', 'status').eq('id', runId).maybeSingle()
+    const { data: fresh, error: statusErr } = await settleWithin(scopedFrom('hr_payroll_runs', 'status').eq('id', runId).maybeSingle(), WRITE_MS, 'Checking the run')
     if (statusErr || !fresh || fresh.status !== 'draft') {
       await loadAll(p)
       setMsg('error:The run was not recomputed — its payslips are unchanged. ' + (statusErr
-        ? 'Could not check that it is still a draft. ' + errorLine(statusErr)
+        ? 'Could not check that it is still a draft. ' + readFailLine(statusErr)
         : fresh ? 'It was finalized somewhere else after this page loaded; the page has been reloaded to show it.'
           : 'It no longer exists — it may have been deleted in another tab.'))
       setBusy(false); return
@@ -468,13 +498,20 @@ export default function PayrollRun() {
     // Delete-then-insert: once the delete has landed the run has NO payslips until the insert does,
     // so each half names the state it leaves behind (S682). A run finalized in another tab is refused
     // by the database (hr_run_finalized) — reload, so this tab stops offering a draft's buttons on it.
-    const { error: delErr } = await scopedDelete('hr_payslips').eq('run_id', runId)
+    const { error: delErr } = await settleWithin(scopedDelete('hr_payslips').eq('run_id', runId), WRITE_MS, 'Clearing the old payslips')
+    if (isTimeout(delErr)) {
+      await loadAll(p)
+      setMsg('error:Could not confirm whether the old payslips were cleared — the server did not answer in time. The page has been reloaded to show what is stored: if the run has no payslips, press Regenerate again.')
+      setBusy(false); return
+    }
     if (delErr) { await loadAll(p); setMsg('error:The run was not recomputed — its payslips are unchanged. ' + errorLine(delErr)); setBusy(false); return }
     if (rows.length > 0) {
-      const { error } = await scopedInsert('hr_payslips', rows.map(r => r.payslip))
+      const { error } = await settleWithin(scopedInsert('hr_payslips', rows.map(r => r.payslip)), WRITE_MS, 'Saving the payslips')
       if (error) {
         await loadAll(p)
-        setMsg(isRunFinalizedError(error)
+        setMsg(isTimeout(error)
+          ? 'error:The old payslips were cleared, but whether the new ones were saved could not be confirmed — the server did not answer in time. The page has been reloaded to show what is stored: if the run has no payslips, press Regenerate again.'
+          : isRunFinalizedError(error)
           ? 'error:The run was finalized somewhere else while this was recomputing, so its payslips were not rebuilt. The page has been reloaded to show it. ' + errorLine(error)
           : 'error:The run\'s payslips were cleared but could not be rebuilt — press Regenerate again now. ' + errorLine(error))
         setBusy(false); return
@@ -512,10 +549,11 @@ export default function PayrollRun() {
     setBusy(true); setMsg('')
     // Re-checked, because deleting a run cascades to its payslips: a run another tab has just generated
     // payslips into must not be deleted from a screen that showed it empty.
-    const { count, error: countErr } = await scopedFrom('hr_payslips', 'id', { count: 'exact', head: true }).eq('run_id', runId)
-    if (countErr || count == null) { await loadAll(p); setMsg('error:The run was not deleted — could not confirm it still has no payslips. ' + errorLine(countErr)); setBusy(false); return }
+    const { count, error: countErr } = await settleWithin(scopedFrom('hr_payslips', 'id', { count: 'exact', head: true }).eq('run_id', runId), WRITE_MS, 'Checking the run')
+    if (countErr || count == null) { await loadAll(p); setMsg('error:The run was not deleted — could not confirm it still has no payslips. ' + readFailLine(countErr)); setBusy(false); return }
     if (count > 0) { await loadAll(p); setMsg(`error:The run was not deleted — it has ${count} payslip${count === 1 ? '' : 's'} now (generated in another tab). The page has been reloaded.`); setBusy(false); return }
-    const { data, error } = await scopedDelete('hr_payroll_runs').eq('id', runId).eq('status', 'draft').select('id')
+    const { data, error } = await settleWithin(scopedDelete('hr_payroll_runs').eq('id', runId).eq('status', 'draft').select('id'), WRITE_MS, 'Deleting the run')
+    if (isTimeout(error)) { await loadAll(p); setMsg('error:Could not confirm whether the empty run was deleted — the server did not answer in time. The page has been reloaded to show what is stored.'); setBusy(false); return }
     if (error) { await loadAll(p); setMsg('error:The run was not deleted. ' + errorLine(error)); setBusy(false); return }
     if (!data || data.length === 0) { await loadAll(p); setMsg('error:The run was not deleted — it is no longer a draft (finalized in another tab), or this account may not delete payroll runs. The page has been reloaded.'); setBusy(false); return }
     await loadAll(p)
@@ -538,7 +576,12 @@ export default function PayrollRun() {
     const p = period
     setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tds, tds_overridden: overridden, net_pay: net } : s))
     // .select('id'): a write RLS refuses is 0 rows with no error, which used to read as saved.
-    const { data, error } = await scopedUpdate('hr_payslips', { tds, tds_overridden: overridden, net_pay: net }).eq('id', slip.id).select('id')
+    const { data, error } = await settleWithin(scopedUpdate('hr_payslips', { tds, tds_overridden: overridden, net_pay: net }).eq('id', slip.id).select('id'), WRITE_MS, 'Saving the income tax')
+    if (isTimeout(error)) {
+      await loadAll(p)
+      setMsg(`error:Could not confirm whether income tax for ${who} was saved — the server did not answer in time. The register has been reloaded and shows what is stored.`)
+      return
+    }
     if (error || !data || data.length === 0) {
       await loadAll(p)
       setMsg(`error:Income tax for ${who} was not saved — the register shows what is stored. `
@@ -624,13 +667,14 @@ export default function PayrollRun() {
     // Re-read EVERYTHING before the first write (S751). This used to finalize from data loaded when
     // the page opened: overtime approved, a claim approved or an employee settled in the meantime was
     // simply locked in wrong, and the freshness gate it relied on was computed from the same old copy.
-    const [inputs, runRes, slipRes] = await Promise.all([
+    const reread = await settleWithin(Promise.all([
       readInputs(p),
       scopedFrom('hr_payroll_runs', 'id, status').eq('id', runId).maybeSingle(),
       scopedFrom('hr_payslips').eq('run_id', runId),
-    ])
-    const readErr = inputs.error || runRes.error || slipRes.error
-    if (readErr) { await stop('Payroll was NOT finalized — nothing has changed. The latest salary, attendance, overtime, advance and TADA data could not be re-read, and a check that could not run has not passed. ' + errorText(readErr, 'operator')); return }
+    ]).then(data => ({ data, error: null })), LOAD_MS, 'Re-reading payroll data')
+    const [inputs, runRes, slipRes] = reread.data || [{}, {}, {}]
+    const readErr = reread.error || inputs.error || runRes.error || slipRes.error
+    if (readErr) { await stop('Payroll was NOT finalized — nothing has changed. The latest salary, attendance, overtime, advance and TADA data could not be re-read, and a check that could not run has not passed. ' + (isTimeout(readErr) ? readFailLine(readErr) : errorText(readErr, 'operator'))); return }
     if (!runRes.data) { await stop('Payroll was NOT finalized — this run no longer exists. The page has been reloaded.'); return }
     if (runRes.data.status !== 'draft') { await stop('Nothing was changed by this click — this run is already finalized, most likely in another tab. The page has been reloaded to show it.'); return }
 
@@ -673,14 +717,15 @@ export default function PayrollRun() {
     // refuses unless the stored payslips are exactly the ids checked above, re-checks the repayments
     // add up to each payslip's advance cut, and writes every ledger or none. The advance allocation
     // stays here: the JS engine owns that arithmetic, and the function validates it.
-    const { data: result, error: finErr } = await supabase.rpc('finalize_payroll_run', {
+    const { data: result, error: finErr } = await settleWithin(supabase.rpc('finalize_payroll_run', {
       p_run_id: runId,
       p_payslip_ids: slips.map(s => s.id),
       p_repayments: repayRows.map(r => ({
         advance_id: r.advance_id, employee_id: r.employee_id, amount: r.amount,
         repaid_date: r.repaid_date, notes: r.notes,
       })),
-    })
+    }), WRITE_MS, 'Finalizing payroll')
+    if (isTimeout(finErr)) { await stop('Could not confirm whether payroll was finalized — the server did not answer in time. The page has been reloaded to show what is stored: if the run shows Finalized, it went through; if it is still a draft, press Finalize again (a run cannot be finalized twice).'); return }
     if (finErr) { await stop('Payroll was NOT finalized — nothing has changed. ' + errorText(finErr, 'operator')); return }
 
     await loadAll(p)
@@ -699,7 +744,7 @@ export default function PayrollRun() {
     if (wo.length > 0) {
       const { advance: a, recoveredHere } = wo[0]
       const more = wo.length > 1 ? ` (and ${wo.length - 1} more)` : ''
-      setMsg(`error:This payroll cannot be reopened yet. ${nameOf(a.employee_id)}'s ${a.type === 'loan' ? 'loan' : 'advance'} of NPR ${fmt(a.amount)}${more} was written off after this payroll recovered NPR ${nprPaisa(recoveredHere)} from it, and reopening would take that back and change what was written off. Put it back into recovery first (Advances & Loans → Reactivate), then reopen.`)
+      setMsg(`error:This payroll cannot be reopened yet. ${nameOf(a.employee_id)}'s ${a.type === 'loan' ? 'loan' : 'advance'} of NPR ${nprPaisa(a.amount)}${more} was written off after this payroll recovered NPR ${nprPaisa(recoveredHere)} from it, and reopening would take that back and change what was written off. Put it back into recovery first (Advances & Loans → Reactivate), then reopen.`)
       return
     }
     setMsg('')
@@ -717,8 +762,9 @@ export default function PayrollRun() {
     // status trigger reactivates anything that owes again), the TADA claims IT marked Paid go back to
     // Approved, and the run returns to draft — all or nothing, under the payroll lock. It used to be
     // five browser writes, each able to stop half-way with its own recovery message.
-    const { data: result, error: reErr } = await supabase.rpc('reopen_payroll_run', { p_run_id: runId })
+    const { data: result, error: reErr } = await settleWithin(supabase.rpc('reopen_payroll_run', { p_run_id: runId }), WRITE_MS, 'Reopening payroll')
     await loadAll(p)
+    if (isTimeout(reErr)) { setMsg('error:Could not confirm whether the run was reopened — the server did not answer in time. The page has been reloaded to show what is stored: if the run shows Draft, it went through; if it still shows Finalized, press Reopen again.'); setBusy(false); return }
     if (reErr) { setMsg('error:Nothing was changed — the run was not reopened. ' + errorText(reErr, 'operator')); setBusy(false); return }
     const notes = []
     if ((result?.tada_claims || 0) > (result?.tada_reverted || 0)) {
@@ -772,6 +818,14 @@ export default function PayrollRun() {
     setMsg('ok:' + text)
   }
 
+  // A payment dialog whose request timed out (S798 PAYROLL-8). It may have landed, so the dialog is
+  // closed and the payments reloaded rather than reporting a failure that may not be one.
+  async function afterPaymentUnsure(what) {
+    setMarkPaid(null); setUndoPay(null)
+    if (period) await loadAll(period)
+    setMsg(`error:Could not confirm whether ${what} — the server did not answer in time. The page has been reloaded, so the Paid column shows what is recorded; check it before trying again.`)
+  }
+
   // The Paid cell. A mark and words for every state, never colour alone; amber only where someone
   // must act (a difference still owed, or an overpayment after a Reopen).
   function renderPaidCell(s, emp) {
@@ -786,7 +840,7 @@ export default function PayrollRun() {
     if (!st || st.state === 'none') return <span style={{ color: 'var(--theme-text2)' }}>—</span>
     const undoItems = st.active.map(p => ({
       key: p.id,
-      label: `Undo NPR ${fmt(p.amount)} paid ${formatAdAsBs(p.paid_on)}…`,
+      label: `Undo NPR ${nprPaisa(p.amount)} paid ${formatAdAsBs(p.paid_on)}…`,
       onSelect: () => { setMsg(''); setUndoPay({ payment: p, name: emp.full_name }) },
       danger: true,
     }))
@@ -798,7 +852,7 @@ export default function PayrollRun() {
     let body
     if (st.state === 'paid') {
       body = (
-        <Tip text={`NPR ${fmt(st.paid)} recorded as paid${st.active.length > 1 ? ` in ${st.active.length} payments` : ''}, last on ${formatAdAsBs(last.paid_on)} by ${methodLabel(last.method).toLowerCase()}${last.reference ? ` (ref. ${last.reference})` : ''}.`} width={260}>
+        <Tip text={`NPR ${nprPaisa(st.paid)} recorded as paid${st.active.length > 1 ? ` in ${st.active.length} payments` : ''}, last on ${formatAdAsBs(last.paid_on)} by ${methodLabel(last.method).toLowerCase()}${last.reference ? ` (ref. ${last.reference})` : ''}.`} width={260}>
           <span style={{ fontSize: 12, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
             <span aria-hidden="true" style={{ color: 'var(--theme-green-text)' }}>✓</span> {formatAdAsBs(last.paid_on)} · {methodLabel(last.method)}
           </span>
@@ -809,8 +863,8 @@ export default function PayrollRun() {
     } else if (st.state === 'short') {
       body = (
         <>
-          <Tip text={`NPR ${fmt(st.paid)} was recorded as paid, but this payslip now comes to NPR ${fmt(st.net)} — the month was reopened and its figures changed. NPR ${fmt(st.due)} is still owed.`} width={270}>
-            <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ NPR {fmt(st.due)} still to pay</span>
+          <Tip text={`NPR ${nprPaisa(st.paid)} was recorded as paid, but this payslip now comes to NPR ${nprPaisa(st.net)} — the month was reopened and its figures changed. NPR ${nprPaisa(st.due)} is still owed.`} width={270}>
+            <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ NPR {nprPaisa(st.due)} still to pay</span>
           </Tip>
           {payBtn('Pay difference')}
         </>
@@ -821,9 +875,9 @@ export default function PayrollRun() {
       const gone = paySummary.noPayslip.includes(s.employee_id)
       body = (
         <Tip text={gone
-          ? `NPR ${fmt(st.paid)} was recorded as paid, but this person no longer has a payslip in ${monthName} — the month was reopened and Regenerate left them out. The whole amount was paid too much; recover it by hand, or undo a payment that was recorded by mistake.`
-          : `NPR ${fmt(st.paid)} was recorded as paid, but this payslip now comes to NPR ${fmt(st.net)} — the month was reopened and its figures went down. NPR ${fmt(-st.due)} was paid too much; recover it by hand or from next month's pay, or undo a payment that was recorded by mistake.`} width={290}>
-          <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ Overpaid NPR {fmt(-st.due)}</span>
+          ? `NPR ${nprPaisa(st.paid)} was recorded as paid, but this person no longer has a payslip in ${monthName} — the month was reopened and Regenerate left them out. The whole amount was paid too much; recover it by hand, or undo a payment that was recorded by mistake.`
+          : `NPR ${nprPaisa(st.paid)} was recorded as paid, but this payslip now comes to NPR ${nprPaisa(st.net)} — the month was reopened and its figures went down. NPR ${nprPaisa(-st.due)} was paid too much; recover it by hand or from next month's pay, or undo a payment that was recorded by mistake.`} width={290}>
+          <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ Overpaid NPR {nprPaisa(-st.due)}</span>
         </Tip>
       )
     }
@@ -1477,7 +1531,7 @@ export default function PayrollRun() {
             {/* A summary of what finalizing actually does, rather than "are you sure?" — the
                 advance recoveries and TADA closures are real writes to other ledgers. */}
             <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
-              <li><strong>{payslips.length}</strong> payslip{payslips.length === 1 ? '' : 's'}, NPR <strong>{fmt(netTotal)}</strong> total net pay</li>
+              <li><strong>{payslips.length}</strong> payslip{payslips.length === 1 ? '' : 's'}, NPR <strong>{nprPaisa(netTotal)}</strong> total net pay</li>
               {advCount > 0 && <li>{advCount} advance/loan recover{advCount === 1 ? 'y' : 'ies'} will be recorded in Advances &amp; Loans</li>}
               {tadaCount > 0 && <li>{tadaCount} TADA claim{tadaCount === 1 ? '' : 's'} will be marked Paid</li>}
               {/* A typed income tax does not block Finalize (it is an intended edit, not staleness), so
@@ -1552,7 +1606,7 @@ export default function PayrollRun() {
               const paidPeople = new Set(activePayments.map(p => p.employee_id)).size
               return (
                 <p style={{ margin: '10px 0 0', color: 'var(--theme-amber-text)' }}>
-                  △ {paidPeople === 1 ? '1 person is' : `${paidPeople} staff are`} already marked paid for {monthName} (NPR {fmt(paySummary.paidTotal)}).
+                  △ {paidPeople === 1 ? '1 person is' : `${paidPeople} staff are`} already marked paid for {monthName} (NPR {nprPaisa(paySummary.paidTotal)}).
                   Those payment records are kept. If you change any figures and finalize again, the Paid column shows anyone still owed a
                   difference, or paid too much — nothing is taken back or paid automatically.
                 </p>
@@ -1570,14 +1624,16 @@ export default function PayrollRun() {
         <MarkPaidDialog
           people={markPaid} periodLabel={periodLabel} runId={run.id}
           onClose={() => setMarkPaid(null)}
-          onDone={res => afterPaymentChange(`Recorded NPR ${fmt(res?.total || 0)} paid to ${res?.payments || 0} ${(res?.payments || 0) === 1 ? 'person' : 'staff'}`)}
+          onDone={res => afterPaymentChange(`Recorded NPR ${nprPaisa(res?.total || 0)} paid to ${res?.payments || 0} ${(res?.payments || 0) === 1 ? 'person' : 'staff'}`)}
+          onUnsure={() => afterPaymentUnsure('the payment was recorded')}
         />
       )}
       {undoPay && (
         <UndoPaymentDialog
           payment={undoPay.payment} name={undoPay.name}
           onClose={() => setUndoPay(null)}
-          onDone={() => afterPaymentChange(`Undone — ${undoPay.name}'s NPR ${fmt(undoPay.payment.amount)} is no longer counted as paid`)}
+          onDone={() => afterPaymentChange(`Undone — ${undoPay.name}'s NPR ${nprPaisa(undoPay.payment.amount)} is no longer counted as paid`)}
+          onUnsure={() => afterPaymentUnsure(`${undoPay.name}'s payment was undone`)}
         />
       )}
       {confirmEl}

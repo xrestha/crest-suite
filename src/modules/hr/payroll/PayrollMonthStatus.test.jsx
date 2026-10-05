@@ -55,6 +55,13 @@ describe('PayrollMonthStatus', () => {
       expect(await within(step('Staff paid')).findByText(/1 of 2 marked paid — NPR 26,697 still to pay/)).toBeInTheDocument()
     })
 
+    // S798 PAYROLL-7: a Reopen that raised a net by 0.30 read "NPR 0 still to pay".
+    it('prints what is still to pay to the paisa', async () => {
+      const raised = [{ employee_id: 'a', net_pay: 29963.3 }, payslips[1]]
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips: raised, payments: [paid('a'), paid('b')] })
+      expect(await within(step('Staff paid')).findByText(/1 of 2 marked paid — NPR 0\.30 still to pay/)).toBeInTheDocument()
+    })
+
     it('ticks only when everyone is paid', async () => {
       renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [paid('a'), paid('b')] })
       expect(await within(step('Staff paid')).findByText('All 2 marked paid')).toBeInTheDocument()

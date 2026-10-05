@@ -36,3 +36,11 @@ export function withTimeout(promise, ms = 20000, label = 'Request') {
 export function isTimeout(err) {
   return err?.name === 'TimeoutError'
 }
+
+// withTimeout for a call that answers `{ data, error }` (S798 PAYROLL-8): a timeout, or a rejection,
+// comes back as the call's own `error`, so every branch that already handles a refused read or write
+// handles a hung one too. A caller whose WRITE timed out tests isTimeout(error) and says "not known",
+// never "not saved" — the request may still land after the clock ran out.
+export function settleWithin(promise, ms = 20000, label = 'Request') {
+  return withTimeout(promise, ms, label).catch(error => ({ data: null, error }))
+}

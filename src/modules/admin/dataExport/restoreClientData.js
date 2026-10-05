@@ -21,6 +21,7 @@
 // person opened, ticked, skipped or dismissed), so a restored client simply starts its checklist
 // again. It is still exported, since it is in CLIENT_SCOPED_TABLES and harmless to carry.
 import { supabase } from '../../../supabaseClient'
+import { runChunkedByIds } from '../../../shared/fetchAllRows'
 
 // Reverse of the delete sequence: parents before children, so every FK target exists first.
 const RESTORE_ORDER = [
@@ -93,12 +94,16 @@ const GENERATED_COLUMNS = {
 // pos_orders.credit_note_id -> pos_credit_notes.id, while pos_credit_notes.order_id ->
 // pos_orders.id. Neither cascades, so one of the two must be inserted with the link empty and
 // patched afterwards. Same shape as the null-first step deleteClientData does in reverse.
-const DEFERRED_LINKS = { pos_orders: ['credit_note_id'] }
+// hr_employees.supervisor_id -> hr_employees.id (S798 DATABASE-4) is the self-referencing case: a
+// supervisor in a later 500-row chunk than their team would fail the FK, so it goes in afterwards too.
+const DEFERRED_LINKS = { pos_orders: ['credit_note_id'], hr_employees: ['supervisor_id'] }
 
 const CHUNK = 500
 
+// Must match exportClientData.js's list. supervisor_id left it in S798 (DATABASE-4): it is an
+// employee id, restored by the second pass below, not a profiles id.
 function isAttributionColumn(key) {
-  return key.endsWith('_by') || key === 'custodian_user_id' || key === 'supervisor_id'
+  return key.endsWith('_by') || key === 'custodian_user_id'
 }
 
 // Strips what must not be inserted, and re-points the row at the target client.
@@ -110,7 +115,9 @@ function isAttributionColumn(key) {
 function prepareRow(table, row, clientId) {
   const out = {}
   for (const [k, v] of Object.entries(row)) {
-    if (k.endsWith('_by_name')) continue                      // export-time annotation, not a column
+    // The export's `<column>_name` beside each attribution id is an annotation, not a column. Testing
+    // only `_by_name` let `custodian_user_id_name` through, which would fail the whole table (S798).
+    if (k.endsWith('_name') && isAttributionColumn(k.slice(0, -'_name'.length))) continue
     if ((GENERATED_COLUMNS[table] || []).includes(k)) continue
     if ((DEFERRED_LINKS[table] || []).includes(k)) continue
     out[k] = isAttributionColumn(k) ? null : v
@@ -298,6 +305,20 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
     const { error } = await supabase
       .from('pos_orders').update({ credit_note_id: order.credit_note_id }).eq('id', order.id)
     if (error) skipped.push(`pos_orders.credit_note_id for ${order.id} (${error.message})`)
+  }
+
+  // Second pass for "Reports to" (S798 DATABASE-4), now that every employee exists. One update per
+  // supervisor rather than per employee, chunked because the ids travel in the URL.
+  const teams = new Map()
+  for (const e of data.hr_employees || []) {
+    if (!e.supervisor_id) continue
+    if (!teams.has(e.supervisor_id)) teams.set(e.supervisor_id, [])
+    teams.get(e.supervisor_id).push(e.id)
+  }
+  for (const [supervisorId, ids] of teams) {
+    const { error } = await runChunkedByIds(ids, part =>
+      supabase.from('hr_employees').update({ supervisor_id: supervisorId }).in('id', part))
+    if (error) skipped.push(`hr_employees.supervisor_id for ${ids.length} employee(s) (${error.message})`)
   }
 
   return { inserted, tables, skipped, renamed }

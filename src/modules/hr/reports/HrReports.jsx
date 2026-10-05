@@ -1,4 +1,4 @@
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
@@ -731,6 +731,8 @@ export default function HrReports() {
               cash payment paid staff twice. With the payments unread there is no safe sheet, so neither
               download is offered. */}
           {tab === 'bank' && (() => {
+            // Every amount here prints to the paisa (S798 PAYROLL-7): the file uploads the exact
+            // figure, and a screen rounded to rupees read 17,501 beside a file paying 17500.50.
             const who = id => nameById[id] || '(employee no longer on file)'
             const leftOff = [
               bankPlan.paid.length ? `already paid: ${bankPlan.paid.map(l => who(l.s.employee_id)).join(', ')}` : '',
@@ -746,11 +748,11 @@ export default function HrReports() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Salary Disbursement — {periodLabel}</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                     {paymentsError
-                      ? <>Net pay NPR {fmt(bankPlan.netTotal)} · what is still owed could not be checked</>
+                      ? <>Net pay NPR {nprPaisa(bankPlan.netTotal)} · what is still owed could not be checked</>
                       : <>{bankPlan.toPay.length === 0
                             ? 'Nothing still to pay'
-                            : <>Still to pay: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(bankPlan.dueTotal)}</strong> to {bankPlan.toPay.length} {bankPlan.toPay.length === 1 ? 'person' : 'people'}</>}
-                          {bankPlan.paidTotal > 0 && <> · NPR {fmt(bankPlan.paidTotal)} already marked paid</>}</>}
+                            : <>Still to pay: <strong style={{ color: 'var(--theme-text1)' }}>NPR {nprPaisa(bankPlan.dueTotal)}</strong> to {bankPlan.toPay.length} {bankPlan.toPay.length === 1 ? 'person' : 'people'}</>}
+                          {bankPlan.paidTotal > 0 && <> · NPR {nprPaisa(bankPlan.paidTotal)} already marked paid</>}</>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }} className="no-print">
@@ -769,8 +771,8 @@ export default function HrReports() {
                 <div role="note" className="note-banner" style={{ margin: 0, border: 'none', borderBottom: '1px solid var(--theme-border)', borderRadius: 0, fontSize: 12 }}>
                   <strong>Left off this sheet.</strong>
                   {bankPlan.paid.length > 0 && <> Already paid: {bankPlan.paid.map(l => who(l.s.employee_id)).join(', ')}.</>}
-                  {bankPlan.over.length > 0 && <> Paid more than their payslip now says: {bankPlan.over.map(l => `${who(l.s.employee_id)} (NPR ${fmt(-l.st.due)} too much)`).join(', ')} — the month was reopened and their pay went down; get it back by hand.</>}
-                  {bankPlan.noPayslip.length > 0 && <> Paid in this run but no longer on it: {bankPlan.noPayslip.map(r => `${who(r.employee_id)} (NPR ${fmt(r.st.paid)})`).join(', ')} — see Payroll.</>}
+                  {bankPlan.over.length > 0 && <> Paid more than their payslip now says: {bankPlan.over.map(l => `${who(l.s.employee_id)} (NPR ${nprPaisa(-l.st.due)} too much)`).join(', ')} — the month was reopened and their pay went down; get it back by hand.</>}
+                  {bankPlan.noPayslip.length > 0 && <> Paid in this run but no longer on it: {bankPlan.noPayslip.map(r => `${who(r.employee_id)} (NPR ${nprPaisa(r.st.paid)})`).join(', ')} — see Payroll.</>}
                 </div>
               )}
               {!paymentsError && bankPlan.lines.length > 0 && bankPlan.toPay.length === 0 && (
@@ -795,12 +797,12 @@ export default function HrReports() {
                           <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name || '(employee no longer on file)'}</td>
                           <td style={{ color: missing ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{emp.bank_name || '△ missing'}</td>
                           <td style={{ color: missing ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{emp.bank_account_no || '△ missing'}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.net_pay)}</td>
-                          {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{st.paid > 0 ? fmt(st.paid) : '—'}</td>}
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{nprPaisa(s.net_pay)}</td>
+                          {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{st.paid > 0 ? nprPaisa(st.paid) : '—'}</td>}
                           {!paymentsError && (
                             <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: st.state === 'over' ? 'var(--theme-amber-text)' : st.state === 'paid' || st.state === 'none' ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
-                              {st.state === 'unpaid' || st.state === 'short' ? fmt(st.due)
-                                : st.state === 'over' ? `△ ${fmt(-st.due)} too much`
+                              {st.state === 'unpaid' || st.state === 'short' ? nprPaisa(st.due)
+                                : st.state === 'over' ? `△ ${nprPaisa(-st.due)} too much`
                                 : st.state === 'paid' ? 'Paid' : '—'}
                             </td>
                           )}
@@ -810,9 +812,9 @@ export default function HrReports() {
                   </tbody>
                   <tfoot><tr>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {bankPlan.lines.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(bankPlan.netTotal)}</td>
-                    {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(bankPlan.linesPaid)}</td>}
-                    {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(bankPlan.dueTotal)}</td>}
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{nprPaisa(bankPlan.netTotal)}</td>
+                    {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{nprPaisa(bankPlan.linesPaid)}</td>}
+                    {!paymentsError && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{nprPaisa(bankPlan.dueTotal)}</td>}
                   </tr></tfoot>
                 </table>
               </div>

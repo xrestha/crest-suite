@@ -10,6 +10,7 @@ import Modal from '../../../components/Modal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
+import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 
@@ -762,9 +763,12 @@ export default function HrStaff() {
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>
                       }
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                    {/* BS first, AD in the title, both pinned to Nepal (the IMS/POS Staff shape, S792):
+                        it was an AD toLocaleDateString in the browser's own zone (S798). */}
+                    <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}
+                      title={p.last_seen_at ? nepalDateLong(p.last_seen_at) : undefined}>
                       {p.last_seen_at
-                        ? new Date(p.last_seen_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                        ? (nepalBsLong(p.last_seen_at) || nepalDateLong(p.last_seen_at))
                         : '—'}
                     </td>
                     <td>

@@ -196,7 +196,7 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
 
 **Still open after stage 3** (found while building it):
 - No SERVER guard against paying a bill twice: Outstanding Payables re-reads payments just before recording one (PURCHASES-10), but two payments in the same second both land. A BEFORE INSERT trigger on `payable_payments` or a pay RPC with a row lock would close it.
-- The HR Staff page's Last Seen is still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fix here and file it in `docs/CROSS-REPO.md` there.
+- ✅ S798 stage 4c (crest-v386) — The HR Staff page's Last Seen was still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fixed here and filed in `docs/CROSS-REPO.md` there.
 - `PosOrders.jsx` (`writeSalesEntries`) and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()` (the device's clock zone) while the backfills now use the Nepal date (SALES-6). Fine on a till in Nepal; `nepalBs(new Date())` would make them agree.
 - `ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too.
 - (stage 4) `get_group_summary` — the Group Console's Spend % — still values a PAN outlet's purchases ex-VAT (D32 covered `get_group_pnl` only).

@@ -1,4 +1,4 @@
-import { withTimeout, isTimeout } from './withTimeout'
+import { withTimeout, isTimeout, settleWithin } from './withTimeout'
 
 describe('withTimeout', () => {
   test('settles a promise that never resolves and never rejects', async () => {
@@ -27,5 +27,25 @@ describe('withTimeout', () => {
   test('works on a thenable — PostgrestBuilder is not a real Promise', async () => {
     const thenable = { then(res) { setTimeout(() => res('done'), 5) } }
     await expect(withTimeout(thenable, 500, 'Save')).resolves.toBe('done')
+  })
+})
+
+describe('settleWithin', () => {
+  test('a hung call answers as its own error, marked as a timeout', async () => {
+    const res = await settleWithin(new Promise(() => {}), 20, 'Finalize')
+    expect(res.data).toBeNull()
+    expect(isTimeout(res.error)).toBe(true)
+  })
+
+  test('an answer passes through untouched, error and all', async () => {
+    const refused = { data: null, error: { code: '42501', message: 'refused' } }
+    await expect(settleWithin(Promise.resolve(refused), 50)).resolves.toBe(refused)
+    await expect(settleWithin(Promise.resolve({ data: [1], error: null }), 50)).resolves.toEqual({ data: [1], error: null })
+  })
+
+  test('a rejection is an error, not a timeout', async () => {
+    const res = await settleWithin(Promise.reject(new Error('boom')), 50)
+    expect(res.error.message).toBe('boom')
+    expect(isTimeout(res.error)).toBe(false)
   })
 })

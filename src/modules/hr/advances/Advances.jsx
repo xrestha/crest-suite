@@ -65,6 +65,17 @@ function realFirstCut(issuedIso, finalizedKeys, latestFinalized) {
   return { first, cut: m, moved: monthKey(m) !== monthKey(first) }
 }
 
+// Someone off payroll (S798 BONUS-LEDGERS-6). Payroll pays active and probation staff, and a leaver only
+// up to their last working day, so no later payroll cuts what they still owe; Final Settlement recovers
+// only what its payout covers and leaves the rest active. The page used to promise "Next salary cut:
+// Kartik payroll" for a settled leaver, who waited for a recovery that could not happen. Keyed on status
+// alone, so a rehire (back to active or probation) reads as before. The words stop short of "no payroll
+// will cut this": a leaver whose last month has not been paid yet may still have one cut, and telling
+// them apart from a settled leaver would need the settlements read.
+const offPayrollStatus = emp => (emp && emp.status !== 'active' && emp.status !== 'probation' ? emp.status : null)
+const statusWord = st => st.charAt(0).toUpperCase() + st.slice(1)
+const OFF_PAYROLL_HINT = 'payroll cuts nothing after their last month. Final Settlement recovers what its payout covers; collect the rest as a cash repayment or write it off.'
+
 // Type is a LABEL, not a schedule (S751 stated default): payroll cuts `installment_amount` a month
 // whichever type it is, and the whole balance when there is none. The words say what happens.
 const TYPE_LABEL = { advance: 'One-time', loan: 'In instalments' }
@@ -409,10 +420,17 @@ export default function Advances() {
   function handleReactivate(adv, balance) {
     const emp = empMap[adv.employee_id]
     const r = cutFor(adv.issued_date)
+    const left = offPayrollStatus(emp)
     askConfirm({
       title: `Reactivate this ${adv.type === 'loan' ? 'loan' : 'advance'}?`,
       confirmLabel: 'Reactivate', busyLabel: 'Reactivating…',
-      body: (
+      body: left ? (
+        <p style={{ margin: 0 }}>
+          NPR {fmt(balance)} becomes owed again by {emp.full_name}. They are {left}, so payroll cuts nothing after their
+          last month. If their Final Settlement is not finalized yet, it recovers what its payout covers; otherwise record
+          the cash repayment once it is active, or write it off again. The write-off reason is cleared; the change is logged.
+        </p>
+      ) : (
         <p style={{ margin: 0 }}>
           NPR {fmt(balance)} becomes owed again{emp ? ` by ${emp.full_name}` : ''}, and payroll resumes cutting it from
           salary{r ? ` from the ${monthLabel(r.cut)} payroll` : ''}. Final Settlement will recover it if they leave. The
@@ -425,7 +443,7 @@ export default function Advances() {
           .eq('id', adv.id).eq('status', 'written_off').select('id')
         if (err) { setPageError(asActionError(err)); load(); return }
         if (!data?.length) { setPageError('It was not reactivated — it is no longer written off, or this login cannot change advances. The page has been reloaded to show its real state.'); load(); return }
-        setPageNotice('Reactivated. Payroll will cut it again.')
+        setPageNotice(left ? 'Reactivated. It is owed again — record the repayment when it is collected.' : 'Reactivated. Payroll will cut it again.')
         load()
       },
     })
@@ -464,6 +482,7 @@ export default function Advances() {
   // write, not only in which button renders, and the row count says whether it landed.
   function handleDeleteRepayment(adv, r, outstanding) {
     const back = round2(outstanding + (parseFloat(r.amount) || 0))
+    const left = offPayrollStatus(empMap[adv.employee_id])
     askConfirm({
       title: 'Delete this repayment?',
       confirmLabel: 'Delete repayment', danger: true, busyLabel: 'Deleting…',
@@ -471,7 +490,11 @@ export default function Advances() {
         <p style={{ margin: 0 }}>
           NPR {fmt(r.amount)} recorded on {formatAdAsBs(r.repaid_date)} is removed, and the {adv.type === 'loan' ? 'loan' : 'advance'} goes
           back to owing NPR {fmt(back)}.
-          {adv.status === 'settled' ? ' It was settled, so it becomes active again and payroll resumes cutting it from salary.' : ''}
+          {adv.status === 'settled'
+            ? left
+              ? ` It was settled, so it becomes active again. They are ${left}, so payroll cuts nothing after their last month.`
+              : ' It was settled, so it becomes active again and payroll resumes cutting it from salary.'
+            : ''}
           {' '}The deletion is logged.
         </p>
       ),
@@ -494,6 +517,8 @@ export default function Advances() {
   const selectedRepaid = selectedAdv ? (repayMap[selected]?.total || 0) : 0
   const selectedOutstanding = selectedAdv ? Math.max(0, parseFloat(selectedAdv.amount) - selectedRepaid) : 0
   const selectedNextCut = selectedAdv?.status === 'active' ? cutFor(selectedAdv.issued_date) : null
+  const selectedLeft = selectedAdv ? offPayrollStatus(empMap[selectedAdv.employee_id]) : null
+  const selectedLeftOwing = !!selectedLeft && selectedAdv.status === 'active' && selectedOutstanding > OWED_EPS
   const selectedIsOwn = !!selectedAdv && isOwnEmployee(selectedAdv.employee_id)
 
 
@@ -642,10 +667,14 @@ export default function Advances() {
               <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
                 Issued {fmtD(selectedAdv.issued_date)}
                 {selectedAdv.purpose && ` · ${selectedAdv.purpose}`}
-                {selectedAdv.installment_amount
-                  ? ` · NPR ${fmt(selectedAdv.installment_amount)} cut from each salary`
-                  : selectedAdv.status === 'active' ? ' · whole balance comes off the next salary' : ''}
-                {selectedNextCut && selectedOutstanding > OWED_EPS && ` · Next salary cut: ${monthLabel(selectedNextCut.cut)} payroll`}
+                {selectedLeftOwing ? ` · ${statusWord(selectedLeft)} — ${OFF_PAYROLL_HINT}` : (
+                  <>
+                    {selectedAdv.installment_amount
+                      ? ` · NPR ${fmt(selectedAdv.installment_amount)} cut from each salary`
+                      : selectedAdv.status === 'active' ? ' · whole balance comes off the next salary' : ''}
+                    {selectedNextCut && selectedOutstanding > OWED_EPS && ` · Next salary cut: ${monthLabel(selectedNextCut.cut)} payroll`}
+                  </>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

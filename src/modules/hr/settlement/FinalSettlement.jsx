@@ -9,7 +9,7 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs, formatBsDay, BS_YEAR_MIN, BS_YEAR_MAX } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs, adToBsSafe, formatAdAsBs, formatBsDay, BS_YEAR_MIN, BS_YEAR_MAX } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 import { printWithTitle } from '../../../utils/printTitle'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -32,6 +32,15 @@ function bsDayOf(ad) {
   const [y, m, d] = String(ad).slice(0, 10).split('-').map(Number)
   const bs = adToBs(new Date(y, m - 1, d))
   return formatBsDay(bs.day, bs.month)
+}
+// "2 Poush 2083 BS (2026-12-17 AD)" for the printed statement, or the AD date alone, marked, outside the
+// BS table — never a confident wrong BS date (S798 SETTLEMENT-7).
+function bsWithAd(ad) {
+  if (!ad) return '—'
+  const iso = String(ad).slice(0, 10)
+  const [y, m, d] = iso.split('-').map(Number)
+  const bs = adToBsSafe(new Date(y, m - 1, d))
+  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS (${iso} AD)` : `${iso} (AD)`
 }
 const bsMonthLabel = r => `${BS_MONTHS[r.bs_month - 1]} ${r.bs_year}`
 const PRIOR_STATE = { draft: 'still a draft', not_run: 'not run yet', missing: 'finalized without them' }
@@ -999,7 +1008,10 @@ export default function FinalSettlement() {
               {shownRow.employee_name}{shownRow.employee_code ? ` · ${shownRow.employee_code}` : ''}{shownRow.department ? ` · ${shownRow.department}` : ''}
             </div>
             <div style={{ fontSize: 12, marginTop: 2 }}>
-              Last working date: {shownRow.last_working_date} ({frozen ? '' : `${lastDate.day} ${BS_MONTHS[lastDate.month - 1]} ${lastDate.year} BS · `}AD) ·
+              {/* BS first, the calendar the leaver reads, on a draft and a finalized statement alike
+                  (S798 SETTLEMENT-7): the finalized one printed the AD date alone. Both halves come
+                  from the one stored date, so they cannot disagree. */}
+              Last working date: {bsWithAd(shownRow.last_working_date)} ·
               {' '}Service: {fmtService(parseInt(shownRow.service_months, 10) || 0)} ·
               {' '}Reason: {String(shownRow.separation_reason || '').charAt(0).toUpperCase() + String(shownRow.separation_reason || '').slice(1)}
             </div>
@@ -1186,7 +1198,7 @@ export default function FinalSettlement() {
                       {x.employee_name || '—'}
                       {x.employee_code ? <span style={{ color: 'var(--theme-text3)' }}> · {x.employee_code}</span> : null}
                     </td>
-                    <td className="num" style={{ whiteSpace: 'nowrap' }}>{x.last_working_date}</td>
+                    <td className="num" style={{ whiteSpace: 'nowrap' }} title={`${x.last_working_date} AD`}>{formatAdAsBs(x.last_working_date)}</td>
                     <td style={{ textTransform: 'capitalize' }}>{x.separation_reason}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }} className="num">{fmt(x.net_payout)}</td>
                     <td><PaymentBadge row={x} /></td>

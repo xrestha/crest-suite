@@ -1,4 +1,4 @@
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 import { isSsfContributor } from './payrollCompute'
@@ -17,6 +17,9 @@ import { monthDeposit } from './monthDeposit'
 //
 // Paper only, so black ink and no hover tooltips — every explanation is a visible line.
 const fmt = nprInt
+// Net pay, the advance cut and anything built from them are exact to the paisa (S791), so they print
+// as the register and the payslip do (S798 PAYROLL-7). Whole rupees print unchanged.
+const fmtPaisa = nprPaisa
 const num = v => parseFloat(v) || 0
 const INK = '#000'
 const SOFT = '#444'
@@ -42,8 +45,8 @@ export default function PayrollApprovalSheet({
   const deductions = totals.absence + totals.ssfEmp + totals.other + totals.advDed + totals.tds
   const deductionParts = [
     [totals.absence, 'unpaid days'], [totals.ssfEmp, 'employee SSF'], [totals.other, 'other deductions'],
-    [totals.advDed, 'advance recovery'], [totals.tds, 'income tax'],
-  ].filter(([v]) => v > 0).map(([v, label]) => `${label} ${fmt(v)}`)
+    [totals.advDed, 'advance recovery', fmtPaisa], [totals.tds, 'income tax'],
+  ].filter(([v]) => v > 0).map(([v, label, f = fmt]) => `${label} ${f(v)}`)
   // The month's deposit, not the run's (S798 PAYROLL-2): a leaver's Final Settlement and a festival
   // allowance or incentive paid this month are on the SSF challan and the TDS report too. When they
   // could not be read the two lines say so — the payroll-only figure would be a smaller deposit that
@@ -87,7 +90,7 @@ export default function PayrollApprovalSheet({
       <span style={{ whiteSpace: 'nowrap' }}>{value}</span>
     </div>
   )
-  const money = (v, sign = '') => (v > 0 ? `${sign}${fmt(v)}` : '—')
+  const money = (v, sign = '', f = fmt) => (v > 0 ? `${sign}${f(v)}` : '—')
   // A deposit of nothing is a fact the Owner can act on, so it is said in words rather than a dash.
   const deposit = v => (v > 0 ? fmt(v) : 'none')
   const SignBox = ({ title, role, name }) => (
@@ -149,9 +152,9 @@ export default function PayrollApprovalSheet({
           <div style={{ ...label, marginBottom: 4 }}>This month's pay</div>
           <Line name="Gross pay" value={fmt(totals.gross)} />
           <Line name="Overtime" value={money(totals.ot, '+')} />
-          <Line name="Deductions" value={money(deductions, '−')} sub={deductionParts.join(' · ') || null} />
+          <Line name="Deductions" value={money(deductions, '−', fmtPaisa)} sub={deductionParts.join(' · ') || null} />
           <Line name="Travel claims (TADA), not taxed" value={money(totals.tada, '+')} />
-          <Line name="Net pay to staff" value={`NPR ${fmt(totals.net)}`} strong />
+          <Line name="Net pay to staff" value={`NPR ${fmtPaisa(totals.net)}`} strong />
         </div>
         <div>
           <div style={{ ...label, marginBottom: 4 }}>What it costs, and what goes to the government</div>
@@ -205,10 +208,10 @@ export default function PayrollApprovalSheet({
               <td style={{ textAlign: 'right' }}>{money(num(s.absence_deduction), '−')}</td>
               <td style={{ textAlign: 'right' }}>{money(num(s.ssf_employee), '−')}</td>
               <td style={{ textAlign: 'right' }}>{money(num(s.other_deductions), '−')}</td>
-              <td style={{ textAlign: 'right' }}>{money(num(s.advance_deduction), '−')}</td>
+              <td style={{ textAlign: 'right' }}>{money(num(s.advance_deduction), '−', fmtPaisa)}</td>
               <td style={{ textAlign: 'right' }}>{money(num(s.tds), '−')}</td>
               <td style={{ textAlign: 'right' }}>{money(num(s.tada_amount), '+')}</td>
-              <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(s.net_pay)}</td>
+              <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtPaisa(s.net_pay)}</td>
             </tr>
           ))}
         </tbody>
@@ -221,10 +224,10 @@ export default function PayrollApprovalSheet({
             <td style={{ textAlign: 'right' }}>{money(totals.absence, '−')}</td>
             <td style={{ textAlign: 'right' }}>{money(totals.ssfEmp, '−')}</td>
             <td style={{ textAlign: 'right' }}>{money(totals.other, '−')}</td>
-            <td style={{ textAlign: 'right' }}>{money(totals.advDed, '−')}</td>
+            <td style={{ textAlign: 'right' }}>{money(totals.advDed, '−', fmtPaisa)}</td>
             <td style={{ textAlign: 'right' }}>{money(totals.tds, '−')}</td>
             <td style={{ textAlign: 'right' }}>{money(totals.tada, '+')}</td>
-            <td style={{ textAlign: 'right' }}>{fmt(totals.net)}</td>
+            <td style={{ textAlign: 'right' }}>{fmtPaisa(totals.net)}</td>
           </tr>
         </tfoot>
       </table>
@@ -244,7 +247,7 @@ export default function PayrollApprovalSheet({
       <div className="pa-keep">
         <p style={{ margin: '0 0 8px', fontSize: 12, lineHeight: 1.5 }}>
           I have checked the {periodLabel} payroll above: <strong>{rows.length} employee{rows.length === 1 ? '' : 's'}</strong>,
-          total net pay <strong>NPR {fmt(totals.net)}</strong>, and approve it {finalized ? 'for payment' : 'to be finalized and paid'}.
+          total net pay <strong>NPR {fmtPaisa(totals.net)}</strong>, and approve it {finalized ? 'for payment' : 'to be finalized and paid'}.
         </p>
         <div style={{ display: 'flex', gap: 20 }}>
           <SignBox title="Prepared by" role={preparedBy?.role || ''} name={preparedBy?.name || ''} />

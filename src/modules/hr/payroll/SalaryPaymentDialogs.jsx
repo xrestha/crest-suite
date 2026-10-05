@@ -6,15 +6,22 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { supabase } from '../../../supabaseClient'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprPaisa } from '../../../shared/nepalMoney'
+import { isTimeout, settleWithin } from '../../../utils/withTimeout'
 import { PAYMENT_METHODS, methodLabel, recordSalaryPayments, todayNepalAd, voidSalaryPayment } from './salaryPayments'
 
-const fmt = nprInt
+// A payment is net pay less what was paid, exact to the paisa, so it prints as the register does
+// (S798 PAYROLL-7). Whole rupees print unchanged.
+const fmt = nprPaisa
+// While a dialog is busy its backdrop, Escape and Cancel are inert, so a request that never answers
+// used to strand it until a reload (S798 PAYROLL-8). On a timeout the dialog hands back to the page
+// through `onUnsure`: the write may still have landed, so the page reloads and shows what was recorded.
+const WRITE_MS = 20000
 
 // Mark one person or everyone paid (S782). Records what is still owed on each payslip — the database
 // works the amount out itself, so this dialog only says how much it expects that to be. It moves no
 // money; the copy says so, because "Mark paid" pressed before the transfer is the likely mistake.
-export function MarkPaidDialog({ people, periodLabel, runId, onClose, onDone }) {
+export function MarkPaidDialog({ people, periodLabel, runId, onClose, onDone, onUnsure }) {
   const [paidOn, setPaidOn] = useState(todayNepalAd())
   const [method, setMethod] = useState('bank')
   const [reference, setReference] = useState('')
@@ -35,10 +42,11 @@ export function MarkPaidDialog({ people, periodLabel, runId, onClose, onDone }) 
     setFieldErr(fe)
     if (Object.keys(fe).length > 0) return
     setBusy(true); setError(null)
-    const { data, error: err } = await recordSalaryPayments(supabase, {
+    const { data, error: err } = await settleWithin(recordSalaryPayments(supabase, {
       runId, employeeIds: people.map(p => p.employee_id), paidOn, method, reference,
-    })
+    }), WRITE_MS, 'Recording the payment')
     setBusy(false)
+    if (isTimeout(err)) { onUnsure(); return }
     if (err) { setError(asActionError(err, 'operator')); return }
     onDone(data)
   }
@@ -98,7 +106,7 @@ export function MarkPaidDialog({ people, periodLabel, runId, onClose, onDone }) 
 
 // Undo one payment (S782): a void with a reason, never a delete. The row stays, with who undid it,
 // when and why, so the record of what was paid is never shorter than what happened.
-export function UndoPaymentDialog({ payment, name, onClose, onDone }) {
+export function UndoPaymentDialog({ payment, name, onClose, onDone, onUnsure }) {
   const [reason, setReason] = useState('')
   const [fieldErr, setFieldErr] = useState('')
   const [error, setError] = useState(null)
@@ -110,8 +118,9 @@ export function UndoPaymentDialog({ payment, name, onClose, onDone }) {
     if (r.length < 3) { setFieldErr('Say why this payment is being undone — for example, "marked the wrong person".'); return }
     setFieldErr('')
     setBusy(true); setError(null)
-    const { error: err } = await voidSalaryPayment(supabase, { paymentId: payment.id, reason: r })
+    const { error: err } = await settleWithin(voidSalaryPayment(supabase, { paymentId: payment.id, reason: r }), WRITE_MS, 'Undoing the payment')
     setBusy(false)
+    if (isTimeout(err)) { onUnsure(); return }
     if (err) { setError(asActionError(err, 'operator')); return }
     onDone()
   }

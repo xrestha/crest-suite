@@ -41,9 +41,11 @@ const PARENT_SCOPED_TABLES = [
 // Columns holding a profiles.id purely for display. S543 established by grep that none of these
 // is ever filtered on — they are resolved for show through get_client_profile_names(). That is
 // what makes it safe for restore to null them, and why carrying the NAME alongside preserves
-// everything a reader actually wanted.
+// everything a reader actually wanted. Not hr_employees.supervisor_id (S798 DATABASE-4): S543's grep
+// listed it among the profiles FKs by mistake. It points at another employee, whose id restores
+// verbatim, so every restore was blanking each employee's "Reports to" for nothing.
 const ATTRIBUTION_SUFFIX = '_by'
-const ATTRIBUTION_EXTRA = ['custodian_user_id', 'supervisor_id']
+const ATTRIBUTION_EXTRA = ['custodian_user_id']
 
 function isAttributionColumn(key) {
   return key.endsWith(ATTRIBUTION_SUFFIX) || ATTRIBUTION_EXTRA.includes(key)

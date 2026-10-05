@@ -672,7 +672,7 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
    the SSF/challan section from the code.
 2. ✅ **4b Dashboards and labour figures** (done 2026-10-04, crest-v385; no migration; Owner Report schema 14): REPORTS-5,
    -6, -7, -8, -9, LABOUR-FIGURES-8, -9, -10.
-3. **4c Payroll, settlements and records** (no migration): PAYROLL-7, PAYROLL-8's payroll half, SETTLEMENT-7,
+3. ✅ **4c Payroll, settlements and records** (done 2026-10-05, crest-v386; no migration): PAYROLL-7, PAYROLL-8's payroll half, SETTLEMENT-7,
    BONUS-LEDGERS-6, DATABASE-4, and HR Staff's Last Seen in BS (carried from IMS_TODO.md, S798.7).
 4. **4d Attendance, roster and leave** (no migration): ATTENDANCE-8, -9, ROSTER-10, PAYROLL-8's Roster half
    (Copy Week and publish share ROSTER-10's handler), LEAVE-OT-HOLIDAYS-6, -7.
@@ -685,10 +685,10 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 | --- | --- | --- |
 | DOCS-1 | `Help.js:362`: "A day stays blank until you mark it. Payroll pays monthly staff for a blank day but daily and hourly staff nothing, so mark every day they worked. All Present fills the blanks." | ✅ S798 stage 4a (crest-v384). Help's Attendance guide (now line 364) says a day stays blank until marked. |
 | REPORTS-4 | Rewrite `hrGuideData.js:565-572` from the code (challan incl. settlements; add the SSF number; SSF Basic matches SOSYS; deductions and employer cost as coded); Help: six tabs; two Tips gain exit tax and settlements. | ✅ S798 stage 4a (crest-v384). The guide entry was rewritten from `HrReports.jsx`. Employer cost was already right (S798 3c), so only Total deductions, the challan row rule and the two gotchas changed. Help says six tabs, and the challan tip and both TDS tips (Help and the page Tips) carry settlements and exit tax. |
-| PAYROLL-7 | `nprPaisa` on the approval sheet, MarkPaidDialog, the short/over text and the strip. | 🔴 |
-| PAYROLL-8 | `withTimeout` on payments, finalize/reopen, generate/regenerate (and Roster's Copy Week, publish); on timeout "could not confirm — reload". | 🔴 |
-| BONUS-LEDGERS-6 | For a non-active employee: "Left — no payroll will cut this; record a cash repayment or write it off", also in the Reactivate copy. | 🔴 |
-| SETTLEMENT-7 | BS last working day (AD in brackets) on every statement; BS in the history column. | 🔴 |
+| PAYROLL-7 | `nprPaisa` on the approval sheet, MarkPaidDialog, the short/over text and the strip. | ✅ S798 stage 4c (crest-v386). Also the Undo dialog, the Finalize confirm's net total, the after-payment messages and HR Reports → Bank Transfer, whose CSV already uploaded the exact figure. |
+| PAYROLL-8 | `withTimeout` on payments, finalize/reopen, generate/regenerate (and Roster's Copy Week, publish); on timeout "could not confirm — reload". | 🟡 Payroll half ✅ S798 stage 4c (crest-v386): `settleWithin` (`withTimeout.js`) on the page load, Generate, Regenerate, Finalize, Reopen, Delete empty run, the tax box and both payment dialogs; a timed-out write reloads and says it could not confirm. Roster's Copy Week and publish are 4d. |
+| BONUS-LEDGERS-6 | For a non-active employee: "Left — no payroll will cut this; record a cash repayment or write it off", also in the Reactivate copy. | ✅ S798 stage 4c (crest-v386), worded "Resigned — payroll cuts nothing after their last month. Final Settlement recovers what its payout covers; collect the rest as a cash repayment or write it off" (owner-approved): "no payroll will cut this" is false for a leaver whose last month is still to be paid. Also the delete-a-repayment confirm. |
+| SETTLEMENT-7 | BS last working day (AD in brackets) on every statement; BS in the history column. | ✅ S798 stage 4c (crest-v386). Both from the one stored date (`bsWithAd`); the history column has the AD date on hover. |
 | ATTENDANCE-8 | On `hr_month_finalized`/`hr_month_settled` drop "press Save again", re-read the run; for settled, reload staff and say marks were dropped. | 🔴 |
 | ATTENDANCE-9 | Leave and Holiday columns; Total Days counts every mark; an Unmarked count; Holiday in the export. | 🔴 |
 | ROSTER-10 | Copy to Next Week skips zero-hour leave and holiday markers, or lists them with a tick. | 🔴 |
@@ -697,7 +697,7 @@ finalized. 4e and 4f go last because each needs an "apply", and 4f also needs a 
 | SELF-SERVICE-6 | Derive the password before reserving; count only `invalid_credentials`; else release (new `release_hr_pin_attempt`) and 503; fixed catch-all text. Same in pos- and ims-staff-login. | 🔴 |
 | SELF-SERVICE-7 | DROP/CREATE `get_my_hr_payslips` with `unpaid_days`, `retirement_contribution`; assert first; REVOKE PUBLIC, GRANT authenticated. | 🔴 |
 | SELF-SERVICE-8 | `formatBsDay(day, r.bs_month)` on both sides of the swap list. | 🔴 |
-| DATABASE-4 | Drop `supervisor_id` from `ATTRIBUTION_EXTRA`; restore it in a second pass. | 🔴 |
+| DATABASE-4 | Drop `supervisor_id` from `ATTRIBUTION_EXTRA`; restore it in a second pass. | ✅ S798 stage 4c (crest-v386). `DEFERRED_LINKS`, one update per supervisor (`runChunkedByIds`). Same edit: the restore drops every `<column>_name` annotation, so a set asset custodian no longer fails assets_register (the latent IMS case DATABASE noted). |
 | REPORTS-5 | Keep the runs error: "—" and "could not be read", never "No finalized payroll yet". | ✅ S798 stage 4b (crest-v385). The four payroll cards read "—" / "last finalized payroll could not be read". |
 | REPORTS-6 | Neutral "was due by …" once passed, as the strip. | ✅ S798 stage 4b (crest-v385). "Was due by …" in plain text; the red branch and KCard's `overdue` prop are gone. hss-suite still red: filed in both ledgers. |
 | REPORTS-7 | `useNavBadgeCounts` keeps the last good value on a failed count (HR and `posPending`). | ✅ S798 stage 4b (crest-v385). Fixed in place (`useHrApprovalCounts` does not poll); both counts start from 0 on a client change. |
@@ -824,7 +824,7 @@ BONUS-LEDGERS-4, SETTLEMENT-1 to -5, GAP-PAY-STATE-1 to -4, LEAVE-OT-HOLIDAYS-1 
 ATTENDANCE-7 = ROSTER-5, SELF-SERVICE-2/-3/-4/-7.
 
 **Carried from IMS_TODO.md (S792 still open):** HR Staff's Last Seen is an AD `toLocaleDateString`; fix here and
-file it there.
+file it there. ✅ Fixed S798 stage 4c (crest-v386).
 
 **Never copy a permission gate across.** Here `isAdmin` is the Crest operator and the Owner is `isOwner`; in hss
 `isAdmin` aliases the company's Owner. Re-derive GAP-OPERATOR-1's INSERT-only seam and every
