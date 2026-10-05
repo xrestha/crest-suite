@@ -2,6 +2,7 @@ import { supabase } from '../../../supabaseClient'
 import { scopedFrom } from '../../../shared/scopedDb'
 import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { withTimeout } from '../../../utils/withTimeout'
+import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { workingDaysInRange } from './leaveConstants'
 
 /**
@@ -96,9 +97,15 @@ export function backfillLeaveText({ filled, skipped, settled, employees, error }
  * Months earlier than the client's first period are ignored entirely — that is before they were
  * on Crest, so an approved request back there is imported history, not a gap anyone will close.
  *
+ * A leaver settled in the current employment is left out of a month by the back-fill's own test
+ * (S798, LEAVE-OT-HOLIDAYS-7): a finalized settlement whose last working day is on or before that
+ * month's end, and on or after their join date. The back-fill never marks those days, because the
+ * settlement already paid the month, so counting them kept the banner up for good over leave
+ * nobody will pay. Pass the page's finalized `settlements` and `employees` (with `join_date`).
+ *
  * @returns {Promise<{waiting: Array, unmarked: Array, error: any}>}
  */
-export async function findApprovedLeaveGaps({ clientId, requests, periods }) {
+export async function findApprovedLeaveGaps({ clientId, requests, periods, settlements = [], employees = [] }) {
   const none = { waiting: [], unmarked: [], error: null }
   if (!clientId || !(periods || []).length) return none
 
@@ -110,12 +117,24 @@ export async function findApprovedLeaveGaps({ clientId, requests, periods }) {
   const periodMap = {}
   for (const p of periods) periodMap[`${p.bs_year}:${p.bs_month}`] = p
 
+  const joinDate = {}
+  for (const e of employees || []) joinDate[e.id] = e.join_date || null
+  const monthEnd = {}
+  const settledIn = (empId, bsYear, bsMonth) => {
+    const k = `${bsYear}:${bsMonth}`
+    if (!(k in monthEnd)) monthEnd[k] = formatAd(bsToAd(bsYear, bsMonth, daysInBsMonth(bsYear, bsMonth)))
+    const joined = joinDate[empId]
+    return (settlements || []).some(s => s.employee_id === empId && s.status !== 'draft' && s.last_working_date
+      && s.last_working_date <= monthEnd[k] && (!joined || s.last_working_date >= joined))
+  }
+
   const byMonth = new Map()
   const empIds = new Set()
   for (const req of requests || []) {
     if (req.status !== 'approved') continue
     for (const d of workingDaysInRange(req.start_date, req.end_date)) {
       if (d.bsYear * 12 + d.bsMonth < floor) continue
+      if (settledIn(req.employee_id, d.bsYear, d.bsMonth)) continue
       const k = `${d.bsYear}:${d.bsMonth}`
       if (!byMonth.has(k)) byMonth.set(k, { bsYear: d.bsYear, bsMonth: d.bsMonth, keys: new Set() })
       // employee:day, so two requests covering one day for one person count once — the same key

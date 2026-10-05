@@ -128,3 +128,14 @@ export function rosterDayShape(shift) {
   if (hours > 0) return `present|${hours}|${shiftOvertimeHours(shift)}|${regular}|${duty}`
   return `marker|${zeroHourStatus(shift.name)}|${duty}`
 }
+
+// The leave or holiday status a roster cell stands for when it is a DATED marker, else null (S798,
+// ROSTER-10): a zero-hour marker that Generate from Roster turns into paid or unpaid leave or a paid
+// holiday. Those belong to their dates, not to a weekly pattern, so Copy to Next Week neither copies
+// one forward nor overwrites or clears one already there. A Day Off is a pattern and copies. The
+// branches are rosterDayShape's: unknown hours and any hours are worked days, never markers.
+export function datedMarkerStatus(shift) {
+  if (!shift || hasUnknownHours(shift) || shiftHours(shift) > 0) return null
+  const status = zeroHourStatus(shift.name)
+  return status === 'weekly_off' ? null : status
+}

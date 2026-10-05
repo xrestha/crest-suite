@@ -25,6 +25,8 @@ import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fmtTime, shiftTextColor } from './rosterHelpers'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
+import { settleWithin, isTimeout } from '../../../utils/withTimeout'
+import { datedMarkerStatus } from '../attendance/attendanceFromRoster'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ShiftPicker from './ShiftPicker'
 import SuggestPopover from './SuggestPopover'
@@ -54,6 +56,16 @@ const DEFAULT_SHIFTS = [
 ]
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+// Copy Week and Publish are bounded (S798 PAYROLL-8, the Roster half): a request that never answered
+// left "Checking…" or the Publish button stuck until a reload. A READ that times out wrote nothing; a
+// WRITE that times out may still land, so its message says it could not confirm. Both writes are safe
+// to repeat: Publish and the copy are upserts, and the copy's clear deletes by id.
+const ROSTER_READ_MS = 30000
+const ROSTER_WRITE_MS = 20000
+// A read that gave up. errorLine's timeout wording is for a write ("not known whether this went
+// through"), which a read that changed nothing must not say.
+const readFailLine = err => (isTimeout(err) ? 'The server took too long to answer — check your connection and try again.' : errorLine(err))
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -453,12 +465,12 @@ export default function Roster() {
         if (!months.has(k)) months.set(k, bs)
       })
       const results = await Promise.all([...months.values()].map(bs =>
-        scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
-          .eq('bs_year', bs.year).eq('bs_month', bs.month)))
+        settleWithin(scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+          .eq('bs_year', bs.year).eq('bs_month', bs.month), ROSTER_READ_MS, 'Reading what is published')))
       for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
-      const { data, error } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
-        .eq('bs_year', bsYear).eq('bs_month', bsMonth)
+      const { data, error } = await settleWithin(scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+        .eq('bs_year', bsYear).eq('bs_month', bsMonth), ROSTER_READ_MS, 'Reading what is published')
       if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
@@ -485,12 +497,16 @@ export default function Roster() {
         bs_year: g.bsYear, bs_month: g.bsMonth, bs_day: d,
         published_at: new Date().toISOString(), published_by: profile?.id,
       }))
-      const { error } = await scopedUpsert('hr_roster_publish_state', rows, { onConflict: 'client_id,bs_year,bs_month,bs_day' })
+      const { error } = await settleWithin(scopedUpsert('hr_roster_publish_state', rows, { onConflict: 'client_id,bs_year,bs_month,bs_day' }), ROSTER_WRITE_MS, 'Publishing')
       // A refused publish used to say nothing at all (S749): the badge stayed Draft and nobody was
-      // told why, while the manager believed staff had been sent the roster.
+      // told why, while the manager believed staff had been sent the roster. A timed-out one may have
+      // landed, so it says so; the badges below are re-read either way, and pressing again is safe.
       if (error) {
         const a = asActionError(error)
-        setBoardError({ text: `${BS_MONTHS[g.bsMonth - 1]} ${g.bsYear} may not have been published, and staff were not notified. Press Publish again. ` + a.text, detail: a.detail })
+        const lead = isTimeout(error)
+          ? `Could not confirm that ${BS_MONTHS[g.bsMonth - 1]} ${g.bsYear} was published — the server took too long to answer, and staff were not notified. The Draft/Published badges show what is stored; if they still say Draft, press Publish again (publishing twice is safe).`
+          : `${BS_MONTHS[g.bsMonth - 1]} ${g.bsYear} may not have been published, and staff were not notified. Press Publish again. ` + a.text
+        setBoardError({ text: lead, detail: a.detail })
         break
       }
       // Fire-and-forget, but not silent: a notification failure does not unpublish anything.
@@ -537,7 +553,7 @@ export default function Roster() {
   const [boardError, setBoardError] = useState(null)
   const boardLoadFailed = err => {
     const a = asActionError(err)
-    return { text: 'Could not load part of the roster board — what is shown is from the last successful load. ' + a.text, detail: a.detail }
+    return { text: 'Could not load part of the roster board — what is shown is from the last successful load. ' + (isTimeout(err) ? readFailLine(err) : a.text), detail: a.detail }
   }
   useEffect(() => {
     if (!clientId) return
@@ -784,6 +800,12 @@ export default function Roster() {
   // only the BS months the VISIBLE week spans, and +7 days routinely lands in the next BS month
   // (they run 28–32 days), so a local lookup would report an empty target week and overwrite a
   // real one silently.
+  //
+  // Leave and Holiday markers are the exception to the mirror (S798, ROSTER-10; `datedMarkerStatus`).
+  // They belong to their dates, not to a weekly pattern: copied forward, Generate from Roster turned
+  // Ram's three LEAVE days into three days of unpaid leave on days he worked, and a copied Holiday
+  // paid a daily-wage worker an extra day. So this week's markers are not copied, and next week's are
+  // neither overwritten nor cleared. A Day Off is a pattern and copies like a shift.
   const [copyPlan,  setCopyPlan]  = useState(null)
   const [copyBusy,  setCopyBusy]  = useState(false)
   const [copyError, setCopyError] = useState('')
@@ -818,11 +840,17 @@ export default function Roster() {
 
       const writes = []
       const targetKeys = new Set()
+      // Target cells this week's leave or holiday marker leaves alone (neither written nor cleared).
+      const untouched = new Set()
+      let markersNotCopied = 0
       for (const emp of filteredEmps) {
         for (const p of pairs) {
-          targetKeys.add(rKey(p.to.year, p.to.month, p.to.day, emp.id))
+          const target = rKey(p.to.year, p.to.month, p.to.day, emp.id)
+          targetKeys.add(target)
           const row = roster[rKey(p.from.year, p.from.month, p.from.day, emp.id)]
-          if (row?.shift_type_id) writes.push({ empId: emp.id, to: p.to, shiftTypeId: shiftForDay(row.shift_type_id, p.toIso) })
+          if (!row?.shift_type_id) continue
+          if (datedMarkerStatus(shiftMap[row.shift_type_id])) { markersNotCopied += 1; untouched.add(target); continue }
+          writes.push({ empId: emp.id, to: p.to, shiftTypeId: shiftForDay(row.shift_type_id, p.toIso) })
         }
       }
 
@@ -830,12 +858,13 @@ export default function Roster() {
       const months = new Map()
       pairs.forEach(p => { const k = `${p.to.year}:${p.to.month}`; if (!months.has(k)) months.set(k, p.to) })
       const existingId = new Map()   // target cell key -> hr_roster.id
+      const targetMarkers = new Set() // target cells holding a leave or holiday marker
       const publishedTargetDays = new Set()
       // Both months' reads run together rather than month-then-month; neither filters on the other.
       const monthReads = await Promise.all([...months.values()].map(bs => Promise.all([
-        monthRosterRows(bs.year, bs.month, 'id, employee_id, bs_year, bs_month, bs_day'),
-        scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
-          .eq('bs_year', bs.year).eq('bs_month', bs.month),
+        settleWithin(monthRosterRows(bs.year, bs.month, 'id, employee_id, shift_type_id, bs_year, bs_month, bs_day'), ROSTER_READ_MS, 'Reading next week'),
+        settleWithin(scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+          .eq('bs_year', bs.year).eq('bs_month', bs.month), ROSTER_READ_MS, 'Reading next week'),
       ])))
       for (const [rows, pub] of monthReads) {
         // A failed read here would understate what the copy is about to destroy, so it stops the
@@ -846,17 +875,25 @@ export default function Roster() {
         if (pub.error)  throw pub.error
         for (const r of rows.data || []) {
           const k = rKey(r.bs_year, r.bs_month, r.bs_day, r.employee_id)
-          if (targetKeys.has(k)) existingId.set(k, r.id)
+          if (!targetKeys.has(k)) continue
+          // Next week's own leave or holiday marker stays put, whatever this week holds.
+          if (datedMarkerStatus(shiftMap[r.shift_type_id])) { targetMarkers.add(k); continue }
+          existingId.set(k, r.id)
         }
         for (const r of pub.data || []) publishedTargetDays.add(`${r.bs_year}:${r.bs_month}:${r.bs_day}`)
       }
 
-      const writeKeys = new Set(writes.map(w => rKey(w.to.year, w.to.month, w.to.day, w.empId)))
-      const overwrite = writes.filter(w => existingId.has(rKey(w.to.year, w.to.month, w.to.day, w.empId))).length
-      const clearIds  = [...existingId.entries()].filter(([k]) => !writeKeys.has(k)).map(([, id]) => id)
+      const keyOf = w => rKey(w.to.year, w.to.month, w.to.day, w.empId)
+      const copied = writes.filter(w => !targetMarkers.has(keyOf(w)))
+      const writeKeys = new Set(copied.map(keyOf))
+      const overwrite = copied.filter(w => existingId.has(keyOf(w))).length
+      // A cell this week's marker skipped is left as next week has it, not cleared to match.
+      const clearIds  = [...existingId.entries()].filter(([k]) => !writeKeys.has(k) && !untouched.has(k)).map(([, id]) => id)
+      // Every next-week marker the copy leaves standing, whether a shift or a blank faced it.
+      const targetMarkersKept = targetMarkers.size
 
       const conflicts = [...new Set(
-        writes
+        copied
           .filter(w => isOnApprovedLeave(w.empId, { bsYear: w.to.year, bsMonth: w.to.month, bsDay: w.to.day }))
           .map(w => employees.find(e => e.id === w.empId)?.full_name)
           .filter(Boolean)
@@ -866,12 +903,12 @@ export default function Roster() {
       targetStart.setDate(targetStart.getDate() + 7)
 
       setCopyPlan({
-        writes, clearIds, overwrite, conflicts,
+        writes: copied, clearIds, overwrite, conflicts, markersNotCopied, targetMarkersKept,
         publishedCount: pairs.filter(p => publishedTargetDays.has(`${p.to.year}:${p.to.month}:${p.to.day}`)).length,
         targetLabel: weekLabelFor(targetStart),
       })
     } catch (e) {
-      setCopyError('Could not read next week — nothing was copied. ' + errorLine(e))
+      setCopyError('Could not read next week — nothing was copied. ' + readFailLine(e))
     } finally {
       setCopyBusy(false)
     }
@@ -881,6 +918,15 @@ export default function Roster() {
     if (!copyPlan || copyBusy) return
     setCopyBusy(true)
     setCopyError('')
+    // Land on the week that was just written — the copy is then something the manager reads off
+    // the board, not something the dialog claims happened. A timed-out write goes there too: the
+    // board loads what is stored, which is the only answer to "did it land".
+    const showNextWeek = () => {
+      setCopyPlan(null)
+      const d = new Date(weekStart)
+      d.setDate(d.getDate() + 7)
+      setWeekStart(d)
+    }
     try {
       // Write first, clear second. If the second half fails, next week carries the copied shifts
       // plus a few leftovers — visible on the board and fixable — rather than a week that was
@@ -891,21 +937,21 @@ export default function Roster() {
           shift_type_id: w.shiftTypeId,
           bs_year: w.to.year, bs_month: w.to.month, bs_day: w.to.day,
         }))
-        const { error } = await scopedUpsert('hr_roster', rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' })
+        const { error } = await settleWithin(scopedUpsert('hr_roster', rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' }), ROSTER_WRITE_MS, 'Copying the week')
         if (error) throw error
       }
       if (copyPlan.clearIds.length > 0) {
-        const { error } = await scopedDelete('hr_roster').in('id', copyPlan.clearIds)
+        const { error } = await settleWithin(scopedDelete('hr_roster').in('id', copyPlan.clearIds), ROSTER_WRITE_MS, 'Copying the week')
         if (error) throw error
       }
-      setCopyPlan(null)
-      // Land on the week that was just written — the copy is then something the manager reads off
-      // the board, not something the dialog claims happened.
-      const d = new Date(weekStart)
-      d.setDate(d.getDate() + 7)
-      setWeekStart(d)
+      showNextWeek()
     } catch (e) {
-      setCopyError('The copy did not finish — check next week before running it again. ' + errorLine(e))
+      if (isTimeout(e)) {
+        showNextWeek()
+        setCopyError('Could not confirm the copy finished — the server took too long to answer. This is next week as stored: check it. If shifts are missing, go back a week and copy again (copying twice is safe).')
+      } else {
+        setCopyError('The copy did not finish — check next week before running it again. ' + errorLine(e))
+      }
     } finally {
       setCopyBusy(false)
     }
@@ -1387,7 +1433,7 @@ export default function Roster() {
                 button on the monthly view would have to answer a different question. */}
             {viewMode === 'weekly' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Tip width={280} style={{ borderBottom: 'none', cursor: 'pointer' }} text="Stamps every shift on this week onto the same weekday next week, so next week ends up matching this one exactly. You see what would be overwritten before anything is written.">
+                <Tip width={280} style={{ borderBottom: 'none', cursor: 'pointer' }} text="Stamps every shift on this week onto the same weekday next week, so next week ends up matching this one. Leave and holiday markers stay on their own dates: this week's are not copied, and next week's are left as they are. You see what would be overwritten before anything is written.">
                   <button className="btn btn-ghost" style={{ fontSize: 12 }}
                     disabled={copyBusy || weekShiftCount === 0}
                     onClick={openCopyWeek}>
@@ -1815,6 +1861,21 @@ export default function Roster() {
                     <strong>{copyPlan.clearIds.length}</strong> shift{copyPlan.clearIds.length === 1 ? '' : 's'} next
                     week sit{copyPlan.clearIds.length === 1 ? 's' : ''} on a cell that is empty this week, so
                     {copyPlan.clearIds.length === 1 ? ' it is' : ' they are'} cleared and the two weeks match.
+                  </li>
+                )}
+                {copyPlan.markersNotCopied > 0 && (
+                  <li>
+                    <strong>{copyPlan.markersNotCopied}</strong> leave or holiday marker{copyPlan.markersNotCopied === 1 ? '' : 's'} on
+                    this week {copyPlan.markersNotCopied === 1 ? 'is' : 'are'} not copied, and next week keeps whatever it has on
+                    {copyPlan.markersNotCopied === 1 ? ' that day' : ' those days'}. Leave and holidays belong to their dates —
+                    copied forward, Generate from Roster would mark them as leave or a paid holiday on days people work.
+                  </li>
+                )}
+                {copyPlan.targetMarkersKept > 0 && (
+                  <li>
+                    <strong>{copyPlan.targetMarkersKept}</strong> leave or holiday marker{copyPlan.targetMarkersKept === 1 ? '' : 's'} already
+                    on next week {copyPlan.targetMarkersKept === 1 ? 'stays' : 'stay'} as {copyPlan.targetMarkersKept === 1 ? 'it is' : 'they are'} —
+                    nothing from this week replaces or clears {copyPlan.targetMarkersKept === 1 ? 'it' : 'them'}.
                   </li>
                 )}
                 {copyPlan.conflicts.length > 0 && (

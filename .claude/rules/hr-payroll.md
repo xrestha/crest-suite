@@ -392,6 +392,11 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
   must leave settled leavers out, or one row fails the statement. Inside a DEFINER body the INVOKER
   guard returns early, so a new DEFINER writer of `hr_attendance` calls `hr_pay_month_guard` per row
   itself.
+- **A sheet write the guard refuses is answered, never retried** (S798 ATTENDANCE-8, `payLockOf` /
+  `answerPayLock` in `AttendanceSheet.jsx`): no "press Save again". Finalized re-reads the run, so the
+  lock banner shows. Settled re-reads the staff list (Finalize made the leaver Resigned) and drops the
+  leaver's unsaved marks, since one of their rows refuses every other mark in its statement; the rest
+  can then be saved. Save's two upserts are judged apart: one may land while the other is refused.
 - **The parent-exists test that lets a client or period cascade through lives in the SECURITY
   DEFINER lookup, never in the INVOKER trigger**: an HR account's RLS view of `monthly_periods` can be
   empty, so an `EXISTS` there passes vacuously. Three INVOKER delete guards still test `clients` in
@@ -418,6 +423,10 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
 - **Clear Month** (S743) refuses when the period's run is finalized and when that read fails, and deletes
   `.in('employee_id', listed)`, never the whole period: a mid-month leaver's days are what Final
   Settlement reads.
+- **Month Summary's P + A + O + L + H is Total Days, every day marked** (S798 ATTENDANCE-9). A half
+  day is 0.5 in each of its two columns (worked half P; the other half A for a plain half day, L for
+  half-day leave). Unmarked is `unmarkedDaysFor` (`monthStatus.js`), the payroll strip's own count,
+  so the two never disagree; monthly staff show —.
 - **A shift's normal hours are not its length** (`hr_shift_types.regular_hours`, "Normal hrs", S742).
   `shiftRegularHours` / `shiftOvertimeHours` (`laborForecast.js`) are the one definition. NULL means
   the whole shift is normal time; never default it. Normal hours are CLOCK time, lunch included: on a
@@ -441,6 +450,10 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
   `split_shift_type` (INVOKER, one transaction) keeps the old type for the days before (renamed,
   inactive, `replaced_by` / `replaced_from`). A new writer of `hr_roster.shift_type_id` that copies
   rows follows `replaced_by` (Copy to Next Week's `shiftForDay`).
+- **Leave and holiday markers are dated, not weekly** (S798 ROSTER-10, `datedMarkerStatus` in
+  `attendanceFromRoster.js`, built from `rosterDayShape`'s branches). Copy to Next Week does not copy
+  this week's, and neither replaces nor clears next week's; the dialog counts both. A Day Off copies.
+  A new writer that copies roster rows forward follows the same rule.
 - **Import from machine** (S775): `attendanceImport.js` reads the file, `planImport`
   (`attendanceImportPlan.js`) alone decides what each day becomes, `AttendanceImportModal.jsx` is the
   dialog.
@@ -483,7 +496,14 @@ History: #s742-normal-hours, #s743-clear-month, #s749-roster-attendance-leave-ov
   day once per upsert; and leaves settled leavers out, reporting them as `settled`.
 - **`findApprovedLeaveGaps()`** splits `waiting` (no period yet: say so) from `unmarked` (period
   exists, days missing: actionable). Months before the client's earliest period are ignored. A failed
-  read returns the error, never an empty list.
+  read returns the error, never an empty list. A leaver settled in the current employment is left out
+  by the back-fill's own SQL test (S798 LEAVE-OT-HOLIDAYS-7: finalized settlement, last day on or
+  before the month's end and on or after `join_date`), or the banner never clears. Mark approved leave
+  names `settled` days, never "already marked".
+- **Approval re-reads `monthly_periods` when a day falls in a month the page has none for** (S798
+  LEAVE-OT-HOLIDAYS-6, `monthsWithoutPeriod`): a close can open that month mid-session, after its
+  back-fill ran. The re-read list feeds the snapshot, the write and the put-back; a failed re-read
+  approves nothing.
 - **Say what the reader can do, or that there is nothing to do.** A banner that asks for an
   impossible action trains people to ignore banners.
 - **`days` is derived by the database** (`hr_leave_requests_validate`): calendar days − public,
@@ -599,7 +619,9 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
   page showing historical rows resolves the names its list filtered out: fetch the unknown ids once,
   tracked in a ref. `rejected_by_target` and `cancelled` have no `admin_decided_by`; name the coworker
   who declined or the requester who withdrew.
-- Roster's board and publish loads are request-guarded. `hr_overtime_entries`, `hr_shift_types` and
+- Roster's board and publish loads are request-guarded. Copy Week and Publish are bounded
+  (`settleWithin`, S798 PAYROLL-8): a timed-out write says it could not confirm, and a copy then opens
+  next week as stored. Both are safe to repeat. `hr_overtime_entries`, `hr_shift_types` and
   `hr_shift_swap_requests` are audited; `hr_roster` deliberately is not (volume).
 
 Why: the roster is read as evidence of who works, by payroll, the forecast and the Staff app, so a

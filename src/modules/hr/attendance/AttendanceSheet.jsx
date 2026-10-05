@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { errorLine } from '../../../shared/errorText'
+import { errorLine, errorInfo } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -17,6 +17,20 @@ import AttendanceImportModal from './AttendanceImportModal'
 import { calcHours, shiftHours, shiftRegularHours, hasUnknownHours } from '../roster/laborForecast'
 import { nepalBs } from '../../../shared/nepalTime'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { unmarkedWindow, unmarkedDaysFor } from '../payroll/monthStatus'
+
+// The sheet's staff list. join_date / end_date: Import from machine marks no day before someone
+// joined or after they left. Read on load and again after a write meets a settled leaver.
+const EMPLOYEE_COLS = 'id, full_name, employee_code, pay_basis, status, department, join_date, end_date'
+
+// Which pay-month refusal a write met (hr_pay_month_guard, S791), or null. Neither can be retried
+// past, so a message for one must never say "press Save again" (S798, ATTENDANCE-8).
+function payLockOf(err) {
+  const m = err?.message || ''
+  if (/hr_month_finalized/i.test(m)) return 'finalized'
+  if (/hr_month_settled/i.test(m)) return 'settled'
+  return null
+}
 
 const STATUS_MAP = Object.fromEntries(ATTENDANCE_STATUSES.map(s => [s.key, s]))
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -337,6 +351,56 @@ export default function AttendanceSheet() {
     return `ok:${what}. The sheet could not be read back afterwards, so it is hidden until it loads.`
   }
 
+  // The staff list again, after a write met a settled leaver. Finalize makes them Resigned (or
+  // Terminated, or Inactive), so they drop out of active/probation. Returns who left the sheet, or
+  // null when the read failed.
+  async function refreshEmployees() {
+    const { data, error } = await scopedFrom('hr_employees', EMPLOYEE_COLS).in('status', ['active', 'probation']).order('full_name')
+    if (error) return null
+    const next = data || []
+    const keep = new Set(next.map(e => e.id))
+    setEmployees(next)
+    setSelectedEmployeeId(prev => (keep.has(prev) ? prev : next[0]?.id || ''))
+    return employees.filter(e => !keep.has(e.id))
+  }
+
+  // A write the pay-month guard refused (S798, ATTENDANCE-8). The sheet loaded before payroll was
+  // finalized, or before a leaver was settled, in another tab, and used to answer "press Save again"
+  // over a lock no retry passes, while staying editable. `lead` says what did not happen.
+  //   finalized → the run is re-read, which puts the lock banner up. A Save's marks stay on screen.
+  //   settled   → the staff list is re-read, so the leaver leaves the sheet, and their unsaved marks
+  //               are dropped: one of their rows refused every other unsaved mark with it. The rest
+  //               can then be saved, so that retry is offered (`pending`, a Save's refused keys), or
+  //               the caller's own `retry` sentence.
+  // `drop` is passed through to the reload for cells the write settled either way.
+  async function answerPayLock({ kind, lead, error, pending = null, retry = '', drop }) {
+    const { detail } = errorInfo(error, 'operator')
+    const fine = detail ? ` (${detail})` : ''
+    if (kind === 'finalized') {
+      await loadAttendance(period.id, { carry: true, drop })
+      const kept = pending?.length ? ' What you entered is still on screen, but it cannot be saved while the run is finalized.' : ''
+      setSavedMsg(`error:${lead} Payroll for ${periodLabel} was finalized after this sheet was opened, so its attendance is now locked.${kept} Reopen the payroll run first if the month really needs correcting.${fine}`)
+      return
+    }
+    const gone = await refreshEmployees()
+    if (!gone || gone.length === 0) {
+      setSavedMsg(`error:${lead} ` + errorLine(error) + ' Reload the page to see who is still on this sheet.')
+      return
+    }
+    const goneIds = new Set(gone.map(e => e.id))
+    const isGone = k => goneIds.has(splitCellKey(k).employeeId)
+    const lost = unsaved.filter(isGone).length
+    await loadAttendance(period.id, { carry: true, drop: k => isGone(k) || (drop ? drop(k) : false) })
+    const one = gone.length === 1
+    const names = gone.map(e => e.full_name).join(', ')
+    const dropped = lost ? ` Their ${lost} unsaved mark${lost === 1 ? ' was' : 's were'} dropped — nothing pays a day in a month their settlement already paid.` : ''
+    const left = pending ? pending.filter(k => !isGone(k)) : null
+    const next = left
+      ? (left.length ? ` ${describeChanges(left)} for everyone else ${left.length === 1 ? 'is' : 'are'} still on screen, not saved — press Save again.` : '')
+      : (retry ? ` ${retry}` : '')
+    setSavedMsg(`error:${lead} ${names} ${one ? 'is' : 'are'} no longer on this sheet: ${one ? 'their Final Settlement was' : 'their Final Settlements were'} finalized after it was opened.${dropped}${next}${fine}`)
+  }
+
   function applyPeriod(p) {
     setPeriod(p)
     const today = getBsToday()
@@ -351,9 +415,7 @@ export default function AttendanceSheet() {
       const [pRes, eRes] = await Promise.all([
         scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-        // join_date / end_date: Import from machine marks no day before someone joined or after they left.
-        scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, status, department, join_date, end_date')
-          .in('status', ['active', 'probation']).order('full_name'),
+        scopedFrom('hr_employees', EMPLOYEE_COLS).in('status', ['active', 'probation']).order('full_name'),
       ])
       // A failed read is not "No active employees" or "No period found" (S749) — both of those
       // send the reader to go and create something that already exists.
@@ -456,6 +518,8 @@ export default function AttendanceSheet() {
     if (error) {
       // The cell was cleared optimistically; put it back so the sheet shows what is stored.
       if (before) setRecords(m => ({ ...m, [key]: before }))
+      const lock = payLockOf(error)
+      if (lock) { await answerPayLock({ kind: lock, lead: `Day ${day} was not cleared.`, error }); return }
       setSavedMsg(`error:Day ${day} may not have been cleared — reload to see what is stored. ` + errorLine(error))
       return
     }
@@ -631,6 +695,27 @@ export default function AttendanceSheet() {
       first.length ? scopedUpsert('hr_attendance', first.map(rowFor), { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true }) : none,
     ])
     const error = editRes.error || firstRes.error
+    const lockErr = [editRes.error, firstRes.error].find(e => payLockOf(e))
+    if (lockErr) {
+      // The guard refuses a whole statement, so each half either landed in full or not at all. The
+      // other half may have gone in: a settled leaver's row refuses only the statement it sits in.
+      const refused = [...(editRes.error ? edits : []), ...(firstRes.error ? first : [])]
+      const refusedSet = new Set(refused)
+      const landedFirst = new Set((firstRes.data || []).map(r => `${r.employee_id}:${r.bs_day}`))
+      const keptOut = !firstRes.error && Array.isArray(firstRes.data) ? first.filter(k => !landedFirst.has(k)) : []
+      const keptOutSet = new Set(keptOut)
+      const landed = keys.filter(k => !refusedSet.has(k) && !keptOutSet.has(k))
+      setImportFlags(f => {
+        const next = { ...f }
+        landed.forEach(k => { delete next[k] })
+        return next
+      })
+      const notSaved = `${describeChanges(refused)} ${refused.length === 1 ? 'was' : 'were'} not saved.`
+      const lead = (landed.length ? `Saved ${describeChanges(landed)}, but ${notSaved.charAt(0).toLowerCase()}${notSaved.slice(1)}` : notSaved)
+        + (keptOut.length ? ` ${keptOut.length} day${keptOut.length === 1 ? ' was' : 's were'} marked from another screen meanwhile and left as stored.` : '')
+      await answerPayLock({ kind: payLockOf(lockErr), lead, error: lockErr, pending: refused, drop: k => keptOutSet.has(k) })
+      setSaving(false); return
+    }
     if (error) { setSavedMsg(`error:${describeChanges(keys)} may not have saved. What you entered is still on screen — press Save again (saving twice is safe). ` + errorLine(error)); setSaving(false); return }
     // A flagged day that has been saved was a decision: the reader fixed it or chose Save anyway.
     setImportFlags(f => {
@@ -716,7 +801,12 @@ export default function AttendanceSheet() {
     // leaver's days are what Final Settlement reads.
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
       .in('employee_id', employees.map(e => e.id))
-    if (error) { setSavedMsg(`error:Day ${selectedDay} may not have been cleared — reload to see what is stored. ` + errorLine(error)); setSaving(false); return }
+    if (error) {
+      const lock = payLockOf(error)
+      if (lock) await answerPayLock({ kind: lock, lead: `Day ${selectedDay} was not cleared.`, error, retry: 'Clear the day again to clear it for everyone else.' })
+      else setSavedMsg(`error:Day ${selectedDay} may not have been cleared — reload to see what is stored. ` + errorLine(error))
+      setSaving(false); return
+    }
     const listed = new Set(employees.map(e => e.id))
     const reread = await loadAttendance(period.id, { carry: true, drop: key => { const k = splitCellKey(key); return k.day === selectedDay && listed.has(k.employeeId) } })
     setSavedMsg(reread === false ? landedButUnread(`Cleared Day ${selectedDay}`) : `ok:Cleared Day ${selectedDay}`)
@@ -764,7 +854,12 @@ export default function AttendanceSheet() {
     // kept rather than overwritten; RETURNING lists only the rows that went in.
     const { data: written, error } = await scopedUpsert('hr_attendance', plan.rows, { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true })
     setPendingGenerate(null)
-    if (error) { setSavedMsg('error:The roster days may not have been written — reload to see what is stored, then generate again (it never overwrites a day that already has a mark). ' + errorLine(error)); setGenerating(false); return }
+    if (error) {
+      const lock = payLockOf(error)
+      if (lock) await answerPayLock({ kind: lock, lead: 'Nothing was generated.', error, retry: 'Generate again for everyone else.' })
+      else setSavedMsg('error:The roster days may not have been written — reload to see what is stored, then generate again (it never overwrites a day that already has a mark). ' + errorLine(error))
+      setGenerating(false); return
+    }
     const made = written?.length ?? plan.rows.length
     const kept = plan.rows.length - made
     const done = `Generated ${made} entr${made === 1 ? 'y' : 'ies'} from roster`
@@ -795,7 +890,12 @@ export default function AttendanceSheet() {
     setConfirmClear(null)
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
-    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
+    if (error) {
+      const lock = payLockOf(error)
+      if (lock) await answerPayLock({ kind: lock, lead: `${name}'s records were not cleared.`, error })
+      else setSavedMsg('error:' + errorLine(error))
+      setSaving(false); return
+    }
     const reread = await loadAttendance(period.id, { carry: true, drop: key => splitCellKey(key).employeeId === empId })
     const done = `Cleared ${name}'s records for ${periodLabel}`
     setSavedMsg(reread === false ? landedButUnread(done) : `ok:${done}`)
@@ -834,7 +934,12 @@ export default function AttendanceSheet() {
     setConfirmClear(null)
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).in('employee_id', employees.map(e => e.id))
-    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
+    if (error) {
+      const lock = payLockOf(error)
+      if (lock) await answerPayLock({ kind: lock, lead: `${periodLabel} was not cleared.`, error, retry: 'Clear Month again to clear it for everyone else.' })
+      else setSavedMsg('error:' + errorLine(error))
+      setSaving(false); return
+    }
     const listed = new Set(employees.map(e => e.id))
     const reread = await loadAttendance(period.id, { carry: true, drop: key => listed.has(splitCellKey(key).employeeId) })
     const done = `Cleared ${periodLabel} for all ${employees.length} listed staff`
@@ -910,6 +1015,9 @@ export default function AttendanceSheet() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [unsaved.length])
 
+  // How far into the month a blank day is owed (to today in the running month), for Unmarked.
+  const unmarkedSpan = useMemo(() => (period ? unmarkedWindow(period) : null), [period])
+
   function summaryFor(emp) {
     const counts = {
       present: 0, half_day: 0, absent: 0, paid_leave: 0, unpaid_leave: 0,
@@ -927,7 +1035,19 @@ export default function AttendanceSheet() {
     // 0.1-type fractions summing to 9.600000000000001) rather than displaying/exporting it raw.
     otHours     = Math.round(otHours * 100) / 100
     hoursWorked = Math.round(hoursWorked * 100) / 100
-    return { counts, otHours, hoursWorked }
+    // Every marked day lands in exactly one of P, A, O, L or H (S798, ATTENDANCE-9), so they add up
+    // to the days marked. A half day splits: the worked half is P, the other half A (a plain half
+    // day, which payroll docks 0.5) or L (half-day leave). Total Days used to be P + A + O, which
+    // left out leave and holidays, so a fully marked month could never read as one.
+    const c = counts
+    const present = c.present + (c.half_day + c.half_paid_leave + c.half_unpaid_leave) * 0.5
+    const absent  = c.absent + c.half_day * 0.5
+    const leave   = c.paid_leave + c.unpaid_leave + (c.half_paid_leave + c.half_unpaid_leave) * 0.5
+    const marked  = Object.values(c).reduce((a, n) => a + n, 0)
+    // Daily and hourly staff only (null for monthly, whose blank day is paid): the same count the
+    // payroll month strip makes, through the same helper, over what is on screen now.
+    const unmarked = unmarkedSpan ? unmarkedDaysFor(emp, unmarkedSpan, d => !!cellFor(emp.id, d)) : null
+    return { counts, otHours, hoursWorked, present, absent, off: c.weekly_off, leave, holiday: c.holiday, marked, unmarked }
   }
 
   async function exportExcel() {
@@ -945,6 +1065,10 @@ export default function AttendanceSheet() {
       row['Off'] = s.counts.weekly_off
       row['Paid Leave'] = s.counts.paid_leave + s.counts.half_paid_leave * 0.5
       row['Unpaid Leave'] = s.counts.unpaid_leave + s.counts.half_unpaid_leave * 0.5
+      row['Holiday'] = s.holiday
+      row['Total Days'] = s.marked
+      // Blank for monthly staff, whose unmarked day is paid in full.
+      row['Unmarked'] = s.unmarked ?? ''
       row['OT Hours'] = s.otHours
       if (emp.pay_basis === 'hourly') row['Hours Worked'] = s.hoursWorked
       return row
@@ -1548,10 +1672,16 @@ export default function AttendanceSheet() {
                       <Tip text="Present days for the month — half-days and half-day leave (paid or unpaid) count as 0.5, matching how Payroll counts present days." width={250}>P</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Absent days for the month." width={180}>A</Tip>
+                      <Tip text="Absent days for the month. A half day counts 0.5 here (the half not worked, which payroll docks) and 0.5 under P." width={240}>A</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Off days for the month — marked explicitly per employee, either directly or via Generate from Roster." width={220}>O</Tip>
+                    </th>
+                    <th style={{ textAlign: 'right' }}>
+                      <Tip text="Leave days, paid and unpaid together (the Excel export splits them). Half-day leave counts 0.5 here and 0.5 under P." width={240}>L</Tip>
+                    </th>
+                    <th style={{ textAlign: 'right' }}>
+                      <Tip text="Public holidays marked Holiday. A holiday pays daily and hourly staff for the day; monthly pay does not move." width={240}>H</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
@@ -1559,17 +1689,16 @@ export default function AttendanceSheet() {
                     <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>
                       {/* Days only — OT is hours and stays in its own column beside this one.
                           Adding the two together produced a figure in no unit at all. */}
-                      <Tip text="Total days accounted for — P + A + O. Overtime is not included: it's hours, not days, and has its own column." width={240}>Total Days</Tip>
+                      <Tip text="Every marked day — P + A + O + L + H. Compare it with the month's length to see who still has blank days. Overtime is not included: it's hours, not days, and has its own column." width={260}>Total Days</Tip>
+                    </th>
+                    <th style={{ textAlign: 'right' }}>
+                      <Tip text="Daily and hourly staff only: days they were employed, up to today, with no mark at all. Payroll pays them nothing for a blank day, so mark every day they worked. Monthly staff show —, because a blank day is paid in full for them. Counts what is on screen, saved or not." width={280}>Unmarked</Tip>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {employees.map(emp => {
                     const s = summaryFor(emp)
-                    const pVal  = s.counts.present + s.counts.half_day * 0.5 + s.counts.half_paid_leave * 0.5 + s.counts.half_unpaid_leave * 0.5
-                    const aVal  = s.counts.absent
-                    const oVal  = s.counts.weekly_off
-                    const otVal = s.otHours
                     return (
                       <tr key={emp.id}>
                         <td style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
@@ -1586,11 +1715,22 @@ export default function AttendanceSheet() {
                             </td>
                           )
                         })}
-                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green-text)', fontWeight: 600 }}>{pVal || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{aVal || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{oVal || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{otVal || 0}</td>
-                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-text1)', fontWeight: 700 }}>{pVal + aVal + oVal || 0}</td>
+                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green-text)', fontWeight: 600 }}>{s.present || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{s.absent || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.off || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.leave || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.holiday || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{s.otHours || 0}</td>
+                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-text1)', fontWeight: 700 }}>
+                          {s.marked}<span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}> / {dayCount}</span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {s.unmarked == null
+                            ? <span style={{ color: 'var(--theme-text3)' }}>—</span>
+                            : s.unmarked > 0
+                              ? <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>△ {s.unmarked}</span>
+                              : <span style={{ color: 'var(--theme-text2)' }}>0</span>}
+                        </td>
                       </tr>
                     )
                   })}
@@ -1599,7 +1739,7 @@ export default function AttendanceSheet() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            P column counts present days (half-days as 0.5). O counts explicit Off days. Nothing is marked off automatically — mark each staff member's off days directly, or via Generate from Roster. Payroll reads this sheet: marked absences and unpaid leave are deducted, daily and hourly staff are paid for the days and hours marked here, and overtime is paid at 1.5× unless an approved Overtime entry covers that day. Once payroll for a month is finalized, its sheet is locked.
+            P, A, O, L and H add up to Total Days, every day marked (a half day is 0.5 in each of its two columns). O counts explicit Off days. Unmarked counts the blank days that pay daily and hourly staff nothing. Nothing is marked off automatically — mark each staff member's off days directly, or via Generate from Roster. Payroll reads this sheet: marked absences and unpaid leave are deducted, daily and hourly staff are paid for the days and hours marked here, and overtime is paid at 1.5× unless an approved Overtime entry covers that day. Once payroll for a month is finalized, its sheet is locked.
           </div>
         </div>
       )}

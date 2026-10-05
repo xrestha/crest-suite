@@ -8,7 +8,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange, leaveDayCount, publicHolidayKeys } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
-import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun, leaveDaysByPeriod, planLeaveRevert, LEAVE_MARK_STATUSES } from './leaveRules'
+import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun, leaveDaysByPeriod, monthsWithoutPeriod, planLeaveRevert, LEAVE_MARK_STATUSES } from './leaveRules'
 import { backfillApprovedLeave, findApprovedLeaveGaps } from './backfillApprovedLeave'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -138,8 +138,9 @@ export default function LeaveManagement() {
     const results = await Promise.all([
       // Every status, not just active/probation — the Balances tab filters in JS so it can show a
       // leaver on request, while every other tab here still works from the active list below.
-      // `email`: the second half of the own-record test (useIsOwnEmployee).
-      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, email').order('full_name'),
+      // `email`: the second half of the own-record test (useIsOwnEmployee). `join_date`: the gap
+      // check's settled-leaver test, which tells a rehire from the leaver they were.
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, email, join_date').order('full_name'),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status'),
       // Paged: this is the client's ENTIRE request history and the source of the Balances tab, so
       // the silent 1000-row cap would quietly overstate an employee's remaining leave once the
@@ -165,7 +166,7 @@ export default function LeaveManagement() {
     setLoading(false)
     // After the page is usable, not before it: this is a reconciliation, and a slow extra read
     // must not hold up the queue someone opened the page to work through.
-    setGaps(await findApprovedLeaveGaps({ clientId, requests: reqs || [], periods: pr || [] }))
+    setGaps(await findApprovedLeaveGaps({ clientId, requests: reqs || [], periods: pr || [], settlements: setl || [], employees: emps || [] }))
   }
 
   // Write the days for every month that HAS a period and is still missing them. Only reachable
@@ -176,19 +177,23 @@ export default function LeaveManagement() {
     const open = (gaps?.unmarked || []).filter(u => !finalizedPeriodIds.has(u.period.id))
     if (!open.length) return
     setFilling(true); setMsg('')
-    let filled = 0, skipped = 0
+    let filled = 0, skipped = 0, settled = 0
     for (const u of open) {
       const r = await backfillApprovedLeave({ clientId, period: u.period })
       if (r.error) {
         setMsg(`error:${filled ? `${filled} day${filled === 1 ? '' : 's'} were marked, but t` : 'T'}he rest could not be — try again. ` + errorText(r.error, 'operator'))
         setFilling(false); await load(); return
       }
-      filled += r.filled; skipped += r.skipped
+      filled += r.filled; skipped += r.skipped; settled += r.settled
     }
     await load()
+    // A settled leaver's days are left out by the back-fill (S791) and named, never passed off as
+    // "already marked" (S798, LEAVE-OT-HOLIDAYS-7): they have no row on the sheet at all.
+    const left = settled ? ` ${settled} day${settled === 1 ? '' : 's'} of leave belonging to staff whose Final Settlement already paid that month ${settled === 1 ? 'was' : 'were'} left out — nothing pays them, so there is nothing to mark.` : ''
+    const kept = skipped ? `${skipped} day${skipped === 1 ? '' : 's'} already had a mark and ${skipped === 1 ? 'was' : 'were'} left alone.` : ''
     setMsg(filled
-      ? `ok:${filled} day${filled === 1 ? '' : 's'} marked on the attendance sheet${skipped ? ` (${skipped} already had a mark and were left alone)` : ''}.`
-      : 'ok:Nothing to mark — those days already carry an attendance mark.')
+      ? `ok:${filled} day${filled === 1 ? '' : 's'} marked on the attendance sheet.${kept ? ` ${kept}` : ''}${left}`
+      : `ok:Nothing was marked.${kept ? ` ${kept}` : ''}${left}`)
     setFilling(false)
   }
 
@@ -224,9 +229,9 @@ export default function LeaveManagement() {
   // Write (or revert) the hr_attendance rows for a request's working days. `status` already
   // reflects half- vs full-day (the caller resolves that) — a half-day request is always a
   // single day, so this naturally writes just the one row.
-  async function syncAttendance(req, status) {
+  async function syncAttendance(req, status, periodList) {
     const periodMap = {}
-    periods.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
+    periodList.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
     const days = workingDaysInRange(req.start_date, req.end_date)
     const rows = []
     const missing = []
@@ -285,8 +290,8 @@ export default function LeaveManagement() {
   // approval can put them back. The columns are the ones syncAttendance writes. One employee's days
   // in at most a year's periods: a few hundred rows, under the 1000-row cap.
   const LEAVE_DAY_COLS = 'period_id, bs_day, status, hours_worked, ot_hours, start_time, end_time, break_minutes'
-  async function readLeaveDays(req) {
-    const groups = leaveDaysByPeriod(req, periods)
+  async function readLeaveDays(req, periodList) {
+    const groups = leaveDaysByPeriod(req, periodList)
     const results = await Promise.all(groups.map(({ periodId, days }) =>
       scopedFrom('hr_attendance', LEAVE_DAY_COLS)
         .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', days.map(d => d.bsDay))))
@@ -363,10 +368,21 @@ export default function LeaveManagement() {
     const status = type.paid
       ? (isHalf ? 'half_paid_leave' : 'paid_leave')
       : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
+    // A month this page has no period for may have been created since it loaded (S798,
+    // LEAVE-OT-HOLIDAYS-6): at month end a close opens the next month while approvals go on. Its
+    // back-fill has already run, so these days would be written by nothing, under a message saying
+    // there was nothing to do. Re-read before deciding they must wait; the list feeds the snapshot,
+    // the write and the put-back alike.
+    let periodList = periods
+    if (monthsWithoutPeriod(req, periods).length > 0) {
+      const { data: pr, error: prErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+      if (prErr) return { ok: false, text: 'Could not check which months exist yet, so nothing was changed — try again. ' + errorLine(prErr) }
+      periodList = pr || []
+    }
     // What the days hold now, so a refused approval can put them back (S798, LEAVE-OT-HOLIDAYS-3).
-    const before = await readLeaveDays(req)
+    const before = await readLeaveDays(req, periodList)
     if (before.error) return { ok: false, text: 'Could not read the attendance days this leave covers, so nothing was changed — try again. ' + errorLine(before.error) }
-    const { missing, error: syncErr } = await syncAttendance(req, status)
+    const { missing, error: syncErr } = await syncAttendance(req, status, periodList)
     if (syncErr) return { ok: false, text: 'The leave days could not be marked on the attendance sheet, so the request was NOT approved. Try again. ' + errorLine(syncErr) }
     const { data: apprRows, error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id).select('id')
     if (apprErr || changedNothing(apprRows, apprErr)) {

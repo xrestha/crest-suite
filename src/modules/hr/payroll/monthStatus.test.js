@@ -1,4 +1,4 @@
-import { attendanceGaps, pickStatusPeriod, ssfDeadline } from './monthStatus'
+import { attendanceGaps, pickStatusPeriod, ssfDeadline, unmarkedDaysFor, unmarkedWindow } from './monthStatus'
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 
 const bhadra = { id: 'p5', bs_year: 2083, bs_month: 5 }
@@ -36,6 +36,30 @@ describe('attendanceGaps', () => {
     const r = attendanceGaps({ period: bhadra, employees: [{ id: 'd', pay_basis: 'daily' }], attendance: [], today: { year: 2083, month: 6, day: 2 } })
     expect(r.gaps).toBe(r.cutoff)
     expect(r.cutoff).toBeGreaterThanOrEqual(29)
+  })
+})
+
+describe('unmarkedDaysFor', () => {
+  const today = { year: 2083, month: 5, day: 4 }
+  const window = unmarkedWindow(bhadra, today)
+
+  it('is null for monthly staff, whose blank day is paid', () => {
+    expect(unmarkedDaysFor({ id: 'm', pay_basis: 'monthly' }, window, () => false)).toBeNull()
+  })
+
+  it('counts days employed, to today, with no mark', () => {
+    const marked = new Set([1, 3])
+    expect(unmarkedDaysFor({ id: 'd', pay_basis: 'daily' }, window, d => marked.has(d))).toBe(2)
+    expect(unmarkedDaysFor({ id: 'h', pay_basis: 'hourly', join_date: ad(3) }, window, () => false)).toBe(2)
+  })
+
+  it('agrees with attendanceGaps, which counts through it', () => {
+    const employees = [{ id: 'a', pay_basis: 'daily' }, { id: 'b', pay_basis: 'hourly', end_date: ad(2) }]
+    const attendance = [{ employee_id: 'a', bs_day: 2 }]
+    const marked = new Set(attendance.map(r => `${r.employee_id}:${r.bs_day}`))
+    const each = employees.reduce((n, e) => n + unmarkedDaysFor(e, window, d => marked.has(`${e.id}:${d}`)), 0)
+    expect(each).toBe(attendanceGaps({ period: bhadra, employees, attendance, today }).gaps)
+    expect(each).toBe(5)
   })
 })
 

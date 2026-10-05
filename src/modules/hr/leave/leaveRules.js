@@ -88,6 +88,22 @@ export function leaveDaysByPeriod(req, periods) {
 }
 
 /**
+ * The months a request's days fall in that `periods` has no row for, in day order (S798,
+ * LEAVE-OT-HOLIDAYS-6). Non-empty means the page's list may be stale: the month can have been created
+ * since the page loaded, so approval re-reads the periods before it decides those days must wait.
+ * @returns {Array<{ bsYear: number, bsMonth: number }>}
+ */
+export function monthsWithoutPeriod(req, periods) {
+  const have = new Set((periods || []).map(p => `${p.bs_year}:${p.bs_month}`))
+  const out = new Map()
+  for (const d of workingDaysInRange(req.start_date, req.end_date)) {
+    const k = `${d.bsYear}:${d.bsMonth}`
+    if (!have.has(k) && !out.has(k)) out.set(k, { bsYear: d.bsYear, bsMonth: d.bsMonth })
+  }
+  return [...out.values()]
+}
+
+/**
  * What cancelling or rejecting an APPROVED request does to its days (S798, LEAVE-OT-HOLIDAYS-4). Only
  * a day still marked as leave changes: it is cleared, or marked Holiday when that day is a public
  * holiday now. The old revert skipped every day on today's calendar, so a holiday added after the

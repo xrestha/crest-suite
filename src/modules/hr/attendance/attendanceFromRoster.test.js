@@ -1,4 +1,4 @@
-import { buildAttendanceFromRoster, planAttendanceFromRoster, rosterDayShape, zeroHourStatus } from './attendanceFromRoster'
+import { buildAttendanceFromRoster, datedMarkerStatus, planAttendanceFromRoster, rosterDayShape, zeroHourStatus } from './attendanceFromRoster'
 
 describe('buildAttendanceFromRoster', () => {
   const shiftTypesById = {
@@ -224,5 +224,34 @@ describe('zeroHourStatus', () => {
     ['Training',          'weekly_off'],
   ])('%s → %s', (name, status) => {
     expect(zeroHourStatus(name)).toBe(status)
+  })
+})
+
+describe('datedMarkerStatus', () => {
+  it('names a zero-hour leave or holiday marker by the status Generate would write', () => {
+    expect(datedMarkerStatus({ name: 'LEAVE', hours: 0 })).toBe('unpaid_leave')
+    expect(datedMarkerStatus({ name: 'Paid Sick Leave', hours: 0 })).toBe('paid_leave')
+    expect(datedMarkerStatus({ name: 'Public Holiday', hours: 0 })).toBe('holiday')
+  })
+
+  it('is null for a Day Off, which is a weekly pattern and copies', () => {
+    expect(datedMarkerStatus({ name: 'Day Off', hours: 0 })).toBeNull()
+    expect(datedMarkerStatus({ name: 'Training', hours: 0 })).toBeNull()
+    expect(datedMarkerStatus(null)).toBeNull()
+  })
+
+  it('is null for a worked day, whatever its name', () => {
+    expect(datedMarkerStatus({ name: 'Holiday Duty', hours: 8, start_time: '10:00' })).toBeNull()
+    expect(datedMarkerStatus({ name: 'Leave cover', hours: 6 })).toBeNull()
+    // The default "Split": a working shift with unknown hours is an 8-hour day, never a marker.
+    expect(datedMarkerStatus({ name: 'Split', hours: null })).toBeNull()
+  })
+
+  it('agrees with rosterDayShape on which cells are leave or holiday markers', () => {
+    for (const shift of [{ name: 'LEAVE', hours: 0 }, { name: 'Holiday', hours: 0 }, { name: 'Day Off', hours: 0 }, { name: 'Split', hours: null }, { name: 'Morning', hours: 8 }]) {
+      const shape = rosterDayShape(shift)
+      const marker = shape.startsWith('marker|') && !shape.startsWith('marker|weekly_off')
+      expect(datedMarkerStatus(shift) !== null).toBe(marker)
+    }
   })
 })

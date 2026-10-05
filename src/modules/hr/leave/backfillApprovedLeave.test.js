@@ -172,4 +172,51 @@ describe('findApprovedLeaveGaps', () => {
     expect(r.error).toMatchObject({ code: '42501' })
     expect(r.unmarked).toEqual([])
   })
+
+  // S798 LEAVE-OT-HOLIDAYS-7: Maya was settled with Bhadra 31 as her last day, and her Ashwin leave
+  // was never cancelled. The back-fill leaves her out, so the gap check must too.
+  test('a leaver settled in the current employment is not a gap — the back-fill never marks them', async () => {
+    mockTables({ hr_attendance: { data: [], error: null } })
+    const r = await findApprovedLeaveGaps({
+      clientId: 'c1',
+      requests: [{ ...REQ, status: 'approved' }],
+      periods: [...PERIODS, ASHWIN],
+      settlements: [{ employee_id: 'e1', status: 'finalized', last_working_date: '2026-09-16' }],
+      employees: [{ id: 'e1', join_date: '2024-01-01' }],
+    })
+    expect(r).toEqual({ waiting: [], unmarked: [], error: null })
+    // And no leave for a month that does not exist yet waits on a back-fill that will skip it.
+    const later = await findApprovedLeaveGaps({
+      clientId: 'c1',
+      requests: [{ ...REQ, status: 'approved' }],
+      periods: PERIODS,
+      settlements: [{ employee_id: 'e1', status: 'finalized', last_working_date: '2026-09-16' }],
+      employees: [{ id: 'e1', join_date: '2024-01-01' }],
+    })
+    expect(later.waiting).toEqual([])
+  })
+
+  test('a rehire (joined after the settled last day) still counts, as the back-fill marks them', async () => {
+    mockTables({ hr_attendance: { data: [], error: null } })
+    const r = await findApprovedLeaveGaps({
+      clientId: 'c1',
+      requests: [{ ...REQ, status: 'approved' }],
+      periods: [...PERIODS, ASHWIN],
+      settlements: [{ employee_id: 'e1', status: 'finalized', last_working_date: '2026-03-01' }],
+      employees: [{ id: 'e1', join_date: '2026-06-01' }],
+    })
+    expect(r.unmarked).toEqual([{ period: ASHWIN, days: 2 }])
+  })
+
+  test('a settlement whose last day is after the month does not leave the month out', async () => {
+    mockTables({ hr_attendance: { data: [], error: null } })
+    const r = await findApprovedLeaveGaps({
+      clientId: 'c1',
+      requests: [{ ...REQ, status: 'approved' }],
+      periods: [...PERIODS, ASHWIN],
+      settlements: [{ employee_id: 'e1', status: 'finalized', last_working_date: '2026-11-30' }],
+      employees: [{ id: 'e1', join_date: null }],
+    })
+    expect(r.unmarked).toEqual([{ period: ASHWIN, days: 2 }])
+  })
 })

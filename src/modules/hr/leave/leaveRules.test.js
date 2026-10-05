@@ -1,4 +1,4 @@
-import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun, leaveDaysByPeriod, planLeaveRevert } from './leaveRules'
+import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun, leaveDaysByPeriod, monthsWithoutPeriod, planLeaveRevert } from './leaveRules'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 
 const ad = (y, m, d) => formatAd(bsToAd(y, m, d))
@@ -67,6 +67,20 @@ describe('leaveDaysByPeriod', () => {
     const r = req({ start_date: ad(2083, 6, last - 1), end_date: ad(2083, 7, 2) })
     const groups = leaveDaysByPeriod(r, [{ id: 'p6', bs_year: 2083, bs_month: 6 }])
     expect(groups.map(g => ({ periodId: g.periodId, days: g.days.map(d => d.bsDay) }))).toEqual([{ periodId: 'p6', days: [last - 1, last] }])
+  })
+})
+
+// S798 (LEAVE-OT-HOLIDAYS-6): the page loaded on Ashwin 30; Kartik was opened meanwhile.
+describe('monthsWithoutPeriod', () => {
+  it('names each month the request touches that the list has no period for, once', () => {
+    const last = daysInBsMonth(2083, 6)
+    const r = req({ start_date: ad(2083, 6, last - 1), end_date: ad(2083, 7, 3) })
+    expect(monthsWithoutPeriod(r, [{ id: 'p6', bs_year: 2083, bs_month: 6 }])).toEqual([{ bsYear: 2083, bsMonth: 7 }])
+  })
+
+  it('is empty when every month has a period', () => {
+    const r = req({ start_date: ad(2083, 7, 5), end_date: ad(2083, 7, 8) })
+    expect(monthsWithoutPeriod(r, [{ id: 'p7', bs_year: 2083, bs_month: 7 }])).toEqual([])
   })
 })
 
