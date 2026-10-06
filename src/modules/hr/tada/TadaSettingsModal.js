@@ -3,11 +3,6 @@ import { supabase } from '../../../supabaseClient'
 import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
-  outline: 'none', fontFamily: 'inherit',
-}
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const sectionLbl = { ...lbl, fontWeight: 700, fontSize: 12, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }
 const VEHICLE_TYPES = [
@@ -38,7 +33,7 @@ function OptionListEditor({ label, hint, placeholder, addLabel, options, setOpti
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input
           aria-label={addLabel}
-          style={{ ...inp, flex: 1 }}
+          className="form-input" style={{ flex: 1 }}
           value={newOption}
           onChange={e => setNewOption(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add()}
@@ -134,7 +129,7 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
                 <label style={lbl} htmlFor={`tada-rate-${v.key}`}>{v.label} (NPR)</label>
                 <input
                   id={`tada-rate-${v.key}`}
-                  style={{ ...inp, width: '100%' }} type="number" min="0" step="0.5" placeholder="—"
+                  className="form-input" type="number" min="0" step="0.5" placeholder="—"
                   value={rates[v.key]} onChange={e => setRates(r => ({ ...r, [v.key]: e.target.value }))}
                 />
               </div>

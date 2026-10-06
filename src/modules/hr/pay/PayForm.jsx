@@ -33,11 +33,6 @@ const TABS = [
   { key: 'bank',   label: 'Bank / SSF' },
 ]
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
-  padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%',
-  fontFamily: 'inherit',
-}
 const lbl  = { fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
 const row  = { display: 'flex', gap: 12, flexWrap: 'wrap' }
 const col  = { flex: 1, display: 'flex', flexDirection: 'column' }
@@ -254,7 +249,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                   <label style={lbl} htmlFor="pf-pay-basis">
                     <Tip text="Monthly — fixed salary each month. Daily / Hourly — actual pay is computed from attendance records in Payroll." width={300}>Pay Basis</Tip>
                   </label>
-                  <select id="pf-pay-basis" style={inp} value={form.pay_basis || 'monthly'} onChange={e => set('pay_basis', e.target.value)}>
+                  <select id="pf-pay-basis" className="form-select" style={{ width: '100%' }} value={form.pay_basis || 'monthly'} onChange={e => set('pay_basis', e.target.value)}>
                     {PAY_BASES.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
                   </select>
                 </div>
@@ -268,23 +263,23 @@ export default function PayForm({ employee, onSave, onClose }) {
                       {isMonthly ? 'Basic Salary (NPR / month)' : `Rate (NPR / ${payUnit})`}
                     </Tip>
                   </label>
-                  <input id="pf-basic-salary" type="number" min="0" style={inp}
+                  <input id="pf-basic-salary" type="number" min="0" className="form-input"
                     placeholder={isMonthly ? 'e.g. 25000' : payUnit === 'day' ? 'e.g. 800' : 'e.g. 110'}
                     value={form.basic_salary}
                     onChange={e => set('basic_salary', e.target.value)} />
                   {basicBelowMin && (
                     <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
-                      ⚠ Below minimum basic — Nepal requires at least NPR {MIN_BASIC_MONTHLY.toLocaleString('en-IN')} / month.
+                      ⚠ Below minimum basic — Nepal requires at least NPR {fmt(MIN_BASIC_MONTHLY)} / month.
                     </span>
                   )}
                   {rateBelowMin && (
                     <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
-                      ⚠ Below minimum wage — Nepal requires at least NPR {minRate.toLocaleString('en-IN')} / {payUnit}.
+                      ⚠ Below minimum wage — Nepal requires at least NPR {fmt(minRate)} / {payUnit}.
                     </span>
                   )}
                   {basicTooLow && !basicBelowMin && (
                     <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
-                      ⚠ Basic is below 60% of gross (NPR {Math.round(gross * 0.6).toLocaleString('en-IN')}). Labour Act requires basic ≥ 60% of total pay.
+                      ⚠ Basic is below 60% of gross (NPR {fmt(gross * 0.6)}). Labour Act requires basic ≥ 60% of total pay.
                     </span>
                   )}
                 </div>
@@ -297,18 +292,18 @@ export default function PayForm({ employee, onSave, onClose }) {
                         Dearness Allowance (NPR / month)
                       </Tip>
                     </label>
-                    <input id="pf-dearness" type="number" min="0" style={inp}
+                    <input id="pf-dearness" type="number" min="0" className="form-input"
                       placeholder="e.g. 7380"
                       value={dearness}
                       onChange={e => setDearness(e.target.value)} />
                     {dearnessBelowMin && (
                       <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
-                        ⚠ Below minimum dearness allowance — Nepal requires at least NPR {MIN_DEARNESS_MONTHLY.toLocaleString('en-IN')} / month.
+                        ⚠ Below minimum dearness allowance — Nepal requires at least NPR {fmt(MIN_DEARNESS_MONTHLY)} / month.
                       </span>
                     )}
                     {grossBelowMin && !dearnessBelowMin && (
                       <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
-                        ⚠ Total gross (NPR {fmt(gross)}) is below the minimum wage of NPR {MIN_WAGE_MONTHLY.toLocaleString('en-IN')} / month.
+                        ⚠ Total gross (NPR {fmt(gross)}) is below the minimum wage of NPR {fmt(MIN_WAGE_MONTHLY)} / month.
                       </span>
                     )}
                   </div>
@@ -342,18 +337,18 @@ export default function PayForm({ employee, onSave, onClose }) {
                       const computed  = calcAmount(comp, basic)
                       return (
                         <div key={i} style={{ ...compRow, marginBottom: 6 }}>
-                          <input style={{ ...inp, flex: '2 1 140px', minWidth: 0 }} aria-label={`Allowance ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
-                          <select style={{ ...inp, flex: '1 1 104px', minWidth: 0, padding: '8px 6px' }} aria-label={`Allowance ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
+                          <input className="form-input" style={{ flex: '2 1 140px', minWidth: 0 }} aria-label={`Allowance ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
+                          <select className="form-select" style={{ flex: '1 1 104px', minWidth: 0, padding: '8px 6px' }} aria-label={`Allowance ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
                             <option value="fixed">Fixed NPR</option>
                             <option value="percent_of_basic">% of Basic</option>
                           </select>
-                          <input type="number" min="0" style={{ ...inp, flex: '1 1 80px', minWidth: 0, textAlign: 'right' }}
+                          <input type="number" min="0" className="form-input" style={{ flex: '1 1 80px', minWidth: 0, textAlign: 'right' }}
                             aria-label={`Allowance ${i + 1} amount`}
                             placeholder={comp.calc_type === 'percent_of_basic' ? '%' : 'NPR'}
                             value={comp.value}
                             onChange={e => updateComponent(globalIdx, 'value', e.target.value)} />
                           {comp.calc_type === 'percent_of_basic' && basic > 0 && (
-                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {computed.toLocaleString('en-IN')}</span>
+                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {fmt(computed)}</span>
                           )}
                           <button onClick={() => removeComponent(globalIdx)} aria-label={`Remove allowance ${comp.name || i + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 16, cursor: 'pointer', flexShrink: 0, padding: '0 4px' }}>✕</button>
                         </div>
@@ -389,7 +384,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                             SSF — Employee (11%){basic > SSF_CAP ? ' · capped' : ''} · auto
                           </Tip>
                         </span>
-                        <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 500 }}>NPR {ssf_employee.toLocaleString('en-IN')}</span>
+                        <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 500 }}>NPR {fmt(ssf_employee)}</span>
                       </div>
                     )}
                     {basic > 0 && ssfNoMissing && (
@@ -410,18 +405,18 @@ export default function PayForm({ employee, onSave, onClose }) {
                       return (
                         <div key={i} style={{ marginBottom: 8 }}>
                         <div style={compRow}>
-                          <input style={{ ...inp, flex: '2 1 140px', minWidth: 0 }} aria-label={`Deduction ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
-                          <select style={{ ...inp, flex: '1 1 104px', minWidth: 0, padding: '8px 6px' }} aria-label={`Deduction ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
+                          <input className="form-input" style={{ flex: '2 1 140px', minWidth: 0 }} aria-label={`Deduction ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
+                          <select className="form-select" style={{ flex: '1 1 104px', minWidth: 0, padding: '8px 6px' }} aria-label={`Deduction ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
                             <option value="fixed">Fixed NPR</option>
                             <option value="percent_of_basic">% of Basic</option>
                           </select>
-                          <input type="number" min="0" style={{ ...inp, flex: '1 1 80px', minWidth: 0, textAlign: 'right' }}
+                          <input type="number" min="0" className="form-input" style={{ flex: '1 1 80px', minWidth: 0, textAlign: 'right' }}
                             aria-label={`Deduction ${i + 1} amount`}
                             placeholder={comp.calc_type === 'percent_of_basic' ? '%' : 'NPR'}
                             value={comp.value}
                             onChange={e => updateComponent(globalIdx, 'value', e.target.value)} />
                           {comp.calc_type === 'percent_of_basic' && basic > 0 && (
-                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {computed.toLocaleString('en-IN')}</span>
+                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {fmt(computed)}</span>
                           )}
                           <button onClick={() => removeComponent(globalIdx)} aria-label={`Remove deduction ${comp.name || i + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 16, cursor: 'pointer', flexShrink: 0, padding: '0 4px' }}>✕</button>
                         </div>
@@ -470,7 +465,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                           {r.label}{r.note ? <span style={{ fontSize: 10, color: 'var(--theme-text2)', marginLeft: 6 }}>({r.note})</span> : null}
                         </span>
                         <span style={{ fontSize: r.big ? 15 : 13, color: r.color, fontWeight: r.bold ? 700 : 400 }}>
-                          {r.value < 0 ? '− ' : ''}NPR {Math.abs(r.value).toLocaleString('en-IN')}
+                          {r.value < 0 ? '− ' : ''}NPR {fmt(Math.abs(r.value))}
                         </span>
                       </div>
                     ))}
@@ -482,15 +477,15 @@ export default function PayForm({ employee, onSave, onClose }) {
                       <strong>Minimum wage check (FY 2083/84)</strong>
                       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ color: basic >= MIN_BASIC_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                          {basic >= MIN_BASIC_MONTHLY ? '✓' : '✗'} Basic ≥ NPR {MIN_BASIC_MONTHLY.toLocaleString('en-IN')} &nbsp;
+                          {basic >= MIN_BASIC_MONTHLY ? '✓' : '✗'} Basic ≥ NPR {fmt(MIN_BASIC_MONTHLY)} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(basic)})</span>
                         </div>
                         <div style={{ color: dearnessAmt >= MIN_DEARNESS_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-amber-text)' }}>
-                          {dearnessAmt >= MIN_DEARNESS_MONTHLY ? '✓' : '⚠'} Dearness ≥ NPR {MIN_DEARNESS_MONTHLY.toLocaleString('en-IN')} &nbsp;
+                          {dearnessAmt >= MIN_DEARNESS_MONTHLY ? '✓' : '⚠'} Dearness ≥ NPR {fmt(MIN_DEARNESS_MONTHLY)} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(dearnessAmt)})</span>
                         </div>
                         <div style={{ color: gross >= MIN_WAGE_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                          {gross >= MIN_WAGE_MONTHLY ? '✓' : '✗'} Gross ≥ NPR {MIN_WAGE_MONTHLY.toLocaleString('en-IN')} &nbsp;
+                          {gross >= MIN_WAGE_MONTHLY ? '✓' : '✗'} Gross ≥ NPR {fmt(MIN_WAGE_MONTHLY)} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(gross)})</span>
                         </div>
                       </div>
@@ -515,16 +510,16 @@ export default function PayForm({ employee, onSave, onClose }) {
                 <label style={lbl} htmlFor="pf-bank-name">
                   <Tip text="Bank where salary will be deposited. Used to generate the bank transfer list during payroll disbursement." width={240}>Bank Name</Tip>
                 </label>
-                <input id="pf-bank-name" style={inp} placeholder="e.g. NIC Asia Bank, Laxmi Sunrise" value={form.bank_name} onChange={e => set('bank_name', e.target.value)} />
+                <input id="pf-bank-name" className="form-input" placeholder="e.g. NIC Asia Bank, Laxmi Sunrise" value={form.bank_name} onChange={e => set('bank_name', e.target.value)} />
               </div>
               <div style={row}>
                 <div style={{ ...rowCol, flex: '2 1 200px' }}>
                   <label style={lbl} htmlFor="pf-bank-account">Account No.</label>
-                  <input id="pf-bank-account" style={inp} placeholder="Bank account number" value={form.bank_account_no} onChange={e => set('bank_account_no', e.target.value)} />
+                  <input id="pf-bank-account" className="form-input" placeholder="Bank account number" value={form.bank_account_no} onChange={e => set('bank_account_no', e.target.value)} />
                 </div>
                 <div style={rowCol}>
                   <label style={lbl} htmlFor="pf-bank-branch">Branch</label>
-                  <input id="pf-bank-branch" style={inp} placeholder="e.g. Thamel" value={form.bank_branch} onChange={e => set('bank_branch', e.target.value)} />
+                  <input id="pf-bank-branch" className="form-input" placeholder="e.g. Thamel" value={form.bank_branch} onChange={e => set('bank_branch', e.target.value)} />
                 </div>
               </div>
               <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 20 }}>
@@ -551,7 +546,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                     <label style={lbl} htmlFor="pf-ssf-no">
                       <Tip text="SSF registration number. Payroll deducts SSF only once this is entered — with the switch on and this blank, no SSF comes off and the 1% social security tax is charged instead. It is also what the SSF challan in HR Reports files under." width={280}>SSF No.</Tip>
                     </label>
-                    <input id="pf-ssf-no" style={inp} placeholder="SSF registration number" value={form.ssf_no} onChange={e => set('ssf_no', e.target.value)} />
+                    <input id="pf-ssf-no" className="form-input" placeholder="SSF registration number" value={form.ssf_no} onChange={e => set('ssf_no', e.target.value)} />
                     {ssfNoMissing && (
                       <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
                         ⚠ Until this is entered, payroll deducts no SSF for this employee and charges the 1% social security tax instead.
@@ -572,7 +567,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                     <label style={lbl} htmlFor="pf-life-insurance">
                       <Tip text="Annual life insurance premium paid by the employee. Deductible up to NPR 40,000/year under Nepal Income Tax Act 2058, Section 12. Enter actual premium — excess above 40,000 is ignored." width={300}>Life Insurance Premium (NPR / year)</Tip>
                     </label>
-                    <input id="pf-life-insurance" type="number" min="0" style={inp}
+                    <input id="pf-life-insurance" type="number" min="0" className="form-input"
                       placeholder="0  (cap: NPR 40,000)"
                       value={form.life_insurance_premium || ''}
                       onChange={e => set('life_insurance_premium', e.target.value)} />
@@ -584,7 +579,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                     <label style={lbl} htmlFor="pf-health-insurance">
                       <Tip text="Annual health insurance premium paid by the employee. Deductible up to NPR 20,000/year under Nepal Income Tax Act 2058, Section 12. Enter actual premium — excess above 20,000 is ignored." width={300}>Health Insurance Premium (NPR / year)</Tip>
                     </label>
-                    <input id="pf-health-insurance" type="number" min="0" style={inp}
+                    <input id="pf-health-insurance" type="number" min="0" className="form-input"
                       placeholder="0  (cap: NPR 20,000)"
                       value={form.health_insurance_premium || ''}
                       onChange={e => set('health_insurance_premium', e.target.value)} />

@@ -547,10 +547,16 @@ export default function Roster() {
     .filter(d => { const bs = adToBs(d); return publishedDays.has(`${bs.year}:${bs.month}:${bs.day}`) }).length
 
   // ── Leave-conflict detection ────────────────────────────────────────────────────────────────
-  // Approved leave requests for the client, fetched once (small table) — same "fetch all, filter
-  // in JS" precedent as LeaveManagement.jsx. Used to flag/block scheduling an employee on a day
-  // they already have approved leave for.
-  const [approvedLeaveByEmp, setApprovedLeaveByEmp] = useState({}) // { employeeId: [{start:Date, end:Date}] }
+  // Approved leave requests that touch the dates on the board, plus the week after it (Copy to
+  // Next Week checks those days). Used to flag/block scheduling an employee on a day they already
+  // have approved leave for. Read per board range since S803, merged by request id so a range seen
+  // earlier stays covered; it had been every approved request the client ever had.
+  const [approvedLeaveRows, setApprovedLeaveRows] = useState({}) // { requestId: { employee_id, start, end } }
+  const approvedLeaveByEmp = useMemo(() => {
+    const map = {}
+    for (const r of Object.values(approvedLeaveRows)) (map[r.employee_id] = map[r.employee_id] || []).push(r)
+    return map
+  }, [approvedLeaveRows])
   // True when the read failed: the guard is advisory, so it says on the board that conflicts
   // cannot be checked rather than silently letting a scheduled-on-leave day through.
   const [leaveGuardUnavailable, setLeaveGuardUnavailable] = useState(false)
@@ -562,27 +568,38 @@ export default function Roster() {
     const a = asActionError(err)
     return { text: 'Could not load part of the roster board — what is shown is from the last successful load. ' + (isTimeout(err) ? readFailLine(err) : a.text), detail: a.detail }
   }
+  const leaveClient = useRef(clientId)
+  useEffect(() => { leaveClient.current = clientId; setApprovedLeaveRows({}) }, [clientId])
+  // The AD dates the board shows, then seven more days. `columns` is declared further down, so the
+  // range is worked out from the same state it is.
+  const [leaveFrom, leaveTo] = useMemo(() => {
+    const first = viewMode === 'weekly' ? new Date(weekStart) : bsToAd(bsYear, bsMonth, 1)
+    const last = viewMode === 'weekly' ? new Date(weekStart) : bsToAd(bsYear, bsMonth, daysInBsMonth(bsYear, bsMonth))
+    if (viewMode === 'weekly') last.setDate(last.getDate() + 6)
+    last.setDate(last.getDate() + 7)
+    return [formatAd(first), formatAd(last)]
+  }, [viewMode, weekStart, bsYear, bsMonth])
   useEffect(() => {
     if (!clientId) return
-    // Paged (S682): "small table" stops being true after a couple of years — every approved
-    // request the client has ever had, and past the 1000-row cap the guard silently missed
-    // conflicts for whichever employees fell off the page.
-    fetchAllRows(() => scopedFrom('hr_leave_requests', 'id, employee_id, start_date, end_date').eq('status', 'approved').order('id'))
+    const forClient = clientId
+    // Paged (S682): a busy month of a big team can still pass 1000 rows over a range.
+    fetchAllRows(() => scopedFrom('hr_leave_requests', 'id, employee_id, start_date, end_date')
+      .eq('status', 'approved').lte('start_date', leaveTo).gte('end_date', leaveFrom).order('id'))
       .then(({ data, error }) => {
+        if (leaveClient.current !== forClient) return
         setLeaveGuardUnavailable(!!error)
         if (error) { console.error('approved-leave read failed:', error); return }
-        const map = {}
-        for (const r of data || []) {
-          if (!map[r.employee_id]) map[r.employee_id] = []
-          // Keep as YYYY-MM-DD strings (already what Postgres returns for a `date` column) and
-          // compare lexicographically below — new Date("YYYY-MM-DD") parses as UTC midnight,
-          // which in Nepal (UTC+5:45) is later than local midnight, so a Date-object comparison
-          // silently missed single-day leave and the first day of every multi-day leave.
-          map[r.employee_id].push({ start: r.start_date, end: r.end_date })
-        }
-        setApprovedLeaveByEmp(map)
+        // Keep as YYYY-MM-DD strings (already what Postgres returns for a `date` column) and
+        // compare lexicographically below — new Date("YYYY-MM-DD") parses as UTC midnight,
+        // which in Nepal (UTC+5:45) is later than local midnight, so a Date-object comparison
+        // silently missed single-day leave and the first day of every multi-day leave.
+        setApprovedLeaveRows(prev => {
+          const next = { ...prev }
+          for (const r of data || []) next[r.id] = { employee_id: r.employee_id, start: r.start_date, end: r.end_date }
+          return next
+        })
       })
-  }, [clientId, scopedFrom])
+  }, [clientId, scopedFrom, leaveFrom, leaveTo])
 
   function isOnApprovedLeave(empId, col) {
     const ranges = approvedLeaveByEmp[empId]

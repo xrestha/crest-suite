@@ -94,11 +94,6 @@ const ADVANCE_STATUS = {
 const sourceOf = r => (r.payroll_run_id ? 'payroll' : r.final_settlement_id ? 'settlement' : 'manual')
 const SOURCE_LABEL = { payroll: 'Payroll', settlement: 'Final Settlement', manual: 'Manual' }
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
-  outline: 'none', width: '100%', fontFamily: 'inherit',
-}
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const hint = { fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }
 
@@ -846,7 +841,7 @@ export default function Advances() {
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 180 }}>
                 <label style={lbl} htmlFor="adv-amount"><Tip text="Total amount issued to the employee." width={200}>Amount (NPR)</Tip></label>
-                <input id="adv-amount" style={invalidStyle(inp, fieldErr['adv-amount'])} type="number" min="1" placeholder="e.g. 20000" value={addForm.amount} onChange={e => setAdd('amount', e.target.value)} {...fieldAria('adv-amount', fieldErr['adv-amount'])} />
+                <input id="adv-amount" className="form-input" style={invalidStyle({}, fieldErr['adv-amount'])} type="number" min="1" placeholder="e.g. 20000" value={addForm.amount} onChange={e => setAdd('amount', e.target.value)} {...fieldAria('adv-amount', fieldErr['adv-amount'])} />
                 <FieldError id="adv-amount" message={fieldErr['adv-amount']} />
               </div>
               <div style={{ flex: 1, minWidth: 180 }}>
@@ -855,7 +850,7 @@ export default function Advances() {
                     Installment / Month (NPR){addForm.type === 'loan' ? '' : ' — optional'}
                   </Tip>
                 </label>
-                <input id="adv-installment" style={invalidStyle(inp, fieldErr['adv-installment'])} type="number" min="1" placeholder="e.g. 5000" value={addForm.installment_amount} onChange={e => setAdd('installment_amount', e.target.value)} {...fieldAria('adv-installment', fieldErr['adv-installment'])} />
+                <input id="adv-installment" className="form-input" style={invalidStyle({}, fieldErr['adv-installment'])} type="number" min="1" placeholder="e.g. 5000" value={addForm.installment_amount} onChange={e => setAdd('installment_amount', e.target.value)} {...fieldAria('adv-installment', fieldErr['adv-installment'])} />
                 <FieldError id="adv-installment" message={fieldErr['adv-installment']} />
                 {!fieldErr['adv-installment'] && addInstBlank && addForm.type === 'advance' && (
                   <div style={hint}>
@@ -867,12 +862,12 @@ export default function Advances() {
 
             <div>
               <label style={lbl} htmlFor="adv-purpose">Purpose</label>
-              <input id="adv-purpose" style={inp} placeholder="e.g. Medical emergency, festival advance…" value={addForm.purpose} onChange={e => setAdd('purpose', e.target.value)} />
+              <input id="adv-purpose" className="form-input" placeholder="e.g. Medical emergency, festival advance…" value={addForm.purpose} onChange={e => setAdd('purpose', e.target.value)} />
             </div>
 
             <div>
               <label style={lbl} htmlFor="adv-notes">Notes</label>
-              <textarea id="adv-notes" style={{ ...inp, height: 60, resize: 'vertical' }} placeholder="Optional internal notes" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
+              <textarea id="adv-notes" className="form-input" style={{ height: 60, resize: 'vertical' }} placeholder="Optional internal notes" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
             </div>
 
             {error && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</div>}
@@ -904,13 +899,13 @@ export default function Advances() {
 
             <div>
               <label style={lbl} htmlFor="adv-repay-amount"><Tip text="Up to what is still owed. Paying it all marks the advance settled." width={220}>Amount (NPR)</Tip></label>
-              <input id="adv-repay-amount" style={invalidStyle(inp, fieldErr['adv-repay-amount'])} type="number" min="1" max={selectedOutstanding} placeholder={`Up to ${fmt(selectedOutstanding)}`} value={repayForm.amount} onChange={e => setRepay('amount', e.target.value)} {...fieldAria('adv-repay-amount', fieldErr['adv-repay-amount'])} />
+              <input id="adv-repay-amount" className="form-input" style={invalidStyle({}, fieldErr['adv-repay-amount'])} type="number" min="1" max={selectedOutstanding} placeholder={`Up to ${fmt(selectedOutstanding)}`} value={repayForm.amount} onChange={e => setRepay('amount', e.target.value)} {...fieldAria('adv-repay-amount', fieldErr['adv-repay-amount'])} />
               <FieldError id="adv-repay-amount" message={fieldErr['adv-repay-amount']} />
             </div>
 
             <div>
               <label style={lbl} htmlFor="adv-repay-notes">Notes</label>
-              <input id="adv-repay-notes" style={inp} placeholder="e.g. Cash returned by employee" value={repayForm.notes} onChange={e => setRepay('notes', e.target.value)} />
+              <input id="adv-repay-notes" className="form-input" placeholder="e.g. Cash returned by employee" value={repayForm.notes} onChange={e => setRepay('notes', e.target.value)} />
             </div>
 
             {error && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</div>}
@@ -941,7 +936,7 @@ export default function Advances() {
               later if the money does come back.
             </p>
             <label style={lbl} htmlFor="adv-writeoff-reason">Reason (required)</label>
-            <textarea id="adv-writeoff-reason" style={{ ...invalidStyle(inp, writeOff.err), height: 70, resize: 'vertical' }}
+            <textarea id="adv-writeoff-reason" className="form-input" style={{ ...invalidStyle({}, writeOff.err), height: 70, resize: 'vertical' }}
               placeholder="e.g. Employee left without notice; balance agreed as a hardship grant"
               value={writeOff.reason} disabled={writeOff.busy}
               onChange={e => { const v = e.target.value; setWriteOff(w => ({ ...w, reason: v, err: '' })) }}

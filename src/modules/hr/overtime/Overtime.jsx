@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { nprInt } from '../../../shared/nepalMoney'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -29,11 +30,6 @@ const lbl = {
   fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
   letterSpacing: '0.04em', textTransform: 'uppercase',
   display: 'block', marginBottom: 4,
-}
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
-  padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none',
-  fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
 }
 
 const BLANK = {
@@ -486,7 +482,7 @@ export default function Overtime() {
             </Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 18 }}>
-            {approvedAmt > 0 ? `NPR ${approvedAmt.toLocaleString('en-IN')}` : '—'}
+            {approvedAmt > 0 ? `NPR ${nprInt(approvedAmt)}` : '—'}
           </div>
           <div className="stat-sub">approved entries</div>
         </div>
@@ -558,7 +554,7 @@ export default function Overtime() {
                         {otLabel(e.ot_type, e.ot_hours)}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>
-                        {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${a.toLocaleString('en-IN')}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
+                        {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${nprInt(a)}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
                       </td>
                       <td>
                         {/* Which multiplier applies is a CATEGORY, not a status — brass, so amber can keep
@@ -651,7 +647,7 @@ export default function Overtime() {
             <input
               aria-label="BS day"
               type="number" min={1} max={maxDay}
-              style={{ ...inp, flex: 1, textAlign: 'center' }}
+              className="form-input" style={{ flex: 1, textAlign: 'center' }}
               value={form.bs_day}
               onChange={e => onDateChange('bs_day', e.target.value)}
               placeholder="Day"
@@ -663,7 +659,7 @@ export default function Overtime() {
           <input
             id="ot-hours"
             type="number" min="0.5" step="0.5"
-            style={{ ...inp, marginBottom: 14 }}
+            className="form-input" style={{ marginBottom: 14 }}
             value={form.ot_hours}
             onChange={e => setForm(f => ({ ...f, ot_hours: e.target.value }))}
             placeholder="e.g. 2.5"
@@ -706,7 +702,7 @@ export default function Overtime() {
           <textarea
             id="ot-reason"
             rows={2}
-            style={{ ...inp, resize: 'vertical', marginBottom: 14 }}
+            className="form-input" style={{ resize: 'vertical', marginBottom: 14 }}
             value={form.reason}
             onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
             placeholder="e.g. Event setup, Kitchen cover, Inventory count…"

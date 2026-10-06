@@ -27,10 +27,6 @@ const fmt = nprInt
 const TABLE = 'hr_incentives'
 const NONE = []
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
-  padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
-}
 
 // The amber banner shape PayrollRun's stale-draft card set (S570) — whole border tinted, 8% fill.
 const amberBanner = {
@@ -668,7 +664,7 @@ export default function IncentiveRun() {
               {activeConfigs.map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? '' : ' (inactive)'}</option>)}
             </select>
             <input
-              aria-label="Bonus name" style={{ ...inp, width: 170 }} value={labelInput} placeholder="Bonus name, e.g. Q1 Sales Bonus"
+              aria-label="Bonus name" className="form-input" style={{ width: 170 }} value={labelInput} placeholder="Bonus name, e.g. Q1 Sales Bonus"
               disabled={busy}
               onChange={e => setLabelInput(e.target.value)} onBlur={commitLabel}
               onKeyDown={e => { if (e.key === 'Enter') commitLabel() }}
@@ -909,12 +905,12 @@ export default function IncentiveRun() {
                         <td style={{ textAlign: 'right' }}>
                           {!editable
                             ? <span style={{ color: excluded ? 'var(--theme-text3)' : 'var(--theme-text1)', fontWeight: 700 }}>{excluded ? '—' : fmt(r.amount)}</span>
-                            : <MoneyInput key={`${r.id}:amount`} aria-label={`Gross incentive for ${nameOf(r.employee_id)}`} value={r.amount} onCommit={(raw, reset) => updateAmount(r, raw, reset)} disabled={busy} style={{ ...inp, width: 110, textAlign: 'right', fontWeight: 600 }} />}
+                            : <MoneyInput key={`${r.id}:amount`} aria-label={`Gross incentive for ${nameOf(r.employee_id)}`} value={r.amount} onCommit={(raw, reset) => updateAmount(r, raw, reset)} disabled={busy} className="form-input" style={{ width: 110, textAlign: 'right', fontWeight: 600 }} />}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {!editable
                             ? <span style={{ color: r.tds > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
-                            : <MoneyInput key={`${r.id}:tds`} aria-label={`Income tax for ${nameOf(r.employee_id)}`} value={r.tds} onCommit={(raw, reset) => updateTds(r, raw, reset)} disabled={busy} style={{ ...inp, width: 90, textAlign: 'right' }} />}
+                            : <MoneyInput key={`${r.id}:tds`} aria-label={`Income tax for ${nameOf(r.employee_id)}`} value={r.tds} onCommit={(raw, reset) => updateTds(r, raw, reset)} disabled={busy} className="form-input" style={{ width: 90, textAlign: 'right' }} />}
                           {estimate && (
                             <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 2 }}>
                               <Tip text="No payroll month has been finalized for this person yet this tax year, so their tax is worked out from salary alone. It is flagged for an update once payroll months are finalized." width={280}>estimate</Tip>
@@ -925,7 +921,7 @@ export default function IncentiveRun() {
                         <td>
                           {!editable
                             ? <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{excluded ? '—' : (r.note || '—')}</span>
-                            : <input key={`${r.id}:note`} aria-label={`Note for ${nameOf(r.employee_id)}`} defaultValue={r.note || ''} onBlur={ev => updateNote(r, ev.target.value)} placeholder="—" disabled={busy} style={{ ...inp, width: '100%' }} />}
+                            : <input key={`${r.id}:note`} aria-label={`Note for ${nameOf(r.employee_id)}`} defaultValue={r.note || ''} onBlur={ev => updateNote(r, ev.target.value)} placeholder="—" disabled={busy} className="form-input" />}
                         </td>
                         {!finalized && (
                           <td className="no-print" style={{ textAlign: 'right' }}>

@@ -6,11 +6,6 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
 import { errorLine } from '../../../shared/errorText'
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
-  outline: 'none', width: '100%', fontFamily: 'inherit',
-}
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const EMPTY = { id: null, name: '', calc_type: 'manual', default_value: '', prorate_by_service: false, active: true }
 
@@ -132,7 +127,7 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
 
         <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <label style={lbl} htmlFor="inccfg-name">{editing ? 'Edit Incentive Type' : 'New Incentive Type'}</label>
-          <input id="inccfg-name" style={invalidStyle(inp, nameErr)} placeholder="e.g. Sales Bonus" value={form.name} onChange={e => set('name', e.target.value)} {...fieldAria('inccfg-name', nameErr)} />
+          <input id="inccfg-name" className="form-input" style={invalidStyle({}, nameErr)} placeholder="e.g. Sales Bonus" value={form.name} onChange={e => set('name', e.target.value)} {...fieldAria('inccfg-name', nameErr)} />
           <FieldError id="inccfg-name" message={nameErr} />
           <div style={{ display: 'flex', gap: 10 }}>
             <select aria-label="How this incentive is calculated" className="form-select" style={{ flex: 1 }} value={form.calc_type} onChange={e => set('calc_type', e.target.value)}>
@@ -141,7 +136,7 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
               <option value="percent_of_basic">{CALC_LABEL.percent_of_basic}</option>
             </select>
             {form.calc_type !== 'manual' && (
-              <input id="inccfg-value" style={{ ...invalidStyle(inp, valueErr), width: 120 }} type="number" min="0" max={form.calc_type === 'percent_of_basic' ? 100 : undefined}
+              <input id="inccfg-value" className="form-input" style={{ ...invalidStyle({}, valueErr), width: 120 }} type="number" min="0" max={form.calc_type === 'percent_of_basic' ? 100 : undefined}
                 aria-label={form.calc_type === 'percent_of_basic' ? 'Percent of monthly basic' : 'Amount in NPR'}
                 placeholder={form.calc_type === 'percent_of_basic' ? '%' : 'NPR'}
                 value={form.default_value} onChange={e => set('default_value', e.target.value)} {...fieldAria('inccfg-value', valueErr)} />

@@ -30,11 +30,6 @@ const lbl = {
   letterSpacing: '0.04em', textTransform: 'uppercase',
   display: 'block', marginBottom: 4,
 }
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
-  padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none',
-  fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
-}
 
 export default function HolidayCalendar() {
   const { clientId, hasHrAccess } = useAuth()
@@ -495,7 +490,7 @@ export default function HolidayCalendar() {
           <label style={lbl} htmlFor="hol-name">Holiday Name *</label>
           <input
             id="hol-name"
-            style={inp}
+            className="form-input"
             value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             placeholder="e.g. Vijaya Dashami"
@@ -531,7 +526,7 @@ export default function HolidayCalendar() {
               <input
                 id="hol-bs-day"
                 type="number"
-                style={{ ...inp, textAlign: 'center' }}
+                className="form-input" style={{ textAlign: 'center' }}
                 value={form.bs_day}
                 min={1}
                 max={maxDay}
@@ -578,7 +573,7 @@ export default function HolidayCalendar() {
             <input
               id="hol-demand-multiplier"
               type="number" min="0" step="0.1"
-              style={{ ...inp, width: 120 }}
+              className="form-input" style={{ width: 120 }}
               value={form.demand_multiplier}
               onChange={e => setForm(f => ({ ...f, demand_multiplier: e.target.value }))}
               placeholder="e.g. 1.5"

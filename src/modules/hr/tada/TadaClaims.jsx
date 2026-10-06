@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { Fragment, useState, useEffect, useCallback, useMemo } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -14,6 +14,7 @@ import TadaSettingsModal from './TadaSettingsModal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { settleWithin } from '../../../utils/withTimeout'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
@@ -41,11 +42,6 @@ const fmtTs = ts => {
   if (!ts) return '—'
   const bs = nepalBs(ts)
   return bs ? `${bs.year}-${pad2(bs.month)}-${pad2(bs.day)}` : (nepalDateAd(ts) || '—')
-}
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
-  outline: 'none', width: '100%', fontFamily: 'inherit',
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 // PayrollRun's stale-draft card is this product's amber banner; same shape as Leave and Attendance.
@@ -95,7 +91,11 @@ export default function TadaClaims() {
   const [employees, setEmployees] = useState([])
   const [vendors,   setVendors]   = useState([])
   const [claims,    setClaims]    = useState([])
-  const [items,     setItems]     = useState([])
+  // A claim's expense lines, read when its detail is opened (S803): { rows } | { error } | { loading }.
+  // They used to be read for every claim the client ever filed on each load, chunked by id, to show
+  // the lines of the one claim someone expands.
+  const [lineCache, setLineCache] = useState({})
+  const linesClient = useRef(clientId)
   const [loading,   setLoading]   = useState(true)
   // The client whose claims are on screen (the Advances pattern). `loading` alone cannot say it: a
   // reload after a decision keeps the same client's rows visible, while an admin client switch must
@@ -186,24 +186,16 @@ export default function TadaClaims() {
       return null
     }
     const [{ data: emps }, { data: vends }, { data: cls }, { data: settingsRow }] = results
-    const claimIds = (cls || []).map(c => c.id)
-    // hr_tada_claim_items has no client_id column of its own — scoped via claim_id against this
-    // client's already-scoped claim ids, same parent-scoped pattern as recipe_ingredients.
-    // Chunked: an .in() list of every claim id is a URL as well as a row count (S629).
-    const [itemsRes, payrollRes, settledRes] = await Promise.all([
-      claimIds.length > 0
-        ? fetchAllRowsChunked(claimIds, ids => supabase.from('hr_tada_claim_items').select('*').in('claim_id', ids).order('id'))
-        : Promise.resolve({ data: [], error: null }),
+    const [payrollRes, settledRes] = await Promise.all([
       readPayrollDrafts(),
       scopedFrom('hr_final_settlements', 'employee_id, last_working_date').eq('status', 'finalized'),
     ])
     if (!loadReq.isCurrent(key)) return null
-    if (itemsRes.error) { setLoadError(asActionError(itemsRes.error, 'operator')); setLoading(false); return null }
     setLoadError(null)
     setEmployees(emps || [])
     setVendors(vends || [])
     setClaims(cls || [])
-    setItems(itemsRes.data || [])
+    setLineCache({})   // re-read on open, so a reload never shows lines from before it
     // Fail SOFT: the payroll standing is a hint beside the claim, not the claim. A failed read shows
     // no chip at all and says so in a banner — never a confident "will be paid by the next payroll".
     setDraftByClaim(payrollRes.error ? null : payrollRes.data)
@@ -221,7 +213,8 @@ export default function TadaClaims() {
   // chips, open dialogs and messages — before the new client's read starts, so nothing of theirs
   // can be acted on while it arrives.
   useEffect(() => {
-    setClaims([]); setItems([]); setEmployees([]); setVendors([])
+    linesClient.current = clientId
+    setClaims([]); setLineCache({}); setEmployees([]); setVendors([])
     setDraftByClaim(null); setSettledRows(null); setPayrollError(null); setLoadError(null); setActionError(null)
     setSelected(null); setPayTarget(null); setRejectTarget(null); setShowAdd(false); setShowSettings(false)
     setMonthFilter('all')
@@ -263,11 +256,22 @@ export default function TadaClaims() {
     }
     return ids
   }, [settledRows, empMap])
-  const itemsByClaimId = useMemo(() => {
-    const m = {}
-    items.forEach(i => { (m[i.claim_id] = m[i.claim_id] || []).push(i) })
-    return m
-  }, [items])
+  // One claim's lines, when its detail is open. hr_tada_claim_items has no client_id of its own;
+  // the claim id comes from this client's scoped list, and RLS on the parent claim does the rest.
+  // A single-parent read, so it is not paged; bounded, because the detail waits on it.
+  useEffect(() => {
+    if (!selected || lineCache[selected]) return
+    const id = selected
+    const forClient = linesClient.current
+    setLineCache(p => ({ ...p, [id]: { loading: true } }))
+    void settleWithin(
+      supabase.from('hr_tada_claim_items').select('*').eq('claim_id', id).order('id'),
+      20000, 'Loading the expense lines',
+    ).then(({ data, error }) => {
+      if (linesClient.current !== forClient) return
+      setLineCache(p => ({ ...p, [id]: error ? { error: asActionError(error, 'operator') } : { rows: data || [] } }))
+    })
+  }, [selected, lineCache])
 
   // Each claim's trip-start BS month, once. The month list is built from the claims themselves
   // rather than monthly_periods — an HR login cannot read monthly_periods, so its dropdown was empty.
@@ -638,7 +642,8 @@ export default function TadaClaims() {
 
   function renderClaimDetail(c) {
     const emp = empMap[c.employee_id] || {}
-    const lines = itemsByClaimId[c.id] || []
+    const entry = lineCache[c.id]
+    const lines = entry?.rows || []
     return (
       <div style={{ padding: '16px 18px' }}>
         <div style={{ marginBottom: 14 }}>
@@ -664,6 +669,16 @@ export default function TadaClaims() {
               <tr><th>Category</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
             </thead>
             <tbody>
+              {(!entry || entry.loading) && (
+                <tr><td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Loading the expense lines…</td></tr>
+              )}
+              {entry?.error && (
+                <tr><td colSpan={3}>
+                  <ActionError error={{ text: 'Could not load this claim’s expense lines; the total below is the claim’s own. ' + entry.error.text, detail: entry.error.detail }} />
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }}
+                    onClick={e => { e.stopPropagation(); setLineCache(p => { const n = { ...p }; delete n[c.id]; return n }) }}>Retry</button>
+                </td></tr>
+              )}
               {lines.map(it => (
                 <tr key={it.id}>
                   <td>{it.category}</td>
@@ -871,7 +886,7 @@ export default function TadaClaims() {
                 {startPointMode === 'custom' && (
                   <input
                     aria-label="Custom start point"
-                    style={{ ...inp, marginTop: 6 }} placeholder="Where did the trip start?"
+                    className="form-input" style={{ marginTop: 6 }} placeholder="Where did the trip start?"
                     value={addForm.start_point} onChange={e => setAdd('start_point', e.target.value)}
                   />
                 )}
@@ -894,7 +909,7 @@ export default function TadaClaims() {
                 {purposeMode === 'custom' && (
                   <input
                     aria-label="Custom trip purpose"
-                    style={{ ...inp, marginTop: 6 }} placeholder="Describe the purpose"
+                    className="form-input" style={{ marginTop: 6 }} placeholder="Describe the purpose"
                     value={addForm.trip_purpose} onChange={e => setAdd('trip_purpose', e.target.value)}
                   />
                 )}
@@ -903,7 +918,7 @@ export default function TadaClaims() {
 
             <div>
               <label style={lbl} htmlFor="tada-destination">Destination</label>
-              <input id="tada-destination" style={inp} placeholder="e.g. Pokhara" value={addForm.destination} onChange={e => setAdd('destination', e.target.value)} />
+              <input id="tada-destination" className="form-input" placeholder="e.g. Pokhara" value={addForm.destination} onChange={e => setAdd('destination', e.target.value)} />
               {addForm.trip_purpose === PURCHASE_PURPOSE && (
                 <div style={{ marginTop: 6 }}>
                   <SearchableSelect
@@ -948,10 +963,10 @@ export default function TadaClaims() {
                       <select aria-label={`Expense ${idx + 1} category`} className="form-select" style={{ flex: '0 1 140px', minWidth: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <input aria-label={`Expense ${idx + 1} description`} style={{ ...inp, flex: '1 1 160px', minWidth: 0 }} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
+                      <input aria-label={`Expense ${idx + 1} description`} className="form-input" style={{ flex: '1 1 160px', minWidth: 0 }} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
                       {/* A negative is simply not taken (S751) — it used to shrink the Total shown
                           here while the save dropped the line, so the two disagreed. */}
-                      <input aria-label={`Expense ${idx + 1} amount (NPR)`} style={{ ...inp, flex: '0 1 110px', minWidth: 0 }} type="number" min="0" placeholder="Amount" value={it.amount}
+                      <input aria-label={`Expense ${idx + 1} amount (NPR)`} className="form-input" style={{ flex: '0 1 110px', minWidth: 0 }} type="number" min="0" placeholder="Amount" value={it.amount}
                         onChange={e => { if (acceptTadaAmount(e.target.value)) setItem(idx, 'amount', e.target.value) }} />
                       {addForm.items.length > 1 && (
                         <button type="button" className="btn btn-ghost btn-sm btn-icon btn-icon--delete" aria-label={`Remove expense line ${idx + 1}`} title={`Remove expense line ${idx + 1}`} style={{ flexShrink: 0 }} onClick={() => removeItemRow(idx)}><span aria-hidden="true">✕</span></button>
@@ -969,7 +984,7 @@ export default function TadaClaims() {
                         </select>
                         <input
                           aria-label={`Expense ${idx + 1} distance in km`}
-                          style={{ ...inp, width: 100, flexShrink: 0 }} type="number" min="0" step="0.1"
+                          className="form-input" style={{ width: 100, flexShrink: 0 }} type="number" min="0" step="0.1"
                           placeholder="Distance (km)" value={it.distanceKm} onChange={e => setItemDistance(idx, e.target.value)}
                         />
                         {vehicleRates[it.vehicle] == null ? (
@@ -989,7 +1004,7 @@ export default function TadaClaims() {
 
             <div>
               <label style={lbl} htmlFor="tada-notes">Notes</label>
-              <textarea id="tada-notes" style={{ ...inp, height: 50, resize: 'vertical' }} placeholder="Optional" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
+              <textarea id="tada-notes" className="form-input" style={{ height: 50, resize: 'vertical' }} placeholder="Optional" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
             </div>
 
             {lookAlike && (

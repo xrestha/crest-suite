@@ -35,10 +35,6 @@ const typeFill = c => c || 'var(--theme-text2)'
 const typeTint = (c, pct) => `color-mix(in srgb, ${typeFill(c)} ${pct}%, transparent)`
 const typeText = c => `color-mix(in srgb, ${typeFill(c)} 45%, var(--theme-text1))`
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
-  padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
-}
 
 // The product's amber banner, byte-for-byte what PayrollRun's stale-draft card uses: the whole
 // border tinted and an 8% fill, never a thick rule down one side. The first draft of the gap
@@ -739,14 +735,14 @@ export default function LeaveManagement() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }}>
               <div>
                 <label style={lbl} htmlFor="leave-employee">Employee</label>
-                <select id="leave-employee" style={{ ...inp, width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
+                <select id="leave-employee" className="form-select" style={{ width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
                   <option value="">— Select —</option>
                   {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                 </select>
               </div>
               <div>
                 <label style={lbl} htmlFor="leave-type">Leave Type</label>
-                <select id="leave-type" style={{ ...inp, width: '100%' }} value={fType} onChange={e => setFType(e.target.value)}>
+                <select id="leave-type" className="form-select" style={{ width: '100%' }} value={fType} onChange={e => setFType(e.target.value)}>
                   <option value="">— Select —</option>
                   {activeTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.paid ? '' : ' (unpaid)'}</option>)}
                 </select>
@@ -763,13 +759,13 @@ export default function LeaveManagement() {
                 <label style={lbl} htmlFor="leave-day-type">
                   <Tip text="Only applies to a single-day request — pick the same Start and End date." width={240}>Day Type</Tip>
                 </label>
-                <select id="leave-day-type" style={disabledStyle({ ...inp, width: '100%' }, !isSingleDay)} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
+                <select id="leave-day-type" className="form-select" style={disabledStyle({ width: '100%' }, !isSingleDay)} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
                   {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
                 </select>
               </div>
               <div>
                 <label style={lbl} htmlFor="leave-reason">Reason</label>
-                <input id="leave-reason" style={{ ...inp, width: '100%' }} value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
+                <input id="leave-reason" className="form-input" value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
@@ -970,7 +966,7 @@ export default function LeaveManagement() {
                             if (!name) { e.target.value = t.name; setMsg('error:A leave type needs a name — it was put back.'); return }
                             updateType(t.id, { name })
                           }}
-                          style={{ ...inp, width: '100%', color: typeText(t.color), fontWeight: 600 }} />
+                          className="form-input" style={{ color: typeText(t.color), fontWeight: 600 }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <input aria-label={`Paid — ${t.name}`} type="checkbox" checked={t.paid} onChange={e => updateType(t.id, { paid: e.target.checked })} />
@@ -986,7 +982,7 @@ export default function LeaveManagement() {
                             if (n === parseFloat(t.annual_quota)) return
                             updateType(t.id, { annual_quota: n })
                           }}
-                          style={{ ...inp, width: 90, textAlign: 'right' }} />
+                          className="form-input" style={{ width: 90, textAlign: 'right' }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <input aria-label={`Carry forward — ${t.name}`} type="checkbox" checked={t.carry_forward} onChange={e => updateType(t.id, { carry_forward: e.target.checked })} />
