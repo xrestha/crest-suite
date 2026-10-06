@@ -568,11 +568,11 @@ export default function Advances() {
           { label: 'Active Advances', value: advanceCount, tip: 'One-time advances still being recovered. Unless a monthly cut was set, the whole balance comes off the next salary — never more than that month\'s pay; anything left waits for the one after.' },
           { label: 'Active Loans', value: loanCount, tip: 'Loans being repaid in instalments: the set amount comes off each salary until nothing is owed. There is no fixed end date — a month with too little pay takes less, and the loan simply runs a month longer.' },
         ].map(c => (
-          <div key={c.label} className="card" style={{ padding: '14px 16px' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}>
+          <div key={c.label} className="stat-card">
+            <div className="stat-label">
               <Tip text={c.tip} width={260}>{c.label}</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{c.value}</div>
+            <div className="stat-value" style={{ whiteSpace: 'nowrap' }}>{c.value}</div>
           </div>
         ))}
       </div>

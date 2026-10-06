@@ -467,7 +467,7 @@ export default function Overtime() {
               Approved
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{approvedCount}</div>
+          <div className="stat-value">{approvedCount}</div>
           <div className="stat-sub">{approvedHrs > 0 ? `${approvedHrs}h total` : 'no hours'}</div>
         </div>
         <div className="stat-card">
@@ -485,7 +485,7 @@ export default function Overtime() {
               Est. OT Cost
             </Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>
+          <div className="stat-value" style={{ fontSize: 18 }}>
             {approvedAmt > 0 ? `NPR ${approvedAmt.toLocaleString('en-IN')}` : '—'}
           </div>
           <div className="stat-sub">approved entries</div>
@@ -496,7 +496,7 @@ export default function Overtime() {
       <FilterChips label="Filter overtime by status" active={statusTab} onChange={setStatusTab} style={{ marginBottom: 16 }}
         options={['all', 'pending', 'approved', 'rejected'].map(s => ({
           key: s,
-          label: <>{s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}{s !== 'all' && <span style={{ marginLeft: 5, fontSize: 11, color: 'var(--theme-text3)' }}>({entries.filter(e => e.status === s).length})</span>}</>,
+          label: <>{s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}{s !== 'all' && <span style={{ marginLeft: 5, fontSize: 11, color: 'var(--theme-text2)' }}>({entries.filter(e => e.status === s).length})</span>}</>,
         }))} />
 
       {/* Table */}

@@ -1195,27 +1195,26 @@ export default function PayrollRun() {
             {/* Stat cards */}
             <div className="stat-grid">
               {[
-                { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-text1)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
-                { label: 'Deductions',   value: totalDeductions, color: 'var(--theme-text1)', tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
+                { label: 'Total Gross',  value: totals.gross, tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
+                { label: 'Deductions',   value: totalDeductions, tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
                 {
-                  label: 'Net Payable', value: totals.net, color: 'var(--theme-text1)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.',
+                  label: 'Net Payable', value: totals.net, tip: 'Total take-home pay to disburse this period, TADA reimbursements included.',
                   sub: finalized && !paymentsError && paySummary.owed > 0
                     ? `${payslips.length} payslip${payslips.length === 1 ? '' : 's'} · ${paySummary.paid} of ${paySummary.owed} marked paid`
                     : undefined,
                 },
-                { label: 'Employer SSF', value: totals.ssfEmpr, color: 'var(--theme-text2)', tip: '20% SSF the company pays on top — not part of net payable.' },
+                { label: 'Employer SSF', value: totals.ssfEmpr, tip: '20% SSF the company pays on top — not part of net payable.' },
                 {
-                  label: 'Cost to Business', value: cost.total, color: 'var(--theme-text1)',
-                  tip: 'What this month\'s payroll costs the business: pay earned (gross, less unpaid days, plus overtime) plus the employer\'s 20% SSF. It is more than Net Payable because the employee SSF, CIT and income tax withheld are still paid by the business — to the SSF fund and the tax office instead of to staff. Travel claims are reimbursements, not pay, and are shown underneath.',
+                  label: 'Cost to Business', value: cost.total, tip: 'What this month\'s payroll costs the business: pay earned (gross, less unpaid days, plus overtime) plus the employer\'s 20% SSF. It is more than Net Payable because the employee SSF, CIT and income tax withheld are still paid by the business — to the SSF fund and the tax office instead of to staff. Travel claims are reimbursements, not pay, and are shown underneath.',
                   sub: `NPR ${fmt(cost.earned)} pay + NPR ${fmt(cost.employerSsf)} employer SSF${cost.tada > 0 ? ` · plus NPR ${fmt(cost.tada)} travel claims` : ''}`,
                 },
               ].map(s => (
-                <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <div key={s.label} className="stat-card">
+                  <div className="stat-label">
                     <Tip text={s.tip} width={260}>{s.label}</Tip>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>NPR {fmt(s.value)}</div>
-                  <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 3 }}>{s.sub || `${payslips.length} payslip${payslips.length === 1 ? '' : 's'}`}</div>
+                  <div className="stat-value" style={{ whiteSpace: 'nowrap' }}>NPR {fmt(s.value)}</div>
+                  <div className="stat-sub">{s.sub || `${payslips.length} payslip${payslips.length === 1 ? '' : 's'}`}</div>
                 </div>
               ))}
             </div>

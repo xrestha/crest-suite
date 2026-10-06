@@ -170,8 +170,8 @@ export default function HrLabourPanel() {
           <ChartCard
             title={`Labour cost by month — last ${months.length} finalized`}
             legend={<span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
-              <span style={{ color: PAY_HEX }}>■</span> Pay · <span style={{ color: OT_HEX }}>■</span> Overtime · <span style={{ color: SSF_HEX }}>■</span> Employer SSF
-              {months.some(m => m.other) && <> · <span style={{ color: OTHER_HEX }}>■</span> Bonus &amp; final pay</>}
+              <span aria-hidden="true" style={{ color: PAY_HEX }}>■</span> Pay · <span aria-hidden="true" style={{ color: OT_HEX }}>■</span> Overtime · <span aria-hidden="true" style={{ color: SSF_HEX }}>■</span> Employer SSF
+              {months.some(m => m.other) && <> · <span aria-hidden="true" style={{ color: OTHER_HEX }}>■</span> Bonus &amp; final pay</>}
             </span>}
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>

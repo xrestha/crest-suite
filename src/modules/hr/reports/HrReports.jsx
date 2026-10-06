@@ -622,18 +622,18 @@ export default function HrReports() {
           {/* ── SUMMARY ── */}
           {tab === 'summary' && (
             <div>
+              {/* Correct figures take the ink (hr-payroll.md); the strip is the stat-card family, not .card
+                  tiles (S803). */}
               <div className="stat-grid stat-grid--compact" style={{ marginBottom: 28 }}>
                 {[
-                  { label: 'Total Earned',   value: tot.gross,   color: 'var(--theme-accent-ink)', tip: 'Pay actually earned across all payslips: gross, less absence and unpaid days, plus overtime.' },
-                  { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red-text)', tip: 'Employee SSF + salary deductions (CIT, etc.) + TDS + advance recoveries.' },
-                  { label: 'Net Payable',    value: tot.net,     color: 'var(--theme-green-text)', tip: tot.tada > 0 ? `Total take-home pay to disburse: earned − deductions + NPR ${fmt(tot.tada)} of travel claims (TADA) paid with the salary.` : 'Total take-home pay to disburse: earned − deductions.' },
-                  { label: 'Employer Cost',  value: tot.empCost, color: 'var(--theme-text3)', tip: 'What the business spends on salary: pay earned + employer SSF (20%). Travel claims are reimbursements and are not included.' },
+                  { label: 'Total Earned',   value: tot.gross,   tip: 'Pay actually earned across all payslips: gross, less absence and unpaid days, plus overtime.' },
+                  { label: 'Total Deductions', value: tot.ded,   tip: 'Employee SSF + salary deductions (CIT, etc.) + TDS + advance recoveries.' },
+                  { label: 'Net Payable',    value: tot.net,     tip: tot.tada > 0 ? `Total take-home pay to disburse: earned − deductions + NPR ${fmt(tot.tada)} of travel claims (TADA) paid with the salary.` : 'Total take-home pay to disburse: earned − deductions.' },
+                  { label: 'Employer Cost',  value: tot.empCost, tip: 'What the business spends on salary: pay earned + employer SSF (20%). Travel claims are reimbursements and are not included.' },
                 ].map(s => (
-                  <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      <Tip text={s.tip} width={250}>{s.label}</Tip>
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>NPR {fmt(s.value)}</div>
+                  <div key={s.label} className="stat-card stat-card--compact">
+                    <div className="stat-label"><Tip text={s.tip} width={250}>{s.label}</Tip></div>
+                    <div className="stat-value" style={{ fontSize: 18, whiteSpace: 'nowrap' }}>NPR {fmt(s.value)}</div>
                   </div>
                 ))}
               </div>
@@ -647,15 +647,15 @@ export default function HrReports() {
                 </div>
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Earned</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Take-home pay, including any travel claims paid with the salary." width={220}>Net</Tip></th></tr></thead>
+                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Earned</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right' }}><Tip text="Take-home pay, including any travel claims paid with the salary." width={220}>Net</Tip></th></tr></thead>
                     <tbody>
                       {depts.map(d => (
                         <tr key={d.dept}>
                           <td style={{ color: 'var(--theme-text1)' }}>{d.dept}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{d.count}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(d.gross)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(d.ded)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(d.net)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmt(d.ded)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(d.net)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -663,8 +663,8 @@ export default function HrReports() {
                       <td style={{ color: 'var(--theme-text2)' }}>Total</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{rows.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tot.gross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(tot.ded)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(tot.net)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmt(tot.ded)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tot.net)}</td>
                     </tr></tfoot>
                   </table>
                 </div>
@@ -679,7 +679,7 @@ export default function HrReports() {
                 <div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>SSF Challan — {periodLabel}</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                    Total to deposit: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(ssfTotals.total)}</strong>
+                    Total to deposit: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(ssfTotals.total)}</strong>
                     {' '}· due by the {SSF_DEPOSIT_DAY}th of the following month
                     {noSsfCount > 0 && <span> · {noSsfCount} enrolled employee{noSsfCount > 1 ? 's' : ''} with no SSF number, so nothing was deducted</span>}
                   </div>
@@ -696,7 +696,7 @@ export default function HrReports() {
               ) : (
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>SSF No</th><th>Employee</th><th style={{ textAlign: 'right' }}><Tip text={`The basic the contribution was actually worked out on — the basic earned this month (less unpaid days), or what a daily or hourly worker earned — capped at NPR ${fmt(SSF_CAP)}. This is the figure to type into SOSYS.`} width={260}>SSF Basic</Tip></th><th style={{ textAlign: 'right' }}><Tip text={`SSF deducted from the employee's pay: 11% of the SSF basic (capped at NPR ${fmt(SSF_CAP)}).`} width={250}>Employee 11%</Tip></th><th style={{ textAlign: 'right' }}><Tip text={`SSF paid by the company on top of salary: 20% of the SSF basic (capped at NPR ${fmt(SSF_CAP)}).`} width={260}>Employer 20%</Tip></th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Total SSF deposit to submit = Employee 11% + Employer 20%." width={240}>Total 31%</Tip></th></tr></thead>
+                    <thead><tr><th>SSF No</th><th>Employee</th><th style={{ textAlign: 'right' }}><Tip text={`The basic the contribution was actually worked out on — the basic earned this month (less unpaid days), or what a daily or hourly worker earned — capped at NPR ${fmt(SSF_CAP)}. This is the figure to type into SOSYS.`} width={260}>SSF Basic</Tip></th><th style={{ textAlign: 'right' }}><Tip text={`SSF deducted from the employee's pay: 11% of the SSF basic (capped at NPR ${fmt(SSF_CAP)}).`} width={250}>Employee 11%</Tip></th><th style={{ textAlign: 'right' }}><Tip text={`SSF paid by the company on top of salary: 20% of the SSF basic (capped at NPR ${fmt(SSF_CAP)}).`} width={260}>Employer 20%</Tip></th><th style={{ textAlign: 'right' }}><Tip text="Total SSF deposit to submit = Employee 11% + Employer 20%." width={240}>Total 31%</Tip></th></tr></thead>
                     <tbody>
                       {ssfRows.map(r => (
                         <tr key={r.id}>
@@ -708,7 +708,7 @@ export default function HrReports() {
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(ssfBaseOf(r.employee, r.employer))}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.employee)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.employer)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(r.employee + r.employer)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(r.employee + r.employer)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -717,7 +717,7 @@ export default function HrReports() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(ssfTotals.base)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(ssfTotals.emp)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(ssfTotals.empr)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(ssfTotals.total)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(ssfTotals.total)}</td>
                     </tr></tfoot>
                   </table>
                 </div>
@@ -830,7 +830,7 @@ export default function HrReports() {
                 <div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>TDS / Income Tax — {periodLabel}</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                    Income tax to deposit for this month: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(tdsTotals.monthTds)}</strong>
+                    Income tax to deposit for this month: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(tdsTotals.monthTds)}</strong>
                     {hasMonthBonuses && <span> · includes NPR {fmt(tdsTotals.bonusTds)} withheld from festival allowances and incentives paid this month</span>}
                     {hasMonthSettlements && <span> · includes NPR {fmt(tdsTotals.exitTds)} withheld from final settlement exit payments</span>}
                   </div>
@@ -867,7 +867,7 @@ export default function HrReports() {
                     <th style={{ textAlign: 'right' }}><Tip text="Festival allowances (e.g. Dashain) and incentives that were finalized with this month as their pay month. They are paid separately from the payslip, but they are income all the same." width={280}>Festival allowance &amp; incentives</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax (TDS) withheld from those festival allowances and incentives. It is due for deposit with this month's salary tax." width={270}>Tax on them</Tip></th>
                     {hasMonthSettlements && <th style={{ textAlign: 'right' }}><Tip text="Gratuity, leave encashment, festival share and notice pay paid in a Final Settlement finalized for this month, and the tax withheld on them." width={280}>Exit payments / tax</Tip></th>}
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Everything withheld from this employee this month: tax on salary + tax on festival allowances and incentives + tax on exit payments from a Final Settlement finalized for this month. This is what you deposit with the Inland Revenue Department for the month." width={290}>Total to deposit</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Everything withheld from this employee this month: tax on salary + tax on festival allowances and incentives + tax on exit payments from a Final Settlement finalized for this month. This is what you deposit with the Inland Revenue Department for the month." width={290}>Total to deposit</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax withheld from this employee so far this fiscal year (from Shrawan), up to and including this month — finalized payslips, finalized festival allowances and incentives, and finalized Final Settlements (their last month's salary tax and the tax on their exit payments). If this month's payroll is still a draft, its tax is included too." width={300}>Withheld this year</Tip></th>
                   </tr></thead>
                   <tbody>
@@ -876,30 +876,30 @@ export default function HrReports() {
                         <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{r.name}</td>
                         <td style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{r.pan || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.taxable === null ? '—' : fmt(r.taxable)}</td>
-                        <td style={{ textAlign: 'right', color: r.salaryTds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.salaryTds > 0 ? fmt(r.salaryTds) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: r.salaryTds > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{r.salaryTds > 0 ? fmt(r.salaryTds) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
                           {r.bonusAmount > 0 ? fmt(r.bonusAmount) : '—'}
                           {r.bonuses.length > 0 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{r.bonuses.map(b => b.source === 'festival' ? (b.festival_name || 'Festival') : (b.run_label || 'Incentive')).join(' · ')}</div>}
                         </td>
-                        <td style={{ textAlign: 'right', color: r.bonusTds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.bonusTds > 0 ? fmt(r.bonusTds) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: r.bonusTds > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{r.bonusTds > 0 ? fmt(r.bonusTds) : '—'}</td>
                         {hasMonthSettlements && (
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
                             {r.exitAmount > 0 ? fmt(r.exitAmount) : '—'}
-                            {r.exitTds > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red-text)' }}>tax {fmt(r.exitTds)}</div>}
+                            {r.exitTds > 0 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>tax {fmt(r.exitTds)}</div>}
                           </td>
                         )}
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{r.monthTds > 0 ? fmt(r.monthTds) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{r.monthTds > 0 ? fmt(r.monthTds) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.ytd)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot><tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {tdsRows.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(tdsTotals.salaryTds)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tdsTotals.salaryTds)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(tdsTotals.bonusAmount)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(tdsTotals.bonusTds)}</td>
-                    {hasMonthSettlements && <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(tdsTotals.exitAmount)}<div style={{ fontSize: 10, color: 'var(--theme-red-text)' }}>tax {fmt(tdsTotals.exitTds)}</div></td>}
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(tdsTotals.monthTds)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tdsTotals.bonusTds)}</td>
+                    {hasMonthSettlements && <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(tdsTotals.exitAmount)}<div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>tax {fmt(tdsTotals.exitTds)}</div></td>}
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tdsTotals.monthTds)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tdsTotals.ytd)}</td>
                   </tr></tfoot>
                 </table>
@@ -1008,7 +1008,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
             </div>
           )}
           {emp.employee_code && <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Code: {emp.employee_code}</div>}
-          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>PAN: <span style={{ color: emp.pan_no ? 'var(--theme-text2)' : 'var(--theme-accent-ink)' }}>{emp.pan_no || '⚠ not on file'}</span></div>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>PAN: <span style={{ color: emp.pan_no ? 'var(--theme-text2)' : 'var(--theme-amber-text)' }}>{emp.pan_no || '⚠ not on file'}</span></div>
         </div>
       </div>
 
@@ -1023,7 +1023,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                 <th style={{ textAlign: 'right' }}><Tip text="Pay earned in the month: gross, less absence and unpaid days, plus overtime." width={240}>Income Earned</Tip></th>
                 <th style={{ textAlign: 'right' }}>SSF Deducted</th>
                 <th style={{ textAlign: 'right' }}><Tip text="CIT / provident fund contributions, which reduce taxable income within the same cap as SSF." width={240}>CIT / PF</Tip></th>
-                <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>TDS Withheld</th>
+                <th style={{ textAlign: 'right' }}>TDS Withheld</th>
               </tr>
             </thead>
             <tbody>
@@ -1038,7 +1038,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                     <td style={{ textAlign: 'right' }}>{fmtN(num(s.gross) - num(s.absence_deduction) + num(s.ot_amount))}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(s.ssf_employee) > 0 ? fmtN(s.ssf_employee) : '—'}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(s.retirement_contribution) > 0 ? fmtN(s.retirement_contribution) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: num(s.tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(s.tds) > 0 ? fmtN(s.tds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: num(s.tds) > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{num(s.tds) > 0 ? fmtN(s.tds) : '—'}</td>
                   </tr>
                 )
               })}
@@ -1048,7 +1048,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                   <td style={{ textAlign: 'right' }}>{fmtN(st.partial_salary)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(st.month_ssf_employee) > 0 ? fmtN(st.month_ssf_employee) : '—'}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(st.month_retirement_contribution) > 0 ? fmtN(st.month_retirement_contribution) : '—'}</td>
-                  <td style={{ textAlign: 'right', color: num(st.month_tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(st.month_tds) > 0 ? fmtN(st.month_tds) : '—'}</td>
+                  <td style={{ textAlign: 'right', color: num(st.month_tds) > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{num(st.month_tds) > 0 ? fmtN(st.month_tds) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1058,7 +1058,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                 <td style={{ textAlign: 'right' }}>{fmtN(salary.gross)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtN(salary.ssf)}</td>
                 <td style={{ textAlign: 'right' }}>{salary.retirement > 0 ? fmtN(salary.retirement) : '—'}</td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(salary.tds)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtN(salary.tds)}</td>
               </tr>
             </tfoot>
           </table>
@@ -1079,7 +1079,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                   <th>Payment</th>
                   <th>Paid in</th>
                   <th style={{ textAlign: 'right' }}>Income</th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>TDS Withheld</th>
+                  <th style={{ textAlign: 'right' }}>TDS Withheld</th>
                 </tr>
               </thead>
               <tbody>
@@ -1088,7 +1088,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                     <td>{bonusLabel(b)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{bonusPaidIn(b)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtN(num(b.amount))}</td>
-                    <td style={{ textAlign: 'right', color: num(b.tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(b.tds) > 0 ? fmtN(num(b.tds)) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: num(b.tds) > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{num(b.tds) > 0 ? fmtN(num(b.tds)) : '—'}</td>
                   </tr>
                 ))}
                 {settlements.filter(st => settlementLump(st) > 0).map(st => (
@@ -1096,7 +1096,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                     <td>Final settlement — gratuity, leave, festival share, notice</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{BS_MONTHS[st.settle_bs_month - 1]} {st.settle_bs_year}</td>
                     <td style={{ textAlign: 'right' }}>{fmtN(settlementLump(st))}</td>
-                    <td style={{ textAlign: 'right', color: num(st.lump_tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(st.lump_tds) > 0 ? fmtN(st.lump_tds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: num(st.lump_tds) > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{num(st.lump_tds) > 0 ? fmtN(st.lump_tds) : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1104,12 +1104,12 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                 <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={2} style={{ color: 'var(--theme-text2)' }}>One-off payments total ({oneOffCount})</td>
                   <td style={{ textAlign: 'right' }}>{fmtN(bonus.amount)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(bonus.tds)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtN(bonus.tds)}</td>
                 </tr>
                 <tr style={{ fontWeight: 700 }}>
                   <td colSpan={2} style={{ color: 'var(--theme-text1)' }}>Total for the year — salary + one-off payments</td>
                   <td style={{ textAlign: 'right' }}>{fmtN(totals.gross)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(totals.tds)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtN(totals.tds)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -1137,14 +1137,14 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
                 {r.label}
                 {r.sub && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{r.sub}</div>}
               </span>
-              <span style={{ fontSize: 12, color: r.neg ? 'var(--theme-red-text)' : 'var(--theme-text1)', whiteSpace: 'nowrap', paddingLeft: 12 }}>
+              <span style={{ fontSize: 12, color: r.neg ? 'var(--theme-text1)' : 'var(--theme-text1)', whiteSpace: 'nowrap', paddingLeft: 12 }}>
                 {r.neg ? '− ' : ''}NPR {fmtN(r.value)}
               </span>
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, marginTop: 4 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>Annual Taxable Income</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {fmtN(taxable)}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {fmtN(taxable)}</span>
           </div>
         </div>
 
@@ -1166,7 +1166,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '2px solid var(--theme-border)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>Total TDS Withheld</span>
-            <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {fmtN(totals.tds)}</span>
+            <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {fmtN(totals.tds)}</span>
           </div>
           <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6, lineHeight: 1.5 }}>
             Deposited by employer with the Inland Revenue Department, Nepal.

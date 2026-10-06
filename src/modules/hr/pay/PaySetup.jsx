@@ -150,20 +150,18 @@ export default function PaySetup() {
       </div>
 
       {/* Stat cards — not while loading or after a failed read, where every total would be a
-          confident NPR 0 (S594's rule). */}
+          confident NPR 0 (S594's rule). The stat-card family, every figure in ink (S803). */}
       {!loading && !loadError && <div className="stat-grid">
         {[
-          { label: 'Total Gross Payroll', value: fmt(totals.gross),        color: 'var(--theme-accent-ink)', tip: 'Gross earnings (basic + allowances) for a full month, across the monthly-paid employees on the tab you have open. Daily/hourly workers are excluded — their pay is computed at payroll.' },
-          { label: 'SSF — Employee',       value: fmt(totals.ssf_emp),      color: 'var(--theme-red-text)', tip: '11% SSF on basic salary (capped at NPR 100,000 each), for employees with SSF switched on AND an SSF number — the same rule payroll uses.' },
-          { label: 'SSF — Employer',       value: fmt(totals.ssf_employer), color: 'var(--theme-text2)', tip: 'The 20% SSF the company pays on top of salaries — not deducted from employee net pay.' },
-          { label: 'Net before income tax', value: fmt(totals.net),         color: 'var(--theme-green-text)', tip: 'Gross − SSF employee − other deductions, for a full month. Income tax (TDS), absences, overtime, advance recovery and TADA are worked out in Payroll, so actual take-home pay differs.' },
+          { label: 'Total Gross Payroll', value: fmt(totals.gross),        tip: 'Gross earnings (basic + allowances) for a full month, across the monthly-paid employees on the tab you have open. Daily/hourly workers are excluded — their pay is computed at payroll.' },
+          { label: 'SSF — Employee',       value: fmt(totals.ssf_emp),      tip: '11% SSF on basic salary (capped at NPR 100,000 each), for employees with SSF switched on AND an SSF number — the same rule payroll uses.' },
+          { label: 'SSF — Employer',       value: fmt(totals.ssf_employer), tip: 'The 20% SSF the company pays on top of salaries — not deducted from employee net pay.' },
+          { label: 'Net before income tax', value: fmt(totals.net),         tip: 'Gross − SSF employee − other deductions, for a full month. Income tax (TDS), absences, overtime, advance recovery and TADA are worked out in Payroll, so actual take-home pay differs.' },
         ].map(s => (
-          <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              <Tip text={s.tip} width={260}>{s.label}</Tip>
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>NPR {s.value}</div>
-            <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 3 }}>{totals.count} monthly employee{totals.count === 1 ? '' : 's'} · {tabLabel}</div>
+          <div key={s.label} className="stat-card">
+            <div className="stat-label"><Tip text={s.tip} width={260}>{s.label}</Tip></div>
+            <div className="stat-value" style={{ whiteSpace: 'nowrap' }}>NPR {s.value}</div>
+            <div className="stat-sub">{totals.count} monthly employee{totals.count === 1 ? '' : 's'} · {tabLabel}</div>
           </div>
         ))}
       </div>}
@@ -173,7 +171,7 @@ export default function PaySetup() {
         options={tabs.map(t => ({
           key: t.key, title: t.tip,
           // No count over a list that is loading or failed to load: "0" there is not a count.
-          label: <>{t.label}{!loading && !loadError && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>{employees.filter(TAB_MATCH[t.key]).length}</span>}</>,
+          label: <>{t.label}{!loading && !loadError && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text2)' }}>{employees.filter(TAB_MATCH[t.key]).length}</span>}</>,
         }))} />
 
       <div className="card" style={{ padding: 0 }}>
@@ -206,7 +204,7 @@ export default function PaySetup() {
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="SSF Employee (11% of basic, when SSF is switched on and an SSF number is entered) plus any other deductions configured for the employee." width={250}>Deductions</Tip>
                   </th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                  <th style={{ textAlign: 'right' }}>
                     <Tip text="Gross − deductions for a full month, before income tax (TDS). Payroll also applies absences, overtime, advance recovery and TADA, so the payslip's take-home pay differs." width={260}>Net before tax</Tip>
                   </th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
@@ -249,10 +247,10 @@ export default function PaySetup() {
                       {s.monthly ? (
                         <>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 13 }}>{fmt(s.basic)}</td>
-                          <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', fontSize: 13 }}>{s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 13 }}>{s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13, fontWeight: 500 }}>{fmt(s.gross)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(s.ssf_employer)}</td>
                         </>
                       ) : (
@@ -261,7 +259,7 @@ export default function PaySetup() {
                             NPR {fmt(s.rate)} / {s.unit}
                           </td>
                           <td style={{ textAlign: 'right', fontSize: 12 }}>
-                            <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>~{fmt(s.estMonthly)}</span>
+                            <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>~{fmt(s.estMonthly)}</span>
                             <span style={{ color: 'var(--theme-text2)', fontSize: 10, marginLeft: 4 }}>est/mo</span>
                           </td>
                           {/* ONE column (SSF Employer). It was colSpan 2, which made every daily/hourly
@@ -288,8 +286,8 @@ export default function PaySetup() {
                   <td />
                   <td />
                   <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(totals.deductions)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmt(totals.deductions)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totals.net)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmt(totals.ssf_employer)}</td>
                   <td />
                   <td />

@@ -771,17 +771,17 @@ export default function FestivalAllowance() {
           {/* KPI cards */}
           <div className="stat-grid">
             {[
-              { label: 'Gross Payout',     value: fmt(total),            color: 'var(--theme-text1)', tip: 'Total festival allowance before income tax is taken off.' },
-              { label: 'Income Tax (TDS)', value: fmt(totalTds),         color: 'var(--theme-text1)',   tip: 'Income tax held back from the allowance and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so the allowance is taxed at the rate the employee actually falls in.' },
-              { label: 'Net Payout',       value: fmt(total - totalTds), color: 'var(--theme-text1)', tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
-              { label: 'Employees',        value: payRows.length,        color: 'var(--theme-text1)',      tip: 'People in this run, not counting anyone marked Excluded.' },
-              { label: 'Average Gross',    value: fmt(payRows.length ? total / payRows.length : 0), color: 'var(--theme-text3)', tip: 'Gross payout ÷ people in the run (excluded staff not counted).' },
+              { label: 'Gross Payout',     value: fmt(total),            tip: 'Total festival allowance before income tax is taken off.' },
+              { label: 'Income Tax (TDS)', value: fmt(totalTds),         tip: 'Income tax held back from the allowance and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so the allowance is taxed at the rate the employee actually falls in.' },
+              { label: 'Net Payout',       value: fmt(total - totalTds), tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
+              { label: 'Employees',        value: payRows.length,        tip: 'People in this run, not counting anyone marked Excluded.' },
+              { label: 'Average Gross',    value: fmt(payRows.length ? total / payRows.length : 0), tip: 'Gross payout ÷ people in the run (excluded staff not counted).' },
             ].map(s => (
-              <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div key={s.label} className="stat-card">
+                <div className="stat-label">
                   <Tip text={s.tip} width={280}>{s.label}</Tip>
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>
+                <div className="stat-value" style={{ whiteSpace: 'nowrap' }}>
                   {s.label === 'Employees' ? s.value : `NPR ${s.value}`}
                 </div>
               </div>
