@@ -233,7 +233,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Shift Types</h3>
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Shift Types</h2>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
             Customize the shift templates shown on the roster board
           </p>

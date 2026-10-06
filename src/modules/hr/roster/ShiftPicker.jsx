@@ -1,26 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { calcHours } from './laborForecast'
 import { fmtTime } from './rosterHelpers'
+import useMenuKeys from './useMenuKeys'
 
 export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cellCount = 1 }) {
   const ref = useRef()
 
-  useEffect(() => {
-    function onDown(e) {
-      if (
-        ref.current && !ref.current.contains(e.target) &&
-        anchorRef.current && !anchorRef.current.contains(e.target)
-      ) onClose()
-    }
-    function onKey(e) { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [onClose, anchorRef])
+  // Focus, arrows, Escape/Tab back to the cell and outside-click close (S803, RowMenu's model).
+  useMenuKeys(ref, anchorRef, onClose)
 
   const rect = anchorRef.current?.getBoundingClientRect()
   if (!rect) return null
@@ -33,7 +21,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
   const active = shifts.filter(s => s.active !== false)
 
   return createPortal(
-    <div ref={ref} role="menu" aria-label={cellCount > 1 ? `Assign a shift to ${cellCount} cells` : 'Assign a shift'} style={{
+    <div ref={ref} role="menu" className="roster-menu" aria-label={cellCount > 1 ? `Assign a shift to ${cellCount} cells` : 'Assign a shift'} style={{
       position: 'fixed', top, left, zIndex: 2100,
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
       borderRadius: 'var(--radius-md)', boxShadow: '0 8px 32px rgba(0,0,0,0.55)',

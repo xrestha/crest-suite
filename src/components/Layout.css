@@ -2481,6 +2481,25 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
 .row-menu-item:focus-visible {
   box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
 }
+
+/* The roster's shift picker and Suggest list (S803): their items are inline-styled buttons, so they
+   take RowMenu's focus treatment here — hover tint plus an inset ring — now that the keyboard can
+   actually reach them (useMenuKeys). */
+.roster-menu [role="menuitem"]:focus-visible {
+  background: var(--theme-focus-ring) !important;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
+}
+
+/* A roster board cell (S803). Its inline style draws the SELECTION as an outline and sets
+   `outline: none` otherwise, which removed the browser's focus ring too — so arrowing S768's roving
+   focus across a 40 × 32 board showed nothing. The ring is a box-shadow, which an inline outline
+   cannot cancel, lifted above its neighbours so the next cell does not paint over it. */
+.roster-cell:focus-visible {
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
 /* Signal colour as TEXT takes the -text variant (the .btn-danger rule, same reason). */
 .row-menu-item--danger { color: var(--theme-red-text); }
 .row-menu-item:disabled { opacity: 0.55; cursor: not-allowed; }

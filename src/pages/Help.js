@@ -383,6 +383,7 @@ const HR_FEATURES = [
       'Plan the roster before the month starts — it helps forecast labour cost and avoids scheduling conflicts',
       'Roster is for planning; Attendance is the official record that feeds payroll — use ⚡ Generate from Roster on the Attendance page to pull shift assignments across as a starting point instead of retyping them',
       'Click and drag across cells to assign the same shift to multiple days/staff at once, instead of one click per cell',
+      'From the keyboard: the arrow keys move between cells, Enter opens the shift list with its first shift selected, the arrows and Home/End move through it, and Escape closes it back to the same cell',
       'Each employee can only have one shift per day — assigning a new one replaces whatever was there before',
       '"Clear (Unassign)" at the bottom of the shift picker removes the assignment entirely — the cell goes blank and that day disappears from the employee\'s own Self-Service roster (there\'s nothing to show). To actually mark someone off in a way that still shows up everywhere, assign a real shift type instead — e.g. the built-in "Day Off" (0h) — not Clear',
       'The Shifts tab lets you rename, recolour, and adjust the hours of any shift to match your venue\'s terminology',

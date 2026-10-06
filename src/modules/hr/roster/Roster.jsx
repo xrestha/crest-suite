@@ -241,8 +241,13 @@ export default function Roster() {
   // demand_forecast_daily, from src/utils/demandForecastData.js's runForecast). Best-effort — a
   // client who's never run Demand Forecast just sees an empty overlay, not an error.
   const [forecastByDay, setForecastByDay] = useState({}) // { 'y:m:d': { covers, revenue, generated_at } }
+  // Guarded like the board's other three range loaders (S803). Without it, two quick ‹ › presses let
+  // the older week's read land last; its map is keyed by date, so the week on screen showed no
+  // forecast at all — "Rec" gone and Suggest hidden on exactly the short-staffed days it is for.
+  const forecastReq = useLatestRequest()
   const loadForecast = useCallback(async () => {
     if (!clientId) return
+    const reqKey = forecastReq.begin(`${clientId}:${viewMode}:${viewMode === 'weekly' ? weekStart.getTime() : `${bsYear}-${bsMonth}`}`)
     let all = []
     if (viewMode === 'weekly') {
       const months = new Map()
@@ -257,10 +262,12 @@ export default function Roster() {
       const results = await Promise.all([...months.values()].map(bs =>
         scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, revenue_estimated, generated_at, holiday_name, holiday_multiplier')
           .is('recipe_id', null).eq('bs_year', bs.year).eq('bs_month', bs.month)))
+      if (!forecastReq.isCurrent(reqKey)) return
       for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
       const { data, error } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, revenue_estimated, generated_at, holiday_name, holiday_multiplier')
         .is('recipe_id', null).eq('bs_year', bsYear).eq('bs_month', bsMonth)
+      if (!forecastReq.isCurrent(reqKey)) return
       if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
@@ -280,7 +287,7 @@ export default function Roster() {
       }
     }
     setForecastByDay(map)
-  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom])
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom, forecastReq])
 
   useEffect(() => { loadForecast() }, [loadForecast])
 
@@ -878,7 +885,8 @@ export default function Roster() {
           if (!targetKeys.has(k)) continue
           // Next week's own leave or holiday marker stays put, whatever this week holds.
           if (datedMarkerStatus(shiftMap[r.shift_type_id])) { targetMarkers.add(k); continue }
-          existingId.set(k, r.id)
+          // The whole cell, not just the id: the clear below deletes on id AND whose day it is (S803).
+          existingId.set(k, { id: r.id, empId: r.employee_id, year: r.bs_year, month: r.bs_month, day: r.bs_day })
         }
         for (const r of pub.data || []) publishedTargetDays.add(`${r.bs_year}:${r.bs_month}:${r.bs_day}`)
       }
@@ -888,7 +896,7 @@ export default function Roster() {
       const writeKeys = new Set(copied.map(keyOf))
       const overwrite = copied.filter(w => existingId.has(keyOf(w))).length
       // A cell this week's marker skipped is left as next week has it, not cleared to match.
-      const clearIds  = [...existingId.entries()].filter(([k]) => !writeKeys.has(k) && !untouched.has(k)).map(([, id]) => id)
+      const clearIds  = [...existingId.entries()].filter(([k]) => !writeKeys.has(k) && !untouched.has(k)).map(([, cell]) => cell)
       // Every next-week marker the copy leaves standing, whether a shift or a blank faced it.
       const targetMarkersKept = targetMarkers.size
 
@@ -940,11 +948,30 @@ export default function Roster() {
         const { error } = await settleWithin(scopedUpsert('hr_roster', rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' }), ROSTER_WRITE_MS, 'Copying the week')
         if (error) throw error
       }
+      let leftAlone = 0
       if (copyPlan.clearIds.length > 0) {
-        const { error } = await settleWithin(scopedDelete('hr_roster').in('id', copyPlan.clearIds), ROSTER_WRITE_MS, 'Copying the week')
-        if (error) throw error
+        // On id AND the employee and day read when the dialog opened (S803), the Board's own Clear
+        // rule (S798 ROSTER-2): a swap approved while this dialog stood open moves a row to the
+        // coworker under the same id, and a delete by id alone took the coworker's shift.
+        const groups = new Map() // `${empId}:${year}:${month}` -> { empId, year, month, ids, days }
+        for (const c of copyPlan.clearIds) {
+          const k = `${c.empId}:${c.year}:${c.month}`
+          if (!groups.has(k)) groups.set(k, { empId: c.empId, year: c.year, month: c.month, ids: [], days: [] })
+          groups.get(k).ids.push(c.id)
+          groups.get(k).days.push(c.day)
+        }
+        const out = await settleWithin(Promise.all([...groups.values()].map(g => scopedDelete('hr_roster')
+          .in('id', g.ids).eq('employee_id', g.empId).eq('bs_year', g.year).eq('bs_month', g.month).in('bs_day', g.days)
+          .select('id'))), ROSTER_WRITE_MS, 'Copying the week')
+        if (!Array.isArray(out)) throw out.error
+        const clearErr = out.find(r => r.error)?.error
+        if (clearErr) throw clearErr
+        leftAlone = copyPlan.clearIds.length - out.reduce((n, r) => n + (r.data?.length || 0), 0)
       }
       showNextWeek()
+      if (leftAlone > 0) {
+        setCopyError(`Copied. ${leftAlone} leftover shift${leftAlone === 1 ? '' : 's'} next week had changed since you opened the copy (a swap was approved, or someone edited the roster) and ${leftAlone === 1 ? 'was' : 'were'} left in place — check next week.`)
+      }
     } catch (e) {
       if (isTimeout(e)) {
         showNextWeek()
@@ -1395,26 +1422,26 @@ export default function Roster() {
 
               {viewMode === 'weekly' ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Previous week"
                     onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d) }}>‹</button>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>
+                  <span aria-live="polite" style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>
                     {weekLabel}
                   </span>
-                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Next week"
                     onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }}>›</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                  <button className="btn btn-ghost btn-sm"
                     onClick={() => setWeekStart(weekSunday(new Date()))}>Today</button>
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Previous month"
                     onClick={() => { if (bsMonth === 1) { setBsYear(y => y - 1); setBsMonth(12) } else setBsMonth(m => m - 1) }}>‹</button>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>
+                  <span aria-live="polite" style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>
                     {BS_MONTHS[bsMonth - 1]} {bsYear}
                   </span>
-                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Next month"
                     onClick={() => { if (bsMonth === 12) { setBsYear(y => y + 1); setBsMonth(1) } else setBsMonth(m => m + 1) }}>›</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                  <button className="btn btn-ghost btn-sm"
                     onClick={() => { setBsYear(today.year); setBsMonth(today.month) }}>This Month</button>
                 </div>
               )}
@@ -1572,10 +1599,12 @@ export default function Roster() {
                                       </span>
                                     </Tip>
                                     {short && (
+                                      // .btn-icon (S803): the hand-rolled glyph was an ~11–14px target with no
+                                      // focus ring, and the only way into Suggest on a phone or tablet board.
                                       <button type="button" onClick={e => openSuggest(e, col)} title="Suggest who to schedule"
                                         aria-label={`Suggest who to schedule on ${formatBsDay(col.bsDay, col.bsMonth)}`}
-                                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 11, padding: 0, lineHeight: 1 }}>
-                                        ✨
+                                        className="btn btn-ghost btn-sm btn-icon">
+                                        <span aria-hidden="true">✨</span>
                                       </button>
                                     )}
                                   </div>
@@ -1709,16 +1738,21 @@ export default function Roster() {
                                     >
                                       {shift ? (
                                         <>
-                                          <span style={{ fontSize: viewMode === 'weekly' ? 11 : 9, fontWeight: 700, color: shiftTextById[shift.id] || shift.color, lineHeight: 1.2 }}>
+                                          {/* 10px is the floor for real text; the month view's two-letter
+                                              code was 9px (S803). */}
+                                          <span style={{ fontSize: viewMode === 'weekly' ? 11 : 10, fontWeight: 700, color: shiftTextById[shift.id] || shift.color, lineHeight: 1.2 }}>
                                             {viewMode === 'weekly' ? shift.name : shift.name.slice(0, 2).toUpperCase()}
                                           </span>
+                                          {/* text2, not text3 (S803): the time and hours sit on the shift's own
+                                              tint, where text3 measured 3.97–4.30:1 on both presets across 120
+                                              week-view and 158 month-view labels (the S794 text3-on-tint rule). */}
                                           {viewMode === 'weekly' && shift.start_time && (
-                                            <span style={{ fontSize: 10, color: 'var(--theme-text3)', lineHeight: 1 }}>
+                                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1 }}>
                                               {fmtTime(shift.start_time)}–{fmtTime(shift.end_time)}
                                             </span>
                                           )}
                                           {hrs != null && (
-                                            <span style={{ fontSize: 10, color: 'var(--theme-text3)', lineHeight: 1 }}>{hrs}h</span>
+                                            <span style={{ fontSize: viewMode === 'weekly' ? 11 : 10, color: 'var(--theme-text2)', lineHeight: 1 }}>{hrs}h</span>
                                           )}
                                         </>
                                       ) : (
@@ -1909,22 +1943,22 @@ export default function Roster() {
 
             {viewMode === 'weekly' ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Previous week"
                   onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d) }}>‹</button>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>{weekLabel}</span>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                <span aria-live="polite" style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>{weekLabel}</span>
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Next week"
                   onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }}>›</button>
-                <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                <button className="btn btn-ghost btn-sm"
                   onClick={() => setWeekStart(weekSunday(new Date()))}>Today</button>
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Previous month"
                   onClick={() => { if (bsMonth === 1) { setBsYear(y => y - 1); setBsMonth(12) } else setBsMonth(m => m - 1) }}>‹</button>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>{BS_MONTHS[bsMonth - 1]} {bsYear}</span>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                <span aria-live="polite" style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>{BS_MONTHS[bsMonth - 1]} {bsYear}</span>
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }} aria-label="Next month"
                   onClick={() => { if (bsMonth === 12) { setBsYear(y => y + 1); setBsMonth(1) } else setBsMonth(m => m + 1) }}>›</button>
-                <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                <button className="btn btn-ghost btn-sm"
                   onClick={() => { setBsYear(today.year); setBsMonth(today.month) }}>This Month</button>
               </div>
             )}

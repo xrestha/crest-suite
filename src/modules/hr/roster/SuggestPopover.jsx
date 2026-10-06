@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { calcHours } from './laborForecast'
+import useMenuKeys from './useMenuKeys'
 
 // "who should cover this short-staffed day" — two-step: rank employees not already scheduled
 // that day (fewest hours scheduled this period first — the candidate pool is whatever the
@@ -11,21 +12,9 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
   const ref = useRef()
   const [pickedEmp, setPickedEmp] = useState(null)
 
-  useEffect(() => {
-    function onDown(e) {
-      if (
-        ref.current && !ref.current.contains(e.target) &&
-        anchorRef.current && !anchorRef.current.contains(e.target)
-      ) onClose()
-    }
-    function onKey(e) { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [onClose, anchorRef])
+  // RowMenu's keyboard model (S803). Keyed on the picked employee so the shift step takes focus
+  // when the list swaps, as the employee step did on open.
+  useMenuKeys(ref, anchorRef, onClose, pickedEmp?.id || 'employees')
 
   const rect = anchorRef.current?.getBoundingClientRect()
   if (!rect) return null
@@ -44,7 +33,7 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
   }
 
   return createPortal(
-    <div ref={ref} role="menu" aria-label="Suggest who to schedule" style={{
+    <div ref={ref} role="menu" className="roster-menu" aria-label={pickedEmp ? `Shift for ${pickedEmp.full_name}` : 'Suggest who to schedule'} style={{
       position: 'fixed', top, left, zIndex: 2100,
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
       borderRadius: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
@@ -60,7 +49,7 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
               Everyone in this view is already scheduled that day.
             </div>
           ) : candidates.slice(0, 8).map(emp => (
-            <button key={emp.id} onClick={() => setPickedEmp(emp)}
+            <button key={emp.id} role="menuitem" onClick={() => setPickedEmp(emp)}
               style={{ ...rowBtn, justifyContent: 'space-between', gap: 10 }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
               onMouseLeave={e => e.currentTarget.style.background = 'none'}
@@ -80,15 +69,16 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
             <span>Shift for {pickedEmp.full_name}</span>
             {/* Was a <span onClick> — no keyboard or screen-reader path back to the employee list. */}
             <button
-              className="btn btn-ghost"
-              style={{ fontSize: 11, padding: '2px 8px', color: 'var(--theme-accent-ink)' }}
+              role="menuitem"
+              data-menu-secondary="true"
+              className="btn btn-ghost btn-sm"
               onClick={() => setPickedEmp(null)}
-            >‹ back</button>
+            >‹ Back</button>
           </div>
           {active.map(s => {
             const hrs = s.hours ?? calcHours(s.start_time, s.end_time)
             return (
-              <button key={s.id} onClick={() => onAssign(pickedEmp.id, s.id)}
+              <button key={s.id} role="menuitem" onClick={() => onAssign(pickedEmp.id, s.id)}
                 style={{ ...rowBtn, gap: 10 }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'none'}
