@@ -6,7 +6,7 @@ import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { supabase } from '../../../supabaseClient'
 import { errorText } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import Fab from '../../../components/Fab'
@@ -70,7 +70,9 @@ export default function EmployeeList() {
   const { clientId, profile, hasHrAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setSsRemoveErr(CONFIRM_TIMEOUT_TEXT) })
   const [bulkError, setBulkError] = useState(null) // the last bulk access change that did not land
 
   // Seeded from the short-lived session cache so a revisit paints the last-known roster instantly

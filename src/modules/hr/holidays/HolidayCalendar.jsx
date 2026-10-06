@@ -6,7 +6,7 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
 import { errorText, errorLine } from '../../../shared/errorText'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { SIGHTED_HOLIDAYS, resolveYear, planSeed } from './holidayData'
 import { fiscalYearOf } from '../payroll/tds'
 import { NOTHING_CHANGED, changedNothing } from '../nothingChanged'
@@ -39,7 +39,9 @@ const inp = {
 export default function HolidayCalendar() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   const [holidays, setHolidays] = useState([])
   const [loading,  setLoading]  = useState(true)
   // Seed dedupes against the list on screen, so it may only run over a list that actually loaded —

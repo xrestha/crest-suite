@@ -16,7 +16,7 @@ import {
 } from '../payroll/bonusTax'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useIsOwnEmployee } from '../ownRecord'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
@@ -118,7 +118,9 @@ function MoneyInput({ value, onCommit, ...rest }) {
 export default function FestivalAllowance() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   const baseReq = useLatestRequest()
   const runReq  = useLatestRequest()
   const today = getBsToday()

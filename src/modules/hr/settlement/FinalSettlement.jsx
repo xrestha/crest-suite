@@ -18,11 +18,20 @@ import { leaveUsed, leaveEncashed } from '../leave/leaveBalance'
 import { fetchYtdMap } from '../payroll/payrollData'
 import { bonusFiscalYear } from '../payroll/bonusTax'
 import { firstError } from '../../../shared/queryError'
-import { errorLine } from '../../../shared/errorText'
+import { errorLine, isNetworkError } from '../../../shared/errorText'
+import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { nepalDateAd } from '../../../shared/nepalTime'
 import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
 import { settlementAdjustments, settlementPaymentState } from './settlementPayment'
 import { splitPlan, loginLabel, moveLine, removeLine, finalizedLoginNote, reopenLoginLines, notUndoneLines } from './settlementLogins'
+
+// The longest a settlement write is waited on (S803). Finalize, Reopen, Mark paid and Record difference
+// were bare awaits: a request that never answered left every button disabled with no message, the hang
+// S798 PAYROLL-8 bounded on Payroll Run and not here.
+const WRITE_MS = 25000
+// A dropped connection or a timeout proves nothing about the write: the reply can be lost after the
+// database committed. Only a refusal FROM the database says the transaction did not happen.
+const outcomeUnknown = err => isTimeout(err) || isNetworkError(err)
 
 const fmt = nprInt
 
@@ -680,9 +689,16 @@ export default function FinalSettlement() {
     const saved = await writeDraft()
     if (!saved) { setBusy(false); return }
     setCurrent(saved)
-    const { data, error } = await supabase.rpc('finalize_final_settlement', { p_settlement_id: saved.id })
+    const { data, error } = await settleWithin(supabase.rpc('finalize_final_settlement', { p_settlement_id: saved.id }), WRITE_MS, 'Finalizing the settlement')
     if (error) {
       setBusy(false)
+      if (outcomeUnknown(error)) {
+        await Promise.all([loadClientData(clientId), loadEmployees()])
+        setReloadTick(t => t + 1)
+        setMsg('error:Could not confirm whether the settlement was finalized — the server did not answer. The page has been reloaded to show what is stored: if it shows Finalized, it went through (logins blocked, advances recovered); if it is still a draft, finalize again. ' + errorLine(error))
+        return
+      }
+      // A refusal from the database: finalize is one transaction, so nothing but the draft was written.
       setMsg('error:' + errorLine(error) + ' The figures are saved as a draft; nothing else was written.')
       await loadClientData(clientId)
       return
@@ -701,9 +717,16 @@ export default function FinalSettlement() {
     const row = reopenTarget
     if (!row || !reopenReason.trim()) return
     setBusy(true); setMsg('')
-    const { data, error } = await supabase.rpc('reopen_final_settlement', { p_settlement_id: row.id, p_reason: reopenReason.trim() })
+    const { data, error } = await settleWithin(supabase.rpc('reopen_final_settlement', { p_settlement_id: row.id, p_reason: reopenReason.trim() }), WRITE_MS, 'Reopening the settlement')
     setBusy(false)
-    if (error) { setMsg('error:' + errorLine(error)); return }
+    if (error && outcomeUnknown(error)) {
+      setReopenTarget(null)
+      await loadClientData(clientId)
+      setReloadTick(t => t + 1)
+      setMsg('error:Could not confirm whether the settlement was reopened — the server did not answer. The page has been reloaded to show what is stored: if it is a draft again, the reopen went through. ' + errorLine(error))
+      return
+    }
+    if (error) { setMsg('error:The settlement was not reopened — it is still finalized. ' + errorLine(error)); return }
     setReopenTarget(null); setReopenReason('')
     setCurrent(data)
     await loadClientData(clientId)
@@ -728,9 +751,14 @@ export default function FinalSettlement() {
 
   async function markPaid(row, method) {
     setBusy(true); setMsg('')
-    const { data, error } = await scopedUpdate('hr_final_settlements', { paid_at: new Date().toISOString(), paid_method: method })
-      .eq('id', row.id).eq('status', 'finalized').is('paid_at', null).select()
+    const { data, error } = await settleWithin(scopedUpdate('hr_final_settlements', { paid_at: new Date().toISOString(), paid_method: method })
+      .eq('id', row.id).eq('status', 'finalized').is('paid_at', null).select(), WRITE_MS, 'Marking the settlement paid')
     setBusy(false)
+    if (error && outcomeUnknown(error)) {
+      await loadClientData(clientId)
+      setMsg('error:Could not confirm the payment was recorded — the server did not answer. The page has been reloaded: if the settlement shows as paid, it went through; if not, mark it paid again. ' + errorLine(error))
+      return
+    }
     if (error) { setMsg('error:The settlement was not marked as paid — it still shows as owed. ' + errorLine(error)); return }
     if (!data?.length) { setMsg('error:Nothing was changed — this settlement is already recorded as paid, or was reopened, on another screen. Reload the page.'); return }
     setCurrent(data[0])
@@ -742,9 +770,14 @@ export default function FinalSettlement() {
   // out the amount (net less what was paid) and keeps the entry beside the first payment.
   async function recordDifference(row, method) {
     setBusy(true); setMsg('')
-    const { data, error } = await supabase.rpc('record_settlement_difference', { p_settlement_id: row.id, p_method: method })
+    const { data, error } = await settleWithin(supabase.rpc('record_settlement_difference', { p_settlement_id: row.id, p_method: method }), WRITE_MS, 'Recording the difference')
     setBusy(false)
-    if (error) { setMsg('error:' + errorLine(error)); return }
+    if (error && outcomeUnknown(error)) {
+      await loadClientData(clientId)
+      setMsg('error:Could not confirm the difference was recorded — the server did not answer. The page has been reloaded: if what was paid now matches the settlement, it went through. Recording it again is refused once it has. ' + errorLine(error))
+      return
+    }
+    if (error) { setMsg('error:The difference was not recorded. ' + errorLine(error)); return }
     setCurrent(data)
     await loadClientData(clientId)
     const last = settlementAdjustments(data).slice(-1)[0]

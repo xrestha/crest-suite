@@ -9,7 +9,7 @@ import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, HR_REQUEST_STATUS } from '../payrollConstants'
 import { errorLine } from '../../../shared/errorText'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
 import { useIsOwnEmployee } from '../ownRecord'
@@ -47,7 +47,9 @@ const BLANK = {
 export default function Overtime() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   const monthReq = useLatestRequest()
 
   const [periods,   setPeriods]   = useState([])

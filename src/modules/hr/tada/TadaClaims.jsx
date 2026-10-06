@@ -14,7 +14,7 @@ import TadaSettingsModal from './TadaSettingsModal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
@@ -85,7 +85,9 @@ export default function TadaClaims() {
   // the page from offering a button that is certain to be refused.
   const canPay = hasHrAccess('manager')
   const { scopedFrom, scopedUpdate, scopedDelete } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setActionError(CONFIRM_TIMEOUT_TEXT) })
   const loadReq = useLatestRequest()
   const [actionError, setActionError] = useState(null) // an approve/reject/pay/delete that did not land
   const [busyId, setBusyId] = useState(null)

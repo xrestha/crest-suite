@@ -11,7 +11,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 
 // Mirrors src/modules/ims/staff/ImsStaff.jsx structurally — same role model, same custom-role
@@ -60,7 +60,9 @@ async function invokeDetail(data, error, fallback) {
 export default function HrStaff() {
   const { clientId, hasHrAccess, isAdmin, isOwner, session, profile, adminViewClientName } = useAuth()
   const { scopedFrom } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg(CONFIRM_TIMEOUT_TEXT) })
   const [staff,         setStaff]         = useState([])
   const [employees,     setEmployees]     = useState([]) // hr_employees, unlinked ones only
   const [eligibleUsers, setEligibleUsers] = useState([]) // existing client accounts with no pos_role/hr_self_service/ims_role/hr_role yet

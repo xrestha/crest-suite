@@ -15,6 +15,14 @@ import { fetchMonthDepositExtras, monthDeposit } from '../payroll/monthDeposit'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
 import WeatherHeaderSlot from '../../../pages/dashboard/WeatherHeaderSlot'
 import HrLabourPanel from './HrLabourPanel'
+import { settleWithin } from '../../../utils/withTimeout'
+
+// Each read is bounded on its own (S803): the page's two Promise.all batches had no limit, so one
+// request that never answered left the skeleton and "Loading dashboard data…" up for ever, with no
+// Retry, while the labour panel below already bounded its own. A timed-out read comes back as that
+// read's own `error`, so every tile's existing "unavailable" rendering and the Retry banner handle it.
+const READ_MS = 20000
+const bounded = q => settleWithin(q, READ_MS, 'Loading the HR dashboard')
 
 const fmt = nprInt
 // A leave day in BS, as the Leave page prints it — "17 Ashwin 2083" (S798 REPORTS-9; this queue
@@ -151,32 +159,32 @@ export default function HrDashboard() {
     setLoading(true)
 
     const results = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, status, retirement_date, basic_salary, pay_basis'),
-      scopedFrom('hr_leave_types', 'id, name'),
-      scopedFrom('hr_leave_requests', 'id, employee_id, leave_type_id, status, start_date, end_date, created_at')
+      bounded(scopedFrom('hr_employees', 'id, full_name, status, retirement_date, basic_salary, pay_basis')),
+      bounded(scopedFrom('hr_leave_types', 'id, name')),
+      bounded(scopedFrom('hr_leave_requests', 'id, employee_id, leave_type_id, status, start_date, end_date, created_at')
         .eq('status', 'pending')
-        .order('created_at', { ascending: false }).limit(8),
-      scopedFrom('hr_overtime_entries', 'id, employee_id, bs_year, bs_month, bs_day, ot_hours, ot_type, created_at')
+        .order('created_at', { ascending: false }).limit(8)),
+      bounded(scopedFrom('hr_overtime_entries', 'id, employee_id, bs_year, bs_month, bs_day, ot_hours, ot_type, created_at')
         .eq('status', 'pending')
-        .order('created_at', { ascending: false }).limit(8),
-      scopedFrom('hr_tada_claims', 'id, employee_id, trip_purpose, destination, total_amount, start_date, end_date, created_at')
+        .order('created_at', { ascending: false }).limit(8)),
+      bounded(scopedFrom('hr_tada_claims', 'id, employee_id, trip_purpose, destination, total_amount, start_date, end_date, created_at')
         .eq('status', 'pending')
-        .order('created_at', { ascending: false }).limit(8),
+        .order('created_at', { ascending: false }).limit(8)),
       // Only pending_admin needs a manager action — pending_target is still waiting on the
       // coworker's own accept/decline, same filter SwapRequestsPanel.jsx uses.
-      scopedFrom('hr_shift_swap_requests', 'id, requester_employee_id, target_employee_id, bs_year, bs_month, requester_bs_day, target_bs_day, created_at')
+      bounded(scopedFrom('hr_shift_swap_requests', 'id, requester_employee_id, target_employee_id, bs_year, bs_month, requester_bs_day, target_bs_day, created_at')
         .eq('status', 'pending_admin')
-        .order('created_at', { ascending: false }).limit(8),
-      scopedFrom('hr_payroll_runs', 'id, period_id, monthly_periods(bs_year, bs_month)')
+        .order('created_at', { ascending: false }).limit(8)),
+      bounded(scopedFrom('hr_payroll_runs', 'id, period_id, monthly_periods(bs_year, bs_month)')
         .eq('status', 'finalized')
-        .order('created_at', { ascending: false }).limit(1),
+        .order('created_at', { ascending: false }).limit(1)),
       // Both sides of the Advances Outstanding KPI are paged. `hr_advance_repayments` is an
       // unfiltered lifetime ledger — one row per advance per payroll month — so it crosses the
       // 1000-row cap first, and because outstanding is `amount − repaid`, truncating the
       // repayments side alone makes the dashboard OVERSTATE what staff still owe. `.order('id')`
       // is the unique tiebreaker fetchAllRows requires.
-      fetchAllRows(() => scopedFrom('hr_advances', 'id, amount').eq('status', 'active').order('id')),
-      fetchAllRows(() => scopedFrom('hr_advance_repayments', 'advance_id, amount').order('id')),
+      bounded(fetchAllRows(() => scopedFrom('hr_advances', 'id, amount').eq('status', 'active').order('id'))),
+      bounded(fetchAllRows(() => scopedFrom('hr_advance_repayments', 'advance_id, amount').order('id'))),
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
@@ -259,8 +267,8 @@ export default function HrDashboard() {
       // on the run, but their Final Settlement deducted the final month's SSF, and the SSF challan
       // these cards link to adds it. A failed read of either half shows no figure, as below.
       const [{ data: slips, error: slipsErr }, extras] = await Promise.all([
-        scopedFrom('hr_payslips', 'net_pay, ssf_employee, ssf_employer').eq('run_id', lastRun.id),
-        mp ? fetchMonthDepositExtras(scopedFrom, mp) : { data: { settlements: [], bonuses: [] }, error: null },
+        bounded(scopedFrom('hr_payslips', 'net_pay, ssf_employee, ssf_employer').eq('run_id', lastRun.id)),
+        mp ? bounded(fetchMonthDepositExtras(scopedFrom, mp)) : { data: { settlements: [], bonuses: [] }, error: null },
       ])
       if (loadIdRef.current !== myId) return // superseded again after this extra await
       hadRealError = hadRealError || slipsErr || extras.error
@@ -336,7 +344,8 @@ export default function HrDashboard() {
 
   return (
     <div>
-      <div role="status" aria-live="polite" className="sr-only">Dashboard data loaded</div>
+      {/* Says so when a read failed (S803): it announced "loaded" over a partial page. */}
+      <div role="status" aria-live="polite" className="sr-only">{loadError ? 'Dashboard loaded with errors — some figures could not be read' : 'Dashboard data loaded'}</div>
       {/* Both returns carry the weather slot, so the header does not jump when the data lands. */}
       <div className={weatherStrip.visible ? 'page-header page-header--split' : 'page-header'}>
         <div>
@@ -349,7 +358,9 @@ export default function HrDashboard() {
       {/* A load failure used to be indistinguishable from "this client genuinely has no data" —
           every query above silently discarded Supabase's error field. */}
       {loadError && (
-        <div className="card dash-section" style={{
+        // role="alert" (dashboards.md: the load-error banner carries it) — a screen reader was told
+        // nothing about a partial page (S803).
+        <div role="alert" className="card dash-section" style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',

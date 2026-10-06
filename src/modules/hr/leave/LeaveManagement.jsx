@@ -13,7 +13,7 @@ import { backfillApprovedLeave, findApprovedLeaveGaps } from './backfillApproved
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorText, errorLine } from '../../../shared/errorText'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
 import { useIsOwnEmployee } from '../ownRecord'
 import { NOTHING_CHANGED, changedNothing } from '../nothingChanged'
@@ -62,7 +62,9 @@ function bsLabel(iso) {
 export default function LeaveManagement() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   const today = adToBs(new Date())
   const [bsYear,    setBsYear]    = useState(today.year)
   const [tab,       setTab]       = useState('requests')

@@ -21,7 +21,7 @@ import { nepalBsLong } from '../../../shared/nepalTime'
 import { firstRecoveryMonth } from '../payroll/payrollData'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { errorLine } from '../../../shared/errorText'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useIsOwnEmployee } from '../ownRecord'
 import { OwnRecordNote } from '../ApprovalControls'
 
@@ -111,7 +111,9 @@ const EMPTY_REPAY = { repaid_date: '', amount: '', notes: '' }
 export default function Advances() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setPageError(CONFIRM_TIMEOUT_TEXT) })
   // A page-level action failure (settle, delete, write-off) — the modal-scoped `error` cannot show it.
   const [pageError, setPageError] = useState(null)
   const [pageNotice, setPageNotice] = useState('')

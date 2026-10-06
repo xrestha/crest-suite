@@ -7,7 +7,7 @@ import Modal from '../../../components/Modal'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useIsOwnEmployee } from '../ownRecord'
 import { BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, endsBeforeJoining, rehireNeedsNewJoinDate, staleRehireEndDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
@@ -85,7 +85,9 @@ const col = { flex: 1, display: 'flex', flexDirection: 'column' }
 
 export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setError(CONFIRM_TIMEOUT_TEXT) })
   const isEdit = !!employee
   // Your own record's email is the Owner's to change (S798 3a, H2): it is one of the two links that
   // make the record yours, so changing it would lift the own-pay rule (hr_own_pay refuses it).

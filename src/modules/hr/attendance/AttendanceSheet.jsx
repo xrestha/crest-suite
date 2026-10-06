@@ -7,7 +7,7 @@ import { errorLine, errorInfo } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { settleWithin } from '../../../utils/withTimeout'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay, bsDayOrdinal, formatAdAsBs } from '../../../utils/bsCalendar'
@@ -110,7 +110,9 @@ export default function AttendanceSheet() {
   const savedRef = useRef({})
   // The ask before a SAVED day is deleted (S803, owner decision): one tap on 🗑 used to remove a
   // pay-affecting row from hr_attendance with no confirm and no undo.
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setSavedMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   // A period switch waiting on "discard N unsaved changes?".
   const [pendingPeriodId, setPendingPeriodId] = useState(null)
   const [loading,   setLoading]   = useState(true)

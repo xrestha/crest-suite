@@ -29,7 +29,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { fetchMonthDepositExtras } from './monthDeposit'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useIsOwnEmployee } from '../ownRecord'
 import { groupOwnChanges } from './ownAttendanceChanges'
@@ -143,7 +143,9 @@ export default function PayrollRun() {
   const { clientId, hasHrAccess, profile, isAdmin, isOwner } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const periodReq = useLatestRequest()
-  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
+  // could not confirm (S803).
+  const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   const [periods,    setPeriods]    = useState([])
   const [period,     setPeriod]     = useState(null)
   const [run,        setRun]        = useState(null)

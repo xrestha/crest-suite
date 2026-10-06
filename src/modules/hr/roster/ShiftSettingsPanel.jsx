@@ -11,6 +11,12 @@ import { rosterDayShape } from '../attendance/attendanceFromRoster'
 import { BS_MONTHS, adToBs, formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalCivilDate } from '../../../shared/nepalTime'
 import { STANDARD_HOURS_PER_DAY } from '../payrollConstants'
+import { settleWithin } from '../../../utils/withTimeout'
+
+// Bounded (S803): both writes below run under a ConfirmModal that is inert while busy, so a request
+// that never answered left the dialog on screen until a reload. errorText's timeout rule says it may
+// still have landed.
+const WRITE_MS = 25000
 
 const EMPTY_FORM = { name: '', color: '#6B7280', start_time: '', end_time: '', hours: '', regular_hours: '' }
 
@@ -126,12 +132,12 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
     const { shift, payload } = split
     setSplitBusy(true)
     setError(null)
-    const { error: err } = await supabase.rpc('split_shift_type', {
+    const { error: err } = await settleWithin(supabase.rpc('split_shift_type', {
       p_shift_type_id: shift.id, p_from_year: from.year, p_from_month: from.month, p_from_day: from.day,
       p_old_name: archiveName(shift, split.fromIso), p_name: payload.name, p_color: payload.color,
       p_start_time: payload.start_time, p_end_time: payload.end_time,
       p_hours: payload.hours, p_regular_hours: payload.regular_hours,
-    })
+    }), WRITE_MS, 'Applying the change')
     setSplitBusy(false)
     setSplit(null)
     // One transaction: on a refusal the shift type and the roster are exactly as they were.
@@ -198,7 +204,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
       shift: s,
       run: async () => {
         setError(null)
-        const { error: err } = await scopedDelete('hr_shift_types').eq('id', s.id)
+        const { error: err } = await settleWithin(scopedDelete('hr_shift_types').eq('id', s.id), WRITE_MS, 'Deleting the shift type')
         if (err) { setError(asActionError(err, 'operator')); return }
         setShiftTypes(prev => prev.filter(x => x.id !== s.id))
       },
