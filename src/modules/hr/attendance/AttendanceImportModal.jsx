@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import ActionError from '../../../components/ActionError'
@@ -58,6 +58,7 @@ export default function AttendanceImportModal({
 }) {
   const [step, setStep] = useState('file')
   const [reading, setReading] = useState(false)
+  const fileRef = useRef(null)
   const [error, setError] = useState('')
   const [file, setFile] = useState(null)          // { name, sheets: [{ name, rows }] }
   const [sheetIndex, setSheetIndex] = useState(0)
@@ -208,10 +209,15 @@ export default function AttendanceImportModal({
               or a list of every punch. Nothing goes on the sheet until you have checked it, and nothing is saved until you press Save.
             </p>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <label className="btn btn-primary" style={{ margin: 0, cursor: reading ? 'wait' : 'pointer' }}>
+              {/* A real button in front of a visually-hidden input (S803), ClientDrawer's shape. The input
+                  was display:none inside a <label>, which is not focusable, so a keyboard or switch user
+                  could reach only the dialog's ×: the whole import needed a mouse to start. */}
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv,.txt,.dat,.pdf"
+                className="visually-hidden" tabIndex={-1} aria-hidden="true" onChange={pickFile} disabled={reading} />
+              <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}
+                disabled={reading} aria-busy={reading || undefined}>
                 {reading ? 'Reading…' : file ? 'Choose another file' : 'Choose file'}
-                <input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt,.dat,.pdf" style={{ display: 'none' }} onChange={pickFile} disabled={reading} />
-              </label>
+              </button>
               {file && <span style={{ fontSize: 12 }}>{file.name}</span>}
               {file && mapping && (
                 <button type="button" className="btn btn-ghost" onClick={() => { setError(''); setStep('columns') }}>Choose columns myself</button>

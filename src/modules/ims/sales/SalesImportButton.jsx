@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, adToBs } from '../../../utils/bsCalendar'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -191,6 +191,7 @@ export default function SalesImportButton({ recipes, onMatched, disabled, select
   const { ask: askConfirm, confirmEl } = useConfirm()   // S765: the overwrite warning was a window.confirm
   const [importSummary, setImportSummary] = useState(null)
   const [importError, setImportError] = useState('')
+  const fileRef = useRef(null)
 
   function handleImportFile(e) {
     setImportError('')
@@ -264,11 +265,15 @@ export default function SalesImportButton({ recipes, onMatched, disabled, select
   return (
     <>
       <Tip text="Upload a vendor/POS 'Sales Report Item Wise' Excel export to auto-fill qty sold and discount for this day. Matches by Product Name against your active menu items and reads the Net quantity and Discount columns; unmatched names are listed below. Review the filled table, then click Save Day as usual." width={300}>
-        <label className="btn btn-ghost" style={{ fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer', margin: 0, opacity: disabled ? 0.5 : 1 }}>
+        {/* A real button, the visually-hidden input beside it (S803, ClientDrawer's shape): display:none
+            inside a <label> took the import out of the tab order entirely. Tip makes the lone button
+            its own focus target. */}
+        <button type="button" className="btn btn-ghost" onClick={() => fileRef.current?.click()} disabled={disabled}>
           ↑ Import Excel
-          <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportFile} disabled={disabled} />
-        </label>
+        </button>
       </Tip>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" className="visually-hidden" tabIndex={-1} aria-hidden="true"
+        onChange={handleImportFile} disabled={disabled} />
       {importError && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 6 }}>{importError}</div>}
       {importSummary && (
         <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 6 }}>

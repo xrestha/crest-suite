@@ -135,16 +135,18 @@ export const OT_HOLIDAY_MULTIPLIER  = 2.0   // overtime on a gazetted public hol
 // A base signal token used as 13px text fails WCAG AA on the light presets, which is why the pair
 // exists. Paid Leave and Holiday previously carried undocumented indigo hexes (#60a5fa/#818cf8)
 // with no home in the palette — mapped here to the nearest documented tokens (accent / purple).
+// The unpaid-leave codes read in text2, not text3 (S803): on their own 13% swatch text3 measured
+// 3.88:1 on Light, and text3 has no headroom on any tint (the S794 rule).
 export const ATTENDANCE_STATUSES = [
   { key: 'present',           label: 'Present',             short: 'P',   color: 'var(--theme-green)',  textColor: 'var(--theme-green-text)' },
   { key: 'half_day',          label: 'Half-day',            short: '½',   color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
   { key: 'absent',            label: 'Absent',               short: 'A',   color: 'var(--theme-red)',   textColor: 'var(--theme-red-text)' },
   { key: 'paid_leave',        label: 'Paid Leave',          short: 'PL',  color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
-  { key: 'unpaid_leave',      label: 'Unpaid Leave',        short: 'UL',  color: 'var(--theme-text3)',  textColor: 'var(--theme-text3)' },
+  { key: 'unpaid_leave',      label: 'Unpaid Leave',        short: 'UL',  color: 'var(--theme-text3)',  textColor: 'var(--theme-text2)' },
   // Half-day leave — distinct from the generic 'half_day' status above so payroll can respect
   // the underlying leave type's paid/unpaid flag instead of always deducting 0.5 day's pay.
   { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
-  { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: 'var(--theme-text3)',  textColor: 'var(--theme-text3)' },
+  { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: 'var(--theme-text3)',  textColor: 'var(--theme-text2)' },
   // Key stays 'weekly_off' (no DB migration needed — hr_attendance_status_check already allows
   // it) even though there's no more auto-computed "weekly" pattern; it's now just an explicit
   // per-employee, per-day Off marking. Label/short changed from "Weekly Off"/"W" to "Off"/"O"

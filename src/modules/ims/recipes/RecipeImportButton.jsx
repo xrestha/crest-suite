@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
@@ -39,6 +39,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
   const [importPreview, setImportPreview] = useState(null) // { recipes:[...], summary } | null
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
+  const fileRef = useRef(null)
   // The success state of a bulk import, shown in the page rather than in an OS dialog (S765).
   const [importDone, setImportDone] = useState('')
 
@@ -272,10 +273,13 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
         : 'Selling Price is EX-VAT: for a NPR 500 menu price at 13% VAT, enter 442.48 — the preview shows the menu price each row will produce.'} Ingredients are matched to your Item Master by name or code, and the preview shows which item each one matched; unmatched ones are listed so you can fix them.`} width={320}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={downloadRecipeTemplate}>↓ Template</button>
       </Tip>
-      <label className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px', cursor: 'pointer', margin: 0 }}>
+      {/* A real button, the visually-hidden input beside it (S803, ClientDrawer's shape): display:none
+          inside a <label> took the import out of the tab order entirely. */}
+      <button type="button" className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={() => fileRef.current?.click()}>
         ↑ Import Excel
-        <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportFile} />
-      </label>
+      </button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" className="visually-hidden" tabIndex={-1} aria-hidden="true"
+        onChange={handleImportFile} />
       {isAdmin && (
         <Tip text="Crest Admin only. Downloads every current recipe and sub-recipe with its full ingredient breakdown and cost by default — a backup, an editable spreadsheet, or a file to hand to another location. Check specific rows in the list below first to export just those instead (works across tabs). Same format as ↓ Template, so it can be edited and re-imported (here, or into a different client)." width={330}>
           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={downloadRecipeExport} disabled={(exportRecipes || recipes).length === 0}>Export Excel</button>

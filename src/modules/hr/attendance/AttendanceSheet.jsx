@@ -7,6 +7,8 @@ import { errorLine, errorInfo } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { settleWithin } from '../../../utils/withTimeout'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay, bsDayOrdinal, formatAdAsBs } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
@@ -22,6 +24,10 @@ import { unmarkedWindow, unmarkedDaysFor } from '../payroll/monthStatus'
 // The sheet's staff list. join_date / end_date: Import from machine marks no day before someone
 // joined or after they left. Read on load and again after a write meets a settled leaver.
 const EMPLOYEE_COLS = 'id, full_name, employee_code, pay_basis, status, department, join_date, end_date'
+// The longest the sheet waits on a write before saying it could not confirm (S803). Save, Generate
+// and the clears used to wait for ever: a hung request left "Saving…" up, and Generate's confirm —
+// inert while busy, by design — trapped the clerk over a month of unsaved marks.
+const WRITE_MS = 25000
 
 // Which pay-month refusal a write met (hr_pay_month_guard, S791), or null. Neither can be retried
 // past, so a message for one must never say "press Save again" (S798, ATTENDANCE-8).
@@ -102,6 +108,9 @@ export default function AttendanceSheet() {
   // across every day of the month (S768) — the ref is the same map for the async reload paths.
   const [savedRecords, setSavedRecords] = useState({})
   const savedRef = useRef({})
+  // The ask before a SAVED day is deleted (S803, owner decision): one tap on 🗑 used to remove a
+  // pay-affecting row from hr_attendance with no confirm and no undo.
+  const { ask: askConfirm, confirmEl } = useConfirm()
   // A period switch waiting on "discard N unsaved changes?".
   const [pendingPeriodId, setPendingPeriodId] = useState(null)
   const [loading,   setLoading]   = useState(true)
@@ -514,13 +523,17 @@ export default function AttendanceSheet() {
       return next
     })
     if (!period) return
-    const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id).eq('bs_day', day)
+    const dayName = formatBsDay(day, period.bs_month)
+    // Bounded (S803): this runs inside the confirm dialog, which cannot be dismissed while busy.
+    const { error } = await settleWithin(
+      scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id).eq('bs_day', day),
+      WRITE_MS, 'Clearing the day')
     if (error) {
       // The cell was cleared optimistically; put it back so the sheet shows what is stored.
       if (before) setRecords(m => ({ ...m, [key]: before }))
       const lock = payLockOf(error)
-      if (lock) { await answerPayLock({ kind: lock, lead: `Day ${day} was not cleared.`, error }); return }
-      setSavedMsg(`error:Day ${day} may not have been cleared — reload to see what is stored. ` + errorLine(error))
+      if (lock) { await answerPayLock({ kind: lock, lead: `${dayName} was not cleared.`, error }); return }
+      setSavedMsg(`error:${dayName} may not have been cleared — reload to see what is stored. ` + errorLine(error))
       return
     }
     // The row is gone, so it leaves the saved copy too — or marking the same day again would
@@ -531,6 +544,29 @@ export default function AttendanceSheet() {
       savedRef.current = nextSaved
       setSavedRecords(nextSaved)
     }
+  }
+  // The 🗑 button and the Status box's "— Not marked —" both come here (S803, owner decision). A mark
+  // not yet saved clears at once, as typing over it would; a SAVED day is a pay row, so deleting it
+  // asks first and says what the blank day then means for this person's pay.
+  function requestClearCell(empId, day) {
+    if (refuseIfLocked()) return
+    if (!(`${empId}:${day}` in savedRef.current) || !period) { clearCell(empId, day); return }
+    const emp = employees.find(e => e.id === empId)
+    const dayName = formatBsDay(day, period.bs_month)
+    const monthly = (emp?.pay_basis || 'monthly') === 'monthly'
+    askConfirm({
+      title: `Delete ${emp?.full_name || 'this employee'}'s ${dayName}?`,
+      body: (
+        <p style={{ margin: 0 }}>
+          The saved mark is removed and {dayName} goes back to Not Marked.{' '}
+          {monthly
+            ? 'A monthly employee is still paid for an unmarked day.'
+            : `${emp?.pay_basis === 'hourly' ? 'An hourly' : 'A daily'} employee is paid nothing for an unmarked day.`}
+        </p>
+      ),
+      confirmLabel: 'Delete the day', danger: true, busyLabel: 'Deleting…',
+      run: () => clearCell(empId, day),
+    })
   }
   // Unpaid break/lunch minutes are subtracted from the raw Start-to-End span to give Hours Worked
   // (clamped at 0) — see autoHoursFor above for when they also reduce OT and when they do not.
@@ -690,10 +726,17 @@ export default function AttendanceSheet() {
     // has marked it since. RETURNING lists the first marks that went in.
     const { first, edits } = splitFirstMarks(keys, savedRef.current)
     const none = { data: [], error: null }
-    const [editRes, firstRes] = await Promise.all([
+    const out = await settleWithin(Promise.all([
       edits.length ? scopedUpsert('hr_attendance', edits.map(rowFor), { onConflict: 'employee_id,period_id,bs_day' }) : none,
       first.length ? scopedUpsert('hr_attendance', first.map(rowFor), { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true }) : none,
-    ])
+    ]), WRITE_MS, 'Saving attendance')
+    if (!Array.isArray(out)) {
+      // Timed out (S803). Either half may have landed; both are safe to send again (an edit
+      // overwrites its own row, a first mark never overwrites), and the marks are still on screen.
+      setSavedMsg(`error:Could not confirm ${describeChanges(keys)} saved — the server took too long to answer. What you entered is still on screen — press Save again (saving twice is safe). ` + errorLine(out.error))
+      setSaving(false); return
+    }
+    const [editRes, firstRes] = out
     const error = editRes.error || firstRes.error
     const lockErr = [editRes.error, firstRes.error].find(e => payLockOf(e))
     if (lockErr) {
@@ -799,8 +842,8 @@ export default function AttendanceSheet() {
     // Scoped to the staff on this sheet, never the whole day (S749 — the S743 Clear Month rule,
     // which this sibling missed). The sheet lists active/probation staff only, and a mid-month
     // leaver's days are what Final Settlement reads.
-    const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
-      .in('employee_id', employees.map(e => e.id))
+    const { error } = await settleWithin(scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
+      .in('employee_id', employees.map(e => e.id)), WRITE_MS, 'Clearing the day')
     if (error) {
       const lock = payLockOf(error)
       if (lock) await answerPayLock({ kind: lock, lead: `Day ${selectedDay} was not cleared.`, error, retry: 'Clear the day again to clear it for everyone else.' })
@@ -852,7 +895,11 @@ export default function AttendanceSheet() {
     // ON CONFLICT DO NOTHING (S798): the plan decided "blank" from the screen, and only the database
     // knows what is really stored. A day saved meanwhile, in another tab or by a leave approval, is
     // kept rather than overwritten; RETURNING lists only the rows that went in.
-    const { data: written, error } = await scopedUpsert('hr_attendance', plan.rows, { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true })
+    // Bounded (S803): the Generate confirm is inert while busy, so a hung write used to leave it on
+    // screen with no way out but a reload.
+    const { data: written, error } = await settleWithin(
+      scopedUpsert('hr_attendance', plan.rows, { onConflict: 'employee_id,period_id,bs_day', ignoreDuplicates: true }),
+      WRITE_MS, 'Generating from roster')
     setPendingGenerate(null)
     if (error) {
       const lock = payLockOf(error)
@@ -889,11 +936,13 @@ export default function AttendanceSheet() {
     const name = employees.find(e => e.id === empId)?.full_name || 'employee'
     setConfirmClear(null)
     setSaving(true); setSavedMsg('')
-    const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
+    const { error } = await settleWithin(
+      scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id),
+      WRITE_MS, 'Clearing the month')
     if (error) {
       const lock = payLockOf(error)
       if (lock) await answerPayLock({ kind: lock, lead: `${name}'s records were not cleared.`, error })
-      else setSavedMsg('error:' + errorLine(error))
+      else setSavedMsg(`error:${name}'s records may not have been cleared — reload to see what is stored. ` + errorLine(error))
       setSaving(false); return
     }
     const reread = await loadAttendance(period.id, { carry: true, drop: key => splitCellKey(key).employeeId === empId })
@@ -933,11 +982,13 @@ export default function AttendanceSheet() {
     if (!period || refuseIfLocked()) return
     setConfirmClear(null)
     setSaving(true); setSavedMsg('')
-    const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).in('employee_id', employees.map(e => e.id))
+    const { error } = await settleWithin(
+      scopedDelete('hr_attendance').eq('period_id', period.id).in('employee_id', employees.map(e => e.id)),
+      WRITE_MS, 'Clearing the month')
     if (error) {
       const lock = payLockOf(error)
       if (lock) await answerPayLock({ kind: lock, lead: `${periodLabel} was not cleared.`, error, retry: 'Clear Month again to clear it for everyone else.' })
-      else setSavedMsg('error:' + errorLine(error))
+      else setSavedMsg(`error:${periodLabel} may not have been cleared — reload to see what is stored. ` + errorLine(error))
       setSaving(false); return
     }
     const listed = new Set(employees.map(e => e.id))
@@ -1326,7 +1377,7 @@ export default function AttendanceSheet() {
                             aria-label={`${emp.full_name} — status`}
                             className="form-select" style={{ padding: CELL_PAD, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
                             value={status || ''} disabled={locked}
-                            onChange={e => e.target.value ? setCell(emp.id, selectedDay, 'status', e.target.value) : clearCell(emp.id, selectedDay)}
+                            onChange={e => e.target.value ? setCell(emp.id, selectedDay, 'status', e.target.value) : requestClearCell(emp.id, selectedDay)}
                           >
                             <option value="" style={{ color: 'var(--theme-text3)' }}>— Not marked —</option>
                             {ATTENDANCE_STATUSES.map(s => <option key={s.key} value={s.key} style={{ color: 'var(--theme-text1)' }}>{s.label}</option>)}
@@ -1387,12 +1438,10 @@ export default function AttendanceSheet() {
                         <td>
                           {rec && !locked && (
                             <Tip text="Delete this record — reverts to Not Marked">
-                              <button onClick={() => clearCell(emp.id, selectedDay)}
-                                aria-label={`Delete ${emp.full_name}'s record for day ${selectedDay}`}
-                                style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, padding: 4, lineHeight: 1 }}
-                                onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red-text)' }}
-                                onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)' }}
-                              >🗑</button>
+                              <button type="button" onClick={() => requestClearCell(emp.id, selectedDay)}
+                                className="btn btn-ghost btn-sm btn-icon btn-icon--delete"
+                                aria-label={`Delete ${emp.full_name}'s record for ${formatBsDay(selectedDay, period?.bs_month)}`}
+                              ><span aria-hidden="true">🗑</span></button>
                             </Tip>
                           )}
                         </td>
@@ -1525,7 +1574,7 @@ export default function AttendanceSheet() {
                               aria-label={`Day ${d} — status`}
                               className="form-select" style={{ padding: CELL_PAD, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
                               value={status || ''} disabled={locked}
-                              onChange={e => e.target.value ? setCell(selectedEmployeeId, d, 'status', e.target.value) : clearCell(selectedEmployeeId, d)}
+                              onChange={e => e.target.value ? setCell(selectedEmployeeId, d, 'status', e.target.value) : requestClearCell(selectedEmployeeId, d)}
                             >
                               <option value="" style={{ color: 'var(--theme-text3)' }}>— Not marked —</option>
                               {ATTENDANCE_STATUSES.map(s => <option key={s.key} value={s.key} style={{ color: 'var(--theme-text1)' }}>{s.label}</option>)}
@@ -1586,12 +1635,10 @@ export default function AttendanceSheet() {
                           <td>
                             {rec && !locked && (
                               <Tip text="Delete this record — reverts to Not Marked">
-                                <button onClick={() => clearCell(selectedEmployeeId, d)}
-                                  aria-label={`Delete the record for day ${d}`}
-                                  style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, padding: 4, lineHeight: 1 }}
-                                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red-text)' }}
-                                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)' }}
-                                >🗑</button>
+                                <button type="button" onClick={() => requestClearCell(selectedEmployeeId, d)}
+                                  className="btn btn-ghost btn-sm btn-icon btn-icon--delete"
+                                  aria-label={`Delete the record for ${formatBsDay(d, period?.bs_month)}`}
+                                ><span aria-hidden="true">🗑</span></button>
                               </Tip>
                             )}
                           </td>
@@ -1711,7 +1758,9 @@ export default function AttendanceSheet() {
                           return (
                             <td key={d} title={flagged ? `Imported day to check — machine: ${importFlags[`${emp.id}:${d}`]}` : undefined}
                               style={{ textAlign: 'center', padding: '6px 4px', ...(flagged ? { outline: '1px dashed var(--theme-amber)', outlineOffset: -3 } : null) }}>
-                              {sc ? <span style={{ color: sc.textColor, fontWeight: 700 }}>{sc.short}</span> : <span style={{ color: 'var(--theme-border)' }}>·</span>}
+                              {/* An unmarked day: text3, not the border token (1.22:1 Light, 1.36:1 Night),
+                                  and named for a screen reader rather than read as "middle dot" (S803). */}
+                              {sc ? <span style={{ color: sc.textColor, fontWeight: 700 }}>{sc.short}</span> : <span style={{ color: 'var(--theme-text3)' }}><span aria-hidden="true">·</span><span className="visually-hidden">Not marked</span></span>}
                             </td>
                           )
                         })}
@@ -1861,6 +1910,7 @@ export default function AttendanceSheet() {
           </p>
         </ConfirmModal>
       )}
+      {confirmEl}
     </div>
   )
 }

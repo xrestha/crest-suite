@@ -1803,6 +1803,14 @@ tr.interactive-row:focus-visible {
   flex: 0 0 auto;
 }
 
+/* A quiet delete in a dense grid (S803, Attendance): ghost at rest so a column of them does not
+   shout, the danger ink on hover AND on keyboard focus. The inline onMouseEnter it replaced showed
+   that the button deletes to the mouse alone. */
+.btn-icon--delete:hover:not(:disabled),
+.btn-icon--delete:focus-visible {
+  color: var(--theme-red-text);
+}
+
 .btn-icon svg {
   width: 15px;
   height: 15px;
