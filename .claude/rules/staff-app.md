@@ -73,6 +73,10 @@ devices install that one.
   `loadRoster` is request-guarded so the older months' load cannot land last.
 - **`subscribeToPush` re-subscribes on a 42501 upsert** (S798): on a shared phone the browser's
   endpoint can still be another employee's row, which RLS will not let this login take over.
+- **Every RPC the app waits on is bounded** (S803): reads 20 s, sends 25 s, through `read`/`write`
+  in `SelfServiceHome`, so a stalled call becomes that area's own error card with Retry. Reopening a
+  sheet resets its busy flag; a second send is refused by the database if the first landed. Net pay
+  and payments print through `nprPaisa`, as the payslip does, in plain ink.
 - **A failed read is not an empty period.** `employeeError.js` turns a Supabase/PostgREST code into
   one honest sentence, and each area holds its own message (`errs` map) so a failed payslip read
   cannot blank a roster that loaded fine. The old portal had one shared string and rendered a failed

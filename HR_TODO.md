@@ -6,6 +6,10 @@ and are not re-asked. Start from the S798.0 index.
 
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
+**S803 technical audit (2026-10-06, 13/20): ✅ done.** Every finding fixed the same day in nine stages
+plus a final polish (crest-v390 → v399). Nothing from it is open here; the report and its Resolution
+table are `.impeccable/audit/2026-10-06T00-48-41Z__src-modules-hr.md`.
+
 **Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
 
 ---

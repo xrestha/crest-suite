@@ -20,6 +20,8 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - Build `stat-card` / `stat-label` / `stat-value` / `stat-sub` from `<div>`s, never `<p>`. For the dense tier use `stat-card--compact`; never re-type the card's box properties inline.
 - A KPI value never wraps. A text value in a tile takes `nowrap` + ellipsis + `title`. 10px is the floor for real text.
 - Dashboard spacing is `dash-section` / `dash-row`; a grid that is also a section takes `stat-grid dash-section`.
+- A stat card that opens a page wraps its figure in `button.stat-card__open`; the card keeps the mouse click (S803).
+- A form's fields go in `.field-grid` (`.field-grid__wide` for a field that needs two columns), side-by-side panels in `.panel-grid`, a form beside its live summary in `.split-pane`; never an inline track list (S803).
 
 ## Tables
 

@@ -215,6 +215,9 @@ History: #s570-stale-draft-and-fetch-helpers, #s600-leaver-proration-and-departe
 - **Every await Payroll Run and its payment dialogs block on is bounded** (S798 PAYROLL-8,
   `settleWithin`). A timed-out read is a failed read; a timed-out WRITE says it could not confirm and
   reloads, never "nothing has changed". A retry is safe because the database refuses the second one.
+  Since S803 the rest of HR is too: Final Settlement's Finalize, Reopen, Mark paid and Record
+  difference (25 s, then reload and say how to read what is stored), the HR Dashboard's reads (20 s),
+  every Attendance write, and every HR confirm (`useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS })`).
 
 Why: a browser sequence of writes can stop half-way, and a page check is skipped by any caller that
 goes straight to REST.
@@ -240,6 +243,9 @@ History: #s613-finalize-gates, #s620-reopen-rank, #s682-finalize-and-reopen-poin
 - **The Bank Transfer sheet carries only what is still owed** (`bankTransferPlan`, S798 3e, H1 (a)),
   draft or finalized, and names who was left off. A failed payments read disables its downloads; it
   never falls back to full net pay. A new pay-out sheet reads payments the same way.
+- **A file exported from a run that is not wholly finalized says DRAFT** (S803; Payroll's since
+  S752): Festival Allowance and Incentive Run put `_DRAFT` in the file name and a FINALIZED / DRAFT /
+  PART FINALIZED line above a workbook's table. A bank CSV carries no extra line, so the name is it.
 - **`runPaymentSummary()` walks payslips AND payments** (S788). Someone paid and then regenerated out
   of the month counts in `over` and `paidTotal` (not `owed`/`paid`), is listed in `noPayslip`, and
   gets their own row on Payroll Run so the Undo stays reachable.
@@ -283,6 +289,9 @@ History: #s782-salary-payments; S798 3e is in the CHANGELOG
   Manager-entered claims go through `create_tada_claim` (one transaction); `submit_my_tada_claim`
   refuses an identical claim twice, NaN, and reversed dates.
 - **`numeric` accepts `'NaN'`, and `NaN > 0` is true**, so a CHECK spells out `<> 'NaN'`.
+- **TADA Claims reads a claim's lines when its row is opened** (S803), one bounded single-parent
+  read, with a Retry under the row on failure. The claim list stays all-time: the page opens on All
+  months and its Paid tile is every claim paid so far.
 
 Why: an advance or claim lives in its own ledger, and every rule here keeps the ledger and the
 payslip from disagreeing about money already moved.
@@ -476,6 +485,8 @@ History: #s600-final-settlement-writes, #s613-finalize-gates, #s620-reopen-rank,
     evening clock-in, and the overnight is shorter than the same-day reading). `suspectReason` sends
     the rest to check with hours `''`, which `stillIncomplete` holds open.
 - Attendance's period switch is request-guarded.
+- **Deleting a SAVED day asks first** (S803, `requestClearCell`), naming the person, the BS day and
+  what a blank day then pays them; an unsaved mark clears at once.
 
 Why: payroll reads the sheet and nothing else, so every mark the sheet loses, overwrites or
 invents is a wrong payslip.
@@ -628,6 +639,10 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
   (`settleWithin`, S798 PAYROLL-8): a timed-out write says it could not confirm, and a copy then opens
   next week as stored. Both are safe to repeat. `hr_overtime_entries`, `hr_shift_types` and
   `hr_shift_swap_requests` are audited; `hr_roster` deliberately is not (volume).
+- **The board's approved-leave guard reads the dates on screen plus the following week** (S803,
+  which Copy to Next Week checks), merged by request id so a range already seen stays covered.
+- **The board works from the keyboard** (S803): arrows move between cells, Enter opens the shift list
+  (`useMenuKeys` in `roster/`), and Escape or Tab returns focus to the cell. A new board popover uses it.
 
 Why: the roster is read as evidence of who works, by payroll, the forecast and the Staff app, so a
 row that is not a shift must never count as one.
@@ -786,7 +801,8 @@ History: #s748-employees-pay-setup-holiday-calendar, #s798-stage-1b
   (`STAFF_LEVEL_BADGE`, all three levels `badge-yellow`; `STAFF_LEVEL_BADGE_NONE` for no access to the
   module).
 - **A correct payroll figure takes the ink; the sign carries direction** (registers, the working
-  panel, Festival/Incentive runs, Final Settlement, Gratuity, Pay Setup's preview, `PayslipBody`).
+  panel, Festival/Incentive runs, Final Settlement, Gratuity, Pay Setup's preview and table, every
+  HR Reports tab including the TDS certificate, Overtime's strip, `PayslipBody`; S803 for the last three).
   Colour is for flags only (SSF no. missing, no bank, out of date, split month, owed by the employee:
   amber with △). `RunStatusBadge` is the one Draft (amber) / Finalized (green) chip beside a run's
   title; Festival Allowance and Incentive Run still build their own per-run list chip, with a third
