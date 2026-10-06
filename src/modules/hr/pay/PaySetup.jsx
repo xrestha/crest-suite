@@ -145,7 +145,8 @@ export default function PaySetup() {
           <h1 className="page-title">Pay Setup</h1>
           <p className="page-subtitle">Salary, allowances, deductions, SSF and bank per employee — click a row to edit. Daily/hourly staff are paid via payroll from attendance.</p>
         </div>
-        <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export Excel</button>
+        {/* Not before the list has loaded: a workbook of a failed read is an empty payroll (S803). */}
+        <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError} style={{ fontSize: 12 }}>⬇ Export Excel</button>
       </div>
 
       {/* Stat cards — not while loading or after a failed read, where every total would be a
@@ -171,7 +172,8 @@ export default function PaySetup() {
       <FilterChips label="Filter by payroll status" active={statusFilter} onChange={setStatusFilter} style={{ marginBottom: 16 }}
         options={tabs.map(t => ({
           key: t.key, title: t.tip,
-          label: <>{t.label}<span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>{employees.filter(TAB_MATCH[t.key]).length}</span></>,
+          // No count over a list that is loading or failed to load: "0" there is not a count.
+          label: <>{t.label}{!loading && !loadError && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>{employees.filter(TAB_MATCH[t.key]).length}</span>}</>,
         }))} />
 
       <div className="card" style={{ padding: 0 }}>

@@ -9,6 +9,7 @@ import Modal from '../../../components/Modal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
+import { edgeFunctionFailure, failedMovesMessage } from '../../../shared/edgeFunctionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 import { chipKeys } from '../../../shared/rovingFocus'
@@ -43,12 +44,6 @@ function passwordProblem(pw, context) {
 const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 const names = list => list.map(p => p.full_name || p.email).join(', ')
 
-// Every admin-user-ops failure arrives the same three ways; one reader for all of them.
-async function invokeDetail(data, error, fallback) {
-  let detail = data?.error || error?.message || fallback
-  try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-  return detail
-}
 
 export default function ImsStaff() {
   const { clientId, hasImsAccess, hrEnabled, session, profile, adminViewClientName, isAdmin, isOwner } = useAuth()
@@ -194,7 +189,8 @@ export default function ImsStaff() {
           const { data, error } = await supabase.functions.invoke('admin-user-ops', {
             body: { action: 'update_ims_role', client_id: clientId, userId: p.id, ims_role: level, ims_job_title: p.ims_job_title },
           })
-          return { p, level, failed: !!(error || data?.error), detail: data?.error || error?.message }
+          const failed = !!(error || data?.error)
+          return { p, level, failed, info: failed ? await edgeFunctionFailure(data, error) : null }
         }))
         const levelById = Object.fromEntries(outcomes.filter(o => !o.failed).map(o => [o.p.id, o.level]))
         if (Object.keys(levelById).length > 0) {
@@ -202,8 +198,7 @@ export default function ImsStaff() {
         }
         const failed = outcomes.filter(o => o.failed)
         if (failed.length > 0) {
-          setMsg(`${failed.length} login(s) could not be moved and keep their previous access: ${names(failed.map(o => o.p))}. ` +
-            (failed[0].detail || 'Try again, or ask the account owner.'))
+          setMsg(failedMovesMessage(failed))
         } else {
           setNotice(`${list.length} login${list.length === 1 ? '' : 's'} moved to the level their role carries.`)
         }
@@ -265,7 +260,8 @@ export default function ImsStaff() {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_ims_role', client_id: clientId, userId: p.id, ims_role: level, ims_job_title: changedLabel },
       })
-      return { p, failed: !!(error || data?.error), detail: data?.error || error?.message }
+      const failed = !!(error || data?.error)
+      return { p, failed, info: failed ? await edgeFunctionFailure(data, error) : null }
     }))
     const moved = new Set(outcomes.filter(o => !o.failed).map(o => o.p.id))
     if (moved.size > 0) {
@@ -273,8 +269,7 @@ export default function ImsStaff() {
     }
     const failed = outcomes.filter(o => o.failed)
     if (failed.length > 0) {
-      setRolesError(`Saved the role, but ${failed.length} login(s) could not be moved to the new level and keep their previous access: ` +
-        names(failed.map(o => o.p)) + '. ' + (failed[0].detail || 'Change their level individually, or try again.'))
+      setRolesError(failedMovesMessage(failed, { prefix: 'Saved the role, but ', fallback: 'Change their level individually, or try again.' }))
     }
   }
 
@@ -349,7 +344,7 @@ export default function ImsStaff() {
         },
       })
       if (error || data?.error) {
-        setAddMsg(await invokeDetail(data, error, 'The role was not assigned — this account still has the access it had before.'))
+        setAddMsg(await edgeFunctionFailure(data, error, 'The role was not assigned — this account still has the access it had before.'))
         setAdding(false); return
       }
       const who = eligibleUsers.find(u => u.id === addForm.existing_user_id)
@@ -375,7 +370,7 @@ export default function ImsStaff() {
         },
       })
       if (error || data?.error) {
-        setAddMsg(await invokeDetail(data, error, 'The counting login was not created. Check your internet and try again.'))
+        setAddMsg(await edgeFunctionFailure(data, error, 'The counting login was not created.'))
         setAdding(false); return
       }
       setNotice(`${addForm.full_name.trim()} can now count stock with that PIN. Set the device up from Stock Count → Settings — they tap their name and type the PIN, nothing else.`)
@@ -402,7 +397,7 @@ export default function ImsStaff() {
       },
     })
     if (error || data?.error) {
-      setAddMsg(await invokeDetail(data, error, 'The account was not created. Check your internet and try again — if the email is already in use, add them through “Existing user” instead.'))
+      setAddMsg(await edgeFunctionFailure(data, error, 'The account was not created — if the email is already in use, add them through “Existing user” instead.'))
       setAdding(false); return
     }
     setNotice(`Login created — they sign in at /login with ${addForm.email.trim()} and the password you set. Share it with them directly.`)
@@ -428,7 +423,7 @@ export default function ImsStaff() {
           body: { action: 'delete_ims_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
-          setMsg(`${p.full_name}'s login was not deleted — it still works. ${await invokeDetail(data, error, '')}`); return
+          setMsg(await edgeFunctionFailure(data, error, `${p.full_name}'s login was not deleted — it still works.`)); return
         }
         setNotice(`${p.full_name}'s IMS login was deleted.`)
         load()
@@ -456,7 +451,7 @@ export default function ImsStaff() {
         : { action: 'reset_ims_password', client_id: clientId, userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
-      setPwMsg(await invokeDetail(data, error, isPin
+      setPwMsg(await edgeFunctionFailure(data, error, isPin
         ? 'The PIN was not changed — the old one still works.'
         : 'The password was not changed — the old one still works.'))
       setResetting(false); return
@@ -488,7 +483,7 @@ export default function ImsStaff() {
       },
     })
     if (error || data?.error) {
-      setMsg(await invokeDetail(data, error, 'The role was not changed — this account still has the access it had before.'))
+      setMsg(await edgeFunctionFailure(data, error, 'The role was not changed — this account still has the access it had before.'))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId
         ? { ...p, ims_role: role?.level || null, ims_job_title: jobTitle || null }

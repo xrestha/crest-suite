@@ -5,6 +5,7 @@ paths:
   - "src/components/FieldError.jsx"
   - "src/modules/hr/selfservice/employeeError.js"
   - "src/modules/ims/**"
+  - "src/shared/edgeFunctionError.js"
 ---
 
 # An error surfaced as `error.message` is not a message (S619)
@@ -143,6 +144,10 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   refusal — Stock Count queues the write in the first case and must never queue in the second, or
   it retries a refusal for ever. It shares the one regex the network rule above tests on, because
   a second copy is how "was this the connection?" starts getting two answers on one page.
+- **An Edge Function failure goes through `edgeFunctionFailure(data, error, consequence)`**
+  (`src/shared/edgeFunctionError.js`, S803). The caller's consequence leads; the function's own
+  message follows only when it is a sentence, else it is `detail`. No answer at all
+  (`FunctionsFetchError`) claims nothing. `data?.error || error?.message` hid the consequence.
 - Distinct from the report rule above: that one is about a figure a page *did not compute*; this
   one is about the sentence shown once something has already failed. Rules only get added here for
   shapes genuinely recognisable from the error — everything else takes an honest fallback.

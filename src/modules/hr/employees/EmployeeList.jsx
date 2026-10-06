@@ -4,7 +4,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { supabase } from '../../../supabaseClient'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorInfo } from '../../../shared/errorText'
+import { edgeFunctionFailure } from '../../../shared/edgeFunctionError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import Tip from '../../../components/Tip'
@@ -107,7 +108,11 @@ export default function EmployeeList() {
   // is not a harmless blank: an empty roster reads as "no staff", and an empty self-service map
   // reads as "nobody has a login" — see the row action, which would then offer Enable to someone
   // who already has one. A failed read is not an empty result (S594).
-  const [loadErr, setLoadErr] = useState('')
+  const [loadErr, setLoadErr] = useState(null)
+  // Whether the list on screen is one this client was actually read as (a cache counts: stale but
+  // true). Until one read succeeds there is no list, so the KPI strip and "No employees yet" stay
+  // off rather than reading a failed first read as a client with no staff (S803).
+  const [listOk, setListOk] = useState(!!cachedEmployees)
   // What a save did beyond the record itself (S798 3b: a rehire's staff logins unblocked, or not).
   // { tone: 'ok' | 'warn', text } or null.
   const [saveNotice, setSaveNotice] = useState(null)
@@ -135,9 +140,10 @@ export default function EmployeeList() {
       const cached = effectiveClientId ? readPageCache('employees', 'employees', effectiveClientId) : null
       setEmployees(cached ?? [])
       setLoading(!!effectiveClientId && !cached)
+      setListOk(!!cached)
       setSelected(new Set())
       setSelfServiceMap({})
-      setLoadErr(''); setSsStatusErr(''); setBulkError(null); setSsRemoveErr('')
+      setLoadErr(null); setSsStatusErr(''); setBulkError(null); setSsRemoveErr('')
       setSupFilter('all')
     }
     if (effectiveClientId) { fetchEmployees(); fetchSelfServiceStatus() }
@@ -153,11 +159,12 @@ export default function EmployeeList() {
       // Leave whatever is already on screen. A cached list is stale but true; [] is a lie that
       // reads as "this client has no employees" — and it would also be written to the cache,
       // so the lie would survive the next visit.
-      setLoadErr(errorText(error, 'operator'))
+      setLoadErr(error)
       setLoading(false)
       return
     }
-    setLoadErr('')
+    setLoadErr(null)
+    setListOk(true)
     setEmployees(data || [])
     writePageCache('employees', 'employees', effectiveClientId, data || [])
     setLoading(false)
@@ -189,9 +196,10 @@ export default function EmployeeList() {
       body: { action: 'create_hr_self_service_login', client_id: effectiveClientId, employee_id: ssTarget.id, pin: ssPin },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to enable self-service'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setSsMsg('Error: ' + detail); setSsBusy(false); return
+      const info = await edgeFunctionFailure(data, error, `Self-Service was not enabled for ${ssTarget.full_name} — they have no PIN yet.`)
+      setSsMsg(info); setSsBusy(false)
+      if (info.network) fetchSelfServiceStatus()   // it may have landed; the row shows which
+      return
     }
     setSsTarget(null); setSsBusy(false)
     fetchSelfServiceStatus()
@@ -223,9 +231,10 @@ export default function EmployeeList() {
           body: { action: 'delete_hr_self_service_login', client_id: effectiveClientId, userId },
         })
         if (error || data?.error) {
-          let detail = data?.error || error?.message || 'Failed to remove self-service access'
-          try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-          setSsRemoveErr(`${emp.full_name}'s access was not removed — their PIN still works. ` + detail); setSsRemoving(null); return
+          const info = await edgeFunctionFailure(data, error, `${emp.full_name}'s access was not removed — their PIN still works.`)
+          setSsRemoveErr(info); setSsRemoving(null)
+          if (info.network) fetchSelfServiceStatus()
+          return
         }
         setSsRemoving(null); setSsRemoveErr('')
         fetchSelfServiceStatus()
@@ -374,9 +383,11 @@ export default function EmployeeList() {
         </div>
       </div>
 
-      {loadErr && (
-        <AlertCard onDismiss={() => setLoadErr('')}>
-          Couldn't load the employee list, so what's shown below may be out of date or incomplete: {loadErr}
+      {/* With a list on screen (a cache, or an earlier read) the failure qualifies it; with none,
+          the table's own slot says the read failed instead of "No employees yet". */}
+      {loadErr && listOk && (
+        <AlertCard onDismiss={() => setLoadErr(null)}>
+          Couldn't refresh the employee list, so what's shown below may be out of date or incomplete: {errorText(loadErr, 'operator')}
         </AlertCard>
       )}
 
@@ -396,13 +407,11 @@ export default function EmployeeList() {
       )}
 
       <ActionError error={bulkError} />
-      {ssRemoveErr && (
-        <AlertCard onDismiss={() => setSsRemoveErr('')}>
-          Couldn't remove Self-Service access: {ssRemoveErr}
-        </AlertCard>
-      )}
+      {ssRemoveErr && <ActionError error={ssRemoveErr} className="action-error--top" />}
 
-      {/* Stat cards */}
+      {/* Stat cards: only over a list that was read. While loading, or after a failed first read,
+          every tile would be a 0 the page never computed. */}
+      {!loading && listOk && (
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Total Employees</div>
@@ -424,17 +433,15 @@ export default function EmployeeList() {
           </div>
           <div className="stat-sub">monthly-paid staff, basic only</div>
         </div>
+        {/* A mouse shortcut only (S803): the card holds a Tip, a control of its own, so it cannot be
+            role="button". The "Retiring soon" toggle in the filter row is the keyboard way in. */}
         <div
-          className="stat-card"
+          className={retiringSoon > 0 ? 'stat-card interactive-card' : 'stat-card'}
           style={retiringSoon > 0 ? { cursor: 'pointer' } : undefined}
           onClick={() => retiringSoon > 0 && setRetiringOnly(v => !v)}
-          {...(retiringSoon > 0 ? {
-            role: 'button', tabIndex: 0, 'aria-pressed': retiringOnly,
-            onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRetiringOnly(v => !v) } },
-          } : {})}
         >
           <div className="stat-label">
-            <Tip text="Active or probation employees whose retirement date falls within the next 180 days. Click to filter." width={260}>
+            <Tip text="Active or probation employees whose retirement date falls within the next 180 days. Click the card, or Retiring soon above the list, to show only them." width={260}>
               Retiring Soon
             </Tip>
           </div>
@@ -442,6 +449,7 @@ export default function EmployeeList() {
           <div className="stat-sub">within 180 days</div>
         </div>
       </div>
+      )}
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -502,6 +510,16 @@ export default function EmployeeList() {
       {/* Table */}
       {loading ? (
         <div className="loading-state">Loading…</div>
+      ) : !listOk && loadErr ? (
+        <div className="card report-error" role="alert">
+          <div className="report-error-title">Could not load the employee list</div>
+          <p className="report-error-body">{errorInfo(loadErr, 'operator').text}</p>
+          <p className="report-error-hint">
+            This is a failed read, not an empty list: nobody has been removed. Reload the page, and if
+            it keeps happening send the detail below to support.
+          </p>
+          {errorInfo(loadErr, 'operator').detail && <p className="action-error-detail">{errorInfo(loadErr, 'operator').detail}</p>}
+        </div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">👤</div>
@@ -676,7 +694,7 @@ export default function EmployeeList() {
                 type="password" autoComplete="new-password" inputMode="numeric" maxLength={6} value={ssPin} onChange={e => setSsPin(e.target.value.replace(/\D/g, ''))}
               />
             </div>
-            {ssMsg && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{ssMsg}</div>}
+            {ssMsg && <ActionError error={ssMsg} />}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setSsTarget(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={enableSelfService} disabled={ssBusy}>{ssBusy ? 'Enabling…' : 'Enable'}</button>

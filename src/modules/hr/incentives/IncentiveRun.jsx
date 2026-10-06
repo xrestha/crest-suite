@@ -593,13 +593,18 @@ export default function IncentiveRun() {
     })
   }
 
+  // A file exported from a draft says so (S803), as Festival Allowance and Payroll's bank file do:
+  // a status line above a workbook's table, and _DRAFT in a CSV's file name (the bank reads it).
   async function exportSheet(data, name, ext = 'xlsx') {
     const XLSX = await import('xlsx')
-    const ws = XLSX.utils.json_to_sheet(data)
+    const status = finalized ? 'FINALIZED' : anyFinalized ? 'PART FINALIZED — the draft rows may change' : 'DRAFT — amounts may change'
+    const ws = ext === 'csv' ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([[`${name} — ${runLabel} ${bsYear} — ${status}`], []])
+    if (ext !== 'csv') XLSX.utils.sheet_add_json(ws, data, { origin: 'A3' })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, name)
     const safe = runLabel.replace(/[^\w-]+/g, '_')
-    XLSX.writeFile(wb, `${name.replace(/\s+/g, '_').toLowerCase()}_${safe}_${bsYear}.${ext}`, ext === 'csv' ? { bookType: 'csv' } : undefined)
+    const draftTag = finalized ? '' : '_DRAFT'
+    XLSX.writeFile(wb, `${name.replace(/\s+/g, '_').toLowerCase()}_${safe}_${bsYear}${draftTag}.${ext}`, ext === 'csv' ? { bookType: 'csv' } : undefined)
   }
   function exportRegister() {
     exportSheet(sortedRows.map(r => {
@@ -831,6 +836,11 @@ export default function IncentiveRun() {
             </div>
           )}
           <div className="card no-print" style={{ marginBottom: 14, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            {!finalized && (
+              <span style={{ marginRight: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--theme-text2)' }}>
+                Not finalized — files downloaded now are marked DRAFT.
+              </span>
+            )}
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportRegister} disabled={busy}>⬇ Register</button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>

@@ -8,7 +8,8 @@ import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, formatAdAsBs } from '../../../utils/bsCalendar'
+import { nepalBsLong } from '../../../shared/nepalTime'
 import { fiscalYearOf, retirementRelief } from '../payroll/tds'
 import { DEFAULT_BONUS_MONTH, bonusFiscalYear, fetchFinalizedBonuses, settlementLump } from '../payroll/bonusTax'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, SSF_DEPOSIT_DAY } from '../payrollConstants'
@@ -21,9 +22,9 @@ import { errorLine } from '../../../shared/errorText'
 import { bankTransferPlan, fetchRunPayments } from '../payroll/salaryPayments'
 
 const fmt = nprInt
-// A date-only string parsed as LOCAL midnight — `new Date('YYYY-MM-DD')` is UTC midnight, a day early
-// for any viewer west of UTC.
-const fmtDate = d => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+// A stored AD date printed in BS, as every other HR screen prints it (S803). It was an en-IN AD
+// date here, on the one HR report that lists join and retirement dates.
+const fmtDate = d => formatAdAsBs(d)
 
 // The SSF base a contribution was actually worked out on — employee 11% + employer 20% ÷ 31%. The
 // challan printed min(basic, cap), which is the contract basic for a monthly employee with unpaid
@@ -344,7 +345,7 @@ export default function HrReports() {
     // the company belongs (S798 REPORTS-8). The buttons are off as well — this is the backstop.
     if (ext !== 'csv' && xlsxBlocked) return
     const XLSX = await import('xlsx')
-    const scope = `${clientName || 'Payroll'} — ${sheet} — ${scoped ? `${periodLabel} — payroll ${runState}` : `as of ${fmtDate(new Date().toISOString().slice(0, 10))}`}${note ? ` — ${note}` : ''}`
+    const scope = `${clientName || 'Payroll'} — ${sheet} — ${scoped ? `${periodLabel} — payroll ${runState}` : `as of ${nepalBsLong(new Date())}`}${note ? ` — ${note}` : ''}`
     const ws = ext === 'csv' ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([[scope], []])
     if (ext !== 'csv') XLSX.utils.sheet_add_json(ws, data, { origin: 'A3' })
     const wb = XLSX.utils.book_new()

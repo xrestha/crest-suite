@@ -10,6 +10,7 @@ import Modal from '../../../components/Modal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
+import { edgeFunctionFailure, failedMovesMessage } from '../../../shared/edgeFunctionError'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
@@ -50,12 +51,6 @@ function passwordProblem(pw, context) {
 const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 const names = list => list.map(p => p.full_name || p.email).join(', ')
 
-// Every admin-user-ops failure arrives the same three ways; one reader for all of them.
-async function invokeDetail(data, error, fallback) {
-  let detail = data?.error || error?.message || fallback
-  try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-  return detail
-}
 
 export default function HrStaff() {
   const { clientId, hasHrAccess, isAdmin, isOwner, session, profile, adminViewClientName } = useAuth()
@@ -244,7 +239,8 @@ export default function HrStaff() {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_hr_role', client_id: clientId, userId: p.id, hr_role: level, hr_job_title: p.hr_job_title },
       })
-      return { p, level, failed: !!(error || data?.error), detail: data?.error || error?.message }
+      const failed = !!(error || data?.error)
+      return { p, level, failed, info: failed ? await edgeFunctionFailure(data, error) : null }
     }))
     const levelById = Object.fromEntries(outcomes.filter(o => !o.failed).map(o => [o.p.id, o.level]))
     if (Object.keys(levelById).length > 0) {
@@ -282,8 +278,7 @@ export default function HrStaff() {
         setMsg(''); setNotice('')
         const failed = await moveLogins(list, levelOf)
         if (failed.length > 0) {
-          setMsg(`${failed.length} login(s) could not be moved and keep their previous access: ${names(failed.map(o => o.p))}. ` +
-            (failed[0].detail || 'Try again, or ask the account owner.'))
+          setMsg(failedMovesMessage(failed))
         } else {
           setNotice(`${list.length} login${list.length === 1 ? '' : 's'} moved to the level their role carries.`)
         }
@@ -300,8 +295,7 @@ export default function HrStaff() {
       if (!ok || affected.length === 0) return
       const failed = await moveLogins(affected, () => level)
       if (failed.length > 0) {
-        setRolesError(`Saved the role, but ${failed.length} login(s) could not be moved to the new level and keep their previous access: ` +
-          names(failed.map(o => o.p)) + '. ' + (failed[0].detail || 'Change their level individually, or try again.'))
+        setRolesError(failedMovesMessage(failed, { prefix: 'Saved the role, but ', fallback: 'Change their level individually, or try again.' }))
       }
     }
     if (affected.length === 0) { commit(); return }
@@ -390,7 +384,7 @@ export default function HrStaff() {
         },
       })
       if (error || data?.error) {
-        setAddMsg(await invokeDetail(data, error, 'The role was not assigned — this account still has the access it had before.'))
+        setAddMsg(await edgeFunctionFailure(data, error, 'The role was not assigned — this account still has the access it had before.'))
         setAdding(false); return
       }
       const who = eligibleUsers.find(u => u.id === addForm.existing_user_id)
@@ -433,7 +427,7 @@ export default function HrStaff() {
       },
     })
     if (error || data?.error) {
-      setAddMsg(await invokeDetail(data, error, 'The account was not created. Check your internet and try again — if the email is already in use, the account owner can add them through “Existing User” instead.'))
+      setAddMsg(await edgeFunctionFailure(data, error, 'The account was not created — if the email is already in use, the account owner can add them through “Existing User” instead.'))
       setAdding(false); return
     }
     setNotice(`Login created — they sign in at /login with ${addForm.email.trim()} and the password you set. Share it with them directly.`)
@@ -459,7 +453,7 @@ export default function HrStaff() {
           body: { action: 'delete_hr_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
-          setMsg(`${p.full_name}'s login was not deleted — it still works. ${await invokeDetail(data, error, '')}`); return
+          setMsg(await edgeFunctionFailure(data, error, `${p.full_name}'s login was not deleted — it still works.`)); return
         }
         setNotice(`${p.full_name}'s HR login was deleted.`)
         load()
@@ -478,7 +472,7 @@ export default function HrStaff() {
       body: { action: 'reset_hr_password', client_id: clientId, userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
-      setPwMsg(await invokeDetail(data, error, 'The password was not changed — the old one still works.'))
+      setPwMsg(await edgeFunctionFailure(data, error, 'The password was not changed — the old one still works.'))
       setResetting(false); return
     }
     setNotice(`Password for ${pwTarget.full_name} changed — the old one no longer works. Share the new one with them directly.`)
@@ -504,7 +498,7 @@ export default function HrStaff() {
       },
     })
     if (error || data?.error) {
-      setMsg(await invokeDetail(data, error, 'The role was not changed — this account still has the access it had before.'))
+      setMsg(await edgeFunctionFailure(data, error, 'The role was not changed — this account still has the access it had before.'))
     } else {
       setStaff(prev => prev.map(s => s.id === p.id ? { ...s, hr_role: role.level, hr_job_title: jobTitle } : s))
     }

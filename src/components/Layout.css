@@ -1402,6 +1402,29 @@ tr.interactive-row:focus-visible {
   border-color: var(--theme-accent);
 }
 
+/* The keyboard and screen-reader way into a stat card that opens something (S803). The card holds a
+   Tip, which is a control, so it cannot itself be role="button"; it keeps the mouse click and this
+   button wraps the figure. Unstyled so the figure looks exactly as it does on a plain card. */
+.stat-card__open {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.stat-card__open .stat-value {
+  display: block;
+}
+.stat-card__open:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+
 /* ClientDashboard.jsx's two "period expired" action buttons (admin's "Go to Periods", the
    client's "End Month & Start Month") were duplicated inline style objects with no hover state at
    all — every other button in the app (.btn, .btn-ghost, .ticket-btn) has one. Consolidated here

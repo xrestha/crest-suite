@@ -86,22 +86,29 @@ function SectionLabel({ children }) {
   )
 }
 
+// A card that opens a page holds a Tip, which is a control of its own, so the card cannot be
+// role="button" (S803; page-layout.md: a card that holds controls puts the affordance on its
+// children). The card keeps the mouse click; the figure is the real button, named "<label>: <value>",
+// which is the keyboard and screen-reader way in.
 function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, alert }) {
+  const valueStyle = { color, fontSize: typeof value === 'string' && value.length > 8 ? 16 : undefined }
   return (
     <div
       className={onClick ? 'stat-card interactive-card' : 'stat-card'}
       onClick={onClick}
       style={onClick ? { cursor: 'pointer' } : undefined}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }) : undefined}
     >
       <div className="stat-label">
         {tip ? <Tip text={tip} width={260}>{label}</Tip> : label}
       </div>
-      <div className="stat-value" style={{ color, fontSize: typeof value === 'string' && value.length > 8 ? 16 : undefined }}>
-        {value}
-      </div>
+      {onClick ? (
+        <button type="button" className="stat-card__open" onClick={e => { e.stopPropagation(); onClick() }}>
+          <span className="sr-only">{label}: </span>
+          <span className="stat-value" style={valueStyle}>{value}</span>
+        </button>
+      ) : (
+        <div className="stat-value" style={valueStyle}>{value}</div>
+      )}
       {sub && <div className="stat-sub" style={alert ? { color: 'var(--theme-amber-text)' } : undefined}>{sub}</div>}
     </div>
   )

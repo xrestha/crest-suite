@@ -11,11 +11,13 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import { GRATUITY_VESTING_MONTHS } from '../payrollConstants'
-import { formatAd } from '../../../utils/bsCalendar'
+import { formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
+import { nepalBsLong } from '../../../shared/nepalTime'
 import { settlementPaymentState, settlementStillOwed } from '../settlement/settlementPayment'
 
 const fmt = nprInt
-const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+// The join date in BS, as every other HR screen prints it (S803); it was an en-IN AD date.
+const fmtD = iso => formatAdAsBs(iso)
 const VEST = GRATUITY_VESTING_MONTHS
 
 // Format service duration as "X yr Y mo"
@@ -117,7 +119,7 @@ export default function GratuityTracker() {
     const XLSX = await import('xlsx')
     const today = formatAd(new Date())
     // The scope goes in the sheet: the filters are not visible in a workbook opened a month later.
-    const scope = `Gratuity accrual as of ${today} · ${dept === 'all' ? 'all departments' : dept}`
+    const scope = `Gratuity accrual as of ${nepalBsLong(new Date()) || today} · ${dept === 'all' ? 'all departments' : dept}`
       + ` · ${filter === 'vested' ? `vested (${VEST}+ months) only` : filter === 'vesting' ? `under ${VEST} months only` : 'all service lengths'}`
       + ` · monthly-paid active and probation staff${nonMonthly > 0 ? ` (${nonMonthly} daily/hourly not included)` : ''}`
     const ws = XLSX.utils.aoa_to_sheet([[scope], []])
@@ -156,7 +158,8 @@ export default function GratuityTracker() {
           </p>
         </div>
         <div className="no-print">
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}>⬇ Export Excel</button>
+          {/* Not before the list has loaded: a workbook of a failed read is a liability of 0 (S803). */}
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel} disabled={loading || !!loadError}>⬇ Export Excel</button>
         </div>
       </div>
 

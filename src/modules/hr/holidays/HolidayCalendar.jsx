@@ -5,7 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
-import { errorText, errorLine } from '../../../shared/errorText'
+import { errorLine, isNetworkError } from '../../../shared/errorText'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { SIGHTED_HOLIDAYS, resolveYear, planSeed } from './holidayData'
 import { fiscalYearOf } from '../payroll/tds'
@@ -220,18 +220,31 @@ export default function HolidayCalendar() {
       to:   `${BS_MONTHS[c.toMonth - 1]} ${c.toDay}`,
     }))
 
+    // A failure part-way re-reads the calendar and says what DID land (S803): the insert is one
+    // statement, but each correction is its own, so an error on the second correction follows an
+    // insert and a correction that both stuck. Seeding again is safe either way — it skips what is there.
     if (toInsert.length > 0) {
       const { error } = await scopedInsert('hr_holiday_calendar', toInsert)
-      if (error) { setMsg('error:' + errorText(error, 'operator')); setBusy(false); return }
-    }
-    for (const c of corrections) {
-      const { data: fixed, error } = await scopedUpdate('hr_holiday_calendar', c.patch).eq('id', c.id).select('id')
-      if (error) { setMsg('error:' + errorText(error, 'operator')); setBusy(false); return }
-      if (changedNothing(fixed, error)) {
+      if (error) {
         await load()
-        setMsg(`error:${toInsert.length ? `${toInsert.length} added, but ` : ''}${c.name} was not moved from ${c.from} to ${c.to}. ` + NOTHING_CHANGED)
+        setMsg('error:' + (isNetworkError(error)
+          ? 'Seed could not confirm the holidays were added — the list below has been re-read, so check it before seeding again. '
+          : 'No holidays were added. ') + errorLine(error))
         setBusy(false); return
       }
+    }
+    let fixedSoFar = 0
+    const landed = () => [toInsert.length && `${toInsert.length} added`, fixedSoFar && `${fixedSoFar} corrected`].filter(Boolean).join(' and ')
+    for (const c of corrections) {
+      const { data: fixed, error } = await scopedUpdate('hr_holiday_calendar', c.patch).eq('id', c.id).select('id')
+      if (error || changedNothing(fixed, error)) {
+        await load()
+        const done = landed()
+        setMsg(`error:${done ? `${done}, but ` : ''}${c.name} was not moved from ${c.from} to ${c.to}. `
+          + (error ? errorLine(error) : NOTHING_CHANGED))
+        setBusy(false); return
+      }
+      fixedSoFar += 1
     }
 
     await load()
