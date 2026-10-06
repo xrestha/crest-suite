@@ -60,7 +60,7 @@ function OptionListEditor({ label, hint, placeholder, addLabel, options, setOpti
               color: 'var(--theme-text1)',
             }}>
               {o}
-              <button onClick={() => remove(o)} title="Remove" aria-label={`Remove ${o}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+              <button type="button" className="btn btn-ghost btn-sm btn-icon btn-icon--delete" onClick={() => remove(o)} title={`Remove ${o}`} aria-label={`Remove ${o}`}><span aria-hidden="true">×</span></button>
             </span>
           ))}
         </div>

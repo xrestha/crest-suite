@@ -851,12 +851,12 @@ export default function LeaveManagement() {
                             <OwnRecordNote label="Yours, approved"
                               tip="Your own approved leave can only be cancelled by someone else — another supervisor, a manager or the Owner." />
                           ) : (req.status === 'pending' || req.status === 'approved') && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel</button>
+                            <button className="btn btn-ghost btn-sm" aria-label={`Cancel the leave for ${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel leave</button>
                           )}
                           {(req.status === 'rejected' || req.status === 'cancelled') && (
                             canReopen ? (
                               <Tip text="For a reject or cancel made by mistake. Puts the request back to Pending with its original dates and reason — approve it again to re-mark the attendance days." width={270}>
-                                <button className="btn btn-ghost btn-sm" onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
+                                <button className="btn btn-ghost btn-sm" aria-label={`Reopen the leave for ${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
                               </Tip>
                             ) : <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>
                           )}

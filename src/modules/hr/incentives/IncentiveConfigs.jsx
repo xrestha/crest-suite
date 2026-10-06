@@ -121,11 +121,11 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
                   {cfg.prorate_by_service && ' · reduced for months worked'}
                 </div>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => startEdit(cfg)} disabled={saving}>Edit</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleActive(cfg)} disabled={saving}>
+              <button className="btn btn-ghost btn-sm" aria-label={`Edit ${cfg.name}`} onClick={() => startEdit(cfg)} disabled={saving}>Edit</button>
+              <button className="btn btn-ghost btn-sm" aria-label={`${cfg.active ? 'Deactivate' : 'Activate'} ${cfg.name}`} onClick={() => toggleActive(cfg)} disabled={saving}>
                 {cfg.active ? 'Deactivate' : 'Activate'}
               </button>
-              <button className="btn btn-danger btn-sm" onClick={() => handleDelete(cfg)} disabled={saving}>Delete</button>
+              <button className="btn btn-danger btn-sm" aria-label={`Delete ${cfg.name}`} onClick={() => handleDelete(cfg)} disabled={saving}>Delete</button>
             </div>
           ))}
         </div>

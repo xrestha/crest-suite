@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { supabase } from '../../../supabaseClient'
 import { errorText, errorInfo } from '../../../shared/errorText'
+import { nprInt } from '../../../shared/nepalMoney'
 import { edgeFunctionFailure } from '../../../shared/edgeFunctionError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
@@ -429,7 +430,7 @@ export default function EmployeeList() {
             </Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 16 }}>
-            NPR {Math.round(payrollAmt).toLocaleString('en-IN')}
+            NPR {nprInt(payrollAmt)}
           </div>
           <div className="stat-sub">monthly-paid staff, basic only</div>
         </div>
@@ -522,7 +523,7 @@ export default function EmployeeList() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">👤</div>
+          <div className="empty-state-icon" aria-hidden="true">👤</div>
           <p className="empty-state-text">
             {employees.length === 0
               ? 'No employees yet. Add your first employee to get started.'
@@ -609,7 +610,7 @@ export default function EmployeeList() {
                       })()}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
-                      {parseFloat(e.basic_salary || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      {nprInt(parseFloat(e.basic_salary || 0))}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span style={{
@@ -633,8 +634,9 @@ export default function EmployeeList() {
                               </Tip>
                               <Tip text="Remove this employee's Self-Service login entirely — their PIN stops working and the account is deleted. Their employee record, payslips and leave history are kept. To suspend access temporarily instead, tick the row and use Deactivate.">
                                 <button
-                                  className="btn btn-ghost"
-                                  style={{ fontSize: 11, padding: '3px 8px', color: 'var(--theme-red-text)' }}
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ color: 'var(--theme-red-text)' }}
+                                  aria-label={`Remove Self-Service for ${e.full_name}`}
                                   onClick={() => removeSelfService(e)}
                                   disabled={ssRemoving === e.id}
                                 >{ssRemoving === e.id ? 'Removing…' : 'Remove'}</button>
@@ -646,13 +648,13 @@ export default function EmployeeList() {
                             <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service ?</span>
                           </Tip>
                         ) : (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEnableSelfService(e)}>
+                          <button className="btn btn-ghost btn-sm" aria-label={`Enable Self-Service for ${e.full_name}`} onClick={() => openEnableSelfService(e)}>
                             Enable Self-Service
                           </button>
                         )}
                         <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: 11, padding: '3px 10px' }}
+                          className="btn btn-ghost btn-sm"
+                          aria-label={`Edit ${e.full_name}`}
                           onClick={() => openEdit(e)}
                         >
                           Edit

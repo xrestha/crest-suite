@@ -65,6 +65,7 @@ export const HR_GUIDE_GROUPS = [
           'Amber means "a queue is waiting", red is reserved for genuinely overdue — a pending approval pile is normal operations, not an error state. This is now the rule across all five HR queues and the employee app, not just this page: amber = open, brass = decided but the money has not moved, green = closed and good, red = refused, grey = withdrawn.',
           'The SSF card counts down only when the deposit amount is above zero — a client with no SSF-enrolled staff gets no countdown for NPR 0. A failed read of the last finalized run shows the four payroll cards as "—" with "last finalized payroll could not be read", never "No finalized payroll yet" (S798 REPORTS-5).',
           'A card that opens a page has its figure as a real button (S803): Tab to it and press Enter. The card holds a Tip, so the card itself is not one big button.',
+          'Small controls across HR are the product classes now (S803): the queue Go to buttons, the Employees row buttons and Pay Setup’s + Add and quick-add chips are btn-sm, and every repeated row action (Edit, Del, Undo, Cancel leave, Mark Paid) carries the person or claim in its accessible name. On a phone a Tip on a short label is padded to a 25px tap target without taking taps from the field below it.',
         ],
         connections: 'Counts come from the same shared approval-count hook the client Dashboard\'s HR column uses, so the two can never disagree. Cards link to Leave, Overtime, TADA Claims, Roster (swaps), Advances and Payroll Run.',
       },

@@ -1335,7 +1335,11 @@ export default function PayrollRun() {
                                 <Tip text={finalized
                                   ? `Paid from ${claimCount} approved TADA claim${claimCount === 1 ? '' : 's'} — marked Paid in TADA Claims when this run was finalized.`
                                   : `The total of ${claimCount} approved TADA claim${claimCount === 1 ? '' : 's'} whose trip was over by the end of ${monthName}. Finalizing marks ${claimCount === 1 ? 'it' : 'them'} Paid. To change the amount, change the claim in TADA Claims, then Regenerate.`} width={290}>
-                                  <span style={{ fontSize: 10, cursor: 'help' }}>🔗</span>
+                                  <span style={{ fontSize: 10, cursor: 'help' }}>
+                                    {/* The glyph was read aloud as "link" in the money register (S803). */}
+                                    <span aria-hidden="true">🔗</span>
+                                    <span className="sr-only">{claimCount} TADA claim{claimCount === 1 ? '' : 's'}</span>
+                                  </span>
                                 </Tip>
                               )}
                               <span style={{ color: tada > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{tada > 0 ? `+${fmt(tada)}` : '—'}</span>

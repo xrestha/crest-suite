@@ -325,12 +325,11 @@ export default function PayForm({ employee, onSave, onClose }) {
                   <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Other Allowances</span>
-                      <button onClick={() => addComponent('earning')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
+                      <button type="button" className="btn btn-ghost btn-sm" aria-label="Add an allowance" onClick={() => addComponent('earning')}>+ Add</button>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_EARNINGS.filter(n => !earnings.find(c => c.name === n)).map(n => (
-                        <button key={n} onClick={() => addComponent('earning', n)}
-                          style={{ background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, color: 'var(--theme-text1)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
+                        <button key={n} type="button" className="btn btn-ghost btn-sm" aria-label={`Add ${n}`} onClick={() => addComponent('earning', n)}>
                           + {n}
                         </button>
                       ))}
@@ -368,13 +367,12 @@ export default function PayForm({ employee, onSave, onClose }) {
                   <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Deductions</span>
-                      <button onClick={() => addComponent('deduction')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
+                      <button type="button" className="btn btn-ghost btn-sm" aria-label="Add a deduction" onClick={() => addComponent('deduction')}>+ Add</button>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_DEDUCTIONS.filter(n => !deductions.find(c => c.name === n)).map(n => {
                         const chip = (
-                          <button onClick={() => addComponent('deduction', n)}
-                            style={{ background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, color: 'var(--theme-text1)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
+                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Add ${n}`} onClick={() => addComponent('deduction', n)}>
                             + {n}
                           </button>
                         )

@@ -1765,6 +1765,21 @@ tr.interactive-row:focus-visible {
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
+/* A tip on a single letter or a short label is a 7-15px tap target on a phone (S803: Attendance's
+   P/A/O/L/H heads, the Labour Forecast cells, Final Settlement's field labels). The trigger is
+   inline, so vertical padding widens what a finger can hit without moving the line it sits on, and
+   the horizontal pad is taken back by an equal negative margin. It pads mostly downward and goes
+   static (Tip's bubble is portalled, so the inline position: relative anchors nothing), so a field
+   just below a label still paints over the pad and keeps every tap on its own edge. Only the plain
+   inline trigger: a caller that passes display: inline-flex (a chip) would grow from the padding. */
+@media (pointer: coarse) {
+  .tip-trigger[style*="display: inline;"] {
+    position: static !important;
+    padding: 2px 4px 10px;
+    margin: 0 -4px;
+  }
+}
+
 .btn:focus-visible,
 .tab-btn:focus-visible {
   outline: none;

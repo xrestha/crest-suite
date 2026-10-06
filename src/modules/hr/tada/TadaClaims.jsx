@@ -561,6 +561,9 @@ export default function TadaClaims() {
     const act = fn => e => { e.stopPropagation(); fn() }
     const busy = busyId === c.id
     const note = { fontSize: 11, color: 'var(--theme-text3)', padding: '0 8px' }
+    // Each repeated row action names its claim (S803): a bare "Delete" or "Undo approval" down a
+    // column of rows is the same name a dozen times.
+    const who = `${empMap[c.employee_id]?.full_name || 'this claim'}, NPR ${fmt(c.total_amount)}`
     if (c.status === 'pending') return (
       <>
         {isOwnClaim(c) ? (
@@ -569,23 +572,23 @@ export default function TadaClaims() {
           </Tip>
         ) : (
           <>
-            <DecisionButtons who={`${empMap[c.employee_id]?.full_name || 'this claim'}, NPR ${fmt(c.total_amount)}`} disabled={busy} stopPropagation
+            <DecisionButtons who={who} disabled={busy} stopPropagation
               onApprove={() => handleApprove(c)} onReject={() => setRejectTarget(c)} />
           </>
         )}
-        <button className="btn btn-danger btn-sm" disabled={busy} onClick={act(() => handleDelete(c))}>Delete</button>
+        <button className="btn btn-danger btn-sm" aria-label={`Delete the claim for ${who}`} disabled={busy} onClick={act(() => handleDelete(c))}>Delete</button>
       </>
     )
     if (c.status === 'approved') return canPay ? (
       <>
         <Tip text="Paid in cash or bank transfer, outside payroll. Use it only if payroll is not paying this claim — never both.">
-          <button className="btn btn-ghost btn-sm" disabled={busy}
+          <button className="btn btn-ghost btn-sm" disabled={busy} aria-label={`Mark paid: ${who}`}
             onClick={act(() => startMarkPaid(c))}>
-            💵 Mark Paid
+            <span aria-hidden="true">💵</span> Mark Paid
           </button>
         </Tip>
         <Tip text="Back to Pending, for a claim approved by mistake or approved twice (a corrected copy beside the first). Payroll does not pay a pending claim.">
-          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={act(() => startUndoDecision(c))}>Undo approval</button>
+          <button className="btn btn-ghost btn-sm" disabled={busy} aria-label={`Undo approval: ${who}`} onClick={act(() => startUndoDecision(c))}>Undo approval</button>
         </Tip>
       </>
     ) : (
@@ -595,7 +598,7 @@ export default function TadaClaims() {
     )
     if (c.status === 'rejected' && canPay) return (
       <Tip text="Back to Pending, to be decided again, for a claim rejected by mistake.">
-        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={act(() => startUndoDecision(c))}>Undo rejection</button>
+        <button className="btn btn-ghost btn-sm" disabled={busy} aria-label={`Undo rejection: ${who}`} onClick={act(() => startUndoDecision(c))}>Undo rejection</button>
       </Tip>
     )
     return <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>
@@ -951,7 +954,7 @@ export default function TadaClaims() {
                       <input aria-label={`Expense ${idx + 1} amount (NPR)`} style={{ ...inp, flex: '0 1 110px', minWidth: 0 }} type="number" min="0" placeholder="Amount" value={it.amount}
                         onChange={e => { if (acceptTadaAmount(e.target.value)) setItem(idx, 'amount', e.target.value) }} />
                       {addForm.items.length > 1 && (
-                        <button aria-label={`Remove expense line ${idx + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0 }} onClick={() => removeItemRow(idx)}>✕</button>
+                        <button type="button" className="btn btn-ghost btn-sm btn-icon btn-icon--delete" aria-label={`Remove expense line ${idx + 1}`} title={`Remove expense line ${idx + 1}`} style={{ flexShrink: 0 }} onClick={() => removeItemRow(idx)}><span aria-hidden="true">✕</span></button>
                       )}
                     </div>
                     {it.category === 'Transport' && (

@@ -1547,7 +1547,7 @@ export default function Roster() {
           ) : filteredEmps.length === 0 ? (
             <div className="card">
               <div className="empty-state">
-                <div className="empty-state-icon">👤</div>
+                <div className="empty-state-icon" aria-hidden="true">👤</div>
                 <p className="empty-state-text">No active employees found.</p>
               </div>
             </div>

@@ -504,7 +504,7 @@ export default function Overtime() {
         <div className="loading-state">Loading…</div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">⏱</div>
+          <div className="empty-state-icon" aria-hidden="true">⏱</div>
           <p className="empty-state-text">
             {entries.length === 0
               ? `No OT entries for ${periodLabel} yet. Click + Log OT to add one.`
@@ -543,6 +543,8 @@ export default function Overtime() {
                   const emp = empMap[e.employee_id] || {}
                   const sc  = STATUS_COLORS[e.status] || STATUS_COLORS.pending
                   const own = isOwnEmployee(e.employee_id)
+                  // Every row action carries the person and day (S803), not a bare "Edit" or "Del".
+                  const who = `${emp.full_name || 'this entry'}, ${formatBsDay(e.bs_day, e.bs_month)}`
                   return (
                     <tr key={e.id}>
                       <td>
@@ -579,11 +581,11 @@ export default function Overtime() {
                             <OwnRecordNote label="Your own entry"
                               tip="This overtime is yours, so someone else decides it — another supervisor, a manager or the Owner." />
                           ) : (
-                            <DecisionButtons who={`${emp.full_name || 'this entry'}, ${formatBsDay(e.bs_day, e.bs_month)}`}
+                            <DecisionButtons who={who}
                               onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
                           ))}
                           {e.status !== 'pending' && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
+                            <button className="btn btn-ghost btn-sm" aria-label={`Undo the decision on ${who}`} onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
                           )}
                           {/* An approved entry keeps its approval through an edit (S749), so editing your
                               own would be approving the new hours yourself. */}
@@ -591,9 +593,9 @@ export default function Overtime() {
                             <OwnRecordNote label="Yours, approved"
                               tip="Your own approved overtime can only be changed by someone else. Undo sends it back to pending if the hours were wrong." />
                           ) : (
-                            <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)} disabled={locked}>Edit</button>
+                            <button className="btn btn-ghost btn-sm" aria-label={`Edit overtime for ${who}`} onClick={() => openEdit(e)} disabled={locked}>Edit</button>
                           )}
-                          <button className="btn btn-danger btn-sm" onClick={() => del(e)} disabled={locked}>Del</button>
+                          <button className="btn btn-danger btn-sm" aria-label={`Delete overtime for ${who}`} onClick={() => del(e)} disabled={locked}>Del</button>
                         </div>
                       </td>
                     </tr>

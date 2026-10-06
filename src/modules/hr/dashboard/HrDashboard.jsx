@@ -583,7 +583,7 @@ export default function HrDashboard() {
             )}
           </div>
           {pendingLeave > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 8 }} onClick={() => navigate('/hr/leave')}>
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/leave')}>
               Go to Leave → approve / reject
             </button>
           )}
@@ -633,7 +633,7 @@ export default function HrDashboard() {
             )}
           </div>
           {pendingOt > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 8 }} onClick={() => navigate('/hr/overtime')}>
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/overtime')}>
               Go to Overtime → approve / reject
             </button>
           )}
@@ -673,7 +673,7 @@ export default function HrDashboard() {
             )}
           </div>
           {pendingTada > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 8 }} onClick={() => navigate('/hr/tada')}>
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/tada')}>
               Go to TADA Claims → approve / reject
             </button>
           )}
@@ -717,7 +717,7 @@ export default function HrDashboard() {
             )}
           </div>
           {pendingSwap > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 8 }} onClick={() => navigate('/hr/roster')}>
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/roster')}>
               Go to Roster → approve / reject
             </button>
           )}
