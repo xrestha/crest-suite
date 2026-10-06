@@ -142,7 +142,8 @@ export default function SelfServiceToday({
               <span style={{ display: 'block', fontSize: 15, fontWeight: 600, color: 'var(--theme-text1)' }}>{latestPayslip.label}</span>
               <span style={{ display: 'block', fontSize: 12, marginTop: 2, color: 'var(--theme-text3)' }}>Net pay</span>
             </span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-green-text)', whiteSpace: 'nowrap' }}>
+            {/* Ink, not green (S803): a correct payroll figure takes the ink; colour is for flags. */}
+            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
               NPR {latestPayslip.net}
             </span>
           </button>

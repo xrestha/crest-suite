@@ -175,7 +175,9 @@ export default function SelfServiceLogin() {
   const shownStaff = q ? staff.filter(s => (s.full_name || '').toLowerCase().includes(q)) : staff
 
   return (
-    <div className="self-service ss-login" style={{
+    // role="main" (S803): the picker and PIN pad had no main landmark, so a screen reader had no
+    // region to jump to; the signed-in shell already renders <main>.
+    <div role="main" className="self-service ss-login" style={{
       minHeight: '100dvh', background: 'var(--theme-bg)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       padding: 'calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom))',

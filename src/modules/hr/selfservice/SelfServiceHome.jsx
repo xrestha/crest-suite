@@ -1,4 +1,4 @@
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprPaisa } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -23,10 +23,20 @@ import { useStaffAppManifest } from './useStaffApp'
 import { rememberedStaffClient } from './staffClient'
 import { signOutThisDevice } from '../../../shared/deviceSignOut'
 import { unsubscribeFromPush } from '../../../utils/webPush'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS } from '../payrollConstants'
 import { methodLabel } from '../payroll/salaryPayments'
 import './selfService.css'
+
+// Every request this app waits on is bounded (S803). Only sign-out was: on a phone link a stalled
+// leave, TADA or swap request left its button on "Submitting…" for ever, and a stalled roster read
+// sat on a bare "Loading…" with no Retry. A timeout comes back as the call's own `error`, so each
+// area's existing error card (with Retry) takes over, and employeeErrorText's staff sentence for a
+// timeout says to check whether it went through before sending again.
+const READ_MS = 20000
+const WRITE_MS = 25000
+const read = q => settleWithin(q, READ_MS, 'Loading')
+const write = (q, label) => settleWithin(q, WRITE_MS, label)
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -53,7 +63,9 @@ function cellsFrom(start, count) {
   })
 }
 
-const fmt = nprInt
+// Net pay, payments and what is still owed print to the paisa, as on the payslip itself (S803; the
+// S798 PAYROLL-7 rule). Whole rupees here put "NPR 25,433 of NPR 25,433 paid so far" over 50 paisa owed.
+const fmt = nprPaisa
 
 // A stored date goes through adToBsSafe, not adToBs: outside the verified BS table adToBs does not
 // throw, it returns a confident wrong date, and a leave request is exactly the kind of arbitrary
@@ -80,10 +92,6 @@ function fmtBsRange(a, b) {
 
 // 16px, not 13: below it iOS Safari zooms the viewport on focus and never zooms back. An inline
 // fontSize beats the .self-service rule in selfService.css, so it has to be restated here.
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
-  padding: '11px 12px', fontSize: 16, color: 'var(--theme-text1)', outline: 'none', width: '100%', fontFamily: 'inherit',
-}
 // These three were the module's only internally-consistent status vocabulary, so S660 adopted them
 // as HR_REQUEST_STATUS / TADA_REQUEST_STATUS for the manager pages too — and they now READ from
 // there rather than keeping a fourth copy. An employee and their manager look at the same request;
@@ -285,8 +293,8 @@ export default function SelfServiceHome() {
   // ── Loaders ────────────────────────────────────────────────────────────────────────────────
   const loadPayslips = useCallback(async () => {
     const [{ data, error }, paid] = await Promise.all([
-      supabase.rpc('get_my_hr_payslips'),
-      supabase.rpc('get_my_salary_payments'),
+      read(supabase.rpc('get_my_hr_payslips')),
+      read(supabase.rpc('get_my_salary_payments')),
     ])
     setErrFor('payslips', error ? employeeErrorText(error) : '')
     if (!error) setPayslips(data || [])
@@ -298,8 +306,8 @@ export default function SelfServiceHome() {
 
   const loadLeave = useCallback(async () => {
     const [{ data: types, error: tErr }, { data: reqs, error: rErr }] = await Promise.all([
-      supabase.rpc('get_my_leave_types'),
-      supabase.rpc('get_my_leave_requests'),
+      read(supabase.rpc('get_my_leave_types')),
+      read(supabase.rpc('get_my_leave_requests')),
     ])
     const error = tErr || rErr
     setErrFor('leave', error ? employeeErrorText(error) : '')
@@ -320,8 +328,8 @@ export default function SelfServiceHome() {
       // Publishing is per day, so the app asks which days are published (S798, ROSTER-4): the
       // month-level answer called every draft day of a part-published month "not scheduled".
       const [roster, published] = await Promise.all([
-        supabase.rpc('get_my_roster', { p_bs_year: year, p_bs_month: month }),
-        supabase.rpc('get_my_roster_published_days', { p_bs_year: year, p_bs_month: month }),
+        read(supabase.rpc('get_my_roster', { p_bs_year: year, p_bs_month: month })),
+        read(supabase.rpc('get_my_roster_published_days', { p_bs_year: year, p_bs_month: month })),
       ])
       // Either read failing is the roster's failure (SELF-SERVICE-4): a dropped publish read used to
       // say "not published yet" over shifts that had loaded.
@@ -343,15 +351,15 @@ export default function SelfServiceHome() {
   }, [monthsNeeded, rosterReq])
 
   const loadSwapRequests = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_my_swap_requests')
+    const { data, error } = await read(supabase.rpc('get_my_swap_requests'))
     setErrFor('swaps', error ? employeeErrorText(error) : '')
     if (!error) setSwapRequests(data || [])
   }, [])
 
   const loadTada = useCallback(async () => {
     const [{ data, error }, vendors] = await Promise.all([
-      supabase.rpc('get_my_tada_claims'),
-      supabase.rpc('get_my_client_vendors'),
+      read(supabase.rpc('get_my_tada_claims')),
+      read(supabase.rpc('get_my_client_vendors')),
     ])
     setErrFor('tada', error ? employeeErrorText(error) : '')
     // The supplier list is a shortcut in the form, so its failure is one line there, never the
@@ -399,7 +407,7 @@ export default function SelfServiceHome() {
     // Clear stale data and show a loading state, or the picker renders holding only its
     // placeholder while the fetch is in flight and reads as "nobody is scheduled".
     setCoworkerRoster([]); setCoworkerLoading(true)
-    supabase.rpc('get_coworker_roster', { p_bs_year: day.bsYear, p_bs_month: day.bsMonth })
+    read(supabase.rpc('get_coworker_roster', { p_bs_year: day.bsYear, p_bs_month: day.bsMonth }))
       .then(({ data, error }) => {
         setCoworkerLoading(false)
         if (error) { setSwapMsg(employeeErrorText(error)); return }
@@ -419,10 +427,10 @@ export default function SelfServiceHome() {
   async function submitSwapRequest() {
     if (!swapTargetEmpId || !swapTargetDay) { setSwapMsg('Pick a colleague and one of their scheduled days.'); return }
     setSwapSubmitting(true); setSwapMsg('')
-    const { data: requestId, error } = await supabase.rpc('request_shift_swap', {
+    const { data: requestId, error } = await write(supabase.rpc('request_shift_swap', {
       p_target_employee_id: swapTargetEmpId, p_bs_year: swapDay.bsYear, p_bs_month: swapDay.bsMonth,
       p_my_bs_day: swapDay.bsDay, p_target_bs_day: parseInt(swapTargetDay, 10), p_note: swapNote,
-    })
+    }), 'Sending the swap request')
     setSwapSubmitting(false)
     if (error) {
       setSwapMsg(employeeErrorText(error))
@@ -448,7 +456,7 @@ export default function SelfServiceHome() {
   async function respondSwap(requestId, accept) {
     if (swapBusy) return
     setSwapBusy(`${requestId}:${accept ? 'accept' : 'decline'}`); setSwapActionErr(''); setDone('')
-    const { error } = await supabase.rpc('respond_shift_swap', { p_request_id: requestId, p_accept: accept })
+    const { error } = await write(supabase.rpc('respond_shift_swap', { p_request_id: requestId, p_accept: accept }), 'Answering the swap')
     setSwapBusy(null)
     if (error) { setSwapActionErr(employeeErrorText(error)); loadSwapRequests(); return }
     supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_target_response', request_id: requestId } })
@@ -461,7 +469,7 @@ export default function SelfServiceHome() {
   async function withdrawSwap(requestId) {
     if (swapBusy) return
     setSwapBusy(`${requestId}:withdraw`); setSwapActionErr(''); setDone('')
-    const { error } = await supabase.rpc('cancel_my_swap_request', { p_request_id: requestId })
+    const { error } = await write(supabase.rpc('cancel_my_swap_request', { p_request_id: requestId }), 'Withdrawing the swap')
     setSwapBusy(null)
     if (error) { setSwapActionErr(employeeErrorText(error)); loadSwapRequests(); return }
     setDone('Swap request withdrawn.')
@@ -477,6 +485,9 @@ export default function SelfServiceHome() {
 
   function openLeave() {
     setStartDate(''); setEndDate(''); setReason(''); setDayType('full'); setMsg(''); setDone('')
+    // A send that never answered used to keep Submitting… on after closing and reopening (S803).
+    // A second send is safe: the leave-overlap trigger refuses the same days twice.
+    setSubmitting(false)
     setLeaveOpen(true)
   }
 
@@ -485,10 +496,10 @@ export default function SelfServiceHome() {
     if (!startDate || !endDate) { setMsg('Select start and end dates.'); return }
     if (workingDays.length === 0) { setMsg('No days in that range.'); return }
     setSubmitting(true); setMsg('')
-    const { error } = await supabase.rpc('submit_my_leave_request', {
+    const { error } = await write(supabase.rpc('submit_my_leave_request', {
       p_leave_type_id: leaveTypeId, p_start_date: startDate, p_end_date: endDate, p_days: days,
       p_reason: reason, p_day_type: dayType,
-    })
+    }), 'Sending the leave request')
     setSubmitting(false)
     if (error) { setMsg(employeeErrorText(error)); return }
     setLeaveOpen(false)
@@ -523,6 +534,8 @@ export default function SelfServiceHome() {
   function openTada() {
     setTadaForm(emptyTadaForm()); setTadaPurposeMode('preset'); setTadaStartPointMode('preset')
     setTadaMsg(''); setDone('')
+    // Same as openLeave (S803); a second identical claim is refused (tada_duplicate).
+    setTadaSubmitting(false)
     setTadaOpen(true)
   }
 
@@ -536,12 +549,12 @@ export default function SelfServiceHome() {
     const validItems = tadaForm.items.filter(it => tadaLineAmount(it) > 0)
     if (validItems.length === 0) { setTadaMsg('Add at least one expense line with an amount.'); return }
     setTadaSubmitting(true); setTadaMsg('')
-    const { error } = await supabase.rpc('submit_my_tada_claim', {
+    const { error } = await write(supabase.rpc('submit_my_tada_claim', {
       p_trip_purpose: tadaForm.trip_purpose, p_destination: tadaForm.destination,
       p_start_date: tadaForm.start_date, p_end_date: tadaForm.end_date, p_notes: tadaForm.notes,
       p_items: validItems.map(it => ({ category: it.category, description: it.description || null, amount: tadaLineAmount(it) })),
       p_start_point: tadaForm.start_point,
-    })
+    }), 'Sending the claim')
     setTadaSubmitting(false)
     // employeeErrorText is errorText(err, 'staff'): tada_duplicate / tada_dates_invalid /
     // tada_amount_invalid each have an employee sentence there, so a refused claim says why.
@@ -806,7 +819,7 @@ export default function SelfServiceHome() {
                   <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</span>
                   <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{paidLine(p) || 'Tap to view full payslip'}</span>
                 </span>
-                <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-green-text)', whiteSpace: 'nowrap' }}>NPR {fmt(p.net_pay)}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>NPR {fmt(p.net_pay)}</span>
               </button>
             ))}
           </div>
@@ -852,7 +865,7 @@ export default function SelfServiceHome() {
             {days > 0 && <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Uses up to {days} day{days !== 1 ? 's' : ''} of your leave — a public holiday inside these dates is not counted.</div>}
             <div className="ss-field">
               <label htmlFor="ss-leave-reason">Reason</label>
-              <textarea id="ss-leave-reason" style={{ ...inp, height: 76, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
+              <textarea id="ss-leave-reason" className="form-input" style={{ height: 76, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
             </div>
             {msg && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--theme-red-text)' }}>{msg}</p>}
             <button className="btn btn-primary btn-block" onClick={submitLeave} disabled={submitting}>
@@ -890,7 +903,7 @@ export default function SelfServiceHome() {
                 <option value={OTHER_PURPOSE}>Other (type below)</option>
               </select>
               {tadaStartPointMode === 'custom' && (
-                <input aria-label="Trip start point" style={inp} placeholder="Where did the trip start?" value={tadaForm.start_point} onChange={e => setTada('start_point', e.target.value)} />
+                <input aria-label="Trip start point" className="form-input" placeholder="Where did the trip start?" value={tadaForm.start_point} onChange={e => setTada('start_point', e.target.value)} />
               )}
             </div>
 
@@ -910,13 +923,13 @@ export default function SelfServiceHome() {
                 <option value={OTHER_PURPOSE}>Other (type below)</option>
               </select>
               {tadaPurposeMode === 'custom' && (
-                <input aria-label="Trip purpose" style={inp} placeholder="Describe the purpose" value={tadaForm.trip_purpose} onChange={e => setTada('trip_purpose', e.target.value)} />
+                <input aria-label="Trip purpose" className="form-input" placeholder="Describe the purpose" value={tadaForm.trip_purpose} onChange={e => setTada('trip_purpose', e.target.value)} />
               )}
             </div>
 
             <div className="ss-field">
               <label htmlFor="ss-tada-destination">Destination</label>
-              <input id="ss-tada-destination" style={inp} placeholder="e.g. Pokhara" value={tadaForm.destination} onChange={e => setTada('destination', e.target.value)} />
+              <input id="ss-tada-destination" className="form-input" placeholder="e.g. Pokhara" value={tadaForm.destination} onChange={e => setTada('destination', e.target.value)} />
               {tadaForm.trip_purpose === PURCHASE_PURPOSE && (tadaVendorsFailed ? (
                 <p role="status" style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>
                   Could not load suppliers. Type the destination instead.
@@ -967,14 +980,14 @@ export default function SelfServiceHome() {
                     <select aria-label={`Category for line ${idx + 1}`} className="form-select" style={{ width: '100%' }} value={it.category} onChange={e => setTadaItem(idx, 'category', e.target.value)}>
                       {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <input aria-label={`Description for line ${idx + 1}`} style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setTadaItem(idx, 'description', e.target.value)} />
-                    <input aria-label={`Amount for line ${idx + 1}`} style={inp} type="number" min="0" inputMode="decimal" placeholder="Amount (NPR)" value={it.amount} onChange={e => { if (acceptTadaAmount(e.target.value)) setTadaItem(idx, 'amount', e.target.value) }} />
+                    <input aria-label={`Description for line ${idx + 1}`} className="form-input" placeholder="Description (optional)" value={it.description} onChange={e => setTadaItem(idx, 'description', e.target.value)} />
+                    <input aria-label={`Amount for line ${idx + 1}`} className="form-input" type="number" min="0" inputMode="decimal" placeholder="Amount (NPR)" value={it.amount} onChange={e => { if (acceptTadaAmount(e.target.value)) setTadaItem(idx, 'amount', e.target.value) }} />
                     {it.category === 'Transport' && (
                       <>
                         <select aria-label={`Vehicle for line ${idx + 1}`} className="form-select" style={{ width: '100%' }} value={it.vehicle} onChange={e => setTadaItemVehicle(idx, e.target.value)}>
                           {VEHICLE_TYPES.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
                         </select>
-                        <input aria-label={`Distance in kilometres for line ${idx + 1}`} style={inp} type="number" min="0" step="0.1" inputMode="decimal" placeholder="Distance (km)" value={it.distanceKm} onChange={e => setTadaItemDistance(idx, e.target.value)} />
+                        <input aria-label={`Distance in kilometres for line ${idx + 1}`} className="form-input" type="number" min="0" step="0.1" inputMode="decimal" placeholder="Distance (km)" value={it.distanceKm} onChange={e => setTadaItemDistance(idx, e.target.value)} />
                         {tadaVehicleRates[it.vehicle] == null ? (
                           <span style={{ fontSize: 12, color: 'var(--theme-amber-text)' }}>No rate set — enter the amount yourself.</span>
                         ) : (
@@ -993,7 +1006,7 @@ export default function SelfServiceHome() {
 
             <div className="ss-field">
               <label htmlFor="ss-tada-notes">Notes</label>
-              <textarea id="ss-tada-notes" style={{ ...inp, height: 66, resize: 'vertical' }} placeholder="Optional" value={tadaForm.notes} onChange={e => setTada('notes', e.target.value)} />
+              <textarea id="ss-tada-notes" className="form-input" style={{ height: 66, resize: 'vertical' }} placeholder="Optional" value={tadaForm.notes} onChange={e => setTada('notes', e.target.value)} />
             </div>
 
             {tadaMsg && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--theme-red-text)' }}>{tadaMsg}</p>}
@@ -1041,7 +1054,7 @@ export default function SelfServiceHome() {
             )}
             <div className="ss-field">
               <label htmlFor="ss-swap-note">Note</label>
-              <textarea id="ss-swap-note" placeholder="Optional" style={{ ...inp, height: 66, resize: 'vertical' }} value={swapNote} onChange={e => setSwapNote(e.target.value)} />
+              <textarea id="ss-swap-note" placeholder="Optional" className="form-input" style={{ height: 66, resize: 'vertical' }} value={swapNote} onChange={e => setSwapNote(e.target.value)} />
             </div>
             {swapMsg && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--theme-red-text)' }}>{swapMsg}</p>}
             <button className="btn btn-primary btn-block" disabled={swapSubmitting} onClick={submitSwapRequest}>

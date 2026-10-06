@@ -29,7 +29,7 @@
    maximum-scale/user-scalable=no — blocks pinch-zoom for everyone and is an accessibility
    failure, which is why index.html deliberately does not use it.
    NOTE an inline fontSize beats this rule, so any control here that sets its own size must set
-   16 too (see the `inp` style object in SelfServiceHome.jsx). */
+   16 too. The form fields are .form-input (S803), which this rule outranks (0,1,1 over 0,1,0). */
 .self-service input,
 .self-service select,
 .self-service textarea {

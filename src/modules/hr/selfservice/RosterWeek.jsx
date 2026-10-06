@@ -11,7 +11,9 @@ import { dayKey, rowKind } from './todayView'
 // days that exist and are published, so rendering its result directly would answer "am I working
 // on Thursday?" by silently omitting Thursday.
 export default function RosterWeek({ days, roster, publishedDays, today, onRequestSwap, labelFor }) {
-  const scheduled = days.filter(d => roster.get(dayKey(d))).length
+  // Working days only (S803): a Day Off or a leave marker is a roster row but not a day on duty
+  // (staff-app.md, S692), so five shifts and two days off read "7 of 7 days scheduled".
+  const scheduled = days.filter(d => { const row = roster.get(dayKey(d)); return row && rowKind(row) === 'work' }).length
 
   return (
     <>
@@ -43,7 +45,7 @@ export default function RosterWeek({ days, roster, publishedDays, today, onReque
                 {!published
                   ? 'Not published yet'
                   : !row
-                    ? '—'
+                    ? 'Not scheduled'   // words, as todayView says them; a bare "—" was read aloud as "dash"
                     : (
                       <>
                         {row.shift_type_name}
