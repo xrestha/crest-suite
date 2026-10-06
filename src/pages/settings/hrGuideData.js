@@ -576,6 +576,7 @@ export const HR_GUIDE_GROUPS = [
           'A trip cannot end before it starts and amounts cannot be negative (numeric accepts \'NaN\' and NaN > 0 is true, so the CHECK spells out <> \'NaN\'). A manager-entered claim matching another on employee, dates and total gets a duplicate warning; submit_my_tada_claim refuses an identical claim outright.',
           'Payroll adds TADA AFTER tax — it is a reimbursement of the employee\'s own money, never taxable income. The payslip\'s TADA amount is not editable; change or reject the claim instead.',
           'A claim’s expense lines are read when its row is opened (S803), one claim at a time and bounded; a failed read says so under the row with a Retry, and the claim’s own total still shows. The page used to read every line of every claim the client ever filed on each load.',
+          'Trip and payment dates print as day, month name and year (9 Ashwin 2083), as on every other HR screen, and a one-day trip names its day once (S803 polish). They were 2083-06-09.',
         ],
         connections: 'Approved claims whose trip has ended fill Payroll Run\'s read-only TADA column (and are marked Paid (Payroll) by its Finalize; Reopen puts them back to Approved). Payroll\'s per-row working counts them as "Travel claims paid by this payroll". Employees file their own claims from Self-Service\'s TADA tab. Pending count surfaces on the HR Dashboard.',
       },

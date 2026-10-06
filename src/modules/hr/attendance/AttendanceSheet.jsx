@@ -1717,22 +1717,23 @@ export default function AttendanceSheet() {
                         {d}
                       </th>
                     ))}
-                    <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>
+                    {/* The letter heads keep a 32px column (S803 polish): a one-letter tip is a 16px target, and at 390 the columns sat close enough that the next tip was inside its 24px circle. */}
+                    <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', minWidth: 32 }}>
                       <Tip text="Present days for the month — half-days and half-day leave (paid or unpaid) count as 0.5, matching how Payroll counts present days." width={250}>P</Tip>
                     </th>
-                    <th style={{ textAlign: 'right' }}>
+                    <th style={{ textAlign: 'right', minWidth: 32 }}>
                       <Tip text="Absent days for the month. A half day counts 0.5 here (the half not worked, which payroll docks) and 0.5 under P." width={240}>A</Tip>
                     </th>
-                    <th style={{ textAlign: 'right' }}>
+                    <th style={{ textAlign: 'right', minWidth: 32 }}>
                       <Tip text="Off days for the month — marked explicitly per employee, either directly or via Generate from Roster." width={220}>O</Tip>
                     </th>
-                    <th style={{ textAlign: 'right' }}>
+                    <th style={{ textAlign: 'right', minWidth: 32 }}>
                       <Tip text="Leave days, paid and unpaid together (the Excel export splits them). Half-day leave counts 0.5 here and 0.5 under P." width={240}>L</Tip>
                     </th>
-                    <th style={{ textAlign: 'right' }}>
+                    <th style={{ textAlign: 'right', minWidth: 32 }}>
                       <Tip text="Public holidays marked Holiday. A holiday pays daily and hourly staff for the day; monthly pay does not move." width={240}>H</Tip>
                     </th>
-                    <th style={{ textAlign: 'right' }}>
+                    <th style={{ textAlign: 'right', minWidth: 32 }}>
                       <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
                     </th>
                     <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>

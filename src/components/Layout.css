@@ -1424,6 +1424,10 @@ tr.interactive-row:focus-visible {
   outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
+/* A 16px figure (a long NPR value) made the button 18px tall: under the 24px floor on a phone. */
+@media (pointer: coarse) {
+  .stat-card__open { min-height: 24px; }
+}
 
 /* ClientDashboard.jsx's two "period expired" action buttons (admin's "Go to Periods", the
    client's "End Month & Start Month") were duplicated inline style objects with no hover state at

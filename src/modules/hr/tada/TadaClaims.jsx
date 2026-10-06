@@ -28,20 +28,21 @@ import { TADA_REQUEST_STATUS } from '../payrollConstants'
 import { useMyOutletLinks } from '../ownRecord'
 
 const fmt = nprInt
-const pad2 = n => String(n).padStart(2, '0')
 const fmtD = iso => {
   if (!iso) return '—'
   const bs = adToBsSafe(new Date(iso + 'T00:00:00'))
   // Out of the BS table's range: show the AD date, marked, never a confident wrong BS date (S753).
   if (!bs) return `${iso} (AD)`
-  return `${bs.year}-${pad2(bs.month)}-${pad2(bs.day)}`
+  // Day, month name, year, as Leave and every other HR screen print a BS date (S803 polish); the
+  // numeric 2083-05-25 asked the reader to know that 05 is Bhadra.
+  return `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
 }
 // A timestamp's BS day AS READ IN NEPAL. `paid_at.slice(0, 10)` took the UTC date, so a payment
 // between 00:00 and 05:45 Kathmandu printed under the previous day (S751).
 const fmtTs = ts => {
   if (!ts) return '—'
   const bs = nepalBs(ts)
-  return bs ? `${bs.year}-${pad2(bs.month)}-${pad2(bs.day)}` : (nepalDateAd(ts) || '—')
+  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : (nepalDateAd(ts) || '—')
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 // PayrollRun's stale-draft card is this product's amber banner; same shape as Leave and Attendance.
@@ -651,7 +652,7 @@ export default function TadaClaims() {
             {emp.full_name} — {c.start_point ? `${c.start_point} → ${c.destination || 'Trip'}` : (c.destination || 'Trip')}
           </div>
           <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
-            {fmtD(c.start_date)} → {fmtD(c.end_date)}
+            {c.end_date && c.end_date !== c.start_date ? `${fmtD(c.start_date)} → ${fmtD(c.end_date)}` : fmtD(c.start_date)}
             {c.trip_purpose && ` · ${c.trip_purpose}`}
           </div>
           {c.notes && <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>{c.notes}</div>}
@@ -823,7 +824,9 @@ export default function TadaClaims() {
                           {c.trip_purpose && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{c.trip_purpose}</div>}
                         </td>
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
-                          <span style={{ whiteSpace: 'nowrap' }}>{fmtD(c.start_date)}</span> → <span style={{ whiteSpace: 'nowrap' }}>{fmtD(c.end_date)}</span>
+                          {/* A one-day trip names its day once. */}
+                          <span style={{ whiteSpace: 'nowrap' }}>{fmtD(c.start_date)}</span>
+                          {c.end_date && c.end_date !== c.start_date && <> → <span style={{ whiteSpace: 'nowrap' }}>{fmtD(c.end_date)}</span></>}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
                         <td>
