@@ -111,8 +111,10 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {configs.length === 0 && <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No incentive types yet — add one below.</p>}
           {configs.map(cfg => (
-            <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--theme-input-bg)', borderRadius: 0, outline: form.id === cfg.id ? '1px solid var(--theme-accent)' : 'none' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
+            // Wraps (S803): beside ~230px of buttons the name was left ~40px on a phone and broke a word
+            // per line. With a 180px basis the buttons drop under the name instead.
+            <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '8px 10px', background: 'var(--theme-input-bg)', borderRadius: 0, outline: form.id === cfg.id ? '1px solid var(--theme-accent)' : 'none' }}>
+              <div style={{ flex: '1 1 180px', minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{cfg.name}{!cfg.active && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · inactive</span>}</div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                   {CALC_LABEL[cfg.calc_type]}{cfg.calc_type !== 'manual' && ` — ${cfg.calc_type === 'percent_of_basic' ? `${cfg.default_value}%` : `NPR ${cfg.default_value}`}`}

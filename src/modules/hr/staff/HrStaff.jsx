@@ -600,13 +600,15 @@ export default function HrStaff() {
             Assign roles to your HR administrators. Staff log in with their email and password, same as you do.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0, flexWrap: 'wrap' }}>
+        {/* No flexShrink: 0 here (S803): it pinned the group at its one-line width, so on a 390px
+            phone "+ Add Staff" sat 74px past the clipped edge (page-layout.md, the S794 shape). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px 20px', flexWrap: 'wrap' }}>
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             aria-label="Search staff by name or email"
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)} disabled={loading || !!loadError}>
               Manage Roles
             </button>

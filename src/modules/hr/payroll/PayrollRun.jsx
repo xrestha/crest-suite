@@ -1019,7 +1019,10 @@ export default function PayrollRun() {
             {/* Hidden while loading and after a failed read (S751): a click then would act on a run and
                 payslips the page could not show — the old outlet's, after a client switch. */}
             {showActions && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              // flexWrap (S803): `.page-header--split > *` wraps only its DIRECT children, and this row is
+              // one level down, so a draft's four buttons held their one-line width and Finalize sat past
+              // the clipped edge of a 390px phone.
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn btn-ghost" onClick={exportExcel} disabled={busy}>⬇ Export</button>
                 {payslips.length > 0 && (
                   <Tip text={`The ${periodLabel} payroll on one sheet — totals, each employee's pay, anything to check, and signature lines — for the Owner to approve. Print it, or choose Save as PDF in the print dialog. A draft prints marked DRAFT; a draft that is out of date must be regenerated first.`} width={300}>

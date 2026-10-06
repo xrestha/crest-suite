@@ -527,7 +527,7 @@ export default function HrDashboard() {
       <HrLabourPanel />
 
       {/* ── Pending queues ───────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
+      <div className="panel-grid">
 
         {/* Leave queue */}
         <div>

@@ -826,7 +826,7 @@ export default function FinalSettlement() {
 
       {/* ── Inputs ────────────────────────────────────────── */}
       <div className="card no-print" style={{ padding: 20, marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+        <div className="field-grid">
 
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-employee">Employee</label>
@@ -854,7 +854,7 @@ export default function FinalSettlement() {
             </select>
           </div>
 
-          <div style={{ gridColumn: 'span 2' }}>
+          <div className="field-grid__wide">
             <BsDateSelect
               id="settle-last-date"
               label="Last Working Date (BS)"

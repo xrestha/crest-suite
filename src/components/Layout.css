@@ -3023,6 +3023,47 @@ textarea::placeholder {
   .pair-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* A form's fields filling as many 220px columns as fit, one of them two columns wide (S803). Final
+   Settlement's inputs were an inline `repeat(auto-fill, minmax(220px, 1fr))` with a `span 2` date
+   picker: below two tracks' width a span-2 item forces an IMPLICIT second track, and at 390px the
+   Separation Reason select and its notice note ran 59px past the clipped edge. `min(220px, 100%)`
+   lets the single phone track shrink to the card, and the wide item takes the whole row there. */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 16px;
+}
+.field-grid__wide { grid-column: span 2; }
+@media screen and (max-width: 600px) {
+  .field-grid__wide { grid-column: 1 / -1; }
+}
+
+/* Two panes side by side with a rule between, stacking on a phone (S803). Pay Setup's editor was an
+   inline `1fr 1fr` inside a 780px dialog, which no media query reaches: at 390px each pane got ~131px
+   of content, the allowance rows collapsed to slivers and the pay preview wrapped a word per line. */
+.split-pane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.split-pane > :first-child { border-right: 1px solid var(--theme-border); }
+.split-pane--single { grid-template-columns: minmax(0, 1fr); }
+.split-pane--single > :first-child { border-right: 0; }
+@media screen and (max-width: 640px) {
+  .split-pane { grid-template-columns: minmax(0, 1fr); }
+  .split-pane > :first-child { border-right: 0; border-bottom: 1px solid var(--theme-border); }
+  .split-pane--single > :first-child { border-bottom: 0; }
+}
+
+/* A grid of panels at least `--panel-min` wide, which never makes one panel wider than the screen
+   (S803). HR Dashboard's approval queues were an inline `minmax(340px, 1fr)`: on a 360px Android,
+   the commonest width in the market, one 340px track is wider than the 328px content box, and each
+   queue and its "Go to …" button ran 12px into the clip. */
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--panel-min, 340px), 100%), 1fr));
+  gap: 16px;
+}
+
 .form-actions {
   display: flex;
   gap: 10px;

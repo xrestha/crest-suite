@@ -39,8 +39,15 @@ const inp = {
   fontFamily: 'inherit',
 }
 const lbl  = { fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
-const row  = { display: 'flex', gap: 12 }
+const row  = { display: 'flex', gap: 12, flexWrap: 'wrap' }
 const col  = { flex: 1, display: 'flex', flexDirection: 'column' }
+// A field inside a `row`: a 200px basis, so the pair wraps onto two lines on a phone instead of
+// squeezing both boxes (S803). `col` itself stays basis-0 — it is also a child of column stacks.
+const rowCol = { ...col, flex: '1 1 200px', minWidth: 0 }
+// One allowance / deduction line: name, how it is worked out, amount, ✕. Bases rather than bare
+// flex weights, so on a phone the amount drops to a second line instead of the type select
+// shrinking to "Fix…" (S803).
+const compRow = { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }
 
 function calcAmount(comp, basic) {
   const v = parseFloat(comp.value) || 0
@@ -191,6 +198,7 @@ export default function PayForm({ employee, onSave, onClose }) {
   const ctc           = gross + ssf_employer
 
   const isMonthly = (form.pay_basis || 'monthly') === 'monthly'
+  const showSummary = basic > 0 && isMonthly
   const payUnit   = (PAY_BASES.find(p => p.key === form.pay_basis) || PAY_BASES[0]).unit
   const minRate   = minRateFor(form.pay_basis, employee.employment_type)
 
@@ -226,10 +234,13 @@ export default function PayForm({ employee, onSave, onClose }) {
             </div>
           )}
           {tab === 'salary' && (
-            <div style={{ display: 'grid', gridTemplateColumns: basic > 0 ? '1fr 1fr' : '1fr', gap: 0 }}>
+            // One condition for the grid and the pane it makes room for (S803): the grid used to split
+            // whenever basic was set, while the summary renders only for monthly pay, so a daily or
+            // hourly employee's form sat in half the dialog beside an empty column.
+            <div className={`split-pane${showSummary ? '' : ' split-pane--single'}`}>
 
               {/* Left column — inputs */}
-              <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, borderRight: basic > 0 ? '1px solid var(--theme-border)' : 'none' }}>
+              <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                 {compsState === 'failed' && (
                   <div role="alert" style={{ padding: '10px 14px', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)' }}>
@@ -331,13 +342,13 @@ export default function PayForm({ employee, onSave, onClose }) {
                       const globalIdx = components.indexOf(comp)
                       const computed  = calcAmount(comp, basic)
                       return (
-                        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                          <input style={{ ...inp, flex: 2 }} aria-label={`Allowance ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
-                          <select style={{ ...inp, flex: 1, padding: '8px 6px' }} aria-label={`Allowance ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
+                        <div key={i} style={{ ...compRow, marginBottom: 6 }}>
+                          <input style={{ ...inp, flex: '2 1 140px', minWidth: 0 }} aria-label={`Allowance ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
+                          <select style={{ ...inp, flex: '1 1 104px', minWidth: 0, padding: '8px 6px' }} aria-label={`Allowance ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
                             <option value="fixed">Fixed NPR</option>
                             <option value="percent_of_basic">% of Basic</option>
                           </select>
-                          <input type="number" min="0" style={{ ...inp, flex: 1, textAlign: 'right' }}
+                          <input type="number" min="0" style={{ ...inp, flex: '1 1 80px', minWidth: 0, textAlign: 'right' }}
                             aria-label={`Allowance ${i + 1} amount`}
                             placeholder={comp.calc_type === 'percent_of_basic' ? '%' : 'NPR'}
                             value={comp.value}
@@ -400,13 +411,13 @@ export default function PayForm({ employee, onSave, onClose }) {
                       const computed  = calcAmount(comp, basic)
                       return (
                         <div key={i} style={{ marginBottom: 8 }}>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <input style={{ ...inp, flex: 2 }} aria-label={`Deduction ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
-                          <select style={{ ...inp, flex: 1, padding: '8px 6px' }} aria-label={`Deduction ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
+                        <div style={compRow}>
+                          <input style={{ ...inp, flex: '2 1 140px', minWidth: 0 }} aria-label={`Deduction ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
+                          <select style={{ ...inp, flex: '1 1 104px', minWidth: 0, padding: '8px 6px' }} aria-label={`Deduction ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
                             <option value="fixed">Fixed NPR</option>
                             <option value="percent_of_basic">% of Basic</option>
                           </select>
-                          <input type="number" min="0" style={{ ...inp, flex: 1, textAlign: 'right' }}
+                          <input type="number" min="0" style={{ ...inp, flex: '1 1 80px', minWidth: 0, textAlign: 'right' }}
                             aria-label={`Deduction ${i + 1} amount`}
                             placeholder={comp.calc_type === 'percent_of_basic' ? '%' : 'NPR'}
                             value={comp.value}
@@ -433,7 +444,7 @@ export default function PayForm({ employee, onSave, onClose }) {
               </div>
 
               {/* Right column — live summary (only when basic is set) */}
-              {basic > 0 && isMonthly && (
+              {showSummary && (
                 <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Monthly Summary</p>
                   <p style={{ margin: '-4px 0 4px', fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
@@ -509,11 +520,11 @@ export default function PayForm({ employee, onSave, onClose }) {
                 <input id="pf-bank-name" style={inp} placeholder="e.g. NIC Asia Bank, Laxmi Sunrise" value={form.bank_name} onChange={e => set('bank_name', e.target.value)} />
               </div>
               <div style={row}>
-                <div style={{ ...col, flex: 2 }}>
+                <div style={{ ...rowCol, flex: '2 1 200px' }}>
                   <label style={lbl} htmlFor="pf-bank-account">Account No.</label>
                   <input id="pf-bank-account" style={inp} placeholder="Bank account number" value={form.bank_account_no} onChange={e => set('bank_account_no', e.target.value)} />
                 </div>
-                <div style={col}>
+                <div style={rowCol}>
                   <label style={lbl} htmlFor="pf-bank-branch">Branch</label>
                   <input id="pf-bank-branch" style={inp} placeholder="e.g. Thamel" value={form.bank_branch} onChange={e => set('bank_branch', e.target.value)} />
                 </div>
@@ -559,7 +570,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                   Annual insurance premiums declared by the employee. Reduces taxable income before TDS is computed each month.
                 </p>
                 <div style={row}>
-                  <div style={col}>
+                  <div style={rowCol}>
                     <label style={lbl} htmlFor="pf-life-insurance">
                       <Tip text="Annual life insurance premium paid by the employee. Deductible up to NPR 40,000/year under Nepal Income Tax Act 2058, Section 12. Enter actual premium — excess above 40,000 is ignored." width={300}>Life Insurance Premium (NPR / year)</Tip>
                     </label>
@@ -571,7 +582,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                       <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>Capped at NPR 40,000 — excess ignored in TDS.</span>
                     )}
                   </div>
-                  <div style={col}>
+                  <div style={rowCol}>
                     <label style={lbl} htmlFor="pf-health-insurance">
                       <Tip text="Annual health insurance premium paid by the employee. Deductible up to NPR 20,000/year under Nepal Income Tax Act 2058, Section 12. Enter actual premium — excess above 20,000 is ignored." width={300}>Health Insurance Premium (NPR / year)</Tip>
                     </label>

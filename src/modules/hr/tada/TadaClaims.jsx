@@ -936,21 +936,24 @@ export default function TadaClaims() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {addForm.items.map((it, idx) => (
                   <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <select aria-label={`Expense ${idx + 1} category`} className="form-select" style={{ width: 140, flexShrink: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
+                    {/* Flex bases, not fixed widths, and the row wraps (S803): at 390px the two fixed boxes
+                        took ~290px of a ~318px dialog and left the description ~25px, so typed text was
+                        invisible. Now the amount drops to a second line before the description shrinks. */}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select aria-label={`Expense ${idx + 1} category`} className="form-select" style={{ flex: '0 1 140px', minWidth: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <input aria-label={`Expense ${idx + 1} description`} style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
+                      <input aria-label={`Expense ${idx + 1} description`} style={{ ...inp, flex: '1 1 160px', minWidth: 0 }} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
                       {/* A negative is simply not taken (S751) — it used to shrink the Total shown
                           here while the save dropped the line, so the two disagreed. */}
-                      <input aria-label={`Expense ${idx + 1} amount (NPR)`} style={{ ...inp, width: 110, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount}
+                      <input aria-label={`Expense ${idx + 1} amount (NPR)`} style={{ ...inp, flex: '0 1 110px', minWidth: 0 }} type="number" min="0" placeholder="Amount" value={it.amount}
                         onChange={e => { if (acceptTadaAmount(e.target.value)) setItem(idx, 'amount', e.target.value) }} />
                       {addForm.items.length > 1 && (
                         <button aria-label={`Remove expense line ${idx + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0 }} onClick={() => removeItemRow(idx)}>✕</button>
                       )}
                     </div>
                     {it.category === 'Transport' && (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 2 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 2 }}>
                         <span style={{ fontSize: 12, flexShrink: 0 }}>🧮</span>
                         <select
                           aria-label={`Expense ${idx + 1} vehicle type`}

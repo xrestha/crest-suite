@@ -764,8 +764,10 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </div>
 
         {/* Footer */}
-        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
+        {/* Wraps (S803): on a 390px phone the two groups needed ~380px against ~310px of card, so the
+            row overflowed the dialog and Save Changes sat off its right edge. */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isEdit && (employee.status === 'active' || employee.status === 'probation') && (
               <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} onClick={handleDeactivate}>
                 Deactivate
@@ -782,7 +784,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </button>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>
             {error && <span role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</span>}
             <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
