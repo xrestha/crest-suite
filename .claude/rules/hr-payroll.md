@@ -750,7 +750,8 @@ History: #s660-status-colours-and-labour-band, #s692-labor-forecast, #s693-labou
   A batch runs each row's OWN decision one after another (`decideEach`) and names every refusal; it
   never writes a set in one statement, because one refused row would fail them all. Leave's batch
   leaves out a request over quota or in a finalized month, and checks quota as if its earlier
-  requests were already approved; `approveCore()` is the approval without the page's busy flag,
+  requests were already approved, walking the list's order: waiting requests first, soonest start
+  first (S805), so the earliest leave gets the balance; `approveCore()` is the approval without the page's busy flag,
   message or reload. Approve and Reject are both neutral small ghosts.
 - **A failed count is not a zero** (S734). `useHrApprovalCounts` returns the failure rather than `|| 0`. A
   queue tile whose empty state is good news needs a third rendering for a failed read: an em-dash

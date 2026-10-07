@@ -2275,8 +2275,16 @@ tr.interactive-row:focus-visible {
   padding: 6px 0; border-top: 1px solid var(--theme-border-lt);
 }
 .phone-card__lines li span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--theme-text1); }
-.phone-card__actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.phone-card__actions .btn { flex: 1 1 0; }
+/* Equal grid tracks, wrapping when a row holds too many (S805). It was a flex row, and flex shares
+   out space AFTER each item's padding, so a tipped button (inside Tip's unpadded `.tip-host` span)
+   came out 22px narrower than the bare buttons beside it: Approve beside a wider Reject. The `.btn`
+   rule fills a `.tip-host` cell and centres the label: a stretched `.btn` is a flex box, where
+   `text-align` does nothing, so every card's labels had sat at the left edge since S796. */
+.phone-card__actions {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(80px, 100%), 1fr));
+  gap: 8px; margin-top: 10px;
+}
+.phone-card__actions .btn { flex: 1 1 0; justify-content: center; }
 @media print { .phone-cards { display: none !important; } }
 
 table.data-table {

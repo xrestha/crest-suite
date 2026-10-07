@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
+import Fab from '../../../components/Fab'
+import Modal from '../../../components/Modal'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange, leaveDayCount, publicHolidayKeys } from './leaveConstants'
@@ -16,6 +18,7 @@ import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { DecisionButtons, BulkApproveBar, decideEach, OwnRecordNote } from '../ApprovalControls'
 import { useIsOwnEmployee } from '../ownRecord'
+import { HR_REQUEST_STATUS } from '../payrollConstants'
 import { NOTHING_CHANGED, changedNothing } from '../nothingChanged'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
@@ -90,7 +93,10 @@ export default function LeaveManagement() {
   const [busy,      setBusy]      = useState(false)
   const [msg,       setMsg]       = useState('')
 
-  // New-request form
+  // New-request form. It lives in a dialog behind "+ Record leave" (S805): it used to open the page
+  // above the queue, so at 30 staff the requests waiting on a decision sat below the fold, ~600px
+  // down on a phone, under a form the manager fills in far less often than they decide one.
+  const [formOpen, setFormOpen] = useState(false)
   const [fEmp,     setFEmp]     = useState('')
   const [fType,    setFType]    = useState('')
   const [fStart,   setFStart]   = useState('')
@@ -220,7 +226,8 @@ export default function LeaveManagement() {
     })
     if (error) { setMsg('error:The request was not submitted. ' + errorLine(error)); setBusy(false); return }
     setFEmp(''); setFType(''); setFStart(''); setFEnd(''); setFReason(''); setFDayType('full')
-    await load(); setMsg('ok:Request submitted'); setBusy(false)
+    setFormOpen(false)
+    await load(); setMsg('ok:Request submitted — it is waiting at the top of the list'); setBusy(false)
   }
 
   // ── Attendance sync ───────────────────────────────────────────────────────
@@ -648,7 +655,51 @@ export default function LeaveManagement() {
     if (error) setMsg('error:The leave type was not added. ' + errorLine(error))
   }
 
-  const filteredRequests = requests.filter(r => adToBs(new Date(r.start_date)).year === bsYear)
+  // Waiting requests first, the oldest start first: the one whose days arrive soonest is the one to
+  // decide (S805). Then everything decided, newest first as read. Approve all walks this order too,
+  // so the earliest leave is the one that uses the balance first when a quota runs short.
+  const filteredRequests = useMemo(() => {
+    const inYear = requests.filter(r => adToBs(new Date(r.start_date)).year === bsYear)
+    const waiting = inYear.filter(r => r.status === 'pending').reverse()
+    return [...waiting, ...inYear.filter(r => r.status !== 'pending')]
+  }, [requests, bsYear])
+  const waitingCount = filteredRequests.filter(r => r.status === 'pending').length
+  const openRecord = () => { setMsg(''); setFormOpen(true) }
+  // The draft stays for next time; a message about it does not outlive the dialog.
+  const closeRecord = () => { setFormOpen(false); setMsg('') }
+
+  // What can be done to a request, for the table's Actions cell and the phone card alike; null when
+  // nothing can (the table prints a dash, the card leaves the row out).
+  const requestActions = (req, e) => {
+    const who = `${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`
+    const own = isOwnEmployee(req.employee_id)
+    if (req.status === 'pending' || req.status === 'approved') return (
+      <>
+        {req.status === 'pending' && (own ? (
+          <OwnRecordNote label="Your own request"
+            tip="This leave is yours, so someone else approves or rejects it — another supervisor, a manager or the Owner. You can still cancel it while it waits." />
+        ) : (
+          <DecisionButtons who={who} disabled={busy}
+            approveTip="Marks these days on the attendance sheet as paid or unpaid leave, by the leave type, so payroll deducts the unpaid ones. Public holidays in the range are marked Holiday and not charged."
+            onApprove={() => approveRequest(req)} onReject={() => decideRequest(req, 'rejected')} />
+        ))}
+        {/* Withdrawing your own pending request moves no pay or balance; cancelling your
+            own APPROVED leave puts the days back on the balance, so someone else does it (H8). */}
+        {req.status === 'approved' && own ? (
+          <OwnRecordNote label="Yours, approved"
+            tip="Your own approved leave can only be cancelled by someone else — another supervisor, a manager or the Owner." />
+        ) : (
+          <button className="btn btn-ghost btn-sm" aria-label={`Cancel the leave for ${who}`} onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel leave</button>
+        )}
+      </>
+    )
+    if ((req.status === 'rejected' || req.status === 'cancelled') && canReopen) return (
+      <Tip text="For a reject or cancel made by mistake. Puts the request back to Pending with its original dates and reason — approve it again to re-mark the attendance days." width={270}>
+        <button className="btn btn-ghost btn-sm" aria-label={`Reopen the leave for ${who}`} onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
+      </Tip>
+    )
+    return null
+  }
 
   if (!hasHrAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -660,10 +711,12 @@ export default function LeaveManagement() {
           <p className="page-subtitle">Leave entitlements, requests, and balances — BS {bsYear}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', maxWidth: 360 }}>{msg.split(':').slice(1).join(':')}</span>}
+          {/* While the dialog is open its own copy speaks, so the message is not announced twice. */}
+          {msg && !formOpen && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', maxWidth: 360 }}>{msg.split(':').slice(1).join(':')}</span>}
           <select className="form-select" aria-label="BS year" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
             {years.map(y => <option key={y} value={y}>BS {y}</option>)}
           </select>
+          <Fab onClick={openRecord} label="+ Record leave" show={tab === 'requests' && !loading && activeEmployees.length > 0} />
         </div>
       </div>
 
@@ -730,61 +783,56 @@ export default function LeaveManagement() {
       ) : tab === 'requests' ? (
         /* ── REQUESTS ── */
         <div>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>New Request</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }}>
-              <div>
-                <label style={lbl} htmlFor="leave-employee">Employee</label>
-                <select id="leave-employee" className="form-select" style={{ width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
-                  <option value="">— Select —</option>
-                  {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={lbl} htmlFor="leave-type">Leave Type</label>
-                <select id="leave-type" className="form-select" style={{ width: '100%' }} value={fType} onChange={e => setFType(e.target.value)}>
-                  <option value="">— Select —</option>
-                  {activeTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.paid ? '' : ' (unpaid)'}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={lbl} htmlFor="leave-start-date">Start Date</label>
-                <BsCalendarPicker id="leave-start-date" value={fStart} onChange={setFStart} placeholder="Pick start date" />
-              </div>
-              <div>
-                <label style={lbl} htmlFor="leave-end-date">End Date</label>
-                <BsCalendarPicker id="leave-end-date" value={fEnd} onChange={setFEnd} placeholder="Pick end date" />
-              </div>
-              <div>
-                <label style={lbl} htmlFor="leave-day-type">
-                  <Tip text="Only applies to a single-day request — pick the same Start and End date." width={240}>Day Type</Tip>
-                </label>
-                <select id="leave-day-type" className="form-select" style={disabledStyle({ width: '100%' }, !isSingleDay)} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
-                  {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={lbl} htmlFor="leave-reason">Reason</label>
-                <input id="leave-reason" className="form-input" value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
-              <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                <Tip text="Every day in the picked range counts against the balance except public holidays from the Holiday Calendar, which are marked Holiday instead. Rostered days off still count — adjust the dates if the employee has one within this range." width={260}>
-                  {fStart && fEnd
-                    ? `${fmt(previewDaysCount)} day${previewDaysCount === 1 ? '' : 's'}${preview.holidayDays.length ? ` · ${preview.holidayDays.length} public holiday${preview.holidayDays.length === 1 ? '' : 's'} not counted` : ''}`
-                    : 'Pick a date range'}
-                </Tip>
-              </span>
-              <button className="btn btn-primary" onClick={submitRequest} disabled={busy}>{busy ? 'Saving…' : 'Submit Request'}</button>
-            </div>
-          </div>
-
           <div className="card" style={{ padding: 0 }}>
-            <BulkApproveBar count={filteredRequests.filter(r => r.status === 'pending').length} noun="leave requests"
-              detail={`${fmt(filteredRequests.filter(r => r.status === 'pending').reduce((s, r) => s + (parseFloat(r.days) || 0), 0))} days`}
+            <BulkApproveBar count={waitingCount} noun="leave requests"
+              detail={`${fmt(filteredRequests.slice(0, waitingCount).reduce((s, r) => s + (parseFloat(r.days) || 0), 0))} days`}
               onApprove={requestBulkApprove} disabled={busy} />
-            <div className="table-wrap">
+            {/* Below 600px each request is one card and the table hides (S805, the S796 pattern): the
+                days on the first line, the decision last, the waiting ones under their own heading. */}
+            <div className="phone-only" style={{ padding: '0 16px' }}>
+              {filteredRequests.length === 0 ? (
+                <p style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '28px 0 116px', margin: 0 }}>No requests for BS {bsYear} yet.</p>
+              ) : (
+                <ul className="phone-cards" aria-label="Leave requests">
+                  {[['Waiting for a decision', filteredRequests.slice(0, waitingCount)], ['Decided', filteredRequests.slice(waitingCount)]]
+                    .filter(([, list]) => list.length > 0).map(([heading, list]) => (
+                      <li key={heading}>
+                        <div className="phone-cards__day">{heading} · {list.length}</div>
+                        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                          {list.map(req => {
+                            const e = empMap[req.employee_id] || {}
+                            const t = typeMap[req.leave_type_id]
+                            const quota = t?.annual_quota || 0
+                            const remaining = quota > 0 ? quota - usedFor(req.employee_id, req.leave_type_id) : null
+                            const days = fmt(req.days)
+                            const actions = requestActions(req, e)
+                            return (
+                              <li key={req.id} className="phone-card">
+                                <div className="phone-card__top">
+                                  <span className="phone-card__title">{e.full_name || '—'}</span>
+                                  <span className="phone-card__figure">{days} day{days === 1 ? '' : 's'}</span>
+                                </div>
+                                <div className="phone-card__meta">
+                                  {t?.name || 'Unknown'}{t && !t.paid ? ' · unpaid' : ''} · {bsLabel(req.start_date)} → {bsLabel(req.end_date)}
+                                </div>
+                                <div className="phone-card__meta">
+                                  <span className={`badge ${HR_REQUEST_STATUS[req.status]?.badge || 'badge-gray'}`}>{LEAVE_STATUSES[req.status]?.label || req.status}</span>
+                                  {remaining != null && (remaining < 0
+                                    ? <span style={{ color: 'var(--theme-red-text)' }}> · {fmt(-remaining)} over the {fmt(quota)}-day quota</span>
+                                    : <> · {fmt(remaining)} of {fmt(quota)} days left</>)}
+                                  {req.reason ? ` · ${req.reason}` : ''}
+                                </div>
+                                {actions && <div className="phone-card__actions">{actions}</div>}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+            <div className="table-wrap phone-hide">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -834,29 +882,7 @@ export default function LeaveManagement() {
                         </td>
                         <td><span style={{ fontSize: 11, fontWeight: 700, color: sc.color }}>{sc.label}</span></td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {req.status === 'pending' && (isOwnEmployee(req.employee_id) ? (
-                            <OwnRecordNote label="Your own request"
-                              tip="This leave is yours, so someone else approves or rejects it — another supervisor, a manager or the Owner. You can still cancel it while it waits." />
-                          ) : (
-                            <DecisionButtons who={`${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} disabled={busy}
-                              approveTip="Marks these days on the attendance sheet as paid or unpaid leave, by the leave type, so payroll deducts the unpaid ones. Public holidays in the range are marked Holiday and not charged."
-                              onApprove={() => approveRequest(req)} onReject={() => decideRequest(req, 'rejected')} />
-                          ))}
-                          {/* Withdrawing your own pending request moves no pay or balance; cancelling your
-                              own APPROVED leave puts the days back on the balance, so someone else does it (H8). */}
-                          {req.status === 'approved' && isOwnEmployee(req.employee_id) ? (
-                            <OwnRecordNote label="Yours, approved"
-                              tip="Your own approved leave can only be cancelled by someone else — another supervisor, a manager or the Owner." />
-                          ) : (req.status === 'pending' || req.status === 'approved') && (
-                            <button className="btn btn-ghost btn-sm" aria-label={`Cancel the leave for ${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel leave</button>
-                          )}
-                          {(req.status === 'rejected' || req.status === 'cancelled') && (
-                            canReopen ? (
-                              <Tip text="For a reject or cancel made by mistake. Puts the request back to Pending with its original dates and reason — approve it again to re-mark the attendance days." width={270}>
-                                <button className="btn btn-ghost btn-sm" aria-label={`Reopen the leave for ${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
-                              </Tip>
-                            ) : <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>
-                          )}
+                          {requestActions(req, e) ?? <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>}
                         </td>
                       </tr>
                     )
@@ -1005,6 +1031,64 @@ export default function LeaveManagement() {
             Defaults follow Nepal's Labour Act 2074, and Maternity (98 days) and Paternity (15) are per birth, not per year. Edits save automatically.
           </p>
         </div>
+      )}
+      {/* Record leave (S805): the form behind the header's + Record leave, so the queue opens the page.
+          The button stays mounted while this is open (the overlay covers it), so closing returns focus
+          to it rather than to the top of the page. */}
+      {formOpen && (
+        <Modal onClose={closeRecord} title="Record leave" maxWidth={600}>
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+            It joins the list as Pending. Approving it there is what marks the days on the attendance sheet.
+          </p>
+          <div className="field-grid" style={{ alignItems: 'start' }}>
+            <div>
+              <label style={lbl} htmlFor="leave-employee">Employee</label>
+              <select id="leave-employee" className="form-select" style={{ width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
+                <option value="">— Select —</option>
+                {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={lbl} htmlFor="leave-type">Leave Type</label>
+              <select id="leave-type" className="form-select" style={{ width: '100%' }} value={fType} onChange={e => setFType(e.target.value)}>
+                <option value="">— Select —</option>
+                {activeTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.paid ? '' : ' (unpaid)'}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={lbl} htmlFor="leave-start-date">Start Date</label>
+              <BsCalendarPicker id="leave-start-date" value={fStart} onChange={setFStart} placeholder="Pick start date" />
+            </div>
+            <div>
+              <label style={lbl} htmlFor="leave-end-date">End Date</label>
+              <BsCalendarPicker id="leave-end-date" value={fEnd} onChange={setFEnd} placeholder="Pick end date" />
+            </div>
+            <div>
+              <label style={lbl} htmlFor="leave-day-type">
+                <Tip text="Only applies to a single-day request — pick the same Start and End date." width={240}>Day Type</Tip>
+              </label>
+              <select id="leave-day-type" className="form-select" style={disabledStyle({ width: '100%' }, !isSingleDay)} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
+                {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={lbl} htmlFor="leave-reason">Reason</label>
+              <input id="leave-reason" className="form-input" value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
+            </div>
+          </div>
+          <div style={{ marginTop: 14, fontSize: 12, color: 'var(--theme-text2)' }}>
+            <Tip text="Every day in the picked range counts against the balance except public holidays from the Holiday Calendar, which are marked Holiday instead. Rostered days off still count — adjust the dates if the employee has one within this range." width={260}>
+              {fStart && fEnd
+                ? `${fmt(previewDaysCount)} day${previewDaysCount === 1 ? '' : 's'}${preview.holidayDays.length ? ` · ${preview.holidayDays.length} public holiday${preview.holidayDays.length === 1 ? '' : 's'} not counted` : ''}`
+                : 'Pick a date range'}
+            </Tip>
+          </div>
+          {msg && <div role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ marginTop: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</div>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+            <button type="button" className="btn btn-ghost" onClick={closeRecord}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={submitRequest} disabled={busy}>{busy ? 'Saving…' : 'Submit Request'}</button>
+          </div>
+        </Modal>
       )}
       {confirmEl}
     </div>
