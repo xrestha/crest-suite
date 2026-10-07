@@ -121,6 +121,8 @@ export default function AttendanceSheet() {
   const [pendingPeriodId, setPendingPeriodId] = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [tab,       setTab]       = useState('mark')
+  // A phone shows the toolbar's entry aids and clears only on request (S805, `.phone-fold`).
+  const [moreOpen,  setMoreOpen]  = useState(false)
   const [selectedDay, setSelectedDay] = useState(getBsToday().day)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('') // By Employee tab
   const [activeTimeKey, setActiveTimeKey] = useState('') // `${empId}:${day}:${field}` currently focused — suppresses the invalid-red flash while mid-typing a digit shorthand
@@ -1280,6 +1282,11 @@ export default function AttendanceSheet() {
                   {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}{unsavedDays.has(d) ? ' — unsaved' : ''}</option>)}
                 </select>
               </div>
+              {/* On a phone the entry aids and the clear fold behind one toggle (S805): the toolbar was five
+                  rows tall above the first employee. The day and Save stay in view. */}
+              <button type="button" className="btn btn-ghost btn-sm phone-only" aria-expanded={moreOpen} aria-controls="att-more-mark att-clear-mark"
+                onClick={() => setMoreOpen(v => !v)}>{moreOpen ? 'Fewer actions' : 'More actions'}</button>
+              <div id="att-more-mark" className={`phone-fold${moreOpen ? ' phone-fold--open' : ''}`} style={{ display: 'contents' }}>
               <Tip text="Marks only the staff who have nothing marked for this day yet. Leave, absences and anything already marked are left as they are — change those one at a time." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => markAll('present')} disabled={locked}>All Present</button>
@@ -1303,6 +1310,7 @@ export default function AttendanceSheet() {
                   <button className="btn btn-ghost btn-sm" onClick={applyBreakToDay} disabled={locked}>Apply Break to Day</button>
                 </Tip>
               </div>
+              </div>
             </div>
             <div style={{ flex: 1 }} />
             {savedMsg && (
@@ -1316,7 +1324,7 @@ export default function AttendanceSheet() {
                 {saving ? 'Saving…' : saveLabel}
               </button>
             </Tip>
-            <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
+            <div id="att-clear-mark" className={`phone-fold${moreOpen ? ' phone-fold--open' : ''}`} style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes the saved record of every employee listed on this sheet for this day — the day reverts to blank for them. Staff who have left are not touched. Can't be undone.">
                 <button className="btn btn-ghost btn-sm" style={{ color: 'var(--theme-red-text)' }} onClick={requestClearDay} disabled={saving || locked}>
                   🗑 Clear Day
@@ -1341,7 +1349,9 @@ export default function AttendanceSheet() {
 
           <div className="card" style={{ padding: 0 }}>
             <div className="table-wrap">
-              <table className="data-table">
+              {/* Below 600px each row restacks into a card of its own inputs (.table-stack, S805): the
+                  same boxes, never a second copy, so what is on screen is what Save writes. */}
+              <table className="data-table table-stack">
                 <thead>
                   <tr>
                     <th>Employee</th>
@@ -1379,7 +1389,7 @@ export default function AttendanceSheet() {
                     const outside = outsideLabel(emp, selectedDay)
                     return (
                       <tr key={emp.id}>
-                        <td>
+                        <td className="stack-main">
                           <div style={{ fontWeight: outside ? 400 : 600, color: outside ? 'var(--theme-text3)' : 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                           <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                             {emp.employee_code || ''}{emp.pay_basis && emp.pay_basis !== 'monthly' ? ` · ${emp.pay_basis}` : ''}
@@ -1388,7 +1398,7 @@ export default function AttendanceSheet() {
                           {unsavedSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
                           {openFlagSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>△ Check · machine: {importFlags[`${emp.id}:${selectedDay}`]}</div>}
                         </td>
-                        <td>
+                        <td data-label="Status">
                           <select
                             id={`att-status-${emp.id}`}
                             aria-label={`${emp.full_name} — status`}
@@ -1400,7 +1410,7 @@ export default function AttendanceSheet() {
                             {ATTENDANCE_STATUSES.map(s => <option key={s.key} value={s.key} style={{ color: 'var(--theme-text1)' }}>{s.label}</option>)}
                           </select>
                         </td>
-                        <td>
+                        <td className="stack-third" data-label="Start">
                           <input type="text" placeholder="--:--" id={`att-start-${emp.id}`} aria-label={`${emp.full_name} — start time`}
                             disabled={noClock} title={clockTitle}
                             className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
@@ -1410,7 +1420,7 @@ export default function AttendanceSheet() {
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'start_time'); setActiveTimeKey('') }} />
                           <FieldError id={`att-start-${emp.id}`} message={timeError(rec?.start_time, `${emp.id}:${selectedDay}:start_time`)} />
                         </td>
-                        <td>
+                        <td className="stack-third" data-label="End">
                           <input type="text" placeholder="--:--" id={`att-end-${emp.id}`} aria-label={`${emp.full_name} — end time`}
                             disabled={noClock} title={clockTitle}
                             className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
@@ -1420,13 +1430,13 @@ export default function AttendanceSheet() {
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'end_time'); setActiveTimeKey('') }} />
                           <FieldError id={`att-end-${emp.id}`} message={timeError(rec?.end_time, `${emp.id}:${selectedDay}:end_time`)} />
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td className="stack-third" data-label="Break (min)" style={{ textAlign: 'right' }}>
                           <input type="number" min="0" step="5" id={`att-break-${emp.id}`} aria-label={`${emp.full_name} — unpaid break minutes`}
                             disabled={noClock} title={clockTitle}
                             className="form-input form-input--auto" style={{ width: 60, textAlign: 'right', padding: CELL_PAD }}
                             value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(emp.id, selectedDay, e.target.value)} placeholder="0" />
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td className="stack-half" data-label="Hours" style={{ textAlign: 'right' }}>
                           {emp.pay_basis === 'hourly' ? (
                             <input type="number" min="0" step="0.5" id={`att-hours-${emp.id}`} aria-label={`${emp.full_name} — hours worked`}
                               disabled={noClock} title={clockTitle}
@@ -1434,7 +1444,7 @@ export default function AttendanceSheet() {
                               value={rec?.hours_worked ?? ''} onChange={e => setCell(emp.id, selectedDay, 'hours_worked', e.target.value)} placeholder="0" />
                           ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td className="stack-half" data-label="OT hours" style={{ textAlign: 'right' }}>
                           <input type="number" min="0" step="0.5" id={`att-ot-${emp.id}`} aria-label={`${emp.full_name} — overtime hours`}
                             disabled={noClock} title={clockTitle}
                             className="form-input form-input--auto" style={{ width: 80, textAlign: 'right', padding: CELL_PAD }}
@@ -1448,11 +1458,11 @@ export default function AttendanceSheet() {
                             )
                           })()}
                         </td>
-                        <td>
+                        <td data-label="Note">
                           <input id={`att-note-${emp.id}`} aria-label={`${emp.full_name} — note`} disabled={locked}
                             className="form-input" style={{ padding: CELL_PAD }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
                         </td>
-                        <td>
+                        <td className="stack-end">
                           {rec && !locked && (
                             <Tip text="Delete this record — reverts to Not Marked">
                               <button type="button" onClick={() => requestClearCell(emp.id, selectedDay)}
@@ -1483,6 +1493,11 @@ export default function AttendanceSheet() {
                   {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}{unsavedEmployees.has(emp.id) ? ' — unsaved' : ''}</option>)}
                 </select>
               </div>
+              {/* On a phone the entry aids and the clear fold behind one toggle (S805): the toolbar was five
+                  rows tall above the first employee. The day and Save stay in view. */}
+              <button type="button" className="btn btn-ghost btn-sm phone-only" aria-expanded={moreOpen} aria-controls="att-more-emp att-clear-emp"
+                onClick={() => setMoreOpen(v => !v)}>{moreOpen ? 'Fewer actions' : 'More actions'}</button>
+              <div id="att-more-emp" className={`phone-fold${moreOpen ? ' phone-fold--open' : ''}`} style={{ display: 'contents' }}>
               <Tip text="Marks only this employee's days that have nothing marked yet. Leave, absences and anything already marked are left as they are — change those one at a time." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'present')} disabled={locked}>All Present</button>
@@ -1506,6 +1521,7 @@ export default function AttendanceSheet() {
                   <button className="btn btn-ghost btn-sm" onClick={() => applyBreakToEmployeeMonth(selectedEmployeeId)} disabled={locked}>Apply Break to Month</button>
                 </Tip>
               </div>
+              </div>
             </div>
             <div style={{ flex: 1 }} />
             {savedMsg && (
@@ -1519,7 +1535,7 @@ export default function AttendanceSheet() {
                 {saving ? 'Saving…' : saveLabel}
               </button>
             </Tip>
-            <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
+            <div id="att-clear-emp" className={`phone-fold${moreOpen ? ' phone-fold--open' : ''}`} style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
                 <button className="btn btn-ghost btn-sm" style={{ color: 'var(--theme-red-text)' }} onClick={() => requestClearEmployeeMonth(selectedEmployeeId)} disabled={saving || locked}>
                   🗑 Clear Month
@@ -1543,7 +1559,7 @@ export default function AttendanceSheet() {
 
           <div className="card" style={{ padding: 0 }}>
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table table-stack">
                 <thead>
                   <tr>
                     <th style={{ width: 110 }}>Date</th>
@@ -1581,13 +1597,13 @@ export default function AttendanceSheet() {
                       const outside = outsideLabel(emp, d)
                       return (
                         <tr key={d}>
-                          <td style={{ color: outside ? 'var(--theme-text3)' : 'var(--theme-text1)', fontWeight: outside ? 400 : 600, fontSize: 13 }}>
+                          <td className="stack-main" style={{ color: outside ? 'var(--theme-text3)' : 'var(--theme-text1)', fontWeight: outside ? 400 : 600, fontSize: 13 }}>
                             {d} · {weekdayOf(period, d)}
                             {outside && <div style={{ fontSize: 11 }}>{outside}</div>}
                             {unsavedSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
                             {openFlagSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-amber-text)' }}>△ Check · machine: {importFlags[`${selectedEmployeeId}:${d}`]}</div>}
                           </td>
-                          <td>
+                          <td data-label="Status">
                             <select
                               id={`att-emp-status-${d}`}
                               aria-label={`Day ${d} — status`}
@@ -1599,7 +1615,7 @@ export default function AttendanceSheet() {
                               {ATTENDANCE_STATUSES.map(s => <option key={s.key} value={s.key} style={{ color: 'var(--theme-text1)' }}>{s.label}</option>)}
                             </select>
                           </td>
-                          <td>
+                          <td className="stack-third" data-label="Start">
                             <input type="text" placeholder="--:--" id={`att-emp-start-${d}`} aria-label={`Day ${d} — start time`}
                               disabled={noClock} title={clockTitle}
                               className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
@@ -1609,7 +1625,7 @@ export default function AttendanceSheet() {
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'start_time'); setActiveTimeKey('') }} />
                             <FieldError id={`att-emp-start-${d}`} message={timeError(rec?.start_time, `${selectedEmployeeId}:${d}:start_time`)} />
                           </td>
-                          <td>
+                          <td className="stack-third" data-label="End">
                             <input type="text" placeholder="--:--" id={`att-emp-end-${d}`} aria-label={`Day ${d} — end time`}
                               disabled={noClock} title={clockTitle}
                               className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
@@ -1619,13 +1635,13 @@ export default function AttendanceSheet() {
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'end_time'); setActiveTimeKey('') }} />
                             <FieldError id={`att-emp-end-${d}`} message={timeError(rec?.end_time, `${selectedEmployeeId}:${d}:end_time`)} />
                           </td>
-                          <td style={{ textAlign: 'right' }}>
+                          <td className="stack-third" data-label="Break (min)" style={{ textAlign: 'right' }}>
                             <input type="number" min="0" step="5" id={`att-emp-break-${d}`} aria-label={`Day ${d} — unpaid break minutes`}
                               disabled={noClock} title={clockTitle}
                               className="form-input form-input--auto" style={{ width: 60, textAlign: 'right', padding: CELL_PAD }}
                               value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(selectedEmployeeId, d, e.target.value)} placeholder="0" />
                           </td>
-                          <td style={{ textAlign: 'right' }}>
+                          <td className="stack-half" data-label="Hours" style={{ textAlign: 'right' }}>
                             {emp?.pay_basis === 'hourly' ? (
                               <input type="number" min="0" step="0.5" id={`att-emp-hours-${d}`} aria-label={`Day ${d} — hours worked`}
                                 disabled={noClock} title={clockTitle}
@@ -1633,7 +1649,7 @@ export default function AttendanceSheet() {
                                 value={rec?.hours_worked ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'hours_worked', e.target.value)} placeholder="0" />
                             ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
-                          <td style={{ textAlign: 'right' }}>
+                          <td className="stack-half" data-label="OT hours" style={{ textAlign: 'right' }}>
                             <input type="number" min="0" step="0.5" id={`att-emp-ot-${d}`} aria-label={`Day ${d} — overtime hours`}
                               disabled={noClock} title={clockTitle}
                               className="form-input form-input--auto" style={{ width: 80, textAlign: 'right', padding: CELL_PAD }}
@@ -1647,11 +1663,11 @@ export default function AttendanceSheet() {
                               )
                             })()}
                           </td>
-                          <td>
+                          <td data-label="Note">
                             <input id={`att-emp-note-${d}`} aria-label={`Day ${d} — note`} disabled={locked}
                               className="form-input" style={{ padding: CELL_PAD }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
                           </td>
-                          <td>
+                          <td className="stack-end">
                             {rec && !locked && (
                               <Tip text="Delete this record — reverts to Not Marked">
                                 <button type="button" onClick={() => requestClearCell(selectedEmployeeId, d)}
@@ -1669,8 +1685,8 @@ export default function AttendanceSheet() {
                 {selectedEmployeeId && (
                   <tfoot>
                     <tr>
-                      <td colSpan={6} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>Total OT Hours</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
+                      <td colSpan={6} className="stack-main" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>Total OT Hours</td>
+                      <td className="stack-end" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                         {days.reduce((sum, d) => sum + (parseFloat(cellFor(selectedEmployeeId, d)?.ot_hours) || 0), 0).toFixed(1)}
                       </td>
                       <td colSpan={2} />

@@ -39,6 +39,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - When a search hides rows, show "N of M" and make the empty state tell "no match" apart from "nothing here yet".
 - Judge fit by measuring `scrollWidth` against `clientWidth` at a resized viewport, using the client's longest real values, never by eye.
 - A table whose bottom-line figure falls past a phone's edge gets a `.phone-cards` list beside it (`.phone-only`), and the table takes `.phone-hide` (S796, Purchases' bills and Recipes). One row per record, the figure it exists for on the first line at the right edge, details in a `<details>`, actions last. Feed it the table's own data so the two cannot disagree; it never prints.
+- A table whose cells are INPUTS takes `.table-stack` instead, which restacks its own rows below 600px; never render its inputs twice. A phone toolbar's secondary controls go in `.phone-fold` behind one toggle; the controls the page exists for stay in view (S805).
 
 ## Sticky headers and scroll containers
 

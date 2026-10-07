@@ -2289,6 +2289,47 @@ tr.interactive-row:focus-visible {
 .phone-card__actions .btn { flex: 1 1 0; justify-content: center; }
 @media print { .phone-cards { display: none !important; } }
 
+/* ── An ENTRY table restacked on a phone (S805) ─────────────────────────────────────────────
+   `.phone-cards` is a second, read-only rendering beside a table. A table of INPUTS cannot take
+   that shape: a second copy of every box means two controls per value with clashing ids and
+   labels, and one of them is the copy not on screen. `.table-stack` restacks the table's own rows
+   instead. Below 600px each row is a six-track grid; a cell spans the full row unless it takes
+   `.stack-half` (3), `.stack-third` (2), `.stack-main` (all but the last track) or `.stack-end`
+   (the last track of the first line, for a row's delete icon). A cell's `data-label` prints above
+   it as its heading, since the thead is hidden; the inputs keep their own aria-labels, so the
+   printed label is left out of the accessibility tree. Attendance's Mark and By Employee tables
+   are the worked example. Print always gets the table. */
+@media screen and (max-width: 600px) {
+  table.table-stack, table.table-stack > tbody, table.table-stack > tfoot { display: block; width: 100%; }
+  table.table-stack > thead { display: none; }
+  table.table-stack > tbody > tr, table.table-stack > tfoot > tr {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px 10px;
+    padding: 12px 16px; border-top: 1px solid var(--theme-border);
+  }
+  table.table-stack > tbody > tr:first-child { border-top: 0; }
+  table.table-stack td {
+    display: block; grid-column: 1 / -1; min-width: 0;
+    padding: 0 !important; border: 0 !important; text-align: left !important;
+  }
+  table.table-stack td:empty { display: none; }
+  /* Hover shades the whole row: per cell, the grid's gaps showed through as stripes. */
+  table.data-table.table-stack tr:hover td { background: transparent; }
+  table.data-table.table-stack > tbody > tr:hover { background: var(--theme-table-hover); }
+  table.table-stack td.stack-half { grid-column: span 3; }
+  table.table-stack td.stack-third { grid-column: span 2; }
+  table.table-stack td.stack-main { grid-column: 1 / -2; }
+  table.table-stack td.stack-end { grid-column: -2 / -1; grid-row: 1; justify-self: end; }
+  table.table-stack td[data-label]::before {
+    content: attr(data-label); content: attr(data-label) / '';
+    display: block; margin-bottom: 4px; font-size: 12px; color: var(--theme-text2);
+  }
+  table.table-stack td input:not([type="checkbox"]):not([type="radio"]), table.table-stack td select { width: 100% !important; }
+
+  /* A toolbar's secondary controls, shown on a phone only when its toggle is pressed (S805). The
+     toggle is a `.phone-only` button with aria-expanded / aria-controls naming every fold. */
+  .phone-fold:not(.phone-fold--open) { display: none !important; }
+}
+
 table.data-table {
   width: 100%;
   border-collapse: collapse;
