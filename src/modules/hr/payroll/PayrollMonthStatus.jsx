@@ -117,6 +117,9 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
   const deadline = ssfDeadline(period.bs_year, period.bs_month)
   const dueLabel = `${deadline.day} ${BS_MONTHS[deadline.month - 1]}`
   const reports = tab => `/hr/reports?tab=${tab}&period=${period.id}`
+  // Every link names the month (S804): Payroll, Attendance and Overtime each open on a month of their
+  // own, so a bare link from "Bhadra payroll" landed on Ashwin. Leave and TADA have no month picker.
+  const attendanceAt = `/hr/attendance?period=${period.id}`
   // Why the deposit is more than the Payroll page's SSF column adds up to.
   const settledNote = s => (s.settlements > 0 ? ` (includes ${s.settledNames.length === 1 ? 'a leaver’s' : `${s.settledNames.length} leavers’`} Final Settlement)` : '')
 
@@ -125,11 +128,11 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
     for (const name of ['Attendance', 'Approvals', 'Payroll', 'Staff paid', 'SSF deposit']) steps.push({ name, tone: 'none', mark: '…', text: 'Checking…' })
   } else {
     const a = state.attendance
-    steps.push(a.error ? { name: 'Attendance', tone: 'none', mark: '—', text: 'Could not check', link: ['/hr/attendance', 'Open Attendance'] }
+    steps.push(a.error ? { name: 'Attendance', tone: 'none', mark: '—', text: 'Could not check', link: [attendanceAt, 'Open Attendance'] }
       : a.future ? { name: 'Attendance', tone: 'none', mark: '—', text: `${month} has not started` }
-      : a.wageStaff === 0 ? { name: 'Attendance', tone: 'done', mark: '✓', text: 'Monthly staff only — an unmarked day is paid', link: ['/hr/attendance', 'Open Attendance'] }
-      : a.gaps === 0 ? { name: 'Attendance', tone: 'done', mark: '✓', text: `Every day marked for daily and hourly staff${a.cutoff < 28 ? ' so far' : ''}`, link: ['/hr/attendance', 'Open Attendance'] }
-      : { name: 'Attendance', tone: 'open', mark: '△', text: `${a.gaps} unmarked day${a.gaps === 1 ? '' : 's'} for ${a.staffWithGaps} daily/hourly staff — an unmarked day pays them nothing`, link: ['/hr/attendance', 'Mark attendance'] })
+      : a.wageStaff === 0 ? { name: 'Attendance', tone: 'done', mark: '✓', text: 'Monthly staff only — an unmarked day is paid', link: [attendanceAt, 'Open Attendance'] }
+      : a.gaps === 0 ? { name: 'Attendance', tone: 'done', mark: '✓', text: `Every day marked for daily and hourly staff${a.cutoff < 28 ? ' so far' : ''}`, link: [attendanceAt, 'Open Attendance'] }
+      : { name: 'Attendance', tone: 'open', mark: '△', text: `${a.gaps} unmarked day${a.gaps === 1 ? '' : 's'} for ${a.staffWithGaps} daily/hourly staff — an unmarked day pays them nothing`, link: [attendanceAt, 'Mark attendance'] })
 
     const ap = state.approvals
     const waiting = ap.error ? 0 : ap.leave + ap.ot + ap.tada
@@ -137,11 +140,12 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       : waiting === 0 ? { name: 'Approvals', tone: 'done', mark: '✓', text: `Nothing touching ${month} is waiting` }
       : {
         name: 'Approvals', tone: 'open', mark: '△', text: `${waiting} waiting for a decision`,
-        links: [ap.leave > 0 && ['/hr/leave', `Leave ${ap.leave}`], ap.ot > 0 && ['/hr/overtime', `Overtime ${ap.ot}`], ap.tada > 0 && ['/hr/tada', `TADA ${ap.tada}`]].filter(Boolean),
+        links: [ap.leave > 0 && ['/hr/leave', `Leave ${ap.leave}`], ap.ot > 0 && [`/hr/overtime?period=${period.id}`, `Overtime ${ap.ot}`], ap.tada > 0 && ['/hr/tada', `TADA ${ap.tada}`]].filter(Boolean),
       })
 
     const r = state.run
-    const payrollLink = onPayrollPage ? null : ['/hr/payroll', 'Open Payroll']
+    const payrollAt = `/hr/payroll?period=${period.id}`
+    const payrollLink = onPayrollPage ? null : [payrollAt, 'Open Payroll']
     steps.push(r.error ? { name: 'Payroll', tone: 'none', mark: '—', text: 'Could not check', link: payrollLink }
       : r.status === 'finalized' && state.leftOut?.length > 0 ? {
         name: 'Payroll', tone: 'open', mark: '△', link: payrollLink,
@@ -149,14 +153,14 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       }
       : r.status === 'finalized' ? { name: 'Payroll', tone: 'done', mark: '✓', text: 'Finalized', link: payrollLink }
       : r.status === 'draft' ? { name: 'Payroll', tone: 'open', mark: '△', text: runStale ? 'Draft — out of date, Regenerate before finalizing' : runHeld ? 'Draft — waiting on a leaver\'s last working day' : 'Draft — not finalized yet', link: payrollLink }
-      : { name: 'Payroll', tone: 'none', mark: '—', text: 'Not generated yet', link: payrollLink && ['/hr/payroll', 'Generate'] })
+      : { name: 'Payroll', tone: 'none', mark: '—', text: 'Not generated yet', link: payrollLink && [payrollAt, 'Generate'] })
 
     // Staff paid (S782). "Not paid" is never inferred from a failed read.
     const pd = r.status !== 'finalized' ? null
       : payments !== undefined ? (paymentsError ? { error: paymentsError } : runPaymentSummary(payslips, payments))
       : state.paid
     const due = pd && !pd.error ? pd.owed - pd.paid : 0
-    steps.push(r.status !== 'finalized' ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'After Finalize — finalizing pays nobody' }
+    steps.push(r.status !== 'finalized' ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'After Finalize — then mark each person paid' }
       : !pd || pd.error ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'Could not check', link: payrollLink }
       // Overpaid is tested BEFORE "nothing to pay" (S788): someone paid and then regenerated out of
       // the month is in `over` but not `owed`, so a run whose remaining payslips all net 0 has owed 0

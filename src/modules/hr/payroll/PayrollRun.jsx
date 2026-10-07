@@ -1,6 +1,6 @@
 import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
-import { Navigate, Link } from 'react-router-dom'
+import { Navigate, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -23,6 +23,7 @@ import { CalcDetail, StoredDetail, FINALIZED_INTRO, driftParts, orphanIntro } fr
 import RowDisclosure from '../../../components/RowDisclosure'
 import RowMenu from '../../../components/RowMenu'
 import PayrollMonthStatus from './PayrollMonthStatus'
+import { pickStatusPeriod } from './monthStatus'
 import { fetchRunPayments, runPaymentSummary, methodLabel } from './salaryPayments'
 import { MarkPaidDialog, UndoPaymentDialog } from './SalaryPaymentDialogs'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -146,8 +147,12 @@ export default function PayrollRun() {
   // A busy confirm cannot be cancelled, so it is released after a time limit and the page says it
   // could not confirm (S803).
   const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
+  const [searchParams, setSearchParams] = useSearchParams()
   const [periods,    setPeriods]    = useState([])
   const [period,     setPeriod]     = useState(null)
+  // Every month's run status (S804): the month this page opens on, and the note naming another
+  // month whose payroll is still a draft. This page's own run keeps its entry current.
+  const [runStatusBy, setRunStatusBy] = useState({})
   const [run,        setRun]        = useState(null)
   const [payslips,   setPayslips]   = useState([])
   const [employees,  setEmployees]  = useState([])
@@ -249,15 +254,28 @@ export default function PayrollRun() {
       setLoading(true); setMsg(''); setLoadError(null); setRun(null); setPayslips([])
       setPayments([]); setPaymentsError(null); setMarkPaid(null); setUndoPay(null)
       setPeriods([]); setPeriod(null); setEmployees([]); setSettled([]); setExtraEmps([]); setConfirmAction(null)
-      setUnended([]); setPaidLastMonth([])
-      const { data: p, error: pErr } = await settleWithin(scopedFrom('monthly_periods')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), LOAD_MS, 'Loading payroll months')
+      setUnended([]); setPaidLastMonth([]); setRunStatusBy({})
+      // One run a month, so the run list is no longer than the period list beside it.
+      const [{ data: p, error: pErr }, { data: runs, error: rErr }] = await Promise.all([
+        settleWithin(scopedFrom('monthly_periods')
+          .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), LOAD_MS, 'Loading payroll months'),
+        settleWithin(scopedFrom('hr_payroll_runs', 'period_id, status'), LOAD_MS, 'Loading payroll months'),
+      ])
       if (!periodReq.isCurrent(claim)) return
-      if (pErr) { setPeriods([]); setPeriod(null); setLoadError(pErr); setLoading(false); return }
+      if (pErr || rErr) { setPeriods([]); setPeriod(null); setLoadError(pErr || rErr); setLoading(false); return }
       setPeriods(p || [])
-      const open = (p || []).find(x => x.status === 'open') || (p || [])[0] || null
+      const statusBy = Object.fromEntries((runs || []).map(r => [r.period_id, r.status]))
+      setRunStatusBy(statusBy)
+      // The month named in the link, else the month the HR Dashboard's strip is on (S804): last month
+      // until its payroll is finalized, then the running month. It opened on the stock module's open
+      // month, so in payroll week an owner landed on "No payroll run for Ashwin" with a primary
+      // Generate while Bhadra's draft was the live work. An id from another client is not listed.
+      const wanted = searchParams.get('period')
+      const open = (wanted && (p || []).find(x => x.id === wanted))
+        || pickStatusPeriod(p, statusBy) || (p || []).find(x => x.status === 'open') || (p || [])[0] || null
       setPeriod(open)
       if (!open) { setLoading(false); return }
+      showPeriodInUrl(open.id)
       periodReq.begin(open.id)
       await loadAll(open)
       if (periodReq.isCurrent(open.id)) setLoading(false)
@@ -371,14 +389,29 @@ export default function PayrollRun() {
     setPayments(pays); setPaymentsError(payErr)
   }
 
+  // The URL says which month is on screen, so a reload or Back returns to it. `replace`: arrowing the
+  // month list must not fill the back button.
+  function showPeriodInUrl(id) {
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', id); return next }, { replace: true })
+  }
+
   async function handlePeriodChange(id) {
     periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setMsg(''); setLoading(true); setConfirmAction(null); setExpandedId(null)
+    showPeriodInUrl(id)
     setMarkPaid(null); setUndoPay(null)
     await loadAll(p)
     if (periodReq.isCurrent(id)) setLoading(false)
   }
+
+  // This page's own Generate, Finalize and Reopen move its month's entry, so the draft note below
+  // never names a month this page has just finalized (S804).
+  useEffect(() => {
+    if (loading || loadError || !period) return
+    const status = run?.status
+    setRunStatusBy(m => (m[period.id] === status ? m : { ...m, [period.id]: status }))
+  }, [loading, loadError, period, run?.status])
 
   // The live recomputation from the loaded data — one buildPayrollRows (payrollData.js), the same
   // function Generate inserts from and each row's working shows, never a second copy of the arithmetic.
@@ -780,6 +813,12 @@ export default function PayrollRun() {
   const monthName = period ? BS_MONTHS[period.bs_month - 1] : 'this month'
   const finalized = run?.status === 'finalized'
   const prevMonthName = period ? BS_MONTHS[(period.bs_month + 10) % 12] : 'last month'
+  const monthLabel = p => `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
+  // Another month whose payroll is still a draft (S804), newest first like the month list. The page
+  // opens on the month being paid, but a pick from the list can leave that draft out of sight.
+  const otherDrafts = periods.filter(p => p.id !== period?.id && runStatusBy[p.id] === 'draft')
+  // Where today sits against a month with no run yet, for the Generate prompt: null once it has ended.
+  const progress = !run && period ? monthProgress(period) : null
   // A payslip this run must not pay, by reason (S798 3e): the copy used to call all of them "already paid
   // by a Final Settlement, or not employed", which told a manager to delete the payslip of someone who
   // had simply been set Resigned with no last day. Held people are named apart, below.
@@ -1042,6 +1081,19 @@ export default function PayrollRun() {
           </div>
         </div>
 
+        {!loading && !loadError && otherDrafts.length > 0 && (
+          <div role="status" className="note-banner no-print" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <strong>
+              {otherDrafts.length === 1
+                ? `${monthLabel(otherDrafts[0])} payroll is still a draft.`
+                : `${otherDrafts.slice(0, -1).map(monthLabel).join(', ')} and ${monthLabel(otherDrafts[otherDrafts.length - 1])} payrolls are still drafts.`}
+            </strong>
+            {otherDrafts.map(p => (
+              <button key={p.id} type="button" className="btn btn-ghost btn-sm" onClick={() => handlePeriodChange(p.id)} disabled={busy}>Open {monthLabel(p)}</button>
+            ))}
+          </div>
+        )}
+
         {showActions && ownSlip && (
           <div role="status" className="note-banner no-print">
             <strong>This payroll pays you.</strong> {nameOf(ownSlip.employee_id)} has a payslip in it, so {finalized ? 'only the Owner can reopen it.' : 'the Owner finalizes it. You can still prepare it: attendance, Regenerate and income tax work as usual.'}
@@ -1186,8 +1238,19 @@ export default function PayrollRun() {
             <div className="card" style={{ padding: 40, textAlign: 'center' }}>
               <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>💵</div>
               <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No payroll run for {periodLabel} yet</div>
-              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 18 }}>Generates a draft for {employees.length} employee{employees.length === 1 ? '' : 's'} from each one's salary structure and {periodLabel} attendance. You can review it before finalizing.</div>
-              <button className="btn btn-primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : 'Generate Payroll'}</button>
+              {/* A month still running offers Generate as the quiet choice, not the page's primary
+                  (S804): its attendance is not in yet, so a draft made now is regenerated once it ends. */}
+              {progress && (
+                <div style={{ fontSize: 13, color: 'var(--theme-text1)', marginBottom: 6 }}>
+                  {progress.future
+                    ? `${monthName} has not started yet.`
+                    : progress.left === 0
+                      ? `Today is the last day of ${monthName}. Payroll is usually generated once the month ends.`
+                      : `${monthName} has ${progress.left} day${progress.left === 1 ? '' : 's'} left. Payroll is usually generated once the month ends.`}
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 18 }}>Generates a draft for {employees.length} employee{employees.length === 1 ? '' : 's'} from each one's salary structure and {periodLabel} attendance{progress && !progress.future ? ' so far — Regenerate it once the month is over' : ''}. You can review it before finalizing.</div>
+              <button className={progress ? 'btn btn-ghost' : 'btn btn-primary'} onClick={generate} disabled={busy}>{busy ? 'Generating…' : progress ? 'Generate early' : 'Generate Payroll'}</button>
             </div>
           )
         ) : (

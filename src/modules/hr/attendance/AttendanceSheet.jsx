@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -165,6 +165,14 @@ export default function AttendanceSheet() {
   // last response to land used to win `records` while `period` was whatever was picked last —
   // so Save Day then wrote one month's rows under another month's period_id.
   const periodReq = useLatestRequest()
+  // The month a link names (S804): the payroll strip's "Mark attendance" for Bhadra used to open on
+  // the running month. Read once, at mount, so writing the URL on a month switch never re-runs the
+  // load below; an id from another client is simply not listed.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const wantedPeriodRef = useRef(searchParams.get('period'))
+  function showPeriodInUrl(id) {
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', id); return next }, { replace: true })
+  }
 
   useEffect(() => {
     if (!clientId) return
@@ -438,7 +446,9 @@ export default function AttendanceSheet() {
       // id matched no option, the dropdown showed this client's first person, and the grid and Save
       // went on writing the previous client's employee.
       setSelectedEmployeeId(prev => (emps.some(e => e.id === prev) ? prev : emps[0]?.id || ''))
-      const open = p.find(x => x.status === 'open') || p[0]
+      // With no month named, the open one: attendance is marked day by day, in the running month.
+      const wanted = wantedPeriodRef.current
+      const open = (wanted && p.find(x => x.id === wanted)) || p.find(x => x.status === 'open') || p[0]
       if (open) {
         periodReq.begin(open.id); applyPeriod(open)
         // resetSheet(), spelled out: an admin's client switch re-runs this over the last client's grid.
@@ -463,6 +473,7 @@ export default function AttendanceSheet() {
     if (!p) return
     periodReq.begin(id)
     applyPeriod(p)
+    showPeriodInUrl(id)
     setImportFlags({})
     setRunStatus('none')
     resetSheet()

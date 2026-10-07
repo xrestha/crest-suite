@@ -20,6 +20,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { errorLine } from '../../../shared/errorText'
 import { bankTransferPlan, fetchRunPayments } from '../payroll/salaryPayments'
+import { reportsPeriodFor } from '../payroll/monthStatus'
 
 const fmt = nprInt
 // A stored AD date printed in BS, as every other HR screen prints it (S803). It was an en-IN AD
@@ -92,7 +93,7 @@ export default function HrReports() {
   const [loadError, setLoadError] = useState(null)
   // A link can open a tab and a month (S768) — Payroll's "Next for Bhadra" and the month strip's SSF
   // step send a manager straight to that month's challan instead of this page's default month.
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tab,       setTab]       = useState(() => (REPORT_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'summary'))
   const [rosterRetiringOnly, setRosterRetiringOnly] = useState(false)
   const [certFy,      setCertFy]      = useState(null)   // { fyStart, label }
@@ -132,13 +133,17 @@ export default function HrReports() {
       if (!periodReq.isCurrent(initKey)) return
       if (empErr) { setLoadError(empErr); setLoading(false); return }
       setEmployees(emps || [])
+      // The month named in the link, else LAST month all month long (S804, reportsPeriodFor): its bank
+      // file, SSF challan and TDS are due by the 25th. The stock module's open month has no payroll
+      // run until it ends, so this page read "No payroll run" for most of every month.
       const wanted = searchParams.get('period')
-      const open = (wanted && (p || []).find(x => x.id === wanted)) || (p || []).find(x => x.status === 'open') || (p || [])[0]
+      const open = (wanted && (p || []).find(x => x.id === wanted))
+        || reportsPeriodFor(p) || (p || []).find(x => x.status === 'open') || (p || [])[0]
       // Claim before loading (S721 rule): once a period change has run, the ref is never null again,
       // so an admin client switch re-running init() would otherwise have every setter in loadAll
       // skipped as "stale" and show the previous client's TDS sheet under the new one.
       if (open) {
-        periodReq.begin(open.id); setPeriod(open); await loadAll(open.id, open)
+        periodReq.begin(open.id); setPeriod(open); showPeriodInUrl(open.id); await loadAll(open.id, open)
         if (!periodReq.isCurrent(open.id)) return
       }
       setLoading(false)
@@ -304,10 +309,17 @@ export default function HrReports() {
     setMonthBonuses(inMonth)
   }
 
+  // The URL says which month is on screen, so a reload or Back returns to it; `replace`, so arrowing
+  // the month list does not fill the back button (S804).
+  function showPeriodInUrl(id) {
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', id); return next }, { replace: true })
+  }
+
   async function handlePeriodChange(id) {
     periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setLoading(true)
+    showPeriodInUrl(id)
     await loadAll(id, p)
     // Only the load still current may clear the loading state. A superseded one used to, which let
     // Export write the previous month's figures under this month's filename while the newer read

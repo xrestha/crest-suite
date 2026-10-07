@@ -85,14 +85,40 @@ export function attendanceGaps({ period, employees, attendance, today = getBsTod
  * Without a running-month period (the stock module has not opened it), last month even if finalized:
  * its staff payments and SSF deposit are still the live questions.
  *
+ * The Payroll page opens on this month too when no ?period= names one (S804), so the strip's "Open
+ * Payroll" and a bare visit land on the same month. It used to open on the stock module's open month:
+ * "No payroll run for Ashwin yet" and a primary Generate, while Bhadra's draft was the live work.
+ *
  * @param periods any order
  * @param runStatusByPeriod period id -> 'draft' | 'finalized'
  */
 export function pickStatusPeriod(periods, runStatusByPeriod, today = getBsToday()) {
-  const find = (y, m) => (periods || []).find(p => p.bs_year === y && p.bs_month === m) || null
-  const last = today.month === 1 ? find(today.year - 1, 12) : find(today.year, today.month - 1)
+  const { last, running } = lastAndRunning(periods, today)
   if (last && runStatusByPeriod[last.id] !== 'finalized') return last
-  return find(today.year, today.month) || last
+  return running || last
+}
+
+/**
+ * The month HR Reports opens on when no ?period= names one (S804): LAST month, all month long. Its
+ * bank file, SSF challan and TDS are due by the 25th of the running month, so they stay the live
+ * reports after its payroll is finalized, when the strip (pickStatusPeriod, H32) has already moved on
+ * to a running month with no run until it ends. Following the strip read "No payroll run for Ashwin"
+ * for ~25 days a month. Without a row for last month, the running month.
+ *
+ * @param periods any order
+ */
+export function reportsPeriodFor(periods, today = getBsToday()) {
+  const { last, running } = lastAndRunning(periods, today)
+  return last || running
+}
+
+// Found by year and month, never the next-older row: a gap in the periods list must not walk back.
+function lastAndRunning(periods, today) {
+  const find = (y, m) => (periods || []).find(p => p.bs_year === y && p.bs_month === m) || null
+  return {
+    last: today.month === 1 ? find(today.year - 1, 12) : find(today.year, today.month - 1),
+    running: find(today.year, today.month),
+  }
 }
 
 /**

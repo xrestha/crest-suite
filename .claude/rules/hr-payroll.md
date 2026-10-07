@@ -164,7 +164,12 @@ History: #s748-employees-pay-setup-holiday-calendar, #s751-payroll-decisions, #s
   recorded; the card says "Was due by", never red, S798 4b). On the HR
   Dashboard it is MANAGER-only because its steps link to manager pages, not because a supervisor's
   read would be empty (it is not; REPORTS-10). Its month is last month until that payroll is
-  finalized, then the running month (H32), never a search back. HR Reports opens on `?tab=` and `?period=`.
+  finalized, then the running month (H32), never a search back. Every step link carries `?period=`.
+- **Which month an HR page opens on** (S804): `?period=` when a link names one; else Payroll takes
+  the strip's month (`pickStatusPeriod`), HR Reports takes LAST month all month (`reportsPeriodFor`:
+  its filings are due by the 25th, after the strip has moved on), and Attendance and Overtime take
+  the open month. A month switch writes `?period=` with `replace`. Never default a payroll page to
+  `status === 'open'`: the stock module's open month has no run until it ends.
 - **Cost to Business is `payrollCashCost()`**: earned pay (gross − absence + OT) + employer SSF, with
   travel claims shown apart.
 

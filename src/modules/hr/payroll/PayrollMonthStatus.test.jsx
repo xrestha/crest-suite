@@ -40,7 +40,17 @@ describe('PayrollMonthStatus', () => {
     renderStrip({ employees: [], attendance: [], run: null, payslips: [] })
     expect(await screen.findByRole('navigation', { name: /Bhadra 2083 payroll/ })).toBeInTheDocument()
     expect([...document.querySelectorAll('.month-status__label')].map(n => n.textContent)).toEqual(['Attendance', 'Approvals', 'Payroll', 'Staff paid', 'SSF deposit'])
-    expect(await within(step('Staff paid')).findByText(/After Finalize — finalizing pays nobody/)).toBeInTheDocument()
+    expect(await within(step('Staff paid')).findByText(/After Finalize — then mark each person paid/)).toBeInTheDocument()
+  })
+
+  // S804: Payroll, Attendance and Overtime each open on a month of their own, so a bare link from the
+  // Bhadra strip landed on Ashwin. Every link names the strip's month.
+  it('links each step to the same month', async () => {
+    mockAnswers.hr_overtime_entries = () => ({ data: null, error: null, count: 1 })
+    renderStrip({ employees: [], attendance: [], run: null, payslips: [] })
+    expect(await within(step('Attendance')).findByRole('link', { name: 'Open Attendance' })).toHaveAttribute('href', '/hr/attendance?period=p5')
+    expect(within(step('Approvals')).getByRole('link', { name: 'Overtime 1' })).toHaveAttribute('href', '/hr/overtime?period=p5')
+    expect(within(step('Payroll')).getByRole('link', { name: 'Generate' })).toHaveAttribute('href', '/hr/payroll?period=p5')
   })
 
   // S782. Finalize pays nobody, so the step between the run and the SSF deposit is whether the

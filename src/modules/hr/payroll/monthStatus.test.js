@@ -1,4 +1,4 @@
-import { attendanceGaps, pickStatusPeriod, ssfDeadline, unmarkedDaysFor, unmarkedWindow } from './monthStatus'
+import { attendanceGaps, pickStatusPeriod, reportsPeriodFor, ssfDeadline, unmarkedDaysFor, unmarkedWindow } from './monthStatus'
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 
 const bhadra = { id: 'p5', bs_year: 2083, bs_month: 5 }
@@ -109,6 +109,31 @@ describe('pickStatusPeriod', () => {
   it('keeps last month when the running month has no period yet, and is null with neither', () => {
     expect(pickStatusPeriod(periods, { ashwin: 'finalized' }, { year: 2083, month: 7, day: 1 }).id).toBe('ashwin')
     expect(pickStatusPeriod(periods, {}, { year: 2083, month: 9, day: 1 })).toBeNull()
+  })
+})
+
+// S804: HR Reports opens on last month all month long — its bank file, SSF challan and TDS are due by
+// the 25th of the running month, after the strip has moved on at Finalize.
+describe('reportsPeriodFor', () => {
+  const periods = [
+    { id: 'ashwin', bs_year: 2083, bs_month: 6 },
+    { id: 'bhadra', bs_year: 2083, bs_month: 5 },
+    { id: 'shrawan', bs_year: 2083, bs_month: 4 },
+  ]
+
+  it('is last month, early and late in the running month', () => {
+    expect(reportsPeriodFor(periods, { year: 2083, month: 6, day: 3 }).id).toBe('bhadra')
+    expect(reportsPeriodFor(periods, { year: 2083, month: 6, day: 28 }).id).toBe('bhadra')
+  })
+
+  it('is the running month when last month has no row, and null with neither', () => {
+    expect(reportsPeriodFor(periods, { year: 2083, month: 4, day: 10 }).id).toBe('shrawan')
+    expect(reportsPeriodFor(periods, { year: 2083, month: 9, day: 1 })).toBeNull()
+  })
+
+  it('finds last month across the year end', () => {
+    const yearEnd = [{ id: 'baisakh', bs_year: 2084, bs_month: 1 }, { id: 'chaitra', bs_year: 2083, bs_month: 12 }]
+    expect(reportsPeriodFor(yearEnd, { year: 2084, month: 1, day: 20 }).id).toBe('chaitra')
   })
 })
 

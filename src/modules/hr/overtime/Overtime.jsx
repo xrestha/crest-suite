@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { nprInt } from '../../../shared/nepalMoney'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
@@ -47,6 +47,7 @@ export default function Overtime() {
   // could not confirm (S803).
   const { ask: askConfirm, confirmEl } = useConfirm({ timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setMsg('error:' + CONFIRM_TIMEOUT_TEXT) })
   const monthReq = useLatestRequest()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [periods,   setPeriods]   = useState([])
   const [period,    setPeriod]    = useState(null)
@@ -94,7 +95,10 @@ export default function Overtime() {
       setEmployees(emps)
       setHolidaysError(hRes.error || null)
       setHolidays(hRes.error ? [] : (hRes.data || []))
-      const open = p.find(x => x.status === 'open') || p[0]
+      // The month a link names (S804: the payroll strip's "Overtime 2" for Bhadra used to open on the
+      // running month, where nothing was waiting), else the open month.
+      const wanted = searchParams.get('period')
+      const open = (wanted && p.find(x => x.id === wanted)) || p.find(x => x.status === 'open') || p[0]
       if (open) {
         setPeriod(open)
         await loadEntries(open.bs_year, open.bs_month)
@@ -143,6 +147,8 @@ export default function Overtime() {
   async function handlePeriodChange(id) {
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setMsg('')
+    // A reload or Back returns to the month on screen; `replace`, so arrowing the list adds no history.
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', id); return next }, { replace: true })
     await loadEntries(p.bs_year, p.bs_month)
     setForm(f => ({ ...f, bs_year: p.bs_year, bs_month: p.bs_month }))
   }
