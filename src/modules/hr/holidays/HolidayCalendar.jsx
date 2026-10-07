@@ -26,7 +26,7 @@ function fyYearsFrom(holidays) {
 const BLANK = { name: '', bs_month: 6, bs_day: 3, holiday_type: 'public', demand_multiplier: '' }
 
 const lbl = {
-  fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
+  fontSize: 12, color: 'var(--theme-text3)', fontWeight: 600,
   letterSpacing: '0.04em', textTransform: 'uppercase',
   display: 'block', marginBottom: 4,
 }
@@ -302,7 +302,7 @@ export default function HolidayCalendar() {
             <strong style={{ color: 'var(--theme-text1)' }}>
               {seedReport.added > 0 ? `Added ${seedReport.added} holiday${seedReport.added > 1 ? 's' : ''} to ${fyLabel(fyYear)}.` : `${fyLabel(fyYear)} was already up to date.`}
             </strong>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setSeedReport(null)}>Dismiss</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setSeedReport(null)}>Dismiss</button>
           </div>
           {seedReport.corrections.map(c => (
             <div key={c.id} style={{ color: 'var(--theme-amber-text)' }}>

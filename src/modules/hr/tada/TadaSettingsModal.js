@@ -3,7 +3,7 @@ import { supabase } from '../../../supabaseClient'
 import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 
-const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
+const lbl = { fontSize: 12, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const sectionLbl = { ...lbl, fontWeight: 700, fontSize: 12, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }
 const VEHICLE_TYPES = [
   { key: '2w', label: '2-Wheeler' },

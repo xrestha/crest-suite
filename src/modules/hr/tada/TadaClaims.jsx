@@ -44,14 +44,14 @@ const fmtTs = ts => {
   const bs = nepalBs(ts)
   return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : (nepalDateAd(ts) || '—')
 }
-const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
+const lbl = { fontSize: 12, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 // PayrollRun's stale-draft card is this product's amber banner; same shape as Leave and Attendance.
 const amberBanner = {
   marginBottom: 14, padding: '12px 16px',
   borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
   background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
 }
-const quietNote = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 3, whiteSpace: 'normal' }
+const quietNote = { fontSize: 12, color: 'var(--theme-text3)', marginTop: 3, whiteSpace: 'normal' }
 
 // Status ladder, shared with every other HR queue and with the employee app — see
 // TADA_REQUEST_STATUS. This page used to invert the module's two loudest signals: Pending was GREY
@@ -568,7 +568,7 @@ export default function TadaClaims() {
   function claimActions(c) {
     const act = fn => e => { e.stopPropagation(); fn() }
     const busy = busyId === c.id
-    const note = { fontSize: 11, color: 'var(--theme-text3)', padding: '0 8px' }
+    const note = { fontSize: 12, color: 'var(--theme-text3)', padding: '0 8px' }
     // Each repeated row action names its claim (S803): a bare "Delete" or "Undo approval" down a
     // column of rows is the same name a dozen times.
     const who = `${empMap[c.employee_id]?.full_name || 'this claim'}, NPR ${fmt(c.total_amount)}`
@@ -957,7 +957,7 @@ export default function TadaClaims() {
                     <label> here would name nothing, so it's a span. Each row's own controls carry
                     their own aria-label instead. */}
                 <span style={{ ...lbl, marginBottom: 0 }}>Expenses</span>
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={addItemRow}>+ Add line</button>
+                <button className="btn btn-ghost btn-sm" onClick={addItemRow}>+ Add line</button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {addForm.items.map((it, idx) => (

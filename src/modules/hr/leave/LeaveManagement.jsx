@@ -1006,4 +1006,4 @@ export default function LeaveManagement() {
   )
 }
 
-const lbl = { display: 'block', fontSize: 11, color: 'var(--theme-text2)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }
+const lbl = { display: 'block', fontSize: 12, color: 'var(--theme-text2)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }

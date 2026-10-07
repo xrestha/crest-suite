@@ -27,7 +27,7 @@ const STATUS_COLORS = {
 }
 
 const lbl = {
-  fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
+  fontSize: 12, color: 'var(--theme-text3)', fontWeight: 600,
   letterSpacing: '0.04em', textTransform: 'uppercase',
   display: 'block', marginBottom: 4,
 }

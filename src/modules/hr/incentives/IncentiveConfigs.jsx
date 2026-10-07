@@ -6,7 +6,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
 import { errorLine } from '../../../shared/errorText'
 
-const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
+const lbl = { fontSize: 12, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const EMPTY = { id: null, name: '', calc_type: 'manual', default_value: '', prorate_by_service: false, active: true }
 
 const CALC_LABEL = { fixed: 'Fixed amount', percent_of_basic: '% of monthly basic', manual: 'Typed by hand each run' }

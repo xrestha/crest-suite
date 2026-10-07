@@ -79,7 +79,7 @@ const NOMINEE_RELATIONS = ['Spouse', 'Father', 'Mother', 'Son', 'Daughter', 'Bro
 // `borderRadius: 6` that was off the closed radius scale of the day. Replaced with the real classes
 // 2026-08-23/S603, which also wins these fields the `[aria-invalid]` and `:disabled` hooks and the
 // coarse-pointer 16px floor, none of which can reach an inline style.
-const lbl = { fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
+const lbl = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
 const row = { display: 'flex', gap: 12 }
 const col = { flex: 1, display: 'flex', flexDirection: 'column' }
 
@@ -606,10 +606,11 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                 </div>
                 <button
                   type="button"
+                  className="btn btn-ghost btn-sm"
                   onClick={calcRetirement}
                   disabled={!form.date_of_birth}
                   title={form.date_of_birth ? 'Set to date of birth + 60 years' : 'Enter Date of Birth first (Personal tab)'}
-                  style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: form.date_of_birth ? 'var(--theme-text3)' : 'var(--theme-text2)', fontSize: 11, padding: '8px 10px', cursor: form.date_of_birth ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
+                  style={{ whiteSpace: 'nowrap' }}>
                   ↻ Age 60
                 </button>
               </div>

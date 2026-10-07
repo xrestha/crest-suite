@@ -219,7 +219,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
             text="A swap only reaches you once the coworker has already accepted it. Approving trades who is scheduled on each of the two days — the shifts themselves stay where they are."
             width={250}
           >
-            <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>What reaches this list?</span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>What reaches this list?</span>
           </Tip>
         </div>
 
@@ -268,7 +268,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
               text="Asked in Crest Staff, not yet accepted or declined by the coworker. Nothing to approve yet. Reject one that is stuck — for example the coworker is away — because while it waits, neither shift can be offered in another swap."
               width={260}
             >
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Why reject one?</span>
+              <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Why reject one?</span>
             </Tip>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

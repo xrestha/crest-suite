@@ -96,7 +96,7 @@ const ADVANCE_STATUS = {
 const sourceOf = r => (r.payroll_run_id ? 'payroll' : r.final_settlement_id ? 'settlement' : 'manual')
 const SOURCE_LABEL = { payroll: 'Payroll', settlement: 'Final Settlement', manual: 'Manual' }
 
-const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
+const lbl = { fontSize: 12, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const hint = { fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }
 
 const EMPTY_ADD = {

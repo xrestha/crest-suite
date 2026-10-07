@@ -21,6 +21,10 @@ import { nepalBs } from '../../../shared/nepalTime'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { unmarkedWindow, unmarkedDaysFor } from '../payroll/monthStatus'
 
+// On the Generate buttons themselves, not on the help line beside them (HR critique 2026-10-06): the
+// rule belongs on the control it governs.
+const GENERATE_FROM_ROSTER_TIP = "Fills blank days up to today from Staff Roster shift assignments — marked Present, with hours from the shift, and any hours beyond the shift's Normal hours filled in as OT. A working shift with no hours set counts as an ordinary 8-hour day. A zero-hour roster entry is read by its name: 'PAID LEAVE' becomes Paid Leave, any other 'LEAVE' becomes Unpaid Leave, a 'Holiday' becomes Holiday, and 'OFF DAY' becomes Off. Days after today, before someone joined or after they left, and days with no roster entry are left blank. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward."
+
 // The sheet's staff list. join_date / end_date: Import from machine marks no day before someone
 // joined or after they left. Read on load and again after a write meets a settled leaver.
 const EMPLOYEE_COLS = 'id, full_name, employee_code, pay_basis, status, department, join_date, end_date'
@@ -1278,14 +1282,16 @@ export default function AttendanceSheet() {
               </div>
               <Tip text="Marks only the staff who have nothing marked for this day yet. Leave, absences and anything already marked are left as they are — change those one at a time." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('present')} disabled={locked}>All Present</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('weekly_off')} disabled={locked}>All Off</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('holiday')} disabled={locked}>All Holiday</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => markAll('present')} disabled={locked}>All Present</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => markAll('weekly_off')} disabled={locked}>All Off</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => markAll('holiday')} disabled={locked}>All Holiday</button>
                 </div>
               </Tip>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={generateFromRoster} disabled={generating || locked || !!rosterReadError}>
-                {generating ? 'Generating…' : '⚡ Generate from Roster'}
-              </button>
+              <Tip text={GENERATE_FROM_ROSTER_TIP} width={320}>
+                <button className="btn btn-ghost btn-sm" onClick={generateFromRoster} disabled={generating || locked || !!rosterReadError}>
+                  {generating ? 'Generating…' : '⚡ Generate from Roster'}
+                </button>
+              </Tip>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
                   <label htmlFor="att-default-break" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</label>
@@ -1294,7 +1300,7 @@ export default function AttendanceSheet() {
                   value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
                 <Tip text="Fills the default break into every already-marked employee's blank Break cell for this day. Never overwrites a Break value already entered, and never marks an untouched employee." width={260}>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={applyBreakToDay} disabled={locked}>Apply Break to Day</button>
+                  <button className="btn btn-ghost btn-sm" onClick={applyBreakToDay} disabled={locked}>Apply Break to Day</button>
                 </Tip>
               </div>
             </div>
@@ -1312,7 +1318,7 @@ export default function AttendanceSheet() {
             </Tip>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes the saved record of every employee listed on this sheet for this day — the day reverts to blank for them. Staff who have left are not touched. Can't be undone.">
-                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={requestClearDay} disabled={saving || locked}>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--theme-red-text)' }} onClick={requestClearDay} disabled={saving || locked}>
                   🗑 Clear Day
                 </button>
               </Tip>
@@ -1330,9 +1336,7 @@ export default function AttendanceSheet() {
 
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
             Only the days you actually mark are saved — an untouched day stays blank and is never assumed Present or Off. For daily- and hourly-paid staff a blank day pays nothing, so mark every day of the month (Present/Off/Holiday/Leave) before payroll runs.{' '}
-            <Tip text="Fills blank days up to today from Staff Roster shift assignments — marked Present, with hours from the shift, and any hours beyond the shift's Normal hours filled in as OT. A working shift with no hours set counts as an ordinary 8-hour day. A zero-hour roster entry is read by its name: 'PAID LEAVE' becomes Paid Leave, any other 'LEAVE' becomes Unpaid Leave, a 'Holiday' becomes Holiday, and 'OFF DAY' becomes Off. Days after today, before someone joined or after they left, and days with no roster entry are left blank. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
-              ⚡ Generate from Roster
-            </Tip>{' '}pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
+            ⚡ Generate from Roster pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
           </div>
 
           <div className="card" style={{ padding: 0 }}>
@@ -1481,14 +1485,16 @@ export default function AttendanceSheet() {
               </div>
               <Tip text="Marks only this employee's days that have nothing marked yet. Leave, absences and anything already marked are left as they are — change those one at a time." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'present')} disabled={locked}>All Present</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'weekly_off')} disabled={locked}>All Off</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'holiday')} disabled={locked}>All Holiday</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'present')} disabled={locked}>All Present</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'weekly_off')} disabled={locked}>All Off</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'holiday')} disabled={locked}>All Holiday</button>
                 </div>
               </Tip>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => generateFromRosterForEmployee(selectedEmployeeId)} disabled={generating || locked || !!rosterReadError}>
-                {generating ? 'Generating…' : '⚡ Generate from Roster'}
-              </button>
+              <Tip text={GENERATE_FROM_ROSTER_TIP} width={320}>
+                <button className="btn btn-ghost btn-sm" onClick={() => generateFromRosterForEmployee(selectedEmployeeId)} disabled={generating || locked || !!rosterReadError}>
+                  {generating ? 'Generating…' : '⚡ Generate from Roster'}
+                </button>
+              </Tip>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
                   <label htmlFor="att-emp-default-break" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</label>
@@ -1497,7 +1503,7 @@ export default function AttendanceSheet() {
                   value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
                 <Tip text="Fills the default break into every already-marked day's blank Break cell for this employee. Never overwrites a Break value already entered, and never marks an untouched day." width={260}>
-                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => applyBreakToEmployeeMonth(selectedEmployeeId)} disabled={locked}>Apply Break to Month</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => applyBreakToEmployeeMonth(selectedEmployeeId)} disabled={locked}>Apply Break to Month</button>
                 </Tip>
               </div>
             </div>
@@ -1515,7 +1521,7 @@ export default function AttendanceSheet() {
             </Tip>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
-                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => requestClearEmployeeMonth(selectedEmployeeId)} disabled={saving || locked}>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--theme-red-text)' }} onClick={() => requestClearEmployeeMonth(selectedEmployeeId)} disabled={saving || locked}>
                   🗑 Clear Month
                 </button>
               </Tip>
@@ -1710,7 +1716,7 @@ export default function AttendanceSheet() {
             )}
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes every listed employee's saved records for this whole month — the sheet reverts to blank. Refused once payroll for the month is finalized. Can't be undone.">
-                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={requestClearMonth} disabled={saving || locked}>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--theme-red-text)' }} onClick={requestClearMonth} disabled={saving || locked}>
                   🗑 Clear Month
                 </button>
               </Tip>

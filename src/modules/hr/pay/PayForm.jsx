@@ -33,7 +33,7 @@ const TABS = [
   { key: 'bank',   label: 'Bank / SSF' },
 ]
 
-const lbl  = { fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
+const lbl  = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
 const row  = { display: 'flex', gap: 12, flexWrap: 'wrap' }
 const col  = { flex: 1, display: 'flex', flexDirection: 'column' }
 // A field inside a `row`: a 200px basis, so the pair wraps onto two lines on a phone instead of
@@ -423,7 +423,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                         {/* S748: payroll takes a marked deduction off taxable income, inside the cap it
                             shares with SSF. A checkbox rather than a name match, because the owner
                             names these rows and a guess would move real tax. */}
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, cursor: 'pointer' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, cursor: 'pointer' }}>
                           <input type="checkbox" checked={!!comp.retirement_fund} onChange={e => updateComponent(globalIdx, 'retirement_fund', e.target.checked)} />
                           <Tip text="Tick for CIT, provident fund or another approved retirement fund. Payroll then takes this deduction off the employee's taxable income, together with SSF, up to NPR 5,00,000 a year or a third of their income, whichever is lower. Leave unticked for anything else. Advances are never a deduction here: payroll recovers them itself from Advances & Loans." width={300}>
                             Retirement fund — reduces taxable income

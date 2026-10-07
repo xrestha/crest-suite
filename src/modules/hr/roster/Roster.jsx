@@ -1557,9 +1557,11 @@ export default function Roster() {
           </div>
 
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 10px' }}>
+            {/* A lone on/off mode, so the product's lone toggle (S765): .tab-btn with aria-pressed, 12px
+                with the touch floor. It was a .btn shrunk to 11px, under the 12px control floor. */}
             <button
-              className={`btn${rangeMode ? ' btn-primary' : ' btn-ghost'}`}
-              style={{ fontSize: 11 }}
+              type="button"
+              className={`tab-btn${rangeMode ? ' tab-btn--active' : ''}`}
               aria-pressed={rangeMode}
               onClick={() => {
                 setRangeMode(m => !m)
@@ -2013,7 +2015,7 @@ export default function Roster() {
 
             {hasPos && (
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <label htmlFor="roster-covers-target" style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                <label htmlFor="roster-covers-target" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                   <Tip text="Target covers each staff member can comfortably serve — used to compute Recommended Staff below. Saved per client.">
                     Covers/Staff target
                   </Tip>
@@ -2028,7 +2030,7 @@ export default function Roster() {
                     say "we are understaffing against our own standard". */}
                 {laborStd?.learnedCoversPerStaffShift != null && (
                   <Tip text={`Over the last ${laborStd.sampleDays} days your staff averaged this many covers per shift. Shown for comparison — it never overwrites your target.`} width={260}>
-                    <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                       (yours runs ~{Math.round(laborStd.learnedCoversPerStaffShift)})
                     </span>
                   </Tip>
