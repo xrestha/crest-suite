@@ -640,6 +640,9 @@ History: #s635-holiday-calendar, #s740-leave-reopen-and-overtime-undo,
   page showing historical rows resolves the names its list filtered out: fetch the unknown ids once,
   tracked in a ref. `rejected_by_target` and `cancelled` have no `admin_decided_by`; name the coworker
   who declined or the requester who withdrew.
+- **The board, Shift Types and Labor Forecast wait on init's reads** (`initLoading`, S805): an empty
+  state there means the staff list or shift types were read and are empty, never that the roster rows
+  landed first.
 - Roster's board and publish loads are request-guarded. Copy Week and Publish are bounded
   (`settleWithin`, S798 PAYROLL-8): a timed-out write says it could not confirm, and a copy then opens
   next week as stored. Both are safe to repeat. `hr_overtime_entries`, `hr_shift_types` and

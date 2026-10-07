@@ -176,6 +176,10 @@ export default function Roster() {
   // The shift types or staff list could not be read: the board shows the error and nothing else,
   // never "No active employees found" (S749).
   const [initFailed, setInitFailed] = useState(false)
+  // The shift types and staff list are still being read. Owned by init alone: `loading` belongs to
+  // the roster-rows loader, and when those rows landed first the board said "No active employees
+  // found." over a staff list still on its way (HR critique 2026-10-06, seen on a phone).
+  const [initLoading, setInitLoading] = useState(true)
   // hr_salary_components earning rows, keyed by employee_id — the allowances half of the loaded
   // hourly rate the Labor Forecast prices scheduled hours at (laborForecast.js's
   // loadedHourlyRateOf). Master data, a handful of rows per employee, read once per client.
@@ -341,16 +345,18 @@ export default function Roster() {
   useEffect(() => {
     if (!clientId) return
     async function init() {
+      setInitLoading(true)
       // ssf_enrolled/ssf_no and the earning components feed loadedHourlyRateOf: Planned Labor
       // Cost is what the employer pays for the hour, not the basic-pay share of it (S692).
+      // Bounded: the board waits on these, so a hung read would otherwise hold "Loading…" for good.
       const [{ data: st, error: stErr }, { data: emps, error: empsErr }, { data: comps, error: compsErr }] = await Promise.all([
-        scopedFrom('hr_shift_types').order('sort_order'),
-        scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, pay_basis, basic_salary, ssf_enrolled, ssf_no')
+        settleWithin(scopedFrom('hr_shift_types').order('sort_order'), ROSTER_READ_MS, 'Reading the shift types'),
+        settleWithin(scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, pay_basis, basic_salary, ssf_enrolled, ssf_no')
           .in('status', ['active', 'probation'])
-          .order('full_name'),
+          .order('full_name'), ROSTER_READ_MS, 'Reading the staff list'),
         // Every employee's, leavers' included: past days on the Labor Forecast price a leaver's hours
         // too (ROSTER-7). Paged — a component per allowance per person passes 1,000 rows quickly.
-        fetchAllRows(() => scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value').eq('type', 'earning').order('id')),
+        settleWithin(fetchAllRows(() => scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value').eq('type', 'earning').order('id')), ROSTER_READ_MS, 'Reading pay components'),
       ])
       if (compsErr) {
         console.error('salary components read failed:', compsErr)
@@ -370,15 +376,16 @@ export default function Roster() {
       // hr_shift_types_client_name_key refuses the duplicate instead.
       if (stErr || empsErr) {
         const a = asActionError(stErr || empsErr)
-        setBoardError({ text: 'Could not load the shift types or the staff list, so the board cannot be shown. Reload to try again. ' + a.text, detail: a.detail })
+        setBoardError({ text: 'Could not load the shift types or the staff list, so the roster cannot be shown. Reload to try again. ' + a.text, detail: a.detail })
         setInitFailed(true)
+        setInitLoading(false)
         return
       }
       setInitFailed(false)
       let shifts = st || []
 
       if (shifts.length === 0) {
-        let { data: seeded, error: seedErr } = await scopedInsert('hr_shift_types', DEFAULT_SHIFTS)
+        let { data: seeded, error: seedErr } = await settleWithin(scopedInsert('hr_shift_types', DEFAULT_SHIFTS), ROSTER_WRITE_MS, 'Setting up the shift types')
         // Two tabs (or React Strict Mode's double effect in dev) seeding at once: the second
         // insert is refused by the name index, and the first one's rows are what to read back.
         if (seedErr?.code === '23505') {
@@ -390,12 +397,15 @@ export default function Roster() {
         if (seedErr) {
           console.error('shift-type seed failed:', seedErr)
           const a = asActionError(seedErr)
-          setBoardError({ text: 'Could not set up the default shift types — the board has nothing to assign until they exist. Reload to try again. ' + a.text, detail: a.detail })
+          setBoardError(isTimeout(seedErr)
+            ? { text: 'Setting up the default shift types took too long to confirm — they may or may not have been saved. Reload to see what is stored. ' + a.text, detail: a.detail }
+            : { text: 'Could not set up the default shift types — the board has nothing to assign until they exist. Reload to try again. ' + a.text, detail: a.detail })
         }
         shifts = seeded || []
       }
       setShiftTypes(shifts)
       setEmployees(emps || [])
+      setInitLoading(false)
     }
     init()
   }, [clientId, scopedFrom, scopedInsert])
@@ -1399,8 +1409,15 @@ export default function Roster() {
             : pendingSwaps > 0 && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }} aria-label={`${pendingSwaps} waiting`}>{pendingSwaps}</span>}</> },
         ]} />
 
+      {/* Shift Settings and Labor Forecast are built from the same two reads as the board: while
+          they load, "No shift types yet" and NPR 0 planned cost would be claims about lists not yet
+          read, and after a failure the error above is the whole answer. */}
+      {(tab === 'shifts' || tab === 'labor') && initLoading && (
+        <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+      )}
+
       {/* ── Shift Settings tab ── */}
-      {tab === 'shifts' && (
+      {tab === 'shifts' && !initLoading && !initFailed && (
         <ShiftSettingsPanel
           clientId={clientId} shiftTypes={shiftTypes} setShiftTypes={setShiftTypes}
           onRosterChanged={loadRoster}
@@ -1561,8 +1578,10 @@ export default function Roster() {
           </div>
 
           {/* Board */}
-          {initFailed ? null : loading ? (
-            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          {/* "No active employees" only once the staff list has actually been read (initLoading),
+              not when the roster rows happen to land first. */}
+          {initFailed ? null : (initLoading || loading) ? (
+            <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : filteredEmps.length === 0 ? (
             <div className="card">
               <div className="empty-state">
@@ -1954,7 +1973,7 @@ export default function Roster() {
 
       {/* ── Labor Forecast tab — kept separate from the Roster Board so this management-only
           data never bleeds into the printed schedule handed to staff ── */}
-      {tab === 'labor' && (
+      {tab === 'labor' && !initLoading && !initFailed && (
         <div className="no-print">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 16 }}>
             <FilterChips label="Forecast range" active={viewMode} onChange={setViewMode} style={{ marginBottom: 0 }}
