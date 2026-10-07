@@ -740,7 +740,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
             </div>
 
             <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 14, marginTop: 6 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
                 <Tip text="The person who receives this employee's SSF / gratuity / final settlement in the event of death. Keep this current." width={300}>Nominee</Tip>
               </p>
               <div style={col}>

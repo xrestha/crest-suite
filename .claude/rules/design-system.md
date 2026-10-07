@@ -807,7 +807,7 @@ Rule**; the HR map itself is in `hr-payroll.md`):
   one verdict is how a five-token palette becomes eight.
 - **A category that borrowed a signal colour gives it back.** Public-vs-optional holidays and
   holiday-vs-weekday OT rates were amber-vs-grey — a gazetted holiday in the same colour as an
-  overdue approval. Both are brass now (`badge-yellow`, the accent-tinted categorical tag), which
+  overdue approval. Both were brass then (`badge-yellow`, the accent-tinted categorical tag; grey since S804, when HR took the accent off every category), which
   also made Holiday Calendar's table agree with its own two stat cards for the first time. The freed
   amber immediately did real work: a demand-forecast holiday badge is brass when a multiplier is set
   (grey since S796, IMS's category chip) and amber `⚠` when it is not — two states that had been

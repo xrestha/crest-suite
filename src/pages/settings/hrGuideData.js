@@ -62,7 +62,7 @@ export const HR_GUIDE_GROUPS = [
           'SSF deposit deadline = 25th of the month after the payroll month, from the last finalized run.',
         ],
         gotchas: [
-          'Amber means "a queue is waiting", red is reserved for genuinely overdue — a pending approval pile is normal operations, not an error state. This is now the rule across all five HR queues and the employee app, not just this page: amber = open, brass = decided but the money has not moved, green = closed and good, red = refused, grey = withdrawn.',
+          'Amber means "a queue is waiting", red is reserved for genuinely overdue — a pending approval pile is normal operations, not an error state. This is now the rule across all five HR queues and the employee app, not just this page: amber = open, grey with a ◷ = decided but the money has not moved, green = closed and good, red = refused, plain grey = withdrawn.',
           'The SSF card counts down only when the deposit amount is above zero — a client with no SSF-enrolled staff gets no countdown for NPR 0. A failed read of the last finalized run shows the four payroll cards as "—" with "last finalized payroll could not be read", never "No finalized payroll yet" (S798 REPORTS-5).',
           'A card that opens a page has its figure as a real button (S803): Tab to it and press Enter. The card holds a Tip, so the card itself is not one big button.',
           'Small controls across HR are the product classes now (S803): the queue Go to buttons, the Employees row buttons and Pay Setup’s + Add and quick-add chips are btn-sm, and every repeated row action (Edit, Del, Undo, Cancel leave, Mark Paid) carries the person or claim in its accessible name. On a phone a Tip on a short label is padded to a 25px tap target without taking taps from the field below it.',
@@ -529,7 +529,7 @@ export const HR_GUIDE_GROUPS = [
           { label: 'When payroll starts recovering', desc: 'The payroll of the BS month AFTER the month the advance was issued. The day does not matter: an advance given on 1 Bhadra and one given on 28 Bhadra are both first cut in the Ashwin payroll. An advance issued in Chaitra is first cut in Baisakh of the next year. A back-dated advance whose first month\'s payroll is already finalized is first cut in the first month without finalized payroll. Payroll\'s per-row working counts the "Advances in recovery this month".' },
           { label: 'Installment / Month', desc: 'A real salary cut, not a reminder. REQUIRED for a loan. LEFT BLANK on a one-time advance, the FULL outstanding balance comes off the first payroll the advance is due in — never more than that month\'s pay; the rest waits for the next.' },
           { label: 'Source (repayment history)', desc: 'Payroll / Final Settlement / Manual. Only a Manual row can be deleted here (logged; the advance goes back to owing and reactivates). Payroll and Final Settlement rows show a lock — undone only by reopening that run or settlement.' },
-          { label: 'Status', desc: 'Active = brass/gold (owed, not overdue — nothing is wrong), Settled = green, Written off = grey. Total Outstanding excludes written-off balances; a separate Written Off card shows their total.' },
+          { label: 'Status', desc: 'Active = grey with a ◷ (owed, not overdue — nothing is wrong), Settled = green, Written off = plain grey. Total Outstanding excludes written-off balances; a separate Written Off card shows their total.' },
         ],
         formulas: [
           'Outstanding is always DERIVED — amount − Σ repayments. There is no stored balance column to drift out of sync.',
@@ -564,7 +564,7 @@ export const HR_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'Per-vehicle km rates', desc: 'Three fixed vehicle categories — 2-wheeler, 4-wheeler, EV — each with its own NPR/km rate set in the settings modal. Only the rates are editable, not the categories.' },
-          { label: 'Status ladder', desc: 'pending (amber — waiting on a decision) → approved (brass — money owed, not yet disbursed) → paid (green). It is a ladder, not tags: a claim never skips approved. Pending used to be grey here and approved amber, which read as the opposite of every other HR queue.' },
+          { label: 'Status ladder', desc: 'pending (amber — waiting on a decision) → approved (grey with a ◷ — money owed, not yet disbursed) → paid (green). It is a ladder, not tags: a claim never skips approved. Pending used to be grey here and approved amber, which read as the opposite of every other HR queue.' },
           { label: 'Tabs and the month filter', desc: 'Pending and Approved show every OPEN claim from any month — a pending claim from last month\'s trip used to be invisible on the Pending tab while the Dashboard counted it. The month filter narrows only Paid, Rejected and All, which are history.' },
           { label: 'Mark Paid', desc: 'Paid in cash or by bank OUTSIDE payroll; needs an HR manager and a method. If the claim is already inside a payroll draft, the page asks first: paying by hand takes it out of that payroll, and that payroll must be Regenerated before it is finalized or the draft still carries the amount.' },
         ],

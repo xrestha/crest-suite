@@ -790,29 +790,37 @@ History: #s748-employees-pay-setup-holiday-calendar, #s798-stage-1b
 - **`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) are the module's only status
   colours** (S660), across all five approval queues and Self-Service:
 
-      amber = open, something is still required of someone
-      brass = decided, but the money has not moved   (badge-yellow)
-      green = closed, good
-      red   = closed, refused
-      grey  = closed, void — withdrawn or cancelled
+      amber  = open, something is still required of someone
+      grey ◷ = decided, but the money has not moved   (OWED_STATUS: badge-gray + mark ◷)
+      green  = closed, good
+      red    = closed, refused
+      grey   = closed, void — withdrawn or cancelled
 
   Take `.badge` for a chip and `.tint` for a hand-drawn one (it carries S549's fill-vs-text split:
-  base token for the fill and border, `*-text` for the label). A ladder with a payment step extends the
-  map (`TADA_REQUEST_STATUS` overrides only `approved` brass and `paid` green). Two open states on one
-  page separate by LABEL and the amber/brass split, never a sixth hue. `Advances.jsx`'s
-  `ADVANCE_STATUS` restates the same hues as literals; derive it from the map when touched.
-- **A category never takes a signal colour:** a public holiday and holiday-rate OT are brass
-  (`badge-yellow`), an optional holiday purple, weekday OT grey. Staff rank badges (S661) come from `src/shared/staffLevelBadge.js`, as in `HrStaff.jsx`
-  (`STAFF_LEVEL_BADGE`, all three levels `badge-yellow`; `STAFF_LEVEL_BADGE_NONE` for no access to the
-  module).
+  base token for the fill and border, `*-text` for the label); where an entry has a `mark`, print it
+  before the label, `aria-hidden`. A ladder with a payment step extends the map
+  (`TADA_REQUEST_STATUS` overrides only `approved` → `OWED_STATUS` and `paid` green); Advances'
+  Active and Final Settlement's unpaid Finalized take `OWED_STATUS` too. Two open states on one page
+  separate by LABEL, never a sixth hue.
+- **HR follows the IMS rule since S804 (DESIGN.md → The One Signal Meaning Rule): the accent never
+  marks a status, a category or a figure.** It is red on both Modernist presets, so HR's old brass
+  put "approved, not paid" beside "rejected" in two reds. Categories are `badge-gray` with the word
+  carrying the difference: OT type, holiday type and the Roster's holiday chip, Department, and staff
+  ranks (`src/shared/staffLevelBadge.js`, all three levels grey, shared with IMS and POS). Attendance
+  marks follow what the day is: green worked (½ included), purple paid but not worked (Holiday, PL,
+  ½PL), grey unpaid or off, red absent. Probation is green, like Active. The accent stays only on
+  what can be pressed or is current (buttons, toggles, the selected row, the current run, the active
+  Crest Staff tab, today's shift icon).
 - **A correct payroll figure takes the ink; the sign carries direction** (registers, the working
   panel, Festival/Incentive runs, Final Settlement, Gratuity, Pay Setup's preview and table, every
-  HR Reports tab including the TDS certificate, Overtime's strip, `PayslipBody`; S803 for the last three).
+  HR Reports tab including the TDS certificate, Overtime's strip, `PayslipBody`, and since S804 the
+  dashboard and Employees tiles, Attendance OT hours and the TADA claim totals). A code is text2.
   Colour is for flags only (SSF no. missing, no bank, out of date, split month, owed by the employee:
-  amber with △). `RunStatusBadge` is the one Draft (amber) / Finalized (green) chip beside a run's
-  title; Festival Allowance and Incentive Run still build their own per-run list chip, with a third
-  state "Part finalized", in the same colours. A resigned or
-  terminated employee is grey, not red.
+  amber with △; Retiring soon: amber, Retired: red). `RunStatusBadge` is the one Draft (amber) /
+  Finalized (green) chip beside a run's title; Festival Allowance and Incentive Run still build their
+  own per-run list chip, with a third state "Part finalized", in the same colours. Roster publish is
+  ○ Draft amber → ◐ partly published amber → ✓ Published green. A resigned or terminated employee is
+  grey, not red.
 - Final Settlement sits in the Payroll nav group; Gratuity stays in Reports.
 - **A day inside a known month prints as `formatBsDay(day, bsMonth)`** (S614; "1st Bhadra"), or
   `bsDayOrdinal(day)` where the month is beside it (both `src/utils/bsCalendar.js`). A destructive
@@ -822,7 +830,8 @@ History: #s748-employees-pay-setup-holiday-calendar, #s798-stage-1b
 Why: one hue meaning opposite verdicts on two screens a manager uses in one sitting is how a
 palette stops meaning anything.
 
-History: #s614-bs-day-labels, #s660-status-colours-and-labour-band, #s768-critique-fixes
+History: #s614-bs-day-labels, #s660-status-colours-and-labour-band, #s768-critique-fixes; S804
+stage 2 is in the CHANGELOG
 
 ## Export, restore and Danger Zone
 

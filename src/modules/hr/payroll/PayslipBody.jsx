@@ -141,8 +141,9 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
       <div style={{
         marginTop: 12, paddingTop: 12, borderTop: `2px solid ${forPrint ? '#000' : 'var(--theme-border)'}`,
         // Background tint only on screen — light fills are unreliable on B&W printers and the
-        // bold border + accent-colored figure already carry the emphasis on paper.
-        background: forPrint ? 'transparent' : 'color-mix(in srgb, var(--theme-accent) 8%, transparent)',
+        // bold border + bold figure already carry the emphasis on paper. A neutral tint, not the
+        // accent (S804): on Modernist the accent is red, which put the net pay in a danger box.
+        background: forPrint ? 'transparent' : 'color-mix(in srgb, var(--theme-text1) 5%, transparent)',
         borderRadius: 0, padding: forPrint ? '12px 0 0' : '10px 10px 6px',
         marginLeft: forPrint ? 0 : -10, marginRight: forPrint ? 0 : -10,
       }}>

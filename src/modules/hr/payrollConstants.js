@@ -27,7 +27,10 @@ export const STATUS_TINT = {
 // border keep the base token, which is what they are for.
 export const EMPLOYEE_STATUS_COLORS = {
   active:     { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' },
-  probation:  { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' },
+  // Probation is an employee on the payroll like any other (S804, owner decision), so it shares
+  // Active's green and the label carries the difference. It was the accent tint, which on both
+  // Modernist presets is red — a new hire's row read like a refused request.
+  probation:  { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' },
   // A leaver is a fact about the record, not something wrong with it (S768) — red here put every
   // former employee in the colour of a refused request. Grey is this module's "closed" state.
   resigned:   STATUS_TINT.gray,
@@ -51,15 +54,20 @@ export const EMPLOYEE_STATUS_COLORS = {
 //   amber  = OPEN. Something is still required of someone. (Matches HrDashboard's own stated rule:
 //            "`alert` means needs attention, which in this design system is AMBER — red means
 //            overdue or failed.")
-//   brass  = DECIDED, but the money has not moved. Committed liability, not a caution.
-//            (`badge-yellow` is the accent tint. FinalSettlement already used it exactly this way
-//            for "Finalized" vs green "Paid".)
+//   grey ◷ = DECIDED, but the money has not moved. Committed liability, not a caution.
 //   green  = CLOSED, good.
 //   red    = CLOSED, refused.
 //   grey   = CLOSED, void — withdrawn or cancelled, never a live state.
 //
+// "Decided, not paid" was brass (`badge-yellow`, the accent tint) until S804. Since S689 the accent
+// is red on both Modernist presets, so an approved claim sat beside a Rejected one in two reds, held
+// apart only by an ink difference a colour-blind reader could not rely on. The owner chose grey
+// with a ◷ mark (2026-10-07): the clock says "still to happen" and is what separates it from a
+// void grey, so a chip in this slot always prints `mark` before its label.
+//
 // `badge` is the class; `tint` is for the few call sites that draw the chip themselves from a
-// bg/border pair (Overtime's table) rather than using the class.
+// bg/border pair (Overtime's table) rather than using the class; `mark`, where present, goes
+// before the label in the chip.
 export const HR_REQUEST_STATUS = {
   pending:   { label: 'Pending',   badge: 'badge-amber', tint: { ...STATUS_TINT.amber,  color: 'var(--theme-amber-text)' } },
   approved:  { label: 'Approved',  badge: 'badge-green', tint: { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' } },
@@ -67,14 +75,19 @@ export const HR_REQUEST_STATUS = {
   cancelled: { label: 'Cancelled', badge: 'badge-gray',  tint: { ...STATUS_TINT.gray,   color: 'var(--theme-text2)' } },
 }
 
+// The "decided, money not moved" slot, for any ladder that has one (TADA's Approved, an Advance
+// being recovered, a Final Settlement finalized but unpaid). One definition so the three cannot
+// drift apart the way the request colours once did.
+export const OWED_STATUS = { badge: 'badge-gray', mark: '◷', tint: { ...STATUS_TINT.gray, color: 'var(--theme-text2)' } }
+
 // TADA is the one ladder with a payment step after the decision, so `approved` there does NOT mean
-// finished — it means the claim is owed and the cash has not left. That is the brass slot above,
+// finished — it means the claim is owed and the cash has not left. That is the grey ◷ slot above,
 // and `paid` takes the green that `approved` holds on every other queue. Keeping this derived from
 // HR_REQUEST_STATUS rather than written out again is the point: only the two states that genuinely
 // differ are restated.
 export const TADA_REQUEST_STATUS = {
   ...HR_REQUEST_STATUS,
-  approved: { label: 'Approved', badge: 'badge-yellow', tint: { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' } },
+  approved: { label: 'Approved', ...OWED_STATUS },
   paid:     { label: 'Paid',     badge: 'badge-green',  tint: { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' } },
 }
 
@@ -134,18 +147,23 @@ export const OT_HOLIDAY_MULTIPLIER  = 2.0   // overtime on a gazetted public hol
 // text variant, for anywhere the status is rendered AS text (dropdown value, month-summary cell).
 // A base signal token used as 13px text fails WCAG AA on the light presets, which is why the pair
 // exists. Paid Leave and Holiday previously carried undocumented indigo hexes (#60a5fa/#818cf8)
-// with no home in the palette — mapped here to the nearest documented tokens (accent / purple).
+// with no home in the palette.
 // The unpaid-leave codes read in text2, not text3 (S803): on their own 13% swatch text3 measured
 // 3.88:1 on Light, and text3 has no headroom on any tint (the S794 rule).
+//
+// The hues follow what the day IS (S804, owner decision): green = worked (a half day included —
+// the ½ says how much), purple = paid but not worked (holiday, paid leave), grey = unpaid or off,
+// red = absent. Half-day and both paid-leave codes were the accent until then, which on both
+// Modernist presets is red: a half day sat beside Absent in the same colour.
 export const ATTENDANCE_STATUSES = [
   { key: 'present',           label: 'Present',             short: 'P',   color: 'var(--theme-green)',  textColor: 'var(--theme-green-text)' },
-  { key: 'half_day',          label: 'Half-day',            short: '½',   color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+  { key: 'half_day',          label: 'Half-day',            short: '½',   color: 'var(--theme-green)',  textColor: 'var(--theme-green-text)' },
   { key: 'absent',            label: 'Absent',               short: 'A',   color: 'var(--theme-red)',   textColor: 'var(--theme-red-text)' },
-  { key: 'paid_leave',        label: 'Paid Leave',          short: 'PL',  color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+  { key: 'paid_leave',        label: 'Paid Leave',          short: 'PL',  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
   { key: 'unpaid_leave',      label: 'Unpaid Leave',        short: 'UL',  color: 'var(--theme-text3)',  textColor: 'var(--theme-text2)' },
   // Half-day leave — distinct from the generic 'half_day' status above so payroll can respect
   // the underlying leave type's paid/unpaid flag instead of always deducting 0.5 day's pay.
-  { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+  { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
   { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: 'var(--theme-text3)',  textColor: 'var(--theme-text2)' },
   // Key stays 'weekly_off' (no DB migration needed — hr_attendance_status_check already allows
   // it) even though there's no more auto-computed "weekly" pattern; it's now just an explicit

@@ -58,7 +58,7 @@ function retireInfo(dateStr) {
   const d = new Date(dateStr); d.setHours(0, 0, 0, 0)
   const days = Math.round((d - today) / 86400000)
   if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }
-  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-amber) 20%, transparent)' }
   return null
 }
 
@@ -558,7 +558,7 @@ export default function HrReports() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Employee Directory</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                     {employees.length} employee{employees.length !== 1 ? 's' : ''}
-                    {retiringCount > 0 && <span> · <span style={{ color: 'var(--theme-accent-ink)' }}>{retiringCount} retiring within 180 days</span></span>}
+                    {retiringCount > 0 && <span> · <span style={{ color: 'var(--theme-amber-text)' }}>{retiringCount} retiring within 180 days</span></span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} className="no-print">
@@ -582,7 +582,7 @@ export default function HrReports() {
                         const r = retireInfo(e.retirement_date)
                         return (
                           <tr key={e.id}>
-                            <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 12 }}>{e.employee_code || '—'}</td>
+                            <td style={{ color: 'var(--theme-text2)', fontWeight: 700, fontSize: 12 }}>{e.employee_code || '—'}</td>
                             <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{e.full_name}</td>
                             <td style={{ color: 'var(--theme-text3)' }}>{e.department || '—'}</td>
                             <td style={{ color: 'var(--theme-text3)' }}>{e.designation || '—'}</td>

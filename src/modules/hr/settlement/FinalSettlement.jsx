@@ -23,6 +23,7 @@ import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { nepalDateAd } from '../../../shared/nepalTime'
 import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
 import { settlementAdjustments, settlementPaymentState } from './settlementPayment'
+import { OWED_STATUS } from '../payrollConstants'
 import { splitPlan, loginLabel, moveLine, removeLine, finalizedLoginNote, reopenLoginLines, notUndoneLines } from './settlementLogins'
 
 // The longest a settlement write is waited on (S803). Finalize, Reopen, Mark paid and Record difference
@@ -79,14 +80,15 @@ function differenceLine(row) {
 }
 
 // One chip for where a settlement's money stands, on the statement and in the history (S798 3b).
-// Amber: something is still required of someone. Brass: decided, money not moved. Green: closed.
+// Amber: something is still required of someone (a draft to finalize, a difference to pay). Grey ◷:
+// decided, money not moved (brass until S804, which is red on Modernist). Green: closed.
 function PaymentBadge({ row }) {
   const pay = settlementPaymentState(row)
   if (pay.state === 'short') return <span className="badge-amber">△ NPR {fmt(pay.due)} still to pay</span>
   if (pay.state === 'over') return <span className="badge-amber">△ NPR {fmt(-pay.due)} overpaid</span>
   if (pay.state === 'paid') return <span className="badge-green">Paid</span>
-  if (pay.state === 'unpaid') return <span className="badge-yellow">Finalized</span>
-  return <span className="badge-gray">Draft{row?.reopened_at ? ' · reopened' : ''}</span>
+  if (pay.state === 'unpaid') return <span className={OWED_STATUS.badge}><span aria-hidden="true">{OWED_STATUS.mark} </span>Finalized</span>
+  return <span className="badge-amber">Draft{row?.reopened_at ? ' · reopened' : ''}</span>
 }
 
 // What finalize_final_settlement would refuse, said before the button is pressed (S798 3b): each with

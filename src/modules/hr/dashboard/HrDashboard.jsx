@@ -430,7 +430,7 @@ export default function HrDashboard() {
           label="Active Staff"
           value={empStats?.active ?? '—'}
           sub={!empStats ? 'headcount unavailable' : empStats.probation > 0 ? `+ ${empStats.probation} on probation` : 'no probation'}
-          color={empStats ? 'var(--theme-green-text)' : 'var(--theme-text2)'}
+          color={empStats ? undefined : 'var(--theme-text2)'}
           tip="Active employees only. Probation shown separately — both are included in payroll."
           onClick={() => navigate('/hr/employees')}
         />
@@ -438,7 +438,7 @@ export default function HrDashboard() {
           label="Basic Payroll / Month"
           value={empStats ? `NPR ${fmt(empStats.payrollBase)}` : '—'}
           sub={empStats ? 'monthly-paid staff, basic only' : 'could not be read'}
-          color={empStats ? 'var(--theme-accent-ink)' : 'var(--theme-text2)'}
+          color={empStats ? undefined : 'var(--theme-text2)'}
           tip="Sum of basic salary for active and probation employees paid monthly. Daily and hourly staff are left out: their rate is not a month's pay. Full payroll (allowances, SSF, TDS) is computed during the payroll run."
           onClick={() => navigate('/hr/payroll')}
         />
@@ -454,7 +454,7 @@ export default function HrDashboard() {
           label="Retiring Soon"
           value={empStats?.retiringSoon ?? '—'}
           sub={empStats ? 'within 180 days' : 'could not be read'}
-          color={!empStats ? 'var(--theme-text2)' : empStats.retiringSoon > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)'}
+          color={empStats ? undefined : 'var(--theme-text2)'}
           tip="Active or probation employees whose retirement date (DOB + 60 years) falls within the next 180 days."
           onClick={() => navigate('/hr/employees')}
           alert={empStats?.retiringSoon > 0}
@@ -617,11 +617,11 @@ export default function HrDashboard() {
                       <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
                         {formatBsDay(e.bs_day, e.bs_month)}
                       </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)', fontSize: 12 }}>{e.ot_hours}h</td>
+                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-text1)', fontSize: 12 }}>{e.ot_hours}h</td>
                       <td>
-                        {/* Which multiplier applies is a CATEGORY, not a status — brass, so amber can keep
-                            meaning "this is waiting on you" in the Status column beside it. */}
-                        <span className={e.ot_type === 'holiday' ? 'badge-yellow' : 'badge-gray'} style={{ fontSize: 10 }}>
+                        {/* Which multiplier applies is a CATEGORY, not a status — grey, the HR category
+                            chip since S804, so amber keeps meaning "this is waiting on you" beside it. */}
+                        <span className="badge-gray" style={{ fontSize: 10 }}>
                           {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
                         </span>
                       </td>

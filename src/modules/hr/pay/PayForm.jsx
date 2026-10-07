@@ -459,7 +459,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: r.big ? '12px 16px' : '7px 16px',
                         borderTop: r.separator ? '1px solid var(--theme-border)' : 'none',
-                        background: r.bg || (r.big ? 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' : 'transparent'),
+                        background: r.bg || (r.big ? 'color-mix(in srgb, var(--theme-text1) 5%, transparent)' : 'transparent'),
                       }}>
                         <span style={{ fontSize: r.big ? 13 : 12, color: r.indent ? 'var(--theme-text2)' : 'var(--theme-text3)', paddingLeft: r.indent ? 12 : 0, fontWeight: r.bold ? 700 : 400 }}>
                           {r.label}{r.note ? <span style={{ fontSize: 10, color: 'var(--theme-text2)', marginLeft: 6 }}>({r.note})</span> : null}

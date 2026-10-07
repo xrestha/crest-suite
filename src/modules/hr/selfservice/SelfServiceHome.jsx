@@ -99,6 +99,8 @@ function fmtBsRange(a, b) {
 const badgeMap = m => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.badge]))
 const STATUS_BADGE = badgeMap(HR_REQUEST_STATUS)
 const TADA_STATUS_BADGE = badgeMap(TADA_REQUEST_STATUS)
+// Approved-not-paid is grey with a ◷ (S804): the mark is what keeps it apart from a void grey.
+const TADA_STATUS_MARK = Object.fromEntries(Object.entries(TADA_REQUEST_STATUS).map(([k, v]) => [k, v.mark]))
 // A swap has two pending states (waiting on the coworker, then on the manager) and two rejected
 // ones; both pairs share their verdict, and the LABEL beside the chip is what separates them.
 const SWAP_STATUS_BADGE = {
@@ -786,7 +788,7 @@ export default function SelfServiceHome() {
                             {c.status === 'paid' && ` · Paid via ${c.paid_method}`}
                           </div>
                         </div>
-                        <span className={TADA_STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{c.status}</span>
+                        <span className={TADA_STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{TADA_STATUS_MARK[c.status] && <span aria-hidden="true">{TADA_STATUS_MARK[c.status]} </span>}{c.status}</span>
                       </div>
                     ))}
                   </div>
@@ -999,7 +1001,7 @@ export default function SelfServiceHome() {
                 ))}
               </div>
 
-              <div style={{ textAlign: 'right', marginTop: 10, fontSize: 15, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+              <div style={{ textAlign: 'right', marginTop: 10, fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
                 Total: NPR {fmt(tadaTotal)}
               </div>
             </div>

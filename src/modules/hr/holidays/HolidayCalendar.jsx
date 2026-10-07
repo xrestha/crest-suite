@@ -337,7 +337,7 @@ export default function HolidayCalendar() {
               Public Holidays
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{publicCount}</div>
+          <div className="stat-value">{publicCount}</div>
           <div className="stat-sub">{fyLabel(fyYear)}</div>
         </div>
         <div className="stat-card">
@@ -346,7 +346,7 @@ export default function HolidayCalendar() {
               Optional Holidays
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-purple-text)' }}>{optionalCount}</div>
+          <div className="stat-value">{optionalCount}</div>
           <div className="stat-sub">{fyLabel(fyYear)}</div>
         </div>
         <div className="stat-card">
@@ -406,12 +406,11 @@ export default function HolidayCalendar() {
                     <td style={{ textAlign: 'center', color: 'var(--theme-text3)' }}>{h.bs_day}</td>
                     <td style={{ textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>{h.bs_year}</td>
                     <td>
-                      {/* Brass / purple, matching this page's own two stat cards above (Public =
-                          accent-ink, Optional = purple-text). They used to be amber / grey down
-                          here, so the same two categories were coloured twice, differently, on one
-                          screen — and amber additionally means "waiting on you" throughout HR,
-                          which a gazetted holiday is not. */}
-                      <span className={h.holiday_type === 'public' ? 'badge-yellow' : 'badge-purple'} style={{ fontSize: 11 }}>
+                      {/* A holiday's type is a category, so both are grey and the word carries it
+                          (S804, the IMS S796 rule). They were brass / purple, and brass is red on
+                          Modernist; before that amber / grey, and amber means "waiting on you"
+                          throughout HR, which a gazetted holiday is not. */}
+                      <span className="badge-gray" style={{ fontSize: 11 }}>
                         {h.holiday_type === 'public' ? 'Public' : 'Optional'}
                       </span>
                     </td>

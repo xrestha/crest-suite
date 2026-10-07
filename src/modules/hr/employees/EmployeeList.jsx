@@ -39,7 +39,7 @@ function retireInfo(dateStr) {
   // `color` is only ever used as the badge's TEXT (the tint + border are the fill), so it takes
   // the *-text contrast variants per the S549 rule.
   if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }
-  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)', days }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-amber) 20%, transparent)', days }
   return { future: true, days }
 }
 
@@ -420,8 +420,8 @@ export default function EmployeeList() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Active</div>
-          <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{active}</div>
-          {probation > 0 && <div className="stat-sub" style={{ color: 'var(--theme-accent-ink)' }}>{probation} on probation</div>}
+          <div className="stat-value">{active}</div>
+          {probation > 0 && <div className="stat-sub">{probation} on probation</div>}
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -446,8 +446,8 @@ export default function EmployeeList() {
               Retiring Soon
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: retiringSoon > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{retiringSoon}</div>
-          <div className="stat-sub">within 180 days</div>
+          <div className="stat-value">{retiringSoon}</div>
+          <div className="stat-sub" style={retiringSoon > 0 ? { color: 'var(--theme-amber-text)' } : undefined}>within 180 days</div>
         </div>
       </div>
       )}
@@ -575,13 +575,13 @@ export default function EmployeeList() {
                         aria-label={`Select ${e.full_name}`}
                       />
                     </td>
-                    <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 12 }}>
+                    <td style={{ color: 'var(--theme-text2)', fontWeight: 700, fontSize: 12 }}>
                       {e.employee_code || '—'}
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{e.full_name}</td>
                     <td style={{ color: 'var(--theme-text2)' }}>{e.designation || '—'}</td>
                     <td>{e.department
-                      ? <span className="badge badge-yellow">{e.department}</span>
+                      ? <span className="badge badge-gray">{e.department}</span>
                       : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                     </td>
                     <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>

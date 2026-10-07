@@ -563,9 +563,9 @@ export default function Overtime() {
                         {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${nprInt(a)}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
                       </td>
                       <td>
-                        {/* Which multiplier applies is a CATEGORY, not a status — brass, so amber can keep
-                            meaning "this is waiting on you" in the Status column beside it. */}
-                        <span className={e.ot_type === 'holiday' ? 'badge-yellow' : 'badge-gray'} style={{ fontSize: 11 }}>
+                        {/* Which multiplier applies is a CATEGORY, not a status — grey, the HR category
+                            chip since S804, so amber keeps meaning "this is waiting on you" beside it. */}
+                        <span className="badge-gray" style={{ fontSize: 11 }}>
                           {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
                         </span>
                       </td>
@@ -695,7 +695,7 @@ export default function Overtime() {
               </div>
             )}
             {form.ot_type === 'holiday' && isHoliday(form.bs_year, form.bs_month, form.bs_day) && (
-              <div style={{ fontSize: 11, color: 'var(--theme-accent-ink)', marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6 }}>
                 {/* The PUBLIC holiday's name — the one that earns 2× — not whichever row sorted first
                     on a date that also carries an optional holiday. */}
                 ✓ {holidays.find(h => h.bs_year === form.bs_year && h.bs_month === form.bs_month && h.bs_day === form.bs_day && h.holiday_type === 'public')?.name}

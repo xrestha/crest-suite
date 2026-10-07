@@ -473,8 +473,8 @@ against ~8%.
 **The One Signal Meaning Rule.** A signal colour carries exactly one meaning across a module, and
 a category never takes a signal colour at all. The vocabulary is written down twice — HR's
 `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) and POS's `posSignals.js` — and
-both say the same thing: **amber** = open, waiting on a person; **accent** = decided but the money
-has not moved, plus every plain category (a rank, a close type, a table state, a period);
+both said the same thing until HR moved off the accent (below): **amber** = open, waiting on a person; **accent** = decided but the money
+has not moved, plus every plain category (a close type, a table state, a period);
 **green** = closed and good; **red** = closed and refused, or wrong and expensive; **grey** = inert
 or a plain identity. Before this was one file, "Pending" was accent on two HR queues, grey on a
 third and amber in the employee app, and amber alone carried eight distinct meanings across POS —
@@ -491,7 +491,15 @@ a band, a threshold or a status word (over/under variance, overdue past 60 days,
 par, Paid); and the accent is kept for what can be pressed or is current — buttons, links, the
 active tab or toggle, today, focus. A category that is a SERIES (a bucket bar, a payment-method
 split) takes a chart slot (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`), never a semantic token.
-HR and POS keep the accent-for-category vocabulary above until they are reviewed the same way.
+
+**HR followed in S804, by owner decision.** Its "decided, but the money has not moved" (TADA
+Approved, an Advance being recovered, a Final Settlement finalized but unpaid) is a grey chip with a
+◷ mark (`OWED_STATUS`), so it no longer sits beside red Rejected in a second red; the clock is what
+keeps it apart from a void grey. Its categories are `badge-gray`, its figures ink, its codes text2,
+and attendance marks follow what the day is (green worked, purple paid but not worked, grey unpaid
+or off, red absent). Staff rank chips (`src/shared/staffLevelBadge.js`) went grey in all three
+modules at the same time, because that file exists so the three cannot disagree. POS keeps the
+accent-for-category vocabulary above for everything else until it is reviewed the same way.
 
 **Under Modernist the accent slot and the danger slot are the same HUE, which makes the rest of
 this rule load-bearing rather than tidy.** They are still separated — measured, the two `*-text`

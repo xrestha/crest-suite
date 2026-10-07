@@ -222,7 +222,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
     if (val !== '' && val != null) return null
     const c = calcHours(startT, endT)
     if (c == null) return <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>auto</span>
-    return <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>= {c}h</span>
+    return <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>= {c}h</span>
   }
 
   // What the Normal hours box means for this shift, in the only unit a manager cares about.
@@ -232,7 +232,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
     const length = resolveHours(startT, endT, hoursVal)
     if (length == null) return null
     const ot = Math.max(0, parseFloat((length - regular).toFixed(1)))
-    return <span style={{ fontSize: 10, color: ot > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{ot > 0 ? `+${ot}h OT` : 'no OT'}</span>
+    return <span style={{ fontSize: 10, color: ot > 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>{ot > 0 ? `+${ot}h OT` : 'no OT'}</span>
   }
 
   return (
@@ -360,7 +360,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                           <>
                             {`${s.regular_hours}h`}
                             {dispH != null && dispH > s.regular_hours && (
-                              <div style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>+{parseFloat((dispH - s.regular_hours).toFixed(1))}h OT</div>
+                              <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>+{parseFloat((dispH - s.regular_hours).toFixed(1))}h OT</div>
                             )}
                           </>
                         ) : <span style={{ color: 'var(--theme-text3)' }}>all</span>}

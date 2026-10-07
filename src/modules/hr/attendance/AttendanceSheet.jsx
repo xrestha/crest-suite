@@ -1664,7 +1664,7 @@ export default function AttendanceSheet() {
                   <tfoot>
                     <tr>
                       <td colSpan={6} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>Total OT Hours</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                         {days.reduce((sum, d) => sum + (parseFloat(cellFor(selectedEmployeeId, d)?.ot_hours) || 0), 0).toFixed(1)}
                       </td>
                       <td colSpan={2} />
@@ -1783,7 +1783,7 @@ export default function AttendanceSheet() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.off || 0}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.leave || 0}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.holiday || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{s.otHours || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{s.otHours || 0}</td>
                         <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-text1)', fontWeight: 700 }}>
                           {s.marked}<span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}> / {dayCount}</span>
                         </td>

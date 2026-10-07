@@ -1500,15 +1500,17 @@ export default function Roster() {
               const nonePublished  = publishedCount === 0
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {/* ○ → ◐ → ✓: nothing published is still open, so it is amber like every HR
+                      Draft (RunStatusBadge), not the grey that means void (S804). */}
                   {nonePublished ? (
-                    <span className="badge-gray" style={{ fontSize: 10 }}>Draft</span>
+                    <span className="badge-amber"><span aria-hidden="true">○ </span>Draft</span>
                   ) : allPublished ? (
                     <Tip text="Every visible day has been published. Staff see further edits to these days in Crest Staff straight away, but nobody is notified — use Re-Publish + Notify to tell them.">
-                      <span className="badge-green" style={{ fontSize: 10 }}>✓ Published</span>
+                      <span className="badge-green">✓ Published</span>
                     </Tip>
                   ) : (
                     <Tip text={`${publishedCount} of ${totalCount} visible days have been published so far.`}>
-                      <span className="badge-amber" style={{ fontSize: 10 }}>◐ {publishedCount}/{totalCount} Published</span>
+                      <span className="badge-amber">◐ {publishedCount}/{totalCount} Published</span>
                     </Tip>
                   )}
                   <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={publishing}
@@ -2142,12 +2144,12 @@ export default function Roster() {
                         {r.holiday && (
                           r.holiday.multiplier != null
                             /* Both cases were amber. They are not the same state: an ADJUSTED
-                               holiday is information (brass, the category tone), an UNADJUSTED one
+                               holiday is information (grey, the category chip), an UNADJUSTED one
                                is a forecast this row silently under-reports until someone sets a
                                multiplier — which is precisely what amber means everywhere else in
                                HR. Colour now separates them; it used to hide the difference. */
                             ? <Tip text={`Forecast Revenue/Covers on this row are adjusted ×${r.holiday.multiplier} for ${r.holiday.name} (set in Holiday Calendar).`} width={260}>
-                                <span className="badge-yellow" style={{ fontSize: 10, marginLeft: 6 }}>{r.holiday.name} ×{r.holiday.multiplier}</span>
+                                <span className="badge-gray" style={{ fontSize: 10, marginLeft: 6 }}>{r.holiday.name} ×{r.holiday.multiplier}</span>
                               </Tip>
                             : <Tip text={`${r.holiday.name} — no demand multiplier set in Holiday Calendar, so Forecast Revenue/Covers on this row are NOT adjusted for it.`} width={260}>
                                 <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>⚠ {r.holiday.name}</span>
@@ -2176,7 +2178,7 @@ export default function Roster() {
                             )}
                             {a?.recorded && a.otHours > 0 && (
                               <Tip text={`${a.otHours}h of these were overtime (beyond the rostered shift), priced at basic × ${1.5} in Labor Cost.`} width={220}>
-                                <span className="badge-yellow" style={{ fontSize: 10, marginLeft: 6 }}>{a.otHours}h OT</span>
+                                <span className="badge-gray" style={{ fontSize: 10, marginLeft: 6 }}>{a.otHours}h OT</span>
                               </Tip>
                             )}
                             {a?.recorded && r.scheduledHrs > 0 && plan(`plan ${r.scheduledHrs}h`)}

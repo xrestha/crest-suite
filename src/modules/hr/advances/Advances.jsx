@@ -19,6 +19,7 @@ import { invalidStyle } from '../../../shared/inlineFieldState'
 import { adToBsSafe, BS_MONTHS, formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
 import { firstRecoveryMonth } from '../payroll/payrollData'
+import { HR_REQUEST_STATUS, OWED_STATUS } from '../payrollConstants'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
@@ -80,13 +81,14 @@ const OFF_PAYROLL_HINT = 'payroll cuts nothing after their last month. Final Set
 // whichever type it is, and the whole balance when there is none. The words say what happens.
 const TYPE_LABEL = { advance: 'One-time', loan: 'In instalments' }
 
-// HR's one status vocabulary (payrollConstants' HR_REQUEST_STATUS, S660): brass = decided but the
-// money has not moved yet (an active advance is owed, not overdue — nothing is wrong), green =
-// closed good, grey = closed void. Amber is deliberately absent: nothing here waits on a decision.
+// HR's one status vocabulary (payrollConstants' HR_REQUEST_STATUS, S660), read from the map rather
+// than restated: grey ◷ = decided but the money has not moved yet (an active advance is owed, not
+// overdue — nothing is wrong; brass until S804), green = closed good, grey = closed void. Amber is
+// deliberately absent: nothing here waits on a decision.
 const ADVANCE_STATUS = {
-  active:      { label: 'Active',      badge: 'badge-yellow' },
-  settled:     { label: 'Settled',     badge: 'badge-green' },
-  written_off: { label: 'Written off', badge: 'badge-gray' },
+  active:      { label: 'Active',      ...OWED_STATUS },
+  settled:     { label: 'Settled',     badge: HR_REQUEST_STATUS.approved.badge },
+  written_off: { label: 'Written off', badge: HR_REQUEST_STATUS.cancelled.badge },
 }
 
 // Where a repayment row came from. Payroll and Final Settlement tag their own rows so their Reopen
@@ -639,7 +641,7 @@ export default function Advances() {
                     {a.purpose || '—'}
                   </td>
                   <td>
-                    <span className={st.badge}>{st.label}</span>
+                    <span className={st.badge}>{st.mark && <span aria-hidden="true">{st.mark} </span>}{st.label}</span>
                   </td>
                 </tr>
               )
@@ -743,7 +745,7 @@ export default function Advances() {
                 width: '100%', height: '100%', borderRadius: 'var(--radius-full)',
                 transform: `scaleX(${Math.min(100, (selectedRepaid / parseFloat(selectedAdv.amount)) * 100) / 100})`,
                 transformOrigin: 'left',
-                background: selectedOutstanding <= OWED_EPS ? 'var(--theme-green)' : 'var(--theme-accent)',
+                background: selectedOutstanding <= OWED_EPS ? 'var(--theme-green)' : 'var(--theme-text2)',
               }} />
             </div>
           </div>

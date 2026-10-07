@@ -58,9 +58,12 @@ const quietNote = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 3, whi
 // (the colour that means cancelled/void everywhere else, so the one column actually waiting on a
 // decision read as the most inert thing on screen) and Approved was AMBER (the colour that means
 // "waiting on you" on the HR Dashboard and in the employee's own copy of this same claim). Approved
-// here is brass — decided, but the cash has not left — and paid takes green.
+// here is grey with a ◷ — decided, but the cash has not left (S804; it was brass, which is red on
+// Modernist) — and paid takes green.
 const STATUS_BADGE = Object.fromEntries(
   Object.entries(TADA_REQUEST_STATUS).map(([k, v]) => [k, v.badge]))
+const STATUS_MARK = Object.fromEntries(
+  Object.entries(TADA_REQUEST_STATUS).map(([k, v]) => [k, v.mark]))
 function emptyAddForm() {
   const today = formatAd(new Date())
   return {
@@ -830,7 +833,7 @@ export default function TadaClaims() {
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
                         <td>
-                          <span className={STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize' }}>{c.status}</span>
+                          <span className={STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize' }}>{STATUS_MARK[c.status] && <span aria-hidden="true">{STATUS_MARK[c.status]} </span>}{c.status}</span>
                           {c.status === 'paid' && c.paid_method && <div style={quietNote}>{c.paid_method === 'Payroll' ? 'by payroll' : c.paid_method}</div>}
                           {payrollStanding(c)}
                         </td>
@@ -1000,7 +1003,7 @@ export default function TadaClaims() {
                   </div>
                 ))}
               </div>
-              <div style={{ textAlign: 'right', marginTop: 8, fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+              <div style={{ textAlign: 'right', marginTop: 8, fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
                 Total: NPR {fmt(addTotal)}
               </div>
             </div>

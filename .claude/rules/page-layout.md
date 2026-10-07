@@ -63,8 +63,8 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 
 - `.btn` always takes a colour variant (`btn-primary`, `btn-ghost`, `btn-danger`, `btn-danger--strong`); alone it renders as browser chrome.
 - A text input uses `.form-input` (plus `form-input--auto` where it sizes to a toolbar), never `.form-select`, which is for `<select>`.
-- The badge set is complete: `badge-green|red|amber|yellow|purple|gray`. `badge-amber` means warning; `badge-yellow` means category.
-- In IMS a figure or a category takes no colour (S796, DESIGN.md → The One Signal Meaning Rule): figures `--theme-text1`, codes `--theme-text2`, category chips `badge-gray`, red/amber/green only from a band, threshold or status word, the accent only for what can be pressed or is current. A how-to or plain-fact banner is `.note-banner`.
+- The badge set is complete: `badge-green|red|amber|yellow|purple|gray`. `badge-amber` means warning; `badge-yellow` means category in POS only.
+- In IMS and HR a figure or a category takes no colour (IMS S796, HR S804; DESIGN.md → The One Signal Meaning Rule): figures `--theme-text1`, codes `--theme-text2`, category chips `badge-gray`, red/amber/green only from a band, threshold or status word, the accent only for what can be pressed or is current. A how-to or plain-fact banner is `.note-banner`.
 - On the POS order screen an inline-styled control takes `.till-hit` (square) or `.till-hit--row` for the 44px touch floor and the focus pair, a menu tile `.till-tile`; never an inline `minWidth`/`minHeight`, which beats the class (S776).
 - A precondition on an action button is `aria-disabled` plus a press that says what is missing, never `disabled` alone; `disabled` is for an action in flight (S776, the S759 pattern).
 - There is no global link style, so an `<a>` sets its own colour: a bare one is the browser's blue, 1.69:1 on the Dark card (S784). Use `--theme-text2` + underline for a quiet in-text link, `--theme-accent-ink` for one that is the action.
