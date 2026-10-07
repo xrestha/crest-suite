@@ -376,6 +376,34 @@ export default function Overtime() {
 
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
 
+  // What can be done to an entry, for the table's last cell and the phone card alike (S805).
+  function rowActions(e, own, who) {
+    return (
+      <>
+        {e.status === 'pending' && (own ? (
+          <OwnRecordNote label="Your own entry"
+            tip="This overtime is yours, so someone else decides it — another supervisor, a manager or the Owner." />
+        ) : (
+          <DecisionButtons who={who}
+            approveTip="Payroll pays approved overtime at 1.5×, or 2× on a public holiday, in place of any OT typed on the attendance sheet for that day. If this month's payroll is already a draft, Regenerate it to include this."
+            onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
+        ))}
+        {e.status !== 'pending' && (
+          <button className="btn btn-ghost btn-sm" aria-label={`Undo the decision on ${who}`} onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
+        )}
+        {/* An approved entry keeps its approval through an edit (S749), so editing your
+            own would be approving the new hours yourself. */}
+        {own && e.status === 'approved' ? (
+          <OwnRecordNote label="Yours, approved"
+            tip="Your own approved overtime can only be changed by someone else. Undo sends it back to pending if the hours were wrong." />
+        ) : (
+          <button className="btn btn-ghost btn-sm" aria-label={`Edit overtime for ${who}`} onClick={() => openEdit(e)} disabled={locked}>Edit</button>
+        )}
+        <button className="btn btn-danger btn-sm" aria-label={`Delete overtime for ${who}`} onClick={() => del(e)} disabled={locked}>Del</button>
+      </>
+    )
+  }
+
   function otLabel(ot_type, ot_hours) {
     const mult = ot_type === 'holiday' ? OT_HOLIDAY_MULTIPLIER : OT_MULTIPLIER
     return `${ot_hours}h × ${mult}×`
@@ -412,7 +440,7 @@ export default function Overtime() {
           <select className="form-select" aria-label="Period" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <Fab onClick={openAdd} label="+ Log OT" show={!drawerOpen} />
+          <Fab onClick={openAdd} label="+ Log OT" />
         </div>
       </div>
 
@@ -518,7 +546,39 @@ export default function Overtime() {
           <BulkApproveBar count={locked ? 0 : filtered.filter(e => e.status === 'pending' && !isOwnEmployee(e.employee_id)).length} noun="overtime entries"
             detail={`${Math.round(filtered.filter(e => e.status === 'pending' && !isOwnEmployee(e.employee_id)).reduce((s, e) => s + (parseFloat(e.ot_hours) || 0), 0) * 10) / 10} hours`}
             onApprove={requestBulkApprove} />
-          <div className="table-wrap table-wrap--fab-clear">
+          {/* Below 600px each entry is one card and the table hides (S805, the S796 pattern): the
+              hours on the first line, the decision last. */}
+          <div className="phone-only" style={{ padding: '0 16px' }}>
+            <ul className="phone-cards" aria-label={`Overtime, ${periodLabel}`}>
+              {filtered.map(e => {
+                const emp = empMap[e.employee_id] || {}
+                const sc  = STATUS_COLORS[e.status] || STATUS_COLORS.pending
+                const own = isOwnEmployee(e.employee_id)
+                const who = `${emp.full_name || 'this entry'}, ${formatBsDay(e.bs_day, e.bs_month)}`
+                const amt = otAmt(e, emp)
+                return (
+                  <li key={e.id} className="phone-card">
+                    <div className="phone-card__top">
+                      <span className="phone-card__title">{emp.full_name || '—'}</span>
+                      <span className="phone-card__figure">{otLabel(e.ot_type, e.ot_hours)}</span>
+                    </div>
+                    <div className="phone-card__meta">
+                      {formatBsDay(e.bs_day, e.bs_month)} {e.bs_year} · {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
+                      {amt !== null ? ` · about NPR ${nprInt(amt)}` : ''}
+                    </div>
+                    <div className="phone-card__meta">
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', color: sc.color, background: sc.bg, border: `1px solid ${sc.border}` }}>
+                        {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
+                      </span>
+                      {e.reason ? ` · ${e.reason}` : ''}
+                    </div>
+                    <div className="phone-card__actions">{rowActions(e, own, who)}</div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+          <div className="table-wrap table-wrap--fab-clear phone-hide">
             <table className="data-table">
               <thead>
                 <tr>
@@ -579,26 +639,7 @@ export default function Overtime() {
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
-                          {e.status === 'pending' && (own ? (
-                            <OwnRecordNote label="Your own entry"
-                              tip="This overtime is yours, so someone else decides it — another supervisor, a manager or the Owner." />
-                          ) : (
-                            <DecisionButtons who={who}
-                              approveTip="Payroll pays approved overtime at 1.5×, or 2× on a public holiday, in place of any OT typed on the attendance sheet for that day. If this month's payroll is already a draft, Regenerate it to include this."
-                              onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
-                          ))}
-                          {e.status !== 'pending' && (
-                            <button className="btn btn-ghost btn-sm" aria-label={`Undo the decision on ${who}`} onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
-                          )}
-                          {/* An approved entry keeps its approval through an edit (S749), so editing your
-                              own would be approving the new hours yourself. */}
-                          {own && e.status === 'approved' ? (
-                            <OwnRecordNote label="Yours, approved"
-                              tip="Your own approved overtime can only be changed by someone else. Undo sends it back to pending if the hours were wrong." />
-                          ) : (
-                            <button className="btn btn-ghost btn-sm" aria-label={`Edit overtime for ${who}`} onClick={() => openEdit(e)} disabled={locked}>Edit</button>
-                          )}
-                          <button className="btn btn-danger btn-sm" aria-label={`Delete overtime for ${who}`} onClick={() => del(e)} disabled={locked}>Del</button>
+                          {rowActions(e, own, who)}
                         </div>
                       </td>
                     </tr>

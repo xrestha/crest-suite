@@ -7,6 +7,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
+import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError from '../../../components/FieldError'
@@ -644,6 +645,28 @@ export default function TadaClaims() {
     )
   }
 
+  // A claim's expense lines on its phone card (S805): the same lazily read lines as the table's
+  // expanded row, as a list, since the card already names the person, trip and total.
+  function claimLinesOnCard(c) {
+    const entry = lineCache[c.id]
+    return (
+      <ul>
+        {(!entry || entry.loading) && <li><span>Loading the expense lines…</span></li>}
+        {entry?.error && (
+          <li style={{ display: 'block' }}>
+            <ActionError error={{ text: 'Could not load this claim’s expense lines; the total above is the claim’s own. ' + entry.error.text, detail: entry.error.detail }} />
+            <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }}
+              onClick={() => setLineCache(p => { const n = { ...p }; delete n[c.id]; return n })}>Retry</button>
+          </li>
+        )}
+        {(entry?.rows || []).map(it => (
+          <li key={it.id}><span>{it.category}{it.description ? ` — ${it.description}` : ''}</span><span>{fmt(it.amount)}</span></li>
+        ))}
+        {c.notes && <li><span>{c.notes}</span></li>}
+      </ul>
+    )
+  }
+
   function renderClaimDetail(c) {
     const emp = empMap[c.employee_id] || {}
     const entry = lineCache[c.id]
@@ -723,11 +746,9 @@ export default function TadaClaims() {
               ⚙ Settings
             </button>
           )}
-          {!loadError && (
-            <button className="btn btn-primary" onClick={() => { setAddForm(emptyAddForm()); setPurposeMode('preset'); setStartPointMode('preset'); setError(''); setShowAdd(true) }}>
-              + New Claim
-            </button>
-          )}
+          {/* The page's primary, floating on a phone like every other HR Add (S805). */}
+          <Fab onClick={() => { setAddForm(emptyAddForm()); setPurposeMode('preset'); setStartPointMode('preset'); setError(''); setShowAdd(true) }}
+            label="+ New Claim" show={!loadError} />
         </div>
       </div>
 
@@ -789,7 +810,48 @@ export default function TadaClaims() {
           <BulkApproveBar count={filtered.filter(c => c.status === 'pending' && !isOwnClaim(c)).length} noun="claims"
             detail={`NPR ${fmt(filtered.filter(c => c.status === 'pending' && !isOwnClaim(c)).reduce((s, c) => s + (parseFloat(c.total_amount) || 0), 0))}`}
             onApprove={requestBulkApprove} />
-          <div className="table-wrap">
+          {/* Below 600px each claim is one card and the table hides (S805, the S796 pattern): the total
+              on the first line, the lines one tap away, the decision last. */}
+          <div className="phone-only">
+            <div className="card" style={{ padding: '0 16px' }}>
+              {filtered.length === 0 ? (
+                <p style={{ textAlign: 'center', color: 'var(--theme-text3)', padding: '28px 0 116px', margin: 0 }}>No claims found.</p>
+              ) : (
+                <ul className="phone-cards" aria-label="TADA claims">
+                  {filtered.map(c => {
+                    const emp = empMap[c.employee_id] || {}
+                    const isSel = selected === c.id
+                    const hasActions = c.status === 'pending' || c.status === 'approved' || (c.status === 'rejected' && canPay)
+                    return (
+                      <li key={c.id} className="phone-card">
+                        <div className="phone-card__top">
+                          <span className="phone-card__title">{emp.full_name || '—'}</span>
+                          <span className="phone-card__figure">NPR {fmt(c.total_amount)}</span>
+                        </div>
+                        <div className="phone-card__meta">
+                          {c.start_point ? `${c.start_point} → ${c.destination || '—'}` : (c.destination || '—')}
+                          {' · '}{fmtD(c.start_date)}{c.end_date && c.end_date !== c.start_date ? ` → ${fmtD(c.end_date)}` : ''}
+                          {c.trip_purpose ? ` · ${c.trip_purpose}` : ''}
+                        </div>
+                        <div className="phone-card__meta">
+                          <span className={STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize' }}>{STATUS_MARK[c.status] && <span aria-hidden="true">{STATUS_MARK[c.status]} </span>}{c.status}</span>
+                          {c.status === 'paid' && c.paid_method && <> · {c.paid_method === 'Payroll' ? 'by payroll' : c.paid_method}</>}
+                          {payrollStanding(c)}
+                        </div>
+                        <details className="phone-card__lines" open={isSel}
+                          onToggle={e => { const open = e.currentTarget.open; if (open !== isSel) setSelected(open ? c.id : null) }}>
+                          <summary>{isSel ? 'Hide' : 'Show'} the expense lines</summary>
+                          {isSel && claimLinesOnCard(c)}
+                        </details>
+                        {hasActions && <div className="phone-card__actions">{claimActions(c)}</div>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+          <div className="table-wrap phone-hide">
             <table className="data-table">
               <thead>
                 <tr>

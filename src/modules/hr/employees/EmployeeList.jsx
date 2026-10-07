@@ -380,7 +380,7 @@ export default function EmployeeList() {
           <button className="btn btn-ghost" onClick={() => setPrintForm(true)} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
             🖨 Print Joining Form
           </button>
-          <Fab onClick={openAdd} label="+ Add Employee" show={!drawerOpen} />
+          <Fab onClick={openAdd} label="+ Add Employee" />
         </div>
       </div>
 
@@ -530,8 +530,63 @@ export default function EmployeeList() {
               : 'No employees match the current filter.'}
           </p>
         </div>
-      ) : (
-        <div className="table-wrap table-wrap--fab-clear">
+      ) : (<>
+        {/* Below 600px each employee is one card and the table hides (S805, the S796 pattern): the
+            basic on the first line, Self-Service and Edit last. */}
+        <div className="phone-only">
+          <div className="card" style={{ padding: '0 16px' }}>
+            <ul className="phone-cards" aria-label="Employees">
+              {filtered.map(e => {
+                const s = STATUS_COLORS[e.status] || STATUS_COLORS.inactive
+                const r = retireInfo(e.retirement_date)
+                const basis = e.pay_basis || 'monthly'
+                const ss = selfServiceMap[e.id]
+                return (
+                  <li key={e.id} className="phone-card">
+                    <div className="phone-card__top">
+                      <span className="phone-card__title">
+                        <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)}
+                          aria-label={`Select ${e.full_name}`} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                        {e.full_name}
+                      </span>
+                      <span className="phone-card__figure">
+                        NPR {nprInt(parseFloat(e.basic_salary || 0))}{basis === 'daily' ? ' /day' : basis === 'hourly' ? ' /hr' : ''}
+                      </span>
+                    </div>
+                    <div className="phone-card__meta">
+                      {[e.designation, e.department, e.employee_code].filter(Boolean).join(' · ') || '—'}
+                      {e.join_date ? ` · joined ${fmtDate(e.join_date)}` : ''}
+                    </div>
+                    <div className="phone-card__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
+                        {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
+                      </span>
+                      {r && (r.soon || r.retired) && (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', color: r.color, background: r.bg, border: `1px solid ${r.border}` }}>
+                          {r.label} · {fmtDate(e.retirement_date)}
+                        </span>
+                      )}
+                      {ss ? (
+                        <span className={`badge ${e.access_blocked ? 'badge-gray' : 'badge-green'}`}>{e.access_blocked ? 'Self-Service (blocked)' : '✓ Self-Service'}</span>
+                      ) : ssStatusErr ? <span className="badge badge-gray">Self-Service ?</span> : null}
+                    </div>
+                    <div className="phone-card__actions">
+                      <button className="btn btn-ghost" aria-label={`Edit ${e.full_name}`} onClick={() => openEdit(e)}>Edit</button>
+                      {ss && !e.access_blocked && (
+                        <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)' }} aria-label={`Remove Self-Service for ${e.full_name}`}
+                          onClick={() => removeSelfService(e)} disabled={ssRemoving === e.id}>{ssRemoving === e.id ? 'Removing…' : 'Remove Self-Service'}</button>
+                      )}
+                      {!ss && !ssStatusErr && (
+                        <button className="btn btn-ghost" aria-label={`Enable Self-Service for ${e.full_name}`} onClick={() => openEnableSelfService(e)}>Enable Self-Service</button>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </div>
+        <div className="table-wrap table-wrap--fab-clear phone-hide">
           <table className="data-table">
             <thead>
               <tr>
@@ -667,7 +722,7 @@ export default function EmployeeList() {
             </tbody>
           </table>
         </div>
-      )}
+      </>)}
 
       {drawerOpen && (
         <EmployeeForm
