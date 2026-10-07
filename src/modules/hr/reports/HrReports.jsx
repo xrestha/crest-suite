@@ -700,7 +700,7 @@ export default function HrReports() {
                   ssfRows.map(r => ({ 'SSF No': r.ssfNo, Employee: r.name, 'Paid through': r.settlement ? 'Final settlement' : 'Payroll', 'SSF Basic': ssfBaseOf(r.employee, r.employer), 'Employee 11%': r.employee, 'Employer 20%': r.employer, 'Total 31%': r.employee + r.employer })),
                   'SSF Challan')}>⬇ Export</button>
               </div>
-              <div className="no-print" style={{ padding: '10px 18px', fontSize: 11, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)' }}>
+              <div className="no-print" style={{ padding: '10px 18px', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)' }}>
                 SSF's SOSYS portal (Collection screen) has no bulk-upload option — confirmed against the official SOSYS manual, entries are typed in one employee at a time. Use this sheet as your reference while entering SOSYS's Collection grid: type each row's <strong>SSF No</strong> and <strong>SSF Basic</strong> — SOSYS calculates the deposit itself, which should match this sheet's <strong>Total 31%</strong>.
               </div>
               {ssfRows.length === 0 ? (
@@ -863,7 +863,7 @@ export default function HrReports() {
                   'TDS Report')}>⬇ Export</button>
               </div>
               {!run && (
-                <div style={{ padding: '10px 18px', fontSize: 11, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)' }}>
+                <div style={{ padding: '10px 18px', fontSize: 12, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)' }}>
                   No payroll run for {periodLabel} yet, so no payroll salary tax is listed — only tax already withheld on festival allowances, incentives and final settlements paid this month.
                 </div>
               )}

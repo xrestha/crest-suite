@@ -202,7 +202,7 @@ export default function PaySetup() {
                     <Tip text="Gross earnings = basic + allowances, before any deduction." width={220}>Gross</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="SSF Employee (11% of basic, when SSF is switched on and an SSF number is entered) plus any other deductions configured for the employee." width={250}>Deductions</Tip>
+                    <Tip text="SSF Employee (11% of basic, with basic capped at NPR 1,00,000, when SSF is switched on and an SSF number is entered) plus any other deductions configured for the employee." width={260}>Deductions</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Gross − deductions for a full month, before income tax (TDS). Payroll also applies absences, overtime, advance recovery and TADA, so the payslip's take-home pay differs." width={260}>Net before tax</Tip>
@@ -298,11 +298,11 @@ export default function PaySetup() {
         )}
       </div>
 
-      <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-        Deductions = SSF Employee (11% of basic, capped at NPR 100,000 basic — only for staff with SSF switched on and an SSF number) + any additional deductions configured per employee. Employer SSF (20%) is paid by the company and not deducted from net salary.
-        Every figure is a full month before income tax (TDS); Payroll works out tax, absences, overtime, advance recovery and TADA each month.
-        Daily/hourly workers show their rate only — their pay is computed each period from attendance in Payroll and is excluded from the monthly payroll totals above.
-      </div>
+      {/* Two sentences (S805): what each column holds is in its header Tip, daily/hourly in the subtitle. */}
+      <p className="page-footnote">
+        Every figure is a full month before income tax; Payroll works out tax, absences, overtime, advance recovery and TADA each month.
+        Daily and hourly staff show their rate only and are left out of the totals above.
+      </p>
 
       {editing && (
         <PayForm

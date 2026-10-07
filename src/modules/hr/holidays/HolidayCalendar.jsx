@@ -476,11 +476,12 @@ export default function HolidayCalendar() {
         </div>
       )}
 
-      <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
-        <strong style={{ color: 'var(--theme-text2)' }}>Holiday overtime:</strong> overtime entered in Overtime for a public holiday is suggested at 2× the regular hourly rate; optional holidays follow company policy. Each overtime entry keeps the rate it was entered at, so a later change here does not reprice it.
-        <br />Seed fills each fiscal year from the Nepal Gazette, for every BS year we hold a gazette for. {SIGHTED_HOLIDAYS} have no gazetted date and are always added by hand.
+      {/* Two sentences (S805): the 2× rate is in the Type Tips, what Seed covers in Seed's own Tip. */}
+      <p className="page-footnote">
+        Each overtime entry keeps the rate it was entered at, so changing or removing a holiday here never reprices overtime
+        already logged. {SIGHTED_HOLIDAYS} have no gazetted date, so add them by hand once they are announced.
         {!canEdit && <><br />View only — holidays set the overtime rate, so only an HR supervisor or manager can change them.</>}
-      </div>
+      </p>
 
       {/* Add / Edit Modal */}
       {form.open && (

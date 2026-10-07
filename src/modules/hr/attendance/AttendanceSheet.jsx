@@ -1334,10 +1334,10 @@ export default function AttendanceSheet() {
             </div>
           )}
 
-          <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Only the days you actually mark are saved — an untouched day stays blank and is never assumed Present or Off. For daily- and hourly-paid staff a blank day pays nothing, so mark every day of the month (Present/Off/Holiday/Leave) before payroll runs.{' '}
-            ⚡ Generate from Roster pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
-          </div>
+          <p className="page-footnote" style={{ margin: '0 0 14px' }}>
+            An untouched day stays blank, never assumed Present or Off, and for daily- and hourly-paid staff a blank day pays nothing.
+            Mark every day before payroll runs, or pre-fill the month with ⚡ Generate from Roster, which never overwrites a day already marked.
+          </p>
 
           <div className="card" style={{ padding: 0 }}>
             <div className="table-wrap">
@@ -1537,9 +1537,9 @@ export default function AttendanceSheet() {
             </div>
           )}
 
-          <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          <p className="page-footnote" style={{ margin: '0 0 14px' }}>
             Fill in this one employee's whole month here, day by day, instead of switching days on the Mark Attendance tab. Same data either way — both tabs read and write the same records, and one Save covers both.
-          </div>
+          </p>
 
           <div className="card" style={{ padding: 0 }}>
             <div className="table-wrap">
@@ -1742,7 +1742,7 @@ export default function AttendanceSheet() {
                       <Tip text="Absent days for the month. A half day counts 0.5 here (the half not worked, which payroll docks) and 0.5 under P." width={240}>A</Tip>
                     </th>
                     <th style={{ textAlign: 'right', minWidth: 32 }}>
-                      <Tip text="Off days for the month — marked explicitly per employee, either directly or via Generate from Roster." width={220}>O</Tip>
+                      <Tip text="Off days for the month — marked explicitly per employee, either directly or via Generate from Roster. Nothing is marked off automatically." width={220}>O</Tip>
                     </th>
                     <th style={{ textAlign: 'right', minWidth: 32 }}>
                       <Tip text="Leave days, paid and unpaid together (the Excel export splits them). Half-day leave counts 0.5 here and 0.5 under P." width={240}>L</Tip>
@@ -1751,7 +1751,7 @@ export default function AttendanceSheet() {
                       <Tip text="Public holidays marked Holiday. A holiday pays daily and hourly staff for the day; monthly pay does not move." width={240}>H</Tip>
                     </th>
                     <th style={{ textAlign: 'right', minWidth: 32 }}>
-                      <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
+                      <Tip text="Total overtime hours for the month. Payroll pays them at 1.5×, except on a day an approved Overtime entry covers, where that entry is paid instead." width={240}>OT</Tip>
                     </th>
                     <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>
                       {/* Days only — OT is hours and stays in its own column beside this one.
@@ -1807,9 +1807,11 @@ export default function AttendanceSheet() {
               </table>
             </div>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            P, A, O, L and H add up to Total Days, every day marked (a half day is 0.5 in each of its two columns). O counts explicit Off days. Unmarked counts the blank days that pay daily and hourly staff nothing. Nothing is marked off automatically — mark each staff member's off days directly, or via Generate from Roster. Payroll reads this sheet: marked absences and unpaid leave are deducted, daily and hourly staff are paid for the days and hours marked here, and overtime is paid at 1.5× unless an approved Overtime entry covers that day. Once payroll for a month is finalized, its sheet is locked.
-          </div>
+          {/* Two sentences (S805): how the columns add up is in their header Tips, the finalized lock in its banner. */}
+          <p className="page-footnote">
+            Payroll reads this sheet and nothing else: absences and unpaid leave are deducted, and daily and hourly staff are paid
+            only for the days marked. Nothing is marked off automatically, so mark off days too, here or with Generate from Roster.
+          </p>
         </div>
       )}
 

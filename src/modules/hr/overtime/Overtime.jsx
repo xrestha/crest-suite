@@ -584,6 +584,7 @@ export default function Overtime() {
                               tip="This overtime is yours, so someone else decides it — another supervisor, a manager or the Owner." />
                           ) : (
                             <DecisionButtons who={who}
+                              approveTip="Payroll pays approved overtime at 1.5×, or 2× on a public holiday, in place of any OT typed on the attendance sheet for that day. If this month's payroll is already a draft, Regenerate it to include this."
                               onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
                           ))}
                           {e.status !== 'pending' && (
@@ -610,12 +611,12 @@ export default function Overtime() {
       )}
       </>)}
 
-      <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
-        <strong style={{ color: 'var(--theme-text2)' }}>Payroll integration:</strong> only <strong>Approved</strong> entries feed into the payroll run.
-        Approved weekday OT is paid at <strong>1.5×</strong> the normal hourly rate; public holiday OT at <strong>2×</strong>.
-        An approved entry <strong>supersedes</strong> any OT typed on the attendance sheet for that same day, so the same hours are never paid twice — and this is the only route to the holiday 2× rate.
-        Regenerate payroll after approving new entries to include them. One entry per person per day — two stretches of overtime on one day are one entry with the hours added up. Once payroll for a month is finalized, its overtime is locked.
-      </div>
+      {/* Two sentences (S805): the rates are in the subtitle and the OT Type field, one-entry-a-day on the
+          Date field, Regenerate on Approve and the bulk confirm, the finalized lock in its banner and Help. */}
+      <p className="page-footnote">
+        Only <strong>approved</strong> entries are paid, and an approved entry replaces any OT typed on the attendance
+        sheet for that day, so the same hours are never paid twice. Regenerate a draft payroll after approving so it includes them.
+      </p>
 
       {/* Add / Edit drawer */}
       {drawerOpen && (
@@ -637,7 +638,7 @@ export default function Overtime() {
 
           {/* Date */}
           <label style={lbl} htmlFor="ot-bs-year">
-            <Tip text="BS date the overtime was worked. Date automatically detects if it falls on a public holiday from your Holiday Calendar." width={300}>
+            <Tip text="BS date the overtime was worked. Date automatically detects if it falls on a public holiday from your Holiday Calendar. One entry per person per day: two stretches of overtime on one day are one entry with the hours added up." width={300}>
               Date (BS) *
             </Tip>
           </label>
@@ -674,7 +675,7 @@ export default function Overtime() {
           {/* OT Type */}
           <div style={{ marginBottom: 14 }}>
             <span style={lbl} id="ot-type-label">
-              <Tip text="Auto-detected from the date: if the date matches a gazetted public holiday in your Holiday Calendar, Holiday (2×) is selected. You can override manually." width={300}>
+              <Tip text="Auto-detected from the date: if the date matches a gazetted public holiday in your Holiday Calendar, Holiday (2×) is selected. You can override manually. An Overtime entry is the only way hours are paid at the holiday 2× rate." width={300}>
                 OT Type *
               </Tip>
             </span>

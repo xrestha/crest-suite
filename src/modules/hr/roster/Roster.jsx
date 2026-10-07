@@ -1570,7 +1570,7 @@ export default function Roster() {
             >
               {rangeMode ? '✓ Select range: on' : '⬚ Select range'}
             </button>
-            <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>
+            <p className="page-footnote" style={{ margin: 0 }}>
               {rangeMode
                 ? (rangeAnchor
                     ? 'Now tap the last cell of the block — the shift you pick applies to everything between.'
@@ -2049,8 +2049,12 @@ export default function Roster() {
             </p>
           )}
 
-          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
-            Coming days: hours and cost come from the roster, priced at what each hour costs the business (basic pay + allowances + employer SSF); revenue and covers come from Demand Forecast (run/update it on the Demand Forecast page) — a day with no forecast yet just shows "—". Days already past are marked <span className="badge-gray" style={{ fontSize: 10 }}>actual</span> and show what was recorded instead: hours and staff from Attendance, revenue from Sales Entries, covers from closed POS bills, with the rostered figure underneath so you can see how the plan held up. A festival/holiday badge next to a date means that day's forecast was adjusted by the multiplier set for it in Holiday Calendar — an unadjusted badge (no "×N") means the holiday is known but no multiplier has been set yet.
+          {/* Two sentences (S805): each holiday badge explains itself in its own Tip. */}
+          <p className="page-footnote" style={{ margin: '0 0 8px' }}>
+            Coming days are priced from the roster at what each hour costs the business (basic pay, allowances and employer SSF),
+            with revenue and covers from Demand Forecast; a day with no forecast yet shows &quot;—&quot;. Past days, marked{' '}
+            <span className="badge-gray" style={{ fontSize: 10 }}>actual</span>, show what was recorded, from Attendance, Sales Entries
+            and closed POS bills, with the rostered figure underneath.
           </p>
           {actualsError && (
             <div style={{ marginBottom: 8 }}>

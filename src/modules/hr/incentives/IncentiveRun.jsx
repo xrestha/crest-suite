@@ -840,7 +840,11 @@ export default function IncentiveRun() {
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportRegister} disabled={busy}>⬇ Register</button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
-            {!finalized && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>}
+            {!finalized && (
+              <Tip text="Works every amount out again from today's settings and basic salary, so press it after a raise. Excluded staff stay excluded." width={260}>
+                <button className="btn btn-ghost btn-sm" onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>
+              </Tip>
+            )}
             {!finalized && <button className="btn btn-primary" onClick={() => setStatus('finalized')} disabled={!canFinalize}>Finalize</button>}
             {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
                 the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
@@ -950,10 +954,9 @@ export default function IncentiveRun() {
               </table>
             </div>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Income tax is worked out for the {fyLabel(fyStart)} tax year, counting salary already paid, salary still to come and other bonuses finalized for earlier months of the year.
-            Press Recompute after a raise; it keeps excluded staff excluded.
-          </div>
+          <p className="page-footnote">
+            Income tax is worked out on the whole {fyLabel(fyStart)} tax year: salary already paid, salary still to come and other bonuses finalized earlier in the year.
+          </p>
         </>
       )}
 

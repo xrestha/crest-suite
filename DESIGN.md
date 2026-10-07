@@ -1353,6 +1353,11 @@ neutral: a `--theme-text2` 6% fill, the ordinary border, text2 copy with an ink 
 had drawn these as accent-tinted boxes in accent-ink, which under Modernist Light is a dark red — a
 how-to line read like a warning. No verdict ever rides on it.
 
+**`.page-footnote`** (S805) is the fine print under a table or form: 12px text2, **at most two
+sentences**, the problem and then the relief. A rule about one control lives on that control (a `Tip`,
+a confirm body); a rule about the module lives in Help. HR's footnotes had grown to 11px walls of seven
+to twenty sentences, with the most consequential rule on the page at its smallest size.
+
 ### Where a month stands, and a decision taken in bulk (S768)
 
 **`.month-status` is a summary card, not a banner.** Payroll and the HR Dashboard open on five

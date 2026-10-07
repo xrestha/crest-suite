@@ -308,7 +308,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>🕘 Swap History</span>
           {history.length > 0 && <span className="badge-gray" style={{ fontSize: 10 }}>{history.length}</span>}
         </div>
-        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
+        <p className="page-footnote" style={{ margin: '0 0 12px' }}>
           The last 50 decided requests, newest first — across every month, not just the one on the board.
         </p>
 

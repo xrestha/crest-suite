@@ -871,11 +871,10 @@ export default function FinalSettlement() {
                 <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>
               ))}
             </select>
-            <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
-              Monthly-salaried employees only — settlement for daily and hourly staff isn't supported yet.
-              {' '}Someone already marked resigned, terminated or inactive is not listed: settle them first,
-              {' '}and Finalize sets that status for you. If they were marked by hand already, set them back to
-              {' '}Probation in HR → Employees to settle them.
+            <p className="page-footnote" style={{ margin: '5px 0 0' }}>
+              Monthly-salaried employees only; daily and hourly staff are not supported yet. Someone already marked
+              resigned, terminated or inactive is not listed: set them back to Probation in Employees, settle them, and
+              Finalize sets the status for you.
             </p>
           </div>
 
@@ -1106,12 +1105,11 @@ export default function FinalSettlement() {
             </p>
           )}
 
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }} className="no-print">
-            <strong style={{ color: 'var(--theme-text2)' }}>Notes:</strong>
-            {' '}The final month is computed the way payroll computes a month — allowances, overtime, SSF, salary deductions — and
-            {' '}its tax is trued up to what was actually earned this fiscal year. Exit payments are taxed at the marginal rate above that.
-            {' '}Tax on retirement and gratuity payments can have special treatment; consult your CA before disbursing.
-          </div>
+          <p className="page-footnote no-print">
+            The final month is worked out the way payroll works out a month, its tax trued up to what was earned this fiscal
+            year, and exit payments are taxed at the marginal rate above that. Retirement and gratuity payments can be taxed
+            differently, so check with your accountant before paying out.
+          </p>
 
           {/* ── Actions ── */}
           <div className="card no-print" style={{ marginTop: 16, padding: '14px 18px' }}>

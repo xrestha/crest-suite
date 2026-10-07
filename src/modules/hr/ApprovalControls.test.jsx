@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { BulkApproveBar, DecisionButtons, decideEach } from './ApprovalControls'
 
@@ -41,5 +41,21 @@ describe('DecisionButtons', () => {
     render(<DecisionButtons who="Sita, 3rd Bhadra" onApprove={() => {}} onReject={() => {}} />)
     expect(screen.getByRole('button', { name: 'Approve — Sita, 3rd Bhadra' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Reject — Sita, 3rd Bhadra' })).toBeInTheDocument()
+  })
+
+  // S805: the rule that used to sit in a footnote under the queue is on the button it governs.
+  it('describes Approve with approveTip when focused, and adds no tab stop of its own', () => {
+    render(<DecisionButtons who="Sita" approveTip="Marks these days on the attendance sheet." onApprove={() => {}} onReject={() => {}} />)
+    const approve = screen.getByRole('button', { name: 'Approve — Sita' })
+    act(() => { approve.focus() })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Marks these days on the attendance sheet.')
+    expect(approve).toHaveAttribute('aria-describedby', screen.getByRole('tooltip').id)
+    expect(screen.getAllByRole('button')).toHaveLength(2)
+  })
+
+  it('leaves both buttons bare when no tip is given', () => {
+    const { container } = render(<DecisionButtons who="Sita" onApprove={() => {}} onReject={() => {}} />)
+    expect(container.querySelectorAll('button')).toHaveLength(2)
+    expect(container.querySelector('.tip-trigger')).toBeNull()
   })
 })

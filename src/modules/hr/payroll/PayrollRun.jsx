@@ -1301,7 +1301,7 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}>Net Pay</th>
                       {showPaid && (
                         <th style={{ textAlign: 'right' }}>
-                          <Tip text="Whether this salary has been paid out, and when. Finalizing pays nobody — Mark paid records the date and how it was paid, and staff see it in the Crest Staff app. If the month is reopened and a figure changes, this shows what is still owed or what was paid too much." width={290}>Paid</Tip>
+                          <Tip text="Whether this salary has been paid out, and when. Finalizing sends no money — Mark paid records the date and how it was paid, and staff see it in the Crest Staff app. If the month is reopened and a figure changes, this shows what is still owed or what was paid too much." width={290}>Paid</Tip>
                         </th>
                       )}
                       <th></th>
@@ -1479,20 +1479,24 @@ export default function PayrollRun() {
               </div>
             </div>
             {/* One topic per line, not a 180-word wall (S613) — the reader is looking up ONE of these
-                rules mid-payroll, never reading all of them. */}
-            <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+                rules mid-payroll, never reading all of them. Since S805 the topics sit behind a disclosure
+                at 12px: open, they were an 11px wall under the register on every visit. */}
+            <div className="page-footnote">
               <p style={{ margin: 0, fontWeight: 600 }}>
                 {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can type over any income tax (TDS) figure.'}
               </p>
+              <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer' }}>How each figure is worked out: who is paid, SSF, income tax, TADA and advances</summary>
               <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
                 <li><strong>How a figure was worked out</strong>: open the ▸ beside a name. A draft shows the full working from current data — attendance tally, gross, absence, overtime, SSF, the income tax bands, advance cut and TADA — and says first if that payslip has drifted from it. A finalized month shows each figure as it was paid, never recalculated. Either prints as a sheet to hand to the employee.</li>
-                <li><strong>Paid</strong>: finalizing pays nobody. Once the money has gone out, Mark paid (one person) or Mark everyone paid records the date and how — bank transfer, cash, eSewa/Khalti or cheque — and staff see it in the Crest Staff app. A mark made by mistake is undone from the ⋯ beside it, with a reason; the record is kept, marked undone. If the month is reopened and a figure changes, the Paid column shows what is still owed, or what was paid too much.</li>
+                <li><strong>Paid</strong>: finalizing locks the payslips but sends no money. Once the money has gone out, Mark paid (one person) or Mark everyone paid records the date and how — bank transfer, cash, eSewa/Khalti or cheque — and staff see it in the Crest Staff app. A mark made by mistake is undone from the ⋯ beside it, with a reason; the record is kept, marked undone. If the month is reopened and a figure changes, the Paid column shows what is still owed, or what was paid too much.</li>
                 <li><strong>Who is paid</strong>: active and probation staff, and anyone who left during the month — paid up to their last working day. Someone whose Final Settlement already paid the month is left out and named above.</li>
                 <li><strong>SSF</strong> deducts only for employees marked SSF-enrolled AND holding an SSF number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan.</li>
                 <li><strong>TDS</strong> (income tax) comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
                 <li><strong>TADA</strong> (travel/daily allowance) is paid by the first payroll after a claim is Approved and its trip is over — a trip from 30 Bhadra to 2 Ashwin is paid in the Ashwin payroll, and never twice. It is added after income tax and is not taxed. The amount is always the claims' own total (🔗 shows how many); to change it, change the claim in TADA Claims and Regenerate. Finalize marks those claims Paid; Reopen puts them back to Approved.</li>
                 <li><strong>Advances</strong>: instalments are deducted starting with the payroll of the month <em>after</em> the advance was issued (an advance given any day in Bhadra is first cut in the Ashwin payroll). A cut never takes pay below zero — if this month's pay is less than the instalment, only what was earned is taken and the rest stays owed for the next payroll. Repayment rows are written to Advances &amp; Loans on Finalize.</li>
               </ul>
+              </details>
             </div>
           </>
         )}

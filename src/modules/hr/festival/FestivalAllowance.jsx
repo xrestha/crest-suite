@@ -852,7 +852,11 @@ export default function FestivalAllowance() {
             <button className="btn btn-ghost" onClick={exportRegister} disabled={busy}>⬇ Register</button>
             <button className="btn btn-ghost" onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
             <button className="btn btn-ghost" onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
-            {!finalized && <button className="btn btn-ghost" onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>}
+            {!finalized && (
+              <Tip text="Works the allowance out again from today's basic salary, so press it after a raise. Daily and hourly amounts you typed and excluded staff are kept." width={260}>
+                <button className="btn btn-ghost" onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>
+              </Tip>
+            )}
             {!finalized && <button className="btn btn-primary" onClick={() => setStatus('finalized')} disabled={!canFinalize}>Finalize</button>}
             {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
                 the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
@@ -966,11 +970,10 @@ export default function FestivalAllowance() {
               </table>
             </div>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Monthly staff get basic × completed months worked up to 15 {monthName} ÷ 12. Daily/hourly staff are typed by hand.
-            Income tax is worked out for the {fyLabel(fyStart)} tax year, counting salary already paid, salary still to come and other bonuses finalized for earlier months of the year.
-            Press Recompute after a raise; it keeps daily/hourly amounts and excluded staff.
-          </div>
+          <p className="page-footnote">
+            Monthly staff get basic × completed months worked up to 15 {monthName} ÷ 12; daily and hourly staff are typed by hand.
+            Income tax is worked out on the whole {fyLabel(fyStart)} tax year: salary already paid, salary still to come and other bonuses finalized earlier in the year.
+          </p>
         </>
       )}
       {confirmEl}

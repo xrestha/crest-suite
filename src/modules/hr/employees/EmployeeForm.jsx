@@ -573,8 +573,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </select>
               {OFF_PAYROLL_STATUSES.has(form.status) && form.status !== (employee?.status ?? 'active') && (
                 <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4, lineHeight: 1.5 }}>
-                  Saving takes {form.full_name.trim() || 'this employee'} off Final Settlement{form.end_date ? ', and off payroll after the End Date' : ''}. If they are leaving, run Final Settlement first — it sets this and the End Date for you.
-                  {!form.end_date && ' Otherwise enter their last working day as the End Date, so payroll pays the days they worked.'}
+                  Saving takes {form.full_name.trim() || 'this employee'} off Final Settlement{form.end_date ? ', and off payroll after the End Date' : ''}. If they are leaving, run Final Settlement first, which sets this and the End Date for you{form.end_date ? '' : '; otherwise enter their last working day as the End Date, so payroll pays the days they worked'}.
                 </span>
               )}
             </div>

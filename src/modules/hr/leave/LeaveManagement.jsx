@@ -455,7 +455,7 @@ export default function LeaveManagement() {
         <>
           <p style={{ margin: skipped.length ? '0 0 10px' : 0 }}>
             {fmt(days)} day{days === 1 ? '' : 's'} in all. Each request's days are marked on the attendance sheet as paid or unpaid
-            leave by its type — exactly as approving it on its own does.
+            leave by its type, so payroll deducts the unpaid ones — exactly as approving it on its own does.
           </p>
           {skipped.length > 0 && <p style={{ margin: 0 }}>Left for you to decide one at a time: {skipped.join('; ')}.</p>}
         </>
@@ -839,6 +839,7 @@ export default function LeaveManagement() {
                               tip="This leave is yours, so someone else approves or rejects it — another supervisor, a manager or the Owner. You can still cancel it while it waits." />
                           ) : (
                             <DecisionButtons who={`${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} disabled={busy}
+                              approveTip="Marks these days on the attendance sheet as paid or unpaid leave, by the leave type, so payroll deducts the unpaid ones. Public holidays in the range are marked Holiday and not charged."
                               onApprove={() => approveRequest(req)} onReject={() => decideRequest(req, 'rejected')} />
                           ))}
                           {/* Withdrawing your own pending request moves no pay or balance; cancelling your
@@ -864,9 +865,12 @@ export default function LeaveManagement() {
               </table>
             </div>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range counts except public holidays from the Holiday Calendar, which are not charged and are marked Holiday on the sheet — a rostered day off still counts, so adjust the dates if the range spans one. Leave approved for a month that has not been created yet cannot be marked on an attendance sheet that does not exist — those days are written automatically the moment that month is opened, and the banner at the top of this page counts anything still waiting. A request rejected or cancelled by mistake can be put back to Pending with <strong>Reopen</strong> (HR managers and the owner) — it keeps the original dates and reason, and marks nothing until it is approved again. Two open or approved requests for the same employee cannot share a day. Approving past the yearly quota asks first. Once payroll for a month is finalized, leave touching that month can no longer be approved or cancelled — reopen the payroll run first.
-          </div>
+          {/* Two sentences (S805). Its other rules moved to where they apply: Approve's Tip, the cancel
+              and Reopen confirms, the form's day count, the waiting-month banner, and Help. */}
+          <p className="page-footnote">
+            Approving marks the days on the attendance sheet, so payroll deducts unpaid leave by itself. Cancelling an
+            approved request clears those days back to blank, not to Present: re-mark them in Attendance if the person did work.
+          </p>
         </div>
       ) : tab === 'balances' ? (
         /* ── BALANCES ── */
@@ -892,7 +896,7 @@ export default function LeaveManagement() {
                     <th style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1 }}>Employee</th>
                     {activeTypes.map(t => (
                       <th key={t.id} style={{ textAlign: 'right', color: typeText(t.color) }}>
-                        <Tip text={`${t.name}: ${t.annual_quota > 0 ? t.annual_quota + ' days/year' : 'uncapped'}${t.paid ? '' : ', unpaid'}. Shows used / quota.`} width={240}>{t.name}</Tip>
+                        <Tip text={`${t.name}: ${t.annual_quota > 0 ? t.annual_quota + ' days/year' : 'uncapped'}${t.paid ? '' : ', unpaid'}. ${t.annual_quota > 0 ? 'Shows used / quota.' : 'Shows the days taken.'}`} width={240}>{t.name}</Tip>
                       </th>
                     ))}
                   </tr>
@@ -925,9 +929,10 @@ export default function LeaveManagement() {
               </table>
             </div>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Each cell shows leave days used against the annual quota for BS {bsYear} — approved requests plus any days encashed on a finalised settlement, since both are days already paid for. Uncapped types (e.g. Unpaid) show only the days taken. Balances are per BS calendar year, not the Shrawan-start fiscal year that payroll and festival allowance use. Quotas are flat annual figures — accrual and carry-forward roll-over are not yet automatic.
-          </div>
+          <p className="page-footnote">
+            Used is approved requests plus any days encashed on a finalized settlement, since both are already paid for.
+            Balances run on the BS calendar year {bsYear}, not the Shrawan fiscal year that payroll and festival allowance use.
+          </p>
         </div>
       ) : (
         /* ── LEAVE TYPES (admin) ── */
@@ -945,7 +950,7 @@ export default function LeaveManagement() {
                       <Tip text="Paid leave marks Attendance as Paid Leave; unpaid marks Unpaid Leave (which Payroll deducts)." width={260}>Paid</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Days allowed per year. 0 = uncapped (e.g. unpaid leave)." width={220}>Annual Quota</Tip>
+                      <Tip text="Days allowed per year, as one flat figure: it does not build up month by month. 0 = uncapped (e.g. unpaid leave)." width={240}>Annual Quota</Tip>
                     </th>
                     <th style={{ textAlign: 'center' }}>
                       <Tip text="Whether unused days carry into next year. Stored for reference — roll-over is not yet automatic." width={260}>Carry Fwd</Tip>
@@ -996,9 +1001,9 @@ export default function LeaveManagement() {
               </table>
             </div>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Defaults follow Nepal's Labour Act 2074. Maternity (98) and Paternity (15) are per-event statutory entitlements rather than annually recurring. Edits save automatically.
-          </div>
+          <p className="page-footnote">
+            Defaults follow Nepal's Labour Act 2074, and Maternity (98 days) and Paternity (15) are per birth, not per year. Edits save automatically.
+          </p>
         </div>
       )}
       {confirmEl}

@@ -225,7 +225,7 @@ export const STEPS = [
   { key: 'monthend.payroll', group: 'monthend', phase: 'monthend', tick: 'data', signal: 'payrollFinalized', module: 'hr',
     access: { hr: 'manager' }, route: '/hr/payroll', where: 'HR → Payroll → Payroll',
     label: 'Run your first payroll',
-    hint: 'Check the month\'s attendance, then generate the payroll, look it over and finalize it. Payslips go to the Crest Staff app. Finalizing pays nobody: once the money has gone out, Mark everyone paid records it.',
+    hint: 'Check the month\'s attendance, then generate the payroll, look it over and finalize it. Payslips go to the Crest Staff app. Finalizing sends no money: once the money has gone out, Mark everyone paid records it.',
     strip: 'Press Generate Payroll, check each person, then press Finalize. Then press Mark everyone paid once the money has gone out.' },
 ]
 

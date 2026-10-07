@@ -15,12 +15,16 @@
 
 import Tip from '../../components/Tip'
 
-export function DecisionButtons({ who, onApprove, onReject, disabled, stopPropagation = false }) {
+// `approveTip` / `rejectTip` (S805) carry what the decision DOES, on the button that does it: the
+// rule used to sit in a footnote under the queue, where nobody pressing Approve was reading.
+export function DecisionButtons({ who, onApprove, onReject, disabled, stopPropagation = false, approveTip, rejectTip }) {
   const wrap = fn => e => { if (stopPropagation) e.stopPropagation(); fn() }
+  const approve = <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={wrap(onApprove)} aria-label={`Approve — ${who}`}>Approve</button>
+  const reject = <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={wrap(onReject)} aria-label={`Reject — ${who}`}>Reject</button>
   return (
     <>
-      <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={wrap(onApprove)} aria-label={`Approve — ${who}`}>Approve</button>
-      <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={wrap(onReject)} aria-label={`Reject — ${who}`}>Reject</button>
+      {approveTip ? <Tip text={approveTip} width={260}>{approve}</Tip> : approve}
+      {rejectTip ? <Tip text={rejectTip} width={260}>{reject}</Tip> : reject}
     </>
   )
 }

@@ -317,11 +317,12 @@ export default function GratuityTracker() {
             </div>
           </div>
 
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--theme-text2)' }}>Nepal Labour Act:</strong> Gratuity accrues at 1 month basic salary per year of service, payable on departure after {VEST} completed months (an assumption — see the note at the top). &nbsp;
-            <strong style={{ color: 'var(--theme-text2)' }}>SSF note:</strong> The employer's 20% SSF contribution includes a 3.33% gratuity sub-fund. Whether SSF fully satisfies the Labour Act obligation is a legal question — consult your CA. The <em>Net Liability</em> column shows the residual after subtracting what SSF has actually been paid. &nbsp;
-            Only monthly-paid employees are shown.
-          </div>
+          {/* Two sentences (S805): the accrual and the vesting assumption are in the subtitle, the 3.33%
+              share and Net Liability in their column Tips. */}
+          <p className="page-footnote">
+            Whether the gratuity share of employer SSF fully meets the Labour Act obligation is a legal question, so check
+            it with your accountant before relying on Net Liability. Only monthly-paid employees are shown.
+          </p>
         </>
       )}
     </div>

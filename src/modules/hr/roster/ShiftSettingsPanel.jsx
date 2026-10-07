@@ -443,12 +443,12 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
         </table>
       </div>
 
-      <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0 }}>
-        Each shift type needs its own name. A shift type used on the roster cannot be deleted — untick Active to retire it.
-        Leave Hours blank to auto-calculate from start/end times. Overnight shifts (e.g. Night 21:00–07:00) wrap past midnight automatically.
-        Normal hrs splits a long shift into normal time and overtime (e.g. 12h with 9 normal = 3h OT); blank means the whole shift is normal time.
-        Attendance → Generate from Roster reads a zero-hour shift by its name: "PAID LEAVE" becomes Paid Leave, any other "LEAVE" becomes Unpaid Leave, "Holiday" becomes Holiday, and "OFF DAY" becomes Off.
-        Changing a shift&apos;s hours, Normal hrs or what its name means, while earlier days on it are not yet in Attendance, asks from which day the change applies; the days before it keep the old values.
+      {/* Two sentences (S805): Hours, End (overnight) and Normal hrs say what they do in their header
+          Tips, and a change to a shift's hours asks from which day in its own dialog. */}
+      <p className="page-footnote" style={{ marginTop: 10 }}>
+        A shift type used on the roster cannot be deleted, so untick Active to retire it. Generate from Roster reads a
+        zero-hour shift by its name: &quot;PAID LEAVE&quot; becomes Paid Leave, any other &quot;LEAVE&quot; Unpaid Leave,
+        &quot;Holiday&quot; Holiday, and &quot;OFF DAY&quot; Off.
       </p>
 
       {split && (() => {

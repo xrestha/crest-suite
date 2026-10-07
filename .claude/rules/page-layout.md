@@ -11,6 +11,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 ## Page shell
 
 - The page root takes no padding and no `maxWidth` (`.main-content` already pads it). Open with `.page-header`, adding `page-header--split` when actions sit on the right; never a hand-rolled `<h2>`.
+- Fine print under a table or form is `<p className="page-footnote">`: at most two sentences, the problem then the relief. A rule about one control goes on that control (a `Tip`, a confirm body); the rest goes to Help (S805).
 - A new POS page is a report unless it is operated during service, and a report gets the product shell (`page-header`, `stat-grid`, `tab-bar`), not a full-screen till layer.
 
 ## Stat grids

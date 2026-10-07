@@ -2625,6 +2625,21 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
 }
 .note-banner strong { color: var(--theme-text1); }
 
+/* The line under a table or form that says what follows from it (S805, the HR critique). At most two
+   sentences: the problem, then the relief. HR had grown 11px walls of seven to twenty sentences here,
+   with its most consequential rules ("rejecting clears those days back to blank, not to Present") at
+   the smallest size on the page. A rule about one control goes on that control (a Tip, a confirm
+   body); a rule about the module goes to Help. 12px text2, not .note-banner's 13px box: this is the
+   page's fine print, and it should read as that. */
+.page-footnote {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--theme-text2);
+  max-width: 80ch;
+}
+.page-footnote strong { color: var(--theme-text1); font-weight: 600; }
+
 /* A report that could not load. This is deliberately NOT the empty state: "nothing to show" and
    "could not load" are different facts and only one of them means the figures on screen are real.
    See ReportPage.jsx for why every report renders one or the other and never a page of zeros. */
