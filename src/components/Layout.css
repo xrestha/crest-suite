@@ -2244,6 +2244,8 @@ tr.interactive-row:focus-visible {
   padding: 12px 0;
 }
 .phone-cards__day + ul > .phone-card:first-child { border-top-width: 2px; }
+/* A list with no day headings starts right under the card's own border: no second rule (S805). */
+.phone-cards > .phone-card:first-child { border-top-color: transparent; }
 .phone-card__top {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
 }

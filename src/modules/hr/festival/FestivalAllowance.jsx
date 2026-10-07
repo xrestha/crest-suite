@@ -5,6 +5,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import RunStatusBadge from '../payroll/RunStatusBadge'
+import { BonusRunList, NewBonusRunDialog, normName } from '../payroll/BonusRuns'
+import Fab from '../../../components/Fab'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
@@ -39,11 +41,6 @@ const amberBanner = {
 // load-bearing: it is how a leaver is recognised at all.
 const EMP_COLS = 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, end_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium, email'
 
-// The name is typed, and every committed change re-reads the year. Committing per keystroke let
-// the empty result for "Tih" land after the real one and offer Generate over a finalized "Tihar"
-// run (S751), so the box commits after a pause, on blur or on Enter — and the load is guarded.
-const NAME_DEBOUNCE_MS = 400
-
 // A person deliberately taken out of a run keeps their row at 0 carrying this note, rather than
 // being deleted (S751 review): a deleted row made them "missing staff" again, and Add missing staff
 // put them straight back at 0 and re-blocked Finalize. The row is the record of the decision.
@@ -54,8 +51,6 @@ const isExcluded = r => String(r.note || '').trim() === EXCLUDED_NOTE
 const ID_CHUNK = 150
 
 const ON_PAYROLL = new Set(['active', 'probation'])
-// "Dashain", "dashain" and "Dash ain" are one festival to a reader and three runs to the database.
-const normName = s => String(s || '').toLowerCase().replace(/\s+/g, '')
 const monthOf  = r => r.bs_month || DEFAULT_BONUS_MONTH
 
 function payMonthBounds(bsYear, bsMonth) {
@@ -124,8 +119,12 @@ export default function FestivalAllowance() {
   const [bsYear,      setBsYear]      = useState(today.year)
   // The pay month for a run not generated yet. An existing run's month is read off its rows.
   const [draftMonth,  setDraftMonth]  = useState(DEFAULT_BONUS_MONTH)
-  const [nameInput,   setNameInput]   = useState('Dashain')
-  const [festival,    setFestival]    = useState('Dashain')   // the committed, trimmed name
+  // The run on screen. Empty means none is open and the page lists the year's runs (S805): a run is
+  // opened from that list or named in the New allowance dialog, never typed into the header, where
+  // each pause in typing re-read the year and a half-typed name was a new run (S751).
+  const [nameInput,   setNameInput]   = useState('')
+  const [festival,    setFestival]    = useState('')   // the committed, trimmed name
+  const [newOpen,     setNewOpen]     = useState(false)
   // Client-wide inputs to the tax: every employee, finalized payslips, finalized bonuses, components.
   const [base,        setBase]        = useState(null)
   const [baseError,   setBaseError]   = useState(null)
@@ -195,10 +194,6 @@ export default function FestivalAllowance() {
 
   useEffect(() => { loadBase() }, [loadBase])
   useEffect(() => { loadRun(bsYear, festival) }, [loadRun, bsYear, festival])
-  useEffect(() => {
-    const t = setTimeout(() => setFestival(nameInput.trim()), NAME_DEBOUNCE_MS)
-    return () => clearTimeout(t)
-  }, [nameInput])
   const commitName = () => setFestival(nameInput.trim())
   const pickRun = name => { setNameInput(name); setFestival(name) }
   const reloadRun = () => loadRun(current.current.year, current.current.name, { quiet: true })
@@ -248,15 +243,17 @@ export default function FestivalAllowance() {
     if (!run || run.year !== bsYear) return NONE
     const m = new Map()
     for (const r of run.yearRows) {
-      const g = m.get(r.festival_name) || { name: r.festival_name, count: 0, finalized: 0, bs_month: monthOf(r) }
+      const g = m.get(r.festival_name) || { name: r.festival_name, count: 0, staff: 0, finalized: 0, gross: 0, tds: 0, bs_month: monthOf(r) }
       g.count += 1
+      if (!isExcluded(r)) g.staff += 1
+      g.gross += parseFloat(r.amount) || 0
+      g.tds += parseFloat(r.tds) || 0
       if (r.status === 'finalized') g.finalized += 1
       m.set(r.festival_name, g)
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [run, bsYear])
   const lookalikes = yearRuns.filter(g => g.name !== festival && normName(g.name) === normName(festival))
-  const otherRuns  = yearRuns.filter(g => normName(g.name) !== normName(festival))
 
   const nameOf = empId => empMap.get(empId)?.full_name || `Employee ${String(empId).slice(0, 8)}`
   const taxWith = (emp, amount, fy, ytd, oth) => (emp ? computeRunBonusTds({
@@ -661,7 +658,9 @@ export default function FestivalAllowance() {
   const loading   = !loadError && !ready
   const taxBlocks = staleTax.length > 0
   const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !ownRow
-  const statusChip = g => (g.finalized === g.count ? { label: 'Finalized', cls: 'badge-green' } : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
+  const MONTH_TIP = 'The month the allowance is paid. It decides the tax year (a bonus paid Baisakh–Ashadh belongs to the tax year that began the Shrawan before), which other bonuses count as paid before it, and the date months of service are counted up to (the 15th). Locked once the run is finalized.'
+  // Continue from the dialog: an existing name opens that run; a new one opens empty, on its pay month.
+  const openNew = ({ name, month }) => { setNewOpen(false); if (month) setDraftMonth(month); pickRun(name) }
 
   return (
     <div>
@@ -669,51 +668,38 @@ export default function FestivalAllowance() {
         <div>
           <h1 className="page-title">Festival Allowance</h1>
           <p className="page-subtitle">
-            Dashain allowance (चाडपर्व खर्च) — {festival || 'unnamed'} {bsYear}, paid in {monthName}
+            Dashain allowance (चाडपर्व खर्च) — {festival ? `${festival} ${bsYear}, paid in ${monthName}` : `BS ${bsYear}`}
             {rows.length > 0 && (
               <RunStatusBadge finalized={finalized} />
             )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
-          <input
-            aria-label="Festival name" className="form-input" style={{ width: 130 }} value={nameInput} placeholder="Festival name"
-            disabled={busy}
-            onChange={e => setNameInput(e.target.value)} onBlur={commitName}
-            onKeyDown={e => { if (e.key === 'Enter') commitName() }}
-          />
           <select className="form-select" aria-label="BS year" value={bsYear} disabled={busy} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
             {years.map(y => <option key={y} value={y}>BS {y}</option>)}
           </select>
-          <Tip text="The month the allowance is paid. It decides the tax year (a bonus paid Baisakh–Ashadh belongs to the tax year that began the Shrawan before), which other bonuses count as paid before it, and the date months of service are counted up to (the 15th). Locked once the run is finalized." width={300}>
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Paid in</span>
-          </Tip>
-          <select
-            className="form-select" aria-label="Paid in (BS month)" value={payMonth}
-            disabled={busy || anyFinalized || (rows.length > 0 && !ready)}
-            onChange={e => changeMonth(parseInt(e.target.value, 10))}
-          >
-            {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
+          {festival && <>
+            <Tip text={MONTH_TIP} width={300}>
+              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Paid in</span>
+            </Tip>
+            <select
+              className="form-select" aria-label="Paid in (BS month)" value={payMonth}
+              disabled={busy || anyFinalized || (rows.length > 0 && !ready)}
+              onChange={e => changeMonth(parseInt(e.target.value, 10))}
+            >
+              {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+          </>}
           {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {/* On the list only: an open run's register is the work, and its floating button would sit on the rows. */}
+          <Fab onClick={() => { setMsg(''); setNewOpen(true) }} label="+ New allowance" show={!festival && ready && !loadError} />
         </div>
       </div>
 
-      {/* Runs that already exist this year — so a past run is found by clicking, not by retyping its name exactly. */}
-      {ready && yearRuns.length > 0 && (
-        <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }} role="group" aria-label={`Festival runs in BS ${bsYear}`}>
-          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Runs in BS {bsYear}:</span>
-          {yearRuns.map(g => {
-            const chip = statusChip(g)
-            const isCurrent = g.name === festival
-            return (
-              <button key={g.name} type="button" className="btn btn-ghost btn-sm" aria-pressed={isCurrent} onClick={() => pickRun(g.name)} disabled={busy}
-                style={isCurrent ? { borderColor: 'var(--theme-accent)' } : undefined}>
-                {g.name} · {BS_MONTHS[g.bs_month - 1]} · {g.count} staff
-                <span className={`badge ${chip.cls}`} style={{ marginLeft: 6 }}>{chip.label}</span>
-              </button>
-            )
-          })}
+      {/* An open run goes back to the year's list; the list itself is the page body below (S805). */}
+      {festival && !loadError && (
+        <div className="no-print" style={{ marginBottom: 14 }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => pickRun('')} disabled={busy}>‹ All BS {bsYear} allowances</button>
         </div>
       )}
 
@@ -722,9 +708,9 @@ export default function FestivalAllowance() {
       ) : loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
       ) : !festival ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>
-          Name the festival above (for example Dashain or Tihar){yearRuns.length > 0 ? ', or pick one of this year’s runs' : ''}.
-        </div>
+        <BonusRunList runs={yearRuns} year={bsYear} noun="festival allowance" onOpen={pickRun}
+          emptyTitle={`No festival allowance for BS ${bsYear} yet`}
+          emptyText="Press + New allowance to name one (Dashain, Tihar) and pick the month it is paid. Nothing is saved until you generate it." />
       ) : rows.length === 0 ? (
         <>
           {lookalikes.length > 0 && (
@@ -732,16 +718,6 @@ export default function FestivalAllowance() {
               <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>“{festival}” differs from the existing “{lookalikes[0].name}” run only by capital letters or spaces.</div>
               Generating would create a second, separate allowance for the same festival. Open the existing one instead:{' '}
               {lookalikes.map(g => <button key={g.name} type="button" className="btn btn-ghost btn-sm" onClick={() => pickRun(g.name)}>{g.name}</button>)}
-            </div>
-          )}
-          {otherRuns.length > 0 && (
-            <div role="alert" className="card" style={{ ...amberBanner, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-              <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>
-                {otherRuns.length === 1
-                  ? `A ${otherRuns[0].name} allowance already exists for BS ${bsYear} — this would be a second one.`
-                  : `${otherRuns.length} festival allowances already exist for BS ${bsYear} (${otherRuns.map(g => g.name).join(', ')}) — this would be another one.`}
-              </div>
-              That is allowed. Each run is taxed on top of the bonuses paid before it that tax year, so its income tax can be higher.
             </div>
           )}
           {eligible.length === 0 ? (
@@ -975,6 +951,12 @@ export default function FestivalAllowance() {
             Income tax is worked out on the whole {fyLabel(fyStart)} tax year: salary already paid, salary still to come and other bonuses finalized earlier in the year.
           </p>
         </>
+      )}
+      {newOpen && (
+        <NewBonusRunDialog title="New festival allowance" runs={yearRuns} year={bsYear} noun="festival allowance"
+          defaultName={yearRuns.some(g => normName(g.name) === normName('Dashain')) ? '' : 'Dashain'} defaultMonth={draftMonth}
+          nameLabel="Festival" namePlaceholder="e.g. Dashain or Tihar" monthTip={MONTH_TIP}
+          onClose={() => setNewOpen(false)} onContinue={openNew} />
       )}
       {confirmEl}
     </div>

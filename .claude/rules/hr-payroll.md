@@ -821,8 +821,8 @@ History: #s748-employees-pay-setup-holiday-calendar, #s798-stage-1b
   dashboard and Employees tiles, Attendance OT hours and the TADA claim totals). A code is text2.
   Colour is for flags only (SSF no. missing, no bank, out of date, split month, owed by the employee:
   amber with △; Retiring soon: amber, Retired: red). `RunStatusBadge` is the one Draft (amber) /
-  Finalized (green) chip beside a run's title; Festival Allowance and Incentive Run still build their
-  own per-run list chip, with a third state "Part finalized", in the same colours. Roster publish is
+  Finalized (green) chip beside a run's title; Festival Allowance and Incentive Run's year list takes
+  `runStatusChip` (`payroll/BonusRuns.jsx`, S805), with a third state "Part finalized", in the same colours. Roster publish is
   ○ Draft amber → ◐ partly published amber → ✓ Published green. A resigned or terminated employee is
   grey, not red.
 - Final Settlement sits in the Payroll nav group; Gratuity stays in Reports.

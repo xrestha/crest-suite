@@ -5,6 +5,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import RunStatusBadge from '../payroll/RunStatusBadge'
+import { BonusRunList, NewBonusRunDialog, normName } from '../payroll/BonusRuns'
+import Fab from '../../../components/Fab'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, formatAdAsBs, getBsToday } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
@@ -39,10 +41,6 @@ const amberBanner = {
 // left, and eligibility is decided against the PAY month, which the query cannot know.
 const EMP_COLS = 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, end_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium, email'
 
-// The bonus name is typed; committing it per keystroke let the empty load for a half-typed name
-// land last and offer Generate over a real run (S751). Commit after a pause, on blur or on Enter.
-const NAME_DEBOUNCE_MS = 400
-
 // A person deliberately taken out of a run keeps their row at 0 carrying this note rather than
 // being deleted — a deleted row came back as "missing staff" (S751 review; FestivalAllowance too).
 const EXCLUDED_NOTE = 'Excluded from this run'
@@ -52,7 +50,6 @@ const isExcluded = r => String(r.note || '').trim() === EXCLUDED_NOTE
 const ID_CHUNK = 150
 
 const ON_PAYROLL = new Set(['active', 'probation'])
-const normName = s => String(s || '').toLowerCase().replace(/\s+/g, '')
 const monthOf  = r => r.bs_month || DEFAULT_BONUS_MONTH
 
 function payMonthBounds(bsYear, bsMonth) {
@@ -130,8 +127,11 @@ export default function IncentiveRun() {
   const [configsError, setConfigsError] = useState(null)
   const [configsReady, setConfigsReady] = useState(false)
   const [configId,     setConfigId]     = useState('')        // the type for a run not generated yet
+  // The run on screen; empty lists the year's runs (S805). A run is opened from that list or named in
+  // the New bonus run dialog, never typed into the header, where a half-typed name was a new run (S751).
   const [labelInput,   setLabelInput]   = useState('')
   const [runLabel,     setRunLabel]     = useState('')        // the committed, trimmed label
+  const [newOpen,      setNewOpen]      = useState(false)
   const [bsYear,       setBsYear]       = useState(today.year)
   const [draftMonth,   setDraftMonth]   = useState(today.month)
   const [base,         setBase]         = useState(null)
@@ -200,10 +200,6 @@ export default function IncentiveRun() {
   useEffect(() => { loadConfigs() }, [loadConfigs])
   useEffect(() => { loadBase() }, [loadBase])
   useEffect(() => { loadRun(bsYear, runLabel) }, [loadRun, bsYear, runLabel])
-  useEffect(() => {
-    const t = setTimeout(() => setRunLabel(labelInput.trim()), NAME_DEBOUNCE_MS)
-    return () => clearTimeout(t)
-  }, [labelInput])
   const commitLabel = () => setRunLabel(labelInput.trim())
   const pickRun = label => { setLabelInput(label); setRunLabel(label) }
   const reloadRun = () => loadRun(current.current.year, current.current.label, { quiet: true })
@@ -257,15 +253,17 @@ export default function IncentiveRun() {
     if (!run || run.year !== bsYear) return NONE
     const m = new Map()
     for (const r of run.yearRows) {
-      const g = m.get(r.run_label) || { name: r.run_label, count: 0, finalized: 0, bs_month: monthOf(r) }
+      const g = m.get(r.run_label) || { name: r.run_label, count: 0, staff: 0, finalized: 0, gross: 0, tds: 0, bs_month: monthOf(r) }
       g.count += 1
+      if (!isExcluded(r)) g.staff += 1
+      g.gross += parseFloat(r.amount) || 0
+      g.tds += parseFloat(r.tds) || 0
       if (r.status === 'finalized') g.finalized += 1
       m.set(r.run_label, g)
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [run, bsYear])
   const lookalikes = runLabel ? yearRuns.filter(g => g.name !== runLabel && normName(g.name) === normName(runLabel)) : NONE
-  const otherRuns  = runLabel ? yearRuns.filter(g => normName(g.name) !== normName(runLabel)) : NONE
 
   const nameOf = empId => empMap.get(empId)?.full_name || `Employee ${String(empId).slice(0, 8)}`
   const taxWith = (emp, amount, fy, ytd, oth) => (emp ? computeRunBonusTds({
@@ -634,7 +632,14 @@ export default function IncentiveRun() {
   const taxBlocks = staleTax.length > 0
   const allZero   = rows.length > 0 && !(total > 0)
   const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !allZero && !ownRow
-  const statusChip = g => (g.finalized === g.count ? { label: 'Finalized', cls: 'badge-green' } : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
+  const MONTH_TIP = 'The month the bonus is paid. It decides the tax year (a bonus paid Baisakh–Ashadh belongs to the tax year that began the Shrawan before), which other bonuses count as paid before it, and, for a type reduced for months worked, the date service is counted up to (the 15th). Locked once the run is finalized.'
+  // Continue from the dialog: an existing name opens that run; a new one opens empty, on its type and
+  // pay month, ready for Generate.
+  const openNew = ({ name, month, typeId }) => {
+    setNewOpen(false)
+    if (month) { setDraftMonth(month); setConfigId(typeId || '') }
+    pickRun(name)
+  }
 
   return (
     <div>
@@ -642,7 +647,7 @@ export default function IncentiveRun() {
         <div>
           <h1 className="page-title">Incentives / Bonus</h1>
           <p className="page-subtitle">
-            One-off bonus runs — {runLabel || 'unnamed run'} {bsYear}, paid in {monthName}
+            One-off bonus runs — {runLabel ? `${runLabel} ${bsYear}, paid in ${monthName}` : `BS ${bsYear}`}
             {rows.length > 0 && (
               <RunStatusBadge finalized={finalized} />
             )}
@@ -650,58 +655,48 @@ export default function IncentiveRun() {
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select
-              className="form-select" aria-label="Bonus type" value={effConfigId}
-              disabled={rows.length > 0 || busy}
-              title={rows.length > 0 ? 'A generated run keeps the type it was generated with.' : undefined}
-              onChange={e => {
-                setConfigId(e.target.value)
-                const cfg = configs.find(c => c.id === e.target.value)
-                if (cfg && !labelInput.trim()) pickRun(cfg.name)
-              }}
-            >
-              <option value="">— No type: type each amount —</option>
-              {activeConfigs.map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? '' : ' (inactive)'}</option>)}
-            </select>
-            <input
-              aria-label="Bonus name" className="form-input" style={{ width: 170 }} value={labelInput} placeholder="Bonus name, e.g. Q1 Sales Bonus"
-              disabled={busy}
-              onChange={e => setLabelInput(e.target.value)} onBlur={commitLabel}
-              onKeyDown={e => { if (e.key === 'Enter') commitLabel() }}
-            />
+            {runLabel && (
+              <select
+                className="form-select" aria-label="Bonus type" value={effConfigId}
+                disabled={rows.length > 0 || busy}
+                title={rows.length > 0 ? 'A generated run keeps the type it was generated with.' : undefined}
+                onChange={e => {
+                  setConfigId(e.target.value)
+                  const cfg = configs.find(c => c.id === e.target.value)
+                  if (cfg && !labelInput.trim()) pickRun(cfg.name)
+                }}
+              >
+                <option value="">— No type: type each amount —</option>
+                {activeConfigs.map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? '' : ' (inactive)'}</option>)}
+              </select>
+            )}
             <select className="form-select" aria-label="BS year" value={bsYear} disabled={busy} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
               {years.map(y => <option key={y} value={y}>BS {y}</option>)}
             </select>
-            <Tip text="The month the bonus is paid. It decides the tax year (a bonus paid Baisakh–Ashadh belongs to the tax year that began the Shrawan before), which other bonuses count as paid before it, and, for a type reduced for months worked, the date service is counted up to (the 15th). Locked once the run is finalized." width={300}>
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Paid in</span>
-            </Tip>
-            <select
-              className="form-select" aria-label="Paid in (BS month)" value={payMonth}
-              disabled={busy || anyFinalized || (rows.length > 0 && !ready)}
-              onChange={e => changeMonth(parseInt(e.target.value, 10))}
-            >
-              {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
+            {runLabel && <>
+              <Tip text={MONTH_TIP} width={300}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Paid in</span>
+              </Tip>
+              <select
+                className="form-select" aria-label="Paid in (BS month)" value={payMonth}
+                disabled={busy || anyFinalized || (rows.length > 0 && !ready)}
+                onChange={e => changeMonth(parseInt(e.target.value, 10))}
+              >
+                {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+              </select>
+            </>}
           </div>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowConfigs(true)} disabled={!configsReady}>⚙ Manage Types</button>
           {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {/* On the list only: an open run's register is the work, and its floating button would sit on the rows. */}
+          <Fab onClick={() => { setMsg(''); setNewOpen(true) }} label="+ New bonus run" show={!runLabel && ready && !loadError} />
         </div>
       </div>
 
-      {ready && yearRuns.length > 0 && (
-        <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }} role="group" aria-label={`Bonus runs in BS ${bsYear}`}>
-          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Runs in BS {bsYear}:</span>
-          {yearRuns.map(g => {
-            const chip = statusChip(g)
-            const isCurrent = g.name === runLabel
-            return (
-              <button key={g.name} type="button" className="btn btn-ghost btn-sm" aria-pressed={isCurrent} onClick={() => pickRun(g.name)} disabled={busy}
-                style={isCurrent ? { borderColor: 'var(--theme-accent)' } : undefined}>
-                {g.name} · {BS_MONTHS[g.bs_month - 1]} · {g.count} staff
-                <span className={`badge ${chip.cls}`} style={{ marginLeft: 6 }}>{chip.label}</span>
-              </button>
-            )
-          })}
+      {/* An open run goes back to the year's list; the list itself is the page body below (S805). */}
+      {runLabel && !loadError && (
+        <div className="no-print" style={{ marginBottom: 14 }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => pickRun('')} disabled={busy}>‹ All BS {bsYear} bonus runs</button>
         </div>
       )}
 
@@ -710,9 +705,9 @@ export default function IncentiveRun() {
       ) : loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)' }}>Loading…</div>
       ) : !runLabel ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
-          Name the bonus run above (and optionally pick a bonus type){yearRuns.length > 0 ? ', or pick one of this year’s runs' : ''} to get started.
-        </div>
+        <BonusRunList runs={yearRuns} year={bsYear} noun="bonus run" onOpen={pickRun}
+          emptyTitle={`No bonus runs for BS ${bsYear} yet`}
+          emptyText="Press + New bonus run to name one, pick its type and the month it is paid. Nothing is saved until you generate it." />
       ) : rows.length === 0 ? (
         <>
           {lookalikes.length > 0 && (
@@ -720,16 +715,6 @@ export default function IncentiveRun() {
               <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>“{runLabel}” differs from the existing “{lookalikes[0].name}” run only by capital letters or spaces.</div>
               Generating would create a second, separate run. Open the existing one instead:{' '}
               {lookalikes.map(g => <button key={g.name} type="button" className="btn btn-ghost btn-sm" onClick={() => pickRun(g.name)}>{g.name}</button>)}
-            </div>
-          )}
-          {otherRuns.length > 0 && (
-            <div role="alert" className="card" style={{ ...amberBanner, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-              <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>
-                {otherRuns.length === 1
-                  ? `A “${otherRuns[0].name}” run already exists for BS ${bsYear} — this would be a second bonus run that year.`
-                  : `${otherRuns.length} bonus runs already exist for BS ${bsYear} (${otherRuns.map(g => g.name).join(', ')}) — this would be another one.`}
-              </div>
-              That is allowed. Each run is taxed on top of the bonuses paid before it that tax year, so its income tax can be higher.
             </div>
           )}
           {eligible.length === 0 ? (
@@ -960,6 +945,12 @@ export default function IncentiveRun() {
         </>
       )}
 
+      {newOpen && (
+        <NewBonusRunDialog title="New bonus run" runs={yearRuns} year={bsYear} noun="bonus run" defaultMonth={draftMonth}
+          nameLabel="Bonus name" namePlaceholder="e.g. Q1 Sales Bonus" monthTip={MONTH_TIP}
+          types={configs.filter(c => c.active).map(c => ({ id: c.id, name: c.name }))}
+          onClose={() => setNewOpen(false)} onContinue={openNew} />
+      )}
       {showConfigs && (
         <IncentiveConfigs configs={configs} onClose={() => setShowConfigs(false)} onChanged={loadConfigs} />
       )}
