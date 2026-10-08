@@ -119,8 +119,14 @@ are load-bearing, each with the reason it exists:
   says what changed (S687).** Upcoming = `reserved_for >= today`, unpaged, under day headers;
   Day is the service view. Activity orders by `updated_at DESC LIMIT 100` — `updated_at` is
   trigger-maintained on this table and on no other, which is why it can be trusted here. Only
-  `created_by` is stored: the Activity label carries no actor for a confirm/seat/cancel, and a
-  future `updated_by` must be set from `auth.uid()` in the trigger, never a parameter. The "new
+  `created_by` is stored, stamped from `auth.uid()` by `pos_reservations_stamp_created_by` and
+  kept on update (S809, operator exempt for the restore); `activityBy` names it on Booked alone.
+  A future `updated_by` must be set the same way, never from a parameter.
+- **A booking, its tables and its bill belong to one outlet (S809, `20261008120000`).** The
+  link's foreign keys are composite, `(reservation_id, client_id)` and `(table_id, client_id)`,
+  and `pos_reservations_guard_order_client` holds `order_id` to the same outlet. Table ids are in
+  the guest QR, so a single-column key let another outlet's login link to them. A DEFINER guard
+  over these tables filters by client itself, whatever the keys already promise. The "new
   since you last looked" stamp is per device (`src/shared/reservationSeen.js`); the page and
   `useNavBadgeCounts` must keep counting from the SAME stamp with the SAME predicate, or the
   nav chip and the tab disagree.

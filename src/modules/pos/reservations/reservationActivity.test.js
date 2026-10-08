@@ -1,4 +1,4 @@
-import { activityEvent, agoLabel, isNewSince, groupByDay } from './reservationActivity'
+import { activityEvent, activityBy, agoLabel, isNewSince, groupByDay } from './reservationActivity'
 
 const T0 = '2026-09-06T10:00:00.000Z'
 const min = n => new Date(Date.parse(T0) + n * 60000).toISOString()
@@ -19,6 +19,27 @@ describe('activityEvent', () => {
   it('falls back to the status label and never throws on a bare row', () => {
     expect(activityEvent({ status: 'no_show', updated_at: T0 })).toEqual({ label: 'No-show', at: T0 })
     expect(activityEvent({ status: 'arrived' })).toEqual({ label: 'Arrived', at: null })
+  })
+})
+
+describe('activityBy', () => {
+  const names = { u1: 'Rina' }
+  it('names who took a booking on Booked only', () => {
+    const r = { source: 'phone', created_by: 'u1' }
+    expect(activityBy(r, { label: 'Booked' }, names)).toBe('by Rina')
+    expect(activityBy(r, { label: 'Edited' }, names)).toBeNull()
+    expect(activityBy(r, { label: 'Confirmed' }, names)).toBeNull()
+    expect(activityBy(r, { label: 'Cancelled' }, names)).toBeNull()
+  })
+  it('says where a booking-link request came from instead of naming anyone', () => {
+    const r = { source: 'website', created_by: 'u1' }
+    expect(activityBy(r, { label: 'Accepted' }, names)).toBe('from your booking link')
+    expect(activityBy(r, { label: 'Declined' }, names)).toBe('from your booking link')
+  })
+  it('prints nothing for an author it cannot name, and never throws on a bare row', () => {
+    expect(activityBy({ source: 'phone', created_by: 'gone' }, { label: 'Booked' }, names)).toBeNull()
+    expect(activityBy({}, { label: 'Booked' })).toBeNull()
+    expect(activityBy(undefined, undefined)).toBeNull()
   })
 })
 

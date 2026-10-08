@@ -27,7 +27,7 @@ import {
 } from './reservationStatus'
 import { describeHoldRefusal } from './reservationConflicts'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from './reservationSettings'
-import { activityEvent, agoLabel, isNewSince, groupByDay } from './reservationActivity'
+import { activityEvent, activityBy, agoLabel, isNewSince, groupByDay } from './reservationActivity'
 import { readSeenStamp, writeSeenStamp } from '../../../shared/reservationSeen'
 import { bookedCoversByHour, overSeatsHours } from './reservationCapacity'
 import { fillTemplate, openWhatsApp } from './whatsappLink'
@@ -605,7 +605,7 @@ export default function PosReservations() {
                 <thead>
                   <tr>
                     <th>When</th>
-                    <th>What <Tip text="The booking's latest change. Who took a booking is recorded; who confirmed, seated or cancelled it is not." width={240}>ⓘ</Tip></th>
+                    <th>What <Tip text="The booking's latest change. Who took a booking is recorded; who edited, confirmed, seated or cancelled it is not." width={240}>ⓘ</Tip></th>
                     <th>Guest</th>
                     <th>For</th>
                     <th style={{ textAlign: 'right' }}>Party</th>
@@ -619,9 +619,7 @@ export default function PosReservations() {
                     const evBs = nepalBs(ev.at)
                     const forBs = nepalBs(r.reserved_for)
                     const fresh = isNewSince(r, seenStamp)
-                    const by = r.status === 'booked' || ev.label === 'Edited' || ev.label === 'Accepted' || ev.label === 'Declined'
-                      ? (r.source === 'website' ? 'guest, online' : staffNames[r.created_by] || null)
-                      : null
+                    const by = activityBy(r, ev, staffNames)
                     return (
                       <tr key={r.id} className={fresh ? 'resv-row--new' : undefined}>
                         <td style={{ whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--theme-text1)' }}>
@@ -630,7 +628,7 @@ export default function PosReservations() {
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <span className={`badge ${RESERVATION_STATUS_BADGE[r.status] || 'badge-gray'}`}>{ev.label}</span>
-                          {by && <span className="cell-sub">by {by}</span>}
+                          {by && <span className="cell-sub">{by}</span>}
                           {fresh && <> <span className="badge badge-yellow badge-sentence">new</span></>}
                         </td>
                         <td>

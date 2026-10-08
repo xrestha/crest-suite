@@ -9,8 +9,8 @@ const EDIT_SLACK_MS = 60000
 /**
  * The row's latest change as { label, at }. `at` is always updated_at (the one column a trigger
  * maintains on every write), so the list orders by what actually moved last. Who confirmed,
- * arrived or cancelled is NOT stored — only created_by is — so the label carries no actor; the
- * page prints "by <name>" for a new booking and nothing else.
+ * arrived or cancelled is NOT stored — only created_by is — so the label carries no actor; see
+ * activityBy for the line under it.
  */
 export function activityEvent(r) {
   const at = r.updated_at || r.created_at || null
@@ -23,6 +23,19 @@ export function activityEvent(r) {
     case 'cancelled': return { label: r.source === 'website' && !r.confirmed_at ? 'Declined' : 'Cancelled', at }
     default:          return { label: STATUS_LABEL[r.status] || r.status || '', at }
   }
+}
+
+/**
+ * The line under the What badge, or null. Only who TOOK a booking is stored (created_by, stamped
+ * from the signed-in login by the database since S809), so a name prints on "Booked" alone: an
+ * edit, an accept or a cancel may have been someone else (RESERVATIONS-12). A booking-link request
+ * has no staff author, so it names where it came from instead, whatever its label.
+ */
+export function activityBy(r, ev, staffNames = {}) {
+  if (r?.source === 'website') return 'from your booking link'
+  if (ev?.label !== 'Booked') return null
+  const name = staffNames[r?.created_by]
+  return name ? `by ${name}` : null
 }
 
 /** "just now" / "12 min ago" / "3 h ago" / "yesterday" / "5 days ago"; '' for nothing usable. */

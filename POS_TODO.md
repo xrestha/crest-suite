@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-08 (S809 — whole-module POS re-analysis filed below as S809.0–S809.3; nothing fixed yet)
+Last updated: 2026-10-08 (S809 — whole-module POS re-analysis filed below as S809.0–S809.3; stage-1 decisions answered; slice 1a shipped)
 
 ---
 
@@ -50,11 +50,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 3 = the floor, kitchen, guests, bookings, loyalty and report figures (lost work and wrong figures);
 4 = P3 copy, docs and polish. Within a stage, P0/P1 rows go first. Mig = needs a migration.
 
-### P0 (1)
+### P0 (0 open; RESERVATIONS-1 shipped in slice 1a, see POS_DECISIONS.md)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| RESERVATIONS-1 | A login at any other Crest outlet can link its own booking to this outlet's table. That includes a self-signup trial nobody has approved, and table ids are printed in the QR. The table-hold guard then reads across tenants and its refusal shows this outlet's guest name, party size and time. The same link blocks the outlet from holding its own table | 1 | — | yes |
 
 ### P1 (7)
 
@@ -138,7 +137,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
 | SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (91)
+### P3 (90 open; RESERVATIONS-12 shipped in slice 1a)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -149,7 +148,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | CREDIT-NOTES-6 | Any login can reset a Credit Note's print counter over REST (twin of CHECKOUT-8) | 1 | — | yes |
 | CUSTOMERS-PARKING-13 | A parking slip's rank rule, number and names are screen-only: any login can issue, renumber or rewrite one | 1 | — | yes |
 | DATABASE-9 | The retired comp-slip number function is still callable | 1 | — | yes |
-| RESERVATIONS-12 | The Activity view names the wrong person, and "who took the booking" is whatever the browser sends | 1 | — | yes |
 | ACCESS-10 | A dead till says a POS manager can re-activate it, but a POS manager can't sign in on a dead tablet | 4 | — | no |
 | ACCESS-11 | Deactivating the tablet you are signed in on with a PIN turns its idle lock off | 4 | — | no |
 | ACCESS-12 | A correct PIN can land the waiter on the Owner's email login with no message | 4 | — | no |
@@ -250,6 +248,9 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 
 Each has a recommended answer. Answering "all as recommended" is enough to start; name any you want
 different.
+
+**Answered 2026-10-08 (S809): every stage-1 question, all as recommended.** Q1 (b), Q2 (a), Q3 (a),
+Q4 (a), Q5 (a), Q6 (a), Q7 (a), Q24 (a), Q26 (a), Q27 (c). Q8–Q23 and Q25 are still open.
 
 **Stage 1**
 
@@ -373,6 +374,31 @@ Rows that touch the same table or function ship together:
   ORDER-FLOW-9 (both are allergy notes not reaching the kitchen).
 - **Stage 4: P3 copy, docs and polish.** Pull a P3 forward into an earlier slice when that slice already
   edits its file.
+
+**Stage 1 slices (owner approved 2026-10-08).** GAP-RELEASE-1 moved up to slice 2. Every later slice
+changes what the database accepts, and a tablet still running the old code would start having its saves
+refused mid-service. RESERVATIONS-1 changes nothing the till sends, so it still goes first. After slice 2
+ships, reload every till by hand once. Each slice re-reads the live body of any function an earlier slice
+changed.
+
+| # | IDs | Migration | Edge Function | Decisions |
+| --- | --- | --- | --- | --- |
+| 1a ✅ | RESERVATIONS-1, RESERVATIONS-12 (shipped 2026-10-08, `20261008120000` live) | hold guard, composite FKs, `order_id` same-client trigger, `created_by` stamp | — | — |
+| 1b | GAP-RELEASE-1 | `min_pos_build` check (part 2) | — | Q27 |
+| 1c | CHECKOUT-2, CHECKOUT-8, CREDIT-NOTES-6 | `guard_pos_order_close` A+B, `pos_orders` CHECK, `guard_pos_credit_note` | — | — |
+| 1d | DATABASE-1, ORDER-FLOW-2 | `pos_kot_log` / `pos_kot_removals` guards, `save_pos_order_items`, `guard_pos_item_price` | — | Q1 |
+| 1e | ACCESS-1, ACCESS-2 | none | — | Q4 |
+| 1f | ACCESS-3, DOCS-1 | none | `admin-user-ops` | Q5, Q6 |
+| 1g | ACCESS-4, GAP-OUTLETS-1 | `set_active_outlet` | `pos-staff-login` | Q24 |
+| 1h | GUEST-4, RESERVATIONS-3, RESERVATIONS-4 | access helper, 3 guest-menu and 3 booking functions | — | Q2, Q3 |
+| 1i | DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7 | `guard_pos_order_payments_closed`, `pos_customers_guard_loyalty`, ledger FK | — | — |
+| 1j | ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9 | retire the shared key, drop 2 dead RPCs, rank checks, comp quantity | — | Q7 |
+| 1k | CHECKOUT-12, CUSTOMERS-PARKING-13 | payment-confirmation guard, parking-slip trigger and unique number | — | — |
+| 1l | SHIFTS-2, GAP-OPERATOR-1 | `pos_shifts_guard` or `close_pos_shift`, `pos_cash_movements_guard`, `guard_pos_credit_note`, restore flag | — | Q26 |
+
+ACCESS-8 needs a migration (it drops `get_pos_device_secret`), although the index above says no. If 1l is
+too big for one chat, split it: SHIFTS-2 with the operator change for the two shift guards, then the
+remaining guards.
 
 ## S809.3 Outside POS, filed here
 

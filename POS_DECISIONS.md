@@ -180,6 +180,20 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 1, slice 1a: RESERVATIONS-1 (P0) and RESERVATIONS-12 (P3)~~ — **shipped S809,
+  2026-10-08**, migration `20261008120000` applied live (crest-v412). Another outlet's login, an
+  unapproved trial included, could link its own booking to this outlet's table, because the link's
+  foreign keys checked only that the ids exist and table ids are printed in the guest QR.
+  `guard_pos_reservation_table_hold` (SECURITY DEFINER) then refused with this outlet's guest name,
+  party size, time and booking id, and a link that landed blocked the table. Fixed with composite
+  keys `(reservation_id, client_id)` / `(table_id, client_id)`, an outlet filter inside the guard,
+  no booking id in its DETAIL, and `pos_reservations_guard_order_client` for `order_id`.
+  `created_by` is stamped from `auth.uid()` and kept on update (`pos_reservations_stamp_created_by`,
+  operator exempt for the restore). The Activity view names a person on Booked only; a booking-link
+  request reads "from your booking link". Verified by the migration's own rolled-back probe as
+  BLOOM CAFE's Owner, a live catalog read-back, and a PostgREST embed check against a control.
+  Original rows: `docs/pos-review-s809/RESERVATIONS.md`.
+
 - [x] ~~The POS module critique (24/40)~~ — **shipped S776, 2026-09-17, every finding fixed in eight
   commits** (`c287f0da` → `e2de401d`, crest-v328 → v335; snapshot
   `.impeccable/critique/2026-09-17T07-02-03Z__src-modules-pos.md`). Owner decisions:
