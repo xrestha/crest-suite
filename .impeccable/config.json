@@ -107,6 +107,24 @@
         ],
         "createdAt": "2026-10-07T00:00:00.000Z",
         "reason": "S806 (HR critique 2026-10-06 minor): DEFAULT_LEAVE_TYPES categorical colour, seeded into hr_leave_types and editable per client - the same class as the DEFAULT_SHIFTS fills above. FILL-only: LeaveManagement renders every leave colour through typeTint() for a fill and typeText() for a label, never as raw text. Scoped to this one file (the S765 rule), so the same hex anywhere else is still flagged. #a78bfa needs no entry: it is the --theme-purple token value."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#d7d3d3",
+        "files": [
+          "src/context/ThemeContext.js"
+        ],
+        "createdAt": "2026-10-08T08:17:26.958Z",
+        "reason": "Modernist Light preset border/borderLt (PRESETS.light). Documented in DESIGN.md Neutral prose and in .impeccable/design.json colorMeta lightPreset (ink-border / ink-border-lt); the hook checks only the frontmatter (which carries the Dark default) and tonal ramps, so Light-only values read as undocumented. Surfaced 2026-10-08 when the cancelled S807 re-theme was stashed and the file was rewritten to its committed state. Scoped to this one file."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#e5e3e3",
+        "files": [
+          "src/context/ThemeContext.js"
+        ],
+        "createdAt": "2026-10-08T08:17:27.143Z",
+        "reason": "Modernist Light preset border/borderLt (PRESETS.light). Documented in DESIGN.md Neutral prose and in .impeccable/design.json colorMeta lightPreset (ink-border / ink-border-lt); the hook checks only the frontmatter (which carries the Dark default) and tonal ramps, so Light-only values read as undocumented. Surfaced 2026-10-08 when the cancelled S807 re-theme was stashed and the file was rewritten to its committed state. Scoped to this one file."
       }
     ]
   }
