@@ -128,18 +128,10 @@ export default function LeaveManagement() {
       setMsg(`error:Could not load ${what} — the figures on this page are from the last successful load. ` + errorText(error, 'operator'))
       setLoading(false)
     }
-    // Seed default leave types on first visit. The error check comes FIRST: a failed read used to
-    // look exactly like "no types yet" and seeded a duplicate set on every retry.
-    let { data: lt, error: ltErr } = await scopedFrom('hr_leave_types').order('sort_order')
-    if (ltErr) { loadFailed('leave types', ltErr); return }
-    if (!lt || lt.length === 0) {
-      const { error: seedErr } = await scopedInsert('hr_leave_types', DEFAULT_LEAVE_TYPES)
-      if (seedErr) { loadFailed('the default leave types', seedErr); return }
-      const r = await scopedFrom('hr_leave_types').order('sort_order')
-      if (r.error) { loadFailed('leave types', r.error); return }
-      lt = r.data || []
-    }
-    const results = await Promise.all([
+    // The leave types are read WITH everything else (S808): none of the reads below uses them, and
+    // reading them first cost every visit a round trip so that the first visit ever could seed.
+    const [ltRes, ...results] = await Promise.all([
+      scopedFrom('hr_leave_types').order('sort_order'),
       // Every status, not just active/probation — the Balances tab filters in JS so it can show a
       // leaver on request, while every other tab here still works from the active list below.
       // `email`: the second half of the own-record test (useIsOwnEmployee). `join_date`: the gap
@@ -160,6 +152,17 @@ export default function LeaveManagement() {
       // public holiday as a leave day.
       scopedFrom('hr_holiday_calendar', 'bs_year, bs_month, bs_day, holiday_type, removed_at').eq('holiday_type', 'public').is('removed_at', null),
     ])
+    // Seed default leave types on first visit. The error check comes FIRST: a failed read used to
+    // look exactly like "no types yet" and seeded a duplicate set on every retry.
+    let { data: lt, error: ltErr } = ltRes
+    if (ltErr) { loadFailed('leave types', ltErr); return }
+    if (!lt || lt.length === 0) {
+      const { error: seedErr } = await scopedInsert('hr_leave_types', DEFAULT_LEAVE_TYPES)
+      if (seedErr) { loadFailed('the default leave types', seedErr); return }
+      const r = await scopedFrom('hr_leave_types').order('sort_order')
+      if (r.error) { loadFailed('leave types', r.error); return }
+      lt = r.data || []
+    }
     const failed = results.find(r => r && r.error)
     if (failed) { loadFailed('leave data', failed.error); return }
     const [{ data: emps }, { data: pr }, { data: reqs }, { data: setl }, { data: runs }, { data: hols }] = results

@@ -158,6 +158,8 @@ export default function HrDashboard() {
   // failed query just zeroed out its stat/emptied its list, indistinguishable from "this client
   // genuinely has none," with no indication anything had actually gone wrong.
   const [loadError, setLoadError] = useState('')
+  // Bumped by Retry only: remounts the month strip and the labour panel, which load on their own.
+  const [retryKey, setRetryKey] = useState(0)
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
@@ -313,34 +315,19 @@ export default function HrDashboard() {
   // header and skeleton for the duration of a fetch that should never have started.
   if (!hasHrAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
-  // A skeleton mirroring the page's real layout (header + 3 stat-grid rows) instead of a plain
-  // "Loading…" text block — consistent with the per-KPI skeleton pattern used elsewhere on the
-  // client and owner dashboards.
-  if (loading) return (
-    <div>
-      {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton,
-          which on its own gives no indication to a screen reader that the page is still loading. */}
-      <div role="status" aria-live="polite" className="sr-only">Loading dashboard data…</div>
-      {/* Both returns carry the weather slot, so the header does not jump when the data lands. */}
-      <div className={weatherStrip.visible ? 'page-header page-header--split' : 'page-header'}>
-        <div>
-          <h1 className="page-title">HR Dashboard</h1>
-          <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
-        </div>
-        <WeatherHeaderSlot strip={weatherStrip} />
-      </div>
-      {[0, 1, 2].map(row => (
-        <div key={row} className="stat-grid dash-section">
-          {[0, 1, 2, 3].map(card => (
-            <div key={card} className="stat-card">
-              <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 8 }} />
-              <span className="skeleton" style={{ display: 'block', width: '40%', height: 24 }} />
-            </div>
-          ))}
+  // A skeleton mirroring the page's real layout (3 stat-grid rows) instead of a plain "Loading…"
+  // text block — consistent with the per-KPI skeleton pattern used elsewhere on the client and
+  // owner dashboards.
+  const skeletonRows = [0, 1, 2].map(row => (
+    <div key={row} className="stat-grid dash-section">
+      {[0, 1, 2, 3].map(card => (
+        <div key={card} className="stat-card">
+          <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 8 }} />
+          <span className="skeleton" style={{ display: 'block', width: '40%', height: 24 }} />
         </div>
       ))}
     </div>
-  )
+  ))
 
   const pendingLeave = pendingCounts.leave
   const pendingOt    = pendingCounts.ot
@@ -357,11 +344,18 @@ export default function HrDashboard() {
     ? { value: '—', sub: 'count unavailable — open the page', color: 'var(--theme-text2)', alert: false }
     : { value: n, sub: n > 0 ? clearSub : 'all clear', color: n > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', alert: n > 0 }
 
+  // ONE return for loading and loaded (S808). The month strip and the labour panel each run their
+  // own reads, and while they sat below a separate loading return they could only mount — and only
+  // START reading — once this page's two levels had landed: 5–6 serial round trips on a slow link
+  // before the page was whole. Kept at the same place in one tree, they mount on the first render and
+  // load beside the page instead. Don't split this back into two returns: the second return would
+  // remount both and put the waterfall back.
   return (
     <div>
-      {/* Says so when a read failed (S803): it announced "loaded" over a partial page. */}
-      <div role="status" aria-live="polite" className="sr-only">{loadError ? 'Dashboard loaded with errors — some figures could not be read' : 'Dashboard data loaded'}</div>
-      {/* Both returns carry the weather slot, so the header does not jump when the data lands. */}
+      {/* The visible loading state is a shimmering skeleton, which on its own tells a screen reader
+          nothing; and a failed read says so (S803): it announced "loaded" over a partial page. */}
+      <div role="status" aria-live="polite" className="sr-only">{loading ? 'Loading dashboard data…' : loadError ? 'Dashboard loaded with errors — some figures could not be read' : 'Dashboard data loaded'}</div>
+      {/* The weather slot shows while loading too, so the header does not jump when the data lands. */}
       <div className={weatherStrip.visible ? 'page-header page-header--split' : 'page-header'}>
         <div>
           <h1 className="page-title">HR Dashboard</h1>
@@ -372,7 +366,7 @@ export default function HrDashboard() {
 
       {/* A load failure used to be indistinguishable from "this client genuinely has no data" —
           every query above silently discarded Supabase's error field. */}
-      {loadError && (
+      {!loading && loadError && (
         // role="alert" (dashboards.md: the load-error banner carries it) — a screen reader was told
         // nothing about a partial page (S803).
         <div role="alert" className="card dash-section" style={{
@@ -384,7 +378,7 @@ export default function HrDashboard() {
             <span aria-hidden="true">⚠</span> {loadError}
           </p>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => load(++loadIdRef.current)}>Retry</button>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => { setRetryKey(k => k + 1); load(++loadIdRef.current) }}>Retry</button>
             <button
               className="btn btn-ghost" style={{ fontSize: 12 }}
               onClick={() => setLoadError('')} aria-label="Dismiss"
@@ -396,8 +390,10 @@ export default function HrDashboard() {
       {/* Where the live payroll month stands, as linked steps (S768). Managers only, because every
           step links to a manager page. Not a read fence: manager rank fences payroll WRITES, and a
           supervisor reads runs and payslips by the S750 decision (REPORTS-10). */}
-      {hasHrAccess('manager') && <PayrollMonthStatus auto />}
+      {/* Keyed on Retry so it re-reads with the page, as it did when the loading return remounted it. */}
+      {hasHrAccess('manager') && <PayrollMonthStatus key={retryKey} auto />}
 
+      {loading ? skeletonRows : (<>
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}
       <SectionLabel>
         Approvals {approvalsFailed
@@ -546,12 +542,16 @@ export default function HrDashboard() {
           No finalized payroll yet. Generate and finalize a payroll run to see net pay and SSF summary here.
         </div>
       )}
+      </>)}
 
       {/* Labour against sales (S800): the hospitality half of an HR home — what each finalized month
           of labour cost, and what share of that month's sales it was. Below the queues' summary
-          rows, above the queues themselves. */}
-      <HrLabourPanel />
+          rows, above the queues themselves. Mounted while the page loads so its reads run beside
+          the page's (S808), and hidden until then so it does not sit under the skeleton and jump
+          down when the real rows replace it. */}
+      <div hidden={loading}><HrLabourPanel key={retryKey} /></div>
 
+      {!loading && (<>
       {/* ── Pending queues ───────────────────────────────────────────────────── */}
       {/* A queue shows only with something in it, or when its read failed, which keeps its alert
           (S806). Four "No pending … ✓" cards repeated the zero tiles above and made the phone
@@ -739,6 +739,7 @@ export default function HrDashboard() {
           </div>
         )}
       </div>
+      </>)}
     </div>
   )
 }

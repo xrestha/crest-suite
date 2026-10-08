@@ -115,14 +115,15 @@ export default function Overtime() {
 
   // Whether payroll for a BS month is finalized. A month with no period has no payroll at all.
   // → 'none' | 'draft' | 'finalized' | 'unknown' (a read failed — treated as locked).
+  // One read, the month with its run embedded (S808): it was the month, then its run, two round trips
+  // in a row on every load and for every month a save touches. One run per month is a table
+  // constraint (client_id, period_id), so the embed holds the row `.maybeSingle()` read.
   async function monthFinalized(bsYear, bsMonth) {
-    const { data: per, error: perErr } = await scopedFrom('monthly_periods', 'id')
+    const { data: per, error } = await scopedFrom('monthly_periods', 'id, hr_payroll_runs(status)')
       .eq('bs_year', bsYear).eq('bs_month', bsMonth).maybeSingle()
-    if (perErr) return 'unknown'
+    if (error) return 'unknown'
     if (!per) return 'none'
-    const { data: run, error: runErr } = await scopedFrom('hr_payroll_runs', 'status').eq('period_id', per.id).maybeSingle()
-    if (runErr) return 'unknown'
-    return run?.status || 'none'
+    return (per.hr_payroll_runs || [])[0]?.status || 'none'
   }
 
   const loadEntries = useCallback(async (bsYear, bsMonth) => {

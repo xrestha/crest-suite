@@ -40,29 +40,47 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
     setState(s => ({ ...s, loading: true }))
     ;(async () => {
       let period = givenPeriod
+      // The run, when it is known before the step reads start: the Payroll page passes its own, and
+      // `auto` reads each month's run with the month itself.
+      let knownRun
       if (auto) {
-        const { data: periods, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+        // One read, not three in a row (S808): the months with their runs embedded. This used to be
+        // months → runs `.in(ids)` → the picked month's run again, three serial round trips before
+        // any step could start, on top of the dashboard's own load. One run per month is a table
+        // constraint (client_id, period_id), so the embed holds the same row `.maybeSingle()` did.
+        const { data: periods, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status, hr_payroll_runs(id, status)')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }).limit(12)
         if (!live) return
         if (error) { setState({ loading: false, periodError: error }); return }
-        const ids = (periods || []).map(p => p.id)
-        const runs = ids.length ? await scopedFrom('hr_payroll_runs', 'period_id, status').in('period_id', ids) : { data: [] }
-        if (!live) return
-        if (runs.error) { setState({ loading: false, periodError: runs.error }); return }
-        period = pickStatusPeriod(periods, Object.fromEntries((runs.data || []).map(r => [r.period_id, r.status])))
-        if (!period) { setState({ loading: false, none: true }); return }
+        const runOf = p => (p.hr_payroll_runs || [])[0] || null
+        const picked = pickStatusPeriod(periods || [], Object.fromEntries((periods || []).filter(runOf).map(p => [p.id, runOf(p).status])))
+        if (!picked) { setState({ loading: false, none: true }); return }
+        const { hr_payroll_runs: _embedded, ...rest } = picked
+        period = rest
+        knownRun = runOf(picked)
       }
 
       const b = periodAdBounds(period)
       const haveOwn = employees && attendance && run !== undefined
-      const [who, att, runRes, leave, ot, tada] = await Promise.all([
+      if (haveOwn) knownRun = run || null
+      const ownPayments = payments !== undefined
+      // The SSF deposit and Staff paid steps. Started beside the counts when the run is already
+      // known to be finalized (S808) — they need the run, not the counts, and waiting on the counts
+      // cost a round trip on both pages that show this strip.
+      const depositReads = runRow => Promise.all([
+        payslips ? { data: payslips } : scopedFrom('hr_payslips', 'employee_id, net_pay, ssf_employee, ssf_employer').eq('run_id', runRow.id),
+        ownPayments ? { data: payments, error: paymentsError || null } : fetchRunPayments(scopedFrom, runRow.id),
+        fetchMonthDepositExtras(scopedFrom, period),
+      ])
+      const [who, att, runRes, leave, ot, tada, earlyDeposit] = await Promise.all([
         haveOwn ? { data: { employees } } : fetchPayrollEmployees(scopedFrom, period),
         haveOwn ? { data: attendance } : fetchAllRows(() => scopedFrom('hr_attendance', 'employee_id, bs_day').eq('period_id', period.id).order('id')),
-        haveOwn ? { data: run } : scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', period.id).maybeSingle(),
+        knownRun !== undefined ? { data: knownRun } : scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', period.id).maybeSingle(),
         scopedFrom('hr_leave_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending').lte('start_date', b.end).gte('end_date', b.start),
         scopedFrom('hr_overtime_entries', 'id', { count: 'exact', head: true }).eq('status', 'pending').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
         // Only a claim whose trip is over by month end is paid by this payroll.
         scopedFrom('hr_tada_claims', 'id', { count: 'exact', head: true }).eq('status', 'pending').lte('end_date', b.end),
+        knownRun?.status === 'finalized' ? depositReads(knownRun) : null,
       ])
       if (!live) return
       const runRow = runRes.error ? null : (runRes.data || null)
@@ -70,12 +88,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       let paid = null
       let leftOut = null
       if (runRow?.status === 'finalized') {
-        const ownPayments = payments !== undefined
-        const [slips, pays, extras] = await Promise.all([
-          payslips ? { data: payslips } : scopedFrom('hr_payslips', 'employee_id, net_pay, ssf_employee, ssf_employer').eq('run_id', runRow.id),
-          ownPayments ? { data: payments, error: paymentsError || null } : fetchRunPayments(scopedFrom, runRow.id),
-          fetchMonthDepositExtras(scopedFrom, period),
-        ])
+        const [slips, pays, extras] = earlyDeposit || await depositReads(runRow)
         if (!live) return
         // S798 3b (GAP-PAY-STATE-4): someone this month's payroll covers who has no payslip in the
         // finalized run. The list already leaves out anyone a finalized Final Settlement pays, so this is

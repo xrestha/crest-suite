@@ -14,6 +14,7 @@ import QuickCalculator from './Calculator'
 import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
+import { prefetchHrPages } from '../shared/prefetchHrPages'
 import { outletMovedText } from '../shared/outletWatch'
 import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
 import ArrivalAlert from './ArrivalAlert'
@@ -441,6 +442,12 @@ export default function Layout() {
   const sidebarRef = useRef(null)
   const hamburgerRef = useRef(null)
   const location = useLocation()
+
+  // The first HR page opened starts a quiet, one-file-at-a-time fetch of the other HR pages' code
+  // (S808, prefetchHrPages.js), so each later page skips the code round trip. Once per session.
+  useEffect(() => {
+    if (location.pathname.startsWith('/hr/') && !location.pathname.startsWith('/hr/self-service')) prefetchHrPages()
+  }, [location.pathname])
 
   // On a phone the sidebar IS a modal drawer — it covers the page behind a 55% scrim — but it had
   // none of a modal's behavior: Escape did nothing, focus never entered it, and focus never came

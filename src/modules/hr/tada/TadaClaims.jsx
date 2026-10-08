@@ -14,7 +14,7 @@ import FieldError from '../../../components/FieldError'
 import TadaSettingsModal from './TadaSettingsModal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import RowDisclosure from '../../../components/RowDisclosure'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { settleWithin } from '../../../utils/withTimeout'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -144,18 +144,19 @@ export default function TadaClaims() {
   // first payroll generated after approval with the trip over (fetchApprovedTadaMap), and a draft
   // run's payslips name the claims they will close in `tada_claim_ids` — Finalize closes exactly
   // those, and only on a payslip still carrying a TADA amount. Read once per load, paged.
+  // One read (S808): the draft runs with their TADA-carrying payslips embedded, where it was the runs
+  // and then a chunked payslip read by their ids — a round trip in a row on every load. A draft run
+  // holds one payslip per employee, so its embedded list stays small.
   const readPayrollDrafts = useCallback(async () => {
     const runsRes = await fetchAllRows(() =>
-      scopedFrom('hr_payroll_runs', 'id, period_id, status, monthly_periods(bs_year, bs_month)').eq('status', 'draft').order('id'))
+      scopedFrom('hr_payroll_runs', 'id, period_id, status, monthly_periods(bs_year, bs_month), hr_payslips(id, run_id, tada_amount, tada_claim_ids)')
+        .eq('status', 'draft').gt('hr_payslips.tada_amount', 0).order('id'))
     if (runsRes.error) return { data: null, error: runsRes.error }
     const runs = runsRes.data || []
     if (runs.length === 0) return { data: {}, error: null }
-    const slipsRes = await fetchAllRowsChunked(runs.map(r => r.id), ids =>
-      scopedFrom('hr_payslips', 'id, run_id, tada_amount, tada_claim_ids').in('run_id', ids).gt('tada_amount', 0).order('id'))
-    if (slipsRes.error) return { data: null, error: slipsRes.error }
     const runById = Object.fromEntries(runs.map(r => [r.id, r]))
     const map = {}
-    ;(slipsRes.data || []).forEach(s => {
+    ;runs.flatMap(r => r.hr_payslips || []).forEach(s => {
       const mp = runById[s.run_id]?.monthly_periods
       // An HR login's RLS view of monthly_periods is empty, so the month may be unknowable here;
       // it then sorts last and the chip says "a payroll draft" rather than guessing one.
@@ -174,6 +175,12 @@ export default function TadaClaims() {
     if (!clientId) return null
     const key = loadReq.begin(clientId)
     setLoading(true)
+    // Started beside the reads below, not after them (S808): neither uses their results, and waiting
+    // put a whole round trip between the claim list and the page.
+    const payrollPromise = Promise.all([
+      readPayrollDrafts(),
+      scopedFrom('hr_final_settlements', 'employee_id, last_working_date').eq('status', 'finalized'),
+    ])
     const results = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, status, email, join_date').order('full_name'),
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
@@ -192,10 +199,7 @@ export default function TadaClaims() {
       return null
     }
     const [{ data: emps }, { data: vends }, { data: cls }, { data: settingsRow }] = results
-    const [payrollRes, settledRes] = await Promise.all([
-      readPayrollDrafts(),
-      scopedFrom('hr_final_settlements', 'employee_id, last_working_date').eq('status', 'finalized'),
-    ])
+    const [payrollRes, settledRes] = await payrollPromise
     if (!loadReq.isCurrent(key)) return null
     setLoadError(null)
     setEmployees(emps || [])

@@ -75,6 +75,19 @@ When the whole set is small (a client's recipe book is ~50 KB), read it ONCE and
 Stock Movements went to 2 levels (2.8 s), Variance 5 → 2. On a slow link the round trips are the
 cost, not the bytes. Test it by counting the reads, as `subRecipeUsage.test.js` does.
 
+**A component that mounts only after the page's loading return is a waterfall too (S808).**
+HrDashboard rendered `PayrollMonthStatus` and `HrLabourPanel` below `if (loading) return <skeleton>`,
+so neither could START its own reads until the page's had landed: 5–6 serial levels, 4.2 s on Fast
+3G, 2 after. One return with the loading branch inside it keeps such children mounted from the first
+render (`hidden` until the page lands if they would otherwise jump); a second return remounts them.
+The tell is a child with its own fetch effect rendered only in the loaded branch. Two cheaper shapes
+from the same sweep: month → its run → the run's payslips is three levels where reading every run
+beside the months, or embedding `hr_payroll_runs(id, status)` in the month read, makes it two (one
+run per month is a constraint); and Leave, TADA and HR Reports each read B after A with B using
+nothing of A. **Every route is lazy, so a first visit also pays its code before any read**:
+`prefetchHrPages()` fetches HR's pages one at a time once the first HR page is up, and its test pins
+the list to `App.js`.
+
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique
 tiebreaker, or the fix trades a slow page for a silently truncated one.

@@ -122,15 +122,20 @@ export default function HrReports() {
       setPeriod(null); setRun(null); setPayslips([]); setYtdTds({}); setMonthBonuses([]); setMonthSettlements([])
       setPayments([]); setPaymentsError(null)
       setCertEmpId(''); setCertSlips([]); setCertBonuses([]); setCertSettlements([])
-      const { data: p, error: pErr } = await scopedFrom('monthly_periods')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      // Read together (S808): the employee master does not depend on the months (it powers the Roster
+      // tab), and every run comes with them, so the chosen month's payslips start one round trip
+      // sooner. These were three serial levels before the month's own reads could begin.
+      const [{ data: p, error: pErr }, { data: emps, error: empErr }, { data: runs, error: runsErr }] = await Promise.all([
+        scopedFrom('monthly_periods')
+          .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+        scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, ssf_enrolled, pan_no, life_insurance_premium, health_insurance_premium, status')
+          .order('full_name'),
+        // One run a month, so no longer than the month list.
+        scopedFrom('hr_payroll_runs'),
+      ])
       if (!periodReq.isCurrent(initKey)) return
       if (pErr) { setLoadError(pErr); setLoading(false); return }
       setPeriods(p || [])
-      // Employee master loads independently of any payroll run (powers the Roster tab).
-      const { data: emps, error: empErr } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, ssf_enrolled, pan_no, life_insurance_premium, health_insurance_premium, status')
-        .order('full_name')
-      if (!periodReq.isCurrent(initKey)) return
       if (empErr) { setLoadError(empErr); setLoading(false); return }
       setEmployees(emps || [])
       // The month named in the link, else LAST month all month long (S804, reportsPeriodFor): its bank
@@ -143,7 +148,10 @@ export default function HrReports() {
       // so an admin client switch re-running init() would otherwise have every setter in loadAll
       // skipped as "stale" and show the previous client's TDS sheet under the new one.
       if (open) {
-        periodReq.begin(open.id); setPeriod(open); showPeriodInUrl(open.id); await loadAll(open.id, open)
+        // A failed runs read is not "no run": loadAll then reads this month's run itself, with its
+        // own error handling.
+        const knownRun = runsErr ? undefined : ((runs || []).find(r => r.period_id === open.id) || null)
+        periodReq.begin(open.id); setPeriod(open); showPeriodInUrl(open.id); await loadAll(open.id, open, knownRun)
         if (!periodReq.isCurrent(open.id)) return
       }
       setLoading(false)
@@ -218,17 +226,29 @@ export default function HrReports() {
     return () => { cancelled = true }
   }, [tab, certFy, certEmpId, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadAll(periodId, p) {
+  // `knownRun`: the month's run row when init has just read it with the month list; omitted (a month
+  // switch), it is read here.
+  async function loadAll(periodId, p, knownRun) {
     setLoadError(null)
     // Started here, awaited at the bottom. The YTD read filters on nothing but the fiscal year `p`
     // falls in — it does not need the run or its payslips — so waiting out those two round trips
     // before issuing it was pure serialisation. It is also the page's biggest read (every finalized
     // payslip the client has, paged), so it is the one worth overlapping.
     const ytdPromise = loadYtd(p, periodId)
-    const [{ data: runRow, error: runErr }, { data: settled, error: settleErr }] = await Promise.all([
-      scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle(),
+    const runRead = knownRun !== undefined
+      ? Promise.resolve({ data: knownRun, error: null })
+      : scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
+    // The payslips and payments need only the run id, so they start the moment the run is known
+    // instead of waiting on the settlements read beside it (S808).
+    const runReads = runRead.then(r => (r.error || !r.data ? null : Promise.all([
+      scopedFrom('hr_payslips').eq('run_id', r.data.id),
+      fetchRunPayments(scopedFrom, r.data.id),
+    ])))
+    const [{ data: runRow, error: runErr }, { data: settled, error: settleErr }, slipsAndPays] = await Promise.all([
+      runRead,
       scopedFrom('hr_final_settlements', '*').eq('status', 'finalized')
         .eq('settle_bs_year', p.bs_year).eq('settle_bs_month', p.bs_month),
+      runReads,
     ])
     if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }   // superseded by a newer period selection
     // S612 silent-zero rule: a failed read here would wear the "no payroll run this period"
@@ -237,11 +257,7 @@ export default function HrReports() {
     setMonthSettlements(settled || [])
     setRun(runRow || null)
     if (runRow) {
-      const [{ data: slips, error: slipErr }, payRes] = await Promise.all([
-        scopedFrom('hr_payslips').eq('run_id', runRow.id),
-        fetchRunPayments(scopedFrom, runRow.id),
-      ])
-      if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }
+      const [{ data: slips, error: slipErr }, payRes] = slipsAndPays
       setPayments(payRes.error ? [] : (payRes.data || [])); setPaymentsError(payRes.error || null)
       if (slipErr) { setLoadError(slipErr); setPayslips([]); await ytdPromise; return }
       setPayslips(slips || [])

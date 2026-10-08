@@ -256,11 +256,12 @@ export default function PayrollRun() {
       setPayments([]); setPaymentsError(null); setMarkPaid(null); setUndoPay(null)
       setPeriods([]); setPeriod(null); setEmployees([]); setSettled([]); setExtraEmps([]); setConfirmAction(null)
       setUnended([]); setPaidLastMonth([]); setRunStatusBy({})
-      // One run a month, so the run list is no longer than the period list beside it.
+      // One run a month, so the run list is no longer than the period list beside it. Whole rows (S808):
+      // the chosen month's run is then already in hand, and its payslips start one round trip sooner.
       const [{ data: p, error: pErr }, { data: runs, error: rErr }] = await Promise.all([
         settleWithin(scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), LOAD_MS, 'Loading payroll months'),
-        settleWithin(scopedFrom('hr_payroll_runs', 'period_id, status'), LOAD_MS, 'Loading payroll months'),
+        settleWithin(scopedFrom('hr_payroll_runs'), LOAD_MS, 'Loading payroll months'),
       ])
       if (!periodReq.isCurrent(claim)) return
       if (pErr || rErr) { setPeriods([]); setPeriod(null); setLoadError(pErr || rErr); setLoading(false); return }
@@ -278,7 +279,7 @@ export default function PayrollRun() {
       if (!open) { setLoading(false); return }
       showPeriodInUrl(open.id)
       periodReq.begin(open.id)
-      await loadAll(open)
+      await loadAll(open, (runs || []).find(r => r.period_id === open.id) || null)
       if (periodReq.isCurrent(open.id)) setLoading(false)
     }
     init()
@@ -330,11 +331,19 @@ export default function PayrollRun() {
   }
 
   // Everything the page shows for one month, as one { data, error }. loadAll bounds it.
-  async function readAll(p) {
-    const [inputs, runRes] = await Promise.all([
-      readInputs(p),
-      scopedFrom('hr_payroll_runs').eq('period_id', p.id).maybeSingle(),
-    ])
+  // `knownRun`: the month's run row when the caller has just read it (the first load reads every run
+  // with the month list); omitted, it is read here. Every reload after a write omits it.
+  async function readAll(p, knownRun) {
+    const runRead = knownRun !== undefined
+      ? Promise.resolve({ data: knownRun, error: null })
+      : scopedFrom('hr_payroll_runs').eq('period_id', p.id).maybeSingle()
+    // The payslips and payments need the run id and nothing else, so they start the moment the run is
+    // known rather than after readInputs' paged reads (S808): one round trip fewer on every load.
+    const runReads = runRead.then(r => (r.error || !r.data ? null : Promise.all([
+      scopedFrom('hr_payslips').eq('run_id', r.data.id),
+      fetchRunPayments(scopedFrom, r.data.id),
+    ])))
+    const [inputs, runRes, slipsAndPays] = await Promise.all([readInputs(p), runRead, runReads])
     let error = inputs.error || runRes.error
     let slips = []
     let extra = []
@@ -342,10 +351,7 @@ export default function PayrollRun() {
     let payErr = null
     const runRow = runRes.data || null
     if (!error && runRow) {
-      const [slipRes, payRes] = await Promise.all([
-        scopedFrom('hr_payslips').eq('run_id', runRow.id),
-        fetchRunPayments(scopedFrom, runRow.id),
-      ])
+      const [slipRes, payRes] = slipsAndPays
       if (payRes.error) payErr = payRes.error
       else pays = payRes.data || []
       if (slipRes.error) error = slipRes.error
@@ -364,10 +370,10 @@ export default function PayrollRun() {
     return { data: { inputs: inputs.data, runRow, slips, extra, pays, payErr }, error: null }
   }
 
-  async function loadAll(p) {
+  async function loadAll(p, knownRun) {
     // A timeout is a failed read like any other (S798 PAYROLL-8): the load-error card, not a page
     // stuck on "Loading…" or behind a busy flag that never clears.
-    const res = await settleWithin(readAll(p), LOAD_MS, 'Loading payroll')
+    const res = await settleWithin(readAll(p, knownRun), LOAD_MS, 'Loading payroll')
     if (!periodReq.isCurrent(p.id)) return   // superseded by a newer period selection
     // A failed read is not an empty month, and a failed PAYSLIP read under a saved run is not a run
     // with no payslips: either used to render as one — an empty register, a "No active employees"
