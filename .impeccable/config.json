@@ -80,6 +80,33 @@
         ],
         "createdAt": "2026-09-16T14:05:42.458Z",
         "reason": "S767 (owner moved the guest pages onto the default Modernist preset): the ONLY radius left in this directory is 50% on the veg / non-veg food mark dot (.gm-diet in guestMenu.css) - the market food-labelling symbol, named as a Shapes exemption in DESIGN.md. Value-specific (50% only, so any other corner here is still flagged) and directory-scoped because the hook reports this stylesheet as GuestMenu.css (derived from the component name) while the file is guestMenu.css, so a basename-scoped entry never matches (S763). Replaces the pre-S767 entries that exempted the whole bone-and-pine guest shape language."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#60a5fa",
+        "files": [
+          "src/modules/hr/leave/leaveConstants.js"
+        ],
+        "createdAt": "2026-10-07T00:00:00.000Z",
+        "reason": "S806 (HR critique 2026-10-06 minor): DEFAULT_LEAVE_TYPES categorical colour, seeded into hr_leave_types and editable per client - the same class as the DEFAULT_SHIFTS fills above. FILL-only: LeaveManagement renders every leave colour through typeTint() for a fill and typeText() for a label, never as raw text. Scoped to this one file (the S765 rule), so the same hex anywhere else is still flagged. #a78bfa needs no entry: it is the --theme-purple token value."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#f472b6",
+        "files": [
+          "src/modules/hr/leave/leaveConstants.js"
+        ],
+        "createdAt": "2026-10-07T00:00:00.000Z",
+        "reason": "S806 (HR critique 2026-10-06 minor): DEFAULT_LEAVE_TYPES categorical colour, seeded into hr_leave_types and editable per client - the same class as the DEFAULT_SHIFTS fills above. FILL-only: LeaveManagement renders every leave colour through typeTint() for a fill and typeText() for a label, never as raw text. Scoped to this one file (the S765 rule), so the same hex anywhere else is still flagged. #a78bfa needs no entry: it is the --theme-purple token value."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#22d3ee",
+        "files": [
+          "src/modules/hr/leave/leaveConstants.js"
+        ],
+        "createdAt": "2026-10-07T00:00:00.000Z",
+        "reason": "S806 (HR critique 2026-10-06 minor): DEFAULT_LEAVE_TYPES categorical colour, seeded into hr_leave_types and editable per client - the same class as the DEFAULT_SHIFTS fills above. FILL-only: LeaveManagement renders every leave colour through typeTint() for a fill and typeText() for a label, never as raw text. Scoped to this one file (the S765 rule), so the same hex anywhere else is still flagged. #a78bfa needs no entry: it is the --theme-purple token value."
       }
     ]
   }

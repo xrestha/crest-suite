@@ -64,15 +64,16 @@ export default function RosterWeek({ days, roster, publishedDays, today, onReque
 
               {/* Only on a day this employee actually works. It used to render on every published
                   row at the same weight as the shift itself — including days off, where it asks a
-                  colleague to trade for nothing. */}
+                  colleague to trade for nothing. The word sits beside the ⇄ (S806): a bare icon told
+                  a first-time user nothing, and the aria-label reached only a screen reader. */}
               {published && row && !off && (
                 <button
                   className="btn btn-ghost"
                   onClick={() => onRequestSwap(d)}
                   aria-label={`Request a swap for ${labelFor(d)}`}
-                  style={{ flexShrink: 0, width: 44, minWidth: 44, padding: 0, justifyContent: 'center' }}
+                  style={{ flexShrink: 0, minWidth: 44, padding: '0 10px', justifyContent: 'center' }}
                 >
-                  <ArrowRightLeft size={16} aria-hidden="true" />
+                  <ArrowRightLeft size={16} aria-hidden="true" /> Swap
                 </button>
               )}
             </div>

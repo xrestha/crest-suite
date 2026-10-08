@@ -19,6 +19,7 @@ import { fetchYtdMap } from '../payroll/payrollData'
 import { bonusFiscalYear } from '../payroll/bonusTax'
 import { firstError } from '../../../shared/queryError'
 import { errorLine, isNetworkError } from '../../../shared/errorText'
+import { plural } from '../../../shared/plural'
 import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { nepalDateAd } from '../../../shared/nepalTime'
 import { attendanceSignature, computeSettlement, earnedLeaveBalance, isEarlierSpell, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
@@ -711,7 +712,7 @@ export default function FinalSettlement() {
     setBusy(false)
     setMsg('ok:Settlement finalized. ' + (data.employee_name || emp.full_name) + ' is now ' + (STATUS_AFTER[data.separation_reason] || 'resigned')
       + '; advances recovered: NPR ' + fmt(data.advance_recovered)
-      + ((data.tada_claim_ids || []).length > 0 ? '; ' + data.tada_claim_ids.length + ' travel claim(s) marked paid' : '')
+      + ((data.tada_claim_ids || []).length > 0 ? '; ' + plural(data.tada_claim_ids.length, 'travel claim') + ' marked paid' : '')
       + finalizedLoginNote(data) + '.')
   }
 
@@ -1262,7 +1263,7 @@ export default function FinalSettlement() {
               <li><strong>NPR {nprPaisa(calc.advanceRecovered)}</strong> recovered against outstanding advances{calc.advanceShortfall > 0.005 ? `; NPR ${nprPaisa(calc.advanceShortfall)} stays owed` : ', which then close'}.</li>
             )}
             {(liveRow.tada_claim_ids || []).length > 0 && (
-              <li>{liveRow.tada_claim_ids.length} approved travel claim(s), NPR {fmt(liveRow.tada_amount)}, are paid here and marked paid.</li>
+              <li>{plural(liveRow.tada_claim_ids.length, 'approved travel claim')}, NPR {fmt(liveRow.tada_amount)}, {liveRow.tada_claim_ids.length === 1 ? 'is' : 'are'} paid here and marked paid.</li>
             )}
             <li>
               {liveRow.employee_name} becomes <strong>{STATUS_AFTER[reason]}</strong> with an end date of {lastAdLabel}, and leaves every payroll, roster and attendance screen.
@@ -1282,7 +1283,7 @@ export default function FinalSettlement() {
             )}
             {loginPlan.move.map(l => <li key={'move:' + l.full_name}>{moveLine(l)}</li>)}
             {loginPlan.remove.map(l => <li key={'remove:' + l.full_name}>{removeLine(l)}</li>)}
-            {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}
+            {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{plural(liveRow.leave_days_encashed, 'leave day')} {Number(liveRow.leave_days_encashed) === 1 ? 'is recorded as paid out and comes' : 'are recorded as paid out and come'} off the leave balance.</li>}
             {paidMonths?.error && (
               <li style={{ color: 'var(--theme-amber-text)' }}>△ Could not check whether their salary for {BS_MONTHS[lastDate.month - 1]} is already recorded as paid — Finalize checks again and refuses if it is.</li>
             )}

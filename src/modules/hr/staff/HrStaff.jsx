@@ -10,6 +10,7 @@ import Modal from '../../../components/Modal'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
+import { plural } from '../../../shared/plural'
 import { edgeFunctionFailure, failedMovesMessage } from '../../../shared/edgeFunctionError'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
@@ -334,7 +335,7 @@ export default function HrStaff() {
     const label = customRoles[i].label
     const holders = staffHolding(label)
     if (holders.length > 0) {
-      setRolesError(`${holders.length} login(s) still hold the “${label}” role — ${names(holders)}. Move them to another role first; removing it now would leave them on a role that no longer exists.`)
+      setRolesError(`${plural(holders.length, 'login')} still ${holders.length === 1 ? 'holds' : 'hold'} the “${label}” role — ${names(holders)}. Move ${holders.length === 1 ? 'it' : 'them'} to another role first; removing it now would leave ${holders.length === 1 ? 'it' : 'them'} on a role that no longer exists.`)
       return
     }
     saveRoles(customRoles.filter((_, idx) => idx !== i))
@@ -343,7 +344,7 @@ export default function HrStaff() {
   function resetToDefaults() {
     const orphans = staff.filter(p => p.hr_job_title && !DEFAULT_ROLES.some(d => d.label === p.hr_job_title))
     if (orphans.length > 0) {
-      setRolesError(`${orphans.length} login(s) hold a custom role — ${names(orphans)}. Move them to Staff, Supervisor or Manager first, then reset.`)
+      setRolesError(`${plural(orphans.length, 'login')} ${orphans.length === 1 ? 'holds' : 'hold'} a custom role — ${names(orphans)}. Move ${orphans.length === 1 ? 'it' : 'them'} to Staff, Supervisor or Manager first, then reset.`)
       return
     }
     saveRoles([])
@@ -976,7 +977,7 @@ export default function HrStaff() {
                         style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                         onClick={() => deleteCustomRole(i)}
                         disabled={rolesSaving}
-                        title={held > 0 ? `${held} login(s) hold this role — move them first` : undefined}
+                        title={held > 0 ? `${plural(held, 'login')} ${held === 1 ? 'holds' : 'hold'} this role — move ${held === 1 ? 'it' : 'them'} first` : undefined}
                       >
                         Remove
                       </button>

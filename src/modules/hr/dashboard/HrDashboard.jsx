@@ -4,6 +4,7 @@ import { useNavigate, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { plural } from '../../../shared/plural'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, formatBsDay, bsDayOrdinal, getBsToday, adToBsSafe } from '../../../utils/bsCalendar'
 import { parseAdDateLocal } from '../../../shared/nepalTime'
@@ -470,7 +471,7 @@ export default function HrDashboard() {
         return (
         <>
           <SectionLabel>
-            Last Finalized Payroll — {payInfo.periodLabel} ({payInfo.count} employees)
+            Last Finalized Payroll — {payInfo.periodLabel} ({plural(payInfo.count, 'employee')})
           </SectionLabel>
           <div className="stat-grid dash-section">
             <KCard

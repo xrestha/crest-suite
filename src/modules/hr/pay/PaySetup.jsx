@@ -6,6 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { errorText } from '../../../shared/errorText'
+import { plural } from '../../../shared/plural'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, PAY_BASES, EMPLOYEE_STATUS_COLORS as STATUS_COLORS } from '../payrollConstants'
@@ -249,7 +250,7 @@ export default function PaySetup() {
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 13 }}>{fmt(s.basic)}</td>
                           <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 13 }}>{s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13, fontWeight: 500 }}>{fmt(s.gross)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
+                          <td style={{ textAlign: 'right', color: s.totalDed > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 13 }}>{s.totalDed > 0 ? `−${fmt(s.totalDed)}` : '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(s.ssf_employer)}</td>
                         </>
@@ -282,11 +283,11 @@ export default function PaySetup() {
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                  <td colSpan={2} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {totals.count} monthly employees</td>
+                  <td colSpan={2} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {plural(totals.count, 'monthly employee')}</td>
                   <td />
                   <td />
                   <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>−{fmt(totals.deductions)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{totals.deductions > 0 ? `−${fmt(totals.deductions)}` : '—'}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totals.net)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmt(totals.ssf_employer)}</td>
                   <td />

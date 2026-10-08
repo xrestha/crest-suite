@@ -10,6 +10,7 @@ import { fetchSsfContributions, ssfFundedFor } from './ssfEnrolment'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
+import { plural } from '../../../shared/plural'
 import { GRATUITY_VESTING_MONTHS } from '../payrollConstants'
 import { formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
@@ -291,7 +292,7 @@ export default function GratuityTracker() {
                       <td style={{ textAlign: 'center' }}>
                         {r.g.vested
                           ? <span className="badge badge-gray">Vested</span>
-                          : <span className="badge badge-gray">Vesting · {VEST - r.g.months} mo left</span>}
+                          : <span className="badge badge-gray badge-sentence">Vesting · {plural(VEST - r.g.months, 'month')} left</span>}
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(r.g.monthlyAccrual)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(r.g.totalAccrued)}</td>
@@ -306,7 +307,7 @@ export default function GratuityTracker() {
                 </tbody>
                 <tfoot>
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={4} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length} employees</td>
+                    <td colSpan={4} style={{ color: 'var(--theme-text2)' }}>Total — {plural(rows.length, 'employee')}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(totalMonthly)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totalAccrued)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totalSsf)}</td>

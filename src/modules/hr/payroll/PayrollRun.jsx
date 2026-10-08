@@ -32,6 +32,7 @@ import { fetchMonthDepositExtras } from './monthDeposit'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { errorText, errorLine } from '../../../shared/errorText'
+import { plural } from '../../../shared/plural'
 import { useIsOwnEmployee } from '../ownRecord'
 import { groupOwnChanges } from './ownAttendanceChanges'
 
@@ -766,7 +767,7 @@ export default function PayrollRun() {
     await loadAll(p)
     const n = result?.repayments || 0
     const t = result?.tada_claims || 0
-    setMsg('ok:Finalized' + (n > 0 ? ` — ${n} advance repayment(s) recorded` : '') + (t > 0 ? ` — ${t} TADA claim(s) marked Paid` : ''))
+    setMsg('ok:Finalized' + (n > 0 ? ` — ${plural(n, 'advance repayment')} recorded` : '') + (t > 0 ? ` — ${plural(t, 'TADA claim')} marked Paid` : ''))
     setBusy(false)
   }
 

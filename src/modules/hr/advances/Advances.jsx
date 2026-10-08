@@ -577,9 +577,9 @@ export default function Advances() {
       {/* Filters */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
         <FilterChips label="Filter by type" active={filterType} onChange={setFilterType}
-          options={[{ key: 'all', label: 'All' }, { key: 'advance', label: 'One-time' }, { key: 'loan', label: 'In instalments' }]} />
+          options={[{ key: 'all', label: 'All kinds' }, { key: 'advance', label: 'One-time' }, { key: 'loan', label: 'In instalments' }]} />
         <FilterChips label="Filter by status" active={filterStatus} onChange={setFilterStatus}
-          options={[{ key: 'active', label: 'Active' }, { key: 'settled', label: 'Settled' }, { key: 'written_off', label: 'Written off' }, { key: 'all', label: 'All' }]} />
+          options={[{ key: 'active', label: 'Active' }, { key: 'settled', label: 'Settled' }, { key: 'written_off', label: 'Written off' }, { key: 'all', label: 'All statuses' }]} />
       </div>
 
       {/* Main table */}

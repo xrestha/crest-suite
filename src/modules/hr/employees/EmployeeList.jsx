@@ -9,6 +9,7 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { edgeFunctionFailure } from '../../../shared/edgeFunctionError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
+import { plural } from '../../../shared/plural'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import Fab from '../../../components/Fab'
@@ -270,7 +271,7 @@ export default function EmployeeList() {
     const { data: savedRows, error } = await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', ids).select('id')
     if (error) {
       const a = asActionError(error)
-      setBulkError({ text: `The ${ids.length} selected employee(s) were not ${blocked ? 'deactivated' : 'activated'} — their access is unchanged. ` + a.text, detail: a.detail })
+      setBulkError({ text: `The ${plural(ids.length, 'selected employee')} ${ids.length === 1 ? 'was' : 'were'} not ${blocked ? 'deactivated' : 'activated'} — their access is unchanged. ` + a.text, detail: a.detail })
       setBulkBusy(false)
       return
     }
@@ -278,7 +279,7 @@ export default function EmployeeList() {
     // screen is the same silence, so the count is compared rather than trusted.
     if ((savedRows?.length || 0) < ids.length) {
       const done = savedRows?.length || 0
-      setBulkError(`${done} of ${ids.length} selected employee(s) were ${blocked ? 'deactivated' : 'activated'}; the rest are unchanged — this login may no longer have HR manager rank, or they were removed on another screen. The list has been reloaded.`)
+      setBulkError(`${done} of ${plural(ids.length, 'selected employee')} ${done === 1 ? 'was' : 'were'} ${blocked ? 'deactivated' : 'activated'}; the rest are unchanged — this login may no longer have HR manager rank, or they were removed on another screen. The list has been reloaded.`)
       await fetchEmployees()
       setBulkBusy(false)
       return
@@ -494,7 +495,7 @@ export default function EmployeeList() {
           padding: '8px 12px', borderRadius: 0, background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
         }}>
           <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selectedVisible.length} selected</span>
-          <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll Run, Payroll Calculation and Final Settlement.">
+          <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll and Final Settlement.">
             <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
               {bulkBusy ? 'Working…' : 'Deactivate (block login)'}
             </button>

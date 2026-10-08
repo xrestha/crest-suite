@@ -26,6 +26,7 @@ import {
   EMPTY_TADA_ITEM, recomputeTadaAmount, tadaLineAmount, tadaItemsTotal, acceptTadaAmount, tadaDatesError, findLookAlikeClaim,
 } from './tadaShared'
 import { TADA_REQUEST_STATUS } from '../payrollConstants'
+import { plural } from '../../../shared/plural'
 import { useMyOutletLinks } from '../ownRecord'
 
 const fmt = nprInt
@@ -775,13 +776,16 @@ export default function TadaClaims() {
           {/* Summary cards */}
           <div className="stat-grid">
             {[
-              { label: 'Pending Review', value: `NPR ${fmt(pendingTotal)}`, tip: `${pendingCount} claim(s) waiting for a decision, from every month.` },
-              { label: 'Approved, Unpaid', value: `NPR ${fmt(approvedTotal)}`, tip: `${approvedCount} approved claim(s) still owed to staff, from every month — paid by the next payroll or by hand.` },
-              { label: 'Paid', value: `NPR ${fmt(paidTotal)}`, tip: monthFilter === 'all' ? 'Every claim paid so far, by payroll or by hand.' : 'Claims paid for trips that began in the month selected below.' },
+              { label: 'Pending Review', value: `NPR ${fmt(pendingTotal)}`, sub: plural(pendingCount, 'claim'), tip: 'Claims waiting for a decision, from every month.' },
+              { label: 'Approved, Unpaid', value: `NPR ${fmt(approvedTotal)}`, sub: plural(approvedCount, 'claim'), tip: 'Approved claims still owed to staff, from every month — paid by the next payroll or by hand.' },
+              { label: 'Paid', value: `NPR ${fmt(paidTotal)}`, sub: 'by payroll or by hand', tip: monthFilter === 'all' ? 'Every claim paid so far, by payroll or by hand.' : 'Claims paid for trips that began in the month selected below.' },
             ].map(c => (
-              <div key={c.label} className="card" style={{ padding: '14px 16px' }}>
-                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}><Tip text={c.tip}>{c.label}</Tip></div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{c.value}</div>
+              // The shared stat tile (S806): this page hand-built its own .card at 11px/22px, so it
+              // missed the stat-grid's label, figure and phone sizing every other HR page has.
+              <div key={c.label} className="stat-card">
+                <div className="stat-label"><Tip text={c.tip}>{c.label}</Tip></div>
+                <div className="stat-value" style={{ whiteSpace: 'nowrap' }}>{c.value}</div>
+                <div className="stat-sub">{c.sub}</div>
               </div>
             ))}
           </div>
@@ -913,10 +917,9 @@ export default function TadaClaims() {
             </table>
           </div>
 
-          <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 12, lineHeight: 1.6 }}>
-            Approved claims are paid automatically by the first payroll after approval once the trip is over —
-            the amount is added to that month’s payslip. Mark Paid is for a claim paid in cash or by bank transfer
-            instead. Pay a claim by hand or let payroll pay it, never both.
+          <p className="page-footnote">
+            Payroll pays an approved claim on the first payslip after the trip ends. If you pay one in cash or by
+            bank transfer instead, press <strong>Mark Paid</strong> so payroll does not pay it a second time.
           </p>
         </>
       )}
