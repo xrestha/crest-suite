@@ -137,6 +137,13 @@ export default function HrDashboard() {
   const [empMap,      setEmpMap]      = useState({})
   const [typeMap,     setTypeMap]     = useState({})
   const pendingCounts = useHrApprovalCounts() // shared with ClientDashboard.jsx's HR column
+  const queueShown = {
+    leave: listErrors.leave || leaveList.length > 0,
+    ot:    listErrors.ot    || otList.length > 0,
+    tada:  listErrors.tada  || tadaList.length > 0,
+    swap:  listErrors.swap  || swapList.length > 0,
+  }
+  queueShown.any = queueShown.leave || queueShown.ot || queueShown.tada || queueShown.swap
   // The weather strip (S786, owner decision): rain changes how many staff a shift needs, and this is
   // the page staffing is run from. Same hook and slot as the main Dashboard, without the sales
   // chart's "×N%" tags, which belong to that chart.
@@ -546,183 +553,191 @@ export default function HrDashboard() {
       <HrLabourPanel />
 
       {/* ── Pending queues ───────────────────────────────────────────────────── */}
+      {/* A queue shows only with something in it, or when its read failed, which keeps its alert
+          (S806). Four "No pending … ✓" cards repeated the zero tiles above and made the phone
+          dashboard 2,565px tall; a clear day is one line. */}
+      {!queueShown.any && (
+        <div className="card card--compact dash-section" style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
+          Nothing waiting ✓ — no leave, overtime, TADA claims or shift swaps to approve.
+        </div>
+      )}
       <div className="panel-grid">
 
         {/* Leave queue */}
-        <div>
-          <SectionLabel>
-            Pending Leave Requests {pendingLeave > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingLeave})</span>}
-          </SectionLabel>
-          <div className="card" style={{ padding: 0 }}>
-            {listErrors.leave ? (
-              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
-            ) : leaveList.length === 0 ? (
-              <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending leave requests ✓</div>
-            ) : (
-              <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Type</th>
-                    <th>From</th>
-                    <th>To</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaveList.map(r => (
-                    <tr key={r.id}>
-                      <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[r.employee_id] || '—'}</td>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{typeMap[r.leave_type_id] || '—'}</td>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmtBsDate(r.start_date)}</td>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmtBsDate(r.end_date)}</td>
+        {queueShown.leave && (
+          <div>
+            <SectionLabel>
+              Pending Leave Requests {pendingLeave > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingLeave})</span>}
+            </SectionLabel>
+            <div className="card" style={{ padding: 0 }}>
+              {listErrors.leave ? (
+                <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+              ) : (
+                <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Type</th>
+                      <th>From</th>
+                      <th>To</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
+                  </thead>
+                  <tbody>
+                    {leaveList.map(r => (
+                      <tr key={r.id}>
+                        <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[r.employee_id] || '—'}</td>
+                        <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{typeMap[r.leave_type_id] || '—'}</td>
+                        <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmtBsDate(r.start_date)}</td>
+                        <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmtBsDate(r.end_date)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              )}
+            </div>
+            {pendingLeave > 0 && (
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/leave')}>
+                Go to Leave → approve / reject
+              </button>
             )}
           </div>
-          {pendingLeave > 0 && (
-            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/leave')}>
-              Go to Leave → approve / reject
-            </button>
-          )}
-        </div>
+        )}
 
         {/* OT queue */}
-        <div>
-          <SectionLabel>
-            Pending OT Entries {pendingOt > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingOt})</span>}
-          </SectionLabel>
-          <div className="card" style={{ padding: 0 }}>
-            {listErrors.ot ? (
-              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
-            ) : otList.length === 0 ? (
-              <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending OT entries ✓</div>
-            ) : (
-              <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th style={{ textAlign: 'center' }}>Date</th>
-                    <th style={{ textAlign: 'center' }}>Hours</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {otList.map(e => (
-                    <tr key={e.id}>
-                      <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[e.employee_id] || '—'}</td>
-                      <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
-                        {formatBsDay(e.bs_day, e.bs_month)}
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-text1)', fontSize: 12 }}>{e.ot_hours}h</td>
-                      <td>
-                        {/* Which multiplier applies is a CATEGORY, not a status — grey, the HR category
-                            chip since S804, so amber keeps meaning "this is waiting on you" beside it. */}
-                        <span className="badge-gray" style={{ fontSize: 10 }}>
-                          {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
-                        </span>
-                      </td>
+        {queueShown.ot && (
+          <div>
+            <SectionLabel>
+              Pending OT Entries {pendingOt > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingOt})</span>}
+            </SectionLabel>
+            <div className="card" style={{ padding: 0 }}>
+              {listErrors.ot ? (
+                <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+              ) : (
+                <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th style={{ textAlign: 'center' }}>Date</th>
+                      <th style={{ textAlign: 'center' }}>Hours</th>
+                      <th>Type</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
+                  </thead>
+                  <tbody>
+                    {otList.map(e => (
+                      <tr key={e.id}>
+                        <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[e.employee_id] || '—'}</td>
+                        <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
+                          {formatBsDay(e.bs_day, e.bs_month)}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-text1)', fontSize: 12 }}>{e.ot_hours}h</td>
+                        <td>
+                          {/* Which multiplier applies is a CATEGORY, not a status — grey, the HR category
+                              chip since S804, so amber keeps meaning "this is waiting on you" beside it. */}
+                          <span className="badge-gray" style={{ fontSize: 10 }}>
+                            {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              )}
+            </div>
+            {pendingOt > 0 && (
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/overtime')}>
+                Go to Overtime → approve / reject
+              </button>
             )}
           </div>
-          {pendingOt > 0 && (
-            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/overtime')}>
-              Go to Overtime → approve / reject
-            </button>
-          )}
-        </div>
+        )}
 
         {/* TADA queue */}
-        <div>
-          <SectionLabel>
-            Pending TADA Claims {pendingTada > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTada})</span>}
-          </SectionLabel>
-          <div className="card" style={{ padding: 0 }}>
-            {listErrors.tada ? (
-              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
-            ) : tadaList.length === 0 ? (
-              <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending TADA claims ✓</div>
-            ) : (
-              <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Trip</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tadaList.map(c => (
-                    <tr key={c.id}>
-                      <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[c.employee_id] || '—'}</td>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{c.destination || c.trip_purpose || '—'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
+        {queueShown.tada && (
+          <div>
+            <SectionLabel>
+              Pending TADA Claims {pendingTada > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTada})</span>}
+            </SectionLabel>
+            <div className="card" style={{ padding: 0 }}>
+              {listErrors.tada ? (
+                <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+              ) : (
+                <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Trip</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
+                  </thead>
+                  <tbody>
+                    {tadaList.map(c => (
+                      <tr key={c.id}>
+                        <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[c.employee_id] || '—'}</td>
+                        <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{c.destination || c.trip_purpose || '—'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              )}
+            </div>
+            {pendingTada > 0 && (
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/tada')}>
+                Go to TADA Claims → approve / reject
+              </button>
             )}
           </div>
-          {pendingTada > 0 && (
-            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/tada')}>
-              Go to TADA Claims → approve / reject
-            </button>
-          )}
-        </div>
+        )}
 
         {/* Shift swap queue */}
-        <div>
-          <SectionLabel>
-            Pending Shift Swaps {pendingSwap > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingSwap})</span>}
-          </SectionLabel>
-          <div className="card" style={{ padding: 0 }}>
-            {listErrors.swap ? (
-              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
-            ) : swapList.length === 0 ? (
-              <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending shift swaps ✓</div>
-            ) : (
-              <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Requester ⇄ Target</th>
-                    <th style={{ textAlign: 'center' }}>Days</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {swapList.map(s => (
-                    <tr key={s.id}>
-                      <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                        <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{empMap[s.requester_employee_id] || '—'}</span>
-                        {' ⇄ '}
-                        <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{empMap[s.target_employee_id] || '—'}</span>
-                      </td>
-                      <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
-                        {bsDayOrdinal(s.requester_bs_day)} ⇄ {formatBsDay(s.target_bs_day, s.bs_month)}
-                      </td>
+        {queueShown.swap && (
+          <div>
+            <SectionLabel>
+              Pending Shift Swaps {pendingSwap > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingSwap})</span>}
+            </SectionLabel>
+            <div className="card" style={{ padding: 0 }}>
+              {listErrors.swap ? (
+                <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+              ) : (
+                <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Requester ⇄ Target</th>
+                      <th style={{ textAlign: 'center' }}>Days</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
+                  </thead>
+                  <tbody>
+                    {swapList.map(s => (
+                      <tr key={s.id}>
+                        <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{empMap[s.requester_employee_id] || '—'}</span>
+                          {' ⇄ '}
+                          <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{empMap[s.target_employee_id] || '—'}</span>
+                        </td>
+                        <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
+                          {bsDayOrdinal(s.requester_bs_day)} ⇄ {formatBsDay(s.target_bs_day, s.bs_month)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              )}
+            </div>
+            {pendingSwap > 0 && (
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/roster')}>
+                Go to Roster → approve / reject
+              </button>
             )}
           </div>
-          {pendingSwap > 0 && (
-            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/hr/roster')}>
-              Go to Roster → approve / reject
-            </button>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )

@@ -12,6 +12,7 @@ import Tip from '../../../components/Tip'
 import Tabs, { FilterChips } from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Bell } from 'lucide-react'
 import {
   calcHours, rKey, shiftHours, computeEmpHours, computeDayHours, computeScheduledCount, computeUnpricedCount,
   computePlannedLaborCost, computeRecommendedHeadcount, summarizeLaborForecastRows,
@@ -41,12 +42,17 @@ import { lcBand, bandFigure, LABOR_WARN, LABOR_CRITICAL } from '../../../shared/
 // the board, which five semantic tokens can't do, and the client can repaint any of them from Shift
 // Types anyway. They are FILL values only; the chip's label text goes through shiftTextColor()
 // (rosterHelpers.js) so a categorical hue never doubles as low-contrast type.
+// No seed may wear a verdict hue (S806): Afternoon was amber and Full Day green, the colours that
+// mean "needs a look" and "done" everywhere else, so a board read as a status report. They are cyan
+// and indigo-700 now, picked by simulating protan/deutan/tritan vision against the other five (worst
+// pair ΔE2000 12.5; plain indigo-500 sat 0.7 from Evening's violet under protan). Only a new
+// client's first seed gets them; a client's own shift colours are never repainted.
 const DEFAULT_SHIFTS = [
   { name: 'Morning',   color: '#3B82F6', start_time: '07:00', end_time: '15:00', hours: 8,  sort_order: 1 },
-  { name: 'Afternoon', color: '#F59E0B', start_time: '13:00', end_time: '21:00', hours: 8,  sort_order: 2 },
+  { name: 'Afternoon', color: '#06B6D4', start_time: '13:00', end_time: '21:00', hours: 8,  sort_order: 2 },
   { name: 'Evening',   color: '#8B5CF6', start_time: '17:00', end_time: '01:00', hours: 8,  sort_order: 3 },
   { name: 'Night',     color: '#64748B', start_time: '21:00', end_time: '07:00', hours: 8,  sort_order: 4 },
-  { name: 'Full Day',  color: '#10B981', start_time: '09:00', end_time: '18:00', hours: 9,  sort_order: 5 },
+  { name: 'Full Day',  color: '#4338CA', start_time: '09:00', end_time: '18:00', hours: 9,  sort_order: 5 },
   { name: 'Split',     color: '#EC4899', start_time: null,    end_time: null,    hours: null, sort_order: 6 },
   // Zero-hour, purely a visible marker — unlike "Clear (Unassign)" in the shift picker (which
   // deletes the roster row entirely), assigning this actually writes a row, so the day shows up
@@ -1530,8 +1536,12 @@ export default function Roster() {
                       <span className="badge-amber">◐ {publishedCount}/{totalCount} Published</span>
                     </Tip>
                   )}
-                  <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={publishing}
+                  {/* The one control here that reaches staff phones, so it is the page's primary
+                      while any visible day is still a draft, and carries the bell either way. It
+                      sat at Print's weight (S806). Once every day is out, a re-send is secondary. */}
+                  <button className={`btn ${allPublished ? 'btn-ghost' : 'btn-primary'}`} style={{ fontSize: 12 }} disabled={publishing}
                     onClick={viewMode === 'weekly' ? publishWeek : publishMonth}>
+                    <Bell size={14} aria-hidden="true" />
                     {publishing ? 'Publishing…' : nonePublished ? `Publish ${viewMode === 'weekly' ? 'Week' : 'Month'} + Notify` : 'Re-Publish + Notify'}
                   </button>
                 </div>

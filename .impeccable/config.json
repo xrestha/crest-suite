@@ -29,9 +29,9 @@
       },
       {
         "rule": "design-system-color",
-        "value": "#f59e0b",
-        "createdAt": "2026-08-26T14:04:19.341Z",
-        "reason": "DEFAULT_SHIFTS categorical fill palette (roster shift chips) - seed data, FILL-only per in-file comment; detector FP class confirmed by S613 assessment B"
+        "value": "#06b6d4",
+        "createdAt": "2026-10-08T00:00:00.000Z",
+        "reason": "DEFAULT_SHIFTS categorical fill palette (roster shift chips) - seed data, FILL-only per in-file comment; detector FP class confirmed by S613 assessment B. S806: Afternoon's seed moved off #f59e0b (amber, a verdict hue on a category), so this entry moved with it."
       },
       {
         "rule": "design-system-color",
@@ -41,9 +41,9 @@
       },
       {
         "rule": "design-system-color",
-        "value": "#10b981",
-        "createdAt": "2026-08-26T14:04:19.641Z",
-        "reason": "DEFAULT_SHIFTS categorical fill palette (roster shift chips) - seed data, FILL-only per in-file comment; detector FP class confirmed by S613 assessment B"
+        "value": "#4338ca",
+        "createdAt": "2026-10-08T00:00:00.000Z",
+        "reason": "DEFAULT_SHIFTS categorical fill palette (roster shift chips) - seed data, FILL-only per in-file comment; detector FP class confirmed by S613 assessment B. S806: Full Day's seed moved off #10b981 (green, a verdict hue on a category), so this entry moved with it."
       },
       {
         "rule": "design-system-color",

@@ -20,8 +20,8 @@ export function fmtTime(t) {
 // (adding one to DEFAULT_SHIFTS would break the seed INSERT), and the colour is user-editable
 // anyway, so any hand-picked pairing covers only the seven seeds. So the label colour is DERIVED:
 // same hue, lightness stepped away from the composited chip background until it clears 4.5:1.
-// A colour that already clears it is returned untouched, so Afternoon/Full Day keep their exact
-// value on every dark preset. Verified across all 7 default shifts × all 10 presets: worst case
+// A colour that already clears it is returned untouched, so a light seed such as Afternoon's cyan
+// keeps its exact value on the dark presets. Verified across all 7 default shifts × all 10 presets: worst case
 // 4.50:1, none below.
 //
 // The FILL keeps the base colour everywhere (swatches, legend dots, chip background, borders) —

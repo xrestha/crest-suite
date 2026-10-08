@@ -228,17 +228,7 @@ export default function SelfServiceLogin() {
               {shownStaff.map(s => {
                 const avatar = avatarColorFor(s.id, isDark)
                 return (
-                  <button
-                    key={s.id} type="button" onClick={() => pickStaff(s)}
-                    style={{
-                      minHeight: 110, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 0,
-                      color: 'var(--theme-text1)', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                      padding: '12px 8px 10px', lineHeight: 1.3, transition: 'border-color 0.15s, background 0.15s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--theme-accent)'; e.currentTarget.style.background = 'var(--theme-table-hover)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--theme-border)'; e.currentTarget.style.background = 'var(--theme-card)' }}
-                  >
+                  <button key={s.id} type="button" className="ss-staff-tile" onClick={() => pickStaff(s)}>
                     <div style={{
                       width: 52, height: 52, borderRadius: 0, background: avatar.bg, color: avatar.fg,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700,

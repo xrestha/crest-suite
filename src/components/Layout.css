@@ -1424,9 +1424,11 @@ tr.interactive-row:focus-visible {
   outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
-/* A 16px figure (a long NPR value) made the button 18px tall: under the 24px floor on a phone. */
+/* A 16px figure (a long NPR value) made the button 18px tall: under the 24px floor on a phone.
+   32 since S806 (measured at 28): the tile's figure is its only touch target, and 32 is the tier
+   every other in-content button takes. */
 @media (pointer: coarse) {
-  .stat-card__open { min-height: 24px; }
+  .stat-card__open { min-height: 32px; }
 }
 
 /* ClientDashboard.jsx's two "period expired" action buttons (admin's "Go to Periods", the
@@ -1959,6 +1961,14 @@ tr.interactive-row:focus-visible {
   }
   .btn-sm,
   table.data-table .btn {
+    min-height: 32px;
+  }
+  /* An entry table's own fields take the in-table button's tier (S806). They were in no rule, so
+     their height was whatever padding and the 16px floor below happened to make: 31px on Festival
+     Allowance, 33px on Attendance. A rule makes the number a decision; 32 keeps a dense grid of
+     inputs a grid on a tablet, as 32 does for the buttons beside them. */
+  table.data-table input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  table.data-table select {
     min-height: 32px;
   }
   /* Chart controls were in neither coarse block, so the expand affordance stayed 24px on a
@@ -3680,6 +3690,12 @@ textarea::placeholder {
   outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
+/* The line's three controls (MET Norway, CC BY 4.0, Change city) sit at the 12px control floor;
+   the plain text around them stays at micro (S806). They were 10px, the smallest interactive text in
+   the product; the whole line at 12px wraps to two in the dashboard header. After the block above,
+   because `font: inherit` there would otherwise put Change city back to the line's size. */
+.weather-strip__credit a,
+.weather-strip__change { font-size: 12px; }
 /* An in-text control is a ~12px-tall target on a tablet. The coarse tier grows its HIT box with
    padding and gives the space straight back with an equal negative margin, so the line under the
    days keeps its height and nothing beside it moves. */

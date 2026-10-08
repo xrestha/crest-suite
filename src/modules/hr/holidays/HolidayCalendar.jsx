@@ -83,6 +83,80 @@ export default function HolidayCalendar() {
   const fyHolidays = fyAllRows.filter(h => !h.removed_at)
   const fyRemoved  = fyAllRows.filter(h => h.removed_at)
 
+  // Coming up first (S806). The year ran Shrawan to Ashadh with nothing marking today, so in Magh
+  // the next holiday sat under six that had passed. Today's own holiday counts as coming up. Only a
+  // year holding both is split: a past or future year stays one list and never opens folded away.
+  const bsKey = (y, m, d) => y * 10000 + m * 100 + d
+  const bsToday = getBsToday()
+  const todayKey = bsKey(bsToday.year, bsToday.month, bsToday.day)
+  const fyPassed   = fyHolidays.filter(h => bsKey(h.bs_year, h.bs_month, h.bs_day) < todayKey)
+  const fyUpcoming = fyHolidays.filter(h => bsKey(h.bs_year, h.bs_month, h.bs_day) >= todayKey)
+  const splitYear  = fyPassed.length > 0 && fyUpcoming.length > 0
+
+  function renderHolidayTable(rows) {
+    return (
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th style={{ width: 32, textAlign: 'center' }}>#</th>
+              <th>Holiday Name</th>
+              <th><Tip text="BS month the holiday falls in." width={160}>Month</Tip></th>
+              <th style={{ textAlign: 'center' }}>Day</th>
+              <th style={{ textAlign: 'center' }}>
+                <Tip text="The actual BS year of this date. Months 1–3 (Baishakh–Ashadh) belong to the second BS year of the fiscal year." width={280}>
+                  BS Year
+                </Tip>
+              </th>
+              <th>
+                <Tip text="Public = gazetted (2× OT if staff work). Optional = floating, at employer discretion." width={260}>
+                  Type
+                </Tip>
+              </th>
+              <th>
+                <Tip text="Scales Demand Forecast on this day. Blank = flagged but unadjusted." width={260}>
+                  Demand
+                </Tip>
+              </th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((h, i) => (
+              <tr key={h.id}>
+                <td style={{ textAlign: 'center', color: 'var(--theme-text3)', fontSize: 11 }}>{i + 1}</td>
+                <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{h.name}</td>
+                <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[h.bs_month - 1]}</td>
+                <td style={{ textAlign: 'center', color: 'var(--theme-text3)' }}>{h.bs_day}</td>
+                <td style={{ textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>{h.bs_year}</td>
+                <td>
+                  {/* A holiday's type is a category, so both are grey and the word carries it
+                      (S804, the IMS S796 rule). They were brass / purple, and brass is red on
+                      Modernist; before that amber / grey, and amber means "waiting on you"
+                      throughout HR, which a gazetted holiday is not. */}
+                  <span className="badge-gray" style={{ fontSize: 11 }}>
+                    {h.holiday_type === 'public' ? 'Public' : 'Optional'}
+                  </span>
+                </td>
+                <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
+                  {h.demand_multiplier != null ? `×${h.demand_multiplier}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  {canEdit && (
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}>Edit</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => removeHoliday(h)} aria-label={`Remove ${h.name}`}>Remove</button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   function openAdd() { setForm({ open: true, editing: null, ...BLANK }); setMsg('') }
   function openEdit(h) {
     setForm({ open: true, editing: h, name: h.name, bs_month: h.bs_month, bs_day: h.bs_day, holiday_type: h.holiday_type, demand_multiplier: h.demand_multiplier ?? '' })
@@ -370,67 +444,24 @@ export default function HolidayCalendar() {
           </p>
         </div>
       ) : (
-        <div className="card" style={{ padding: 0 }}>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 32, textAlign: 'center' }}>#</th>
-                  <th>Holiday Name</th>
-                  <th><Tip text="BS month the holiday falls in." width={160}>Month</Tip></th>
-                  <th style={{ textAlign: 'center' }}>Day</th>
-                  <th style={{ textAlign: 'center' }}>
-                    <Tip text="The actual BS year of this date. Months 1–3 (Baishakh–Ashadh) belong to the second BS year of the fiscal year." width={280}>
-                      BS Year
-                    </Tip>
-                  </th>
-                  <th>
-                    <Tip text="Public = gazetted (2× OT if staff work). Optional = floating, at employer discretion." width={260}>
-                      Type
-                    </Tip>
-                  </th>
-                  <th>
-                    <Tip text="Scales Demand Forecast on this day. Blank = flagged but unadjusted." width={260}>
-                      Demand
-                    </Tip>
-                  </th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fyHolidays.map((h, i) => (
-                  <tr key={h.id}>
-                    <td style={{ textAlign: 'center', color: 'var(--theme-text3)', fontSize: 11 }}>{i + 1}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{h.name}</td>
-                    <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[h.bs_month - 1]}</td>
-                    <td style={{ textAlign: 'center', color: 'var(--theme-text3)' }}>{h.bs_day}</td>
-                    <td style={{ textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>{h.bs_year}</td>
-                    <td>
-                      {/* A holiday's type is a category, so both are grey and the word carries it
-                          (S804, the IMS S796 rule). They were brass / purple, and brass is red on
-                          Modernist; before that amber / grey, and amber means "waiting on you"
-                          throughout HR, which a gazetted holiday is not. */}
-                      <span className="badge-gray" style={{ fontSize: 11 }}>
-                        {h.holiday_type === 'public' ? 'Public' : 'Optional'}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
-                      {h.demand_multiplier != null ? `×${h.demand_multiplier}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {canEdit && (
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}>Edit</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => removeHoliday(h)} aria-label={`Remove ${h.name}`}>Remove</button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="card" style={{ padding: 0 }}>
+            {splitYear && (
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)' }}>
+                <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>Coming up ({fyUpcoming.length})</h2>
+              </div>
+            )}
+            {renderHolidayTable(splitYear ? fyUpcoming : fyHolidays)}
           </div>
-        </div>
+          {splitYear && (
+            <details className="card" style={{ padding: 0, marginTop: 16 }}>
+              <summary style={{ padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+                Already passed ({fyPassed.length})
+              </summary>
+              {renderHolidayTable(fyPassed)}
+            </details>
+          )}
+        </>
       )}
 
       {/* Removed holidays (S748). Kept so Seed leaves them out, shown so that is never a mystery,
@@ -464,7 +495,7 @@ export default function HolidayCalendar() {
                       {canEdit && (
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button className="btn btn-ghost btn-sm" onClick={() => putBack(h)} disabled={busy} aria-label={`Put back ${h.name}`}>Put back</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => deleteForGood(h)} aria-label={`Delete ${h.name} for good`}>Delete for good</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => deleteForGood(h)} aria-label={`Delete ${h.name} for good`}>Delete for good</button>
                         </div>
                       )}
                     </td>

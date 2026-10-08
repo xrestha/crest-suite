@@ -750,7 +750,7 @@ never be hidden by a media query.
 **Touch sizing is scoped to the input method, not to a width.** `@media (pointer: coarse)` gives
 `.btn` 44px and tunes every control down from there — `.sidebar-link`, `.module-tab` and every
 top-bar control (`.topbar-pill`, the context and account triggers) 44,
-`.btn-sm` / `.tab-btn` / an in-table `.btn` 32, the chart controls 44x44 — plus the shell controls a
+`.btn-sm` / `.tab-btn` / an in-table `.btn`, input or select / a stat tile's figure button (`.stat-card__open`) 32 (the fields and the tile since S806), the chart controls 44x44 — plus the shell controls a
 finger actually hits, which were in no coarse rule at all until they were measured (the outlet
 switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at
 27x25). A narrow desktop window keeps its own density, which a width breakpoint could not express.
