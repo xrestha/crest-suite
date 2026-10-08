@@ -9,7 +9,379 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-17 (S776 — POS module critique fixed in full and moved to POS_DECISIONS.md, with the order-screen breakpoint item; four S776 checks that need a second device or live service added under B3)
+Last updated: 2026-10-08 (S809 — whole-module POS re-analysis filed below as S809.0–S809.3; nothing fixed yet)
+
+---
+
+# S809 re-analysis (2026-10-08)
+
+The second whole-module review of Crest POS, 24 days after S754. About twenty sessions had added POS code
+since then that no whole-module review had seen:
+
+- S755's five gap fixes;
+- Crest Customization and build-your-own (S758–S760);
+- the Billing station (S762) and guest-order alerts (S763);
+- the guest menu in the restaurant's name (S767);
+- the S776 critique fixes.
+
+Fourteen read-only area reviews covered checkout, order flow, access, shifts, credit notes, the IMS handoff,
+reports, the floor and kitchen, guest QR ordering, reservations, customers and parking, Customization, the
+database and the docs. A completeness pass then covered three gaps between them: multi-outlet groups
+(GAP-OUTLETS), the Crest operator inside a tenant (GAP-OPERATOR), and a till living across a release or
+offline (GAP-RELEASE).
+
+Each area ran reviewer → adversarial verifier/judge. The verifier re-read the code and the LIVE function,
+trigger, policy and grant bodies, and re-checked every P0 and P1 live. The main session re-checked the P0
+against the live catalog itself. Nothing was written to the live database. The evidence for each ID is in
+`docs/pos-review-s809/<AREA>.md`: where, what happens, evidence, fix, confidence, verification.
+
+**Live exposure is small.** Only BLOOM CAFE (a test outlet) has POS bills: 40 closed. No POS client is
+VAT-registered, none has Customization on, and only 1 booking-table link exists. So most findings are code
+findings that bite once a real outlet runs the till. The few seen in live data are marked "live".
+
+**172 findings** (165 in the fourteen area files and 7 in `GAPS.md`) make **171 rows** after merging
+ORDER-FLOW-1 = CHECKOUT-9, kept at P1. That is **1 P0 · 7 P1 · 70 P2 · 93 P3**. 65 rows need a migration, and
+27 owner decisions (Q1–Q27) are in S809.1. None was rejected outright. The verifiers changed about a fifth
+of the severities and corrected most "What happens" lines; each file's "Verified:" lines say what.
+
+## S809.0 Index
+
+Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock stored or printed wrong;
+3 = the floor, kitchen, guests, bookings, loyalty and report figures (lost work and wrong figures);
+4 = P3 copy, docs and polish. Within a stage, P0/P1 rows go first. Mig = needs a migration.
+
+### P0 (1)
+
+| ID | Finding | Stage | Decision | Mig |
+| --- | --- | --- | --- | --- |
+| RESERVATIONS-1 | A login at any other Crest outlet can link its own booking to this outlet's table. That includes a self-signup trial nobody has approved, and table ids are printed in the QR. The table-hold guard then reads across tenants and its refusal shows this outlet's guest name, party size and time. The same link blocks the outlet from holding its own table | 1 | — | yes |
+
+### P1 (7)
+
+| ID | Finding | Stage | Decision | Mig |
+| --- | --- | --- | --- | --- |
+| CHECKOUT-2 | A supervisor without Allow Void can void a bill over REST, or close it "billed" with no close type. The bill then vanishes from Sales Report, the Z-report, the Dashboard and Exceptions | 1 | — | yes |
+| DATABASE-1 | Any login, a Staff PIN included, can delete or rewrite the kitchen-ticket log, post a fake ticket for the kitchen to cook, and forge pulled-item records under a colleague's name | 1 | Q1 | yes |
+| ORDER-FLOW-2 | A waiter can take a cooked dish off the bill with no pulled-item record, by first saving the line as "not sent" (PATCH or the save RPC) | 1 | — | yes |
+| ACCESS-1 | After activating a till, the Owner stays signed in behind the PIN screen, and "← Back" gives the tablet the Owner's account (S790 fixed only the guide wording) | 1 | — | no |
+| CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers | 2 | Q8 | yes |
+| ORDER-FLOW-1 (= CHECKOUT-9) | If the till's settings read fails or stalls, every bill until a reload prints as a TAX INVOICE without the VAT/PAN number, prefix or address. Bar items go on the kitchen ticket, and the bad copy overwrites the offline settings. The reprint path has the same gap | 2 | — | no |
+| GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
+
+### P2 (65)
+
+| ID | Finding | Stage | Decision | Mig |
+| --- | --- | --- | --- | --- |
+| ACCESS-2 | A PIN left on the Kitchen Display never idle-locks, and its Exit opens the till as that login | 1 | Q4 | no |
+| ACCESS-3 | A POS manager with capped powers can reset the PIN of a waiter who holds more, then use those powers; nothing records the reset | 1 | Q5 | no |
+| ACCESS-4 | A PIN login with sibling-outlet access can switch a till into the other outlet, which then bills in that outlet's name, PAN and invoice series | 1 | — | yes |
+| CHECKOUT-8 | Any login can reset a closed invoice's print counter over REST, so the next reprint carries no "COPY" mark | 1 | — | yes |
+| CUSTOMERS-PARKING-7 | Any login can move a regular's points balance to another phone over REST, and nothing records it | 1 | — | yes |
+| DATABASE-4 | The Loyalty payment sitting on an open bill can be changed or deleted by any login | 1 | — | yes |
+| DATABASE-5 | Any login can delete a loyalty customer, silently wiping its points history | 1 | — | yes |
+| DOCS-1 | A manager's PIN reset leaves the 15-minute lockout in place, so the new PIN is refused too. The fix is code: `admin-user-ops` plus a deploy. IMS count and HR Self-Service PINs have the same gap (S809.3) | 1 | Q6 | no |
+| GUEST-4 | A locked or deactivated outlet's QR codes keep taking orders that no till can open (KNOWN door, effect new) | 1 | Q2 | yes |
+| RESERVATIONS-3 | The public booking page keeps taking requests for a locked, deactivated or archived outlet: GUEST-4's gap, shipped in the same migration | 1 | Q2 | yes |
+| RESERVATIONS-4 | One ordinary connection can switch off an outlet's online booking for every guest, because the outlet-wide limit counts refused attempts | 1 | Q3 | yes |
+| SHIFTS-2 | The signed Z-report's money figures are whatever the tablet sends: one REST call can file a shortage as "✓ Balanced" | 1 | — | yes |
+| CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
+| CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
+| CHECKOUT-5 | A Tax Invoice above NPR 10,000 closes with blank buyer name, address and PAN, though the till's own tip says they are needed | 2 | Q9 | no |
+| CHECKOUT-6 | After an outlet deregisters from VAT, every reprint or view of an old Tax Invoice prints a smaller total (KNOWN, now with the reprint effect) | 2 | — | yes |
+| CHECKOUT-7 | When a close's first try lands late, the bill prints and posts with the cashier's later changes, not the stored payment | 2 | — | no |
+| CHECKOUT-10 | A comp left by a failed, cancelled close reloads as a second plain line, and comping again comps more than was ordered | 2 | — | yes |
+| CREDIT-NOTES-1 | Crediting a bill to re-ring it, as the guide says, or any "Duplicate bill" note, leaves the food counted twice in Inventory usage and that month's Variance | 2 | Q10 | yes |
+| CREDIT-NOTES-2 | A dropped connection mid-note leaves the bill unlinked for good. The note doesn't print, the cash refund and points reversal never run, and nothing can run them later | 2 | — | yes |
+| CREDIT-NOTES-4 | A note's fiscal year, and the day its Inventory reversal lands on, come from the device clock; a REST insert can name any year | 2 | — | yes |
+| CUSTOMERS-PARKING-1 | Delivery platforms earn loyalty points on their own Credit bills. Live: BLOOM CAFE's only award went to a partner, 188 points = NPR 1,880 | 2 | — | yes |
+| CUSTOMERS-PARKING-2 | Points redeemed on a payment attempt that never finished stay spent after a reload, a till lock or a second till | 2 | — | yes |
+| CUSTOMERS-PARKING-3 | A failed read of the point value is taken as NPR 1 a point, and the till never checks what the server charged | 2 | — | no |
+| CUSTOMIZATION-1 | Option Groups treats the outlet as no-VAT when settings are missing or failed, so a choice price saved then is charged 13% over what was typed on a VAT outlet | 2 | — | no |
+| CUSTOMIZATION-3 | The server takes a must-choose dish with no choices and bills the plain price, while the QR path refuses it (KNOWN, new evidence) | 2 | — | yes |
+| IMS-HANDOFF-2 | A bill whose sales reached Inventory but whose "posted" mark did not stays "not posted" for good. Live: BLOOM CAFE bill 40, NPR 1,880 | 2 | — | yes |
+| IMS-HANDOFF-3 | Bills closed on a Staff PIN ignore trim loss in the stock ledger, and their comps are costed NPR 0 on screen and on the slip | 2 | — | yes |
+| REPORTS-1 | After a VAT deregistration, Sales Report, Covers and the 1L+ tab recompute past Tax Invoices without their VAT (KNOWN root, new reach) | 2 | — | yes |
+| SHIFTS-1 | A bill charged, or cash recorded, while "Drawer is short by …" is on screen is left out of the signed Z-report and every later one | 2 | — | no |
+| SHIFTS-3 | A Credit Note's cash refund always takes the whole bill out of the drawer, even when part was paid by card, eSewa or points | 2 | — | yes |
+| ACCESS-5 | Deleting a cashier's POS login wipes their name from past bills, shifts and credit notes, though the confirm says names stay | 3 | Q17 | no |
+| ACCESS-6 | A page reload restarts the idle lock with 3 fresh minutes in the absent waiter's session | 3 | — | no |
+| ACCESS-7 | Locking one till signs that waiter out of every other till, and the other till loses its unsent order | 3 | Q18 | yes |
+| CREDIT-NOTES-3 | A note that couldn't reach Inventory waits for "a manager" in Periods. A POS manager can't open Periods, and an IMS supervisor is told nothing is waiting | 3 | Q12 | yes |
+| CUSTOMERS-PARKING-4 | A regular's points are found only when the phone is typed exactly as on the first bill | 3 | — | yes |
+| CUSTOMERS-PARKING-5 | "Ask the Owner to add the points" leads nowhere: no screen can add or correct a balance | 3 | Q13 | yes |
+| CUSTOMERS-PARKING-6 | A lost Settle reply ends in "already settled", so the cashier believes a colleague took the money | 3 | — | no |
+| CUSTOMERS-PARKING-8 | Customers → Loyalty lists only the first 1,000 customers | 3 | — | no |
+| CUSTOMIZATION-2 | Hiding a sold-out choice mid-service blocks the whole table's order on the till | 3 | — | no |
+| DATABASE-2 | "Clear POS Transactions" deletes every Inventory stock movement, manual ones included, and "Clear IMS" has the mirror fault. Operator-only, never run | 3 | — | no |
+| DATABASE-3 | A restore reports success while dropping parking slips, and once a cash refund exists, every Cash In/Out | 3 | — | no |
+| DOCS-2 | Help tells a cashier to void and re-ring to fix a split payment, which re-sends the food and books a void; ↩ Undo already does it | 3 | — | no |
+| FLOOR-KITCHEN-1 | A waiting QR order is never announced loudly on a till: Orders chimes once and the PIN screen hears nothing (S763 left Orders quiet for the floor view) | 3 | Q14 | yes |
+| FLOOR-KITCHEN-2 | A ticket with every dish pulled stays in New and keeps alarming; clearing it fakes Start/Ready and shows the floor false "Ready" | 3 | — | no |
+| FLOOR-KITCHEN-3 | An all-Kitchen ticket routing is saved but ignored: Beverage still goes to the Bar ticket and board | 3 | Q15 | no |
+| GUEST-2 | A lost Place Order reply plus a retry sends the guest order twice once staff took the first | 3 | — | yes |
+| GUEST-3 | The server lets a second decision overwrite the first, so a dismissed guest order can be accepted and doubled (server half of ORDER-FLOW-11) | 3 | — | yes |
+| IMS-HANDOFF-1 | Only the Owner and operator can post waiting till bills into Inventory; an IMS supervisor is told nothing waits (one decision with CREDIT-NOTES-3) | 3 | Q12 | yes |
+| IMS-HANDOFF-4 | The Owner Report's POS section fails above roughly 200–400 bills a month, and drops credit-noted bills | 3 | — | no |
+| ORDER-FLOW-3 | A lost Send reply plus most kinds of retry leaves dishes "✓ sent" with no ticket printed | 3 | — | no |
+| ORDER-FLOW-4 | Two tablets pressing KOT for the same unsent dishes both print a ticket | 3 | — | yes |
+| ORDER-FLOW-5 | Send, Update, KOT and BOT have no time limit: one stalled request freezes every send and Payment on that till | 3 | — | no |
+| ORDER-FLOW-6 | Wi-Fi up but internet down: the till can't send anything, because offline mode waits for the browser to say offline (KNOWN B3) | 3 | Q16 | no |
+| ORDER-FLOW-7 | A table opened offline gets its kitchen tickets logged twice when two uploads overlap | 3 | — | no |
+| ORDER-FLOW-8 | Dishes fired offline onto a bill another till closed leave no trace once the conflict is dismissed | 3 | — | no |
+| ORDER-FLOW-9 | An instruction added after a dish was sent ("no peanuts — allergy") reaches the paper ticket but never the Kitchen Display | 3 | — | no |
+| ORDER-FLOW-10 | If the order a till lock interrupted was billed meanwhile, the whole old cart returns as "not sent" | 3 | — | no |
+| ORDER-FLOW-11 | An accepted guest order returns to the banner within 5 s with Accept live; a second Accept doubles the dishes | 3 | — | no |
+| REPORTS-2 | 1L+ (Annexure 13) loses past fiscal years once an outlet passes about 1,00,000 bills, and a failure is wiped by the tab's own load | 3 | — | yes |
+| REPORTS-3 | The POS Dashboard and Home count takeaway/delivery bills as guests, so covers disagree with the Covers Report (live) | 3 | — | no |
+| REPORTS-4 | The Customization Report costs a size-scaled choice from one arbitrary bill's portion | 3 | — | no |
+| RESERVATIONS-2 | An Arrived party seen outside its booking window gets no "Seat" prompt, stays Arrived for good and counts as walk-in | 3 | — | no |
+| RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
+| SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
+
+### P3 (91)
+
+| ID | Finding | Stage | Decision | Mig |
+| --- | --- | --- | --- | --- |
+| ACCESS-8 | The shared till key is still on at every client and fetchable through an RPC unused since S754 | 1 | Q7 | no |
+| ACCESS-9 | Four POS rank checks are copies of `pos_caller_has_rank` that don't refuse a settlement-blocked login | 1 | — | yes |
+| CHECKOUT-12 | Once QR auto-confirm goes live, any login could re-point an old payment confirmation at another open bill | 1 | — | yes |
+| CHECKOUT-16 | `apply_pos_item_comps` accepts any quantity, so a REST call can leave a negative line or comp | 1 | — | yes |
+| CREDIT-NOTES-6 | Any login can reset a Credit Note's print counter over REST (twin of CHECKOUT-8) | 1 | — | yes |
+| CUSTOMERS-PARKING-13 | A parking slip's rank rule, number and names are screen-only: any login can issue, renumber or rewrite one | 1 | — | yes |
+| DATABASE-9 | The retired comp-slip number function is still callable | 1 | — | yes |
+| RESERVATIONS-12 | The Activity view names the wrong person, and "who took the booking" is whatever the browser sends | 1 | — | yes |
+| ACCESS-10 | A dead till says a POS manager can re-activate it, but a POS manager can't sign in on a dead tablet | 4 | — | no |
+| ACCESS-11 | Deactivating the tablet you are signed in on with a PIN turns its idle lock off | 4 | — | no |
+| ACCESS-12 | A correct PIN can land the waiter on the Owner's email login with no message | 4 | — | no |
+| CHECKOUT-11 | A reprint from Recent Bills takes HSC codes and "Cashier" from the wrong bill | 4 | — | no |
+| CHECKOUT-13 | A PAN bill's Net Amount doesn't add up on paper (no Round Off line), and a Credit bill prints a "Tender" | 4 | — | no |
+| CHECKOUT-14 | The Complimentary tab says the slip shows no outlet name; it does | 4 | — | no |
+| CHECKOUT-15 | A save refused while split payments are recorded closes the payment window and silently drops them | 4 | — | no |
+| CREDIT-NOTES-5 | A note names and reprints its bill under today's tax settings (TI vs PB after a VAT change) (KNOWN root) | 4 | — | yes |
+| CREDIT-NOTES-7 | Searching notes by invoice number lists every fiscal year's match with no year shown | 4 | — | no |
+| CREDIT-NOTES-8 | The printed note loses a customized line's choices | 4 | — | no |
+| CREDIT-NOTES-9 | The Credit Notes page and the note's "Invoice Date" use the viewer's clock zone | 4 | — | no |
+| CREDIT-NOTES-10 | An unconfirmed cash refund's warning sends the manager to record it on the wrong shift | 4 | — | no |
+| CUSTOMERS-PARKING-9 | An unpaid Credit bill earns spendable points at close, though the guide says points follow payment | 4 | Q19 | yes |
+| CUSTOMERS-PARKING-10 | Nothing shows what points are worth per bill, and changing the point value re-prices every balance unwarned (BLOOM CAFE's test schemes give back 100% and 400%) | 4 | — | no |
+| CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
+| CUSTOMERS-PARKING-12 | A scheme's rate box keeps a change the database refused; clearing it saves 0 and stops earning | 4 | — | no |
+| CUSTOMERS-PARKING-14 | A blocked pop-up loses the parking token silently; the guest's only token reads "REPRINT #2" | 4 | — | no |
+| CUSTOMERS-PARKING-15 | Parking re-reads every slip ever issued on each open and Mark Exited | 4 | — | no |
+| CUSTOMERS-PARKING-16 | An overlapping Settle load can store the previous bill's commission and post the wrong cash | 4 | — | no |
+| CUSTOMIZATION-4 | The till's price for a size-scaled topping is a paisa off the server's on about 1 price in 25 | 4 | — | no |
+| CUSTOMIZATION-5 | A "No …" choice uses up a free pick and a place under the maximum | 4 | Q20 | yes |
+| CUSTOMIZATION-6 | Sizes are stored as a difference from the dish price, so a dish price rise silently raises every size | 4 | — | yes |
+| CUSTOMIZATION-7 | Changing a group's kind keeps old per-dish pick rules, so a Size can be skipped or picked twice | 4 | — | yes |
+| CUSTOMIZATION-8 | Hiding options can leave a "must pick 2" group with one option, taking the dish off the till unwarned | 4 | — | no |
+| DATABASE-6 | Every restore of a QR-ordering client reports the guest-order table as failed | 4 | — | no |
+| DATABASE-7 | Bills and lines have no FK to their client; a deleted client's open order is still in the live table (KNOWN) | 4 | — | yes |
+| DATABASE-8 | The floor, KDS and nav badges re-read the whole order and ticket history every poll; no index matches | 4 | — | yes |
+| DOCS-3 | Help gives six wrong answers about who may do what at the till | 4 | — | no |
+| DOCS-4 | Help still calls Guest QR ordering a Pro switch an admin turns on | 4 | — | no |
+| DOCS-5 | The POS guide still says S754's database rules and tablet keys are not live, plus three more stale sentences | 4 | — | no |
+| DOCS-6 | Help, the guide, the alerts rules and a comment say Orders shows a waiting guest order (copy half of FLOOR-KITCHEN-1) | 4 | — | no |
+| DOCS-7 | Sales Report's help promises each day reconciles to that day's shift; a shift is not a day | 4 | — | no |
+| DOCS-8 | Credit-note copy points managers the wrong way twice ("price correction" credits the whole bill) | 4 | — | no |
+| DOCS-9 | Periods says the frozen Owner Report waits for "an admin"; the Owner can regenerate it | 4 | — | no |
+| DOCS-10 | pos-billing.md still says the till calls `get_next_pos_comp_slip_no` per Charge (untrue since S286) | 4 | — | no |
+| DOCS-11 | Seven rule sentences and code comments describe mechanisms that no longer hold; two would steer a change wrong | 4 | — | no |
+| DOCS-12 | This file keeps a shipped S792 item open and the webhook secret's old home; POS_DECISIONS states two superseded rules | 4 | — | no |
+| FLOOR-KITCHEN-4 | A voided order's tickets vanish from the KDS mid-cook with no word to the kitchen | 4 | — | yes |
+| FLOOR-KITCHEN-5 | A Ready ticket drops off the KDS after 10 minutes but is never marked served; the floor keeps saying Ready | 4 | — | no |
+| FLOOR-KITCHEN-6 | The KDS poll has no stale-answer guard and its taps no time limit | 4 | — | no |
+| FLOOR-KITCHEN-7 | A table can be marked Inactive with an open bill; the floor then refuses it silently | 4 | — | yes |
+| FLOOR-KITCHEN-8 | Two tables can share a name, and a mid-meal rename splits one order's tickets | 4 | — | yes |
+| FLOOR-KITCHEN-9 | A KDS reloaded by the browser makes no sound until touched, and says nothing | 4 | — | no |
+| FLOOR-KITCHEN-10 | On the Billing station, a guest-order banner covers the bill's top bar | 4 | — | no |
+| GUEST-5 | A paid choice is silently dropped when a dish's last choices are switched off while the menu is open | 4 | — | yes |
+| GUEST-6 | The guest menu's first load has no time limit and no "Try again" | 4 | — | no |
+| GUEST-7 | Anyone who ever scanned a table's QR can order to it from anywhere, for as long as the table exists | 4 | Q21 | yes |
+| GUEST-8 | Saving the guest-menu logo on a slow connection can end with no message | 4 | — | no |
+| IMS-HANDOFF-5 | Ending a month never asks whether its till bills reached Inventory | 4 | — | no |
+| IMS-HANDOFF-6 | Stock Movements shows a till sale that added stock as one that took it away (live at BLOOM CAFE) | 4 | — | no |
+| IMS-HANDOFF-7 | The Inventory Dashboard's manual Sales by Category and Sales Mix count a credit note's reversal; Sales Mix subtracts it twice | 4 | — | no |
+| IMS-HANDOFF-8 | A till bill is filed in Inventory under the tablet's date at post time, not its close time (KNOWN, IMS_TODO) | 4 | — | no |
+| IMS-HANDOFF-9 | A till on a client without IMS writes Inventory rows in month one, then says every bill "was not posted" | 4 | — | no |
+| IMS-HANDOFF-10 | Inventory takes a closing bill's lines from the till's screen, not the stored bill | 4 | — | no |
+| ORDER-FLOW-12 | Unsent items kept by the till lock are lost if the order can't be read at sign-in | 4 | — | no |
+| ORDER-FLOW-13 | Pull, save, add back prints "CHANGE ONLY" instead of "+1", so the dish is never re-fired | 4 | — | no |
+| ORDER-FLOW-14 | The cover count is written outside the "changed on another device" check | 4 | — | no |
+| ORDER-FLOW-15 | A queued offline order carries no outlet and replays into whichever client is signed in | 4 | — | no |
+| ORDER-FLOW-16 | An offline upload finishing after the waiter moved tables stamps its version onto the table on screen | 4 | — | no |
+| ORDER-FLOW-17 | A cart line's kitchen timer is matched by dish, not line | 4 | — | no |
+| ORDER-FLOW-18 | A guest order accepted onto a table another tablet changed shows "accepted" even if its dishes were refused | 4 | — | no |
+| ORDER-FLOW-19 | The order-delete pulled-item record groups by dish, not line | 4 | — | yes |
+| REPORTS-5 | The POS Dashboard and Home drop a credited bill from its own day and never subtract the note | 4 | Q22 | no |
+| REPORTS-6 | Delivery Partners' Outstanding goes negative, or counts a cancelled bill, across date ranges | 4 | — | no |
+| REPORTS-7 | Comped Bills values a comp with VAT, Exceptions without: 13% apart | 4 | — | no |
+| REPORTS-8 | Home's POS and kitchen cards show and cache zeros on a failed read | 4 | — | no |
+| REPORTS-9 | POS Sales by Category names no month or basis, follows the open Inventory month and never refreshes. Its arithmetic (credited bills dropped, bill discount ignored, days by the viewer's clock, `useSalesPivotData.js:67-111`) also belongs here: REPORTS and IMS-HANDOFF each handed it to the other | 4 | — | no |
+| REPORTS-10 | Covers' RevPASH divides by inactive tables' seats | 4 | — | no |
+| REPORTS-11 | Between midnight and 6 AM the dashboards drop tickets the KDS still shows late | 4 | — | no |
+| REPORTS-12 | The Customization Report judges choices against today's menu, not as billed | 4 | — | no |
+| RESERVATIONS-6 | "Clear every occupied table" with a booking-seated table deletes lines, then fails | 4 | — | no |
+| RESERVATIONS-7 | A booking cancelled by mistake can't be restored before its day, though the dialog says it can | 4 | Q23 | no |
+| RESERVATIONS-8 | At midnight a late booking still in play vanishes from the floor and the default views | 4 | — | no |
+| RESERVATIONS-9 | An unanswered online request never expires, and that phone stays blocked | 4 | — | yes |
+| RESERVATIONS-10 | Seating from Reservations onto a table another device just opened puts the host on that bill | 4 | — | no |
+| RESERVATIONS-11 | A booking whose table is deleted or made inactive is flagged nowhere | 4 | — | no |
+| SHIFTS-5 | The Z-report's Voided Value includes VAT; Exceptions excludes it | 4 | — | no |
+| SHIFTS-6 | A void is stamped with the till's cached shift, which may be closed | 4 | — | no |
+| SHIFTS-7 | A shift's close time comes from the tablet clock | 4 | — | yes |
+| SHIFTS-8 | Shift History shows no dates | 4 | — | no |
+| SHIFTS-9 | Shift open/close and cash entries have no time limit, and a lost Open reply reads "not opened" | 4 | — | no |
+| SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
+| SHIFTS-11 | A failed first read leaves the Shifts page on "Loading…" for good | 4 | — | no |
+
+### Gaps (7: 5 P2, 2 P3)
+
+| ID | Finding | Sev | Stage | Decision | Mig |
+| --- | --- | --- | --- | --- | --- |
+| GAP-OPERATOR-1 | A credit note or drawer-cash entry the database refuses to the restaurant's manager goes through unchecked when Crest support enters it from the same screen; the refusal sends managers to support | P2 | 1 | Q26 | yes |
+| GAP-OUTLETS-1 | A till signed in on the Owner's own login follows her to whichever outlet she last opened, even from her phone. It drops the unsent order, then bills in the other outlet's name and invoice series. Live: BLOOM CAFE and PKR are a POS group, and 29 of BLOOM's 40 bills were closed on the Owner's login. Ships with ACCESS-4 | P2 | 1 | Q24 | no |
+| GAP-RELEASE-1 | A till never picks up a release on its own: a tablet left on runs the code it opened with while the database moves on. The fix must get past the service worker's cache-first answer. Do it before the stage-1 contract changes | P2 | 1 | Q27 | yes |
+| GAP-OUTLETS-2 | Every HQ push turns each pushed dish back On POS (and Active) at every branch. On a branch whose VAT status differs from HQ's, a pushed dish with no price goes on the till at NPR 0 (no such group live) | P2 | 2 | Q25 | yes |
+| GAP-OUTLETS-3 | The Group Console counts takeaway and delivery bills as guests (REPORTS-3's rule), cuts the month at 05:45 Nepal time, and its Revenue tip over-promises | P2 | 3 | — | yes |
+| GAP-OPERATOR-2 | Inside a client's POS the operator gets every module on, whatever the client bought, so the operator's till behaves unlike the restaurant's | P3 | 4 | — | no |
+| GAP-OPERATOR-3 | What the operator does in a client's POS shows to the Owner as nobody: bills, voids, tickets, a shift and a credit note carry "—" | P3 | 4 | — | yes |
+
+## S809.1 Owner decisions (Q1–Q27)
+
+Each has a recommended answer. Answering "all as recommended" is enough to start; name any you want
+different.
+
+**Stage 1**
+
+- **Q1 (DATABASE-1) Who is named on a kitchen ticket?** Offline, a ticket is uploaded later by whoever is
+  signed in then. (a) Always the login that uploads it: cannot be forged, but an offline ticket is credited
+  to the uploader. **(b) Recommended:** keep the waiter the till recorded when that is a POS login of the
+  same outlet, otherwise the uploader. This still closes the rewrite and delete holes.
+- **Q2 (GUEST-4, RESERVATIONS-3) What should a locked or deactivated outlet's QR menu and booking page
+  show?** **(a) Recommended:** nothing to order or book, the same page as POS switched off. (b) The menu,
+  view-only, with "ordering is off right now". (c) Leave it.
+- **Q3 (RESERVATIONS-4) The limit on online booking requests for the whole outlet.** **(a)
+  Recommended:** keep it, but count only requests that became bookings. (b) Drop it and rely on the
+  per-phone and per-connection limits. (c) Leave it.
+- **Q4 (ACCESS-2) Who may stay signed in on the Kitchen Display?** **(a) Recommended:** only Kitchen/Bar
+  team logins; a Front of House login there locks after 3 minutes like a till. (b) Any login, but Exit goes
+  back to the PIN screen after 3 idle minutes. (c) Leave it.
+- **Q5 (ACCESS-3) May a POS manager reset the PIN of someone with more powers than their own?** **(a)
+  Recommended:** no, the Owner does those (the S754 rule applied to resets). (b) Yes, but every reset is
+  recorded and shown to the Owner. (c) Leave it.
+- **Q6 (DOCS-1) Should a PIN reset end a lockout?** **(a) Recommended:** yes; the new PIN gets five fresh
+  tries. (b) No, and the till says "wait until {time}; a reset does not shorten it".
+- **Q7 (ACCESS-8) Switch the old shared till key off for every client now?** No till has used it since
+  2026-09-14. **(a) Recommended:** yes, all at once. (b) One client at a time by hand. (c) Leave it.
+
+**Stage 2**
+
+- **Q8 (CHECKOUT-1) How does a supervisor without Void clear a table rung by mistake?** **(a)
+  Recommended:** an emptied bill is refused and the till says "ask someone with Void"; revisit with the
+  table-move build. (b) Allow saving an empty order and let Clear Occupied remove it. (c) Let an emptied
+  order close as a void for any supervisor.
+- **Q9 (CHECKOUT-5) Buyer details on a Tax Invoice above NPR 10,000.** **(a) Recommended:** require name
+  and address, as the till's tip already says. (b) Require them only when the guest gives a PAN. (c) Only
+  warn. Worth one question to the accountant, since the research note is from secondary sources.
+- **Q10 (CREDIT-NOTES-1) When a note cancels a bill because it is re-billed or was a duplicate, should
+  the food go back on the shelf in Inventory?** **(a) Recommended:** the note asks "Was this food served to
+  this customer, or is it billed again / a duplicate?", and the second answer puts the stock back. (b) A
+  "Re-issue to the right customer" action instead, still needing (a) for duplicates. (c) Keep it, and tell
+  owners Variance reads low by that food.
+
+**Stage 3**
+
+- **Q11 (GUEST-1) Where does a guest's order-wide note go?** **(a) Recommended:** onto each dish of that
+  order. No migration, and it reaches the ticket and the KDS today; a long note repeats per dish. (b) A
+  ticket-level note printed once at the top (a new field on the ticket log). (c) The guest page takes a
+  note per dish instead.
+- **Q12 (CREDIT-NOTES-3, IMS-HANDOFF-1) Who posts waiting till bills and credit notes into Inventory?**
+  **(a) Recommended:** the Owner and the operator, now. Hide the button from IMS-role logins and reword the
+  instructions. Add a server-side post later. (b) IMS supervisors and managers too, through a new database
+  function (migration). (c) POS managers too, from the POS side.
+- **Q13 (CUSTOMERS-PARKING-5) Who may add or correct a points balance by hand?** **(a) Recommended:** the
+  Owner only; a point is money at the till. (b) The Owner and POS managers.
+- **Q14 (FLOOR-KITCHEN-1) Should a locked till announce a waiting guest order?** **(1) Recommended:** yes;
+  the PIN screen checks through the tablet's own key, since it is every PIN till's resting state. (2) No;
+  the Kitchen Display raises guest orders and the cook calls the floor. (3) No change; Help says one
+  email-login device must stay off the Orders page.
+- **Q15 (FLOOR-KITCHEN-3) What does "every category to Kitchen" mean?** **(1) Recommended:** exactly that;
+  Beverage stops going to the bar. (2) Keep Beverage to the bar, and POS Setup refuses an all-Kitchen save
+  with a sentence saying why.
+- **Q16 (ORDER-FLOW-6) Wi-Fi up but internet down: should a failed send queue and print anyway?**
+  **Recommended: yes**, the Stock Count answer from S731. The kitchen gets its ticket, and the replay is
+  already safe against conflicts. The alternative is to keep refusing until the browser itself says offline.
+- **Q17 (ACCESS-5) What does removing a leaver's POS login do?** **(a) Recommended:** block the login and
+  keep the name on past bills; Delete only a login with no bills. (b) Keep Delete, but the confirm says the
+  name leaves past bills. (c) Copy the staff name onto bills and shifts (migration).
+- **Q18 (ACCESS-7) Should locking one till sign the waiter out of the others?** **(a) Recommended:** no;
+  a lock ends only that till's session, and revoking a tablet ends the sessions opened on it. (b) Yes, but
+  the other till notices at once and keeps its cart. (c) Leave it.
+
+**Stage 4**
+
+- **Q19 (CUSTOMERS-PARKING-9) When does a Credit (tab) bill earn points?** (a) At the close, as now, with
+  the guide corrected. **(b) Recommended:** when it is settled, since points follow money received, as the
+  guide already promises. (c) At the close, but not spendable until settled.
+- **Q20 (CUSTOMIZATION-5) Should a "No onion" use up a free pick or a place under the maximum?** **(a)
+  Recommended:** no; removals never count. (b) Keep the rule and document it. (c) Refuse removals in a group
+  with free picks.
+- **Q21 (GUEST-7) A table QR link that can be revoked?** **(a) Recommended:** a per-table token with a
+  "New QR code" button; only the reprinted table changes. (b) QR ordering only while the table has an open
+  bill. (c) Accept it; staff Accept is the check.
+- **Q22 (REPORTS-5) Should the dashboards follow the Sales Report's credit-note rule?** **(a)
+  Recommended:** yes; the bill stays on its day and the note is a minus on its issue day. (b) Keep dropping
+  credited bills, but correct the comments and say so on the tile.
+- **Q23 (RESERVATIONS-7) May a mistaken cancel be undone before the booking's day?** **(a) Recommended:**
+  yes, until the end of the booking's day, as the dialog already promises. (b) Keep the own-day rule and
+  reword the dialog.
+
+**From the gap pass**
+
+- **Q24 (GAP-OUTLETS-1, stage 1) Should a till follow its login to another outlet at all?** **(a)
+  Recommended:** never. It stops with a notice until the login is switched back, because the tablet knows
+  which counter it stands at and the login does not. Help and the group guide add: a till that must keep
+  billing while the Owner looks at another outlet needs a login of its own. (b) It follows, but parks the
+  cart and names the till in the notice. (c) Leave it, and tell group Owners to run tills on PIN logins only.
+- **Q25 (GAP-OUTLETS-2, stage 2) After an HQ push, whose call is "On POS" for a dish?** **(a)
+  Recommended:** the branch's own. (b) HQ's, but never on a dish with no price. (c) A separate "menu
+  availability" in the push, off by default.
+- **Q26 (GAP-OPERATOR-1, stage 1) May Crest support issue a credit note or record drawer cash that the
+  database refuses to the Owner?** **(a) Recommended:** no. Outside a restore, the operator meets the same
+  integrity checks; the operator stays exempt from rank rules (S754). These checks protect the tax record,
+  not a rank boundary. (b) Yes, but the screen warns first.
+- **Q27 (GAP-RELEASE-1, stage 1) How eagerly should a till take a new release?** (a) It reloads itself at
+  the PIN screen and on an idle floor. (b) A "New version — reload" banner, and staff choose. **(c)
+  Recommended:** (a), plus a database check that tells a too-old till to reload before it writes under
+  changed rules (migration), for releases that change what the till sends.
+
+## S809.2 Fix stages
+
+Split each stage into slices of one migration each before starting, as S798 did, one short chat per slice.
+Rows that touch the same table or function ship together:
+
+- CHECKOUT-8 with CREDIT-NOTES-6;
+- CHECKOUT-4 with CREDIT-NOTES-4;
+- GUEST-4 with RESERVATIONS-3;
+- GUEST-3 with ORDER-FLOW-11;
+- SHIFTS-5 with REPORTS-7.
+
+- **Stage 1: close the doors.** RESERVATIONS-1 first, then CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 and
+  ACCESS-1. After those, the remaining stage-1 rows above.
+- **Stage 2: bills, tax and stock right.** CHECKOUT-1 and ORDER-FLOW-1 first.
+- **Stage 3: the floor, kitchen, guests, bookings, loyalty and report figures.** GUEST-1 first, with
+  ORDER-FLOW-9 (both are allergy notes not reaching the kitchen).
+- **Stage 4: P3 copy, docs and polish.** Pull a P3 forward into an earlier slice when that slice already
+  edits its file.
+
+## S809.3 Outside POS, filed here
+
+- **IMS count PIN and HR Self-Service PIN:** a reset leaves the lockout in place, as DOCS-1 does for POS
+  (reported by the DOCS verifier, not re-checked). HR is shared with hss-suite: when it is fixed here, file
+  it in `docs/CROSS-REPO.md` on both sides.
+- **Trial signup gives a working login before approval** (part of RESERVATIONS-1's reach): RLS honours a
+  pending trial's JWT. This is the documented "UI gate, not a security boundary" (`subscription-access.md`).
+  RESERVATIONS-1 does not need it changed, but any other cross-tenant read would be reachable the same way.
 
 ---
 
