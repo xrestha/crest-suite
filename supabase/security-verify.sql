@@ -121,7 +121,9 @@ ORDER BY 1;
 --
 -- So drift is detected by asking whether each migration's signature object actually exists.
 -- Expect: every row 'PRESENT'. Any 'MISSING' row names a migration file that was written and
--- committed but never actually run against production.
+-- committed but never actually run against production. 'gone' / 'gone-routine' rows are inverted:
+-- the column or function SHOULD have been dropped (S809 1j dropped get_pos_device_secret, which
+-- handed out the shared till key, and the old comp-slip numberer get_next_pos_comp_slip_no).
 WITH expected(migration, kind, obj) AS (VALUES
   ('20260803110000_fixed_asset_register',        'table',   'assets_register'),
   ('20260803120000_..._feature_flag',            'column',  'feature_flags.fixed_asset_register'),
@@ -134,10 +136,11 @@ WITH expected(migration, kind, obj) AS (VALUES
   ('20260810120000_profiles_privilege_guard',    'routine', 'guard_profiles_privileged_columns'),
   ('20260810130000_eligible_users_owner_only',   'routine', 'is_client_owner'),
   ('20260810140000_client_secrets_table',        'table',   'client_secrets'),
-  ('20260810140000_client_secrets_table',        'routine', 'get_pos_device_secret'),
   ('20260810170000_trial_signup_rate_limit',     'table',   'trial_signup_attempts'),
   ('20260810180000_retire_pos_email_and_secret', 'gone',    'clients.pos_device_secret'),
-  ('20260810180000_retire_pos_email_and_secret', 'gone',    'settings.pos_webhook_secret')
+  ('20260810180000_retire_pos_email_and_secret', 'gone',    'settings.pos_webhook_secret'),
+  ('20261009160000_pos_shared_key_rank_checks',  'gone-routine', 'get_pos_device_secret'),
+  ('20261009160000_pos_shared_key_rank_checks',  'gone-routine', 'get_next_pos_comp_slip_no')
 )
 SELECT
   e.migration,
@@ -163,6 +166,11 @@ SELECT
                         WHERE table_schema = 'public'
                           AND table_name  = split_part(e.obj, '.', 1)
                           AND column_name = split_part(e.obj, '.', 2))
+           THEN 'STILL THERE — DROP NEVER RAN' ELSE 'PRESENT (correctly dropped)' END
+    WHEN e.kind = 'gone-routine' THEN
+      -- inverted, for a function: it SHOULD have been dropped.
+      CASE WHEN EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                        WHERE n.nspname = 'public' AND p.proname = e.obj)
            THEN 'STILL THERE — DROP NEVER RAN' ELSE 'PRESENT (correctly dropped)' END
   END AS status
 FROM expected e

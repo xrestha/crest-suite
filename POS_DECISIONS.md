@@ -180,6 +180,39 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 1, slice 1l: SHIFTS-2 (P2), GAP-OPERATOR-1 (P2), owner decision Q26 (a)~~ —
+  **shipped S809, 2026-10-09**, migration `20261009180000` applied live (crest-v415). The signed Z-report's
+  money figures were whatever the tablet sent: `pos_shifts_guard` now adds Expected Cash up from the stored
+  rows (float + paid Cash bills + Cash legs of paid Split bills + Cash In − Cash Out) and refuses
+  (`pos_shift_figures_changed`) a report whose eight cash figures differ, and `pos_cash_count_total()`
+  holds counted totals to the notes counted. It refuses rather than rewrites, because the slip prints from
+  what the page sent. **Q26 (a):** outside a restore, Crest support's credit notes, cash entries and shifts
+  meet the same checks as the Owner's; it keeps only the rank exemption, and can no longer edit a closed
+  shift or edit/delete a cash entry (replacing S754's "the operator may change a closed shift"). The
+  restore is recognised as an operator INSERT of a row dated before the transaction. Original rows:
+  `SHIFTS.md`, `GAPS.md`.
+- [x] ~~S809 stage 1, slice 1k: CHECKOUT-12, CUSTOMERS-PARKING-13 (P3)~~ — **shipped S809, 2026-10-09**,
+  migration `20261009170000` applied live (crest-v415). `pos_payment_confirmations_guard`: a browser may
+  only mark a confirmation used, once, after its matched bill is billed (server time); every other
+  change, insert and delete is refused, operator included. `pos_parking_slips_guard`: issuing needs POS
+  Supervisor; number, issuer, Time In and the bill's number are the server's; afterwards only a reprint
+  (+1) or one close (auto-close only before today's 6 AM Nepal); `UNIQUE (client_id, slip_no)` + NOT NULL.
+  The operator's INSERT is kept as sent for the restore. Original rows: `CHECKOUT.md`, `CUSTOMERS-PARKING.md`.
+- [x] ~~S809 stage 1, slice 1j: ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9 (P3), owner decision Q7 (a)~~
+  — **shipped S809, 2026-10-09**, migration `20261009160000` applied live (crest-v415). The shared till key
+  was rotated and stamped at all three clients (none had used it), and a new `client_secrets` row is born
+  switched off; `get_pos_device_secret` and `get_next_pos_comp_slip_no` are dropped.
+  `apply_pos_item_comps`, `caller_can_set_menu_price` and `settings_guard_staff_roles`' POS lines call the
+  shared rank tests, which refuse a settlement-blocked login. A part-comp is 1 to qty−1, its sent count is
+  split between the two rows, and `pos_order_items_qty_check` holds qty ≥ 1. The legacy shared-key code
+  removal follows (POS_TODO S809.4). Original rows: `ACCESS.md`, `CHECKOUT.md`, `DATABASE.md`.
+- [x] ~~S809 stage 1, slice 1i: DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7 (P2)~~ — **shipped S809,
+  2026-10-09**, migration `20261009150000` applied live (crest-v415). Payment lines are never edited or
+  deleted from a client session (`pos_payment_line_locked`; `redeem_loyalty_points` writes its own as the
+  owner); a customer's phone, outlet and id are fixed; a customer with points history cannot be deleted by
+  anyone until its ledger goes first (`pos_loyalty_ledger_customer_id_fkey` NO ACTION). Operator held to the
+  integrity rules per Q26 (a). Moving points to a new number waits for Q13. Original rows: `DATABASE.md`,
+  `CUSTOMERS-PARKING.md`.
 - [x] ~~S809 stage 1, slice 1h: GUEST-4, RESERVATIONS-3, RESERVATIONS-4 (P2), owner decisions Q2 (a),
   Q3 (a)~~ — **shipped S809, 2026-10-09**, migration `20261009140000` applied live (crest-v414). A
   locked outlet (deactivated or archived, trial pending or ended, past the 7-day grace) kept taking QR

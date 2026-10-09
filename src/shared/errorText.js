@@ -234,6 +234,14 @@ const rules = [
     staff: 'Those points are worth more than this bill. None were redeemed — redeem fewer.',
     operator: 'Those points are worth more than this bill, so none were redeemed. Redeem fewer points.',
   },
+  // S809 1j (migration 20261009160000). apply_pos_item_comps raises it before it writes, in the one
+  // transaction that comps every line of the call, so "nothing was made complimentary" is earned.
+  // The till never sends such a number from a bill it just saved; seeing it means the bill changed.
+  {
+    test: e => hasCode(e, 'pos_comp_qty_invalid'),
+    staff: 'The number of complimentary items did not match the bill, so nothing was made complimentary. Check the Items list on the payment screen and confirm again.',
+    operator: 'Part of a dish can be made complimentary from 1 up to one less than the number on the bill (the dish and numbers are in the detail below), so nothing was made complimentary and no NC number was used. To make a whole dish complimentary, set it to the full number. If the numbers look right, the bill may have changed on another device — reopen it and try again.',
+  },
   {
     test: e => hasCode(e, 'pos_cash_refund_rank'),
     staff: 'Paying a refund out of the drawer needs a manager. No refund was recorded.',
@@ -284,6 +292,24 @@ const rules = [
     staff: 'A shift has to start open. Nothing was saved.',
     operator: 'A shift starts open and is closed with Close Shift, so this was not saved.',
   },
+  // S809 1l (migration 20261009180000). As a shift closes, pos_shifts_guard adds up the shift's own
+  // stored cash bills and Cash In / Out and refuses a closing report whose cash figures differ. The
+  // Shifts page meets it only when a bill or a cash entry landed after its last re-read. It is raised
+  // before the write, so the shift is still open, and the close dialog keeps the count, so pressing
+  // Close Shift again re-reads and works. Raised as P0001, so no generic rule below claims it.
+  {
+    test: e => hasCode(e, 'pos_shift_figures_changed'),
+    staff: 'A bill or a cash entry reached this shift while the drawer was being counted, so the cash it should hold has changed. The shift is still open and your count is still on screen — press Close Shift again to see the new figures.',
+    operator: 'A bill or a cash entry reached this shift after its figures were read, so its Expected Cash has changed, and Crest will not file a closing report that leaves it out. The shift is still open and the count you entered is still on screen: press Close Shift again to count against the new figures.',
+  },
+  // S809 1l. The counted total (or the opening float) must be the notes counted. The Shifts screen
+  // works the total out from the notes it sends, so only a write made some other way meets this.
+  // Raised with 23514, so it must stay above the generic CHECK rule at the end.
+  {
+    test: e => hasCode(e, 'pos_shift_count_mismatch'),
+    staff: 'The cash total does not add up from the notes counted, so it was not saved. Reload the Shifts page and count the drawer again.',
+    operator: 'The cash total sent does not add up from the notes counted (₨1000 down to ₨1), so nothing was saved. Reload the Shifts page and enter the count there — it works the total out from the notes.',
+  },
   {
     test: e => hasCode(e, 'pos_table_has_open_order'),
     staff: 'That table still has an open bill, so it cannot be deleted. Nothing was removed.',
@@ -301,10 +327,12 @@ const rules = [
   {
     // guard_pos_credit_note's amount check. The modal computes the note from the bill's lines; a
     // mismatch means the lines, the discount or the VAT setting it read are not what the bill was
-    // charged with — never something a retry fixes.
+    // charged with — never something a retry fixes. Since S809 1l (GAP-OPERATOR-1) it refuses Crest
+    // support's screen too, so the VAT-change sentence no longer sends the reader to a screen that
+    // would issue the wrong note: support issues it with the bill's own amounts, which the check passes.
     test: e => hasCode(e, 'credit_note_amounts'),
     staff: 'The amounts on this Credit Note do not match the bill, so no note was issued. Close this, reload the bill and try again — tell your manager if it happens again.',
-    operator: 'The Credit Note’s amounts do not match the bill it credits (both sets are in the detail below), so no note was issued and nothing was numbered. A note credits exactly what the bill charged: reload the bill and issue it again. If the outlet’s VAT registration changed since the bill was printed, the note cannot be issued from the till — contact support.',
+    operator: 'The Credit Note’s amounts do not match the bill it credits (both sets are in the detail below), so no note was issued and nothing was numbered. A note credits exactly what the bill charged: reload the bill and issue it again. If the outlet’s VAT registration changed since the bill was printed, the Credit Note screen works the note out under today’s VAT setting, so it is refused from every login, Crest support’s included — contact Crest support, who can issue it with the bill’s own VAT.',
   },
   // S809 1d (migration 20261009120000): the kitchen-ticket log and the pulled-item record. Each is
   // raised by a BEFORE trigger, so the statement rolled back and each may say nothing was changed.
@@ -381,6 +409,63 @@ const rules = [
     test: e => hasCode(e, 'loyalty_rank'),
     staff: 'Only the owner or a POS manager can change loyalty schemes. Nothing was changed.',
     operator: 'Only the Owner or a POS manager can create, change or delete a loyalty scheme, so nothing was changed.',
+  },
+  // S809 1i (migration 20261009150000): the points line on a bill and the customer book. Raised by
+  // the payment-line statement trigger and a BEFORE row trigger on pos_customers, inside the
+  // statement, so each may say nothing was changed. No screen reaches them; a REST write does.
+  {
+    test: e => hasCode(e, 'pos_payment_line_locked'),
+    staff: 'Payment lines are written by the till itself, so they cannot be changed or removed by hand. Nothing was changed — to take points off this bill, press Undo on the points in the payment window.',
+    operator: 'A bill’s payment lines are written only by the till — the points line when points are redeemed, the rest as the bill closes — so they cannot be edited or deleted by hand, and nothing was changed. To take points off an open bill, press Undo on the points in the payment window, which also gives the customer their points back.',
+  },
+  {
+    test: e => hasCode(e, 'pos_customer_has_points_history'),
+    staff: 'This customer has a loyalty points history, so they cannot be deleted. Nothing was changed.',
+    operator: 'This customer has a loyalty points history — every point earned and spent, and which bills spent them — so the customer cannot be deleted and nothing was changed. To stop them earning points, take them off their scheme in Customers → Loyalty instead.',
+  },
+  {
+    test: e => hasCode(e, 'pos_customer_delete_rank'),
+    staff: 'Only the owner or a POS manager can remove a customer who is in a loyalty scheme. Nothing was changed.',
+    operator: 'This customer is enrolled in a loyalty scheme, and only the Owner or a POS manager can take a customer out of one, so the customer was not deleted.',
+  },
+  {
+    test: e => hasCode(e, 'pos_customer_phone_locked'),
+    staff: 'A customer’s phone number cannot be changed, because their points belong to that number. Nothing was changed. A new number becomes a new customer the first time a bill is closed with it, and the points stay with the old number.',
+    operator: 'A customer’s phone number is what their loyalty points and bill history belong to, so it cannot be changed, and nothing was changed. A customer on a new number becomes a new record the first time a bill is closed with it. Their points stay with the old number, which still finds them at the till.',
+  },
+  // S809 1k (migration 20261009170000). Raised by BEFORE triggers on pos_parking_slips and
+  // pos_payment_confirmations, so the statement rolled back and each may say nothing was changed.
+  // Issuing a slip and linking its bill reach the New Parking Slip window (staff copy, after "No slip
+  // was printed."); the others are reached only over REST or by a sweep that words its own refusal.
+  {
+    test: e => hasCode(e, 'pos_parking_slip_rank'),
+    staff: 'Issuing a parking slip needs a supervisor or the owner — ask one to issue it.',
+    operator: 'Issuing a parking slip needs a POS supervisor, a POS manager or the Owner, so no slip was issued. Raise this login’s rank on POS Staff if this person should issue slips.',
+  },
+  {
+    test: e => hasCode(e, 'pos_parking_slip_bill'),
+    staff: 'That bill is not one of this outlet’s bills, so the slip was not issued. Pick the bill again from today’s list, or issue the slip without one.',
+    operator: 'A parking slip can only be linked to a bill of this outlet, and that one is not, so no slip was issued. Pick the bill from today’s list, or issue the slip without a bill.',
+  },
+  {
+    test: e => hasCode(e, 'pos_parking_slip_locked'),
+    staff: 'An issued parking slip cannot be changed — it can only be printed again or marked exited. Nothing was changed.',
+    operator: 'An issued parking slip is the guest’s claim ticket, so its number, vehicle, times and names cannot be changed — it can only be reprinted or marked exited. Nothing was changed. If it is wrong, mark it exited and issue a new slip.',
+  },
+  {
+    test: e => hasCode(e, 'pos_parking_slip_closed'),
+    staff: 'This parking slip is already closed, and a closed slip cannot be reopened. Nothing was changed.',
+    operator: 'A closed parking slip stays closed, so it was not reopened and nothing was changed. If the vehicle is still in the car park, issue a new slip for it.',
+  },
+  {
+    test: e => hasCode(e, 'pos_parking_slip_not_stale'),
+    staff: 'Only a slip from an earlier day closes on its own. Mark this vehicle exited instead. Nothing was changed.',
+    operator: 'Only a slip from before 6 AM today (Nepal time) is closed automatically, so this one was not, and nothing was changed. Mark the vehicle exited instead, which records who confirmed it left.',
+  },
+  {
+    test: e => hasCode(e, 'pos_payment_confirmation_locked'),
+    staff: 'A payment confirmation comes from the payment provider and cannot be changed here. Nothing was changed.',
+    operator: 'A QR payment confirmation is written by the payment provider. The till can only mark it used, once, after the bill it paid is closed, so nothing was changed.',
   },
   // rank_required is one hint for several rank refusals; the recipe price guard and the loyalty
   // award have consequences worth naming, the rest share the generic sentence.

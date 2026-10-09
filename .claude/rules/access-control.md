@@ -148,8 +148,8 @@ after every hook, and rely on `ProtectedRoute` having already resolved `profile`
 **This keeps recurring because the nav condition and the route guard are written in different files
 by different hands.** `/group-dashboard` was the fourth (S617) and `/pos` the fifth (S636) — POS
 Setup is tagged `minPosRole: 'manager'` in the nav and documented "Manager only", and had no route
-guard at all. That one leaked nothing (its single control is behind `canManage` and the device
-secret is rank-checked inside `get_pos_device_secret`, server-side, which is where it belongs), but
+guard at all. That one leaked nothing (its single control is behind `canManage`, and every Till
+Devices RPC checks rank server-side through `pos_device_caller_may_manage`, which is where it belongs), but
 "nothing leaked" is a property of that page, not of the pattern. **Audit by grepping `Layout.js` for
 `minPosRole`/`minImsRole`/`minHrRole` and the `isAdmin || isOwner` render conditions, then checking
 each named route has a matching early return in its own component.** The general form of the fix is

@@ -24,6 +24,11 @@ export { serviceDayStartIso }
 // which already gates the "+ New Parking Slip" Fab behind hasPosAccess('supervisor'); this modal
 // re-checks the same gate internally as defense-in-depth, same double-gate pattern as
 // IssueCreditNoteModal.jsx.
+// S809 (CUSTOMERS-PARKING-13): both of those mirror the table, which is the gate. The trigger
+// pos_parking_slips_guard refuses a till login below Supervisor and stamps the slip number, the
+// issuer, Time In and the linked bill's own number itself, so for a till login the issued_by and
+// bill_invoice_no sent below are ignored. They are still sent for the operator, whose insert the
+// trigger keeps as sent (the restore path).
 export default function NewParkingSlipModal({ outletName, propertyAddress, onClose, onIssued }) {
   const { clientId, profile, hasPosAccess } = useAuth()
   const { scopedFrom, scopedInsert } = useScopedDb()

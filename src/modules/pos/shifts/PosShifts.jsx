@@ -330,6 +330,9 @@ function movementLabel(m) {
 
 // The one definition of what should be in the drawer. Opening float, plus cash taken over the
 // counter, plus every non-sale cash-in (credit settlements included), minus every cash-out.
+// S809 1l: pos_shifts_guard repeats this sum, and loadShiftReport's cash figures, in SQL, and refuses
+// a close whose report disagrees with it — so a change to either copy goes in the same commit as the
+// other, or every close is refused. expectedCashTwin.test.js reads both.
 function expectedCashOf(shift, report) {
   if (!shift || !report) return 0
   return (Number(shift.opening_cash) || 0) + (report.cashSales || 0) + (report.cashIn || 0) - (report.cashOut || 0)

@@ -132,6 +132,16 @@ every such shift reading short by the commission.
 - **A failed Z-report read refuses the close.** Both batches used to drop `error`, and the close
   froze a complete NPR 0 report into `closing_report` and printed it on the signed slip.
 
+**The close is checked against the stored rows (S809 1l, `20261009180000`).** `pos_shifts_guard`
+adds up Expected Cash itself over `loadShiftReport`'s rows (float + `paid_amount` of paid Cash bills +
+Cash legs of paid Split bills + Σin − Σout) and refuses (`pos_shift_figures_changed`) a report whose
+eight cash figures are missing or more than NPR 0.01 off, and (`pos_shift_count_mismatch`) a
+`closing_cash`/`opening_cash` that is not `pos_cash_count_total()` of its denominations. It refuses
+rather than rewrites, because the slip prints from what the page sent. **Expected Cash is now a JS/SQL
+pair: change `expectedCashOf`/`loadShiftReport`'s cash rules and the guard in one commit**
+(`expectedCashTwin.test.js`), or every honest close is refused. A NULL report is allowed. Not
+covered: display figures, the close time (SHIFTS-7), a same-instant write (SHIFTS-1/CHECKOUT-3).
+
 **`salesTotal` is "Total Sales", not "Total Collection"** — it includes Credit bills, which are
 billed but not collected. The screen had this right and the signed paper slip had it wrong.
 
@@ -458,7 +468,10 @@ purpose is to make revenue disappear on purpose. Three holes, all in the same ac
 `guard_pos_item_comp()` (migration `20260819140000`) fences the six comp columns on INSERT and
 UPDATE; `apply_pos_item_comps` stays `SECURITY DEFINER`, so `current_user` inside it is the owner
 and the guard waves it through — the only write path, the same mechanism as `set_active_outlet()`.
-The RPC now checks Supervisor rank and derives `comped_by` from `auth.uid()`.
+The RPC now checks Supervisor rank and derives `comped_by` from `auth.uid()`. Since S809 1j the rank
+test is `pos_caller_has_rank('supervisor')` (a settlement-blocked login is refused), a part-comp takes
+1 to qty−1 (`pos_comp_qty_invalid`), and the line's sent count is split between the two rows, the comp
+taking sent units first. `pos_order_items_qty_check` backs qty ≥ 1 for every writer.
 
 Two things to preserve if this is ever touched:
 
@@ -534,7 +547,13 @@ outlet. **A button that does not render is a statement about the page, not about
 same lesson as S636's `/pos` route guard, one layer down. `pos_caller_has_rank(level)` in
 `20260916110000` is the one POS rank test: admin, the Owner, or a POS login at that rank whose
 login a Final Settlement has not blocked, with every operand COALESCE'd. Every trigger below calls
-it rather than carrying its own copy.
+it rather than carrying its own copy, and since S809 1j so do `apply_pos_item_comps`,
+`caller_can_set_menu_price` (`pos_caller_has_rank('manager') OR ims_caller_has_rank('manager')`) and
+`settings_guard_staff_roles`' POS lines: the last copies are gone. **The operator is exempt from rank,
+never from the record (S809 1l, Q26 a)**: outside a restore it meets the same integrity checks on
+credit notes, cash entries, shifts, payment lines and customers. The restore is recognised as an
+operator INSERT of a row dated before the transaction (`opened_at`/`created_at` < `now()`); no screen
+sends those columns, and a new screen must not.
 
 | What | Rank the table now requires |
 | --- | --- |
@@ -548,7 +567,8 @@ it rather than carrying its own copy.
 | Till setup `settings` columns (discount reasons, note presets, ticket routing, delivery partners, reservation settings, opening hours, loyalty point value) | POS manager |
 | Invoice prefix, VAT number and flag, property address and phone, payment QR | Owner (admin exempt) |
 | `pos_tables` anything but `status` | POS manager. **No delete under an open bill**, for everyone |
-| Loyalty schemes and enrolment | POS manager |
+| Loyalty schemes and enrolment (deleting an enrolled customer too) | POS manager |
+| Parking slips (`pos_parking_slips_guard`, S809 1k) | Issue: Supervisor. Reprint, Mark Exited, the day's auto-close: any POS rank. Number (UNIQUE per outlet), issuer, Time In, the linked bill's number, close time and closer are the server's. Never edited; a closed slip stays closed; auto-close only before today's 6 AM Nepal |
 | Cancel a kitchen ticket | Supervisor, or its order voided; final (S809 1d) |
 
 Three shapes are worth copying:
@@ -594,6 +614,12 @@ an old page (`p_expected_version DEFAULT NULL`), which protects only the changes
   abuse leaves it alone. A new table a till writes under a changed contract can attach the same gate.
 
 ## Still open
+
+**A QR payment confirmation is the provider's (S809 1k, `pos_payment_confirmations_guard`).** Only
+`pos-payment-webhook` (service role) creates one. A browser session may only set `consumed_at`, once,
+after the matched bill is `billed`, and the server stamps the time; every other column, insert and
+delete is refused, the operator included. Keep it that way when the feature goes live: the poll
+trusts `matched_order_id`, `provider` and `amount`.
 
 Open POS work is tracked in `POS_TODO.md` A2; payment-QR auto-confirm is still blocked on FonePay/eSewa merchant onboarding. The phase-6 critique record (what S575–S767 closed) moved word for word to `docs/rules-archive/pos-billing.md`.
 
@@ -863,6 +889,18 @@ policy fixes it without touching the actual threat, which is a till JWT minting 
 - **Both older RPCs checked `profiles.client_id`**, the HOME outlet. They moved to `my_client_id()`
   like everything S750 swept.
 - **Schemes, the point value and enrolment need a POS manager** (`20260916110000`).
+- **The Loyalty line on an open bill is the RPC's (S809 1i, `20261009150000`).**
+  `guard_pos_order_payments_closed` refuses every client session's UPDATE or DELETE of a payment
+  line, the operator's included: `bill_locked` on a closed bill, `pos_payment_line_locked` on an open
+  one. `redeem_loyalty_points` replaces and hands back its own line as the owner. The test is
+  `EXISTS (old_rows)`, because a statement touching no line (an empty order's cascade) still fires.
+- **A customer's identity and history are fixed (S809 1i).** `pos_customers_guard_loyalty` (BEFORE
+  INSERT/UPDATE/DELETE): no client session changes `phone`/`client_id`/`id`
+  (`pos_customer_phone_locked`; the RPCs find a customer by the bill's phone) or deletes a customer
+  with ledger rows (`pos_customer_has_points_history`); deleting an enrolled one needs POS manager
+  (`pos_customer_delete_rank`). `pos_loyalty_ledger_customer_id_fkey` is NO ACTION, not CASCADE:
+  history goes only after its ledger rows (Danger Zone's order), and NO ACTION rather than RESTRICT
+  so a client delete's one-statement cascade still passes. Moving points to a new number waits for Q13.
 
 **A lock that breaks the backup is not a security posture.** Ask of any new locked-down table:
 what writes it during a restore, and as which role? It only surfaced because `RESTORE_ORDER` is a
@@ -925,7 +963,7 @@ Reservations as a promise about a future table (S677), and the repeating arrival
 
 Migrated from the root `CLAUDE.md` (S663).
 
-- `pos_orders.order_no` is assigned by a **BEFORE INSERT trigger** (per-client sequential) — never set it from the frontend; read it back via `.select('id, order_no')` after insert. Same pattern for `pos_orders.invoice_no` (BEFORE UPDATE, partitioned by `client_id + invoice_fy + close_type`) and `pos_credit_notes.credit_note_no` (BEFORE INSERT, partitioned by `client_id + invoice_fy`) — never set these from the frontend either. Item-level comps (`pos_order_items.comp_no`) share the **same NC-series** as a whole-order Complimentary Slip — the frontend calls `get_next_pos_comp_slip_no(client_id, fy)` RPC once per Charge action (one number per comp event, not per line) and passes the result in explicitly; `assign_pos_invoice_no()`'s `close_type='writeoff'` branch locks on and considers that same pool, so the two paths can never collide.
+- `pos_orders.order_no` is assigned by a **BEFORE INSERT trigger** (per-client sequential) — never set it from the frontend; read it back via `.select('id, order_no')` after insert. Same pattern for `pos_orders.invoice_no` (BEFORE UPDATE, partitioned by `client_id + invoice_fy + close_type`) and `pos_credit_notes.credit_note_no` (BEFORE INSERT, partitioned by `client_id + invoice_fy`) — never set these from the frontend either. Item-level comps (`pos_order_items.comp_no`) share the **same NC-series** as a whole-order Complimentary Slip — `apply_pos_item_comps` reserves the number under the shared advisory lock and writes every comped row in the same transaction (one number per comp event, not per line); `get_next_pos_comp_slip_no` was dropped in S809 1j, since its lock released before the number was used; `assign_pos_invoice_no()`'s `close_type='writeoff'` branch locks on and considers that same pool, so the two paths can never collide.
 - The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes automatically on reconnect. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. This was a real bug (S440): `saveOrder` fires `logKotSend('KOT')` + `logKotSend('BOT')` un-awaited, both routing through `enqueuePosOrder`, which silently dropped one station's queued KOT send offline until the merge was made atomic. POS billing is hard-gated offline (`payDisabled` includes `!isOnline`), so the offline surface is order-taking only — no money path is ever reachable without a live server.
 - `settings` was, until S290 (`20260707150000_settings_rls_same_client_write.sql`), the one client-scoped table whose INSERT/UPDATE RLS policies were **admin-only** with no same-client allowance — every settings-writing tab in `PosTableManagement.jsx` (Discounts, Quick Notes, Ticket Routing, Delivery Partners) had been silently no-op'ing for any real (non-admin) client login, since an RLS-blocked write returns zero rows changed with no error rather than throwing. Now follows the standard `is_admin() OR client_id = my_client_id()` pattern like every other table; the `client_id IS NULL` global-defaults row (`app_name`, `app_tagline`, etc.) stays admin-only automatically since a real client's `client_id` can never equal `NULL`. Still stays on raw `supabase.from()` rather than `scopedDb` (see the `scopedDb` note above) — that's about the nullable `client_id`, unrelated to this RLS fix.
 
@@ -980,7 +1018,8 @@ its discount the bill's discount, taxable + non-taxable must equal gross − dis
 equal taxable + non-taxable + VAT within the rupee rounding and `paid_amount` within NPR 1. VAT needs
 a taxable base. `paid_amount` is `payTotal`, the same expression as `computeOrderAmounts().net`,
 which is why pinning net to it pins VAT too. A client whose VAT registration changed between the
-bill and the note is refused, correctly. **A Credit bill with a credit note against it is no longer owed**, so
+bill and the note is refused, correctly, from every login since S809 1l, the operator's screen
+included. **A Credit bill with a credit note against it is no longer owed**, so
 it leaves Customers → Outstanding. A bill settled before it was credited stays in Collected,
 because that money really changed hands.
 

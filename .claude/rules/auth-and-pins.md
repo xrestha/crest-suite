@@ -109,15 +109,20 @@ outlet with three tills that re-activates one would otherwise lose the other two
 that stamp. A manager presses Switch off once the tablets have moved.
 `retire_pos_legacy_device_key` then **rotates** `client_secrets.pos_device_secret` to a value no
 tablet holds, so every path still comparing against it stops matching at once. That includes
-`get_pos_staff` and a stale `pos-staff-login`, so neither had to be redefined.
-`get_pos_device_secret` refuses to hand the key out after that. Deactivating a tablet that has
-its own key revokes that key, not just the localStorage copy.
+`get_pos_staff` and a stale `pos-staff-login`, so neither had to be redefined. **S809 1j
+(`20261009160000`, owner decision Q7 a) switched it off at every client and made a new
+`client_secrets` row born switched off (`pos_legacy_key_retired_at DEFAULT now()`);
+`get_pos_device_secret` is dropped.** Deactivating a tablet that has its own key revokes that key,
+not just the localStorage copy.
 
 **`pos-staff-login` falls back to the pre-S754 check only on `PGRST202`** (the verify function is
 not in the schema cache, i.e. the function deployed ahead of the migration), so a deploy-order slip
-does not lock out every tablet already on a floor. Any other error refuses. **When every client has
-switched the shared key off, delete the legacy branch, its fallback and `get_pos_staff`'s secret
-comparison** (`POS_TODO.md` A2). **Archive, Clear Client Data, Delete Client and the trial purge revoke every
+does not lock out every tablet already on a floor. Any other error refuses. **Every client has now
+switched the shared key off (S809 1j), so the follow-up is due**: delete `pos-staff-login`'s legacy
+branch and its PGRST202 fallback, PosLogin's `get_pos_staff` path, Pos.js's legacy notice and the
+Till Devices shared-key panel, then drop `get_pos_staff`, `verify_pos_legacy_device`,
+`retire_pos_legacy_device_key` and `pos_legacy_device_key_status`, in that order, after the deploys
+(`POS_TODO.md` A2). A stale bundle on a legacy tablet calls `get_pos_staff`, so the drop goes last. **Archive, Clear Client Data, Delete Client and the trial purge revoke every
 tablet key and rotate/retire the shared key (S755)**. `revokeClientTablets` runs first inside
 `deleteClientDataFor`, with the service role, because `revoke_pos_device` and
 `retire_pos_legacy_device_key` refuse a caller with no session. The caller is recorded as

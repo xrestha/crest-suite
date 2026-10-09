@@ -64,18 +64,14 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ORDER-FLOW-1 (= CHECKOUT-9) | If the till's settings read fails or stalls, every bill until a reload prints as a TAX INVOICE without the VAT/PAN number, prefix or address. Bar items go on the kitchen ticket, and the bad copy overwrites the offline settings. The reprint path has the same gap | 2 | — | no |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (61 open; CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4 shipped in slices 1c, 1h)
+### P2 (57 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 | ACCESS-2 | A PIN left on the Kitchen Display never idle-locks, and its Exit opens the till as that login | 1 | Q4 | no |
 | ACCESS-3 | A POS manager with capped powers can reset the PIN of a waiter who holds more, then use those powers; nothing records the reset | 1 | Q5 | no |
 | ACCESS-4 | A PIN login with sibling-outlet access can switch a till into the other outlet, which then bills in that outlet's name, PAN and invoice series | 1 | — | yes |
-| CUSTOMERS-PARKING-7 | Any login can move a regular's points balance to another phone over REST, and nothing records it | 1 | — | yes |
-| DATABASE-4 | The Loyalty payment sitting on an open bill can be changed or deleted by any login | 1 | — | yes |
-| DATABASE-5 | Any login can delete a loyalty customer, silently wiping its points history | 1 | — | yes |
 | DOCS-1 | A manager's PIN reset leaves the 15-minute lockout in place, so the new PIN is refused too. The fix is code: `admin-user-ops` plus a deploy. IMS count and HR Self-Service PINs have the same gap (S809.3) | 1 | Q6 | no |
-| SHIFTS-2 | The signed Z-report's money figures are whatever the tablet sends: one REST call can file a shortage as "✓ Balanced" | 1 | — | yes |
 | CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
 | CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
 | CHECKOUT-5 | A Tax Invoice above NPR 10,000 closes with blank buyer name, address and PAN, though the till's own tip says they are needed | 2 | Q9 | no |
@@ -130,16 +126,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
 | SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (89 open; RESERVATIONS-12 shipped in slice 1a, CREDIT-NOTES-6 in 1c)
+### P3 (83 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-8 | The shared till key is still on at every client and fetchable through an RPC unused since S754 | 1 | Q7 | no |
-| ACCESS-9 | Four POS rank checks are copies of `pos_caller_has_rank` that don't refuse a settlement-blocked login | 1 | — | yes |
-| CHECKOUT-12 | Once QR auto-confirm goes live, any login could re-point an old payment confirmation at another open bill | 1 | — | yes |
-| CHECKOUT-16 | `apply_pos_item_comps` accepts any quantity, so a REST call can leave a negative line or comp | 1 | — | yes |
-| CUSTOMERS-PARKING-13 | A parking slip's rank rule, number and names are screen-only: any login can issue, renumber or rewrite one | 1 | — | yes |
-| DATABASE-9 | The retired comp-slip number function is still callable | 1 | — | yes |
 | ACCESS-10 | A dead till says a POS manager can re-activate it, but a POS manager can't sign in on a dead tablet | 4 | — | no |
 | ACCESS-11 | Deactivating the tablet you are signed in on with a PIN turns its idle lock off | 4 | — | no |
 | ACCESS-12 | A correct PIN can land the waiter on the Owner's email login with no message | 4 | — | no |
@@ -224,11 +214,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
 | SHIFTS-11 | A failed first read leaves the Shifts page on "Loading…" for good | 4 | — | no |
 
-### Gaps (6 open: 4 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b)
+### Gaps (5 open: 3 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OPERATOR-1 in 1l)
 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
-| GAP-OPERATOR-1 | A credit note or drawer-cash entry the database refuses to the restaurant's manager goes through unchecked when Crest support enters it from the same screen; the refusal sends managers to support | P2 | 1 | Q26 | yes |
 | GAP-OUTLETS-1 | A till signed in on the Owner's own login follows her to whichever outlet she last opened, even from her phone. It drops the unsent order, then bills in the other outlet's name and invoice series. Live: BLOOM CAFE and PKR are a POS group, and 29 of BLOOM's 40 bills were closed on the Owner's login. Ships with ACCESS-4 | P2 | 1 | Q24 | no |
 | GAP-OUTLETS-2 | Every HQ push turns each pushed dish back On POS (and Active) at every branch. On a branch whose VAT status differs from HQ's, a pushed dish with no price goes on the till at NPR 0 (no such group live) | P2 | 2 | Q25 | yes |
 | GAP-OUTLETS-3 | The Group Console counts takeaway and delivery bills as guests (REPORTS-3's rule), cuts the month at 05:45 Nepal time, and its Revenue tip over-promises | P2 | 3 | — | yes |
@@ -382,10 +371,10 @@ changed.
 | 1f | ACCESS-3, DOCS-1 | none | `admin-user-ops` | Q5, Q6 |
 | 1g | ACCESS-4, GAP-OUTLETS-1 | `set_active_outlet` | `pos-staff-login` | Q24 |
 | 1h ✅ | GUEST-4, RESERVATIONS-3, RESERVATIONS-4 (shipped 2026-10-09, `20261009140000` live; five guest functions gated, not three) | access helper, 3 guest-menu and 3 booking functions | — | Q2, Q3 |
-| 1i | DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7 | `guard_pos_order_payments_closed`, `pos_customers_guard_loyalty`, ledger FK | — | — |
-| 1j | ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9 | retire the shared key, drop 2 dead RPCs, rank checks, comp quantity | — | Q7 |
-| 1k | CHECKOUT-12, CUSTOMERS-PARKING-13 | payment-confirmation guard, parking-slip trigger and unique number | — | — |
-| 1l | SHIFTS-2, GAP-OPERATOR-1 | `pos_shifts_guard` or `close_pos_shift`, `pos_cash_movements_guard`, `guard_pos_credit_note`, restore flag | — | Q26 |
+| 1i ✅ | DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7 (shipped 2026-10-09, `20261009150000` live) | `guard_pos_order_payments_closed`, `pos_customers_guard_loyalty`, ledger FK | — | — |
+| 1j ✅ | ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9 (shipped 2026-10-09, `20261009160000` live) | retire the shared key, drop 2 dead RPCs, rank checks, comp quantity | — | Q7 |
+| 1k ✅ | CHECKOUT-12, CUSTOMERS-PARKING-13 (shipped 2026-10-09, `20261009170000` live) | payment-confirmation guard, parking-slip trigger and unique number | — | — |
+| 1l ✅ | SHIFTS-2, GAP-OPERATOR-1 (shipped 2026-10-09, `20261009180000` live) | `pos_shifts_guard` or `close_pos_shift`, `pos_cash_movements_guard`, `guard_pos_credit_note`, restore flag | — | Q26 |
 
 ACCESS-8 needs a migration (it drops `get_pos_device_secret`), although the index above says no. If 1l is
 too big for one chat, split it: SHIFTS-2 with the operator change for the two shift guards, then the
@@ -393,12 +382,45 @@ remaining guards.
 
 ## S809.3 Outside POS, filed here
 
-- **IMS count PIN and HR Self-Service PIN:** a reset leaves the lockout in place, as DOCS-1 does for POS
-  (reported by the DOCS verifier, not re-checked). HR is shared with hss-suite: when it is fixed here, file
-  it in `docs/CROSS-REPO.md` on both sides.
+- **IMS count PIN:** a reset leaves the lockout in place, as DOCS-1 does for POS (re-checked by the 1f
+  drafter, 2026-10-09: `reset_ims_pin` clears no lock). Same fix as 1f: `record_ims_pin_attempt(true)`
+  after `updateUserById`, an audit row (`kind: 'ims_count'`), `ImsStaff.jsx` handling `lockout_cleared:
+  false`; `Help.js` ("reset their PIN immediately") and `ImsCountLogin.jsx` are untrue until then. **HR
+  Self-Service has no such gap here** (no reset action: Remove + Enable makes a new login); check
+  hss-suite's own reset path on its side before filing anything in CROSS-REPO.
+- **IMS gate passes have the parking slip's numbering hole** (found by the 1k drafter):
+  `ims_gate_pass_void_guard` does not clear a browser-sent `pass_no`, there is no `UNIQUE (client_id,
+  pass_no)` (live: 3 rows, 0 duplicates), and vehicle, notes and print count are editable.
 - **Trial signup gives a working login before approval** (part of RESERVATIONS-1's reach): RLS honours a
   pending trial's JWT. This is the documented "UI gate, not a security boundary" (`subscription-access.md`).
   RESERVATIONS-1 does not need it changed, but any other cross-tenant read would be reachable the same way.
+
+## S809.4 Found while fixing stage 1 (2026-10-09, not fixed)
+
+- **Legacy shared-key code** (1j): every client's shared key is now off, so delete `pos-staff-login`'s
+  legacy branch and PGRST202 fallback, PosLogin's `get_pos_staff` path, the Pos.js legacy notice and the
+  Till Devices shared-key panel, then drop `get_pos_staff`, `verify_pos_legacy_device`,
+  `retire_pos_legacy_device_key`, `pos_legacy_device_key_status` (after the deploys; `auth-and-pins.md`).
+- `settings_guard_staff_roles`' HR, IMS, travel-claim and weather-city lines still test raw ranks, so a
+  settlement-blocked login passes them for the hour its token lives (1j did the POS lines).
+- `apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
+  NC number, so the till could print an empty comp slip (1j).
+- `pos_payment_confirmations.matched_order_id` is NO ACTION: once auto-confirm is live, Clear Occupied of a
+  bill holding an unused matched confirmation is refused by that key. `pos-payment-webhook` drops the error
+  of both its reads (1k).
+- Grants hygiene (the S782 trap): `anon` MAINTAIN on `pos_parking_slips` / `pos_payment_confirmations`,
+  and TRUNCATE/REFERENCES/TRIGGER on `pos_cash_movements` (1k, 1l).
+- `pos_customers` has no audit trigger, so enrolment changes leave no record; `supabase-sql.md`'s
+  `updated_at` table is wrong about it (the till's upsert writes it from the tablet clock) (1i).
+- Credit Note Book reprint labels from the list loaded at page open, so two managers reprinting one note
+  print the same copy number (the stored count is right since 1c) (1c).
+- Kitchen stage times (`started_at`/`ready_at`/`served_at`) are still tablet-supplied, so prep times
+  can be shaded (1d).
+- Admin → Guest Menu Preview quotes "This menu isn't available right now"; the guest page says "This menu
+  isn't available" (1h).
+- One-line pulls-forward, now that their functions were rebuilt: SHIFTS-7 (`NEW.closed_at := now()` in
+  `pos_shifts_guard`) and SHIFTS-1's database half (`FOR SHARE` on the shift read in
+  `pos_cash_movements_guard`) (1l).
 
 ---
 

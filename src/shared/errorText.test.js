@@ -191,6 +191,45 @@ describe('errorText', () => {
     })
   })
 
+  // S809 1k. The parking-slip and payment-confirmation guards (migration 20261009170000).
+  describe('the parking slip and payment confirmation refusals', () => {
+    const codes = ['pos_parking_slip_rank', 'pos_parking_slip_bill', 'pos_parking_slip_locked',
+      'pos_parking_slip_closed', 'pos_parking_slip_not_stale', 'pos_payment_confirmation_locked']
+
+    it('every code has its own sentence in both audiences, ahead of the generic ones', () => {
+      const generic = { staff: errorText({ code: '42501' }, 'staff'), operator: errorText({ code: '42501' }, 'operator') }
+      const fallback = { staff: errorText({ message: 'x' }, 'staff'), operator: errorText({ message: 'x' }, 'operator') }
+      for (const c of codes) {
+        for (const aud of ['staff', 'operator']) {
+          const text = errorText({ code: '42501', hint: c, message: 'refused' }, aud)
+          expect([c, text]).not.toEqual([c, generic[aud]])
+          expect([c, text]).not.toEqual([c, fallback[aud]])
+        }
+      }
+      // and no two of them share a sentence
+      const seen = new Set(codes.map(c => errorText({ hint: c, message: 'refused' }, 'operator')))
+      expect(seen.size).toBe(codes.length)
+    })
+
+    it('matches on the hint alone and on a message that leads with the table', () => {
+      const hinted = { code: '42501', hint: 'pos_parking_slip_rank', message: 'pos_parking_slips: issuing a parking slip needs a POS supervisor, a POS manager or the Owner' }
+      expect(errorText(hinted, 'staff')).toMatch(/supervisor/i)
+      expect(errorText({ message: 'pos_parking_slip_bill: …' }, 'operator')).toMatch(/bill of this outlet/i)
+    })
+
+    it('a print or close by a login with no POS rank falls to the shared rank sentence, not the issue one', () => {
+      const err = { code: '42501', hint: 'rank_required', message: 'pos_parking_slips: printing or closing a parking slip needs a POS login (Staff rank or above) or the Owner' }
+      expect(errorText(err, 'operator')).toMatch(/POS Staff/)
+      expect(errorText(err, 'operator')).not.toMatch(/issue slips/i)
+    })
+
+    it('says nothing was changed or issued — each is raised before the statement writes', () => {
+      for (const c of codes) {
+        expect(errorText({ hint: c, message: 'refused' }, 'operator')).toMatch(/nothing was changed|no slip was issued|slip was not issued/i)
+      }
+    })
+  })
+
   // S755. A same-second double booking and a credit note whose amounts are not the bill's.
   describe('the S755 table-hold and credit-note amount refusals', () => {
     it('a table-hold refusal says the table is taken and sends the reader to refresh, ahead of the generic sentences', () => {
@@ -206,6 +245,41 @@ describe('errorText', () => {
       expect(errorText(err, 'operator')).toMatch(/reload the bill/i)
       // ahead of the generic CHECK sentence the 23514 code would otherwise get
       expect(errorText(err, 'operator')).not.toBe(errorText({ code: '23514' }, 'operator'))
+    })
+
+    it('since S809 1l the VAT-change case no longer sends the reader to a screen that skips the check', () => {
+      const err = { code: '23514', hint: 'credit_note_amounts', message: 'pos_credit_notes: the amounts on this Credit Note do not match the bill it credits' }
+      expect(errorText(err, 'operator')).toMatch(/Crest support’s included/)
+      expect(errorText(err, 'operator')).toMatch(/bill’s own VAT/)
+      expect(errorText(err, 'operator')).not.toMatch(/cannot be issued from the till — contact support/)
+    })
+  })
+
+  // S809 1l (migration 20261009180000). pos_shifts_guard adds up the shift's own cash as it closes,
+  // and the counted total must be the notes counted.
+  describe('the shift-close cash refusals', () => {
+    const changed = { code: 'P0001', hint: 'pos_shift_figures_changed', message: "pos_shift_figures_changed: this shift's cash figures are not the ones sent with the close (cashSales, byMethod.Cash, expectedCash, variance) — a bill or a cash entry probably reached the shift after its figures were read; nothing was closed, so press Close Shift again to count against the new figures" }
+    const counted = { code: '23514', hint: 'pos_shift_count_mismatch', message: 'pos_shift_count_mismatch: the counted cash (NPR 3530) is not the total of the notes counted (NPR 3430) — count the drawer on the Shifts screen, which adds the notes up itself' }
+    const fallback = errorText({ message: 'x' }, 'operator')
+
+    it('a close refused because a bill landed during the count says the count is kept and to press Close Shift again', () => {
+      for (const aud of ['staff', 'operator']) {
+        expect(errorText(changed, aud)).toMatch(/press Close Shift again/i)
+        expect(errorText(changed, aud)).toMatch(/still open/i)
+      }
+      expect(errorText(changed, 'operator')).not.toBe(fallback)
+      // the hint lost, the code still leads the message
+      expect(errorText({ message: changed.message }, 'operator')).toBe(errorText(changed, 'operator'))
+    })
+
+    it('a count that does not add up says so, ahead of the generic CHECK sentence, without offering the same retry', () => {
+      expect(errorText(counted, 'operator')).toMatch(/notes counted/i)
+      expect(errorText(counted, 'operator')).not.toBe(errorText({ code: '23514' }, 'operator'))
+      expect(errorText(counted, 'operator')).not.toMatch(/try again/i)
+    })
+
+    it('neither code is matched by the other', () => {
+      expect(errorText(changed, 'operator')).not.toBe(errorText(counted, 'operator'))
     })
   })
 
@@ -260,6 +334,26 @@ describe('errorText', () => {
     it('a cancel refusal names who may cancel, and a backwards move sends the reader to reload', () => {
       expect(errorText({ code: '42501', hint: 'pos_kot_cancel_rank', message: 'x' }, 'staff')).toMatch(/supervisor/i)
       expect(errorText({ code: '42501', hint: 'pos_kot_status_backwards', message: 'x' }, 'staff')).toMatch(/reload/i)
+    })
+  })
+
+  // S809 1j. apply_pos_item_comps refuses a part-comp outside 1..qty-1 before it writes anything.
+  describe('the part-comp quantity refusal (S809 1j)', () => {
+    const err = {
+      code: '22023',
+      hint: 'pos_comp_qty_invalid',
+      message: 'pos_comp_qty_invalid: Chicken Momo can be made complimentary from 1 up to 2 here (the bill has 3), not 5 — a whole line is comped in full',
+    }
+
+    it('says nothing was made complimentary and how to comp a whole dish', () => {
+      expect(errorText(err, 'staff')).toMatch(/nothing was made complimentary/i)
+      expect(errorText(err, 'operator')).toMatch(/nothing was made complimentary/i)
+      expect(errorText(err, 'operator')).toMatch(/whole dish/i)
+    })
+
+    it('matches on the message alone when the hint was lost, ahead of the fallback', () => {
+      expect(errorText({ message: err.message }, 'operator')).toBe(errorText(err, 'operator'))
+      expect(errorText(err, 'staff')).not.toBe(errorText({ message: 'x' }, 'staff'))
     })
   })
 
@@ -412,6 +506,59 @@ describe('own pay, own run and claim undo refusals (S798 3a)', () => {
 
   it('undoing a claim decision names who can', () => {
     expect(errorText(raised('tada_undo_rank'), 'operator')).toMatch(/HR manager or the Owner/)
+  })
+})
+
+// S809 1i (migration 20261009150000). The payment-line guard and the customer-book guard raise a
+// stable code in HINT and lead the message with it, like the S754 POS guards.
+describe('POS payment-line and customer-book refusals (S809 1i)', () => {
+  const hinted = (hint, message) => ({ code: '42501', hint, message })
+
+  it('a hand edit of a payment line points at Undo on the points, ahead of the generic permission sentence', () => {
+    const err = hinted('pos_payment_line_locked', "pos_payment_line_locked: a bill's payment lines are written by the till itself …")
+    expect(errorText(err, 'operator')).toMatch(/Undo on the points/)
+    expect(errorText(err, 'staff')).toMatch(/Nothing was changed/)
+    expect(errorText(err, 'operator')).not.toBe(errorText({ code: '42501' }, 'operator'))
+    // the message alone still matches when the hint was lost
+    expect(errorText({ message: err.message }, 'operator')).toBe(errorText(err, 'operator'))
+  })
+
+  it('a closed bill keeps its own sentence', () => {
+    const closed = hinted('bill_locked', 'pos_order_payments: this bill is closed, so how it was paid can no longer be changed')
+    expect(errorText(closed, 'operator')).toMatch(/closed and printed/i)
+    expect(errorText(closed, 'operator')).not.toMatch(/Undo on the points/)
+  })
+
+  it('a customer with points history is not deleted, and the sentence says how to stop them earning', () => {
+    const err = hinted('pos_customer_has_points_history', 'pos_customer_has_points_history: this customer has a loyalty points history …')
+    expect(errorText(err, 'operator')).toMatch(/Customers → Loyalty/)
+    expect(errorText(err, 'staff')).toMatch(/Nothing was changed/)
+  })
+
+  it('deleting an enrolled customer below POS manager names who can', () => {
+    const err = hinted('pos_customer_delete_rank', 'pos_customer_delete_rank: this customer is enrolled in a loyalty scheme …')
+    expect(errorText(err, 'operator')).toMatch(/Owner or a POS manager/)
+    expect(errorText(err, 'operator')).not.toBe(errorText(hinted('loyalty_enrol_rank', 'loyalty_enrol_rank: …'), 'operator'))
+  })
+
+  it('a phone change says the points stay with the old number, and does not send the reader to support', () => {
+    const err = hinted('pos_customer_phone_locked', "pos_customer_phone_locked: a customer's phone number and outlet …")
+    expect(errorText(err, 'staff')).toMatch(/new customer/i)
+    expect(errorText(err, 'operator')).toMatch(/stay with the old number/)
+    // GAP-OPERATOR-1 / Q26 (a): the operator is held to this rule too, so support cannot do it either
+    expect(errorText(err, 'operator')).not.toMatch(/support/i)
+  })
+
+  it('every code this slice raises has its own sentence in both audiences', () => {
+    const generic = { staff: errorText({ code: '42501' }, 'staff'), operator: errorText({ code: '42501' }, 'operator') }
+    const fallback = { staff: errorText({ message: 'x' }, 'staff'), operator: errorText({ message: 'x' }, 'operator') }
+    for (const c of ['pos_payment_line_locked', 'pos_customer_has_points_history', 'pos_customer_delete_rank', 'pos_customer_phone_locked']) {
+      for (const aud of ['staff', 'operator']) {
+        const text = errorText({ code: '42501', hint: c, message: 'refused' }, aud)
+        expect([c, text]).not.toEqual([c, generic[aud]])
+        expect([c, text]).not.toEqual([c, fallback[aud]])
+      }
+    }
   })
 })
 
