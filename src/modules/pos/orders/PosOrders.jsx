@@ -88,14 +88,15 @@ const bounded = (call, label, ms = CLOSE_STEP_MS) =>
 const RELEASE_IDLE_MS = 60 * 1000
 
 // What a kept cart's lines were "not sent before": a lock, or a reload for a new release.
-const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated' : 'the till locked')
+const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated'
+  : kept?.reason === 'outlet' ? 'the till stopped for the outlet change' : 'the till locked')
 
 // `billingStation` is the /pos/billing route (S762) — the SAME component, entered on a third view
 // that lists the open bills instead of the floor plan. Deliberately not a separate page: billing is
 // ~1,500 lines of interlocked state in this file (tenders, splits, comps, discount caps, loyalty,
 // the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
 export default function PosOrders({ billingStation = false } = {}) {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled, outlets } = useAuth()
   // Who the floor's Inventory-posting banners are for (S776): the recovery is Periods → Post POS bills
   // to Inventory, an owner/manager job. hasPosAccess resolves admin and Owner to manager already.
   const canSeeImsPosting = isAdmin || isOwner || hasPosAccess('manager')
@@ -710,7 +711,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     })
   }
   useEffect(() => {
-    const onBeforeLock = e => beforeLockRef.current?.(e.detail?.waitUntil || (() => {}))
+    // The reason rides along ('outlet' when the login moved and the till stopped, S809), so the lines
+    // say why they were kept when they come back.
+    const onBeforeLock = e => beforeLockRef.current?.(e.detail?.waitUntil || (() => {}), e.detail?.reason)
     window.addEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
     return () => window.removeEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
   }, [])
@@ -1738,7 +1741,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const units = Number(kept.unsentUnits) || 0
     const keepAgain = () => {
       keepLockedCart(kept)
-      setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before ${keptBefore(kept)} could not be put back — the order could not be read. They are still kept: ${kept.reason === 'update' ? 'reload the page' : 'lock the till and sign in again'} once the connection is back.`)
+      setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before ${keptBefore(kept)} could not be put back — the order could not be read. They are still kept: ${kept.reason === 'update' ? 'reload the page' : kept.reason === 'outlet' ? 'open Orders again' : 'lock the till and sign in again'} once the connection is back.`)
     }
     lockedCartRef.current = kept
     try {
@@ -4119,6 +4122,17 @@ The tables were left occupied rather than freed with their orders still open.`)
 
         {activeTable?.section && !narrowTill && (
           <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{activeTable.section}</span>
+        )}
+
+        {/* This layer covers the top bar that names the outlet, so in a group it says it here (S809
+            GAP-OUTLETS-1): a bill rung on this screen takes this outlet's name and invoice number. */}
+        {outlets.length > 1 && outletName && (
+          <Tip text="The outlet this order belongs to. Its bill prints this outlet's name and takes this outlet's next invoice number.">
+            <span style={{
+              fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', cursor: 'default',
+              maxWidth: narrowTill ? 120 : 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{outletName}</span>
+          </Tip>
         )}
 
         {orderNo && (

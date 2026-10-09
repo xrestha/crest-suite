@@ -23,11 +23,30 @@ export function outletMovedElsewhere(renderedClientId, freshRow) {
 }
 
 // What the window says after it has moved itself. `name` is null when the outlet is not in this
-// login's outlet list (an admin moved the login to another client entirely).
-export function outletMovedText(name) {
+// login's outlet list (an admin moved the login to another client entirely). `cartKeptAt` names the
+// outlet whose till kept an order not yet sent (S809 GAP-OUTLETS-1): the order screen keeps it the
+// way a till lock does, so the sentence must not say it was lost.
+export function outletMovedText(name, { cartKeptAt } = {}) {
   const where = name ? `This window now shows ${name}` : 'This window now shows another outlet'
+  const lost = cartKeptAt
+    ? `The till order you had not sent is kept, and comes back when you open Orders at ${cartKeptAt} again. Anything else typed there but not saved was not kept.`
+    : 'Anything typed there but not saved was not kept.'
   return `${where}: your account changed outlet in another window or on another device. ` +
-    'The page you had open was closed, and anything typed there but not saved was not kept.'
+    `The page you had open was closed. ${lost}`
+}
+
+// A window that did NOT follow its login, because it holds offline changes for the outlet it shows
+// (S809 GAP-OUTLETS-1). Those changes can only be sent while the login is on that outlet, so moving
+// the window would replay them under the other one. `here` is the outlet this window shows, `there`
+// where the login is now (null when it is not in this login's outlet list).
+export function outletHeldText({ here, there, pending }) {
+  const n = Number(pending) || 0
+  const changes = `${n} change${n === 1 ? '' : 's'}`
+  const away = there ? `to ${there} ` : ''
+  const at = here || 'this outlet'
+  return `Your account moved ${away}in another window or on another device, but this window still holds ` +
+    `${changes} made offline at ${at} that ${n === 1 ? 'has' : 'have'} not reached the server. They can only be sent from ${at}, ` +
+    `so this window stays there, and nothing on it can load or save until your account is back on ${at}.`
 }
 
 // Another tab of this browser switched outlet. The message carries no outlet: a receiver re-reads

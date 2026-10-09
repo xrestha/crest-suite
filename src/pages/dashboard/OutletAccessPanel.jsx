@@ -72,6 +72,12 @@ export default function OutletAccessPanel({ outlets }) {
     await load()
   }
 
+  // A till PIN login works only on its own outlet's tablets (S809 ACCESS-4): set_active_outlet refuses
+  // it every other outlet, and set_outlet_access refuses to grant one. pos_role marks it here because
+  // get_group_outlet_access returns no pos_email, and only create_pos_staff ever sets a pos_role: every
+  // PIN login has one and no other login does. The server tests pos_email itself.
+  const isTillPin = r => !r.is_owner && !!r.pos_role
+
   const roleLabel = r => {
     if (r.is_owner) return 'Owner'
     const parts = []
@@ -156,6 +162,15 @@ export default function OutletAccessPanel({ outlets }) {
                           </td>
                         )
                       }
+                      if (isTillPin(r)) {
+                        return (
+                          <td key={o.id} style={{ textAlign: 'center' }}>
+                            <Tip text={`A till PIN works only on its own outlet's tablets, so it cannot be given ${o.name}. If this person also works there, add them under ${o.name}'s POS Staff with a PIN of their own.`}>
+                              <span style={{ color: 'var(--theme-text3)' }}>till only</span>
+                            </Tip>
+                          </td>
+                        )
+                      }
                       return (
                         <td key={o.id} style={{ textAlign: 'center' }}>
                           <input
@@ -169,7 +184,7 @@ export default function OutletAccessPanel({ outlets }) {
                       )
                     })}
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {r.is_owner ? null : isDirty(r) ? (
+                      {r.is_owner || isTillPin(r) ? null : isDirty(r) ? (
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() => save(r)}

@@ -1,4 +1,4 @@
-import { accountOutlet, outletMovedElsewhere, outletMovedText, announceOutletSwitch, listenForOutletSwitch } from './outletWatch'
+import { accountOutlet, outletMovedElsewhere, outletMovedText, outletHeldText, announceOutletSwitch, listenForOutletSwitch } from './outletWatch'
 
 describe('accountOutlet', () => {
   test('the selected outlet wins over home, as my_client_id() resolves it', () => {
@@ -30,6 +30,28 @@ describe('outletMovedText', () => {
     expect(outletMovedText('Lakeside')).toMatch(/^This window now shows Lakeside:/)
     expect(outletMovedText(null)).toMatch(/^This window now shows another outlet:/)
     expect(outletMovedText('Lakeside')).toMatch(/not saved was not kept/)
+  })
+
+  test('a till order kept on the way out is said to be kept, and where it comes back (S809)', () => {
+    const t = outletMovedText('Lakeside', { cartKeptAt: 'Thamel' })
+    expect(t).toMatch(/till order you had not sent is kept/)
+    expect(t).toMatch(/open Orders at Thamel again/)
+    expect(t).toMatch(/Anything else typed there/)
+  })
+})
+
+describe('outletHeldText', () => {
+  test('says why the window stayed, where, and what it is waiting for', () => {
+    const t = outletHeldText({ here: 'Thamel', there: 'Lakeside', pending: 2 })
+    expect(t).toMatch(/^Your account moved to Lakeside in another window/)
+    expect(t).toMatch(/2 changes made offline at Thamel that have not reached the server/)
+    expect(t).toMatch(/until your account is back on Thamel\.$/)
+  })
+
+  test('one change, and an outlet it does not know', () => {
+    const t = outletHeldText({ here: 'Thamel', there: null, pending: 1 })
+    expect(t).toMatch(/^Your account moved in another window/)
+    expect(t).toMatch(/1 change made offline at Thamel that has not/)
   })
 })
 

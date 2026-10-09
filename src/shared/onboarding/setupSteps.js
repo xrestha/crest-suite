@@ -139,11 +139,13 @@ export const STEPS = [
   { key: 'pos.device', group: 'pos', phase: 'setup', tick: 'data', signal: 'devices', module: 'pos',
     access: { pos: 'manager' }, route: '/pos', where: 'POS → Admin → Till Devices',
     label: 'Switch on the till tablet',
-    // Sign OUT, not "Open POS Login Screen": that button only navigates, so the Owner's own login
-    // stayed live on the till, one Back tap from their whole account (S790 review).
-    hint: 'Do this on the tablet or computer you bill from: sign in there with your own email, open Till Devices, give it a name like "Front counter" and press Activate. Then sign out (the menu under your name → Sign out), so your own login is not left open on the till. From then on the tablet opens on the staff PIN screen; right after signing out, press Staff Login on the sign-in page to reach it.',
+    // S790 named the hole: "Open POS Login Screen" only navigated, so the Owner's own login stayed
+    // live on the till, one Back tap from their whole account. S809 (ACCESS-1) renamed the button
+    // "Sign out and open the PIN screen" and made it sign out (this tablet only), and the PIN screen
+    // now signs out any login it finds on an activated tablet.
+    hint: 'Do this on the tablet or computer you bill from: sign in there with your own email, open Till Devices, give it a name like "Front counter" and press Activate. Then press Sign out and open the PIN screen, so your own login is not left open on the till. It signs you out on that tablet only; your phone and laptop stay signed in. If the tablet ever shows the email sign-in page instead, press Staff Login there.',
     skip: 'Skip — I bill from this computer with my own login',
-    strip: 'On the till tablet: type a name like Front counter and press Activate. Then sign out, so your own login is not left open here.' },
+    strip: 'On the till tablet: type a name like Front counter, press Activate, then Sign out and open the PIN screen.' },
   { key: 'pos.firstbill', group: 'pos', phase: 'setup', tick: 'data', signal: 'paidBill', module: 'pos',
     access: { pos: 'supervisor' }, route: '/pos/shifts', where: 'POS → Floor → Shifts, then Orders',
     label: 'Bill your first real customer',

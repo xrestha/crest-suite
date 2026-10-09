@@ -124,7 +124,9 @@ Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaf
   POS Manager rank (the HR rule). `refusePosPowerEscalation()` refuses a `pos_discount_limit` above
   the caller's own cap, and refuses "no limit" (NULL) from any capped caller. It also refuses
   `pos_allow_void` from a caller who cannot void. Otherwise a 10%-capped manager could give a waiter
-  an unlimited discount and then use that waiter's PIN. **A login a capped manager creates without
+  an unlimited discount and then use that waiter's PIN. Since S809 1f the same test
+  (`posPowerBeyondCaller`) refuses a PIN RESET of a login holding a power the caller lacks; delete
+  is not covered (ACCESS-5). **A login a capped manager creates without
   naming a limit starts at the creator's cap**, because the column default is NULL = unlimited, so
   omission was itself an escalation. Admin and the Owner are exempt. **Since S776 POS Staff names
   one on every create: 0% (owner decision — a new login discounts nothing until a manager sets a

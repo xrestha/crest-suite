@@ -78,6 +78,13 @@ export function takeLockedCart(profileId, clientId, now = Date.now()) {
   return hit
 }
 
+/** The cart this login left on this outlet's till, left in place, or null. For saying what is kept. */
+export function lockedCartFor(profileId, clientId, now = Date.now()) {
+  if (!profileId || !clientId) return null
+  const hit = prune(readAll(), now)[profileId]
+  return hit && hit.clientId === clientId ? hit : null
+}
+
 /** What the PIN screen says is waiting: one row per login, for this outlet only. */
 export function listLockedCarts(clientId, now = Date.now()) {
   if (!clientId) return []
@@ -89,10 +96,13 @@ export function listLockedCarts(clientId, now = Date.now()) {
 // Called by Layout just before a PIN session signs out. The order screen listens (it holds the cart)
 // and may hand back work that must finish first — a points redemption left standing by an unfinished
 // close — through `waitUntil`. Bounded, so a dead connection cannot keep the till from locking.
-export async function runBeforePosLock(ms = 5000) {
+// Also called by AuthContext when the login has moved to another outlet and this window's till is
+// about to stop or close (S809 GAP-OUTLETS-1), with `reason` 'outlet'. The reason travels with the
+// kept cart, so the lines say why they were kept when they come back.
+export async function runBeforePosLock(ms = 5000, reason) {
   const pending = []
   window.dispatchEvent(new CustomEvent(POS_BEFORE_LOCK_EVENT, {
-    detail: { waitUntil: p => pending.push(Promise.resolve(p)) },
+    detail: { waitUntil: p => pending.push(Promise.resolve(p)), reason },
   }))
   if (pending.length === 0) return
   await withTimeout(Promise.allSettled(pending), ms, 'Handing work back before the lock').catch(e => {

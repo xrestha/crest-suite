@@ -1,5 +1,5 @@
 import {
-  keepLockedCart, takeLockedCart, listLockedCarts, lockedCartWhere, runBeforePosLock,
+  keepLockedCart, takeLockedCart, listLockedCarts, lockedCartWhere, runBeforePosLock, lockedCartFor,
   LOCKED_CART_MAX_AGE_MS, POS_BEFORE_LOCK_EVENT,
 } from './posLockedCart'
 
@@ -75,5 +75,28 @@ describe('posLockedCart', () => {
     await expect(runBeforePosLock(20)).resolves.toBeUndefined()
     errSpy.mockRestore()
     window.removeEventListener(POS_BEFORE_LOCK_EVENT, hang)
+  })
+
+  // S809 GAP-OUTLETS-1: the outlet stop keeps the cart through the same event, and says why.
+  it('passes the reason to the order screen, and none for a plain lock', async () => {
+    const reasons = []
+    const onLock = e => reasons.push(e.detail.reason)
+    window.addEventListener(POS_BEFORE_LOCK_EVENT, onLock)
+    await runBeforePosLock(1000)
+    await runBeforePosLock(1000, 'outlet')
+    window.removeEventListener(POS_BEFORE_LOCK_EVENT, onLock)
+    expect(reasons).toEqual([undefined, 'outlet'])
+  })
+
+  it('reports a kept cart without taking it, for that login on that outlet only', () => {
+    const t0 = 2_000_000
+    keepLockedCart(cart(), t0)
+    expect(lockedCartFor('p-ram', 'c-1', t0).savedAt).toBe(t0)
+    expect(lockedCartFor('p-ram', 'c-2', t0)).toBeNull()
+    expect(lockedCartFor('p-sita', 'c-1', t0)).toBeNull()
+    expect(lockedCartFor(null, 'c-1', t0)).toBeNull()
+    // Still there to be taken.
+    expect(takeLockedCart('p-ram', 'c-1', t0)).not.toBeNull()
+    expect(lockedCartFor('p-ram', 'c-1', t0)).toBeNull()
   })
 })

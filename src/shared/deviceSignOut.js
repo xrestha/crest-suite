@@ -28,9 +28,16 @@ export function clearStoredAuthSession(storage = window.localStorage) {
 // True when the library signed out normally. False means the session was cleared by hand: the
 // in-memory client still holds it, so the caller must leave with a full page load
 // (`window.location.replace`), never a router navigate, or the next screen reads it back.
-export async function signOutThisDevice() {
+//
+// `scope: 'local'` ends this device's session only (S809 ACCESS-1): /logout?scope=local revokes
+// the refresh token of the session this device holds and nothing else. With no scope, supabase-js
+// uses its documented default, 'global', which revokes every session of the login, so its phone and
+// laptop drop to the sign-in page within the hour. The till lock still passes no scope; whether it
+// should is ACCESS-7's decision (Q18).
+export async function signOutThisDevice({ scope } = {}) {
   try {
-    const { error } = await withTimeout(supabase.auth.signOut(), SIGN_OUT_WAIT_MS, 'Sign out')
+    const request = scope === 'local' ? supabase.auth.signOut({ scope: 'local' }) : supabase.auth.signOut()
+    const { error } = await withTimeout(request, SIGN_OUT_WAIT_MS, 'Sign out')
     if (!error) return true
     console.error('Sign-out did not reach the server; clearing this device instead.', error)
   } catch (e) {

@@ -671,7 +671,7 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void').eq('id', user.id).single()
+      .from('profiles').select('role, full_name, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void').eq('id', user.id).single()
 
     // ── POS/IMS/HR manager-accessible actions (before admin-only guard) ──────
     // isCallerOwner must exclude every staff-account marker (pos_role, pos_email, ims_role,
@@ -887,10 +887,13 @@ Deno.serve(async (req) => {
     }
     const MODULE_LABEL: Record<string, string> = { pos: 'POS', ims: 'IMS', hr: 'HR', self_service: 'HR Self-Service' }
 
+    // The POS powers and lock stamp are read for reset_pos_pin (S809 1f): its power check compares the
+    // target's discount limit and Void against the caller's, and its audit row says whether the reset
+    // ended a lockout.
     async function loadTarget(userId: string) {
       const { data } = await admin
         .from('profiles')
-        .select('id, role, client_id, pos_role, pos_email, ims_role, ims_email, hr_role, hr_self_service')
+        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, ims_role, ims_email, hr_role, hr_self_service')
         .eq('id', userId).single()
       return data as Record<string, unknown> | null
     }
@@ -968,17 +971,29 @@ Deno.serve(async (req) => {
     // never grant NULL. Admin and the Owner are exempt. Returns a ready-to-send error or null.
     const callerDiscountCap: number | null =
       profile?.pos_discount_limit === null || profile?.pos_discount_limit === undefined ? null : Number(profile.pos_discount_limit)
-    function refusePosPowerEscalation(limit: unknown, allowVoid: unknown) {
+    // The one comparison behind that rule: which of the two POS powers the caller does not hold.
+    // `limit` undefined means "not being set" and is not compared; NULL is unlimited. Granting a
+    // power (refusePosPowerEscalation) and resetting the PIN of someone who already holds one
+    // (reset_pos_pin, S809 1f) are refused on this same test, each in its own words, so the two can
+    // never disagree about what "more" means. Admin and the Owner hold every power.
+    function posPowerBeyondCaller(limit: unknown, allowVoid: unknown): 'unlimited_discount' | 'higher_discount' | 'void' | null {
       if (isCallerAdmin || isCallerOwner) return null
       if (limit !== undefined && callerDiscountCap !== null) {
-        if (limit === null) {
-          return json({ error: `You can give a discount limit of up to ${callerDiscountCap}% — your own limit. "No limit" is more than that; ask the account owner.` }, 403)
-        }
-        if (typeof limit === 'number' && limit > callerDiscountCap) {
-          return json({ error: `You can give a discount limit of up to ${callerDiscountCap}% — your own limit. Ask the account owner for more.` }, 403)
-        }
+        if (limit === null) return 'unlimited_discount'
+        if (typeof limit === 'number' && limit > callerDiscountCap) return 'higher_discount'
       }
-      if (allowVoid === true && profile?.pos_allow_void !== true) {
+      if (allowVoid === true && profile?.pos_allow_void !== true) return 'void'
+      return null
+    }
+    function refusePosPowerEscalation(limit: unknown, allowVoid: unknown) {
+      const gap = posPowerBeyondCaller(limit, allowVoid)
+      if (gap === 'unlimited_discount') {
+        return json({ error: `You can give a discount limit of up to ${callerDiscountCap}% — your own limit. "No limit" is more than that; ask the account owner.` }, 403)
+      }
+      if (gap === 'higher_discount') {
+        return json({ error: `You can give a discount limit of up to ${callerDiscountCap}% — your own limit. Ask the account owner for more.` }, 403)
+      }
+      if (gap === 'void') {
         return json({ error: 'Your own login cannot void bills, so you cannot give Void permission to anyone. Ask the account owner.' }, 403)
       }
       return null
@@ -1546,6 +1561,27 @@ Deno.serve(async (req) => {
       // a way to sign in as them.
       const pinManageDenied = requireManageableTarget(pinTarget!, 'pos')
       if (pinManageDenied) return pinManageDenied
+      // Nor the PIN of someone holding a power the caller lacks (S809 ACCESS-3; owner decision Q5 (a),
+      // 2026-10-08: the S754 rule applied to resets). A new PIN lets whoever chose it sign in as that
+      // person, so a manager capped at 10% with no Void could reset the PIN of a cashier the Owner
+      // trusted with Void or no cap, then void or discount as her — the escalation S754 closed for
+      // grants, reached through the reset instead. The target's powers are what the reset hands the
+      // caller, so they go through the grant test unchanged. A limit the read did not return counts
+      // as unlimited (refused for a capped caller) rather than as "not being set" (not compared).
+      const pinTargetLimit = pinTarget!.pos_discount_limit === null || pinTarget!.pos_discount_limit === undefined
+        ? null : Number(pinTarget!.pos_discount_limit)
+      const pinPowerGap = posPowerBeyondCaller(pinTargetLimit, pinTarget!.pos_allow_void)
+      if (pinPowerGap) {
+        const pinFullName = pinTarget!.full_name
+        const pinName = typeof pinFullName === 'string' ? pinFullName.trim() : ''
+        const who = pinName || 'This staff member'
+        const why = pinPowerGap === 'void'
+          ? `${who} can void bills and your login cannot`
+          : pinPowerGap === 'unlimited_discount'
+            ? `${who} has no discount limit and yours is ${callerDiscountCap}%`
+            : `${who} can give discounts of up to ${pinTargetLimit}% and yours stop at ${callerDiscountCap}%`
+        return json({ error: `${why}, so only the account owner can reset ${pinName ? `${pinName}'s` : 'their'} PIN.` }, 403)
+      }
 
       // Salt must be this account's existing email, not a freshly generated one — the login
       // side derives from whatever pos_email currently holds, so a reset that salted with
@@ -1566,7 +1602,48 @@ Deno.serve(async (req) => {
 
       await vaultPin(userId, pinTarget.client_id, 'pos', pin)
 
-      return json({ success: true })
+      // A reset ends a lockout (S809 DOCS-1; owner decision Q6 (a), 2026-10-08). The 15-minute lock
+      // protects the OLD PIN against guessing; the new one starts with five fresh tries. Before this,
+      // pos-staff-login's reservation refused the new PIN until the lock ran out, while the till told
+      // the waiter to ask for exactly this reset. record_pos_pin_attempt(success) is the call a correct
+      // sign-in makes: service role only, a DEFINER body (so guard_profiles_privileged_columns lets it
+      // through), and log_audit() skips a change to the lockout columns alone. It runs after the
+      // password, never before: a reset that failed must not hand a guesser five more tries at the old
+      // PIN. A failure here leaves a working new PIN behind the old lock, so it is reported, not thrown.
+      const pinLockStamp = pinTarget.pos_pin_locked_until
+      const pinLockedUntil = typeof pinLockStamp === 'string' && Date.parse(pinLockStamp) > Date.now() ? pinLockStamp : null
+      const { error: unlockErr } = await admin.rpc('record_pos_pin_attempt', { p_staff_id: userId, p_success: true })
+      if (unlockErr) console.error('[admin-user-ops] reset_pos_pin: PIN changed but the lockout was not cleared:', unlockErr.message)
+
+      // Every reset leaves a trace (S809 ACCESS-3): who reset which login's PIN, and when — never the
+      // PIN. Nothing recorded one before: the password lives in auth.users and the vault has no audit
+      // trigger. Filed beside the PIN reveal's VIEW row (table staff_pin_vault, "Staff PIN" on the
+      // Audit Log page), so one filter answers "who has touched this login's PIN". Best-effort after
+      // the change, like the reveal's row: the PIN is already changed, and failing the request would
+      // tell the manager it was not.
+      const { data: pinClient } = await admin
+        .from('clients').select('name').eq('id', pinTarget.client_id).maybeSingle()
+      const { error: pinAuditErr } = await admin.from('audit_logs').insert({
+        client_id:   pinTarget.client_id,
+        client_name: pinClient?.name ?? null,
+        user_id:     user.id,
+        user_name:   profile?.full_name ?? user.email ?? null,
+        table_name:  'staff_pin_vault',
+        action:      'UPDATE',
+        record_id:   userId,
+        new_data:    {
+          kind:         'pos',
+          staff_member: pinTarget.full_name ?? null,
+          pin_reset:    true,
+          // Only when the login was locked out at the time: whether this reset ended it.
+          ...(pinLockedUntil ? { lockout_ended: !unlockErr } : {}),
+        },
+      })
+      if (pinAuditErr) console.error('[admin-user-ops] reset_pos_pin audit insert failed:', pinAuditErr.message)
+
+      // lockout_cleared:false + locked_until tells POS Staff the new PIN is saved but the till will
+      // refuse it until then. A client built before S809 1f ignores both and behaves as it always did.
+      return json({ success: true, lockout_cleared: !unlockErr, locked_until: unlockErr ? pinLockedUntil : null })
     }
 
     // ── Reveal a staff member's PIN — PLATFORM ADMIN ONLY ─────────────────────

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
@@ -76,6 +77,36 @@ export default function PosLogin() {
     })
   }, [clientId, deviceId, deviceSecret, retryToken])
 
+  // ── Nobody stays signed in behind the PIN screen (S809 ACCESS-1) ──
+  // This screen looks signed out. When a login was still live on the tablet, the Owner who had just
+  // activated it or the Crest operator, its "← Back" (and the browser's) went straight into that
+  // account with no PIN. So on an activated tablet it signs out any session it finds, on this tablet
+  // only ('local', so an Owner's phone and laptop stay signed in), and shows no staff until that is
+  // done. A PIN session is signed out too: none should be live while this screen shows.
+  // The one session it must never touch is the one its own PIN sign-in creates: `ownSessionRef` is
+  // set just before setSession, and no sign-out starts while a sign-in is in flight, because both
+  // write the one stored session and the later write would win.
+  const { session, ready, signOut } = useAuth()
+  const ownSessionRef = useRef(false)
+  const clearStartedRef = useRef(false)
+  const [clearing, setClearing] = useState(false)
+  const staleSession = !!clientId && !!deviceSecret && !!ready && !!session && !ownSessionRef.current && !signingIn
+  useEffect(() => {
+    if (!staleSession || clearStartedRef.current || typeof signOut !== 'function') return
+    clearStartedRef.current = true
+    setClearing(true)
+    // false: /logout could not be reached; AuthContext cleared this tablet itself and is reloading it
+    // here. true: the session is gone, so a login that appears later (another tab) is caught again.
+    // A throw (none is expected: deviceSignOut catches its own) keeps the staff hidden: a PIN screen
+    // over a live login is the state this exists to prevent.
+    signOut({ to: '/pos/login', scope: 'local' }).then(clean => {
+      if (!clean) return
+      clearStartedRef.current = false
+      setClearing(false)
+    }, e => console.error('Could not sign out the login left on this tablet:', e))
+  }, [staleSession, signOut])
+  const holdForSignOut = staleSession || clearing
+
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
     if (k === 'C') { setPin(''); setError(''); return }
@@ -98,7 +129,7 @@ export default function PosLogin() {
   }, [selected, pin, pressKey]) // eslint-disable-line
 
   async function handleSignIn() {
-    if (pin.length < 4 || signingIn) return
+    if (pin.length < 4 || signingIn || holdForSignOut) return
     setSigningIn(true); setError('')
 
     try {
@@ -129,10 +160,12 @@ export default function PosLogin() {
         if (status === 423 || body?.locked) {
           // Names the way out, not just the wall. The lockout clears on its own, but 15 minutes is
           // a long time mid-service, and the person who can fix it immediately is standing in the
-          // same building: any POS manager can reset a PIN from POS Staff. Deliberately "your
-          // manager" rather than support — this never needs to reach Crest.
+          // same building: a reset from POS Staff ends the lockout (S809 DOCS-1; before that the new
+          // PIN was refused until the lock ran out). "a manager or the owner", not "your manager":
+          // a manager's own PIN, and the PIN of anyone holding a power their manager lacks (S809
+          // ACCESS-3), are reset by the Owner. Never support — this never needs to reach Crest.
           const when = body?.locked_until ? formatLockRemaining(body.locked_until) : 'later'
-          setError(`Too many incorrect attempts. Try again ${when}, or ask your manager to reset your PIN.`)
+          setError(`Too many incorrect attempts. Try again ${when}, or ask a manager or the owner to reset your PIN.`)
           setPin('')
         } else if (status === 401 && body?.error === ERR_DEVICE_NOT_ACTIVATED) {
           // The device key no longer works: this tablet was revoked in Till Devices, or it still
@@ -150,6 +183,8 @@ export default function PosLogin() {
       }
       if (!data?.access_token) { setError(UNREACHABLE_MSG); return }
 
+      // From here the session on this tablet is the one this screen signed in (S809 ACCESS-1).
+      ownSessionRef.current = true
       await supabase.auth.setSession({
         access_token: data.access_token,
         refresh_token: data.refresh_token,
@@ -201,7 +236,8 @@ const pinDots = Math.max(4, pin.length)
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
             Its device key was revoked, so staff can't sign in on it. An owner or POS manager can sign
-            in here, open <strong>POS → Admin → Till Devices</strong>, and activate this tablet again.
+            in here, open <strong>POS → Admin → Till Devices</strong>, activate this tablet again, then
+            press <strong>Sign out and open the PIN screen</strong>.
           </p>
           <button className="btn btn-primary" onClick={() => navigate('/login')}>
             Owner Login
@@ -224,8 +260,9 @@ const pinDots = Math.max(4, pin.length)
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
             Staff PIN login only works on a device an owner or manager has activated first.
-            Log in with your owner account, open <strong>POS → Admin → Till Devices</strong>, and click
-            <strong> Activate</strong> — then this screen will show your staff.
+            Log in with your owner account, open <strong>POS → Admin → Till Devices</strong>, click
+            <strong> Activate</strong>, then <strong>Sign out and open the PIN screen</strong> — this
+            screen will then show your staff.
           </p>
           <button className="btn btn-primary" onClick={() => navigate('/login')}>
             Owner Login
@@ -262,7 +299,12 @@ const pinDots = Math.max(4, pin.length)
         </div>
       </div>
 
-      {!selected ? (
+      {holdForSignOut ? (
+        /* No staff and no PIN pad while a login left on this tablet is being signed out (S809). */
+        <p role="status" style={{ color: 'var(--theme-text3)', textAlign: 'center', maxWidth: 320, margin: 0 }}>
+          Signing out the login that was left open on this tablet…
+        </p>
+      ) : !selected ? (
         /* ── Staff grid ─────────────────────────────────────────────────── */
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
           {keptCarts.length > 0 && (

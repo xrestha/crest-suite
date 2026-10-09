@@ -12,6 +12,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import PremiumGate from './components/PremiumGate'
 import ModuleGate from './components/ModuleGate'
+import TillOutletGate from './modules/pos/TillOutletGate'
 import RouteFallback from './components/RouteFallback'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import './components/Layout.css'
@@ -314,16 +315,18 @@ export default function App() {
 
               {/* Crest POS — gated on pos_enabled */}
               <Route path="/pos"        element={<ModuleGate module="pos"><Pos /></ModuleGate>} />
-              <Route path="/pos/orders" element={<ModuleGate module="pos"><PosOrders /></ModuleGate>} />
+              {/* The till pages run only in the outlet the till belongs to (S809 GAP-OUTLETS-1, Q24):
+                  TillOutletGate sits inside ModuleGate on Orders, Billing, Shifts and the KDS. */}
+              <Route path="/pos/orders" element={<ModuleGate module="pos"><TillOutletGate><PosOrders /></TillOutletGate></ModuleGate>} />
               {/* Billing station (S762) — the same component on its third view: a list of open
                   bills instead of the floor plan. Supervisor+ is enforced inside PosOrders, since a
                   nav item is not a guard and this URL is typeable. */}
-              <Route path="/pos/billing" element={<ModuleGate module="pos"><PosOrders billingStation /></ModuleGate>} />
+              <Route path="/pos/billing" element={<ModuleGate module="pos"><TillOutletGate><PosOrders billingStation /></TillOutletGate></ModuleGate>} />
               <Route path="/pos/tables" element={<ModuleGate module="pos"><PosTableManagement /></ModuleGate>} />
               <Route path="/pos/customers" element={<ModuleGate module="pos"><PosCustomers /></ModuleGate>} />
               <Route path="/pos/parking" element={<ModuleGate module="pos"><PosParkingSlips /></ModuleGate>} />
               <Route path="/pos/reservations" element={<ModuleGate module="pos"><PosReservations /></ModuleGate>} />
-              <Route path="/pos/shifts" element={<ModuleGate module="pos"><PosShifts /></ModuleGate>} />
+              <Route path="/pos/shifts" element={<ModuleGate module="pos"><TillOutletGate><PosShifts /></TillOutletGate></ModuleGate>} />
               <Route path="/pos/exceptions" element={<ModuleGate module="pos"><PosExceptionReport /></ModuleGate>} />
               <Route path="/pos/credit-notes" element={<ModuleGate module="pos"><CreditNotes /></ModuleGate>} />
               <Route path="/pos/sales-report" element={<ModuleGate module="pos"><SalesReport /></ModuleGate>} />
@@ -332,7 +335,7 @@ export default function App() {
               <Route path="/pos/dashboard" element={<ModuleGate module="pos"><PosDashboard /></ModuleGate>} />
               <Route path="/pos/kot-log" element={<ModuleGate module="pos"><KotLog /></ModuleGate>} />
               <Route path="/pos/covers-report" element={<ModuleGate module="pos"><CoversReport /></ModuleGate>} />
-              <Route path="/pos/kds" element={<ModuleGate module="pos"><KitchenDisplay /></ModuleGate>} />
+              <Route path="/pos/kds" element={<ModuleGate module="pos"><TillOutletGate><KitchenDisplay /></TillOutletGate></ModuleGate>} />
               <Route path="/pos/staff"  element={<ModuleGate module="pos"><PosStaff /></ModuleGate>} />
 
               {/* Crest Customization (S758) — gated on customization_enabled, which the database only

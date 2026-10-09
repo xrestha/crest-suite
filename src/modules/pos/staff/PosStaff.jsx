@@ -10,7 +10,7 @@ import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
+import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 
 const PERMISSION_LEVELS = [
   { value: 'staff',      label: 'Staff',      desc: 'Take orders, view floor' },
@@ -70,6 +70,23 @@ export default function PosStaff() {
     if (canGrantAnything) return ''
     if (p.id === profile?.id) return 'Your own login is changed by the account owner.'
     if (p.pos_role === 'manager') return 'A manager’s login is changed by the account owner.'
+    return ''
+  }
+  // Reset PIN only (S809 ACCESS-3, owner decision Q5): never the PIN of someone holding a power this
+  // viewer lacks, because a new PIN would let the viewer sign in as them and use it. Mirrors the
+  // server's posPowerBeyondCaller in its order: discount first (blank = no limit), then Void. The
+  // rest of the row stays editable: taking a power away is always allowed.
+  const resetLockReason = p => {
+    const rowReason = rowLockReason(p)
+    if (rowReason || canGrantAnything) return rowReason
+    const name = p.full_name || 'This staff member'
+    const limit = p.pos_discount_limit === null || p.pos_discount_limit === undefined ? null : Number(p.pos_discount_limit)
+    if (viewerCap !== null && (limit === null || limit > viewerCap)) {
+      return `${name} can give bigger discounts than your login can, so the account owner resets this PIN.`
+    }
+    if (p.pos_allow_void === true && !viewerCanVoid) {
+      return `${name} can void bills and your login cannot, so the account owner resets this PIN.`
+    }
     return ''
   }
   const { scopedFrom } = useScopedDb()
@@ -377,12 +394,18 @@ export default function PosStaff() {
 
   async function resetPin() {
     if (!pinValid(newPin)) { setPinMsg('PIN must be 4–6 digits.'); return }
-    setResetting(true); setPinMsg('')
+    setResetting(true); setPinMsg(''); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'reset_pos_pin', client_id: clientId, userId: pinTarget.id, pin: newPin },
     })
     if (error || data?.error) {
       setPinMsg((await edgeRefusal(error, data)) || 'The PIN was not changed.'); setResetting(false); return
+    }
+    // A reset ends a lockout (S809 DOCS-1). If the server saved the PIN but could not lift a lockout
+    // that is still running, the till refuses the new PIN until then, so say so rather than close
+    // as if all was well. Pressing Reset PIN again retries the lift.
+    if (data?.lockout_cleared === false && data?.locked_until) {
+      setMsg(`${pinTarget.full_name || 'This login'}’s new PIN is saved, but the lockout from wrong tries could not be lifted, so the till will refuse it until ${nepalTime(data.locked_until)}. Reset the PIN again to lift the lockout now.`)
     }
     setPinTarget(null); setResetting(false)
   }
@@ -581,6 +604,7 @@ export default function PosStaff() {
                 // S754: a row the viewer may not change renders read-only, with the reason on hover,
                 // rather than as live controls the server then refuses one at a time.
                 const lockReason = rowLockReason(p)
+                const pinLockReason = resetLockReason(p)
                 const rowDisabled = !!saving[p.id] || !!lockReason
                 const blocked = p.settlement_blocked === true
                 return (
@@ -699,8 +723,8 @@ export default function PosStaff() {
                         {/* A settlement-blocked login cannot sign in whatever its PIN, so a new PIN
                             would only look like access restored (S754). */}
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}
-                          disabled={blocked || !!lockReason}
-                          title={blocked ? 'Blocked at Final Settlement — a new PIN would not let them sign in.' : lockReason || undefined}>
+                          disabled={blocked || !!pinLockReason}
+                          title={blocked ? 'Blocked at Final Settlement — a new PIN would not let them sign in.' : pinLockReason || undefined}>
                           Reset PIN
                         </button>
                         <button

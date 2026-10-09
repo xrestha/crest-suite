@@ -256,8 +256,9 @@ floor-view check.
   path; the Change field flips to a red "Short by"). Split mode always guarded this.
 - **Idle lock is WIRED** — `usePosIdleLock` runs from `Layout.js`: PIN-staff sessions on a
   bound device (`pos_device_client_id` in localStorage) lock to `/pos/login` after 3 idle
-  minutes, 20s `role="alert"` countdown first. `/pos/kds` and owner/admin sessions are
-  deliberately exempt. Don't add a second lock per page. **The exemption must key off the RAW
+  minutes, 20s `role="alert"` countdown first. Owner/admin sessions are exempt, and a Kitchen/Bar
+  login on `/pos/kds`: the exemption is the LOGIN's, not the page's (S809 1e, Q4 a; one predicate,
+  `posIdleLockApplies()`). A touch after the full period locks rather than renews. Don't add a second lock per page. **The exemption must key off the RAW
   `profile.pos_role` column (`isPinStaff` in Layout.js), never the resolved `posRole` rank** —
   that rank is 'manager' for every admin and Owner, so gating on it enables the lock for
   exactly the people it must exempt. This shipped broken (S575→S583): any admin or Owner on a

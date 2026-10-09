@@ -242,6 +242,7 @@ export const SUITE_GUIDE_GROUPS = [
           'Tick an outlet to let a person work there; untick to take it away. Ticks are only a draft until you press the Save button at the end of THAT person\'s row — each row saves on its own, through set_outlet_access, which replaces that person\'s whole list in one go. Leaving the page before Save keeps nothing.',
           'Unticking moves the person back to their home outlet at once (set_outlet_access clears their selection). It does not sign them out: a window they have open on the removed outlet can no longer read or write it, and moves itself home the next time they return to it or open another page.',
           'Owners have no checkboxes: they reach every outlet in the group already.',
+          'Till PIN logins show "till only" and have no checkboxes: a PIN works only on its own outlet\'s tablets (S809). Someone who works at two outlets gets a PIN login at each, from each outlet\'s POS Staff.',
         ],
         fields: [
           { label: 'It grants REACH, never RANK', desc: 'Deliberately not a per-outlet role matrix. That would put a second rank rule into AuthContext, all three hasXAccess helpers and the SQL Owner test — four places that would then have to agree.' },
@@ -251,6 +252,7 @@ export const SUITE_GUIDE_GROUPS = [
         formulas: [],
         gotchas: [
           'The access table has NO write policy at all — set_outlet_access() is the only path.',
+          'set_active_outlet refuses a till PIN login every outlet but its own, and set_outlet_access refuses to grant one (S809, 20261009130000). A till also stops its till pages, rather than follow the Owner\'s login, while the account is in another outlet.',
           'A revoke also clears active_client_id, so it EVICTS rather than merely denying the next switch. Denying the next switch would leave someone sitting inside an outlet they had just lost access to.',
           'The outlet list here comes from the RPC, not from the session\'s own outlet list: the matrix must include outlets excluded from the FIGURES for want of Suite Pro, because access and staffing are not what the group is billed for.',
         ],

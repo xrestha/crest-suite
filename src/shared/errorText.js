@@ -378,6 +378,18 @@ const rules = [
     staff: 'Only the owner or a POS manager can change the till setup. Nothing was saved.',
     operator: 'Only the Owner or a POS manager can change the till setup (the setting is named in the detail below), so nothing was saved.',
   },
+  // S809 ACCESS-4 (20261009130000): a till PIN login stays at its own outlet. Both raised before the
+  // function writes anything, so each may say nothing changed. Ahead of the generic 42501 sentence.
+  {
+    test: e => hasCode(e, 'pos_pin_outlet_pinned'),
+    staff: 'A till PIN works only at its own outlet, so this login cannot switch to another one. Nothing was changed.',
+    operator: 'A till PIN login works only at the outlet whose tablets it signs in on, so it cannot switch outlet and nothing was changed. Someone who also works at another outlet needs a PIN login there: add them under that outlet’s POS Staff.',
+  },
+  {
+    test: e => hasCode(e, 'outlet_access_pin_login'),
+    staff: 'A till PIN works only at its own outlet, so it cannot be given another one. Nothing was saved.',
+    operator: 'A till PIN login works only at its own outlet, so it cannot be given another one here and nothing was saved. If this person also works at another outlet, add them under that outlet’s POS Staff with a PIN of their own.',
+  },
   {
     test: e => hasCode(e, 'invoice_settings_rank'),
     staff: 'Only the owner can change the invoice and VAT details printed on bills. Nothing was saved.',

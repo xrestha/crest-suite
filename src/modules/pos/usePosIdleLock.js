@@ -18,10 +18,28 @@ export const POS_IDLE_LOCK_MS = 3 * 60 * 1000
 export const POS_IDLE_WARN_MS = 20 * 1000
 
 /**
+ * Whether the till idle lock runs for this login, here. One test, read by Layout (which runs the lock)
+ * and by the Kitchen Display (which says so).
+ *
+ * Every input is about the LOGIN's raw columns, never the resolved rank, which is 'manager' for admin
+ * and the Owner (S583): `pinStaff` is !!profile.pos_role, `stationTeam` a 'kitchen'/'bar' pos_team.
+ * Admin and Owner sessions never lock. The Kitchen Display exemption belongs to a Kitchen or Bar team
+ * login only (S809 ACCESS-2, owner decision Q4 a): keyed on the path alone, a Front of House PIN left
+ * on the KDS never locked, and the KDS's Exit opened the till as that login.
+ *
+ * @param {{ pinStaff: boolean, boundTablet: boolean, stationTeam: boolean, path: string }} who
+ */
+export function posIdleLockApplies({ pinStaff, boundTablet, stationTeam, path }) {
+  if (!pinStaff || !boundTablet) return false
+  return !(stationTeam && String(path || '').startsWith('/pos/kds'))
+}
+
+/**
  * Locks a POS till back to its PIN screen after a period of no input.
  *
- * Deliberately does nothing unless `enabled` — the caller decides, so the Kitchen Display (a
- * screen meant to stay awake and untouched on a wall) and the PIN screen itself never lock.
+ * Deliberately does nothing unless `enabled` — the caller decides, so a Kitchen or Bar team login on
+ * the Kitchen Display (a screen meant to stay awake and untouched on a wall) and the PIN screen
+ * itself never lock. A Front of House login on the Kitchen Display does (S809 ACCESS-2, Layout.js).
  *
  * Also drives the counting tablet's lock (S792, D39), which passes its own, longer `lockMs`; the
  * mechanics — real input only, idle measured from the last touch across a sleep — are the same.
@@ -77,6 +95,12 @@ export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_M
     }
 
     const onActivity = () => {
+      if (locked) return
+      // S809 ACCESS-2: a touch that arrives after the whole period has passed locks instead of
+      // renewing it. While timers are held back (a sleeping machine whose tab never went hidden), the
+      // overdue lock can run AFTER the first tap, and that tap used to buy three more minutes: on the
+      // Kitchen Display it was the tap on Exit, which opened the till as the absent login.
+      if (Date.now() - lastActivityRef.current >= lockMs) { lock(); return }
       lastActivityRef.current = Date.now()
       arm(lockMs)
     }

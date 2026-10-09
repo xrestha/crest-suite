@@ -584,3 +584,23 @@ describe('login link refusals (S798 3f-1)', () => {
     }
   })
 })
+
+describe('till PIN outlet refusals (S809 ACCESS-4)', () => {
+  const refused = (name, msg) => ({ code: '42501', hint: name, message: `${name}: ${msg}` })
+
+  it('a PIN login switching outlet is told it stays at its own, ahead of the generic permission rule', () => {
+    const err = refused('pos_pin_outlet_pinned', 'a till PIN login works only at its own outlet, so it cannot switch to another')
+    expect(errorText(err, 'staff')).toMatch(/only at its own outlet/)
+    expect(errorText(err, 'staff')).toMatch(/Nothing was changed/)
+    expect(errorText(err, 'operator')).toMatch(/POS Staff/)
+    expect(errorText(err, 'operator')).not.toBe(errorText({ code: '42501', message: 'x' }, 'operator'))
+    // A wrapper that dropped the hint still matches on the message.
+    expect(errorText({ message: err.message }, 'operator')).toBe(errorText(err, 'operator'))
+  })
+
+  it('granting a PIN login another outlet says nothing was saved and where to add them instead', () => {
+    const err = refused('outlet_access_pin_login', 'a till PIN login works only at its own outlet, so it cannot be given another')
+    expect(errorText(err, 'operator')).toMatch(/nothing was saved/)
+    expect(errorText(err, 'operator')).toMatch(/PIN of their own/)
+  })
+})

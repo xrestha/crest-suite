@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
+import { POS_IDLE_LOCK_MS, posIdleLockApplies } from '../usePosIdleLock'
 import { playGuestAlert } from '../posChime'
 import ArrivalAlert from '../../../components/ArrivalAlert'
 import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
@@ -411,6 +412,20 @@ export default function KitchenDisplay() {
             <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--theme-text3)' }}>
               Live view of today's {station === 'KOT' ? 'kitchen' : 'bar'} tickets — printing still happens as normal, this just mirrors it on screen.
             </p>
+            {/* S809 ACCESS-2 (owner decision Q4 a): only a Kitchen or Bar login stays signed in here.
+                A Front of House PIN locks like a till (Layout.js), so say why before the board
+                goes back to the PIN screen. The same test Layout runs the lock on. */}
+            {posIdleLockApplies({
+              pinStaff: !!profile?.pos_role,
+              boundTablet: !!localStorage.getItem('pos_device_client_id'),
+              stationTeam: isTeamLocked,
+              path: '/pos/kds',
+            }) && (
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+                You are signed in with a Front of House login, so this screen locks after {Math.round(POS_IDLE_LOCK_MS / 60000)} minutes
+                without a touch. To keep it on, sign in with a Kitchen or Bar login (POS Staff → Team).
+              </p>
+            )}
           </div>
         </div>
         {!isTeamLocked && (

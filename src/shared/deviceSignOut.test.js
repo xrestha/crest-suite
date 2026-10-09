@@ -48,6 +48,24 @@ describe('signOutThisDevice', () => {
     expect(window.localStorage.getItem('crest_staff_client')).toBe('c1')
   })
 
+  test('with no scope the library default is used, unchanged (S809)', async () => {
+    supabase.auth.signOut.mockResolvedValue({ error: null })
+    expect(await signOutThisDevice()).toBe(true)
+    expect(supabase.auth.signOut).toHaveBeenLastCalledWith()
+  })
+
+  test('scope local signs out this device only (S809 ACCESS-1)', async () => {
+    supabase.auth.signOut.mockResolvedValue({ error: null })
+    expect(await signOutThisDevice({ scope: 'local' })).toBe(true)
+    expect(supabase.auth.signOut).toHaveBeenLastCalledWith({ scope: 'local' })
+  })
+
+  test('any other scope value falls back to the default rather than being passed through', async () => {
+    supabase.auth.signOut.mockResolvedValue({ error: null })
+    expect(await signOutThisDevice({ scope: 'others' })).toBe(true)
+    expect(supabase.auth.signOut).toHaveBeenLastCalledWith()
+  })
+
   test('a sign-out that throws is treated the same way', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {})
     supabase.auth.signOut.mockRejectedValue(new Error('network down'))

@@ -180,6 +180,27 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 1, slice 1g: ACCESS-4 (P2), GAP-OUTLETS-1 (P2), owner decision Q24 (a)~~ — **shipped
+  S809, 2026-10-09**, migration `20261009130000` applied live (crest-v416). A till PIN login works only at
+  its own outlet: `set_active_outlet` refuses it any other and `set_outlet_access` refuses to grant one,
+  and Outlet Access shows "till only". **Q24 (a), as applied:** a till never follows its login. On a
+  tablet activated for one outlet, Orders, Billing, Shifts and the KDS stop with "This till belongs to …"
+  while the account is in another (`TillOutletGate`), the unsent cart kept and a Back button; a window
+  that is no till and holds offline changes stays put with an amber banner. The draft's `pos-staff-login`
+  clear was dropped (owner, 2026-10-09): only `set_active_outlet()` writes `active_client_id`. Original
+  rows: `ACCESS.md`, `GAPS.md`.
+- [x] ~~S809 stage 1, slice 1f: ACCESS-3 (P2), DOCS-1 (P2), owner decisions Q5 (a), Q6 (a)~~ — **shipped
+  S809, 2026-10-09**, `admin-user-ops` deployed (crest-v416). **Q5 (a):** a POS manager cannot reset the
+  PIN of a login holding a power they lack (Void, a higher discount limit or none); the Owner does, and
+  POS Staff greys the button with the reason. Every reset writes a `staff_pin_vault` UPDATE audit row,
+  never the PIN. **Q6 (a):** a reset ends the lockout (`record_pos_pin_attempt(true)` after the password
+  change), so the new PIN works at once. Original rows: `ACCESS.md`, `DOCS.md`.
+- [x] ~~S809 stage 1, slice 1e: ACCESS-1 (P1), ACCESS-2 (P2), owner decision Q4 (a)~~ — **shipped S809,
+  2026-10-09**, no migration (crest-v416). Till Devices' button is "Sign out and open the PIN screen" and
+  signs out on that tablet only; the PIN screen signs out any login left on an activated tablet before it
+  shows staff. **Q4 (a):** on the KDS only a Kitchen/Bar login is exempt from the 3-minute idle lock; a
+  Front of House PIN locks like a till, and a touch after the full period locks rather than renews.
+  Original rows: `ACCESS.md`.
 - [x] ~~S809 stage 1, slice 1l: SHIFTS-2 (P2), GAP-OPERATOR-1 (P2), owner decision Q26 (a)~~ —
   **shipped S809, 2026-10-09**, migration `20261009180000` applied live (crest-v415). The signed Z-report's
   money figures were whatever the tablet sent: `pos_shifts_guard` now adds Expected Cash up from the stored

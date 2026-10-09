@@ -31,7 +31,7 @@ function readStoredDevice() {
 }
 
 export default function Pos() {
-  const { clientId, profile, isAdmin, adminViewClientName, hasPosAccess } = useAuth()
+  const { clientId, profile, isAdmin, adminViewClientName, hasPosAccess, signOut } = useAuth()
   const navigate = useNavigate()
   const { ask, confirmEl } = useConfirm()
 
@@ -44,6 +44,7 @@ export default function Pos() {
   const [activating, setActivating] = useState(false)
   const [activateError, setActivateError] = useState(null)
   const [notice, setNotice] = useState('')
+  const [leaving, setLeaving] = useState(false)
 
   const canManage = hasPosAccess('manager')
   const { devices, legacy, loading: devicesLoading, error: devicesError, reload } = usePosDevices(canManage ? clientId : null)
@@ -88,8 +89,23 @@ export default function Pos() {
     localStorage.setItem(LS.deviceName, name)
     setStored(readStoredDevice())
     setDeviceName('')
-    setNotice(`“${name}” is activated. Staff can sign in on this tablet with their PIN.`)
+    setNotice(`“${name}” is activated. Press “Sign out and open the PIN screen” below before you hand it to your staff.`)
     reload()
+  }
+
+  // S809 ACCESS-1. This button used to open the PIN screen with whoever activated the tablet still
+  // signed in behind it: the Owner, or the Crest operator on site. The screen looked signed out, but
+  // its "← Back", the browser's back button and an installed app's relaunch all went straight into
+  // that account with no PIN, and an Owner session never idle-locks. Now it signs out first, on this
+  // tablet only ('local'), so the Owner's phone and laptop stay signed in. PosLogin also signs out any
+  // session it finds on an activated tablet, for every other way of reaching the PIN screen.
+  async function openPinScreen() {
+    if (leaving) return
+    setLeaving(true)
+    // false: the network sign-out failed, and AuthContext cleared this tablet and is reloading it
+    // to the PIN screen itself.
+    if (!(await signOut({ to: '/pos/login', scope: 'local' }))) return
+    navigate('/pos/login', { replace: true })
   }
 
   function forgetLocally() {
@@ -233,13 +249,17 @@ export default function Pos() {
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={() => navigate('/pos/login')}>
-              Open POS Login Screen
+            <button className="btn btn-primary" onClick={openPinScreen} disabled={leaving}>
+              {leaving ? 'Signing out…' : 'Sign out and open the PIN screen'}
             </button>
-            <button className="btn btn-danger" onClick={askDeactivate}>
+            <button className="btn btn-danger" onClick={askDeactivate} disabled={leaving}>
               Deactivate Device
             </button>
           </div>
+          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '12px 0 0', lineHeight: 1.6 }}>
+            Your login is signed out on this tablet only, so nobody can tap Back into it. You stay
+            signed in on your other devices.
+          </p>
           {!onLegacyKey && <ActionError error={activateError} />}
         </div>
       )}

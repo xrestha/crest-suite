@@ -11,11 +11,13 @@ import AppErrorBoundary from './AppErrorBoundary'
 // Aliased — `Calculator` is already taken in this file by the lucide icon used for the HR
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
-import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
+import { usePosIdleLock, posIdleLockApplies } from '../modules/pos/usePosIdleLock'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { prefetchHrPages } from '../shared/prefetchHrPages'
-import { outletMovedText } from '../shared/outletWatch'
+import { outletMovedText, outletHeldText } from '../shared/outletWatch'
+import { isTillPath, readTillDevice, tillStop } from '../modules/pos/tillOutlet'
+import { withTimeout, isTimeout } from '../utils/withTimeout'
 import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
 import ArrivalAlert from './ArrivalAlert'
 import SetupStepStrip from './SetupStepStrip'
@@ -388,9 +390,9 @@ export default function Layout() {
           isTrial, trialPending, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
-          outletMoved, dismissOutletMoved, checkOutlet,
+          outletMoved, dismissOutletMoved, checkOutlet, outletHeld, returnToOutlet,
           hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
-          imsCountOnly,
+          imsCountOnly, isStationTeam,
           suitePlan } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
@@ -507,13 +509,41 @@ export default function Layout() {
   // The window has moved itself to the outlet the account is in now: leave the page that was open,
   // exactly as a switch from the top bar does, since its data and any half-typed form belong to the
   // outlet it was showing.
+  //
+  // Except a till page on a bound tablet (S809 GAP-OUTLETS-1, owner decision Q24 (a)): it stays where
+  // it is. TillOutletGate stops it while the window shows another outlet than the tablet's, says why,
+  // and lets it run again — the kept cart coming back — once the login is back. Leaving for the
+  // dashboard would take the counter off its own screen in both directions. The path is read at the
+  // moment of the move, not as a dependency: a dependency would re-run this on every later page change.
   const outletMovedId = outletMoved?.id
   useEffect(() => {
     if (!outletMovedId) return
     setOutletDropdownOpen(false)
     setOpenMenu(null)
+    if (readTillDevice().clientId && isTillPath(window.location.pathname)) { dismissOutletMoved(); return }
     navigate('/dashboard')
-  }, [outletMovedId, navigate])
+  }, [outletMovedId, navigate, dismissOutletMoved])
+
+  // A window held by its own offline changes (S809 GAP-OUTLETS-1): the banner's way out brings the
+  // login back to the outlet this window shows, where the changes can be sent.
+  const [heldBusy, setHeldBusy] = useState(false)
+  const [heldError, setHeldError] = useState('')
+  async function handleReturnHeld() {
+    setHeldBusy(true)
+    setHeldError('')
+    let error
+    try {
+      ({ error } = await withTimeout(returnToOutlet(clientId), 20000, 'Switching back'))
+    } catch (err) {
+      error = err
+    }
+    setHeldBusy(false)
+    // A timeout does not prove the switch failed: the next check finds out, and the banner goes.
+    if (error) setHeldError(isTimeout(error) ? 'The server took too long to answer. If this banner is still here in a minute, try again.' : (error.message || 'Could not switch back.'))
+  }
+  // What stops the till here, for the guest-order alert below: a counter tablet must not chime for
+  // another outlet's tables, and a held window cannot read its own.
+  const tillStoppedHere = !!tillStop({ deviceClientId: readTillDevice().clientId, clientId, held: !!outletHeld })
 
   // Suite ENTITLEMENT only — the reachability half (`suiteVisible`) needs `unlockedItems` and is
   // derived further down. Declared here because the panel-routing effect above reads it, and it
@@ -626,16 +656,27 @@ export default function Layout() {
   // Without a lock that is only as accurate as a habit, so PIN-staff sessions on a bound POS
   // device return to the PIN screen after 3 idle minutes (see usePosIdleLock for the timing
   // rationale). Deliberately NOT enabled for Owner/admin sessions (no pos_role — they sign in
-  // with email/password, not a PIN, even on the till) and not on the KDS, a screen meant to sit
-  // untouched on a kitchen wall. handleSignOut already routes a bound device to /pos/login.
+  // with email/password, not a PIN, even on the till), nor for a Kitchen or Bar team login on the
+  // KDS, a screen meant to sit untouched on a kitchen wall. handleSignOut already routes a bound
+  // device to /pos/login.
   // PIN till session = the RAW pos_role column, never the resolved posRole rank — that rank is
   // 'manager' for every admin/Owner, which is exactly who the idle lock, the Lock-POS button
   // label and the sign-out routing must exempt. Reading the rank here signed an admin out
   // after 3 idle minutes on any machine that had ever completed POS device binding (S583).
+  // The KDS exemption is the LOGIN's, not the page's (S809 ACCESS-2, owner decision Q4 a). Keyed on
+  // the path alone, any PIN left on /pos/kds never locked, and the KDS's own Exit then opened the
+  // till as that login: a manager's PIN left on the kitchen screen at 6 pm could void bills at 9.
+  // A Front of House login there now locks after 3 idle minutes like any till. `isStationTeam`
+  // reads the login's raw pos_team ('kitchen'/'bar'); it is false for admin and Owner, who are
+  // exempt above. The test itself is posIdleLockApplies (usePosIdleLock.js), which the KDS also reads.
   const isPinStaff = !!profile?.pos_role
   const [idleLockSecs, setIdleLockSecs] = useState(null)
-  const idleLockEnabled = isPinStaff && !!localStorage.getItem('pos_device_client_id') &&
-    !location.pathname.startsWith('/pos/kds')
+  const idleLockEnabled = posIdleLockApplies({
+    pinStaff: isPinStaff,
+    boundTablet: !!localStorage.getItem('pos_device_client_id'),
+    stationTeam: !!isStationTeam,
+    path: location.pathname,
+  })
   usePosIdleLock(idleLockEnabled, setIdleLockSecs, handleSignOut)
   // The counting tablet's lock (S792, owner decision D39): the same mechanics, ten minutes, for a
   // count PIN session only — `imsCountOnly` keys on the raw `ims_email` column, so an Owner or an
@@ -937,7 +978,7 @@ export default function Layout() {
   //                 reach Orders (KITCHEN_TEAM_ALLOWED_PATHS), so the button would be a dead end.
   //                 That board raises its own loud alert for the thing the kitchen CAN act on.
   const guestAlertRoute = location.pathname !== '/pos/orders' && location.pathname !== '/pos/kds'
-  const guestAlerts = useGuestOrderAlerts(posVisible)
+  const guestAlerts = useGuestOrderAlerts(posVisible && !tillStoppedHere)
   const guestAlertOn = guestAlertRoute && guestAlerts.requests.length > 0
   useEffect(() => {
     if (!guestAlertOn || guestAlerts.muted) return
@@ -1500,9 +1541,11 @@ export default function Layout() {
                     </span>
                   </span>
                   {/* Multi-outlet: the same dropdown mechanic the admin switcher above uses, but
-                      scoped to this owner's own group and written through set_active_outlet().
-                      canSwitchOutlet is false for every staff account and for anyone with fewer
-                      than two outlets, so an ungrouped client sees exactly what they see today. */}
+                      scoped to this login's group and written through set_active_outlet().
+                      canSwitchOutlet is true for the Owner and for a staff login allowlisted into
+                      another outlet (Outlet Access, S617); false for a till PIN login, which never
+                      leaves its outlet (S809 ACCESS-4), and for anyone with fewer than two outlets,
+                      so an ungrouped client sees exactly what they see today. */}
                   {canSwitchOutlet ? (
                     <button
                       type="button"
@@ -2075,8 +2118,30 @@ export default function Layout() {
             neutral note banner: nothing failed, and the reader has nothing to fix. */}
         {outletMoved && (
           <div role="status" className="note-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <span>{outletMovedText(outletMoved.name)}</span>
+            <span>{outletMovedText(outletMoved.name, { cartKeptAt: outletMoved.cartKeptAt })}</span>
             <button type="button" className="btn btn-ghost btn-sm" onClick={dismissOutletMoved}>Dismiss</button>
+          </div>
+        )}
+        {/* This window did NOT follow its login, because it holds offline changes for the outlet it
+            shows (S809 GAP-OUTLETS-1). Amber, unlike the note above: every page here is reading
+            nothing until the reader acts, and the button is the one thing that fixes it. A till page
+            says the same in its own stop notice (TillOutletGate), so it is not said twice there. */}
+        {outletHeld && !isTillPath(location.pathname) && (
+          <div role="alert" className="note-banner" style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+            background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--theme-amber) 45%, transparent)',
+          }}>
+            <span style={{ flex: '1 1 320px', color: 'var(--theme-text1)' }}>
+              {outletHeldText({ here: clientName, there: outletHeld.name, pending: outletHeld.pending })}
+              {heldError && <span style={{ display: 'block', marginTop: 6, color: 'var(--theme-red-text)' }}>{heldError}</span>}
+            </span>
+            <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <button type="button" className="btn btn-primary btn-sm" onClick={handleReturnHeld} disabled={heldBusy}>
+                {heldBusy ? 'Switching…' : `Back to ${clientName || 'this outlet'}`}
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Moves your account back on every device.</span>
+            </span>
           </div>
         )}
 

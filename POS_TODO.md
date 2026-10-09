@@ -55,23 +55,18 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P1 (4 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d)
+### P1 (3 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-1 | After activating a till, the Owner stays signed in behind the PIN screen, and "← Back" gives the tablet the Owner's account (S790 fixed only the guide wording) | 1 | — | no |
 | CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers | 2 | Q8 | yes |
 | ORDER-FLOW-1 (= CHECKOUT-9) | If the till's settings read fails or stalls, every bill until a reload prints as a TAX INVOICE without the VAT/PAN number, prefix or address. Bar items go on the kitchen ticket, and the bad copy overwrites the offline settings. The reprint path has the same gap | 2 | — | no |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (57 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2)
+### P2 (53 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-2 | A PIN left on the Kitchen Display never idle-locks, and its Exit opens the till as that login | 1 | Q4 | no |
-| ACCESS-3 | A POS manager with capped powers can reset the PIN of a waiter who holds more, then use those powers; nothing records the reset | 1 | Q5 | no |
-| ACCESS-4 | A PIN login with sibling-outlet access can switch a till into the other outlet, which then bills in that outlet's name, PAN and invoice series | 1 | — | yes |
-| DOCS-1 | A manager's PIN reset leaves the 15-minute lockout in place, so the new PIN is refused too. The fix is code: `admin-user-ops` plus a deploy. IMS count and HR Self-Service PINs have the same gap (S809.3) | 1 | Q6 | no |
 | CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
 | CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
 | CHECKOUT-5 | A Tax Invoice above NPR 10,000 closes with blank buyer name, address and PAN, though the till's own tip says they are needed | 2 | Q9 | no |
@@ -214,11 +209,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
 | SHIFTS-11 | A failed first read leaves the Shifts page on "Loading…" for good | 4 | — | no |
 
-### Gaps (5 open: 3 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OPERATOR-1 in 1l)
+### Gaps (4 open: 2 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l)
 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
-| GAP-OUTLETS-1 | A till signed in on the Owner's own login follows her to whichever outlet she last opened, even from her phone. It drops the unsent order, then bills in the other outlet's name and invoice series. Live: BLOOM CAFE and PKR are a POS group, and 29 of BLOOM's 40 bills were closed on the Owner's login. Ships with ACCESS-4 | P2 | 1 | Q24 | no |
 | GAP-OUTLETS-2 | Every HQ push turns each pushed dish back On POS (and Active) at every branch. On a branch whose VAT status differs from HQ's, a pushed dish with no price goes on the till at NPR 0 (no such group live) | P2 | 2 | Q25 | yes |
 | GAP-OUTLETS-3 | The Group Console counts takeaway and delivery bills as guests (REPORTS-3's rule), cuts the month at 05:45 Nepal time, and its Revenue tip over-promises | P2 | 3 | — | yes |
 | GAP-OPERATOR-2 | Inside a client's POS the operator gets every module on, whatever the client bought, so the operator's till behaves unlike the restaurant's | P3 | 4 | — | no |
@@ -367,9 +361,9 @@ changed.
 | 1b ✅ | GAP-RELEASE-1 (shipped 2026-10-09, `20261009100000` live) | `pos_min_till_build()` floor (NULL) + `pos_till_build_gate` statement triggers; the till reloads itself | — | Q27 |
 | 1c ✅ | CHECKOUT-2, CHECKOUT-8, CREDIT-NOTES-6 (shipped 2026-10-09, `20261009110000` live) | `guard_pos_order_close` A+B, `pos_orders` CHECK, `guard_pos_credit_note` | — | — |
 | 1d ✅ | DATABASE-1, ORDER-FLOW-2 (shipped 2026-10-09, `20261009120000` live) | `pos_kot_log` / `pos_kot_removals` guards, `save_pos_order_items`, `guard_pos_item_price` | — | Q1 |
-| 1e | ACCESS-1, ACCESS-2 | none | — | Q4 |
-| 1f | ACCESS-3, DOCS-1 | none | `admin-user-ops` | Q5, Q6 |
-| 1g | ACCESS-4, GAP-OUTLETS-1 | `set_active_outlet` | `pos-staff-login` | Q24 |
+| 1e ✅ | ACCESS-1, ACCESS-2 (shipped 2026-10-09, app only) | none | — | Q4 |
+| 1f ✅ | ACCESS-3, DOCS-1 (shipped 2026-10-09) | none | `admin-user-ops` | Q5, Q6 |
+| 1g ✅ | ACCESS-4, GAP-OUTLETS-1 (shipped 2026-10-09, `20261009130000`; pos-staff-login left alone, owner 2026-10-09) | `set_active_outlet`, `set_outlet_access` | — | Q24 |
 | 1h ✅ | GUEST-4, RESERVATIONS-3, RESERVATIONS-4 (shipped 2026-10-09, `20261009140000` live; five guest functions gated, not three) | access helper, 3 guest-menu and 3 booking functions | — | Q2, Q3 |
 | 1i ✅ | DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7 (shipped 2026-10-09, `20261009150000` live) | `guard_pos_order_payments_closed`, `pos_customers_guard_loyalty`, ledger FK | — | — |
 | 1j ✅ | ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9 (shipped 2026-10-09, `20261009160000` live) | retire the shared key, drop 2 dead RPCs, rank checks, comp quantity | — | Q7 |
@@ -421,6 +415,23 @@ remaining guards.
 - One-line pulls-forward, now that their functions were rebuilt: SHIFTS-7 (`NEW.closed_at := now()` in
   `pos_shifts_guard`) and SHIFTS-1's database half (`FOR SHARE` on the shift read in
   `pos_cash_movements_guard`) (1l).
+- Sign-out scope: the Owner's and admin's account-menu Sign out, and Crest Staff's (shared with
+  hss-suite), are still `global`, so signing out on a shared device ends that login on every device
+  (ACCESS-7's shape). An Owner left on a wall KDS never locks, and its Exit opens the till as the
+  Owner; Help should steer wall screens onto a Kitchen login (1e).
+- A Release reload restarts the idle clock, so a till locks at about 4 minutes once per release
+  (ACCESS-6, stage 3) (1e).
+- The Owner cannot see who reset a PIN: the new `staff_pin_vault` UPDATE row is in the admin-only
+  Audit Log. The page labels its field "Pin Reset" (`FIELD_LABELS` in `AuditLog.js`). The till's
+  lockout line now differs from `SelfServiceLogin.jsx`'s (HR, shared with hss-suite) (1f).
+- `set_active_outlet` refuses an allowlisted non-Owner who asks for their HOME outlet by id ("no
+  access"), because Outlet Access stores no home row, so the top-bar switcher's home entry fails for
+  allowlisted staff (latent, 0 rows). The till's new buttons send NULL. Fix: `outletSwitchArg` inside
+  `switchOutlet`, or home-by-id as the reset in SQL (1g).
+- A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
+  and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client). The
+  cart save on an outlet move also tries to cancel a standing points redemption, which fails once the
+  login has moved (1g).
 
 ---
 

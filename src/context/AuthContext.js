@@ -4,6 +4,8 @@ import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 import { withTimeout } from '../utils/withTimeout'
 import { accountOutlet, outletMovedElsewhere, announceOutletSwitch, listenForOutletSwitch } from '../shared/outletWatch'
+import { runBeforePosLock, lockedCartFor } from '../modules/pos/posLockedCart'
+import { outletSwitchArg, readTillDevice } from '../modules/pos/tillOutlet'
 import { signOutThisDevice } from '../shared/deviceSignOut'
 import { getAccessState, suiteLive } from '../utils/subscription'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
@@ -159,6 +161,11 @@ export function AuthProvider({ children }) {
   // GAP-OUTLETS-2); Layout goes to the dashboard and says so. `{ id, name }`, id so a second move
   // re-fires the effect.
   const [outletMoved, setOutletMoved] = useState(null)
+  // Set when this window found its login had changed outlet elsewhere and did NOT follow, because it
+  // holds offline changes for the outlet it shows (S809 GAP-OUTLETS-1). `{ name, pending }`: where the
+  // login is now and how many changes are waiting. Layout says so on every page, and the till pages
+  // stop (TillOutletGate). Cleared once the login is back on this window's outlet.
+  const [outletHeld, setOutletHeld] = useState(null)
   // switchingRef: this tab's own switch is in flight, so a wake or page change mid-switch must not
   // read the half-done state as a move made elsewhere. outletCheckRef: the latest check, called from
   // listeners registered once.
@@ -388,9 +395,14 @@ export function AuthProvider({ children }) {
   // session is then cleared by hand and the page reloaded there, since the in-memory client still
   // holds it. Returns false in that case, so a caller must not navigate on top. A caller wired
   // straight to onClick passes an event, which is why `to` is read defensively.
+  // `scope: 'local'` (S809 ACCESS-1) signs the login out of THIS device only: an Owner or the operator
+  // leaving a till for its PIN screen stays signed in on their own phone and laptop. Without it the
+  // library default signs the login out everywhere (deviceSignOut.js).
   async function signOut(opts) {
     const to = typeof opts?.to === 'string' ? opts.to : '/login'
+    const scope = opts?.scope === 'local' ? 'local' : undefined
     setOutletMoved(null)
+    setOutletHeld(null)
     setProfile(null)
     setFeatureFlags({})
     setAdminViewClientId(null)
@@ -408,7 +420,7 @@ export function AuthProvider({ children }) {
     setReady(false)
     // A shared till or counting tablet: a failed /logout used to leave the last login's session for
     // the next person, because the result was never read.
-    const clean = await signOutThisDevice()
+    const clean = await signOutThisDevice({ scope })
     if (!clean) window.location.replace(to)
     return clean
   }
@@ -476,12 +488,30 @@ export function AuthProvider({ children }) {
   // before. This is a UI convenience over set_active_outlet()'s server-side check, never a
   // substitute for it — that RPC enforces the same rule and is the thing that actually holds.
   const homeClientId = profile?.client_id || null
+  // A till PIN login never switches (S809 ACCESS-4): it signs in only on a tablet of its home outlet,
+  // and a switch would make that tablet bill in another outlet's name, PAN and invoice series every
+  // time it signs in there. set_active_outlet refuses it whatever this says; this only keeps the
+  // switcher from offering a door that is shut. The raw pos_email column, as isOwner reads it.
+  const isPinLogin = !isAdmin && !!profile?.pos_email
   const switchableOutlets = useMemo(() => {
+    if (isPinLogin) return []
     if (isOwner) return outlets
     if (!allowedOutletIds.length) return []
     return outlets.filter(o => o.id === homeClientId || allowedOutletIds.includes(o.id))
-  }, [isOwner, outlets, allowedOutletIds, homeClientId])
+  }, [isPinLogin, isOwner, outlets, allowedOutletIds, homeClientId])
   const canSwitchOutlet = switchableOutlets.length > 1
+
+  // Offline changes this browser still has to send, in either queue. Stock ops write against the
+  // current tenant just as POS orders do. 0 where there is no offline store: nothing to protect.
+  async function pendingOfflineChanges() {
+    try {
+      const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
+      const [stockOps, posOrders] = await Promise.all([getQueue(), getPosOrderQueue()])
+      return (stockOps?.length || 0) + (posOrders?.length || 0)
+    } catch {
+      return 0
+    }
+  }
 
   // Writes through set_active_outlet(), never a direct PATCH: active_client_id decides which
   // tenant every RLS policy resolves to, so it is a privileged column and is deliberately NOT on
@@ -495,16 +525,19 @@ export function AuthProvider({ children }) {
   // silently flushes a queued write against the wrong tenant. Guarding the privileged action
   // itself makes that unbypassable.
   async function switchOutlet(targetClientId) {
-    try {
-      const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
-      // Both queues matter: stock ops write against the current tenant just as POS orders do.
-      const [stockOps, posOrders] = await Promise.all([getQueue(), getPosOrderQueue()])
-      const pending = (stockOps?.length || 0) + (posOrders?.length || 0)
+    // Bringing the login back to the outlet THIS window already shows moves no queued change to
+    // another outlet: it is how a window held by its own queue gets going again (S809 GAP-OUTLETS-1).
+    // Nor does going to a bound till's own outlet: the till pages run nowhere else (TillOutletGate),
+    // so the orders a till queued are that outlet's. A till follows its login away with them still
+    // waiting (it is never held, below), and refusing here would leave it no way back to send them.
+    // NULL is the RPC's reset to home, so it is home that is compared.
+    const target = targetClientId || homeClientId
+    const realign = !!target && (target === clientId || target === readTillDevice().clientId)
+    if (!realign) {
+      const pending = await pendingOfflineChanges()
       if (pending > 0) {
         return { error: { message: `${pending} offline change${pending === 1 ? '' : 's'} still syncing — reconnect and let them finish before switching outlet.` } }
       }
-    } catch {
-      // No offline store on this device: nothing queued, nothing to protect.
     }
     switchingRef.current = true
     try {
@@ -515,6 +548,8 @@ export function AuthProvider({ children }) {
       try { sessionStorage.clear() } catch { /* private mode */ }
       if (session?.user?.id) {
         await fetchProfile(session.user.id)
+        // The login is where this window is again (or the window followed it here).
+        setOutletHeld(null)
         // Every other tab of this browser is now filtering by the outlet we left (S798).
         announceOutletSwitch(session.user.id)
       }
@@ -522,6 +557,12 @@ export function AuthProvider({ children }) {
     } finally {
       switchingRef.current = false
     }
+  }
+
+  // "Take my login back to this outlet", from a stopped till or a held window (S809). Home goes as
+  // NULL, the reset set_active_outlet allows every login; see outletSwitchArg.
+  function returnToOutlet(targetClientId) {
+    return switchOutlet(outletSwitchArg(targetClientId, homeClientId))
   }
 
   // Did this login change outlet in another window, another tab or on another device, or lose the
@@ -534,6 +575,13 @@ export function AuthProvider({ children }) {
   // two-column read of the caller's own row — never fetchProfile on every wake, which was the S463
   // slow-load cause; the full reload runs only when the outlet really moved. Best effort: a failed
   // or slow read leaves the window as it is, and the next wake or page change asks again.
+  //
+  // Two things happen first since S809 (GAP-OUTLETS-1). The order screen keeps its unsent cart, the
+  // way a till lock does (posLockedCart.js), because the page holding it is about to stop or close.
+  // Then a window that is no till and holds offline changes does not move at all: they belong to the
+  // outlet it shows, and switchOutlet refuses to carry them across for the same reason. It is marked
+  // held instead, and waits for the login to come back (Layout's banner, TillOutletGate on the till
+  // pages).
   async function checkOutletStillCurrent() {
     const userId = session?.user?.id
     if (!userId || isAdmin || !profile || outlets.length < 2) return
@@ -545,11 +593,36 @@ export function AuthProvider({ children }) {
         15000, 'Outlet check'
       )
       if (error || !data || switchingRef.current) return
-      if (!outletMovedElsewhere(clientId, data)) return
+      if (!outletMovedElsewhere(clientId, data)) {
+        // The login is back on this window's outlet, from here or anywhere else.
+        setOutletHeld(null)
+        return
+      }
+      const now = accountOutlet(data)
+      const nowName = outlets.find(o => o.id === now)?.name || null
+      const parkedFrom = clientId
+      const parkStart = Date.now()
+      await runBeforePosLock(5000, 'outlet')
+      // A bound till is never held: its orders cannot be sent from another outlet whatever this
+      // window shows, because its till pages stop there (TillOutletGate), and its stock counts carry
+      // their outlet (S731). It follows the login like any window, and its till pages wait.
+      const pending = readTillDevice().clientId ? 0 : await pendingOfflineChanges()
+      if (switchingRef.current) return
+      if (pending > 0) {
+        setOutletHeld(prev => (prev && prev.name === nowName && prev.pending === pending) ? prev : { name: nowName, pending })
+        return
+      }
       try { sessionStorage.clear() } catch { /* private mode */ }
       if (!(await fetchProfile(userId))) return
-      const now = accountOutlet(data)
-      setOutletMoved({ id: Date.now(), name: outlets.find(o => o.id === now)?.name || null })
+      setOutletHeld(null)
+      // Kept by THIS check, not left over from an earlier lock, before the notice says so.
+      const kept = lockedCartFor(userId, parkedFrom)
+      const keptNow = !!kept && Number(kept.savedAt) >= parkStart
+      setOutletMoved({
+        id: Date.now(),
+        name: nowName,
+        cartKeptAt: keptNow ? (outlets.find(o => o.id === parkedFrom)?.name || profile?.clients?.name || 'the outlet you left') : null,
+      })
     } catch (err) {
       console.warn('Outlet check skipped:', err?.message || err)
     } finally {
@@ -745,6 +818,8 @@ export function AuthProvider({ children }) {
       // degrades to today's single-outlet behavior without a special case.
       outlets, switchableOutlets, allowedOutletIds, canSwitchOutlet, switchOutlet,
       outletMoved, dismissOutletMoved, checkOutlet,
+      // S809 GAP-OUTLETS-1: a window that stayed put for its offline queue, and the way back.
+      outletHeld, returnToOutlet,
       groupId: profile?.clients?.group_id || null,
       imsEnabled,
       hrEnabled,
