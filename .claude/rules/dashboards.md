@@ -183,7 +183,7 @@ History: docs/rules-archive/dashboards.md#s617-owner-pages-role-guard
 
 - Below the branch table, Outlet Access and Push master data are Owner/admin only through the page guard.
 - Outlet Access (`OutletAccessPanel.jsx`) grants reach, never rank. It reads `get_group_outlet_access()`, the group-wide sibling of `get_client_profile_names()`, because `profiles_select` RLS is self-or-admin. The home outlet renders as a fixed marker, never a checkbox, so nobody can be locked out of their own branch.
-- Push master data (`MasterPushPanel.jsx`) always previews before it writes, and the dry run returns exactly the rows the write applies. Its three refusals are in `.claude/rules/multi-outlet.md`: branch purchase rates are never overwritten, selling price is a separate opt-in, and an unmappable ingredient is reported rather than dropped.
+- Push master data (`MasterPushPanel.jsx`) always previews before it writes, and the dry run returns exactly the rows the write applies. Its refusals are in `.claude/rules/multi-outlet.md`: branch purchase rates are never overwritten, selling price is a separate opt-in, a branch's own On POS and Active are never written (S809 2h), and an unmappable ingredient is reported rather than dropped.
 - Both panels take their outlet list from the RPC's `rows`, never AuthContext's `outlets`, so the matrix includes outlets excluded from the figures for want of Suite Pro.
 
 Why: access and staffing are not what the group is billed for.

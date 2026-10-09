@@ -161,7 +161,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'Same choices tapped again add to the same line; different choices are a new line; Change on a line replaces it (or folds it into an identical line already on the order).',
         ],
         gotchas: [
-          'If the option catalog cannot be read, the whole menu reads as failed — deliberately. Without it a dish that must have a size could go on plain, which the server accepts because it validates only rows that send options.',
+          'If the option catalog cannot be read, the whole menu reads as failed — deliberately. Without it a dish that must have a size could be added plain. Since S809 2h the server refuses that too: save_pos_order_items counts every new line of a customizable dish while Customization is live, choices sent or not, as submit_guest_order does (option_count). A line already on the order keeps its exemption, so a dish that gains a required group mid-meal does not lock a running order.',
           'Offline works for order-taking as for everything else on the till: the picks are queued as option ids and priced by the server on sync.',
           'A stale menu on another tablet (a price changed mid-service) changes nothing on a line already saved — an existing line keeps its price and its snapshot.',
           'Keyboard: one Tab stop per group, arrows move between chips, Escape cancels the window. Every chip has a visible focus ring now.',

@@ -6,7 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature, mapSignature } from '../../../shared/setIfChanged'
-import { pointsValue, maxRedeemablePoints } from '../customers/loyaltyPoints'
+import { pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers } from '../customers/loyaltyPoints'
 import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { contrastRatio } from '../../../utils/avatarColor'
@@ -794,7 +794,12 @@ export default function PosOrders({ billingStation = false } = {}) {
   // `reason` is 'update' when a new release reloads the till (S809 1b), so the restored lines say so.
   const beforeLockRef = useRef(null)
   beforeLockRef.current = (waitUntil, reason = 'lock') => {
-    if (liveRedemptionRef.current?.orderId) waitUntil(cancelLiveRedemption())
+    // S809 2g: not while a payment try at that bill is unsettled (landing after the handback, it would
+    // close the bill paid partly in points the guest got back), nor once the login has moved outlet
+    // (the server refuses it there). Left standing, the points go back when the bill next closes any
+    // way but a Split charge with points (guard_pos_order_close), or the next Split charge replaces them.
+    const standing = liveRedemptionRef.current?.orderId
+    if (standing && reason !== 'outlet' && !closeAttemptFor(standing)) waitUntil(cancelLiveRedemption())
     if (view !== 'order' || !profile?.id || !clientId) return
     // Units beyond what is saved on the server. A note edit or a lowered quantity alone keeps nothing:
     // there is no line to bring back, and the saved order already holds the rest.
@@ -943,7 +948,11 @@ export default function PosOrders({ billingStation = false } = {}) {
         supabase.from('settings').select('pos_loyalty_point_value').eq('client_id', clientId).maybeSingle(),
       ])
       if (cancelled) return
-      setLoyaltyPointValue(Number(setRes?.data?.pos_loyalty_point_value) || 1)
+      // S809 2g (CUSTOMERS-PARKING-3): an unread point value is not NPR 1 a point. At NPR 10 the screen
+      // offered a tenth of what the server then charged the guest. Only a value that is not set reads
+      // as 1, as the server reads it (the column default).
+      if (setRes.error) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points. ${errorText(setRes.error, 'staff')}`); return }
+      setLoyaltyPointValue(Number(setRes.data?.pos_loyalty_point_value) || 1)
       // A failed read is not 'no points' — that difference is the whole S594 rule, and here it
       // would have a cashier tell a regular to their face that they have nothing.
       if (custRes.error) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points. ${errorText(custRes.error, 'staff')}`); return }
@@ -1654,6 +1663,9 @@ export default function PosOrders({ billingStation = false } = {}) {
         // missing from the till's menu entirely — unorderable, with no error and nothing on screen
         // to say a row had been filtered out. Same fix as Menu Pricing's own read.
         .or('category.is.null,category.neq.Sub-Recipe')
+        // S809 2h: a dish with no price above zero is left off, as the guest menu does. The till
+        // billed it at NPR 0; save_pos_order_items now refuses it as a new line (line_not_on_menu).
+        .gt('selling_price', 0)
         .order('name'),
       scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
       customizationEnabled
@@ -3606,6 +3618,19 @@ export default function PosOrders({ billingStation = false } = {}) {
       const loyaltyTender = closeType === 'paid' ? tenders.find(t => t.method === 'Loyalty') : null
       const custRow = buyerCustomerRow()
       let custUpsertDone = false
+      // S809 2g (CUSTOMERS-PARKING-2): a Split charge without points first hands back any redemption
+      // standing on this bill that this screen does not know of (another till's, or one from before a
+      // reload or a lock); redeeming 0 does nothing when none stands. Its payment lines would be refused
+      // after the close otherwise. Every other close has it handed back by guard_pos_order_close itself.
+      if (!loyaltyTender && isSplit && hasFeature('loyalty') && liveRedemptionRef.current?.orderId !== orderId) {
+        const { error: backErr } = await bounded(supabase.rpc('redeem_loyalty_points', { p_order_id: orderId, p_points: 0 }), 'Checking the bill for points')
+        if (backErr) {
+          const byEarlier = await settleIfEarlierClosed(earlier, backErr)
+          if (byEarlier) return byEarlier === 'finished'
+          setCloseMsg(`error:Could not check this bill for points left from an earlier try, so it was not charged — try again. ${errorText(backErr, 'staff')}`)
+          return false
+        }
+      }
       if (!loyaltyTender && liveRedemptionRef.current?.orderId === orderId) {
         const res = await cancelLiveRedemption()
         if (!res.ok) {
@@ -3637,9 +3662,20 @@ export default function PosOrders({ billingStation = false } = {}) {
         // Marked BEFORE the call: a response lost after the server committed must still leave this
         // screen able to hand the points back (undo, Cancel, or a close without them).
         liveRedemptionRef.current = { orderId }
-        const { error: redErr } = await bounded(supabase.rpc('redeem_loyalty_points', {
+        const { data: redeemed, error: redErr } = await bounded(supabase.rpc('redeem_loyalty_points', {
           p_order_id: orderId, p_points: loyaltyTender.points,
         }), 'Redeeming the points')
+        // S809 2g (CUSTOMERS-PARKING-3): the points are worth what the server charged for them (the
+        // outlet's point value now, which a manager may have changed since the phone was entered). The
+        // points line takes that amount and the cashier checks the rest before confirming again; the
+        // redemption stands, and the next Confirm replaces it (Undo or Cancel hands it back).
+        if (!redErr && redeemedAmountDiffers(redeemed, loyaltyTender.amount)) {
+          const worth = Number(redeemed)
+          setLoyaltyPointValue(worth / loyaltyTender.points)
+          setTenders(prev => prev.map(t => (t.method === 'Loyalty' ? { ...t, amount: worth } : t)))
+          setCloseMsg(`error:${loyaltyTender.points} points are worth ${fmtNpr(worth)} at today's point value, not ${fmtNpr(loyaltyTender.amount)}, so the bill was not charged. The points line now shows ${fmtNpr(worth)} — check the rest of the payment, then confirm again.`)
+          return false
+        }
         if (redErr) {
           const byEarlier = await settleIfEarlierClosed(earlier, redErr)
           if (byEarlier) return byEarlier === 'finished'
@@ -5154,8 +5190,11 @@ The tables were left occupied rather than freed with their orders still open.`)
                 Deliberately NOT gated on Supervisor rank, unlike comp above it: comping is
                 discretionary and giving away stock, whereas redeeming is a customer spending
                 something they already own. The real control is server-side — redeem_loyalty_points
-                re-checks the balance and will refuse. */}
-            {billingTab === 'pay' && hasFeature('loyalty') && (loyaltyBalance !== null || loyaltyLookupMsg) && (() => {
+                re-checks the balance and will refuse.
+                S809 2g: nor for a delivery partner's order — the partner owes the bill and neither earns
+                nor spends points (award/redeem_loyalty_points refuse it too). */}
+            {billingTab === 'pay' && hasFeature('loyalty') && (loyaltyBalance !== null || loyaltyLookupMsg) &&
+              !deliveryPartner && !isDeliveryPartnerPhone(buyerPhone, billingSettings.delivery_partners) && (() => {
               const applied = tenders.find(t => t.method === 'Loyalty')
               const cap = maxRedeemablePoints(loyaltyBalance, redeemableTotal, loyaltyPointValue)
               return (

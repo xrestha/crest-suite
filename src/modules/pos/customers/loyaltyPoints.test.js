@@ -1,4 +1,4 @@
-import { loyaltyPoints, pointsValue, maxRedeemablePoints } from './loyaltyPoints'
+import { loyaltyPoints, pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers } from './loyaltyPoints'
 
 // These encode the same boundaries award_loyalty_points() enforces in SQL. The till renders a
 // preview from this module and the ledger is written by that function, so a divergence would show
@@ -83,5 +83,62 @@ describe('maxRedeemablePoints', () => {
     expect(maxRedeemablePoints(50, 0, 1)).toBe(0)
     expect(maxRedeemablePoints(50, 100, 0)).toBe(0)
     expect(maxRedeemablePoints(null, null, null)).toBe(0)
+  })
+})
+
+// S809 2g (CUSTOMERS-PARKING-1). The same cases the migration's probe sends to
+// pos_phone_is_delivery_partner(), which is what award/redeem actually ask.
+describe('isDeliveryPartnerPhone', () => {
+  const partners = [
+    { name: 'Foodmandu', phone: '9800000209', commission_pct: 20 },
+    { name: 'No phone', phone: '', commission_pct: 10 },
+    { name: 'Short code', phone: '1660', commission_pct: 15 },
+  ]
+
+  test('the phone the partner picker copies onto the bill', () => {
+    expect(isDeliveryPartnerPhone('9800000209', partners)).toBe(true)
+    expect(isDeliveryPartnerPhone('  9800000209 ', partners)).toBe(true)
+  })
+
+  test('the same number typed another way (+977, dashes, a leading 0)', () => {
+    expect(isDeliveryPartnerPhone('+977 980-000-0209', partners)).toBe(true)
+    expect(isDeliveryPartnerPhone('09800000209', partners)).toBe(true)
+  })
+
+  test('a short partner number matches only as typed, never by its digits alone', () => {
+    expect(isDeliveryPartnerPhone('1660', partners)).toBe(true)
+    expect(isDeliveryPartnerPhone('1-660', partners)).toBe(false)
+  })
+
+  test('a guest, a blank phone, a partner with no phone and no partner list are not partners', () => {
+    expect(isDeliveryPartnerPhone('9800000201', partners)).toBe(false)
+    expect(isDeliveryPartnerPhone('', partners)).toBe(false)
+    expect(isDeliveryPartnerPhone(null, partners)).toBe(false)
+    expect(isDeliveryPartnerPhone('9800000209', null)).toBe(false)
+    expect(isDeliveryPartnerPhone('9800000209', [])).toBe(false)
+  })
+})
+
+// S809 2g (CUSTOMERS-PARKING-3): the till stops a Charge whose points the server valued differently.
+describe('redeemedAmountDiffers', () => {
+  test('the screen took NPR 1 a point where the outlet values one at NPR 10', () => {
+    expect(redeemedAmountDiffers(1000, 100)).toBe(true)
+    expect(redeemedAmountDiffers(150, 300)).toBe(true)
+  })
+
+  test('the same amount, however the answer is written, is no difference', () => {
+    expect(redeemedAmountDiffers(300, 300)).toBe(false)
+    expect(redeemedAmountDiffers('300.00', 300)).toBe(false)
+    expect(redeemedAmountDiffers(1.01, 1.0)).toBe(false) // a paisa of independent rounding
+  })
+
+  test('two paisa or more apart is a difference', () => {
+    expect(redeemedAmountDiffers(1.02, 1.0)).toBe(true)
+  })
+
+  test('an answer that is not a number cannot be compared, so it is not called a difference', () => {
+    expect(redeemedAmountDiffers(null, 300)).toBe(false)
+    expect(redeemedAmountDiffers(undefined, 300)).toBe(false)
+    expect(redeemedAmountDiffers('abc', 300)).toBe(false)
   })
 })

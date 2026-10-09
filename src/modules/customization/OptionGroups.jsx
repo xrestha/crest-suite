@@ -14,6 +14,7 @@ import ReportLoadError from '../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { loadOptionCatalog, KIND_LABEL, DIET_LABEL } from './customizationData'
 import { STANDARD_VAT, inclFromEx, ruleText, signedPrice } from '../../shared/optionPricing'
+import { vatModeOf, VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import OptionGroupModal from './OptionGroupModal'
 import OptionModal from './OptionModal'
 import AttachGroupsModal from './AttachGroupsModal'
@@ -49,12 +50,19 @@ const TABS = [['groups', 'Groups'], ['dishes', 'Dishes']]
 
 export default function OptionGroups() {
   const { isAdmin, isOwner, profile, clientId, clientModules } = useAuth()
-  const { settings } = useSettings()
+  const settingsCtx = useSettings()
   const { scopedFrom, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask, confirmEl } = useConfirm()
 
   const imsOn = !!clientModules?.ims
-  const vatReg = !!settings?.is_vat_registered
+  // S809 2h (CUSTOMIZATION-1): the outlet's VAT basis is vatModeOf's, as on Menu Pricing (S792 D31).
+  // It was `!!settings?.is_vat_registered`, which read a settings row still loading, a failed read
+  // and another client's row all as "no VAT": an option price typed then (or an option merely renamed,
+  // since every save rewrites the price) was stored without VAT taken off, and a VAT outlet charged
+  // 13% over what was typed. Now an unknown mode saves no option (OptionModal) and the page says so;
+  // the figures on screen read it as VAT, as the till does.
+  const vatMode = vatModeOf(settingsCtx, clientId)
+  const vatReg = vatMode !== 'pan'
   const entryVat = vatReg ? STANDARD_VAT : 0
 
   const [tab, setTab] = useState('groups')
@@ -315,6 +323,13 @@ export default function OptionGroups() {
         </div>
       )}
 
+      {vatMode == null && !settingsCtx.loading && (
+        <div role="status" className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', marginBottom: 16 }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>Options cannot be saved right now.</strong>{' '}
+          <span style={{ color: 'var(--theme-text2)' }}>{VAT_MODE_UNKNOWN_TEXT}</span>
+        </div>
+      )}
+
       <div className="tab-bar" role="tablist" aria-label="Option Groups views"
         onKeyDown={e => moveRovingFocus(e, '[role="tab"]')?.click()}>
         {TABS.map(([k, label]) => (
@@ -570,6 +585,7 @@ export default function OptionGroups() {
           ingredients={openOption?.ingredients || []}
           attachedDishes={dishesForGroup(openGroup.id)}
           vat={entryVat}
+          vatUnknown={vatMode == null}
           imsEnabled={imsOn}
           itemChoices={itemChoices}
           onClose={() => setOptionModal(null)}

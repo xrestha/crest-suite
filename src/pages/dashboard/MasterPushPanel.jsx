@@ -26,13 +26,13 @@ const ENTITY_CHOICES = [
     key: 'recipes',
     keys: ['recipes'],
     label: 'Recipes & ingredients',
-    tip: 'Recipe cards and their ingredient lines, remapped to each branch’s own items. An ingredient with no counterpart at that branch is reported, never silently dropped.',
+    tip: 'Recipe cards and their ingredient lines, remapped to each branch’s own items. An ingredient with no counterpart at that branch is reported, never silently dropped. Each branch keeps its own On POS and Active switch for a dish it already has; a new dish starts as it is at HQ, except that it arrives off the till, unpriced, when HQ has no price for it or the branch charges VAT differently.',
   },
   {
     key: 'prices',
     keys: ['prices'],
     label: 'Selling prices',
-    tip: 'Also overwrite each branch’s menu prices with HQ’s. Leave this off if branches price differently — the recipe itself still gets standardised either way.',
+    tip: 'Also overwrite each branch’s menu prices with HQ’s. Leave this off if branches price differently — the recipe itself still gets standardised either way. A dish HQ has not priced keeps the branch’s price.',
     requires: 'recipes',
   },
 ]

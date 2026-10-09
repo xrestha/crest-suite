@@ -8,6 +8,7 @@ import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { OPTION_COLS, DIET_LABEL, parseAllergens } from './customizationData'
 import { exFromIncl, inclFromEx, signedPrice } from '../../shared/optionPricing'
+import { VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import { npr } from '../../shared/nepalMoney'
 
 // Create or edit one option inside a group.
@@ -29,8 +30,10 @@ import { npr } from '../../shared/nepalMoney'
 
 const newKey = () => Math.random().toString(36).slice(2)
 
+// `vatUnknown` (S809 2h, CUSTOMIZATION-1): the page could not confirm whether the outlet charges VAT
+// (settings loading, failed, or another client's row), so `vat` is a guess and nothing is saved.
 export default function OptionModal({
-  group, option, ingredients, attachedDishes, vat, imsEnabled,
+  group, option, ingredients, attachedDishes, vat, vatUnknown = false, imsEnabled,
   itemChoices, onClose, onSaved,
 }) {
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -105,7 +108,9 @@ export default function OptionModal({
   }
 
   async function save() {
-    if (saving || !validate()) return
+    // Every save writes price_delta from the form through `vat` — a rename included — so none while
+    // the VAT basis is unknown (S809 2h).
+    if (saving || vatUnknown || !validate()) return
     setSaving(true)
     setActionError(null)
     const row = {
@@ -398,10 +403,16 @@ export default function OptionModal({
         )}
 
         <ActionError error={actionError} />
+        {vatUnknown && (
+          <p role="note" id="opt-vat-unknown" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
+            △ Nothing can be saved here yet. {VAT_MODE_UNKNOWN_TEXT}
+          </p>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
         <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save} disabled={saving} aria-busy={saving || undefined}>
+        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save} disabled={saving || vatUnknown} aria-busy={saving || undefined}
+          aria-describedby={vatUnknown ? 'opt-vat-unknown' : undefined}>
           {saving ? 'Saving…' : option ? 'Save option' : 'Add option'}
         </button>
       </div>

@@ -3,6 +3,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { pointsValue } from './loyaltyPoints'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -26,7 +27,11 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 // a POS manager or the Owner — the database refuses anyone else (loyalty_rank, loyalty_enrol_rank,
 // pos_setup_rank). A supervisor still opens this tab to look a balance up, so it renders read-only
 // for them with one line saying who can change it, rather than as controls that each fail.
-export default function LoyaltyTab({ pointValue, onPointValueSaved, canManage = false }) {
+//
+// `pointValue` is null until the outlet's settings were read (S809 2g): the box stays empty, Save waits,
+// and the Worth column shows nothing, rather than a guessed NPR 1 a manager could save over the real
+// value. `pointValueError` is the failed read, when there was one.
+export default function LoyaltyTab({ pointValue, pointValueError = null, onPointValueSaved, canManage = false }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
 
@@ -41,7 +46,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved, canManage = 
   const [newRate, setNewRate] = useState('1')
   const [newMin, setNewMin] = useState('0')
   const [savingScheme, setSavingScheme] = useState(false)
-  const [valueStr, setValueStr] = useState(String(pointValue ?? 1))
+  const [valueStr, setValueStr] = useState(pointValue == null ? '' : String(pointValue))
   const [savingValue, setSavingValue] = useState(false)
 
   const load = useCallback(async () => {
@@ -73,7 +78,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved, canManage = 
   }, [scopedFrom])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setValueStr(String(pointValue ?? 1)) }, [pointValue])
+  useEffect(() => { setValueStr(pointValue == null ? '' : String(pointValue)) }, [pointValue])
 
   async function addScheme() {
     const name = newName.trim()
@@ -170,14 +175,18 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved, canManage = 
               id="loyalty-point-value" type="number" min="0.01" step="0.01"
               className="form-input" value={valueStr}
               onChange={e => setValueStr(e.target.value)}
-              readOnly={!canManage}
+              readOnly={!canManage || pointValue == null}
             />
             {canManage && (
-              <button className="btn btn-ghost" onClick={savePointValue} disabled={savingValue}>
+              <button className="btn btn-ghost" onClick={savePointValue} disabled={savingValue || pointValue == null}>
                 {savingValue ? 'Saving…' : 'Save'}
               </button>
             )}
           </div>
+          {pointValueError && (() => {
+            const why = asActionError(pointValueError, 'operator')
+            return <ActionError error={{ text: `This outlet’s point value could not be read, so the box is left empty, the Worth column shows nothing and Save waits. Reload the page to try again. ${why.text}`, detail: why.detail }} />
+          })()}
         </div>
       </div>
 
@@ -319,7 +328,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved, canManage = 
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: bal > 0 ? 700 : 400, color: bal > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>{bal}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                            {bal > 0 ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
+                            {bal > 0 && pointValue != null ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
                           </td>
                         </tr>
                       )

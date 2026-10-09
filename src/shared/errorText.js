@@ -259,13 +259,13 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'option_count'),
-    staff: 'The choices on a dish do not fit what it allows. Nothing was saved — change the choices and save again.',
-    operator: 'The choices on a dish break its rule — too few picks in a group that must be chosen, or too many (named in the detail below) — so the order was not saved. Change the choices and save again.',
+    staff: 'A dish on this order is missing a choice it must have (a size, a base…) or has too many. Nothing was saved — tap Choices on that dish, pick, and save again.',
+    operator: 'The choices on a dish break its rule — too few picks (or none) in a group that must be chosen, or too many (named in the detail below) — so the order was not saved. Change the choices and save again.',
   },
   {
     test: e => hasCode(e, 'line_not_on_menu'),
-    staff: 'Something on this order is no longer on the menu. Nothing was saved — remove it and save again.',
-    operator: 'A dish on this order is no longer on the menu (named in the detail below), so the order was not saved. Remove it from the order and save again — or put the dish back on the POS menu in Menu Pricing first.',
+    staff: 'Something on this order is no longer on the menu, or has no price yet. Nothing was saved — remove it and save again.',
+    operator: 'A dish on this order is no longer on the menu or has no menu price yet (named in the detail below), so the order was not saved. Remove it from the order and save again — or put the dish back on the POS menu, with a price, in Menu Pricing first.',
   },
   {
     test: e => hasCode(e, 'award_window_closed'),
@@ -276,6 +276,21 @@ const rules = [
     test: e => hasCode(e, 'redeem_exceeds_bill'),
     staff: 'Those points are worth more than this bill. None were redeemed — redeem fewer.',
     operator: 'Those points are worth more than this bill, so none were redeemed. Redeem fewer points.',
+  },
+  // S809 2g (migration 20261009230000). redeem_loyalty_points refuses to spend points on a bill tagged
+  // to a delivery partner or carrying a partner's phone: the platform owes the bill and pays it later,
+  // so it neither earns nor spends points. Raised before the redemption is written, so none was.
+  {
+    test: e => hasCode(e, 'pos_points_delivery_partner'),
+    staff: 'This bill is on a delivery partner’s phone (Foodmandu, Pathao and the like), and a delivery partner does not earn or spend points. No points were used — undo the points and take the payment another way.',
+    operator: 'This bill carries a delivery partner’s phone, or is marked as a partner’s order. The partner owes the bill and pays it later, so it does not earn or spend loyalty points, and none were used. Undo the points and take the payment another way; a guest’s own points need the guest’s own phone on the bill.',
+  },
+  // S809 2g: the CHECK settings_pos_loyalty_point_value_positive. Customers → Loyalty already refuses 0
+  // before saving, so only a hand-made request reaches it. A 23514, so it sits above the generic rule.
+  {
+    test: e => /settings_pos_loyalty_point_value_positive/i.test(e.message || ''),
+    staff: 'A point has to be worth more than NPR 0. Nothing was changed.',
+    operator: 'The value of one loyalty point has to be more than NPR 0 (at 0 a guest would spend points and get nothing off the bill), so it was not changed. Enter what one point takes off a bill, for example 1.',
   },
   // S809 1j (migration 20261009160000). apply_pos_item_comps raises it before it writes, in the one
   // transaction that comps every line of the call, so "nothing was made complimentary" is earned.

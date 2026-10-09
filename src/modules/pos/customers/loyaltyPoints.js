@@ -1,3 +1,5 @@
+import { normalizePhone } from '../../../utils/phone'
+
 /**
  * The loyalty earn arithmetic, in one place.
  *
@@ -62,4 +64,46 @@ export function maxRedeemablePoints(balance, billTotal, pointValue) {
   const total = Number(billTotal)
   if (!Number.isFinite(total) || total <= 0) return 0
   return Math.min(bal, Math.floor(total / v))
+}
+
+/**
+ * Whether a bill's phone is one of the outlet's delivery partners' (S809 2g, CUSTOMERS-PARKING-1).
+ * A platform owes its bills and remits them later; it is in the customer book only because picking it
+ * puts its name and phone on the bill. So it neither earns nor spends points, and the till shows no
+ * points panel for it.
+ *
+ * Mirrors pos_phone_is_delivery_partner() in `20261009230000_pos_loyalty_points_s809.sql`, which
+ * award_loyalty_points and redeem_loyalty_points ask: the same text (the picker copies the partner's
+ * phone exactly), or the same number written another way, through normalizePhone (the twin of
+ * pos_customers.phone_canonical). **If you change one, change both.**
+ *
+ * @param {string} phone      The phone on the bill.
+ * @param {Array<{phone?: string}>} partners  settings.pos_delivery_partners (null when unset).
+ */
+export function isDeliveryPartnerPhone(phone, partners) {
+  const raw = String(phone || '').trim()
+  if (!raw || !Array.isArray(partners)) return false
+  const canon = normalizePhone(raw)
+  return partners.some(p => {
+    const pRaw = String(p?.phone || '').trim()
+    if (!pRaw) return false
+    if (pRaw === raw) return true
+    const pCanon = normalizePhone(pRaw)
+    return pCanon !== null && pCanon === canon
+  })
+}
+
+/**
+ * Whether the amount redeem_loyalty_points charged for the points differs from the amount the till
+ * showed (S809 2g, CUSTOMERS-PARKING-3). The server values the points at the outlet's point value at
+ * that moment; the till's figure was worked out from the value it read when the phone was entered,
+ * which a manager may have changed since. More than a paisa apart is a difference (the two sides
+ * round independently); an answer that is not a number cannot be compared and is not one.
+ */
+export function redeemedAmountDiffers(serverAmount, screenAmount) {
+  if (serverAmount === null || serverAmount === undefined || serverAmount === '') return false
+  const s = Number(serverAmount)
+  if (!Number.isFinite(s)) return false
+  const c = Number(screenAmount) || 0
+  return Math.abs(Math.round(s * 100) - Math.round(c * 100)) > 1
 }

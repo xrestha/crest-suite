@@ -192,8 +192,10 @@ it returns `{inserted, items_version, items}`. Four rules it enforces:
 - **Open orders only** (`order_not_open`).
 - **A NEW line is priced from the menu, not the tablet.** It takes `recipes.selling_price`, with VAT
   as `addItem()` computes it. The line must be a dish the till menu would offer: same client,
-  active, `pos_enabled`, not a Sub-Recipe (`line_not_on_menu` names the dish). An EXISTING line keeps
-  the price it was saved with, so a menu change mid-meal does not reprice food already ordered.
+  active, `pos_enabled`, not a Sub-Recipe, with a `selling_price` above 0 (S809 2h, the guest path's
+  rule; `line_not_on_menu` names the dish, and the till's menu read leaves such a dish out). An
+  EXISTING line keeps the price it was saved with, so a menu change mid-meal does not reprice food
+  already ordered. Comped rows count in the pulled-item record and the sent floor (S809 2h).
 - **`p_expected_version` against `pos_orders.items_version`** refuses a save from a tablet that
   loaded the order before another one saved it (`stale_order`). The screen reloads the order and
   says it changed on another device. NULL keeps the old behaviour for a stale bundle.
@@ -238,7 +240,9 @@ floor-view check.
   `defaultSelection(dishGroups)`, so a defaulted size is priced and snapshotted like any pick; the
   cart's Choices / Change button opens the window for any unsent line whose dish has groups. A failed
   option catalog read is still a failed menu read — without it a dish that must have a size could go
-  on plain, which `save_pos_order_items` accepts because it validates only rows that send options.
+  on plain. Since S809 2h `save_pos_order_items` refuses that too (`option_count`): every new line is
+  counted while Customization is live, choices sent or not, as `pos_price_selection` counts it; a line
+  already on the order keeps its exemption.
 - **A sent line's choices are never edited in place** (owner decision): remove it with a pull reason
   and add it again, so the kitchen gets a fresh ticket. Change exists only on an unsent line.
 - **Stock at close reads the SERVER snapshot, never the cart.** The cart's choices are built by the
@@ -846,7 +850,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 
 - **Every await on the close path is bounded** (`bounded()` / `CLOSE_STEP_MS` in `PosOrders.jsx`). Cancel stays disabled while a close is in flight, so an unbounded await was a till with no way out.
 - **A timeout or dropped connection on the close write is not a failure.** `closeAttemptRef` is set just before the write; `settleUnknownClose()` reads the bill: closed by this login with this close type → `finishClosedBill()` (legs, print, the rest); open straight after the timeout → keep the mark, the write can still land; unreadable → say it is unknown. The next press AND Cancel settle it first. Without this a retry was refused "already closed" and blamed on another till, and the bill never printed.
-- **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`, a Map, memory only: a lock or reload still forgets them). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print, no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
+- **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`, a Map, memory only: a lock or reload still forgets them; since 2g the lock hands back points only when no try at that bill is unsettled, never on an outlet move, and the close returns forgotten points itself). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print, no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
 - **Order after the close is an owner decision: Split legs → print → table, booking, IMS, customer, loyalty.** Legs first because of their 10-minute window and because `printBill` reads them. Print counters are not awaited. Don't move bookkeeping back in front of the paper.
 - Verified live by letting the PATCH reach the server and aborting its response (`route.fetch()` then `route.abort()`), and again with the read-back also aborted.
 - **The close buttons are never `disabled` for a missing input, only `aria-disabled`.** `closeBlocker()` is the one list: closeOrder refuses with its `text`, the button shows its `label`, and `pressClose()` opens the folded section and focuses its `field`. A new close precondition goes into `closeBlocker`, never into a button's `disabled` expression. Void asks first (`confirmVoid`). `closeStartRefusal` (`tillBillChecks.js`) runs first: unread till settings, then an emptied cart (Void exempt, owner Q8 a); `fullInvoiceRefusal` follows the buyer-ID check (a VAT bill above `ABBREVIATED_INVOICE_LIMIT`, measured on what the guest pays, needs name and address, Q9 a).
@@ -919,6 +923,16 @@ policy fixes it without touching the actual threat, which is a till JWT minting 
 
 **Loyalty is earned and spent only at the close, by the closer (S754, `20260916100000`).**
 - **`redeem_loyalty_points`** needs supervisor rank and an OPEN order.
+- **A Loyalty line belongs only on a Split charge (S809 2g, `20261009230000`).** `guard_pos_order_close`
+  hands back a standing redemption on any other close via `redeem_loyalty_points(id, 0)`, in the
+  close's transaction, so points from a try that never finished return by themselves. The till hands
+  back first before a Split charge without points. Never make the till the only path that returns them.
+- **A delivery partner neither earns nor spends (S809 2g).** award returns 0 and redeem refuses
+  (`pos_points_delivery_partner`) for a partner-tagged bill or a partner's phone in any format:
+  `pos_phone_is_delivery_partner` (SQL) and `isDeliveryPartnerPhone` (JS) are twins; change both.
+- **`settings_pos_loyalty_point_value_positive`**: a point is worth more than 0; NULL reads as 1
+  everywhere. The till never guesses an unread value and stops when the redeemed amount differs from
+  its screen (`redeemedAmountDiffers`).
 - **`award_loyalty_points`** is callable only by the order's `closed_by`, within the window after
   the server-stamped `closed_at`. A failed award cannot be retried later from the till; the Owner or
   operator can.

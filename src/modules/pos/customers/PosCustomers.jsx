@@ -391,7 +391,10 @@ export default function PosCustomers() {
       {/* ══ LOYALTY TAB ══ */}
       {mainTab === 'loyalty' && hasFeature('loyalty') && (
         <LoyaltyTab
-          pointValue={pointValue}
+          // S809 2g (CUSTOMERS-PARKING-3): only a value that was read. On a failed read the tab showed 1,
+          // so balances read at a tenth of their worth, and a Save would have written 1 over the real value.
+          pointValue={settingsRead === true ? pointValue : null}
+          pointValueError={settingsRead && settingsRead !== true ? settingsRead : null}
           // S754 (owner decision): schemes, the point value and enrolment are a POS manager's or the
           // Owner's. hasPosAccess resolves admin and the Owner to manager, so this one test is the
           // pos_loyalty_schemes_guard / pos_customers_guard_loyalty / settings guard rank.

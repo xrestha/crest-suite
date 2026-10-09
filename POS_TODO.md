@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-08 (S809 — whole-module POS re-analysis filed below as S809.0–S809.3; stage-1 decisions answered; slice 1a shipped)
+Last updated: 2026-10-09 (S809 — stages 1 and 2 complete: every slice 1a–1l and 2a–2h shipped live; stage 3 next)
 
 ---
 
@@ -61,15 +61,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | --- | --- | --- | --- | --- |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (39 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3)
+### P2 (34 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CUSTOMERS-PARKING-1 | Delivery platforms earn loyalty points on their own Credit bills. Live: BLOOM CAFE's only award went to a partner, 188 points = NPR 1,880 | 2 | — | yes |
-| CUSTOMERS-PARKING-2 | Points redeemed on a payment attempt that never finished stay spent after a reload, a till lock or a second till | 2 | — | yes |
-| CUSTOMERS-PARKING-3 | A failed read of the point value is taken as NPR 1 a point, and the till never checks what the server charged | 2 | — | no |
-| CUSTOMIZATION-1 | Option Groups treats the outlet as no-VAT when settings are missing or failed, so a choice price saved then is charged 13% over what was typed on a VAT outlet | 2 | — | no |
-| CUSTOMIZATION-3 | The server takes a must-choose dish with no choices and bills the plain price, while the QR path refuses it (KNOWN, new evidence) | 2 | — | yes |
 | ACCESS-5 | Deleting a cashier's POS login wipes their name from past bills, shifts and credit notes, though the confirm says names stay | 3 | Q17 | no |
 | ACCESS-6 | A page reload restarts the idle lock with 3 fresh minutes in the absent waiter's session | 3 | — | no |
 | ACCESS-7 | Locking one till signs that waiter out of every other till, and the other till loses its unsent order | 3 | Q18 | yes |
@@ -191,11 +186,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
 | SHIFTS-11 | A failed first read leaves the Shifts page on "Loading…" for good | 4 | — | no |
 
-### Gaps (4 open: 2 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l)
+### Gaps (3 open: 1 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l, GAP-OUTLETS-2 in 2h)
 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
-| GAP-OUTLETS-2 | Every HQ push turns each pushed dish back On POS (and Active) at every branch. On a branch whose VAT status differs from HQ's, a pushed dish with no price goes on the till at NPR 0 (no such group live) | P2 | 2 | Q25 | yes |
 | GAP-OUTLETS-3 | The Group Console counts takeaway and delivery bills as guests (REPORTS-3's rule), cuts the month at 05:45 Nepal time, and its Revenue tip over-promises | P2 | 3 | — | yes |
 | GAP-OPERATOR-2 | Inside a client's POS the operator gets every module on, whatever the client bought, so the operator's till behaves unlike the restaurant's | P3 | 4 | — | no |
 | GAP-OPERATOR-3 | What the operator does in a client's POS shows to the Owner as nobody: bills, voids, tickets, a shift and a credit note carry "—" | P3 | 4 | — | yes |
@@ -372,8 +366,8 @@ forward because their functions are rebuilt here anyway.
 | 2d ✅ | CHECKOUT-7 (shipped 2026-10-09, app only, crest-v418) | none: the close read-back path | — |
 | 2e ✅ | CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3; S809.4: a note's `created_at` is the server's (shipped 2026-10-09, `20261009210000` live, crest-v420) | link trigger on `pos_credit_notes`; a restock `sales_entries` source and `ims_stock_movements_guard` | Q10 |
 | 2f ✅ | IMS-HANDOFF-2, IMS-HANDOFF-3 (shipped 2026-10-09, `20261009220000` live, crest-v420; BLOOM's bill 40 was gone, so the repair marked 0) | `sales_entries` stamp trigger (and BLOOM bill 40's stamp); DEFINER depletion and comp-cost reads | — |
-| 2g | CUSTOMERS-PARKING-1, -2, -3 | `award_loyalty_points` / `redeem_loyalty_points`; `guard_pos_order_close` (a standing Loyalty leg, after 2c); point value > 0; BLOOM's 188 partner points zeroed | — |
-| 2h | CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2 | `save_pos_order_items` (a must-choose dish with no choices, an unpriced new line), `push_master_data` (the branch keeps On POS and Active) | Q25 |
+| 2g ✅ | CUSTOMERS-PARKING-1, -2, -3 (shipped 2026-10-09, `20261009230000` live, crest-v421; BLOOM's 188 partner points were already gone with the data clear) | `award_loyalty_points` / `redeem_loyalty_points`; `guard_pos_order_close` (a standing Loyalty leg, after 2c); point value > 0 | — |
+| 2h ✅ | CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2; S809.4: comped rows in `before_sent`/`stored_sent` (shipped 2026-10-09, `20261009240000` live, crest-v421) | `save_pos_order_items` (a must-choose dish with no choices, an unpriced new line), `push_master_data` (the branch keeps On POS and Active) | Q25 |
 
 ## S809.3 Outside POS, filed here
 
@@ -436,8 +430,9 @@ forward because their functions are rebuilt here anyway.
     late first try). Fix: send `items_version` with the close and refuse a mismatch; first check what
     bumps it (`apply_pos_item_comps`?) so a normal close is never refused. Since 2d the till says so on
     the floor when the stored lines don't add up to the money (2d).
-  - Unknown-close marks live in memory only: a PIN lock, leaving Orders or a reload forgets them, and the
-    lock still hands back a standing redemption (2d).
+  - Unknown-close marks live in memory only: a PIN lock, leaving Orders or a reload forgets them (2d).
+    ~~The lock still hands back a standing redemption.~~ Fixed in 2g: the lock skips it while a try at
+    that bill is unsettled, and the close itself returns forgotten points.
   - A 5xx from the gateway on the close write is reported to the cashier as a refusal, though the
     database may still commit it (2d).
   - The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
@@ -448,9 +443,9 @@ forward because their functions are rebuilt here anyway.
     legs short of `paid_amount` ("press Close Shift again in a moment") (2b).
   - ~~A Credit Note inserted by a client session keeps a sent `created_at`, which backdates its printed
     date: set `NEW.created_at := now()` on the non-restore path, with slice 2e (2b).~~ Fixed in 2e.
-  - `save_pos_order_items` leaves comped rows out of `before_sent` and `stored_sent`, so after a cancelled
-    close the folded, already-sent comped dish reads as not sent and could print on a KOT again. Count
-    comped rows in both, with slice 2h, which owns that function (main session, 2b review).
+  - ~~`save_pos_order_items` leaves comped rows out of `before_sent` and `stored_sent`, so after a cancelled
+    close the folded, already-sent comped dish reads as not sent and could print on a KOT again (main
+    session, 2b review).~~ Fixed in 2h: comped rows count in both.
   - Raise `pos_min_till_build()` to crest-v417 so a till older than 2a cannot charge an emptied cart, but
     only after checking that `x-crest-build` reaches `request.headers` through PostgREST in production
     (1b's open check); every till would be refused otherwise (2b).
@@ -490,9 +485,24 @@ forward because their functions are rebuilt here anyway.
   - Drafting briefs should give each parallel drafter its own scratchpad subfolder and local Postgres
     port: two drafters overwrote each other's replica scripts (2c, 2e).
 - A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
-  and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client). The
-  cart save on an outlet move also tries to cancel a standing points redemption, which fails once the
-  login has moved (1g).
+  and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client) (1g).
+  ~~The cart save on an outlet move also tries to cancel a standing points redemption, which fails once
+  the login has moved.~~ Fixed in 2g: an outlet move leaves the points for that bill's own close.
+- **Found while drafting stage 2, wave 3 (2g, 2h; 2026-10-09, not fixed):**
+  - A guest whose points stand on an open bill from an earlier try sees a lower balance on another till
+    and cannot use them there until that bill closes; a line like "N points held on bill 12" would help
+    (2g).
+  - Customers → Loyalty still offers a delivery partner's customer row for enrolment; enrolling it now
+    does nothing (cosmetic, 2g).
+  - Menu Pricing (both branches) lets a manager tick On POS on a dish with no price, and IMS recipes
+    default to `pos_enabled = true`; such a dish now just stays off the till, so Menu Pricing should say
+    "not on the till until it has a price" (2h).
+  - `push_master_data`'s preview for a dish matched by name on the first push never says its price is
+    overwritten when Selling prices is ticked; its plan table has no `DROP … IF EXISTS`, so two calls in
+    one transaction fail with 42P07 (tests only) (2h).
+  - The till's menu read requires `is_active`/`pos_enabled = true` while `save_pos_order_items` accepts
+    NULL (0 NULL rows, latent), and the till's `option_count` message names no dish though the server
+    sends one (CUSTOMIZATION-2 would help) (2h).
 
 ---
 

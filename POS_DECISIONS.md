@@ -180,6 +180,27 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 2, slice 2h: CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2 (P2), owner decision
+  Q25 (a); plus the S809.4 comped-rows item~~ — **shipped S809, 2026-10-09**, migration
+  `20261009240000` applied live (crest-v421). `save_pos_order_items` counts every new line of a
+  customizable dish while Customization is live, choices sent or not (`option_count`, the guest path's
+  rule), refuses a new line whose dish has no `selling_price` above 0 (`line_not_on_menu`), and counts
+  comped rows as sent. Option Groups takes its VAT basis from `vatModeOf` and saves nothing while it is
+  unknown. **Q25 (a):** `push_master_data` never writes a branch's `pos_enabled` or `is_active` on
+  update, and never writes a price HQ does not have. **Decided (owner, 2026-10-09, as recommended):** a
+  dish priced NPR 0 counts as unpriced and stays off the till (give things away through Complimentary);
+  a NEW dish pushed from HQ starts as it is at HQ, but off the till when HQ has not priced it. Original
+  rows: `CUSTOMIZATION.md`, `GAPS.md`.
+- [x] ~~S809 stage 2, slice 2g: CUSTOMERS-PARKING-1, -2, -3 (P2)~~ — **shipped S809, 2026-10-09**,
+  migration `20261009230000` applied live (crest-v421). A delivery partner neither earns nor spends
+  points (partner tag or partner phone in any format, `pos_phone_is_delivery_partner`). Points left on a
+  bill by an unfinished payment are handed back by `guard_pos_order_close` on any close that is not a
+  Split charge; refusing such a close instead was rejected, because it would add a refusal mid-service
+  to every till build. Point value > 0 is a CHECK (it sees every writer), and the till never guesses an
+  unread value and stops when the server's redeemed amount differs. BLOOM CAFE's 188 partner points had
+  already gone with the owner's data clear, so nothing was zeroed. **Decided (owner, 2026-10-09, as
+  recommended):** a partner-tagged bill with the guest's own phone earns nothing. Original rows:
+  `CUSTOMERS-PARKING.md`.
 - [x] ~~S809 stage 2, slice 2f: IMS-HANDOFF-2, IMS-HANDOFF-3 (P2)~~ — **shipped S809, 2026-10-09**,
   migration `20261009220000` applied live (crest-v420). The database marks a bill posted to Inventory in
   the same transaction as its sales rows (`sales_entries_stamp_pos_source`), and a credit note from its
