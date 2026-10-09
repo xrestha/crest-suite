@@ -180,6 +180,15 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 2, slice 2d: CHECKOUT-7 (P2)~~ — **shipped S809, 2026-10-09**, app only (crest-v418).
+  A close whose answer was lost stays unknown until nothing of it can still land (30 s after its last
+  unanswered write, over the live 8 s statement and lock timeouts). Meanwhile its payment controls stay
+  locked to what was sent, Cancel discards nothing, the floor marks the table "Payment not yet known",
+  and the till re-reads every 15 s. A bill the first try closed is finished from what was STORED, never
+  the screen, and the floor says so when they differ. **Decided (as built, recommended):** a first try
+  that lands after the cashier moved on does NOT print by itself, since the guest has usually gone and a
+  bill appearing mid-service confuses; the floor says to reprint it from Recent Bills, and its Inventory
+  post is left to Periods. Original row: `CHECKOUT.md`.
 - [x] ~~S809 stage 2, slice 2a: ORDER-FLOW-1 (= CHECKOUT-9, P1), CHECKOUT-1 till half (P1), CHECKOUT-5
   (P2), owner decisions Q8 (a), Q9 (a)~~ — **shipped S809, 2026-10-09**, app only (crest-v417). The till
   bills only on settings from a read that answered in this visit: a failed or stalled read is never used

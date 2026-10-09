@@ -62,14 +62,13 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers. The till half shipped in 2a; the database backstop is 2b | 2 | Q8 | yes |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (52 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5)
+### P2 (51 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 | CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
 | CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
 | CHECKOUT-6 | After an outlet deregisters from VAT, every reprint or view of an old Tax Invoice prints a smaller total (KNOWN, now with the reprint effect) | 2 | — | yes |
-| CHECKOUT-7 | When a close's first try lands late, the bill prints and posts with the cashier's later changes, not the stored payment | 2 | — | no |
 | CHECKOUT-10 | A comp left by a failed, cancelled close reloads as a second plain line, and comping again comps more than was ordered | 2 | — | yes |
 | CREDIT-NOTES-1 | Crediting a bill to re-ring it, as the guide says, or any "Duplicate bill" note, leaves the food counted twice in Inventory usage and that month's Variance | 2 | Q10 | yes |
 | CREDIT-NOTES-2 | A dropped connection mid-note leaves the bill unlinked for good. The note doesn't print, the cash refund and points reversal never run, and nothing can run them later | 2 | — | yes |
@@ -385,7 +384,7 @@ forward because their functions are rebuilt here anyway.
 | 2a ✅ | CHECKOUT-1 (till half), ORDER-FLOW-1 (= CHECKOUT-9), CHECKOUT-5 (shipped 2026-10-09, app only, crest-v417) | none: the till's settings read, the Bill Register view, `closeBlocker` | Q8, Q9 |
 | 2b | CHECKOUT-1 (server half), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4, CHECKOUT-10, SHIFTS-1 (database half), SHIFTS-7 (P3); S809.4: `apply_pos_item_comps`' skipped partial row | `guard_pos_order_close` (empty bill, open shift `FOR SHARE`, invoice year from the Nepal date), `guard_pos_credit_note` (year), `apply_pos_item_comps` (year, `comped` filter), `pos_cash_movements_guard` (`FOR SHARE`), `pos_shifts_guard` (`closed_at := now()`) | Q8 |
 | 2c | CHECKOUT-6, REPORTS-1, CREDIT-NOTES-5 (P3) | `pos_orders.vat_registered`, stamped at the close (after 2b) | — |
-| 2d | CHECKOUT-7 | none: the close read-back path | — |
+| 2d ✅ | CHECKOUT-7 (shipped 2026-10-09, app only, crest-v418) | none: the close read-back path | — |
 | 2e | CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3 | link trigger on `pos_credit_notes`; a restock `sales_entries` source and `ims_stock_movements_guard` | Q10 |
 | 2f | IMS-HANDOFF-2, IMS-HANDOFF-3 | `sales_entries` stamp trigger (and BLOOM bill 40's stamp); DEFINER depletion and comp-cost reads | — |
 | 2g | CUSTOMERS-PARKING-1, -2, -3 | `award_loyalty_points` / `redeem_loyalty_points`; `guard_pos_order_close` (a standing Loyalty leg, after 2c); point value > 0; BLOOM's 188 partner points zeroed | — |
@@ -445,6 +444,20 @@ forward because their functions are rebuilt here anyway.
   access"), because Outlet Access stores no home row, so the top-bar switcher's home entry fails for
   allowlisted staff (latent, 0 rows). The till's new buttons send NULL. Fix: `outletSwitchArg` inside
   `switchOutlet`, or home-by-id as the reset in SQL (1g).
+- **Found while drafting stage 2 (2026-10-09, not fixed):**
+  - The close write does not pin the lines it priced: `guard_pos_order_close` accepts a close whose
+    `items_version` moved since `paid_amount` was worked out (a second press's save landing before a
+    late first try). Fix: send `items_version` with the close and refuse a mismatch; first check what
+    bumps it (`apply_pos_item_comps`?) so a normal close is never refused. Since 2d the till says so on
+    the floor when the stored lines don't add up to the money (2d).
+  - Unknown-close marks live in memory only: a PIN lock, leaving Orders or a reload forgets them, and the
+    lock still hands back a standing redemption (2d).
+  - A 5xx from the gateway on the close write is reported to the cashier as a refusal, though the
+    database may still commit it (2d).
+  - The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
+    "reprint it from Recent Bills" (2d).
+  - `viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
+    no time limit; `reprintItemCompSlip` drops both read errors and prints nothing silently (2a).
 - A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
   and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client). The
   cart save on an outlet move also tries to cancel a standing points redemption, which fails once the

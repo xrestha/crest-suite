@@ -3265,6 +3265,12 @@ textarea::placeholder {
   font-weight: 600;
 }
 
+/* `.btn:disabled`'s treatment. First used by the payment window's tabs while a close is unsettled (S809). */
+.tab-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .tab-bar {
   display: flex;
   gap: 6px;
@@ -3349,6 +3355,24 @@ textarea::placeholder {
 .pay-method-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+/* Locked while a close's first try is still unsettled (S809 CHECKOUT-7). The chosen method keeps its
+   fill — it is what the cashier must read: the payment that was sent — and the others step back. */
+.pay-method-btn:disabled {
+  cursor: not-allowed;
+}
+.pay-method-btn:disabled:not(.pay-method-btn--selected) {
+  opacity: 0.55;
+}
+
+/* The payment window's method, tender and discount controls as one group, so a single `disabled`
+   locks them all (S809). A bare fieldset brings a border, padding and a min-content width. */
+.pay-lock {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
 }
 
 /* Red tint rather than a solid red fill (DESIGN.md's Danger-button spec): --theme-red ranges from
