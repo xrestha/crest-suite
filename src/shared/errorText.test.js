@@ -562,6 +562,48 @@ describe('POS payment-line and customer-book refusals (S809 1i)', () => {
   })
 })
 
+// S809 3k (migration 20261010110000, owner decision Q13 b): adjust_loyalty_points.
+describe('hand corrections of a points balance (S809 3k)', () => {
+  const codes = ['pos_points_adjust_rank', 'pos_points_adjust_amount', 'pos_points_adjust_reason',
+    'pos_points_adjust_below_zero', 'pos_points_adjust_partner', 'pos_points_adjust_no_customer']
+
+  it('every code has its own sentence in both audiences, ahead of the generic ones', () => {
+    const generic = { staff: errorText({ code: '42501' }, 'staff'), operator: errorText({ code: '42501' }, 'operator') }
+    const fallback = { staff: errorText({ message: 'x' }, 'staff'), operator: errorText({ message: 'x' }, 'operator') }
+    const seen = new Set()
+    for (const c of codes) {
+      for (const aud of ['staff', 'operator']) {
+        const text = errorText({ code: c === 'pos_points_adjust_rank' ? '42501' : 'P0001', hint: c, message: 'refused' }, aud)
+        expect([c, text]).not.toEqual([c, generic[aud]])
+        expect([c, text]).not.toEqual([c, fallback[aud]])
+        // Raised before the ledger row is written, so each may say so.
+        expect([c, text]).toEqual([c, expect.stringMatching(/No points were changed|no points were changed|none were added/)])
+        seen.add(text)
+      }
+    }
+    expect(seen.size).toBe(codes.length * 2)
+  })
+
+  it('the message alone still matches when the hint was lost', () => {
+    const msg = 'pos_points_adjust_below_zero: this customer holds 40 points, so at most 40 can be taken off, and no points were changed'
+    expect(errorText({ message: msg }, 'operator')).toBe(errorText({ code: 'P0001', hint: 'pos_points_adjust_below_zero', message: msg }, 'operator'))
+  })
+
+  it('the till and the award refusals send the reader to Customers → Loyalty, not to "ask the Owner" with nowhere to go', () => {
+    const late = { code: '42501', hint: 'award_window_closed', message: 'This bill closed too long ago …' }
+    const notCloser = { code: '42501', hint: 'rank_required', message: 'Points for a bill are added by the person who closed it, as it closes — …' }
+    for (const err of [late, notCloser]) {
+      for (const aud of ['staff', 'operator']) expect(errorText(err, aud)).toMatch(/Customers → Loyalty/)
+    }
+  })
+
+  it('a phone change still says the points stay with the old number, and now how to move them', () => {
+    const err = { code: '42501', hint: 'pos_customer_phone_locked', message: "pos_customer_phone_locked: a customer's phone number and outlet …" }
+    expect(errorText(err, 'operator')).toMatch(/stay with the old number/)
+    expect(errorText(err, 'operator')).toMatch(/Adjust in Customers → Loyalty/)
+  })
+})
+
 describe('login link refusals (S798 3f-1)', () => {
   const raised = (name, code = 'P0001') => ({ code, message: `${name}: …` })
 

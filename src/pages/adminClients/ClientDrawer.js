@@ -315,7 +315,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setLoadingUsers(true); setUsersLoadErr(null)
     const { data: profs, error: profErr } = await supabase
       .from('profiles')
-      .select('id, full_name, role, client_id')
+      // pos_email: a till login's Delete goes through delete_pos_staff (S809 3i, deleteUser below).
+      .select('id, full_name, role, client_id, pos_email')
       .eq('client_id', client.id)
     // "No users yet for this client" on a failed read is a claim the operator acts on — by
     // creating a second Owner login (S736). Render the failure instead.
@@ -431,8 +432,26 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     if (!window.confirm(`Delete "${user.full_name}" (${user.email})? This permanently removes the login and frees the email to be reused.`)) return
     setUserError('')
     try {
-      await adminOp('deleteUser', { userId: user.id })
+      // A till (PIN) login goes through delete_pos_staff (S809 ACCESS-5): it refuses a login that has
+      // recorded anything at the till, whose delete would take the name off those bills, shifts and
+      // tickets, and the operator is offered Block instead, as POS Staff offers it.
+      if (user.pos_email) await adminOp('delete_pos_staff', { client_id: client.id, userId: user.id })
+      else await adminOp('deleteUser', { userId: user.id })
     } catch (err) {
+      if (err.code === 'pos_login_has_records') {
+        if (!window.confirm(`${err.message}\n\nBlock ${user.full_name || 'this login'} now?`)) {
+          setUserError(`${user.full_name || 'The login'} was not deleted, and their PIN still works.`)
+          return
+        }
+        try {
+          await adminOp('block_pos_staff', { client_id: client.id, userId: user.id })
+          setUserSuccess(`✓ ${user.full_name || 'The login'} is blocked: it can no longer sign in, and its name stays on everything it recorded.`)
+        } catch (blockErr) {
+          // admin-user-ops' refusal is already a sentence naming the person and what happened.
+          setUserError(blockErr.message)
+        }
+        return
+      }
       const alreadyGone = /not found/i.test(err.message)
       if (!alreadyGone) {
         // Auth user still exists but deletion failed — don't remove the profile
@@ -830,9 +849,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         })
         const restoredCount = accounts.restored?.length || 0
         note = restoredCount ? ` ${restoredCount} PIN login${restoredCount !== 1 ? 's' : ''} restored with their original PINs.` : ''
-        // A settled leaver's till or count PIN comes back blocked, as their settlement left it (S798).
-        const blockedBack = (accounts.restored || []).filter(r => /blocked/.test(r.kind))
+        // A settled leaver's till or count PIN comes back blocked, as their settlement left it (S798),
+        // and a till login POS Staff blocked comes back blocked too (S809 3i).
+        const blockedBack = (accounts.restored || []).filter(r => /blocked \(settled leaver\)/.test(r.kind))
         if (blockedBack.length) note += ` Restored blocked, as their Final Settlement left them: ${blockedBack.map(r => r.full_name).join(', ')}.`
+        const posBlockedBack = (accounts.restored || []).filter(r => /blocked \(POS Staff\)/.test(r.kind))
+        if (posBlockedBack.length) note += ` Restored blocked, as POS Staff had blocked them: ${posBlockedBack.map(r => r.full_name).join(', ')}.`
         if (accounts.manual?.length) {
           note += ` ${accounts.manual.length} account${accounts.manual.length !== 1 ? 's' : ''} must be recreated by hand: ` +
             accounts.manual.map(m => `${m.full_name} (${m.kind})`).join(', ') + '.'
@@ -852,8 +874,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       const renamedNote = result.renamed?.length
         ? ` ${result.renamed.length} duplicate item name${result.renamed.length !== 1 ? 's were' : ' was'} restored with a "-DUP" suffix — merge or retire them in Item Master: ${result.renamed.join(', ')}.`
         : ''
-      setRestoreMsg(`${relink.failed ? 'error' : 'ok'}:Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}` +
-        (result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}.` : ''))
+      // A restore that left rows behind is not a success, however much else landed (S809 DATABASE-3):
+      // it leads with what is missing, in the error colour. `skipped` holds only losses now; the kept
+      // feature flags and the tables left out by design are `notes`, which do not change the colour.
+      const lost = result.skipped || []
+      const lostNote = lost.length
+        ? `The restore is NOT complete: ${lost.length} part${lost.length !== 1 ? 's' : ''} did not come back — ${lost.join('; ')}. `
+        : ''
+      const notesLine = result.notes?.length ? ` ${result.notes.join(' ')}` : ''
+      setRestoreMsg(`${relink.failed || lost.length ? 'error' : 'ok'}:${lostNote}Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}${notesLine}`)
       onClientUpdated()
     } catch (err) {
       setRestoreMsg('error:' + err.message)
@@ -902,9 +931,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   async function handleClearModule(module) {
     const labels = {
-      ims: 'IMS transactions (purchases, stock counts, wastage, staff meals, sales, budgets, payables, POs, requisitions, overheads, stock movements)\n\nKEPT: items, vendors, categories, recipes, par levels, and periods',
+      ims: 'IMS transactions (purchases, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, overheads)\n\nKEPT: items, vendors, categories, recipes, par levels, periods, and everything the till posted to Inventory (its sales and stock movements stay with its bills)',
       hr:  'HR transactions (attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster)\n\nKEPT: employees, salary components, leave types, holiday calendar, shift types',
-      pos: 'POS transactions (orders, order items, shifts, customers, POS-sourced sales entries, stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs. Occupied tables are freed.',
+      pos: 'POS transactions (orders, order items, shifts, customers, and what the till posted to Inventory: its sales entries and stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs, and hand-entered sales with their stock movements. Occupied tables are freed.',
     }
     if (!window.confirm(
       `Clear ${module.toUpperCase()} transactions for "${client.name}"?\n\n` +
@@ -2125,7 +2154,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 Clear one module — transactions only, setup kept
               </p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-                <Tip text="Deletes IMS activity: purchases, stock counts, wastage, staff meals, sales, budgets, payables, POs, requisitions, overheads, stock movements, demand forecast runs. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll). Cannot be undone.">
+                <Tip text="Deletes IMS activity: purchases, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, overheads, demand forecast runs. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll), and what the till posted to Inventory. Cannot be undone.">
                   <button onClick={() => handleClearModule('ims')} disabled={deleting}
                     className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'ims' ? 'Working…' : 'Clear IMS Transactions'}
@@ -2137,7 +2166,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     {deletingAction === 'hr' ? 'Working…' : 'Clear HR Transactions'}
                   </button>
                 </Tip>
-                <Tip text="Deletes POS activity: orders, order items, shifts, customers, credit notes, payment confirmations, guest order requests, POS-sourced sales entries, and the stock-movements ledger. Keeps tables, floor plan, and staff accounts/PINs; occupied tables are freed. Invoice numbering restarts. Cannot be undone.">
+                <Tip text="Deletes POS activity: orders, order items, shifts, customers, credit notes, payment confirmations, guest order requests, and what the till posted to Inventory (its sales entries and stock movements). Keeps tables, floor plan, staff accounts/PINs, and hand-entered sales with their stock movements; occupied tables are freed. Invoice numbering restarts. Cannot be undone.">
                   <button onClick={() => handleClearModule('pos')} disabled={deleting}
                     className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'pos' ? 'Working…' : 'Clear POS Transactions'}

@@ -180,6 +180,29 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 3, slice 3k: CUSTOMERS-PARKING-4, -5, -8 (P2), CUSTOMERS-PARKING-12 (P3), owner
+  decision Q13 (b); plus two S809.4 items (the customer book's audit trail, a delivery partner's row
+  offered for enrolment)~~ — **shipped S809, 2026-10-09**, migration `20261010110000` applied live
+  (crest-v424). A customer is the number, not the spelling: `award_`/`redeem_loyalty_points` find the
+  customer by `phone_canonical` (7+ digits), the till stores the bill's phone as the number, and the
+  partial unique key `pos_customers_client_phone_canonical_key` holds one customer per number per outlet
+  (the raw-text key stays for older tills). **Q13 (b):** `adjust_loyalty_points` lets the Owner and POS
+  managers add or take off points by hand in Customers → Loyalty → Adjust, with a reason kept against
+  their name; never below 0 by hand, never adding to a delivery partner's number, no bill attached.
+  Loyalty lists every customer, with a search. **Decided (owner, 2026-10-09):** a one-tap "add the
+  points this bill earned" and a "Move points" action for a regular's new number are both stage-4
+  builds. Original rows: `CUSTOMERS-PARKING.md`.
+- [x] ~~S809 stage 3, slice 3i: ACCESS-5, DATABASE-2, DATABASE-3 (P2), DATABASE-6 (P3), owner decision
+  Q17 (a)~~ — **shipped S809, 2026-10-09**, migration `20261010100000` applied live, `admin-user-ops`
+  v65 (crest-v424). **Q17 (a):** POS Staff blocks a leaver (`pos_set_login_blocked`: marker
+  `profiles.pos_blocked_at`, ban, sessions ended, in one transaction); `pos_caller_has_rank`, Till
+  Devices and the till's picker refuse a blocked login; Delete works only for a login with nothing in
+  `pos_login_recorded_rows` (every non-cascading key to a login, read from the catalog); Unblock is for
+  a mistake and is refused for an HR leaver; a Final Settlement's block stays HR's. Clear POS and Clear
+  IMS each remove only their own module's sales and stock rows, and `stock_movements_source_check`
+  holds the four sources between them. A restore follows every parent a key names (parking slips after
+  bills, cash movements after credit notes), leaves the guest-order and payment-confirmation tables out
+  on purpose, and says in red what it could not bring back. Original rows: `ACCESS.md`, `DATABASE.md`.
 - [x] ~~S809 stage 3, slice 3a: GUEST-1 (P1), ORDER-FLOW-9 (P2), owner decision Q11 (a)~~ — **shipped
   S809, 2026-10-09**, app only (crest-v423), no migration. **Q11 (a):** Accept puts a guest's
   order-wide note on each of their dishes ("Guest: …"); on a line that already held the table's food

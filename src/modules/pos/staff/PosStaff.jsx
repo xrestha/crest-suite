@@ -53,6 +53,14 @@ async function edgeRefusal(error, data) {
   return error ? errorLine(error) : ''
 }
 
+// The whole answer body, for a refusal that carries a `code` as well as its sentence (S809 3i: a
+// Delete refused because the login recorded something offers Block). A response body reads once, so
+// a caller uses this OR edgeRefusal, never both.
+async function edgeBody(error, data) {
+  if (data?.error) return data
+  try { return await error?.context?.json() } catch (_) { return null }
+}
+
 export default function PosStaff() {
   const { clientId, hasPosAccess, hrEnabled, isAdmin, isOwner, profile } = useAuth()
   // What this viewer may hand out (S754 — mirrors admin-user-ops' refusePosPowerEscalation and
@@ -72,23 +80,26 @@ export default function PosStaff() {
     if (p.pos_role === 'manager') return 'A manager’s login is changed by the account owner.'
     return ''
   }
-  // Reset PIN only (S809 ACCESS-3, owner decision Q5): never the PIN of someone holding a power this
-  // viewer lacks, because a new PIN would let the viewer sign in as them and use it. Mirrors the
-  // server's posPowerBeyondCaller in its order: discount first (blank = no limit), then Void. The
-  // rest of the row stays editable: taking a power away is always allowed.
-  const resetLockReason = p => {
+  // Reset PIN (S809 ACCESS-3, owner decision Q5), and Block, Unblock and Delete (S809 3i, the same
+  // rule): never on someone holding a power this viewer lacks; a new PIN would let the viewer sign in
+  // as them and use it. Mirrors the server's posPowerBeyondCaller in its order: discount first
+  // (blank = no limit), then Void. The rest of the row stays editable: taking a power away is always
+  // allowed. `ownerDoes` ends the sentence, e.g. "resets this PIN".
+  const powerLockReason = (p, ownerDoes) => {
     const rowReason = rowLockReason(p)
     if (rowReason || canGrantAnything) return rowReason
     const name = p.full_name || 'This staff member'
     const limit = p.pos_discount_limit === null || p.pos_discount_limit === undefined ? null : Number(p.pos_discount_limit)
     if (viewerCap !== null && (limit === null || limit > viewerCap)) {
-      return `${name} can give bigger discounts than your login can, so the account owner resets this PIN.`
+      return `${name} can give bigger discounts than your login can, so the account owner ${ownerDoes}.`
     }
     if (p.pos_allow_void === true && !viewerCanVoid) {
-      return `${name} can void bills and your login cannot, so the account owner resets this PIN.`
+      return `${name} can void bills and your login cannot, so the account owner ${ownerDoes}.`
     }
     return ''
   }
+  const resetLockReason = p => powerLockReason(p, 'resets this PIN')
+  const removeLockReason = p => powerLockReason(p, 'blocks, unblocks or deletes this login')
   const { scopedFrom } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const [staff,       setStaff]       = useState([])
@@ -358,15 +369,20 @@ export default function PosStaff() {
 
   // ── Delete staff ───────────────────────────────────────────────────────────
   // Deleting a PIN login is irreversible, so the ask is the product's own dialog (S682).
+  // S809 ACCESS-5 (owner decision Q17 a): Delete is only for a login that recorded nothing. A deleted
+  // login's id is wiped from every bill, shift, ticket and note it is on, which this confirm used to
+  // promise the opposite of. The server decides (admin-user-ops reads every column that names a
+  // login) and refuses with the way out, Block, which this page then offers.
   function deleteStaff(p) {
     askConfirm({
       title: `Delete ${p.full_name}'s POS login?`,
       confirmLabel: 'Delete Login', danger: true, busyLabel: 'Deleting…',
       body: (
         <p style={{ margin: 0 }}>
-          {p.full_name}'s PIN stops working at the till immediately. Bills they closed keep their name on the audit trail and
-          the Sales Exception Report. To give them access again later you will create a new login with a new PIN. This
-          cannot be undone.
+          Delete is only for a login that has not recorded anything. If {p.full_name} has closed a bill, run a shift,
+          sent a kitchen ticket or recorded anything else at the till, deleting would take their name off those
+          records, so you will be offered Block instead, which keeps it. A deleted login cannot be brought back:
+          giving them access again means a new login with a new PIN.
         </p>
       ),
       run: async () => {
@@ -375,7 +391,18 @@ export default function PosStaff() {
           body: { action: 'delete_pos_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
-          const why = await edgeRefusal(error, data)
+          const body = await edgeBody(error, data)
+          const why = body?.error || (error ? errorLine(error) : '')
+          // The login has recorded something: nothing was deleted, and Block is the way out, unless it
+          // is blocked already (here or by a Final Settlement), when there is nothing more to do.
+          if (body?.code === 'pos_login_has_records') {
+            if (p.settlement_blocked === true || p.pos_blocked_at) {
+              setMsg(`${p.full_name}'s login stays: it has recorded work at the till, so deleting it would take their name off those records. It is already blocked, so it cannot sign in.`)
+            } else {
+              offerBlockInstead(p, why)
+            }
+            return
+          }
           // Only a refusal the function WROTE proves the login survived; a dropped call does not.
           const answered = !!data?.error || error?.name === 'FunctionsHttpError'
           setMsg(answered
@@ -387,6 +414,75 @@ export default function PosStaff() {
         load()
       },
     })
+  }
+
+  // ── Block / Unblock (S809 ACCESS-5, owner decision Q17 a) ───────────────────
+  // Removing a leaver's till login blocks it: the PIN stops signing in, the login leaves the till's
+  // staff picker, any session it has is ended, and the login stays so its name stays on everything
+  // it recorded. Final Settlement's shape, for a restaurant that settles nobody in HR. Unblock is for
+  // a block made by mistake. Same rank as Delete (removeLockReason; the server checks it again).
+  function blockStaff(p) {
+    askConfirm({
+      title: `Block ${p.full_name}'s POS login?`,
+      confirmLabel: 'Block Login', danger: true, busyLabel: 'Blocking…',
+      body: blockBody(p),
+      run: () => setBlocked(p, true),
+    })
+  }
+  function offerBlockInstead(p, why) {
+    askConfirm({
+      title: `Block ${p.full_name}'s login instead?`,
+      confirmLabel: 'Block Login', danger: true, busyLabel: 'Blocking…',
+      body: (
+        <div>
+          <p style={{ margin: '0 0 8px' }}>{why || `${p.full_name} has recorded work at the till, so their login cannot be deleted.`}</p>
+          {blockBody(p)}
+        </div>
+      ),
+      run: () => setBlocked(p, true),
+    })
+  }
+  function blockBody(p) {
+    return (
+      <p style={{ margin: 0 }}>
+        {p.full_name}'s PIN stops signing in and they leave the till's staff list now. A till they are still signed
+        in on loses their access within the hour, and cannot close a bill, run a shift or move cash for them
+        meanwhile. Their name stays on every bill, shift and ticket they recorded. If this is a mistake, Unblock
+        gives the login back as it was.
+      </p>
+    )
+  }
+  function unblockStaff(p) {
+    askConfirm({
+      title: `Unblock ${p.full_name}'s POS login?`,
+      confirmLabel: 'Unblock Login', busyLabel: 'Unblocking…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {p.full_name}'s PIN signs in again straight away, with the same access level, discount limit and Void
+          permission as before. Unblock a login blocked by mistake; for someone who left and is coming back, check
+          their access level and PIN first.
+        </p>
+      ),
+      run: () => setBlocked(p, false),
+    })
+  }
+  async function setBlocked(p, blocking) {
+    setMsg('')
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: blocking ? 'block_pos_staff' : 'unblock_pos_staff', client_id: clientId, userId: p.id },
+    })
+    if (error || data?.error) {
+      const why = await edgeRefusal(error, data)
+      // The function writes its refusal as a sentence that says what happened; a dropped call proves
+      // nothing either way, so the list is read again.
+      const answered = !!data?.error || error?.name === 'FunctionsHttpError'
+      setMsg(answered
+        ? why || `${p.full_name}'s login was not ${blocking ? 'blocked' : 'unblocked'}.`
+        : `It is not known whether ${p.full_name}'s login was ${blocking ? 'blocked' : 'unblocked'}: the call did not come back. Reload the page to see. ` + why)
+      if (!answered) load()
+      return
+    }
+    load()
   }
 
   // ── Reset PIN ──────────────────────────────────────────────────────────────
@@ -587,7 +683,7 @@ export default function PosStaff() {
                     1280 and 270px at 768, so Delete rendered clipped and Reset PIN scrolled off
                     entirely on a tablet. An opaque background is required or the scrolled-away
                     columns show through underneath. */}
-                <th style={{ width: 200, position: 'sticky', right: 0, background: 'var(--theme-card)', zIndex: 2 }}>Actions</th>
+                <th style={{ width: 260, position: 'sticky', right: 0, background: 'var(--theme-card)', zIndex: 2 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -607,6 +703,12 @@ export default function PosStaff() {
                 const pinLockReason = resetLockReason(p)
                 const rowDisabled = !!saving[p.id] || !!lockReason
                 const blocked = p.settlement_blocked === true
+                // S809 3i: blocked from this page (Block), not by a settlement. Unblock is offered.
+                const posBlocked = !blocked && !!p.pos_blocked_at
+                const removeReason = removeLockReason(p)
+                const resetReason = blocked ? 'Blocked at Final Settlement — a new PIN would not let them sign in.'
+                  : posBlocked ? 'This login is blocked — unblock it first; a new PIN would not let them sign in.'
+                  : pinLockReason
                 return (
                   <tr key={p.id}>
                     <td>
@@ -616,7 +718,12 @@ export default function PosStaff() {
                           <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Blocked at settlement</span>
                         </Tip>
                       )}
-                      {lockReason && !blocked && (
+                      {posBlocked && (
+                        <Tip text={`Blocked here${nepalBsLong(p.pos_blocked_at) ? ` on ${nepalBsLong(p.pos_blocked_at)}` : ''}: this PIN no longer signs in and the login is off the till's staff picker. It is kept so every bill, shift and ticket they recorded keeps their name. Unblock it if it was blocked by mistake.`}>
+                          <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Login blocked</span>
+                        </Tip>
+                      )}
+                      {lockReason && !blocked && !posBlocked && (
                         <Tip text={lockReason}>
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)', marginRight: 6 }}>Owner changes this login</span>
                         </Tip>
@@ -720,19 +827,34 @@ export default function PosStaff() {
                     </td>
                     <td style={{ position: 'sticky', right: 0, background: 'var(--theme-card)' }}>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        {/* A settlement-blocked login cannot sign in whatever its PIN, so a new PIN
-                            would only look like access restored (S754). */}
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}
-                          disabled={blocked || !!pinLockReason}
-                          title={blocked ? 'Blocked at Final Settlement — a new PIN would not let them sign in.' : pinLockReason || undefined}>
+                        {/* A blocked login (settlement or Block) cannot sign in whatever its PIN, so a
+                            new PIN would only look like access restored (S754). */}
+                        {/* aria-disabled, so a press on a phone says why (S809 3i; the S759 pattern). */}
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
+                          onClick={() => { if (resetReason) { setMsg(resetReason); return } openReset(p) }}
+                          aria-disabled={resetReason ? true : undefined}
+                          title={resetReason || undefined}>
                           Reset PIN
                         </button>
+                        {/* S809 3i: Block keeps the login and its name on every record; Unblock undoes a
+                            block made here. A settlement's block is HR's, so neither is offered on it.
+                            aria-disabled, not disabled: a press says why (the S759 pattern). */}
+                        {!blocked && (
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => { if (removeReason) { setMsg(removeReason); return } if (posBlocked) unblockStaff(p); else blockStaff(p) }}
+                            aria-disabled={removeReason ? true : undefined}
+                            title={removeReason || (posBlocked
+                              ? 'Let this PIN sign in again — for a login blocked by mistake.'
+                              : 'Stop this PIN signing in, and keep their name on every bill, shift and ticket they recorded.')}>
+                            {posBlocked ? 'Unblock' : 'Block'}
+                          </button>
+                        )}
                         <button
                           className="btn btn-ghost"
                           style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
-                          onClick={() => deleteStaff(p)}
-                          disabled={!!lockReason}
-                          title={lockReason || undefined}
+                          onClick={() => { if (removeReason) { setMsg(removeReason); return } deleteStaff(p) }}
+                          aria-disabled={removeReason ? true : undefined}
+                          title={removeReason || 'Only for a login that has not recorded anything at the till; otherwise you are offered Block.'}
                         >
                           Delete
                         </button>

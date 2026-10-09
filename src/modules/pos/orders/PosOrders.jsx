@@ -7,6 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature, mapSignature } from '../../../shared/setIfChanged'
 import { pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers } from '../customers/loyaltyPoints'
+import { phoneForRecord, customerPhoneKey } from '../../../utils/phone'
 import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { contrastRatio } from '../../../utils/avatarColor'
@@ -943,9 +944,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     const phone = buyerPhone.trim()
     if (!phone) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
     let cancelled = false
+    // S809 3k (CUSTOMERS-PARKING-4): found by the number, however it is typed, as the server finds it.
+    const key = customerPhoneKey(phone)
     const timer = setTimeout(async () => {
       const [custRes, setRes] = await Promise.all([
-        scopedFrom('pos_customers', 'id, name').eq('phone', phone).maybeSingle(),
+        scopedFrom('pos_customers', 'id, name').eq(key.column, key.value).maybeSingle(),
         supabase.from('settings').select('pos_loyalty_point_value').eq('client_id', clientId).maybeSingle(),
       ])
       if (cancelled) return
@@ -977,7 +980,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     invoice_no: null, invoice_fy: null,
     payment_method: splitMode && tenders.length > 0 ? 'Split' : payMethod,
     tendered_amount: !splitMode && payMethod === 'Cash' ? resolveTendered(payTotal) : null,
-    buyer_name: buyerName, buyer_address: buyerAddress, buyer_pan: buyerPan, buyer_phone: buyerPhone,
+    buyer_name: buyerName, buyer_address: buyerAddress, buyer_pan: buyerPan, buyer_phone: phoneForRecord(buyerPhone),
     bill_remarks: billRemarks, close_reason: closeReason,
     discount_amount: discountAmt,
     table_name: activeTable?.name, order_no: orderNo, print_count: 0,
@@ -2963,7 +2966,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // left to retry — the ref is dropped and the caller says who can fix the balance.
       if (error.hint === HINT.notOpen) {
         if (liveRedemptionRef.current === live) liveRedemptionRef.current = null
-        return { ok: false, closed: true, text: 'The bill is already closed, so any points redeemed on it can no longer be handed back from the till — ask the Owner to check the customer’s balance.' }
+        return { ok: false, closed: true, text: 'The bill is already closed, so any points redeemed on it can no longer be handed back from the till — the Owner or a POS manager can check the customer’s points and correct them in Customers → Loyalty.' }
       }
       return { ok: false, text: error.hint === HINT.rank ? 'Handing points back needs a POS Supervisor login or above.' : errorText(error, 'staff') }
     }
@@ -3270,7 +3273,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   function buyerCustomerRow() {
     if (!buyerName.trim() || !buyerPhone.trim()) return null
     return {
-      name: buyerName.trim(), phone: buyerPhone.trim(), updated_at: new Date().toISOString(),
+      name: buyerName.trim(), phone: phoneForRecord(buyerPhone), updated_at: new Date().toISOString(),
       ...(buyerAddress.trim() ? { address: buyerAddress.trim() } : {}),
       ...(buyerPan.trim() ? { pan: buyerPan.trim() } : {}),
     }
@@ -3663,7 +3666,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (loyaltyTender) {
         setCloseStep('Redeeming points…')
         const { error: buyerErr } = await bounded(scopedUpdate('pos_orders', {
-          buyer_name: buyerName.trim() || null, buyer_phone: buyerPhone.trim() || null,
+          buyer_name: buyerName.trim() || null, buyer_phone: phoneForRecord(buyerPhone) || null,
         }).eq('id', orderId), 'Attaching the customer')
         if (buyerErr) {
           const byEarlier = await settleIfEarlierClosed(earlier, buyerErr)
@@ -3724,7 +3727,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         buyer_name:       buyerName.trim() || null,
         buyer_address:    buyerAddress.trim() || null,
         buyer_pan:        buyerPan.trim() || null,
-        buyer_phone:      buyerPhone.trim() || null,
+        buyer_phone:      phoneForRecord(buyerPhone) || null,
         bill_remarks:     billRemarks.trim() || null,
         // S809 2c: the tax status this total was worked out under. guard_pos_order_close stamps the bill's
         // own from settings, and refuses a Charge that assumed the other one (pos_vat_status_changed).
@@ -3990,14 +3993,15 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (hasFeature('loyalty') && closeType === 'paid' && phone) {
       const who = updated.buyer_name || (attempt ? '' : buyerName.trim()) || phone
       const { data: earned, error: loyErr } = await bounded(supabase.rpc('award_loyalty_points', { p_order_id: updated.id }), 'Adding the points')
-      // The award's own refusals (not the closer, past the 10-minute window) already say "ask the Owner".
+      // The award's own refusals (not the closer, past the 10-minute window) already say where points
+      // are added by hand (S809 3k: Customers → Loyalty, by the Owner or a POS manager).
       if (loyErr && (loyErr.hint === HINT.rank || loyErr.hint === 'award_window_closed')) {
         setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${loyErr.message}` })
       } else if (loyErr && (isTimeout(loyErr) || isNetworkError(loyErr))) {
         // The award may have landed with its answer lost, so this must not invite adding them by hand.
-        setLoyaltyNote({ ok: false, text: `It is not known whether points were added for ${who} — the connection dropped. Ask the Owner to check the customer's balance before adding any by hand.` })
+        setLoyaltyNote({ ok: false, text: `It is not known whether points were added for ${who} — the connection dropped. The Owner or a POS manager can check in Customers → Loyalty (Adjust shows the customer's recent points) before adding any by hand.` })
       } else if (loyErr) {
-        setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${errorText(loyErr, 'staff')} They can only be added from the till as the bill closes, so ask the Owner to add them.` })
+        setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${errorText(loyErr, 'staff')} They can only be added from the till as the bill closes; the Owner or a POS manager can add them by hand in Customers → Loyalty.` })
       } else if (earned > 0) setLoyaltyNote({ ok: true, text: `+${earned} point${earned === 1 ? '' : 's'} for ${who}` })
     }
 

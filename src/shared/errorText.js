@@ -269,8 +269,8 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'award_window_closed'),
-    staff: 'This bill closed too long ago for points to be added from the till. The bill itself is fine — ask the owner to add the points.',
-    operator: 'Loyalty points are added as a bill closes, and this one closed more than 10 minutes ago, so none were added. The bill is unaffected; the Owner can add the points.',
+    staff: 'This bill closed too long ago for points to be added from the till. The bill itself is fine — the owner or a POS manager can add the points in Customers → Loyalty.',
+    operator: 'Loyalty points are added as a bill closes, and this one closed more than 10 minutes ago, so none were added. The bill is unaffected; add them by hand with Adjust in Customers → Loyalty.',
   },
   {
     test: e => hasCode(e, 'redeem_exceeds_bill'),
@@ -284,6 +284,39 @@ const rules = [
     test: e => hasCode(e, 'pos_points_delivery_partner'),
     staff: 'This bill is on a delivery partner’s phone (Foodmandu, Pathao and the like), and a delivery partner does not earn or spend points. No points were used — undo the points and take the payment another way.',
     operator: 'This bill carries a delivery partner’s phone, or is marked as a partner’s order. The partner owes the bill and pays it later, so it does not earn or spend loyalty points, and none were used. Undo the points and take the payment another way; a guest’s own points need the guest’s own phone on the bill.',
+  },
+  // S809 3k (migration 20261010110000, owner decision Q13 b). adjust_loyalty_points: the Owner or a POS
+  // manager adds or takes off points by hand in Customers → Loyalty. Every refusal is raised before the
+  // ledger row is written, so each may say no points were changed.
+  {
+    test: e => hasCode(e, 'pos_points_adjust_rank'),
+    staff: 'Only the owner or a POS manager can add or take off points by hand. No points were changed.',
+    operator: 'Only the Owner or a POS manager can add or take off loyalty points by hand, so no points were changed. A POS manager who has left (their Final Settlement is done) cannot either.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_adjust_amount'),
+    staff: 'Enter how many points, as a whole number. No points were changed.',
+    operator: 'Enter how many points to add or take off, as a whole number above 0 (at most 10,00,000 at a time), so no points were changed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_adjust_reason'),
+    staff: 'Say why the points are being changed. No points were changed.',
+    operator: 'Say in a few words why the points are being changed (300 characters at most) — the reason is kept with the correction — so no points were changed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_adjust_below_zero'),
+    staff: 'That would take this customer below 0 points. No points were changed.',
+    operator: 'That would take this customer below 0 points, so no points were changed. A balance is never taken below 0 by hand — take off at most what the customer holds now (their points may have been spent at a till since this page loaded; reload to see).',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_adjust_partner'),
+    staff: 'A delivery partner’s number cannot be given points. No points were changed.',
+    operator: 'This is a delivery partner’s number (Foodmandu, Pathao and the like). A partner owes its bills and pays later, so it does not earn or spend points, and none were added. Points already on it can be taken off.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_adjust_no_customer'),
+    staff: 'That customer is no longer in the book. No points were changed.',
+    operator: 'That customer is no longer in the customer book (deleted since this page loaded), so no points were changed. Reload the page.',
   },
   // S809 2g: the CHECK settings_pos_loyalty_point_value_positive. Customers → Loyalty already refuses 0
   // before saving, so only a hand-made request reaches it. A 23514, so it sits above the generic rule.
@@ -510,7 +543,7 @@ const rules = [
   {
     test: e => hasCode(e, 'pos_customer_phone_locked'),
     staff: 'A customer’s phone number cannot be changed, because their points belong to that number. Nothing was changed. A new number becomes a new customer the first time a bill is closed with it, and the points stay with the old number.',
-    operator: 'A customer’s phone number is what their loyalty points and bill history belong to, so it cannot be changed, and nothing was changed. A customer on a new number becomes a new record the first time a bill is closed with it. Their points stay with the old number, which still finds them at the till.',
+    operator: 'A customer’s phone number is what their loyalty points and bill history belong to, so it cannot be changed, and nothing was changed. A customer on a new number becomes a new record the first time a bill is closed with it. Their points stay with the old number, which still finds them at the till; to move them, take them off the old number and add them to the new one with Adjust in Customers → Loyalty.',
   },
   // S809 1k (migration 20261009170000). Raised by BEFORE triggers on pos_parking_slips and
   // pos_payment_confirmations, so the statement rolled back and each may say nothing was changed.
@@ -555,8 +588,8 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'rank_required') && /person who closed it/i.test(e.message || ''),
-    staff: 'Points for a bill are added by whoever closed it, as it closes. The bill itself is fine — ask the owner to add the points.',
-    operator: 'Loyalty points for a bill are added by the person who closed it, as it closes, so none were added from this login. The bill is unaffected; the Owner can add the points.',
+    staff: 'Points for a bill are added by whoever closed it, as it closes. The bill itself is fine — the owner or a POS manager can add the points in Customers → Loyalty.',
+    operator: 'Loyalty points for a bill are added by the person who closed it, as it closes, so none were added from this login. The bill is unaffected; add them by hand with Adjust in Customers → Loyalty.',
   },
   {
     test: e => hasCode(e, 'rank_required'),

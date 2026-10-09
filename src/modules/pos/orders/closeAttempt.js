@@ -1,5 +1,6 @@
 import { fmtNpr } from './posOrdersConstants'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
+import { phoneForRecord } from '../../../utils/phone'
 
 // A bill close whose answer was lost (S776) — the pure half of S809 CHECKOUT-7.
 //
@@ -94,10 +95,11 @@ export function legsToRecord(sentTenders, existing) {
 }
 
 // The customer-book row a closed bill names, taken from the bill rather than the screen. Null unless it
-// carries both a name and a phone, as the till's own buyerCustomerRow requires.
+// carries both a name and a phone, as the till's own buyerCustomerRow requires. The phone is stored as
+// the number (S809 3k), so a bill typed "+977 …" by an older till still updates the regular's one row.
 export function customerRowFromBill(row, nowIso) {
   const name = String(row?.buyer_name || '').trim()
-  const phone = String(row?.buyer_phone || '').trim()
+  const phone = phoneForRecord(row?.buyer_phone)
   if (!name || !phone) return null
   const address = String(row.buyer_address || '').trim()
   const pan = String(row.buyer_pan || '').trim()

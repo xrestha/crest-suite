@@ -141,6 +141,15 @@ describe('finishing from the stored bill', () => {
     expect(customerRowFromBill(null, 'T')).toBeNull()
   })
 
+  test('the customer row stores the number, however the bill had it typed (S809 3k)', () => {
+    expect(customerRowFromBill({ buyer_name: 'Asha', buyer_phone: '+977 980-000-0000' }, 'T'))
+      .toEqual({ name: 'Asha', phone: '9800000000', updated_at: 'T' })
+    // A short code is kept as typed: there is no number to go by.
+    expect(customerRowFromBill({ buyer_name: 'Asha', buyer_phone: ' 1-2345 ' }, 'T'))
+      .toEqual({ name: 'Asha', phone: '1-2345', updated_at: 'T' })
+    expect(customerRowFromBill({ buyer_name: 'Asha', buyer_phone: '   ' }, 'T')).toBeNull()
+  })
+
   test('stored lines must come to what the bill was paid (the save-then-late-landing case)', () => {
     const row = { close_type: 'paid', paid_amount: 3150, discount_amount: 0 }
     const withComp = [

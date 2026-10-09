@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-09 (S809 — stages 1 and 2 complete; stage 3 decisions taken and split into slices 3a–3o, wave 1 = 3a, 3i, 3k drafting)
+Last updated: 2026-10-09 (S809 — stages 1 and 2 complete; stage 3 split into slices 3a–3o, wave 1 (3a, 3i, 3k) shipped)
 
 ---
 
@@ -60,21 +60,15 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P2 (33 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3; in stage 3: ORDER-FLOW-9)
+### P2 (27 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3; in stage 3: ORDER-FLOW-9, ACCESS-5, DATABASE-2, DATABASE-3, CUSTOMERS-PARKING-4, CUSTOMERS-PARKING-5, CUSTOMERS-PARKING-8)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-5 | Deleting a cashier's POS login wipes their name from past bills, shifts and credit notes, though the confirm says names stay | 3 | Q17 | no |
 | ACCESS-6 | A page reload restarts the idle lock with 3 fresh minutes in the absent waiter's session | 3 | — | no |
 | ACCESS-7 | Locking one till signs that waiter out of every other till, and the other till loses its unsent order | 3 | Q18 | yes |
 | CREDIT-NOTES-3 | A note that couldn't reach Inventory waits for "a manager" in Periods. A POS manager can't open Periods, and an IMS supervisor is told nothing is waiting | 3 | Q12 | yes |
-| CUSTOMERS-PARKING-4 | A regular's points are found only when the phone is typed exactly as on the first bill | 3 | — | yes |
-| CUSTOMERS-PARKING-5 | "Ask the Owner to add the points" leads nowhere: no screen can add or correct a balance | 3 | Q13 | yes |
 | CUSTOMERS-PARKING-6 | A lost Settle reply ends in "already settled", so the cashier believes a colleague took the money | 3 | — | no |
-| CUSTOMERS-PARKING-8 | Customers → Loyalty lists only the first 1,000 customers | 3 | — | no |
 | CUSTOMIZATION-2 | Hiding a sold-out choice mid-service blocks the whole table's order on the till | 3 | — | no |
-| DATABASE-2 | "Clear POS Transactions" deletes every Inventory stock movement, manual ones included, and "Clear IMS" has the mirror fault. Operator-only, never run | 3 | — | no |
-| DATABASE-3 | A restore reports success while dropping parking slips, and once a cash refund exists, every Cash In/Out | 3 | — | no |
 | DOCS-2 | Help tells a cashier to void and re-ring to fix a split payment, which re-sends the food and books a void; ↩ Undo already does it | 3 | — | no |
 | FLOOR-KITCHEN-1 | A waiting QR order is never announced loudly on a till: Orders chimes once and the PIN screen hears nothing (S763 left Orders quiet for the floor view) | 3 | Q14 | yes |
 | FLOOR-KITCHEN-2 | A ticket with every dish pulled stays in New and keeps alarming; clearing it fakes Start/Ready and shows the floor false "Ready" | 3 | — | no |
@@ -98,7 +92,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
 | SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (81 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5)
+### P3 (79 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -116,7 +110,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | CUSTOMERS-PARKING-9 | An unpaid Credit bill earns spendable points at close, though the guide says points follow payment | 4 | Q19 | yes |
 | CUSTOMERS-PARKING-10 | Nothing shows what points are worth per bill, and changing the point value re-prices every balance unwarned (BLOOM CAFE's test schemes give back 100% and 400%) | 4 | — | no |
 | CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
-| CUSTOMERS-PARKING-12 | A scheme's rate box keeps a change the database refused; clearing it saves 0 and stops earning | 4 | — | no |
 | CUSTOMERS-PARKING-14 | A blocked pop-up loses the parking token silently; the guest's only token reads "REPRINT #2" | 4 | — | no |
 | CUSTOMERS-PARKING-15 | Parking re-reads every slip ever issued on each open and Mark Exited | 4 | — | no |
 | CUSTOMERS-PARKING-16 | An overlapping Settle load can store the previous bill's commission and post the wrong cash | 4 | — | no |
@@ -125,7 +118,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | CUSTOMIZATION-6 | Sizes are stored as a difference from the dish price, so a dish price rise silently raises every size | 4 | — | yes |
 | CUSTOMIZATION-7 | Changing a group's kind keeps old per-dish pick rules, so a Size can be skipped or picked twice | 4 | — | yes |
 | CUSTOMIZATION-8 | Hiding options can leave a "must pick 2" group with one option, taking the dish off the till unwarned | 4 | — | no |
-| DATABASE-6 | Every restore of a QR-ordering client reports the guest-order table as failed | 4 | — | no |
 | DATABASE-7 | Bills and lines have no FK to their client; a deleted client's open order is still in the live table (KNOWN) | 4 | — | yes |
 | DATABASE-8 | The floor, KDS and nav badges re-read the whole order and ticket history every poll; no index matches | 4 | — | yes |
 | DOCS-3 | Help gives six wrong answers about who may do what at the till | 4 | — | no |
@@ -399,15 +391,24 @@ needs a migration since 1d made cancelling a ticket Supervisor-only.
 | 3f | ORDER-FLOW-6, -7, -8 [ORDER-FLOW-15, -16] | none (ORDER-FLOW-8's pulled-item record can't be written from the browser since 1d) | Q16 |
 | 3g | ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5 [ORDER-FLOW-12] | none | — |
 | 3h | ACCESS-6, ACCESS-7 [ACCESS-11, ACCESS-12; the legacy shared-key code, its DROPs in a later migration] | sessions recorded per tablet, `revoke_pos_device` ends them; `pos-staff-login` deploy | Q18 |
-| 3i | ACCESS-5, DATABASE-2, DATABASE-3 [DATABASE-6] | a POS block marker read by `pos_caller_has_rank`; `admin-user-ops` deploy | Q17 |
+| 3i ✅ | ACCESS-5, DATABASE-2, DATABASE-3 [DATABASE-6] (shipped 2026-10-09, `20261010100000` live, admin-user-ops v65, crest-v424) | a POS block marker read by `pos_caller_has_rank`; `admin-user-ops` deploy | Q17 |
 | 3j | CREDIT-NOTES-3, IMS-HANDOFF-1 [DOCS-9] | maybe: whatever a POS manager needs to post from the POS side | Q12 |
-| 3k | CUSTOMERS-PARKING-4, -5, -8 [CUSTOMERS-PARKING-12] | `award_`/`redeem_loyalty_points` match `phone_canonical`, a unique key on it (the raw-phone key kept for older tills), new `adjust_loyalty_points` | Q13 |
+| 3k ✅ | CUSTOMERS-PARKING-4, -5, -8 [CUSTOMERS-PARKING-12] (shipped 2026-10-09, `20261010110000` live, crest-v424) | `award_`/`redeem_loyalty_points` match `phone_canonical`, a unique key on it (the raw-phone key kept for older tills), new `adjust_loyalty_points` | Q13 |
 | 3l | CUSTOMERS-PARKING-6, SHIFTS-4, DOCS-2 [CUSTOMERS-PARKING-16] | none | — |
 | 3m | REPORTS-2, FLOOR-KITCHEN-3, IMS-HANDOFF-4 (credit-noted bills) | none | Q15 |
 | 3n | REPORTS-3, GAP-OUTLETS-3 [REPORTS-8] | `get_group_summary` | — |
 | 3o | CUSTOMIZATION-2, REPORTS-4 [REPORTS-12] | none | — |
 
-Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k.
+Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k — all shipped 2026-10-09.
+
+**Added to stage 4 by the owner (2026-10-09):**
+
+- **One-tap "add the points this bill earned"** on a bill whose award did not land (the till said
+  points were not added): works out the exact points from the bill and its scheme, and is reversed by
+  a Credit Note on that bill like an ordinary award. Today a manager works the number out and types it
+  into Adjust, and a later Credit Note does not take those hand-added points back (3k).
+- **"Move points" for a regular's new number**: one action that takes the balance off the old number
+  and puts it on the new one, recorded as a pair. Today it is two hand corrections in Adjust (3k).
 
 ## S809.3 Outside POS, filed here
 
@@ -532,8 +533,8 @@ Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k.
   - A guest whose points stand on an open bill from an earlier try sees a lower balance on another till
     and cannot use them there until that bill closes; a line like "N points held on bill 12" would help
     (2g).
-  - Customers → Loyalty still offers a delivery partner's customer row for enrolment; enrolling it now
-    does nothing (cosmetic, 2g).
+  - ~~Customers → Loyalty still offers a delivery partner's customer row for enrolment; enrolling it now
+    does nothing (cosmetic, 2g).~~ Fixed in 3k: the row reads "Delivery partner — earns no points".
   - Menu Pricing (both branches) lets a manager tick On POS on a dish with no price, and IMS recipes
     default to `pos_enabled = true`; such a dish now just stays off the till, so Menu Pricing should say
     "not on the till until it has a price" (2h).
@@ -555,6 +556,33 @@ Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k.
     made never hear of it, on paper or on the KDS (P3, 3a).
   - The cart's note box shows every note, an allergy note included, in grey italic (`--theme-text3`)
     (P3, 3a).
+  - **For 3h (`pos-staff-login`):** a blocked login, or a settled leaver, picked from a stale till list
+    gets "Invalid credentials" (shown as a wrong PIN), and each try counts toward the lockout. Filter
+    `pos_blocked_at` and `settlement_blocked_by` in its staff lookup, or give its own answer (3i).
+  - Deleting an IMS or HR staff login (`delete_ims_staff` / `delete_hr_staff`) also SET NULLs its name
+    on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i).
+  - Live `pos_parking_slips_guard` still lets any operator INSERT through unchanged; its comment says 1l
+    narrowed it to a restore, the body does not (3i).
+  - Clear IMS also deletes the Fixed Assets register and categories, which neither its confirm nor the
+    "setup kept" heading mentions (3i).
+  - After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
+    stays un-depleted until that day is re-saved (3i).
+  - The retired shared-key picker `get_pos_staff` still lists blocked logins (3h drops it), and the Audit
+    Log shows `pos_blocked_at` under its raw column name (`FIELD_LABELS` in AuditLog.js) (3i).
+  - Recorded-rows counts are full table scans per Delete press; the Unblock leaver check reads
+    `hr_employee_id` only, not the S798 3f-1 employee links (3i).
+  - `pos_loyalty_ledger` carries the S782 grants trap: anon and authenticated hold REFERENCES, TRIGGER
+    and TRUNCATE (not reachable through REST). `REVOKE TRUNCATE, REFERENCES, TRIGGER ON
+    public.pos_loyalty_ledger FROM anon, authenticated;` (3k).
+  - Customers' own bill history matches `buyer_phone` exactly and its search misses "+977…" spellings;
+    only pre-3k bills typed differently (0 live) (3k). "00977 98…" is not read as the same number by
+    either twin (they agree, so nothing splits) (3k).
+  - No screen shows a customer's full points history (Adjust shows the latest 10); Loyalty's member list
+    hides when no scheme exists, so balances left after every scheme is deleted cannot be adjusted;
+    "+ Add scheme" is `disabled` with no reason when the name is empty (3k).
+  - Between a release and every till reloading, an older till that creates a customer typed "+977…"
+    stores that spelling, and a new till's later upsert for them is refused and logged (name/PAN
+    updates do not land; points still work) (3k).
 
 ---
 

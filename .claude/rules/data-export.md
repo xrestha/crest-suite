@@ -51,7 +51,12 @@ Two failure modes this feature produced, both worth remembering because neither 
 but sat beside the other IMS transactions in `RESTORE_ORDER` — so the first chunk holding a POS row
 was refused and, the loop breaking a table on its first failure, a POS client's entire sales history
 dropped out of the restore. **Adding an FK to a table in `RESTORE_ORDER` is a change to its
-position**: check the order in the same edit.
+position**: check the order in the same edit. Since S809 3i an insert follows every parent its keys
+name, whatever the delete action (`restoreClientData.test.js` reads the migrations); parking slips
+follow the bills and cash movements the credit notes. `pos_guest_order_requests` and
+`pos_payment_confirmations` are exported and deliberately left out (`RESTORE_LEFT_OUT`). `skipped`
+holds real losses only and turns the summary red; `notes` are neutral. The staff roster exports
+`pos_blocked_at`, and `restore_staff_accounts` re-bans a blocked login.
 
 **Columns the server stamps ride along with `select('*')` (S809).** `pos_orders.vat_registered` (2c)
 is kept by a restore, and a pre-2c backup restores bills unstamped, read under today's setting.

@@ -125,8 +125,12 @@ Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaf
   the caller's own cap, and refuses "no limit" (NULL) from any capped caller. It also refuses
   `pos_allow_void` from a caller who cannot void. Otherwise a 10%-capped manager could give a waiter
   an unlimited discount and then use that waiter's PIN. Since S809 1f the same test
-  (`posPowerBeyondCaller`) refuses a PIN RESET of a login holding a power the caller lacks; delete
-  is not covered (ACCESS-5). **A login a capped manager creates without
+  (`posPowerBeyondCaller`) refuses a PIN RESET of a login holding a power the caller lacks; Block,
+  Unblock and Delete take the same test since S809 3i. **A till login is removed by Block, not Delete
+  (S809 3i, Q17 a):** `block_pos_staff`/`unblock_pos_staff` → `pos_set_login_blocked` (marker
+  `profiles.pos_blocked_at`, ban, sessions ended, one transaction); Delete is refused while
+  `pos_login_recorded_rows` finds anything. One block at a time: the settlement's or POS Staff's.
+  **A login a capped manager creates without
   naming a limit starts at the creator's cap**, because the column default is NULL = unlimited, so
   omission was itself an escalation. Admin and the Owner are exempt. **Since S776 POS Staff names
   one on every create: 0% (owner decision — a new login discounts nothing until a manager sets a

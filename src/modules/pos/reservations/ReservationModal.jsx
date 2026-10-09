@@ -65,10 +65,13 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
     if (!canonical) { setLookup(null); return }
     setLookup({ loading: true })
     const trimmed = String(raw).trim()
+    // S809 3k: since 3k the till stores a bill's phone as the number ("9841234567"); bills from before
+    // keep the spelling typed. Both are asked for, so a booking typed "+977 …" still finds the visits.
+    const billPhones = [...new Set([trimmed, canonical])]
     const [cust, visits, credit, noShows] = await Promise.all([
       scopedFrom('pos_customers', 'id, name').eq('phone_canonical', canonical).limit(1),
-      scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').eq('buyer_phone', trimmed),
-      scopedFrom('pos_orders', 'paid_amount').eq('payment_method', 'Credit').eq('status', 'billed').is('credit_settled_at', null).eq('buyer_phone', trimmed),
+      scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').in('buyer_phone', billPhones),
+      scopedFrom('pos_orders', 'paid_amount').eq('payment_method', 'Credit').eq('status', 'billed').is('credit_settled_at', null).in('buyer_phone', billPhones),
       scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('phone_canonical', canonical).eq('status', 'no_show'),
     ])
     // A failed lookup must not render as "new guest, no history" — that is the vacuous-guard shape.

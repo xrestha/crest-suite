@@ -56,6 +56,9 @@ const TABLE_LABELS = {
   // on a credit note included) is money leaving or entering that drawer
   pos_shifts:             'POS Shift',
   pos_cash_movements:     'Cash Movement',
+  // audited since S809 3k — loyalty enrolment only (joined at creation, scheme changed, an enrolled
+  // customer deleted); the till's customer upsert on every bill is not recorded
+  pos_customers:          'POS Customer',
   // Crest Suite
   assets_register:          'Fixed Asset',
   assets_depreciation_runs: 'Depreciation Run',
@@ -103,10 +106,12 @@ const TABLE_EXTRA_IGNORE = {
   // items_version (S754) is bumped by save_pos_order_items on every cart save — the optimistic lock
   // between two tablets, not an event. log_audit() skips a write that changes only it.
   pos_orders: new Set(['covers', 'print_count', 'comp_print_count', 'items_version']),
+  // phone_canonical is generated from phone, so it only ever repeats a phone change.
+  pos_customers: new Set(['phone_canonical']),
 }
 
 const FIELD_LABELS = {
-  uom: 'UOM', pan: 'PAN', vat_amount: 'VAT',
+  uom: 'UOM', pan: 'PAN', vat_amount: 'VAT', loyalty_scheme_id: 'Loyalty Scheme',
   ims_role: 'IMS Role', hr_role: 'HR Role', pos_role: 'POS Role',
   pos_team: 'POS Team', pos_discount_limit: 'Discount Limit %', pos_allow_void: 'Allow Void',
   pos_job_title: 'POS Job Title', ims_job_title: 'IMS Job Title', hr_job_title: 'HR Job Title',

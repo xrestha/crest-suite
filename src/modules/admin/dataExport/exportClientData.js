@@ -23,7 +23,9 @@ const MAX_ROWS = 500000
 const IN_CHUNK = 200
 
 // Tables scoped by period_id rather than client_id — reached through this client's own periods.
-const PERIOD_SCOPED_TABLES = [
+// Exported for restoreClientData.test.js: every table a backup carries must have a restore step or a
+// stated reason not to.
+export const PERIOD_SCOPED_TABLES = [
   'purchase_entries', 'sales_entries', 'opening_stock', 'closing_stock',
   'wastages', 'staff_meals', 'budgets',
 ]
@@ -31,7 +33,7 @@ const PERIOD_SCOPED_TABLES = [
 // Tables with neither client_id nor period_id — reached through their parent's ids.
 // payable_payments is deliberately absent: it carries its own client_id and is already in
 // CLIENT_SCOPED_TABLES, so fetching it here too would duplicate every row.
-const PARENT_SCOPED_TABLES = [
+export const PARENT_SCOPED_TABLES = [
   { table: 'recipe_ingredients',   fk: 'recipe_id',      parent: 'recipes' },
   { table: 'purchase_order_items', fk: 'po_id',          parent: 'purchase_orders' },
   { table: 'requisition_lines',    fk: 'requisition_id', parent: 'requisitions' },
@@ -151,10 +153,11 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     // to select; GoTrue holds it and it is not exportable at any privilege level.
     // hr_employee_id and settlement_blocked_by are what relink_staff_accounts puts back after a
     // restore (S798): deleting the employees and settlements clears both on every kept login.
+    // pos_blocked_at is how restore_staff_accounts brings a login POS Staff blocked back blocked (S809 3i).
     supabase.from('profiles')
       .select('id, full_name, role, client_id, pos_role, pos_team, pos_discount_limit, pos_allow_void, ' +
               'pos_email, ims_role, ims_job_title, hr_role, hr_job_title, hr_self_service, ' +
-              'hr_self_service_email, ims_email, hr_employee_id, settlement_blocked_by, pos_job_title')
+              'hr_self_service_email, ims_email, hr_employee_id, settlement_blocked_by, pos_blocked_at, pos_job_title')
       .eq('client_id', clientId),
     // Ciphertext only. The AES-GCM key lives in app_secrets and never enters this file, so these
     // rows are inert on disk — but they let a restore give POS/Self-Service staff their original

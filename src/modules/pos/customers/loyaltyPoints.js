@@ -107,3 +107,86 @@ export function redeemedAmountDiffers(serverAmount, screenAmount) {
   const c = Number(screenAmount) || 0
   return Math.abs(Math.round(s * 100) - Math.round(c * 100)) > 1
 }
+
+// The most points one hand correction may change, either way: adjust_loyalty_points refuses more
+// (a typo guard, well above any real balance). Kept equal to the SQL's 1,000,000.
+export const MAX_POINTS_ADJUST = 1000000
+// The longest reason adjust_loyalty_points keeps.
+export const MAX_ADJUST_REASON = 300
+
+/**
+ * Checks a hand correction of a points balance before it is sent (S809 3k, CUSTOMERS-PARKING-5), with
+ * the same rules adjust_loyalty_points applies on the server, so the window can say what is wrong next
+ * to the field instead of after a round trip. The server still decides.
+ *
+ * @param {{direction: 'add'|'take'|'', pointsStr: string, reason: string, balance: number|null,
+ *          isPartner?: boolean}} input  `balance` is the customer's points now (null when unknown).
+ * @returns {{points: number|null, newBalance: number|null,
+ *            errors: {direction?: string, points?: string, reason?: string}}}
+ *   `points` is signed (+ adds, − takes off); null until the choice and the box make an allowed amount.
+ *   Nothing may be sent while `errors` has any key.
+ */
+export function pointsAdjustment({ direction, pointsStr, reason, balance, isPartner = false }) {
+  const errors = {}
+  if (direction !== 'add' && direction !== 'take') errors.direction = 'Choose whether to add points or take them off.'
+  else if (direction === 'add' && isPartner) errors.direction = 'A delivery partner’s number cannot be given points — it does not earn or spend them.'
+
+  const typed = String(pointsStr ?? '').replace(/[,\s]/g, '')
+  let count = null
+  if (!typed) errors.points = 'Enter how many points.'
+  else if (!/^\d+$/.test(typed)) errors.points = 'Points are whole numbers, like 50.'
+  else {
+    count = Number(typed)
+    if (count === 0) { errors.points = 'Enter more than 0 points.'; count = null }
+    else if (count > MAX_POINTS_ADJUST) { errors.points = `At most ${MAX_POINTS_ADJUST.toLocaleString('en-IN')} points at a time — check the number.`; count = null }
+  }
+
+  // Never below zero by hand (the server refuses it too). A balance already below zero can still be
+  // brought up.
+  const known = typeof balance === 'number' && Number.isFinite(balance)
+  if (count !== null && direction === 'take' && known && count > Math.max(balance, 0)) {
+    errors.points = balance > 0
+      ? `This customer holds ${balance.toLocaleString('en-IN')} points, so at most ${balance.toLocaleString('en-IN')} can be taken off.`
+      : 'This customer holds no points, so none can be taken off.'
+  }
+
+  const why = String(reason ?? '').trim()
+  if (!why) errors.reason = 'Say why — the reason is kept with the correction.'
+  else if (why.length > MAX_ADJUST_REASON) errors.reason = `Keep the reason under ${MAX_ADJUST_REASON} characters.`
+
+  // The reason does not hold back the preview: the new balance shows as soon as the amount is right.
+  const points = count === null || errors.direction || errors.points ? null : (direction === 'take' ? -count : count)
+  return { points, newBalance: points !== null && known ? balance + points : null, errors }
+}
+
+/**
+ * What a box in a scheme's row does when it loses focus (S809 3k, CUSTOMERS-PARKING-12): an empty box
+ * keeps the stored value (it used to save 0, which stopped a scheme earning or dropped its minimum), the
+ * stored value itself saves nothing, and anything else must be a number of 0 or more.
+ *
+ * @returns {{action: 'keep'} | {action: 'save', value: number} | {action: 'invalid', text: string}}
+ */
+export function schemeNumberCommit(typed, stored) {
+  const t = String(typed ?? '').trim()
+  if (t === '') return { action: 'keep' }
+  const v = Number(t)
+  if (!Number.isFinite(v) || v < 0) return { action: 'invalid', text: 'Enter a number of 0 or more.' }
+  if (v === Number(stored)) return { action: 'keep' }
+  return { action: 'save', value: v }
+}
+
+/**
+ * One line of a customer's points history in plain words (S809 3k): what happened, and on which bill.
+ * `row` is a pos_loyalty_ledger row with `pos_orders` embedded as {order_no, invoice_no} when it has a
+ * bill. A correction's own note is the best description of it (a hand correction's starts "By hand:").
+ */
+export function describeLedgerRow(row) {
+  const o = row?.pos_orders || null
+  const bill = o ? (o.invoice_no != null ? `Bill #${o.invoice_no}` : (o.order_no != null ? `Order #${o.order_no}` : 'A bill')) : null
+  const note = String(row?.note || '').trim()
+  let what
+  if (row?.kind === 'earn') what = 'Earned'
+  else if (row?.kind === 'redeem') what = 'Spent'
+  else what = note || 'Corrected'
+  return { what, bill }
+}

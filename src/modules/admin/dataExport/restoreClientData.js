@@ -1,10 +1,15 @@
 // Rebuilds a client's data from the .json artifact produced by exportClientData.js.
 //
-// Insert order is the REVERSE of deleteClientData's delete order (admin-user-ops/index.ts).
-// That sequence already encodes the full FK dependency graph of this schema — including the
-// circular pos_orders <-> pos_credit_notes reference and the monthly_owner_reports ->
-// monthly_periods ordering, both of which only surfaced as production errors (S382). Deriving a
-// fresh insert order by inspection would be re-doing that discovery, wrongly.
+// Insert order: a table goes in after EVERY parent its foreign keys name, whatever their delete
+// action (S809 DATABASE-3). This used to be described as "the reverse of deleteClientData's delete
+// order", which holds only for a NO ACTION key: a SET NULL key lets the delete run in either order,
+// and reversing it put pos_parking_slips before pos_orders and pos_cash_movements before
+// pos_credit_notes. A linked slip and a credit-note refund then failed their table's first chunk, and
+// the loop below abandons a table there: every parking slip, and every Cash In / Out of every shift,
+// left out of a restore reported as done. restoreClientData.test.js reads every foreign key in
+// supabase/migrations and fails on a child placed before its parent, so the next key added to a
+// restored table fails a test instead of a restore. The two exceptions are the second passes at the
+// end (DEFERRED_LINKS) and the attribution columns, which are restored empty.
 //
 // Scope: this restores DATA. Logins are a separate concern (reprovisionAccounts.js) because
 // passwords live in GoTrue and are not exportable at any privilege level.
@@ -20,11 +25,22 @@
 // profiles id that does not survive a restore. It is personal UI state (which checklist steps one
 // person opened, ticked, skipped or dismissed), so a restored client simply starts its checklist
 // again. It is still exported, since it is in CLIENT_SCOPED_TABLES and harmless to carry.
+//
+// `pos_guest_order_requests` and `pos_payment_confirmations` are left out too (S809 DATABASE-6).
+// Both are live state with no client INSERT at all: a guest's QR order waits for the till to accept
+// or decline it, and a payment confirmation is written by the payment provider alone
+// (pos_payment_confirmations_guard). Every restore of a QR-ordering client reported the request
+// table as failed, which taught the operator to read past the list where real losses appear.
+// Nothing reads an old request or confirmation, and both stay in the backup file.
+//
+// A restore never reports success while rows stay behind (S809 DATABASE-3): a table that fails says
+// how many of its rows did not come back and why, every table a backup carries has a step here or a
+// stated reason in RESTORE_LEFT_OUT, and ClientDrawer shows any gap as an error.
 import { supabase } from '../../../supabaseClient'
 import { runChunkedByIds } from '../../../shared/fetchAllRows'
 
-// Reverse of the delete sequence: parents before children, so every FK target exists first.
-const RESTORE_ORDER = [
+// Parents before children, so every FK target exists first (header).
+export const RESTORE_ORDER = [
   // Foundations
   'categories', 'vendors', 'items', 'recipes', 'recipe_ingredients', 'recipe_suggestions',
   // Crest Customization (S758): groups before options before their ingredients (composite FKs);
@@ -58,16 +74,20 @@ const RESTORE_ORDER = [
   // came back fully owed. hr_salary_payments (S782) likewise references a run and an employee.
   'hr_advance_repayments', 'hr_salary_payments', 'hr_tada_claims', 'hr_tada_claim_items',
   // POS — tables/customers before orders; credit notes after orders (circular FK, see below)
-  // pos_cash_movements after pos_shifts and pos_orders — it holds an FK to both.
-  'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts', 'pos_parking_slips',
+  'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts',
   // pos_order_item_options (S758) right after the lines it snapshots — FKs to the order and the line.
   'pos_orders', 'pos_order_items', 'pos_order_item_options', 'pos_order_payments', 'pos_kot_log', 'pos_kot_removals',
+  // A slip names the bill it was stamped against (order_id), so after the orders (S809 DATABASE-3).
+  // pos_parking_slips_guard keeps a restored slip's number, issuer and times as they were.
+  'pos_parking_slips',
   'pos_loyalty_ledger',
   // Reservations reference pos_orders (order_id) and pos_tables (via the join table), both above.
   'pos_reservations', 'pos_reservation_tables',
-  'pos_guest_order_requests', 'pos_payment_confirmations',
-  'pos_cash_movements',
   'pos_credit_notes',
+  // After the shifts, the orders AND the credit notes (S809 DATABASE-3): a refund names its note.
+  // A restored note's own trigger (pos_credit_note_settle, S809 2e) links its bill and writes no
+  // refund, so the refund the backup carries is restored here exactly once.
+  'pos_cash_movements',
   // sales_entries AFTER the POS tables (S747), not beside the other IMS transactions. Its
   // pos_order_id (20260818170000) and pos_credit_note_id (20260914140200) are foreign keys, and
   // restoring it before pos_orders refused the first chunk carrying a POS bill's revenue — which,
@@ -96,13 +116,47 @@ const GENERATED_COLUMNS = {
 // patched afterwards. Same shape as the null-first step deleteClientData does in reverse.
 // hr_employees.supervisor_id -> hr_employees.id (S798 DATABASE-4) is the self-referencing case: a
 // supervisor in a later 500-row chunk than their team would fail the FK, so it goes in afterwards too.
-const DEFERRED_LINKS = { pos_orders: ['credit_note_id'], hr_employees: ['supervisor_id'] }
+export const DEFERRED_LINKS = { pos_orders: ['credit_note_id'], hr_employees: ['supervisor_id'] }
+
+// Tables a backup carries that the loop below deliberately does not insert, each with the reason
+// the operator is shown when the backup holds rows of it (header). A table in neither list is
+// reported as not restored (restoreCoverage), so a new exported table cannot drop out silently.
+export const RESTORE_LEFT_OUT = {
+  ims_count_assignments:     'stock-count sections are ticked again by the manager, because the logins they named come back with new ids',
+  onboarding_progress:       "each person's setup checklist starts again, because it keys on logins that come back with new ids",
+  pos_guest_order_requests:  "guests' QR orders are live till traffic, accepted or declined at the time, and are kept in the backup file only",
+  pos_payment_confirmations: "QR payment confirmations are the payment provider's own record, kept in the backup file only",
+}
+// Restored by their own steps rather than the loop: the client row and settings (below), and the
+// logins with their PIN vault (restore_staff_accounts / relink_staff_accounts in ClientDrawer).
+export const RESTORED_ELSEWHERE = ['clients', 'settings', 'profiles', 'staff_pin_vault']
+
+// What the backup holds that no step restores: the left-out tables with rows (a note, not a
+// failure) and any table nothing here knows (a failure, so it is said). Pure, for the test.
+export function restoreCoverage(data) {
+  const leftOut = []
+  const unknown = []
+  for (const [table, rows] of Object.entries(data || {})) {
+    if (!Array.isArray(rows) || rows.length === 0) continue
+    if (RESTORE_ORDER.includes(table) || RESTORED_ELSEWHERE.includes(table)) continue
+    if (RESTORE_LEFT_OUT[table]) leftOut.push({ table, rows: rows.length, why: RESTORE_LEFT_OUT[table] })
+    else unknown.push({ table, rows: rows.length })
+  }
+  return { leftOut, unknown }
+}
+
+// The line for a table whose rows did not all come back: which table, how many rows, and the
+// database's own reason (the operator reads it; S809 DATABASE-3).
+export function lostRowsLine(table, total, restored, reason) {
+  const missing = total - restored
+  return `${table}: ${missing.toLocaleString('en-IN')} of ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} not restored (${reason})`
+}
 
 const CHUNK = 500
 
 // Must match exportClientData.js's list. supervisor_id left it in S798 (DATABASE-4): it is an
 // employee id, restored by the second pass below, not a profiles id.
-function isAttributionColumn(key) {
+export function isAttributionColumn(key) {
   return key.endsWith('_by') || key === 'custodian_user_id'
 }
 
@@ -226,7 +280,8 @@ async function assertEmpty(clientId) {
 /**
  * @param clientId  target client — must be empty
  * @param parsed    the parsed .json artifact ({ manifest, data })
- * @returns { inserted, tables, skipped }
+ * @returns { inserted, tables, skipped, notes, renamed } — `skipped` lists only what did NOT come
+ *   back (any entry means the restore is incomplete); `notes` are expected, nothing lost.
  */
 export async function restoreClientData(clientId, parsed, { onProgress = () => {} } = {}) {
   if (!clientId) throw new Error('restoreClientData: clientId is required')
@@ -240,10 +295,20 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
   let inserted = 0
   let tables = 0
   const skipped = []
+  // Lines that are not a loss: the kept feature flags, and tables left out by design (S809 DATABASE-6).
+  const notes = []
   // Rows that landed under a changed name. Separate from `skipped`, which means "did not restore":
   // these DID restore, and reporting them as skipped would say the opposite of what happened.
   const renamed = []
   let done = 0
+
+  const coverage = restoreCoverage(data)
+  for (const t of coverage.unknown) {
+    skipped.push(lostRowsLine(t.table, t.rows, 0, 'this restore has no step for that table'))
+  }
+  for (const t of coverage.leftOut) {
+    notes.push(`${t.table} (${t.rows.toLocaleString('en-IN')} row${t.rows === 1 ? '' : 's'}) not restored by design: ${t.why}.`)
+  }
 
   for (const table of RESTORE_ORDER) {
     done++
@@ -258,6 +323,7 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
     }
 
     let tableFailed = false
+    let tableRestored = 0
     for (const part of chunk(rows, CHUNK)) {
       const payload = part.map(r => prepareRow(table, r, clientId))
       const { error } = await supabase.from(table).insert(payload)
@@ -268,15 +334,18 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
         if (table === 'feature_flags' && /duplicate key/i.test(error.message)) {
           // Expected on every Archive → Restore: the live flags row was deliberately kept and
           // deliberately wins. The raw constraint name read as a failure at the end of the
-          // product's own recommended recovery path (S574).
-          skipped.push("feature_flags (kept this client's existing feature access)")
+          // product's own recommended recovery path (S574). A note, not a loss.
+          notes.push("feature_flags (kept this client's existing feature access).")
         } else {
-          skipped.push(`${table} (${error.message})`)
+          // How many rows stayed behind, not only which table (S809 DATABASE-3): the chunks before
+          // this one did land.
+          skipped.push(lostRowsLine(table, rows.length, tableRestored, error.message))
         }
         tableFailed = true
         break
       }
       inserted += payload.length
+      tableRestored += payload.length
     }
     if (!tableFailed) tables++
   }
@@ -299,7 +368,10 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
     else { inserted += 1; tables++ }
   }
 
-  // Second pass for the circular POS link, now that both sides exist.
+  // Second pass for the circular POS link, now that both sides exist. Since S809 2e a restored
+  // note's own trigger (pos_credit_note_settle) links its bill as it is inserted, so this writes the
+  // value already there, which guard_pos_order_close lets through unchanged; it stays for a link the
+  // trigger did not make.
   const orderLinks = (data.pos_orders || []).filter(o => o.credit_note_id)
   for (const order of orderLinks) {
     const { error } = await supabase
@@ -321,5 +393,5 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
     if (error) skipped.push(`hr_employees.supervisor_id for ${ids.length} employee(s) (${error.message})`)
   }
 
-  return { inserted, tables, skipped, renamed }
+  return { inserted, tables, skipped, notes, renamed }
 }

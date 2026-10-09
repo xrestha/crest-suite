@@ -1,4 +1,7 @@
-import { loyaltyPoints, pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers } from './loyaltyPoints'
+import {
+  loyaltyPoints, pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers,
+  pointsAdjustment, schemeNumberCommit, describeLedgerRow, MAX_POINTS_ADJUST,
+} from './loyaltyPoints'
 
 // These encode the same boundaries award_loyalty_points() enforces in SQL. The till renders a
 // preview from this module and the ledger is written by that function, so a divergence would show
@@ -140,5 +143,93 @@ describe('redeemedAmountDiffers', () => {
     expect(redeemedAmountDiffers(null, 300)).toBe(false)
     expect(redeemedAmountDiffers(undefined, 300)).toBe(false)
     expect(redeemedAmountDiffers('abc', 300)).toBe(false)
+  })
+})
+
+// S809 3k (CUSTOMERS-PARKING-5): the same rules adjust_loyalty_points applies in
+// 20261010110000_pos_loyalty_phone_and_adjust_s809.sql, checked before the window sends anything.
+describe('pointsAdjustment', () => {
+  const base = { direction: 'add', pointsStr: '50', reason: 'Points from bill 1234 that did not reach the till', balance: 570 }
+
+  test('adding points gives a signed amount and the new balance', () => {
+    expect(pointsAdjustment(base)).toEqual({ points: 50, newBalance: 620, errors: {} })
+    expect(pointsAdjustment({ ...base, pointsStr: '1,000' }).points).toBe(1000)
+  })
+
+  test('taking points off is negative, and down to exactly 0 is allowed', () => {
+    expect(pointsAdjustment({ ...base, direction: 'take', pointsStr: '570' })).toEqual({ points: -570, newBalance: 0, errors: {} })
+  })
+
+  test('never below zero by hand, as the server refuses (pos_points_adjust_below_zero)', () => {
+    const r = pointsAdjustment({ ...base, direction: 'take', pointsStr: '571' })
+    expect(r.points).toBeNull()
+    expect(r.errors.points).toMatch(/at most 570/)
+    expect(pointsAdjustment({ ...base, direction: 'take', pointsStr: '1', balance: 0 }).errors.points).toMatch(/no points/)
+    // A minus balance (a credit note took back points already spent) can be brought up, not further down.
+    expect(pointsAdjustment({ ...base, direction: 'take', pointsStr: '1', balance: -40 }).errors.points).toBeDefined()
+    expect(pointsAdjustment({ ...base, pointsStr: '40', balance: -40 })).toEqual({ points: 40, newBalance: 0, errors: {} })
+  })
+
+  test('an unknown balance leaves the limit to the server and shows no new balance', () => {
+    expect(pointsAdjustment({ ...base, direction: 'take', balance: null })).toEqual({ points: -50, newBalance: null, errors: {} })
+  })
+
+  test('the amount must be a whole number above 0 and within the typo guard', () => {
+    for (const s of ['', '  ', '0', '2.5', '-5', 'abc', String(MAX_POINTS_ADJUST + 1)]) {
+      const r = pointsAdjustment({ ...base, pointsStr: s })
+      expect([s, r.points, Boolean(r.errors.points)]).toEqual([s, null, true])
+    }
+    expect(pointsAdjustment({ ...base, pointsStr: String(MAX_POINTS_ADJUST) }).errors).toEqual({})
+  })
+
+  test('a reason is required, and kept short (pos_points_adjust_reason)', () => {
+    expect(pointsAdjustment({ ...base, reason: '   ' }).errors.reason).toMatch(/Say why/)
+    expect(pointsAdjustment({ ...base, reason: 'x'.repeat(301) }).errors.reason).toMatch(/300/)
+    // The preview does not wait for the reason.
+    expect(pointsAdjustment({ ...base, reason: '' }).newBalance).toBe(620)
+  })
+
+  test('a direction must be chosen, and a delivery partner can only lose points (pos_points_adjust_partner)', () => {
+    expect(pointsAdjustment({ ...base, direction: '' }).errors.direction).toBeDefined()
+    expect(pointsAdjustment({ ...base, direction: '' }).points).toBeNull()
+    const partner = pointsAdjustment({ ...base, isPartner: true })
+    expect(partner.errors.direction).toMatch(/delivery partner/)
+    expect(partner.points).toBeNull()
+    expect(pointsAdjustment({ ...base, direction: 'take', isPartner: true, balance: 188, pointsStr: '188' }).errors).toEqual({})
+  })
+})
+
+// S809 3k (CUSTOMERS-PARKING-12): a scheme's rate and minimum boxes.
+describe('schemeNumberCommit', () => {
+  test('a cleared box keeps the stored value instead of saving 0', () => {
+    expect(schemeNumberCommit('', 10)).toEqual({ action: 'keep' })
+    expect(schemeNumberCommit('   ', 500)).toEqual({ action: 'keep' })
+  })
+
+  test('the stored value saves nothing; a new one saves', () => {
+    expect(schemeNumberCommit('10', 10)).toEqual({ action: 'keep' })
+    expect(schemeNumberCommit('10.0', '10')).toEqual({ action: 'keep' })
+    expect(schemeNumberCommit('12', 10)).toEqual({ action: 'save', value: 12 })
+    // An explicit 0 is a choice (no minimum spend), not a cleared box.
+    expect(schemeNumberCommit('0', 500)).toEqual({ action: 'save', value: 0 })
+  })
+
+  test('a negative or non-number is refused before it is sent', () => {
+    expect(schemeNumberCommit('-1', 10).action).toBe('invalid')
+    expect(schemeNumberCommit('abc', 10).action).toBe('invalid')
+  })
+})
+
+describe('describeLedgerRow', () => {
+  test('an earn and a spend name their bill', () => {
+    expect(describeLedgerRow({ kind: 'earn', points: 100, pos_orders: { invoice_no: 812, order_no: 40 } })).toEqual({ what: 'Earned', bill: 'Bill #812' })
+    expect(describeLedgerRow({ kind: 'redeem', points: -30, pos_orders: { invoice_no: null, order_no: 41 } })).toEqual({ what: 'Spent', bill: 'Order #41' })
+  })
+
+  test('a correction reads its own note; a hand correction has no bill', () => {
+    expect(describeLedgerRow({ kind: 'adjust', note: 'By hand: Birthday gift', pos_orders: null })).toEqual({ what: 'By hand: Birthday gift', bill: null })
+    expect(describeLedgerRow({ kind: 'adjust', note: 'Points handed back: this bill was not paid with them', pos_orders: { invoice_no: null, order_no: 7 } }))
+      .toEqual({ what: 'Points handed back: this bill was not paid with them', bill: 'Order #7' })
+    expect(describeLedgerRow({ kind: 'adjust', note: null })).toEqual({ what: 'Corrected', bill: null })
   })
 })

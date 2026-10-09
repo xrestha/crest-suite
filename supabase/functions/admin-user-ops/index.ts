@@ -108,6 +108,69 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
 // years is the same answer. reopen_final_settlement clears whichever it finds.
 const LEAVER_BAN = '876000h'
 
+// Which module an Inventory row belongs to, by its source (S809 DATABASE-2). Clear POS Transactions
+// used to delete every stock_movements row of the client, the manual Sales Entry depletion included,
+// and Clear IMS Transactions every POS one, and since S809 2e a "not served" credit note's
+// 'pos_credit_restock' rows were in neither clear's list. Every value sales_entries_source_check and
+// stock_movements_source_check allow (migration 20261010100000) is in exactly one list below; a
+// sales_entries row with no source is a hand-entered sale (the column's legacy default) and is IMS's.
+// clearModuleSources.test.js holds these four lists to both CHECKs.
+const IMS_SALES_SOURCES = ['manual']
+const POS_SALES_SOURCES = ['pos', 'pos_comp', 'pos_credit', 'pos_credit_restock']
+const IMS_MOVEMENT_SOURCES = ['manual']
+const POS_MOVEMENT_SOURCES = ['pos_sale', 'pos_comp', 'pos_credit_restock']
+
+// What each column that keeps a till login's name means, for the sentence that refuses a Delete
+// (S809 ACCESS-5). Which columns count is the database's: pos_login_reference_columns() reads every
+// foreign key to a login that does not go with it, plus pos_orders.opened_by and
+// pos_order_items.comped_by, so a new one is counted the day its key exists. This map only words
+// them; one it does not know reads as "other records". posLoginRecords.test.js holds it to the POS
+// keys in the migrations.
+const POS_RECORD_WORDS: Record<string, [string, string]> = {
+  'pos_orders.closed_by':               ['closed 1 bill', 'closed {n} bills'],
+  'pos_orders.opened_by':               ['opened 1 order', 'opened {n} orders'],
+  'pos_orders.credit_settled_by':       ['settled 1 credit bill', 'settled {n} credit bills'],
+  'pos_order_items.comped_by':          ['made 1 dish complimentary', 'made {n} dishes complimentary'],
+  'pos_order_payments.recorded_by':     ['recorded 1 payment', 'recorded {n} payments'],
+  'pos_shifts.opened_by':               ['opened 1 shift', 'opened {n} shifts'],
+  'pos_shifts.closed_by':               ['closed 1 shift', 'closed {n} shifts'],
+  'pos_cash_movements.created_by':      ['recorded 1 cash entry', 'recorded {n} cash entries'],
+  'pos_credit_notes.issued_by':         ['issued 1 credit note', 'issued {n} credit notes'],
+  'pos_kot_log.sent_by':                ['sent 1 kitchen ticket', 'sent {n} kitchen tickets'],
+  'pos_kot_log.status_updated_by':      ['moved 1 kitchen ticket along', 'moved {n} kitchen tickets along'],
+  'pos_kot_removals.removed_by':        ['took 1 sent dish off a bill', 'took {n} sent dishes off bills'],
+  'pos_parking_slips.issued_by':        ['issued 1 parking slip', 'issued {n} parking slips'],
+  'pos_parking_slips.exited_by':        ['marked 1 vehicle as gone', 'marked {n} vehicles as gone'],
+  'pos_reservations.created_by':        ['took 1 booking', 'took {n} bookings'],
+  'pos_loyalty_ledger.created_by':      ['recorded 1 points entry', 'recorded {n} points entries'],
+  'pos_guest_order_requests.decided_by': ['answered 1 guest QR order', 'answered {n} guest QR orders'],
+  'pos_devices.created_by':             ['activated 1 till', 'activated {n} tills'],
+  'pos_devices.revoked_by':             ['switched off 1 till', 'switched off {n} tills'],
+  'profiles.pos_blocked_by':            ['blocked 1 login', 'blocked {n} logins'],
+}
+
+// "closed 14 bills, opened 3 shifts and sent 120 kitchen tickets" from pos_login_recorded_rows' rows,
+// in POS_RECORD_WORDS' order, at most four named and the rest summed as other records.
+function describePosLoginRecords(rows: Array<{ table_name: string; column_name: string; n: number | string }>): string {
+  const order = Object.keys(POS_RECORD_WORDS)
+  const named: Array<{ at: number; n: number; words: [string, string] }> = []
+  let other = 0
+  for (const r of rows) {
+    const n = Number(r.n) || 0
+    if (n <= 0) continue
+    const key = `${r.table_name}.${r.column_name}`
+    const words = POS_RECORD_WORDS[key]
+    if (words) named.push({ at: order.indexOf(key), n, words })
+    else other += n
+  }
+  named.sort((a, b) => a.at - b.at)
+  for (const x of named.slice(4)) other += x.n
+  const parts = named.slice(0, 4).map(x => (x.n === 1 ? x.words[0] : x.words[1]).replace('{n}', x.n.toLocaleString('en-IN')))
+  if (other > 0) parts.push(other === 1 ? 'recorded 1 other entry' : `recorded ${other.toLocaleString('en-IN')} other entries`)
+  if (parts.length <= 1) return parts[0] || 'recorded entries'
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
 // S792 (DATABASE-5). An id list travels in the URL, and the gateway refuses one past a few hundred
 // uuids (414, measured at ~254 in S706). The wipes below used to pass a client's whole list at once
 // — every recipe, order or bill line — so on a mature client they threw part-way, after
@@ -671,7 +734,7 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, full_name, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void').eq('id', user.id).single()
+      .from('profiles').select('role, full_name, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void, pos_blocked_at, settlement_blocked_by').eq('id', user.id).single()
 
     // ── POS/IMS/HR manager-accessible actions (before admin-only guard) ──────
     // isCallerOwner must exclude every staff-account marker (pos_role, pos_email, ims_role,
@@ -680,7 +743,10 @@ Deno.serve(async (req) => {
     // outside its own domain (e.g. an HR self-service PIN account calling create_pos_staff).
     // pos_email since S752: a PIN login whose pos_role was cleared passed as the Owner.
     const isCallerAdmin      = profile?.role === 'admin'
-    const isCallerPosManager = profile?.pos_role === 'manager'
+    // S809 3i: a blocked POS manager (POS Staff or Final Settlement) manages nobody, as
+    // pos_caller_has_rank refuses it every rank. Its sessions are ended by the block, so this is the
+    // second line, for a token still alive.
+    const isCallerPosManager = profile?.pos_role === 'manager' && !profile?.pos_blocked_at && !profile?.settlement_blocked_by
     const isCallerImsManager = profile?.ims_role === 'manager'
     const isCallerHrManager  = profile?.hr_role === 'manager'
     const isCallerOwner      = profile?.role === 'client' && !profile?.pos_role && !profile?.pos_email && !profile?.ims_role && !profile?.hr_self_service && !profile?.hr_role
@@ -835,7 +901,8 @@ Deno.serve(async (req) => {
       return json({ success: true })
     }
 
-    if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff' || action === 'update_pos_role') {
+    if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff' || action === 'update_pos_role'
+        || action === 'block_pos_staff' || action === 'unblock_pos_staff') {
       if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
     }
     if (action === 'create_ims_staff' || action === 'reset_ims_password' || action === 'delete_ims_staff' || action === 'update_ims_role'
@@ -889,11 +956,11 @@ Deno.serve(async (req) => {
 
     // The POS powers and lock stamp are read for reset_pos_pin (S809 1f): its power check compares the
     // target's discount limit and Void against the caller's, and its audit row says whether the reset
-    // ended a lockout.
+    // ended a lockout. The two block stamps are read for Block / Unblock (S809 3i).
     async function loadTarget(userId: string) {
       const { data } = await admin
         .from('profiles')
-        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, ims_role, ims_email, hr_role, hr_self_service')
+        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, pos_blocked_at, settlement_blocked_by, ims_role, ims_email, hr_role, hr_self_service')
         .eq('id', userId).single()
       return data as Record<string, unknown> | null
     }
@@ -997,6 +1064,33 @@ Deno.serve(async (req) => {
         return json({ error: 'Your own login cannot void bills, so you cannot give Void permission to anyone. Ask the account owner.' }, 403)
       }
       return null
+    }
+    // Acting on a login that holds a power the caller lacks (S809 1f for a PIN reset; S809 3i for
+    // Block, Unblock and Delete, the same rule). The target's powers go through the grant test
+    // unchanged; a limit the read did not return counts as unlimited (refused for a capped caller)
+    // rather than as "not being set" (not compared). `doing` finishes "only the account owner can …",
+    // e.g. "reset Bina's PIN". Returns a ready-to-send error or null.
+    function posPowerRefusal(target: Record<string, unknown>, doing: string) {
+      const targetLimit = target.pos_discount_limit === null || target.pos_discount_limit === undefined
+        ? null : Number(target.pos_discount_limit)
+      const gap = posPowerBeyondCaller(targetLimit, target.pos_allow_void)
+      if (!gap) return null
+      const who = whoOf(target)
+      const why = gap === 'void'
+        ? `${who} can void bills and your login cannot`
+        : gap === 'unlimited_discount'
+          ? `${who} has no discount limit and yours is ${callerDiscountCap}%`
+          : `${who} can give discounts of up to ${targetLimit}% and yours stop at ${callerDiscountCap}%`
+      return json({ error: `${why}, so only the account owner can ${doing}.` }, 403)
+    }
+    // "Bina" / "This staff member", and "Bina's" / "their", for the sentences above and below.
+    function whoOf(target: Record<string, unknown>) {
+      const n = typeof target.full_name === 'string' ? target.full_name.trim() : ''
+      return n || 'This staff member'
+    }
+    function possessive(target: Record<string, unknown>) {
+      const n = typeof target.full_name === 'string' ? target.full_name.trim() : ''
+      return n ? `${n}'s` : 'their'
     }
 
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
@@ -1197,6 +1291,9 @@ Deno.serve(async (req) => {
             // Omitted when absent so the column's own DEFAULT 'foh' applies rather than a null
             // colliding with NOT NULL — same reasoning as create_pos_staff.
             ...(p.pos_team ? { pos_team: p.pos_team } : {}),
+            // A login POS Staff blocked comes back blocked (S809 3i); the ban follows below. Who
+            // blocked it is not kept: that login's id did not survive the restore.
+            ...(p.pos_blocked_at ? { pos_blocked_at: p.pos_blocked_at } : {}),
           } : isSelfService ? {
             hr_self_service:       true,
             hr_self_service_email: email,
@@ -1240,7 +1337,22 @@ Deno.serve(async (req) => {
           }
           blocked = true
         }
-        restored.push({ full_name: p.full_name, kind: blocked ? `${kindLabel}, blocked (settled leaver)` : kindLabel })
+        // S809 3i: the same for a till login POS Staff blocked. The stamp went in with the profile
+        // above; without the ban the vaulted PIN would sign them straight back in.
+        let posBlocked = false
+        if (!blocked && isPos && p.pos_blocked_at) {
+          const { error: banErr } = await admin.auth.admin.updateUserById(authData.user.id, { ban_duration: LEAVER_BAN })
+          if (banErr) {
+            await admin.auth.admin.deleteUser(authData.user.id)
+            manual.push({ full_name: p.full_name, kind: kindLabel, reason: `left out — POS Staff had blocked this login, and the block could not be re-applied (${banErr.message})` })
+            continue
+          }
+          posBlocked = true
+        }
+        restored.push({
+          full_name: p.full_name,
+          kind: blocked ? `${kindLabel}, blocked (settled leaver)` : posBlocked ? `${kindLabel}, blocked (POS Staff)` : kindLabel,
+        })
       }
 
       return json({ success: true, restored, manual })
@@ -1273,7 +1385,7 @@ Deno.serve(async (req) => {
 
       const [liveRes, empRes, finRes] = await Promise.all([
         admin.from('profiles')
-          .select('id, full_name, hr_employee_id, settlement_blocked_by, pos_email, hr_self_service, ims_role, hr_role')
+          .select('id, full_name, hr_employee_id, settlement_blocked_by, pos_blocked_at, pos_email, hr_self_service, ims_role, hr_role')
           .eq('client_id', client_id),
         admin.from('hr_employees').select('id, join_date').eq('client_id', client_id),
         admin.from('hr_final_settlements').select('id, employee_id, last_working_date')
@@ -1283,7 +1395,7 @@ Deno.serve(async (req) => {
       if (readErr) return json({ error: `could not read the restored client: ${readErr.message}` }, 500)
 
       type Live = { id: string; full_name: string | null; hr_employee_id: string | null; settlement_blocked_by: string | null;
-        pos_email: string | null; hr_self_service: boolean | null; ims_role: string | null; hr_role: string | null }
+        pos_blocked_at: string | null; pos_email: string | null; hr_self_service: boolean | null; ims_role: string | null; hr_role: string | null }
       const live = (liveRes.data || []) as Live[]
       const liveById = new Map(live.map(p => [p.id, p]))
       const joinOf = new Map((empRes.data || []).map((e: { id: string; join_date: string | null }) => [e.id, e.join_date]))
@@ -1340,7 +1452,9 @@ Deno.serve(async (req) => {
           return banned
         }
         let blockBy: string | null = null
-        if (!p.settlement_blocked_by && blocksLogins) {
+        // A login POS Staff blocked keeps that block as its own (S809 3i): its ban is POS Staff's, and
+        // a settlement stamp on top would let a Reopen lift it. Finalize leaves such a login alone too.
+        if (!p.settlement_blocked_by && !p.pos_blocked_at && blocksLogins) {
           if (r.settlement_blocked_by) {
             if (finalizedIds.has(r.settlement_blocked_by)) blockBy = r.settlement_blocked_by
           } else if (!('settlement_blocked_by' in r) && employeeId) {
@@ -1538,10 +1652,89 @@ Deno.serve(async (req) => {
       // is the Owner's or the operator's to remove, and a manager cannot remove their own (S754).
       const posDeleteManageDenied = requireManageableTarget(posTarget!, 'pos')
       if (posDeleteManageDenied) return posDeleteManageDenied
+      // The S809 1f rule, as for a PIN reset (S809 3i).
+      const posDeletePowerDenied = posPowerRefusal(posTarget!, `delete ${possessive(posTarget!)} login`)
+      if (posDeletePowerDenied) return posDeletePowerDenied
+
+      // ── Delete only a login that recorded nothing (S809 ACCESS-5; owner decision Q17 (a)) ──────
+      // Deleting the auth user deletes the profile, and every key from the till's tables to it is ON
+      // DELETE SET NULL: the bills, shifts, cash entries, tickets and credit notes it recorded kept
+      // their rows and lost the name, while the confirm said the names stayed. A login with any such
+      // row is refused with the way out the owner chose, Block. Decided here, from the database's
+      // own list of those columns (pos_login_recorded_rows), never by the page. A failed read refuses:
+      // an unread history is not an empty one.
+      const posWho = whoOf(posTarget!)
+      const { data: recorded, error: recErr } = await admin.rpc('pos_login_recorded_rows', { p_profile_id: userId })
+      if (recErr) {
+        console.error('[admin-user-ops] delete_pos_staff: could not read what the login recorded — refusing:', recErr.code, recErr.message)
+        return json({ error: `Could not check whether ${posWho} has recorded anything at the till, so the login was not deleted and their PIN still works. Try again in a moment.` }, 503)
+      }
+      const recordedRows = (recorded || []) as Array<{ table_name: string; column_name: string; n: number }>
+      if (recordedRows.length > 0) {
+        return json({
+          error: `${posWho} has ${describePosLoginRecords(recordedRows)} at the till, so deleting this login would take their name off those records. Block the login instead: it can no longer sign in, and the name stays on every record.`,
+          code: 'pos_login_has_records',
+          records: recordedRows,
+        }, 409)
+      }
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
       if (delErr) return json({ error: delErr.message }, 400)
       return json({ success: true })
+    }
+
+    // ── Block / Unblock a POS login (S809 ACCESS-5; owner decision Q17 (a), 2026-10-09) ────────
+    // Removing a leaver's till login BLOCKS it: they can no longer sign in, every session they have is
+    // ended, and the profile stays, so their name stays on every bill, shift, ticket and note they
+    // recorded. Final Settlement's shape (S753/S798) for a restaurant with no HR. Unblock is for a
+    // block made by mistake. Whoever may delete a POS login may block or unblock one, on the same
+    // rules: requireStaffTarget, requireManageableTarget (never a peer manager, never your own) and
+    // the S809 1f power rule. The block itself is pos_set_login_blocked (service role only): the
+    // stamp, the ban and the session end in one transaction, so a failure leaves nothing half done.
+    if (action === 'block_pos_staff' || action === 'unblock_pos_staff') {
+      const blocking = action === 'block_pos_staff'
+      const verb = blocking ? 'block' : 'unblock'
+      const { userId } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      const blockTarget = await loadTarget(userId)
+      const blockDenied = requireStaffTarget(blockTarget, 'pos')
+      if (blockDenied) return blockDenied
+      // The operator skips requireStaffTarget's marker test; a block is for till logins only.
+      if (!blockTarget!.pos_email) return json({ error: 'This is not a till (PIN) login, so it cannot be blocked from POS Staff.' }, 400)
+      const blockManageDenied = requireManageableTarget(blockTarget!, 'pos')
+      if (blockManageDenied) return blockManageDenied
+      const blockPowerDenied = posPowerRefusal(blockTarget!, `${verb} ${possessive(blockTarget!)} login`)
+      if (blockPowerDenied) return blockPowerDenied
+
+      const who = whoOf(blockTarget!)
+      const settlementSentence = `${who}'s logins were blocked by their Final Settlement in HR, so this one is unblocked there, not here: reopen the settlement, or rehire them in HR → Employees.`
+      // Said before the call, in words: the database refuses the same (pos_login_settlement_blocked).
+      if (blockTarget!.settlement_blocked_by) {
+        return json({ error: blocking ? `${who}'s login is already blocked by their Final Settlement in HR.` : settlementSentence, code: 'pos_login_settlement_blocked' }, 409)
+      }
+
+      const { data: outcome, error: blockErr } = await admin.rpc('pos_set_login_blocked', {
+        p_profile_id: userId, p_blocked: blocking, p_actor: user.id,
+      })
+      if (blockErr) {
+        if (blockErr.hint === 'pos_unblock_leaver') {
+          return json({ error: `HR shows ${who} as no longer working here, so the login stays blocked. If they are coming back, rehire them in HR → Employees first, then unblock it.`, code: 'pos_unblock_leaver' }, 409)
+        }
+        if (blockErr.hint === 'pos_login_settlement_blocked') {
+          return json({ error: settlementSentence, code: 'pos_login_settlement_blocked' }, 409)
+        }
+        if (blockErr.hint === 'pos_login_not_found') {
+          return json({ error: 'This is not a till (PIN) login, so it cannot be blocked from POS Staff.' }, 400)
+        }
+        console.error(`[admin-user-ops] ${action}: pos_set_login_blocked failed:`, blockErr.code, blockErr.message)
+        // An answer from the database (it carries a code) means its one transaction rolled back, so
+        // nothing changed. No answer at all proves nothing either way.
+        return blockErr.code
+          ? json({ error: `${who}'s login was not ${blocking ? 'blocked' : 'unblocked'}: the server could not finish, and nothing was changed. Try again in a moment.` }, 500)
+          : json({ error: `It is not known whether ${who}'s login was ${blocking ? 'blocked' : 'unblocked'}: the answer was lost on the way. Reload the page to see, then try again.` }, 503)
+      }
+      return json({ success: true, outcome })
     }
 
     // ── Reset a POS staff PIN ─────────────────────────────────────────────────
@@ -1566,22 +1759,10 @@ Deno.serve(async (req) => {
       // person, so a manager capped at 10% with no Void could reset the PIN of a cashier the Owner
       // trusted with Void or no cap, then void or discount as her — the escalation S754 closed for
       // grants, reached through the reset instead. The target's powers are what the reset hands the
-      // caller, so they go through the grant test unchanged. A limit the read did not return counts
-      // as unlimited (refused for a capped caller) rather than as "not being set" (not compared).
-      const pinTargetLimit = pinTarget!.pos_discount_limit === null || pinTarget!.pos_discount_limit === undefined
-        ? null : Number(pinTarget!.pos_discount_limit)
-      const pinPowerGap = posPowerBeyondCaller(pinTargetLimit, pinTarget!.pos_allow_void)
-      if (pinPowerGap) {
-        const pinFullName = pinTarget!.full_name
-        const pinName = typeof pinFullName === 'string' ? pinFullName.trim() : ''
-        const who = pinName || 'This staff member'
-        const why = pinPowerGap === 'void'
-          ? `${who} can void bills and your login cannot`
-          : pinPowerGap === 'unlimited_discount'
-            ? `${who} has no discount limit and yours is ${callerDiscountCap}%`
-            : `${who} can give discounts of up to ${pinTargetLimit}% and yours stop at ${callerDiscountCap}%`
-        return json({ error: `${why}, so only the account owner can reset ${pinName ? `${pinName}'s` : 'their'} PIN.` }, 403)
-      }
+      // caller, so they go through the grant test unchanged (posPowerRefusal, shared with Block,
+      // Unblock and Delete since S809 3i; the sentence is the one 1f wrote).
+      const pinPowerDenied = posPowerRefusal(pinTarget!, `reset ${possessive(pinTarget!)} PIN`)
+      if (pinPowerDenied) return pinPowerDenied
 
       // Salt must be this account's existing email, not a freshly generated one — the login
       // side derives from whatever pos_email currently holds, so a reset that salted with
@@ -2298,11 +2479,16 @@ Deno.serve(async (req) => {
           await del(admin.from('closing_stock').delete().in('period_id', periodIds), 'closing_stock')
           await del(admin.from('wastages').delete().in('period_id', periodIds), 'wastages')
           await del(admin.from('staff_meals').delete().in('period_id', periodIds), 'staff_meals')
-          await del(admin.from('sales_entries').delete().in('period_id', periodIds).eq('source', 'manual'), 'sales_entries')
+          // Hand-entered sales only, a NULL source among them (S809 DATABASE-2). The till's rows stay
+          // with the bills that wrote them: Post POS bills to Inventory skips a stamped bill, so a
+          // till row deleted here never came back.
+          await del(admin.from('sales_entries').delete().in('period_id', periodIds)
+            .or(`source.is.null,source.in.(${IMS_SALES_SOURCES.join(',')})`), 'sales_entries')
           await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
         }
 
-        await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
+        // The manual Sales Entry depletion only; the till's movements stay with its bills (DATABASE-2).
+        await del(admin.from('stock_movements').delete().eq('client_id', clientId).in('source', IMS_MOVEMENT_SOURCES), 'stock_movements')
 
         const poIds = await readAllIds('purchase_orders', (f, t) =>
           admin.from('purchase_orders').select('id').eq('client_id', clientId).order('id').range(f, t))
@@ -2372,12 +2558,16 @@ Deno.serve(async (req) => {
         await del(admin.from('pos_guest_order_requests').delete().eq('client_id', clientId), 'pos_guest_order_requests')
         // By client_id (S792, DATABASE-5), not a URL holding every order id of the till.
         await del(admin.from('pos_order_items').delete().eq('client_id', clientId), 'pos_order_items')
-        // POS-generated depletion ledger + POS-sourced sales entries go with the orders
-        await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
-        const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
+        // The till's Inventory rows go with the orders, and only those (S809 DATABASE-2): this deleted
+        // every stock movement of the client, so the manual Sales Entry depletion went with the bills
+        // and Book Stock read the shelf as fuller than it was. A credit note's "not served" restock
+        // rows (S809 2e) are the till's too, and were in neither clear's list.
+        await del(admin.from('stock_movements').delete().eq('client_id', clientId).in('source', POS_MOVEMENT_SOURCES), 'pos stock_movements')
+        const { data: periods, error: periodsErr } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
+        if (periodsErr) throw new Error(`Failed to read monthly_periods: ${periodsErr.message}`)
         const periodIds = (periods || []).map((p: { id: string }) => p.id)
         if (periodIds.length > 0) {
-          await del(admin.from('sales_entries').delete().in('period_id', periodIds).in('source', ['pos', 'pos_comp', 'pos_credit']), 'pos sales_entries')
+          await del(admin.from('sales_entries').delete().in('period_id', periodIds).in('source', POS_SALES_SOURCES), 'pos sales_entries')
         }
         // Before orders/shifts: its FKs to both are ON DELETE SET NULL, so leaving it until
         // after would orphan the rows rather than remove them.

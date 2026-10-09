@@ -600,7 +600,8 @@ Every POS screen already hid its controls by rank. The table behind each one too
 outlet. **A button that does not render is a statement about the page, not about the data** — the
 same lesson as S636's `/pos` route guard, one layer down. `pos_caller_has_rank(level)` in
 `20260916110000` is the one POS rank test: admin, the Owner, or a POS login at that rank whose
-login a Final Settlement has not blocked, with every operand COALESCE'd. Every trigger below calls
+login neither a Final Settlement nor POS Staff (`pos_blocked_at`, S809 3i) has blocked, with every
+operand COALESCE'd. Every trigger below calls
 it rather than carrying its own copy, and since S809 1j so do `apply_pos_item_comps`,
 `caller_can_set_menu_price` (`pos_caller_has_rank('manager') OR ims_caller_has_rank('manager')`) and
 `settings_guard_staff_roles`' POS lines: the last copies are gone. **The operator is exempt from rank,
@@ -622,6 +623,8 @@ sends those columns, and a new screen must not.
 | Invoice prefix, VAT number and flag, property address and phone, payment QR | Owner (admin exempt) |
 | `pos_tables` anything but `status` | POS manager. **No delete under an open bill**, for everyone |
 | Loyalty schemes and enrolment (deleting an enrolled customer too) | POS manager |
+| Add or take off loyalty points by hand (`adjust_loyalty_points`, S809 3k) | POS manager; reason required, never below 0 |
+| Block / Unblock / Delete a till login (admin-user-ops, S809 3i) | POS manager, as a PIN reset (never a peer manager, own login, or a stronger login). Delete only a login with no rows in `pos_login_recorded_rows` |
 | Parking slips (`pos_parking_slips_guard`, S809 1k) | Issue: Supervisor. Reprint, Mark Exited, the day's auto-close: any POS rank. Number (UNIQUE per outlet), issuer, Time In, the linked bill's number, close time and closer are the server's. Never edited; a closed slip stays closed; auto-close only before today's 6 AM Nepal |
 | Cancel a kitchen ticket | Supervisor, or its order voided; final (S809 1d) |
 
@@ -943,7 +946,16 @@ policy fixes it without touching the actual threat, which is a till JWT minting 
   its screen (`redeemedAmountDiffers`).
 - **`award_loyalty_points`** is callable only by the order's `closed_by`, within the window after
   the server-stamped `closed_at`. A failed award cannot be retried later from the till; the Owner or
-  operator can.
+  a POS manager adds the points by hand.
+- **`adjust_loyalty_points(customer, points, reason)` (S809 3k, `20261010110000`, Q13 b):** Owner, POS
+  manager or operator; reason required; never below 0; never adds to a partner's number; `order_id`
+  NULL, because redeem hands back and a credit note reverses every adjust row on a bill;
+  `created_by = auth.uid()`.
+- **A customer is the number, not the spelling (S809 3k).** award and redeem find the customer by
+  `phone_canonical` when the bill's phone has 7+ digits (`pos_phone_canonical()` mirrors the generated
+  column; `normalizePhone`/`customerPhoneKey`/`phoneForRecord` are the JS twins: change them together),
+  else by the raw text. `pos_customers_client_phone_canonical_key` (partial, 7+ digits) holds one row
+  per number per outlet; `pos_customers_client_id_phone_key` stays for older tills' upserts.
 - **`reverse_loyalty_for_credit_note(p_credit_note_id)`** is manager-only and runs as a credit
   note's side-effect. It takes back the points the bill earned and returns the points spent on it.
   It writes at most two `adjust` rows per customer, each carrying `pos_loyalty_ledger.credit_note_id`,
@@ -966,7 +978,8 @@ policy fixes it without touching the actual threat, which is a till JWT minting 
   with ledger rows (`pos_customer_has_points_history`); deleting an enrolled one needs POS manager
   (`pos_customer_delete_rank`). `pos_loyalty_ledger_customer_id_fkey` is NO ACTION, not CASCADE:
   history goes only after its ledger rows (Danger Zone's order), and NO ACTION rather than RESTRICT
-  so a client delete's one-statement cascade still passes. Moving points to a new number waits for Q13.
+  so a client delete's one-statement cascade still passes. Moving points to a new number is two hand
+  corrections today; a Move action is a stage-4 item (owner, 2026-10-09).
 
 **A lock that breaks the backup is not a security posture.** Ask of any new locked-down table:
 what writes it during a restore, and as which role? It only surfaced because `RESTORE_ORDER` is a

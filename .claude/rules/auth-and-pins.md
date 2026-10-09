@@ -105,7 +105,8 @@ when one was last used.
   rather than telling the floor to re-activate the till over a blip. Both refusals return the
   same 401 string, because which half failed is not something to tell a caller holding a dead key.
   The picker is `get_pos_device_staff`, which RAISES on a dead key rather than returning no rows, so
-  "revoked" and "no staff" are different screens.
+  "revoked" and "no staff" are different screens. It leaves out a POS-blocked login (S809 3i), whose
+  PIN then gets `user_banned` from GoTrue.
 
 **The shared key is retired explicitly, never automatically when the first tablet registers.** An
 outlet with three tills that re-activates one would otherwise lose the other two mid-service.

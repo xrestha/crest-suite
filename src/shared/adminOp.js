@@ -17,12 +17,22 @@ export async function adminOp(action, params = {}) {
     // functions.invoke gives a generic "non-2xx status code" message; the real
     // reason is in the response body (error.context) — surface it.
     let detail = error.message || 'Edge function error'
+    let code
     try {
       const body = await error.context.json()
       detail = body?.error?.message || body?.error || body?.message || detail
+      code = body?.code
     } catch (_) {}
-    throw new Error(detail)
+    // The refusal's `code` rides along (S809 3i: `pos_login_has_records` lets the caller offer
+    // Block instead of Delete), so a caller can act on WHICH refusal without matching its words.
+    const e = new Error(detail)
+    if (code) e.code = code
+    throw e
   }
-  if (data?.error) throw new Error(data.error.message || data.error || 'Admin op failed')
+  if (data?.error) {
+    const e = new Error(data.error.message || data.error || 'Admin op failed')
+    if (data.code) e.code = data.code
+    throw e
+  }
   return data
 }

@@ -399,6 +399,8 @@ export default function PosCustomers() {
           // Owner's. hasPosAccess resolves admin and the Owner to manager, so this one test is the
           // pos_loyalty_schemes_guard / pos_customers_guard_loyalty / settings guard rank.
           canManage={hasPosAccess('manager')}
+          // S809 3k: a partner's row is shown as a partner, never offered for enrolment or added points.
+          deliveryPartners={billingSettings.delivery_partners}
           onPointValueSaved={async v => {
             // settings is nullable-client_id, so it stays on raw supabase rather than scopedDb.
             // `.select('id')`: a client with no settings row matches nothing and returns no error,
