@@ -65,7 +65,7 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 - **`SuiteGate` (`clients.suite_plan`) upsells in place instead of redirecting**, so a Suite nav item carries no `featureKey`/`minPlan`.
 - **A nav item hidden by role is not a guard.** No gate checks a role, and restrictive RLS returns `[]` instead of an error, so an unguarded report shows confident wrong figures. Put the role check (e.g. `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />`) in the page after its hooks. Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and `isAdmin || isOwner`. A sub-route inherits nothing from its parent.
 - **Staff ranks** are `pos_role`/`ims_role`/`hr_role` (`staff|supervisor|manager`, NULL = none). Admin and Owner resolve to `manager`, so gate staff-only (till) behaviour on the raw `profile.pos_role`. A page's rank guard must match its nav tag.
-- **Guest QR Ordering's only gate is `pos_enabled`; never remove that check.** `false` in `feature_flags` does not revoke anything.
+- **Guest QR Ordering's gates are `pos_enabled` and, since S809, the account lock `client_access_open()`; never remove either.** `false` in `feature_flags` does not revoke anything.
 - `clientModules` drives display (nav, dashboard sections); `imsEnabled`/`hrEnabled` drive route access. Anything asking "does this client have HR/POS" reads `hrEnabled`/`posEnabled`.
 - Client MRR is computed only in `src/shared/clientMrr.js`, and prices resolve through `useSettings().pricing`. Anything added to `clients` that changes what a client pays needs a place in the admin client list.
 

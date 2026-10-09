@@ -180,6 +180,35 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 1, slice 1h: GUEST-4, RESERVATIONS-3, RESERVATIONS-4 (P2), owner decisions Q2 (a),
+  Q3 (a)~~ — **shipped S809, 2026-10-09**, migration `20261009140000` applied live (crest-v414). A
+  locked outlet (deactivated or archived, trial pending or ended, past the 7-day grace) kept taking QR
+  orders and booking requests nobody could see. `client_access_open()` is the SQL twin of
+  `getAccessState().locked === false`; all eight public guest-menu and booking functions that gate on
+  `pos_enabled` call it beside that gate and answer exactly as POS switched off (five guest functions,
+  not the three the slice table named, so a locked outlet never answers differently from POS off). The
+  outlet-wide booking cap (40 an hour) counts website bookings created, not attempts, with code `busy`;
+  the per-connection cap (5, refused attempts counted) is unchanged. Original rows: `GUEST.md`,
+  `RESERVATIONS.md`.
+- [x] ~~S809 stage 1, slice 1d: DATABASE-1, ORDER-FLOW-2 (P1), owner decision Q1 (b)~~ — **shipped S809,
+  2026-10-09**, migration `20261009120000` applied live (crest-v414). The kitchen-ticket log is
+  append-only (`guard_pos_kot_log`: no client delete, direct or by deleting its order; only the stage
+  moves, forward; `cancelled` needs a voided order or Supervisor), a pulled-item record comes only from
+  `save_pos_order_items` (`guard_pos_kot_removals`), and a line's sent count never falls outside the
+  save (`guard_pos_item_price`, and the save floors each row at its share of what the kitchen has).
+  **Q1 (b):** an offline ticket keeps the waiter the till recorded when that is a POS login (role or
+  PIN) of the outlet; anyone else becomes the uploading login; an online send names its own login. An
+  Owner's offline ticket uploaded under a waiter's session is therefore credited to the waiter
+  (accepted). Original rows: `DATABASE.md`, `ORDER-FLOW.md`.
+- [x] ~~S809 stage 1, slice 1c: CHECKOUT-2 (P1), CHECKOUT-8 (P2), CREDIT-NOTES-6 (P3)~~ — **shipped S809,
+  2026-10-09**, migration `20261009110000` applied live (crest-v414). A bill closes only as billed +
+  paid, billed + writeoff or voided + void (`pos_close_mismatch` in `guard_pos_order_close`, and the
+  CHECK `pos_orders_status_close_type_check`); the Allow Void test reads the status as well as the
+  close type. Print counters on bills and Credit Notes only go up: a lower value is IGNORED, not
+  refused, because the till writes count + 1 without waiting for the answer and a till a reprint
+  behind must not be told its print failed. `ims_posted_at` is set once, on a closed bill, at POS
+  Supervisor (bills) or Manager (notes) and above, and the first mark stands. Original rows:
+  `CHECKOUT.md`, `CREDIT-NOTES.md`.
 - [x] ~~S809 stage 1, slice 1b: GAP-RELEASE-1 (P2), owner decision Q27 (c)~~ — **shipped S809,
   2026-10-09**, migration `20261009100000` applied live (crest-v413). A till never took a release on
   its own: the lock, a PIN sign-in and the Kitchen Display move by `navigate()`, never by a page

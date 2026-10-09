@@ -55,33 +55,26 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P1 (7)
+### P1 (4 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CHECKOUT-2 | A supervisor without Allow Void can void a bill over REST, or close it "billed" with no close type. The bill then vanishes from Sales Report, the Z-report, the Dashboard and Exceptions | 1 | — | yes |
-| DATABASE-1 | Any login, a Staff PIN included, can delete or rewrite the kitchen-ticket log, post a fake ticket for the kitchen to cook, and forge pulled-item records under a colleague's name | 1 | Q1 | yes |
-| ORDER-FLOW-2 | A waiter can take a cooked dish off the bill with no pulled-item record, by first saving the line as "not sent" (PATCH or the save RPC) | 1 | — | yes |
 | ACCESS-1 | After activating a till, the Owner stays signed in behind the PIN screen, and "← Back" gives the tablet the Owner's account (S790 fixed only the guide wording) | 1 | — | no |
 | CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers | 2 | Q8 | yes |
 | ORDER-FLOW-1 (= CHECKOUT-9) | If the till's settings read fails or stalls, every bill until a reload prints as a TAX INVOICE without the VAT/PAN number, prefix or address. Bar items go on the kitchen ticket, and the bad copy overwrites the offline settings. The reprint path has the same gap | 2 | — | no |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (65)
+### P2 (61 open; CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4 shipped in slices 1c, 1h)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 | ACCESS-2 | A PIN left on the Kitchen Display never idle-locks, and its Exit opens the till as that login | 1 | Q4 | no |
 | ACCESS-3 | A POS manager with capped powers can reset the PIN of a waiter who holds more, then use those powers; nothing records the reset | 1 | Q5 | no |
 | ACCESS-4 | A PIN login with sibling-outlet access can switch a till into the other outlet, which then bills in that outlet's name, PAN and invoice series | 1 | — | yes |
-| CHECKOUT-8 | Any login can reset a closed invoice's print counter over REST, so the next reprint carries no "COPY" mark | 1 | — | yes |
 | CUSTOMERS-PARKING-7 | Any login can move a regular's points balance to another phone over REST, and nothing records it | 1 | — | yes |
 | DATABASE-4 | The Loyalty payment sitting on an open bill can be changed or deleted by any login | 1 | — | yes |
 | DATABASE-5 | Any login can delete a loyalty customer, silently wiping its points history | 1 | — | yes |
 | DOCS-1 | A manager's PIN reset leaves the 15-minute lockout in place, so the new PIN is refused too. The fix is code: `admin-user-ops` plus a deploy. IMS count and HR Self-Service PINs have the same gap (S809.3) | 1 | Q6 | no |
-| GUEST-4 | A locked or deactivated outlet's QR codes keep taking orders that no till can open (KNOWN door, effect new) | 1 | Q2 | yes |
-| RESERVATIONS-3 | The public booking page keeps taking requests for a locked, deactivated or archived outlet: GUEST-4's gap, shipped in the same migration | 1 | Q2 | yes |
-| RESERVATIONS-4 | One ordinary connection can switch off an outlet's online booking for every guest, because the outlet-wide limit counts refused attempts | 1 | Q3 | yes |
 | SHIFTS-2 | The signed Z-report's money figures are whatever the tablet sends: one REST call can file a shortage as "✓ Balanced" | 1 | — | yes |
 | CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
 | CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
@@ -137,7 +130,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
 | SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (90 open; RESERVATIONS-12 shipped in slice 1a)
+### P3 (89 open; RESERVATIONS-12 shipped in slice 1a, CREDIT-NOTES-6 in 1c)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -145,7 +138,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ACCESS-9 | Four POS rank checks are copies of `pos_caller_has_rank` that don't refuse a settlement-blocked login | 1 | — | yes |
 | CHECKOUT-12 | Once QR auto-confirm goes live, any login could re-point an old payment confirmation at another open bill | 1 | — | yes |
 | CHECKOUT-16 | `apply_pos_item_comps` accepts any quantity, so a REST call can leave a negative line or comp | 1 | — | yes |
-| CREDIT-NOTES-6 | Any login can reset a Credit Note's print counter over REST (twin of CHECKOUT-8) | 1 | — | yes |
 | CUSTOMERS-PARKING-13 | A parking slip's rank rule, number and names are screen-only: any login can issue, renumber or rewrite one | 1 | — | yes |
 | DATABASE-9 | The retired comp-slip number function is still callable | 1 | — | yes |
 | ACCESS-10 | A dead till says a POS manager can re-activate it, but a POS manager can't sign in on a dead tablet | 4 | — | no |
@@ -384,12 +376,12 @@ changed.
 | --- | --- | --- | --- | --- |
 | 1a ✅ | RESERVATIONS-1, RESERVATIONS-12 (shipped 2026-10-08, `20261008120000` live) | hold guard, composite FKs, `order_id` same-client trigger, `created_by` stamp | — | — |
 | 1b ✅ | GAP-RELEASE-1 (shipped 2026-10-09, `20261009100000` live) | `pos_min_till_build()` floor (NULL) + `pos_till_build_gate` statement triggers; the till reloads itself | — | Q27 |
-| 1c | CHECKOUT-2, CHECKOUT-8, CREDIT-NOTES-6 | `guard_pos_order_close` A+B, `pos_orders` CHECK, `guard_pos_credit_note` | — | — |
-| 1d | DATABASE-1, ORDER-FLOW-2 | `pos_kot_log` / `pos_kot_removals` guards, `save_pos_order_items`, `guard_pos_item_price` | — | Q1 |
+| 1c ✅ | CHECKOUT-2, CHECKOUT-8, CREDIT-NOTES-6 (shipped 2026-10-09, `20261009110000` live) | `guard_pos_order_close` A+B, `pos_orders` CHECK, `guard_pos_credit_note` | — | — |
+| 1d ✅ | DATABASE-1, ORDER-FLOW-2 (shipped 2026-10-09, `20261009120000` live) | `pos_kot_log` / `pos_kot_removals` guards, `save_pos_order_items`, `guard_pos_item_price` | — | Q1 |
 | 1e | ACCESS-1, ACCESS-2 | none | — | Q4 |
 | 1f | ACCESS-3, DOCS-1 | none | `admin-user-ops` | Q5, Q6 |
 | 1g | ACCESS-4, GAP-OUTLETS-1 | `set_active_outlet` | `pos-staff-login` | Q24 |
-| 1h | GUEST-4, RESERVATIONS-3, RESERVATIONS-4 | access helper, 3 guest-menu and 3 booking functions | — | Q2, Q3 |
+| 1h ✅ | GUEST-4, RESERVATIONS-3, RESERVATIONS-4 (shipped 2026-10-09, `20261009140000` live; five guest functions gated, not three) | access helper, 3 guest-menu and 3 booking functions | — | Q2, Q3 |
 | 1i | DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7 | `guard_pos_order_payments_closed`, `pos_customers_guard_loyalty`, ledger FK | — | — |
 | 1j | ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9 | retire the shared key, drop 2 dead RPCs, rank checks, comp quantity | — | Q7 |
 | 1k | CHECKOUT-12, CUSTOMERS-PARKING-13 | payment-confirmation guard, parking-slip trigger and unique number | — | — |

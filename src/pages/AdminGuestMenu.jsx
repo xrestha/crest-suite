@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import ReportLoadError from '../components/ReportLoadError'
 import { tidyName } from '../modules/pos/guestmenu/guestMenuHelpers'
+import { getAccessState, GRACE_DAYS } from '../utils/subscription'
 
 // Crest Admin utility: preview the currently-viewed client's guest QR menu (GuestMenu.jsx,
 // /pos/menu/:tableId) without needing to scan a printed QR code or ask the client for one.
@@ -28,6 +29,14 @@ const amberBanner = {
 
 const linkStyle = { color: 'var(--theme-accent-ink)', fontWeight: 600 }
 
+// Why getAccessState locks a client, in the words the banner below finishes its sentence with.
+const LOCK_REASON = {
+  deactivated: 'it is deactivated',
+  pending: 'its trial signup has not been approved yet',
+  trial: 'its free trial has ended',
+  expired: `its subscription ran out more than ${GRACE_DAYS} days ago`,
+}
+
 function Header({ clientName, children, subtitle }) {
   return (
     <div className={children ? 'page-header page-header--split' : 'page-header'}>
@@ -42,7 +51,7 @@ function Header({ clientName, children, subtitle }) {
 
 export default function AdminGuestMenu() {
   const { adminViewClientId } = useAuth()
-  const [client, setClient] = useState(null)       // { name, pos_enabled }
+  const [client, setClient] = useState(null)       // the clients row, for its name, POS switch and access state
   const [tables, setTables] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -63,7 +72,9 @@ export default function AdminGuestMenu() {
     setLoadError(null)
     setCoverage(null)
     Promise.all([
-      supabase.from('clients').select('name, pos_enabled').eq('id', adminViewClientId).single(),
+      // The whole row, because getAccessState reads it below (S809): naming its columns here would
+      // be a second copy of that list, and a module end date added there would never reach this page.
+      supabase.from('clients').select('*').eq('id', adminViewClientId).single(),
       // NOT `.neq('status', 'inactive')`: `pos_tables.status` is nullable and a server-side .neq
       // also drops every NULL row. Inactive tables are KEPT — their QR still serves the menu
       // (without ordering), so the operator has to be able to preview exactly that.
@@ -141,6 +152,26 @@ export default function AdminGuestMenu() {
 
   const clientName = client?.name || ''
   const posOff = client && !client.pos_enabled
+  const access = getAccessState(client)
+
+  // S809 (GUEST-4): a client locked out of Crest gets what POS switched off gets — get_guest_menu
+  // and the booking functions answer nothing (client_access_open), because no till there could see
+  // an order or a booking. Said first: switching POS on would not bring this menu back.
+  if (client && access.locked) {
+    return (
+      <div>
+        <Header clientName={clientName} />
+        <div role="alert" className="card" style={amberBanner}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>{clientName} is locked out of Crest, so guests can't order or book.</strong>{' '}
+          Every login there is locked because {LOCK_REASON[access.reason] || 'its access has lapsed'}, so no till could see a
+          guest order or a booking request. Every table QR code shows "This menu isn't available" and the online booking
+          link shows "Online booking isn't available here right now", the same as with POS switched off. Both come back
+          the moment the client's access is restored.{' '}
+          <Link to="/admin/clients" style={linkStyle}>Manage this client in Admin → Clients →</Link>
+        </div>
+      </div>
+    )
+  }
 
   // get_guest_menu returns nothing at all while POS is off, so every QR shows "This menu isn't
   // available right now". Said before anything else, because the frame below would otherwise be

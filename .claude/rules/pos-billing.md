@@ -167,8 +167,13 @@ it returns `{inserted, items_version, items}`. Four rules it enforces:
 
 `guard_pos_item_price` refuses any browser write to a line's price, quantity or identity outside
 that function. The function marks its own transaction with `set_config(..., true)`, which a
-PostgREST table request cannot carry. `sent_to_kot`, `sent_qty` and `notes` stay directly
-writable, because the send path needs them.
+PostgREST table request cannot carry. `notes` stays directly writable. **A line's sent count may
+rise but never fall outside the save (S809 1d, `20261009120000`)**: the count is
+`GREATEST(sent_qty, qty if sent_to_kot)`, a direct write that lowers it is refused
+(`pos_item_sent_lowered`), and inside the save each replacement row's `sent_qty` is floored at its
+share of the stored count for its line, so a count falls only with the quantity, which the removal
+record writes up. `sent_to_kot` is left as sent: false with `sent_qty = qty` is the screen's own
+"edited since sent" state.
 
 **One open order per table** is a unique index (`pos_orders_one_open_per_table`), not a
 floor-view check.
@@ -208,6 +213,8 @@ floor-view check.
   `src/utils/orderLineIngredients.js` is the only place those lines become raw items.
 - **The guest menu calls `get_guest_menu_options` beside `get_guest_menu`**, and a `PGRST202` (the
   function not deployed yet) reads as "no choices", not a warning to every guest.
+- **Every public guest function gates on `pos_enabled` AND `client_access_open()` (S809 1h).** A
+  new one copies both, and its locked answer must equal its POS-off answer.
 
 ### A size scales the picks after it (S760, build-your-own dishes)
 
@@ -284,7 +291,11 @@ Three things to know before touching it:
 - **~~It fires only when `close_type`, `status` or `discount_amount` actually change.~~ Superseded
   S754 — see "A guard on how a bill closes is not a guard on a closed bill" below.** The void and
   discount-cap checks inside it still fire only on those three columns; the function now also locks
-  every closed bill.
+  every closed bill. **S809 1c:** the void test keys on `status = 'voided'` OR `close_type = 'void'`,
+  and every close must be billed + paid, billed + writeoff or voided + void (HINT
+  `pos_close_mismatch`). The CHECK `pos_orders_status_close_type_check` holds the same pairs,
+  COALESCE'd because a CHECK passes on NULL. Until then `{"status":"voided"}` with no close type
+  skipped Allow Void and dropped the bill out of every report (CHECKOUT-2).
 - **`paid_amount` is deliberately NOT enforced.** Re-deriving the bill total in SQL means a second
   copy of the VAT-on-discounted-base arithmetic and the round-to-the-rupee rule, i.e. a second
   definition of a figure the product is sold on. A drifted copy would not misreport a number, it
@@ -328,6 +339,16 @@ name against it.
   `current_user`) and when the client itself is being deleted. **`pos_kot_removals.order_id` is now
   nullable and SET NULL**, with `order_no`/`table_name` snapshotted, because the record has to
   outlive the order it was pulled from — under CASCADE, Clear Occupied's second statement destroyed it.
+- **The record and the ticket log are write-guarded (S809 1d, `20261009120000`).**
+  `guard_pos_kot_removals` (INVOKER, `current_user` seam) admits a client session's insert only inside
+  `save_pos_order_items` (`crest.pos_kot_removals_rpc`, on for its one insert) or the operator's
+  restore. `guard_pos_kot_log` (DEFINER, keyed on `auth.jwt() ->> 'role'`, because deleting a
+  ticket's order cascades as the owner) makes a ticket append-only: no client delete, direct or by
+  deleting its order (DELETE revoked too); the order must be the outlet's; `sent_at` and the stage
+  are stamped; `sent_by` is kept only when it is a POS login of the outlet, else the uploader (Q1 b);
+  an UPDATE moves only the stage, forward, with `status_updated_by` stamped; `cancelled` needs a
+  voided order or Supervisor and is final. **A DEFINER function that writes either table on a
+  client's behalf is checked like the client**: give it its own transaction flag.
 - The 2-arg `save_pos_order_items` signature was **dropped**, against the standing keep-the-old-
   arity rule in `.claude/rules/supabase-sql.md`. PostgREST resolves by argument name, so keeping
   both would make every 2-arg call ambiguous (`function is not unique`) — dropping it is what lets
@@ -472,8 +493,11 @@ the same four rules:
 - **An allow-list of what may still change on a closed row**, not a deny-list of what may not.
   `guard_pos_order_close()` compares `to_jsonb(NEW) - allowed` with `to_jsonb(OLD) - allowed`.
   Eight columns are allowed: `ims_posted_at`, `print_count`, `comp_print_count`,
-  `credit_note_id`, and the four credit-settlement columns. Each of those is itself ranked and
-  set-once. The next column added to `pos_orders` is locked by default (invariant #1's reason).
+  `credit_note_id`, and the four credit-settlement columns. `credit_note_id` and the settlement
+  columns are ranked and set-once. Since S809 1c the two print counters only go up (a lower value
+  is ignored, not refused, so a till a reprint behind is not told its print failed; a CHECK keeps
+  them ≥ 0), and `ims_posted_at` is set only on a closed bill, at POS Supervisor or above, and then
+  stands. The next column added to `pos_orders` is locked by default (invariant #1's reason).
 - **The child tables need their own lock.** Locking `pos_orders` did nothing for its lines and
   payments. Statement-level AFTER triggers (`guard_pos_order_items_closed`,
   `guard_pos_order_payments_closed`) look the order up once per statement, not once per row, on the
@@ -525,6 +549,7 @@ it rather than carrying its own copy.
 | Invoice prefix, VAT number and flag, property address and phone, payment QR | Owner (admin exempt) |
 | `pos_tables` anything but `status` | POS manager. **No delete under an open bill**, for everyone |
 | Loyalty schemes and enrolment | POS manager |
+| Cancel a kitchen ticket | Supervisor, or its order voided; final (S809 1d) |
 
 Three shapes are worth copying:
 
@@ -947,7 +972,8 @@ Both run whether or not the bill link landed, because the money and the points f
 failure of either is a warning naming what now reads wrong, never a reason to withhold the document.
 
 **Issuing is manager-only in the table too** (`guard_pos_credit_note`): `issued_by` is stamped,
-a note is never edited except its print count and Inventory stamp, never deleted, and a bill is
+a note is never edited except its print count (only upward) and its Inventory stamp (set once, by
+a POS manager, the Owner or the operator; S809 1c), never deleted, and a bill is
 credited once. **The amounts are checked against the bill (S755, HINT `credit_note_amounts`)**
 without a second copy of the VAT formula. The note's gross must equal the bill's non-comped lines,
 its discount the bill's discount, taxable + non-taxable must equal gross − discount, and net must

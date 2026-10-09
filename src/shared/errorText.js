@@ -150,6 +150,15 @@ const rules = [
     staff: 'That can only be recorded once the bill is closed. Nothing was changed.',
     operator: 'Credit Note, settlement and close details can only be recorded on a closed bill, and this one is still open — nothing was changed.',
   },
+  // S809 1c (migration 20261009110000). guard_pos_order_close refuses a close whose status and close
+  // type disagree, or that has no close type: such a bill left every money report, and "voided"
+  // with no close type got past Allow Void. Raised by a BEFORE trigger on an open order, so the
+  // bill is still open and nothing was changed. No till sends one; a hand-made request does.
+  {
+    test: e => hasCode(e, 'pos_close_mismatch'),
+    staff: 'This bill could not be closed that way. A bill is closed as paid, complimentary or void, and nothing was changed. Reload the bill and close it from the Payment screen.',
+    operator: 'A bill closes as Paid, Complimentary or Void, and its status has to say the same. This close did not, so it was refused and the bill is still open. Nothing was changed. Close it from the Payment screen; if a till sent this, reload that till.',
+  },
   {
     test: e => hasCode(e, 'option_edit_rank'),
     staff: 'Only the Owner or a manager can change the customization options. Nothing was changed.',
@@ -296,6 +305,40 @@ const rules = [
     test: e => hasCode(e, 'credit_note_amounts'),
     staff: 'The amounts on this Credit Note do not match the bill, so no note was issued. Close this, reload the bill and try again — tell your manager if it happens again.',
     operator: 'The Credit Note’s amounts do not match the bill it credits (both sets are in the detail below), so no note was issued and nothing was numbered. A note credits exactly what the bill charged: reload the bill and issue it again. If the outlet’s VAT registration changed since the bill was printed, the note cannot be issued from the till — contact support.',
+  },
+  // S809 1d (migration 20261009120000): the kitchen-ticket log and the pulled-item record. Each is
+  // raised by a BEFORE trigger, so the statement rolled back and each may say nothing was changed.
+  // No screen writes any of these on purpose; they are what a stale tablet or a hand-made request
+  // meets.
+  {
+    test: e => hasCode(e, 'pos_kot_ticket_locked'),
+    staff: 'A kitchen ticket cannot be deleted or edited once it is sent — only moved along on the Kitchen Display. Nothing was changed.',
+    operator: 'A kitchen ticket is the record of what went to the kitchen or bar, so it cannot be deleted or edited — only its stage (started, ready, served) moves. An order with a ticket cannot be deleted either. Nothing was changed: to stop an order, void it; to take a dish off, remove it on the order screen, which records who pulled it.',
+  },
+  {
+    test: e => hasCode(e, 'pos_kot_other_outlet'),
+    staff: 'That ticket is for an order at another outlet, so it was not logged. Go back to the floor and open the table again.',
+    operator: 'A kitchen ticket can only be logged against an order of this outlet, and this one named another outlet’s order, so it was not logged. Reload the order screen; if it happens again, the till is signed in to a different outlet than the order it shows.',
+  },
+  {
+    test: e => hasCode(e, 'pos_kot_cancel_rank'),
+    staff: 'Only a supervisor can cancel a kitchen ticket. Nothing was changed — to stop the food, a supervisor voids the order.',
+    operator: 'A kitchen ticket is cancelled when its order is voided, or by a POS supervisor or above, and this login is neither — so the ticket was left as it was.',
+  },
+  {
+    test: e => hasCode(e, 'pos_kot_status_backwards'),
+    staff: 'A kitchen ticket only moves forward, and a cancelled one stays cancelled. Nothing was changed — reload the screen.',
+    operator: 'A kitchen ticket only moves forward (new → started → ready → served), and a cancelled one stays cancelled, so this change was refused. Reload to see where it stands; if the dish has to be made again, send it again from the order screen.',
+  },
+  {
+    test: e => hasCode(e, 'pos_kot_removal_direct'),
+    staff: 'A pulled-item record is written by the order screen when a sent dish is taken off. Nothing was recorded.',
+    operator: 'A pulled-item record is written by the order screen itself when a dish that was already sent comes off the bill — with the login, the time and the reason — so it cannot be added, edited or deleted directly. Nothing was recorded.',
+  },
+  {
+    test: e => hasCode(e, 'pos_item_sent_lowered'),
+    staff: 'A dish already sent to the kitchen cannot be marked as not sent. Nothing was changed — to take it off, remove it on the order screen and give a reason.',
+    operator: 'A dish already sent to the kitchen or bar cannot be marked as not sent, so nothing was changed. To take it off the bill, remove it on the order screen: that records who pulled it and why under KOT Log → Pulled Items.',
   },
   {
     test: e => hasCode(e, 'pos_tables_rank'),

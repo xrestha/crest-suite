@@ -209,6 +209,60 @@ describe('errorText', () => {
     })
   })
 
+  // S809 1c. A close whose status and close type disagree is refused by guard_pos_order_close
+  // with ERRCODE 22023, which no generic rule words.
+  describe('the S809 mismatched-close refusal', () => {
+    const err = {
+      code: '22023',
+      hint: 'pos_close_mismatch',
+      message: 'pos_orders: a bill closes as paid or complimentary (billed) or as void (voided), and this close sent status voided with close type none',
+    }
+
+    it('names the three ways a bill closes and sends the reader to the Payment screen, in both audiences', () => {
+      for (const aud of ['staff', 'operator']) {
+        const text = errorText(err, aud)
+        expect(text).toMatch(/void/i)
+        expect(text).toMatch(/Payment screen/)
+        expect(text).not.toBe(errorText({ message: 'x' }, aud))
+      }
+    })
+
+    it('matches on the hint alone, and is not the generic closed-bill sentence', () => {
+      expect(errorText({ code: '22023', hint: 'pos_close_mismatch', message: 'refused' }, 'operator')).toBe(errorText(err, 'operator'))
+      expect(errorText(err, 'operator')).not.toBe(errorText({ code: '42501', hint: 'bill_locked', message: 'refused' }, 'operator'))
+    })
+  })
+
+  // S809 1d. The kitchen-ticket log and the pulled-item record, guarded by triggers.
+  describe('the S809 kitchen-ticket and pulled-item refusals', () => {
+    const codes = ['pos_kot_ticket_locked', 'pos_kot_other_outlet', 'pos_kot_cancel_rank',
+      'pos_kot_status_backwards', 'pos_kot_removal_direct', 'pos_item_sent_lowered']
+
+    it('every code has its own sentence in both audiences, ahead of the generic ones', () => {
+      for (const c of codes) {
+        for (const aud of ['staff', 'operator']) {
+          const text = errorText({ code: '42501', hint: c, message: 'refused' }, aud)
+          expect([c, text]).not.toEqual([c, errorText({ code: '42501' }, aud)])
+          expect([c, text]).not.toEqual([c, errorText({ message: 'x' }, aud)])
+        }
+      }
+      // the outlet refusal is raised as 23503, which has its own generic sentence too
+      expect(errorText({ code: '23503', hint: 'pos_kot_other_outlet', message: 'x' }, 'operator'))
+        .not.toBe(errorText({ code: '23503', message: 'x' }, 'operator'))
+    })
+
+    it('matches on the message alone, where the hint was lost', () => {
+      const err = { message: 'pos_kot_ticket_locked: a kitchen ticket is the record of what was sent to the kitchen or bar…' }
+      expect(errorText(err, 'operator')).toMatch(/void it/i)
+      expect(errorText({ message: 'pos_item_sent_lowered: a dish already sent…' }, 'operator')).toMatch(/Pulled Items/)
+    })
+
+    it('a cancel refusal names who may cancel, and a backwards move sends the reader to reload', () => {
+      expect(errorText({ code: '42501', hint: 'pos_kot_cancel_rank', message: 'x' }, 'staff')).toMatch(/supervisor/i)
+      expect(errorText({ code: '42501', hint: 'pos_kot_status_backwards', message: 'x' }, 'staff')).toMatch(/reload/i)
+    })
+  })
+
   // S749. Raised by BEFORE triggers and by approve_shift_swap's one transaction.
   describe('the roster, attendance, leave and overtime refusals', () => {
     const raised = name => ({ code: 'P0001', message: `${name}: …` })

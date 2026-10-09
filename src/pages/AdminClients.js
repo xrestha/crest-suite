@@ -319,8 +319,9 @@ export default function AdminClients() {
       body: (
         <p style={{ margin: 0 }}>
           Every login at this property — Owner, staff, POS tills and the employee app — is locked out
-          the moment this saves, with no grace period. Their data is untouched, and Activate reverses it
-          just as instantly. To close out a client who has left, Manage → Danger → Archive takes a
+          the moment this saves, with no grace period, and its table QR menus and online booking page
+          stop taking orders and bookings. Their data is untouched, and Activate reverses it just as
+          instantly. To close out a client who has left, Manage → Danger → Archive takes a
           backup first.
         </p>
       ),

@@ -42,7 +42,15 @@ are load-bearing, each with the reason it exists:
   cannot. Validation refusals (`closed_day`, `walk_in`, `full`, `hours`, …) sit BEFORE the
   attempts insert on purpose. **The page words every refusal itself by `code`** and uses the
   server's `message` only as a fallback: the server says "the restaurant", and a client may be a
-  cafe, a bar or a banquet hall.
+  cafe, a bar or a banquet hall. Two limits sit after the attempts row: per connection (5 an hour,
+  refused attempts counted, code `rate`) and per outlet (40 requests that BECAME bookings an hour,
+  code `busy`, S809 1h). The outlet one used to count attempts, so one connection's refusals shut
+  the page for everyone (RESERVATIONS-4). **Never count refused attempts toward a limit every guest
+  shares.**
+- **A locked outlet's public pages answer as POS switched off (S809 1h, `20261009140000`).** The
+  three booking functions and five guest-menu functions call `client_access_open()` beside
+  `pos_enabled` and return the identical POS-off answer. `get_reservation_request_status` and
+  `get_guest_order_request_status` stay ungated, so a guest's own card behaves as with POS off.
 - **The ladder reverses in exactly two places, and only on the booking's own day (S681).**
   `no_show → arrived` ("They turned up") and `cancelled → booked` ("Reinstate"). A no-show is shown
   on every future booking form from that phone number, so a guest marked at 8:20 who walks in at

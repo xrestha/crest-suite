@@ -42,6 +42,9 @@ function refusalCopy(code, outlet, maxParty, lead) {
     case 'too_far':  return 'Online booking is open up to 14 days ahead.'
     case 'hours':    return `That time is outside ${who}'s booking hours — pick another slot.`
     case 'rate':     return `Too many booking requests from this connection. Please call or message ${who} instead.`
+    // S809 (RESERVATIONS-4): the whole outlet has taken its hourly share of online requests. Not
+    // this guest's connection, so not the line above.
+    case 'busy':     return `Online booking is busy right now. Please call or message ${who} instead.`
     case 'pending':  return `You already have a booking request waiting for ${who} to confirm.`
     case 'closed_day': return `${who} is closed that day — pick another day.`
     case 'walk_in':  return `${who} takes walk-ins only that day — just come by.`
