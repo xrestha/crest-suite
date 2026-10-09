@@ -4,7 +4,7 @@
 // always "the currently open one." See CLAUDE.md's Monthly Owner/Manager Report section.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
@@ -436,8 +436,10 @@ async function computePosSection(clientId, period) {
 
   const posResults = await Promise.all([
     supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
-    scopedFrom('pos_orders', clientId, 'id, discount_amount, closed_at, credit_note_id, payment_method, covers')
-      .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs),
+    // Paged: a busy month passes 1,000 paid bills, and a bare select stopped there with no error,
+    // freezing a short POS section into the snapshot.
+    fetchAllRows(() => scopedFrom('pos_orders', clientId, 'id, discount_amount, closed_at, credit_note_id, payment_method, covers')
+      .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs).order('id')),
   ])
   throwFirstError(posResults)
   const [{ data: settings }, { data: orderData }] = posResults
@@ -449,7 +451,9 @@ async function computePosSection(clientId, period) {
     // Paged: a month of bill lines runs to thousands. This one is written into a FROZEN snapshot,
     // so a truncated read wouldn't just be wrong once — it would be preserved as the permanent
     // record of that period, with no later recompute to correct it (S529).
-    ? await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', orderIds).order('id'))
+    // Chunked as well: every paid bill's id goes in the URL, and a month of a few hundred bills
+    // was a 400 Bad Request that froze the POS section as failed.
+    ? await fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', ids).order('id'))
     : { data: [] }
   throwFirstError([itemRowsRes])
   const { data: itemRows } = itemRowsRes
@@ -496,13 +500,13 @@ async function computePosSection(clientId, period) {
     compedCount = compGroups.size
   }
 
-  const voidRowsRes = await scopedFrom('pos_orders', clientId, 'id')
-    .in('close_type', ['void', 'writeoff']).gte('closed_at', fromTs).lte('closed_at', toTs)
+  const voidRowsRes = await fetchAllRows(() => scopedFrom('pos_orders', clientId, 'id')
+    .in('close_type', ['void', 'writeoff']).gte('closed_at', fromTs).lte('closed_at', toTs).order('id'))
   throwFirstError([voidRowsRes])
   const voidOrderIds = (voidRowsRes.data || []).map(o => o.id)
   let voidsAmount = 0
   if (voidOrderIds.length > 0) {
-    const voidItemsRes = await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', voidOrderIds).order('id'))
+    const voidItemsRes = await fetchAllRowsChunked(voidOrderIds, ids => scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', ids).order('id'))
     throwFirstError([voidItemsRes])
     voidsAmount = (voidItemsRes.data || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
   }
