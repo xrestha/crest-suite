@@ -214,6 +214,14 @@ record writes up. `sent_to_kot` is left as sent: false with `sent_qty = qty` is 
 **One open order per table** is a unique index (`pos_orders_one_open_per_table`), not a
 floor-view check.
 
+**A changed instruction is its own ticket (S809 3a).** `logKotSend` logs a CHANGE ONLY line
+(`isChangeOnlyLine`, `src/modules/pos/kitchenNotes.js`) as a separate `pos_kot_log` row of
+`{qty: 0, change: true}` lines, in the same insert as the food; the KDS shows a CHANGE card whose Seen
+moves it new → served. **Every count of kitchen tickets adds `.not('items', 'cs', KOT_CHANGE_ITEMS)`**,
+and a change line is never mixed into a food ticket, or that filter hides the food. A guest's order note
+goes onto each of their dishes (`guestDishNote`, Q11 a): "Guest ×N: …" on a line already holding the
+table's food.
+
 ### A line is its recipe PLUS its selection (S758, Crest Customization)
 
 - **`lineKeyOf` in `posOrdersConstants.js` is the one definition of a line's identity**: the recipe

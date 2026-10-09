@@ -59,7 +59,8 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
       const note  = kotOptionLines(i.options) + (i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : '')
       // Already sent, quantity unchanged — only the note moved (S754). This used to fall through to
       // "×qty", which a station reads as a fresh order and cooks again. It prints no quantity at all.
-      if ((i.sent_qty || 0) > 0 && delta === 0) {
+      // `change` is a logged CHANGE ticket's line being reprinted (S809 3a), whose quantity is 0.
+      if (i.change || ((i.sent_qty || 0) > 0 && delta === 0)) {
         return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">CHANGE</span></div><div class="note b">CHANGE ONLY — not a new order</div>${note}`
       }
       // A negative delta (qty reduced since the last send, then resent) needs its own label —

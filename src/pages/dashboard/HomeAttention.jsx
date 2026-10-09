@@ -5,6 +5,7 @@ import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { withTimeout } from '../../utils/withTimeout'
 import { nepalDayStartTs, todayNepalAdIso } from '../../modules/pos/reports/reportRange'
 import { KDS_LATE_MS } from '../../modules/pos/posSignals'
+import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 import { ticketSummary } from '../../modules/pos/dashboard/posDashboardMath'
 import { closingCountPreflight } from '../periods/closePeriod'
 import { BS_MONTHS, daysInBsMonth, getBsToday } from '../../utils/bsCalendar'
@@ -62,7 +63,8 @@ export default function HomeAttention({
     try {
       const [guest, kot, unposted, count] = await withTimeout(Promise.all([
         posFront ? scopedFrom('pos_guest_order_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending') : none,
-        posFront ? scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart) : none,
+        // Same read as the POS Dashboard's, a CHANGE ticket (S809 3a) left out the same way.
+        posFront ? scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart).not('items', 'cs', KOT_CHANGE_ITEMS) : none,
         // The floor's own count (PosOrders.jsx): billed and never confirmed into Inventory.
         wantPosting ? scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').is('ims_posted_at', null) : none,
         // null when it could not check — the close dialog says the same.

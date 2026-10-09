@@ -188,7 +188,8 @@ screen: `/pos/orders` answers it better already, and `/pos/kds` because the kitc
 guest order and a kitchen-team login cannot even reach Orders
 (`KITCHEN_TEAM_ALLOWED_PATHS`), so the button would be a dead end.
 
-**The KDS's own standing alert fires on ANY ticket in New, and clears on Start** (owner decision).
+**The KDS's own standing alert fires on ANY ticket in New, and clears on Start** (owner decision), or
+on Seen for a CHANGE card (S809 3a, owner 2026-10-09: an allergy change rings until it is read).
 It hardens on `WARN_MS` and again on `LATE_MS` — **the same two thresholds the card strip and the
 ▲/△ marks already use** — so the banner cannot disagree with the board underneath it, and its
 elapsed figure rounds the way the card's own label rounds for the same reason. A new alert on this

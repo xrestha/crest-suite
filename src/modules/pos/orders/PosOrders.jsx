@@ -48,6 +48,7 @@ import { errorText, isNetworkError } from '../../../shared/errorText'
 import { withTimeout, isTimeout } from '../../../utils/withTimeout'
 import { keepLockedCart, takeLockedCart, lockedCartWhere, POS_BEFORE_LOCK_EVENT } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
+import { KOT_CHANGE_ITEMS, isChangeOnlyLine, joinNote, guestDishNote } from '../kitchenNotes'
 import {
   trackCloseWrite, openReadIsFinal, paymentDifferenceNote, describeStoredPayment, storedLinesMatchPaid,
   storedDiscountRatio, legsToRecord, customerRowFromBill, latestCompRows,
@@ -1247,18 +1248,21 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Merges one guest-requested item into the local cart, same dedup-by-line-key logic as
   // addItem() — but at whatever qty the guest asked for (addItem always adds exactly 1), and
   // without triggering the upsell suggestion engine (this isn't a staff menu tap).
-  function mergeGuestItem(it) {
+  //
+  // GUEST-1 (S809 3a, owner decision Q11 a): the guest's order-wide note (`orderNote`) goes onto each
+  // of their dishes beside the dish's own note, so it prints under every dish on the KOT/BOT and shows
+  // on the Kitchen Display. Accept used to drop it: it reached nobody but the waiter's banner.
+  function mergeGuestItem(it, orderNote) {
     setOrderItems(prev => {
       const key = lineKeyOf(it)
       const idx = prev.findIndex(i => lineKeyOf(i) === key)
       if (idx >= 0) {
-        // The cart holds one line per recipe_id, so a guest's note ("no onion — allergy") has
-        // nowhere to go but onto the existing line. It used to be dropped here outright (S754),
-        // i.e. the one order path where the diner typed the instruction themselves lost it.
-        const guestNote = (it.note || '').trim()
+        // The cart holds one line per line key, so the guest's words have nowhere to go but onto the
+        // existing line (they used to be dropped here outright, S754). That line already holds the
+        // table's own food, so the note names the guest's plates ("Guest ×2: …"): it does not claim
+        // food ordered earlier, and the line's own note stays as it was (kitchenNotes.js).
         const current = prev[idx]
-        const parts = (current.notes || '').split(',').map(s => s.trim()).filter(Boolean)
-        const notes = guestNote && !parts.includes(guestNote) ? [...parts, guestNote].join(', ') : (current.notes || '')
+        const notes = joinNote(current.notes, guestDishNote({ dishNote: it.note, orderNote, qty: it.qty, shared: true }))
         return prev.map((item, n) => n === idx
           ? {
               ...item,
@@ -1278,7 +1282,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         vat_rate:    vatReg ? (parseFloat(it.vat_rate) || 0) : 0,
         sent_to_kot: false,
         sent_qty:    0,
-        notes:       it.note || '',
+        notes:       guestDishNote({ dishNote: it.note, orderNote, qty: it.qty }),
         // A guest's customized dish (S758 stage 6) keeps its choices; the server re-prices it from
         // the option ids on save, so the snapshot's price is display only.
         ...(it.selection_key ? {
@@ -1301,7 +1305,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     setDecidingGuestReqIds(prev => new Set(prev).add(request.id))
     try {
       if (decision === 'accepted') {
-        for (const it of (request.items || [])) mergeGuestItem(it)
+        for (const it of (request.items || [])) mergeGuestItem(it, request.guest_notes)
+        if ((request.guest_notes || '').trim()) setMsg('ok:The guest\'s note is on each of their dishes and prints on the kitchen ticket when you send.')
         setPendingAcceptedGuestReqIds(prev => new Set(prev).add(request.id))
         // Hide it from the banner/floor badge now (it's already reflected in the cart) — restored
         // by loadPendingGuestOrders() if the staff navigates away before saving (backToFloor).
@@ -1346,7 +1351,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (orderIds.length === 0) { setKotStatusByTable({}); return }
     // Cancelled tickets belong to a voided order; they used to fall through KOT_STATUS_RANK's `?? 0`
     // and read as "Sent". Served ones are kept — they are what turns a finished table to "Served".
+    // A CHANGE ticket (S809 3a, kitchenNotes.js) is nothing to cook, so it never makes a table read "Sent".
     const { data, error } = await scopedFrom('pos_kot_log', 'order_id, status').in('order_id', orderIds).neq('status', 'cancelled')
+      .not('items', 'cs', KOT_CHANGE_ITEMS)
     // Polled every few seconds. Returning here keeps the last known badges on screen; falling
     // through with a null `data` computes an EMPTY map and blanks every table's kitchen status,
     // which a waiter reads as "nothing has been started" rather than as a failed read.
@@ -1372,6 +1379,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const { data, error } = await scopedFrom('pos_kot_log', 'id, items, status, sent_at, started_at, ready_at, estimated_prep_minutes')
       .eq('order_id', oid)
       .neq('status', 'cancelled')
+      .not('items', 'cs', KOT_CHANGE_ITEMS) // a CHANGE ticket (S809 3a) is no dish's cooking stage
       .order('sent_at', { ascending: false })
     // Same rule as loadKotStatus: an empty result on a failed read would drop every per-item
     // Sent/Started/Ready timer off the cart, which is indistinguishable from the kitchen not
@@ -2748,17 +2756,24 @@ export default function PosOrders({ billingStation = false } = {}) {
         // Clamped at 0: a reduced-then-resent item must not log a negative delta, which would
         // cancel its earlier sends in the cumulative sum and un-flag it in KOT Reconciliation.
         qty: (i.sent_qty || 0) > 0 ? Math.max(0, i.qty - i.sent_qty) : i.qty,
-      })).filter(i => i.qty > 0), // a pure reduction has nothing new to prepare — see below
+      })),
       sent_by: profile?.id || null,
     }
     // A pure reduction (every item clamped to 0 above) has no work left for this station to log
     // as a KDS ticket — the printed slip (built from the un-clamped `items` separately, with its
     // own "↓N (now qty)" label) is still the record of the cut; there's just nothing to add here.
-    if (payload.items.length === 0) return
+    // ORDER-FLOW-9 (S809 3a): a line the paper prints as "CHANGE ONLY" (its instruction changed after
+    // it was sent) is logged as its own CHANGE ticket beside the food, in the same insert, so the
+    // Kitchen Display shows it ("Seen" clears it) and no ticket count includes it (kitchenNotes.js).
+    const sends = [
+      { ...payload, items: payload.items.filter(i => i.qty > 0) },
+      { ...payload, items: payload.items.filter((_, n) => isChangeOnlyLine(items[n])).map(l => ({ ...l, qty: 0, change: true })) },
+    ].filter(s => s.items.length > 0)
+    if (sends.length === 0) return
     // Offline: queued alongside the order and replayed on sync — same best-effort contract as the
     // online path (a failed replay is silently retried later, never blocks/surfaces to the waiter).
     if (!navigator.onLine) {
-      await enqueuePosOrder(oid, { kot_sends: [payload] })
+      await enqueuePosOrder(oid, { kot_sends: sends })
       return
     }
     // Deliberately best-effort — a ticket-log problem must never block a waiter mid-service —
@@ -2767,7 +2782,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // have fired on a bug in the argument-building above, so every real failure of the insert
     // reached neither the log nor anywhere else. Consequence when it does fail: KOT Register
     // and KOT Reconciliation are missing this send, and the KDS never shows the ticket.
-    const { error: logErr } = await scopedInsert('pos_kot_log', payload)
+    const { error: logErr } = await scopedInsert('pos_kot_log', sends)
     if (logErr) console.error('pos_kot_log insert failed:', logErr)
   }
 
@@ -2797,13 +2812,18 @@ export default function PosOrders({ billingStation = false } = {}) {
       .limit(50)
     if (error) { setMsg(`error:Could not load this order's tickets to reprint. ${errorText(error, 'staff')}`); return }
     const latest = {}
-    for (const row of data || []) if (!latest[row.station]) latest[row.station] = row
+    // A send that changed an instruction logged it as a CHANGE ticket in the same insert as its food,
+    // so at the same sent_at (S809 3a): the paper carried both, and so does the reprint.
+    for (const row of data || []) {
+      if (!latest[row.station]) latest[row.station] = { ...row }
+      else if (latest[row.station].sent_at === row.sent_at) latest[row.station].items = [...(latest[row.station].items || []), ...(row.items || [])]
+    }
     const rows = ['KOT', 'BOT'].map(st => latest[st]).filter(Boolean)
     if (rows.length === 0) { setMsg('error:Nothing has been sent to the kitchen or bar for this order yet.'); return }
     let allPrinted = true
     for (const row of rows) {
       // Logged quantities are already the delta that was fired, so each prints as a plain ×qty.
-      const lines = (row.items || []).map(i => ({ name: i.name, qty: i.qty, notes: i.notes || '', sent_qty: 0, options: i.options || null }))
+      const lines = (row.items || []).map(i => ({ name: i.name, qty: i.qty, notes: i.notes || '', sent_qty: 0, options: i.options || null, change: i.change === true }))
       if (!printTicket(row.station, lines, row.order_no ?? orderNo, { reprint: true })) allPrinted = false
     }
     setMsg(allPrinted
@@ -4598,7 +4618,8 @@ The tables were left occupied rather than freed with their orders still open.`)
             <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13 }}>
                 🔔 Guest ordered: {(req.items || []).map(it => `${it.qty}× ${it.name}${it.option_summary ? ` (${it.option_summary})` : ''}`).join(', ')}
-                {req.guest_notes && <span style={{ color: 'var(--theme-text3)' }}> — "{req.guest_notes}"</span>}
+                {/* GUEST-1 (S809 3a): at full contrast, and it says where Accept puts it. */}
+                {req.guest_notes && <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}> — Note for the kitchen: "{req.guest_notes}" (goes on each of their dishes)</span>}
               </span>
               <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
                 <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}

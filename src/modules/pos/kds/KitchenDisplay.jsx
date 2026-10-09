@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
+import { isChangeLine, isChangeTicket, changeNoteText } from '../kitchenNotes'
 import { POS_IDLE_LOCK_MS, posIdleLockApplies } from '../usePosIdleLock'
 import { playGuestAlert } from '../posChime'
 import ArrivalAlert from '../../../components/ArrivalAlert'
@@ -74,7 +75,8 @@ function attachRemovals(tickets, removals) {
     const matches = []
     for (const t of tickets) {
       if (t.order_id !== r.order_id) continue
-      ;(t.items || []).forEach((i, idx) => { if (sameLine(r, i)) matches.push({ t, idx, qty: Number(i.qty) || 0 }) })
+      // A CHANGE line (S809 3a) is an instruction, not food sent, so a pull never lands on it.
+      ;(t.items || []).forEach((i, idx) => { if (!isChangeLine(i) && sameLine(r, i)) matches.push({ t, idx, qty: Number(i.qty) || 0 }) })
     }
     if (matches.length === 0) continue
     const before = matches.filter(m => new Date(m.t.sent_at).getTime() <= removedMs)
@@ -341,6 +343,13 @@ export default function KitchenDisplay() {
   const alertUrgent = oldestNewMs > LATE_MS
   const alertMuted = alertMutedUntil > now
   const alertOn = newTickets.length > 0
+  // A CHANGE card (S809 3a, ORDER-FLOW-9) holds the alert like any New ticket: a changed instruction
+  // is often an allergy, the last thing to leave unread. Its one button, Seen, clears it, so it is loud
+  // until someone has read it and never after.
+  const newChanges = newTickets.filter(isChangeTicket).length
+  const takeHint = newChanges === 0 ? 'Tap Start on the card to take it.'
+    : newChanges === newTickets.length ? 'Read the change, then tap Seen on the card.'
+    : 'Tap Start on a new ticket, or Seen once you have read a change.'
 
   // The REPEAT. A genuinely new arrival is chimed by playNewTicketChime inside load(), which is
   // what knows an id it has not seen before — so this one deliberately does NOT sound immediately,
@@ -387,11 +396,11 @@ export default function KitchenDisplay() {
           muted={alertMuted}
           onMute={() => setAlertMutedUntil(Date.now() + MUTE_MS)}
           title={newTickets.length === 1
-            ? `New ticket — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
-            : `${newTickets.length} tickets waiting to start`}
+            ? `${newChanges ? 'Changed instruction' : 'New ticket'} — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
+            : `${newTickets.length} tickets waiting${newChanges ? ` — ${newChanges} with a changed instruction` : ' to start'}`}
           detail={oldestNewMs < 30000
-            ? 'Just in. Tap Start on the card to take it.'
-            : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. Tap Start on the card to take it.`}
+            ? `Just in. ${takeHint}`
+            : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. ${takeHint}`}
         />
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 'var(--arrival-alert-h, 76px)' : 0 }}>
@@ -509,6 +518,10 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
   // Strip and border encode the same fact deliberately — redundant reinforcement of the one thing
   // on this card that needs someone, not two different facts competing for the same two hues.
   const stripColor = ticketStripColor({ status: ticket.status, isLate, isWarn })
+  // ORDER-FLOW-9 (S809 3a): a CHANGE card. A waiter changed the instruction on a dish this station
+  // already has, so there is nothing new to cook: its one button, Seen, moves it straight to served
+  // (guard_pos_kot_log allows any forward move) and it leaves the board.
+  const change = isChangeTicket(ticket)
 
   // Estimated-vs-actual readout, shown once a ticket has an estimate on it (set via the Start
   // popup) — a live "time left" while in progress, then a settled comparison once Ready.
@@ -539,9 +552,23 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
         <span style={{ fontWeight: 700, fontSize: 22, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
         <span style={{ fontSize: 14, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
       </div>
+      {change && (
+        <div style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text1)', marginBottom: 6 }}>
+          Changed instruction — nothing new to cook
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
         {(ticket.items || []).map((i, idx) => {
           const note = itemNote(i)
+          if (isChangeLine(i)) {
+            return (
+              <div key={idx} style={{ fontSize: 20, color: 'var(--theme-text2)' }}>
+                {i.name}
+                <ItemOptions options={i.options} />
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)', paddingLeft: 16 }}>Now: {changeNoteText(i)}</div>
+              </div>
+            )
+          }
           // S754: a line pulled or reduced after this ticket was sent. The strike-through and the
           // word "cancelled" carry it, not only the red — the kitchen must stop cooking it.
           const pulled = ticket.removals?.[idx]
@@ -592,9 +619,9 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
         {action && (
           <button
             className="btn btn-primary" style={{ fontSize: 16, padding: '10px 20px' }} disabled={advancing}
-            onClick={() => isStartAction ? onRequestEstimate(ticket) : onAdvance(ticket, next)}
+            onClick={() => change ? onAdvance(ticket, 'served') : isStartAction ? onRequestEstimate(ticket) : onAdvance(ticket, next)}
           >
-            {advancing ? '…' : action}
+            {advancing ? '…' : change ? 'Seen' : action}
           </button>
         )}
       </div>

@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-09 (S809 — stages 1 and 2 complete: every slice 1a–1l and 2a–2h shipped live; stage 3 next)
+Last updated: 2026-10-09 (S809 — stages 1 and 2 complete; stage 3 decisions taken and split into slices 3a–3o, wave 1 = 3a, 3i, 3k drafting)
 
 ---
 
@@ -55,13 +55,12 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P1 (1 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e, ORDER-FLOW-1 in 2a, CHECKOUT-1 in 2a–2b)
+### P1 (0 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e, ORDER-FLOW-1 in 2a, CHECKOUT-1 in 2a–2b, GUEST-1 in 3a)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (34 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3)
+### P2 (33 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3; in stage 3: ORDER-FLOW-9)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -90,7 +89,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ORDER-FLOW-6 | Wi-Fi up but internet down: the till can't send anything, because offline mode waits for the browser to say offline (KNOWN B3) | 3 | Q16 | no |
 | ORDER-FLOW-7 | A table opened offline gets its kitchen tickets logged twice when two uploads overlap | 3 | — | no |
 | ORDER-FLOW-8 | Dishes fired offline onto a bill another till closed leave no trace once the conflict is dismissed | 3 | — | no |
-| ORDER-FLOW-9 | An instruction added after a dish was sent ("no peanuts — allergy") reaches the paper ticket but never the Kitchen Display | 3 | — | no |
 | ORDER-FLOW-10 | If the order a till lock interrupted was billed meanwhile, the whole old cart returns as "not sent" | 3 | — | no |
 | ORDER-FLOW-11 | An accepted guest order returns to the banner within 5 s with Accept live; a second Accept doubles the dishes | 3 | — | no |
 | REPORTS-2 | 1L+ (Annexure 13) loses past fiscal years once an outlet passes about 1,00,000 bills, and a failure is wiped by the tab's own load | 3 | — | yes |
@@ -203,7 +201,21 @@ different.
 Q4 (a), Q5 (a), Q6 (a), Q7 (a), Q24 (a), Q26 (a), Q27 (c).
 
 **Answered 2026-10-09 (S809): every stage-2 question, all as recommended** (asked in plain words).
-Q8 (a), Q9 (a), Q10 (a), Q25 (a). Q11–Q23 are still open.
+Q8 (a), Q9 (a), Q10 (a), Q25 (a).
+
+**Answered 2026-10-09 (S809): every stage-3 question** (asked in plain words). Q11 (a), Q14 (1), Q16 yes,
+Q17 (a), Q18 (a), as recommended. Two differ from the recommendation:
+
+- **Q12 (c):** POS managers may post waiting till bills and credit notes into Inventory too, from the POS
+  side, beside the Owner and the operator. An IMS-role login that cannot post is told who can, never
+  "nothing is waiting".
+- **Q13 (b):** the Owner and POS managers may add or correct a points balance by hand.
+
+**Q15 (1), settled after research** (Toast and Square both route each dish to exactly the station the
+owner assigns, and a one-station café puts everything on it): an empty bar list means nothing goes to the
+bar, and only NULL means the `['Beverage']` default, so a new outlet still starts with drinks at the bar.
+With an empty list the till hides its BOT button, Ticket Routing says "No bar: every dish prints on the
+kitchen ticket", and a category rename in Settings never adds a bar category. Q19–Q23 are still open.
 
 **Stage 1**
 
@@ -369,6 +381,34 @@ forward because their functions are rebuilt here anyway.
 | 2g ✅ | CUSTOMERS-PARKING-1, -2, -3 (shipped 2026-10-09, `20261009230000` live, crest-v421; BLOOM's 188 partner points were already gone with the data clear) | `award_loyalty_points` / `redeem_loyalty_points`; `guard_pos_order_close` (a standing Loyalty leg, after 2c); point value > 0 | — |
 | 2h ✅ | CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2; S809.4: comped rows in `before_sent`/`stored_sent` (shipped 2026-10-09, `20261009240000` live, crest-v421) | `save_pos_order_items` (a must-choose dish with no choices, an unpriced new line), `push_master_data` (the branch keeps On POS and Active) | Q25 |
 
+**Stage 3 slices (owner approved 2026-10-09; Q11–Q18 answered, see S809.1).** No database object is
+rebuilt in more than one stage-3 slice, so no function forces an order. `PosOrders.jsx` is edited by 11
+slices: merge 3a → 3b → 3c → 3e → 3f → 3g → 3o (3j, 3k, 3l, 3m touch other regions). Also 3a before 3d
+(KitchenDisplay.jsx, posSignals.js), 3c before 3h (Layout.js, PosLogin.jsx), 3j before 3n
+(ClientDashboard.jsx). Bracketed IDs are P3 rows or S809.4 items pulled forward. Found by the split:
+IMS-HANDOFF-4's "fails above ~200–400 bills" half was closed by S810 (8a656b68), and FLOOR-KITCHEN-2
+needs a migration since 1d made cancelling a ticket Supervisor-only.
+
+| # | IDs | Migration | Decisions |
+| --- | --- | --- | --- |
+| 3a ✅ | GUEST-1, ORDER-FLOW-9 (shipped 2026-10-09, app only, crest-v423) | none; a change-only ticket shows as a CHANGE card that "Seen" moves to served | Q11 |
+| 3b | GUEST-2, GUEST-3, ORDER-FLOW-11 [ORDER-FLOW-18, GUEST-5, GUEST-6] | `submit_guest_order` (a 5th argument, the 4-argument form dropped), a guard on `pos_guest_order_requests`; raise `pos_min_till_build` only once `x-crest-build` is proven to reach `request.headers` | — |
+| 3c | FLOOR-KITCHEN-1 [FLOOR-KITCHEN-10, DOCS-6] | a tablet-key read of waiting guest orders for the PIN screen | Q14 |
+| 3d | FLOOR-KITCHEN-2 [FLOOR-KITCHEN-5, FLOOR-KITCHEN-6] | `guard_pos_kot_log`: a kitchen login may cancel a ticket whose every line was pulled; stage times are the server's | — |
+| 3e | ORDER-FLOW-3, -4, -5 [ORDER-FLOW-13, -14] | none | — |
+| 3f | ORDER-FLOW-6, -7, -8 [ORDER-FLOW-15, -16] | none (ORDER-FLOW-8's pulled-item record can't be written from the browser since 1d) | Q16 |
+| 3g | ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5 [ORDER-FLOW-12] | none | — |
+| 3h | ACCESS-6, ACCESS-7 [ACCESS-11, ACCESS-12; the legacy shared-key code, its DROPs in a later migration] | sessions recorded per tablet, `revoke_pos_device` ends them; `pos-staff-login` deploy | Q18 |
+| 3i | ACCESS-5, DATABASE-2, DATABASE-3 [DATABASE-6] | a POS block marker read by `pos_caller_has_rank`; `admin-user-ops` deploy | Q17 |
+| 3j | CREDIT-NOTES-3, IMS-HANDOFF-1 [DOCS-9] | maybe: whatever a POS manager needs to post from the POS side | Q12 |
+| 3k | CUSTOMERS-PARKING-4, -5, -8 [CUSTOMERS-PARKING-12] | `award_`/`redeem_loyalty_points` match `phone_canonical`, a unique key on it (the raw-phone key kept for older tills), new `adjust_loyalty_points` | Q13 |
+| 3l | CUSTOMERS-PARKING-6, SHIFTS-4, DOCS-2 [CUSTOMERS-PARKING-16] | none | — |
+| 3m | REPORTS-2, FLOOR-KITCHEN-3, IMS-HANDOFF-4 (credit-noted bills) | none | Q15 |
+| 3n | REPORTS-3, GAP-OUTLETS-3 [REPORTS-8] | `get_group_summary` | — |
+| 3o | CUSTOMIZATION-2, REPORTS-4 [REPORTS-12] | none | — |
+
+Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k.
+
 ## S809.3 Outside POS, filed here
 
 - **IMS count PIN:** a reset leaves the lockout in place, as DOCS-1 does for POS (re-checked by the 1f
@@ -503,6 +543,18 @@ forward because their functions are rebuilt here anyway.
   - The till's menu read requires `is_active`/`pos_enabled = true` while `save_pos_order_items` accepts
     NULL (0 NULL rows, latent), and the till's `option_count` message names no dish though the server
     sends one (CUSTOMIZATION-2 would help) (2h).
+- **Found while drafting stage 3, wave 1 (3a, 3i, 3k; 2026-10-09, not fixed):**
+  - `mergeUnsentLines` (`posOrdersConstants.js`) keeps the base line's note and drops the incoming one,
+    so on the lock restore, stale recovery, adopt-open-order and offline-conflict paths a note typed on
+    this device (a guest's allergy note included) vanishes when the other copy has any note. Fix:
+    `notes: joinNote(l.notes, inc.notes) || null`. Belongs in 3g (3a).
+  - `get_guest_order_progress` and `get_guest_table_status` count a CHANGE ticket until it is Seen, so a
+    guest's tracker can sit below "Ready" and a table badge read "Sent" meanwhile. Fix: `AND NOT
+    (k.items @> '[{"change":true}]'::jsonb)` in each ticket loop. Fold into 3b's migration (3a).
+  - A note changed on a partly sent line (2 sent, now 3) reaches only the "+1" ticket; the 2 already
+    made never hear of it, on paper or on the KDS (P3, 3a).
+  - The cart's note box shows every note, an allergy note included, in grey italic (`--theme-text3`)
+    (P3, 3a).
 
 ---
 

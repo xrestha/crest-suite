@@ -16,6 +16,7 @@ import { CHART_COLORS } from '../../../shared/chartColors'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalDayStartTs, todayNepalAdIso, todayNepalBs } from '../reports/reportRange'
 import { KDS_LATE_MS } from '../posSignals'
+import { KOT_CHANGE_ITEMS } from '../kitchenNotes'
 import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
@@ -130,7 +131,8 @@ export default function PosDashboard() {
         scopedFrom('pos_orders', 'id, table_id, opened_at, pos_order_items(qty, unit_price, comped)').eq('status', 'open'),
         scopedFrom('pos_tables', 'status').neq('status', 'inactive'),
         scopedFrom('pos_guest_order_requests', 'id, created_at').eq('status', 'pending'),
-        scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart),
+        // A CHANGE ticket (S809 3a) is an instruction for the kitchen to read, not food being made.
+        scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart).not('items', 'cs', KOT_CHANGE_ITEMS),
         canMoney ? scopedFrom('pos_shifts', 'opened_at').eq('status', 'open').maybeSingle() : Promise.resolve({ data: null, error: null }),
         scopedFrom('monthly_periods', 'id, bs_year, bs_month').eq('status', 'open').maybeSingle(),
       ])

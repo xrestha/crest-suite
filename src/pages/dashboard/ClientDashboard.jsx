@@ -59,6 +59,7 @@ import { CHART_COLORS, COST_BREAKDOWN_COLORS, costSliceColor } from '../../share
 import { dashboardModules, IMS_DASHBOARD_PATH } from '../../shared/dashboardHome'
 import { npr } from '../../shared/nepalMoney'
 import { KDS_LATE_MS } from '../../modules/pos/posSignals'
+import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -1075,6 +1076,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const { data, error } = await scopedFrom('pos_kot_log', 'status, sent_at, started_at, ready_at')
       .eq('station', kdsStation)
       .neq('status', 'cancelled')
+      .not('items', 'cs', KOT_CHANGE_ITEMS) // a CHANGE ticket (S809 3a) is not a dish made or waiting
       .gte('sent_at', fromTs).lte('sent_at', toTs)
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 

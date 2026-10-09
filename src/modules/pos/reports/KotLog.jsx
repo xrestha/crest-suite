@@ -16,6 +16,8 @@ import RangePresets from './RangePresets'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
+// A CHANGE ticket's line (S809 3a) reads "Chicken Momo — now: No peanuts", never "×0".
+import { kotItemText } from '../kitchenNotes'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
 
@@ -358,7 +360,7 @@ export default function KotLog() {
           'Order#': r.order_no,
           'Station': r.station,
           'Stage': kotStage(r.status).label,
-          'Items': (r.items || []).map(i => `${i.name} ×${i.qty}`).join(', '),
+          'Items': (r.items || []).map(kotItemText).join(', '),
           'Sent By': staffNames[r.sent_by] || '—',
           'Est. Prep (min)': r.estimated_prep_minutes ?? '',
           'Actual Prep (min)': actualPrepMin(r) ?? '',
@@ -405,7 +407,7 @@ export default function KotLog() {
             rows.push({
               ...base, 'Station': log.station,
               'Time': nepalTime24(log.sent_at),
-              'Items': (log.items || []).map(i => `${i.name} ×${i.qty}`).join(', '),
+              'Items': (log.items || []).map(kotItemText).join(', '),
               'Sent By': staffNames[log.sent_by] || '—', 'Flag': flag,
             })
           }
@@ -503,7 +505,7 @@ export default function KotLog() {
                         outcomes (statusBadge's 'Billed'), so KOT takes purple, BOT yellow (S613). */}
                     <td><span className={STATION_BADGE[r.station] || 'badge-gray'} style={{ fontSize: 11 }}>{r.station}</span></td>
                     <td><span className={kotStage(r.status).badge} style={{ fontSize: 11 }}>{kotStage(r.status).label}</span></td>
-                    <td>{(r.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
+                    <td>{(r.items || []).map(kotItemText).join(', ')}</td>
                     <td>{staffNames[r.sent_by] || '—'}</td>
                     <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red-text)' : undefined }}>
                       {est == null && actual == null ? '—' : `${est ?? '—'}m / ${actual ?? '—'}m`}
@@ -612,7 +614,7 @@ export default function KotLog() {
                                     <td>{nepalTime(log.sent_at)}</td>
                                     {/* Same KOT-purple / BOT-yellow category colours as the Register tab (S613). */}
                                     <td><span className={STATION_BADGE[log.station] || 'badge-gray'} style={{ fontSize: 11 }}>{log.station}</span></td>
-                                    <td>{(log.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
+                                    <td>{(log.items || []).map(kotItemText).join(', ')}</td>
                                     <td>{staffNames[log.sent_by] || '—'}</td>
                                   </tr>
                                 ))}

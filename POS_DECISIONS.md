@@ -180,6 +180,15 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 3, slice 3a: GUEST-1 (P1), ORDER-FLOW-9 (P2), owner decision Q11 (a)~~ — **shipped
+  S809, 2026-10-09**, app only (crest-v423), no migration. **Q11 (a):** Accept puts a guest's
+  order-wide note on each of their dishes ("Guest: …"); on a line that already held the table's food
+  it reads "Guest ×N: …", so it never claims the food ordered earlier, and the line's own note is
+  kept. An instruction changed on a dish already sent is logged as its own CHANGE ticket (lines
+  `{qty: 0, change: true}`) beside the food of the same send; the KDS shows it with one button, Seen
+  (new → served), and every count of kitchen tickets leaves it out. **Decided (owner, 2026-10-09, as
+  recommended):** a CHANGE card rings like a New ticket until Seen, because an allergy change must not
+  sit unread. Original rows: `GUEST.md`, `ORDER-FLOW.md`.
 - [x] ~~S809 stage 2, slice 2h: CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2 (P2), owner decision
   Q25 (a); plus the S809.4 comped-rows item~~ — **shipped S809, 2026-10-09**, migration
   `20261009240000` applied live (crest-v421). `save_pos_order_items` counts every new line of a
