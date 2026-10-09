@@ -42,6 +42,7 @@ import { playChime } from '../posChime'
 import { errorText, isNetworkError } from '../../../shared/errorText'
 import { withTimeout, isTimeout } from '../../../utils/withTimeout'
 import { keepLockedCart, takeLockedCart, lockedCartWhere, POS_BEFORE_LOCK_EVENT } from '../posLockedCart'
+import { useReleaseReload } from '../../../shared/releaseWatch'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
@@ -82,6 +83,12 @@ const stripCodeWord = (msg, word) => String(msg || '').replace(new RegExp(`^(pos
 const CLOSE_STEP_MS = 20000
 const bounded = (call, label, ms = CLOSE_STEP_MS) =>
   withTimeout(call, ms, label).catch(error => ({ data: null, error }))
+
+// How long an idle floor waits, untouched, before it reloads for a new release (S809 1b).
+const RELEASE_IDLE_MS = 60 * 1000
+
+// What a kept cart's lines were "not sent before": a lock, or a reload for a new release.
+const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated' : 'the till locked')
 
 // `billingStation` is the /pos/billing route (S762) — the SAME component, entered on a third view
 // that lists the open bills instead of the floor plan. Deliberately not a separate page: billing is
@@ -684,8 +691,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // screen holds the cart, so it is what keeps the lines not yet saved — for this login only — and
   // hands back a points redemption an unfinished close left standing, which nobody would be left here
   // to undo. Read through a ref for closeOrderRef's reason: the listener is registered once.
+  // `reason` is 'update' when a new release reloads the till (S809 1b), so the restored lines say so.
   const beforeLockRef = useRef(null)
-  beforeLockRef.current = waitUntil => {
+  beforeLockRef.current = (waitUntil, reason = 'lock') => {
     if (liveRedemptionRef.current?.orderId) waitUntil(cancelLiveRedemption())
     if (view !== 'order' || !profile?.id || !clientId) return
     // Units beyond what is saved on the server. A note edit or a lowered quantity alone keeps nothing:
@@ -698,7 +706,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     keepLockedCart({
       profileId: profile.id, profileName: profile.full_name || '', clientId,
       tableId: activeTable?.id || null, tableName: activeTable?.name || null,
-      orderId: orderId || null, orderNo: orderNo || null, covers, items: orderItems, unsentUnits,
+      orderId: orderId || null, orderNo: orderNo || null, covers, items: orderItems, unsentUnits, reason,
     })
   }
   useEffect(() => {
@@ -706,6 +714,22 @@ export default function PosOrders({ billingStation = false } = {}) {
     window.addEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
     return () => window.removeEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
   }, [])
+
+  // ── A new release (S809 1b, releaseWatch.js) ──
+  // The till reloads itself on an idle floor: no dialog, nothing saving, closing or syncing, and a
+  // minute untouched. When the database refuses this page as too old it reloads within seconds from
+  // wherever it is, keeping the unsent cart the way a lock does; nothing was written, so nothing is
+  // lost but the reload. The lines come back on this screen's next mount (takeLockedCart below).
+  const releaseSafe = (view === 'floor' || view === 'bills') && !saving && !closing && !billingOpen &&
+    !syncingOffline && !coversModal && !recentBillsOpen && !billPreviewOpen
+  useReleaseReload(releaseSafe, RELEASE_IDLE_MS, async () => {
+    const pending = []
+    beforeLockRef.current?.(p => pending.push(Promise.resolve(p)), 'update')
+    if (pending.length === 0) return
+    await withTimeout(Promise.allSettled(pending), 5000, 'Handing work back before the update').catch(e => {
+      console.error('before-update work did not finish; reloading anyway:', e)
+    })
+  })
 
   // The covers numpad answers the keyboard too (S776): digits, Backspace and Enter. It was click-only,
   // on a till that often has a keyboard. Escape stays the Modal's own; a focused button keeps its
@@ -1703,7 +1727,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const units = missing.reduce((n, m) => n + (Number(m.qty) || 0), 0)
     setOrderItems(prev => mergeUnsentLines(prev, missing))
     const moved = kept.orderId && kept.orderId !== loadedOrderId
-    setMsg(`ok:${units} item${units === 1 ? '' : 's'} not sent before the till locked ${units === 1 ? 'is' : 'are'} back${moved ? ' — the order they were on has closed, so this is a new one' : ''}. Check, then send or save.`)
+    setMsg(`ok:${units} item${units === 1 ? '' : 's'} not sent before ${keptBefore(kept)} ${units === 1 ? 'is' : 'are'} back${moved ? ' — the order they were on has closed, so this is a new one' : ''}. Check, then send or save.`)
   }
 
   // After a PIN sign-in: the order this login left when the till locked, reopened (S776). Its lines
@@ -1714,7 +1738,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const units = Number(kept.unsentUnits) || 0
     const keepAgain = () => {
       keepLockedCart(kept)
-      setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before the till locked could not be put back — the order could not be read. They are still kept: lock the till and sign in again once the connection is back.`)
+      setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before ${keptBefore(kept)} could not be put back — the order could not be read. They are still kept: ${kept.reason === 'update' ? 'reload the page' : 'lock the till and sign in again'} once the connection is back.`)
     }
     lockedCartRef.current = kept
     try {
@@ -1722,7 +1746,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         const { data: table, error } = await bounded(scopedFrom('pos_tables', '*').eq('id', kept.tableId).maybeSingle(), 'Reading the table')
         if (error) { keepAgain(); return }
         if (!table || table.status === 'inactive') {
-          setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before the till locked could not be put back — that table is no longer in use. Ring them on another table or a takeaway.`)
+          setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before ${keptBefore(kept)} could not be put back — that table is no longer in use. Ring them on another table or a takeaway.`)
           return
         }
         await openTable(table)

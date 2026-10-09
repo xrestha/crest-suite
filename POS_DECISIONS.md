@@ -180,6 +180,19 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 1, slice 1b: GAP-RELEASE-1 (P2), owner decision Q27 (c)~~ — **shipped S809,
+  2026-10-09**, migration `20261009100000` applied live (crest-v413). A till never took a release on
+  its own: the lock, a PIN sign-in and the Kitchen Display move by `navigate()`, never by a page
+  load, and the service worker replaces its cache, not the page running. Now the PIN screen, an idle
+  floor and an idle Kitchen Display reload themselves once a new worker takes over
+  (`src/shared/releaseWatch.js`). Every `/rest/v1/` call carries `x-crest-build`, and
+  `pos_till_build_gate` (BEFORE statement triggers on `pos_orders` and `pos_order_items`) refuses a
+  signed-in browser's bill write from a page older than `pos_min_till_build()`, which starts NULL (no
+  floor). A refused till keeps its unsent cart and reloads within seconds. A later slice that
+  changes what the till sends raises the floor in its own migration, after its release is deployed.
+  Verified by the migration's rolled-back probe (old, missing and unreadable builds refused; current
+  passes; anon, service role and no-JWT pass) and a live catalog read-back.
+  Original row: `docs/pos-review-s809/GAPS.md`.
 - [x] ~~S809 stage 1, slice 1a: RESERVATIONS-1 (P0) and RESERVATIONS-12 (P3)~~ — **shipped S809,
   2026-10-08**, migration `20261008120000` applied live (crest-v412). Another outlet's login, an
   unapproved trial included, could link its own booking to this outlet's table, because the link's

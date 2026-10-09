@@ -546,6 +546,7 @@ const POS_FEATURES = [
                     'Tablets activated before this update share one key for the whole restaurant. They keep working. Once every tablet has been activated again, a manager switches the shared key off in Till Devices — it cannot be switched back on',
                     'A tablet left asleep locks as soon as it wakes if it has been idle longer than 3 minutes, so the next person cannot bill under the last waiter\'s name',
                     'Locking still works when the Wi-Fi drops: if the till cannot reach Crest within a few seconds, it forgets the sign-in on that tablet anyway and goes back to the PIN screen',
+                    'A till takes a new version of Crest by itself. When one is out, the tablet reloads at a quiet moment: at the PIN screen, on the floor after a minute nobody has touched it, or on an idle Kitchen Display, never while someone is in the middle of an order. If Crest ever refuses a save because the till is too old, it says so, keeps the items you had not sent, and reloads within a few seconds; send them again once it is back',
                     'Items you tapped in but had not sent or saved are NOT lost when the till locks (or when you press Lock POS). They are kept on that tablet for your PIN only: the PIN screen says so ("Kept for Ram: 3 items not sent on Table 5"), and when you sign in again the table reopens with them back as unsent, ready to send. Another waiter signing in never gets them. Anything left for more than 12 hours is dropped',
                   ],
                 },

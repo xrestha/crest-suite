@@ -5,6 +5,12 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { initInstallPrompt } from './utils/installPrompt';
 import { initChunkReloadGuard } from './shared/chunkReload';
+import { initReleaseWatch } from './shared/releaseWatch';
+
+// Listens for a new release taking over this page, so a till screen can reload itself at a safe
+// moment (S809 1b). Before the worker registers: a first visit's worker claiming the page must be
+// told apart from a release.
+initReleaseWatch();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

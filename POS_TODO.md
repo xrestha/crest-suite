@@ -232,13 +232,12 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
 | SHIFTS-11 | A failed first read leaves the Shifts page on "Loading…" for good | 4 | — | no |
 
-### Gaps (7: 5 P2, 2 P3)
+### Gaps (6 open: 4 P2, 2 P3; GAP-RELEASE-1 shipped in slice 1b)
 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
 | GAP-OPERATOR-1 | A credit note or drawer-cash entry the database refuses to the restaurant's manager goes through unchecked when Crest support enters it from the same screen; the refusal sends managers to support | P2 | 1 | Q26 | yes |
 | GAP-OUTLETS-1 | A till signed in on the Owner's own login follows her to whichever outlet she last opened, even from her phone. It drops the unsent order, then bills in the other outlet's name and invoice series. Live: BLOOM CAFE and PKR are a POS group, and 29 of BLOOM's 40 bills were closed on the Owner's login. Ships with ACCESS-4 | P2 | 1 | Q24 | no |
-| GAP-RELEASE-1 | A till never picks up a release on its own: a tablet left on runs the code it opened with while the database moves on. The fix must get past the service worker's cache-first answer. Do it before the stage-1 contract changes | P2 | 1 | Q27 | yes |
 | GAP-OUTLETS-2 | Every HQ push turns each pushed dish back On POS (and Active) at every branch. On a branch whose VAT status differs from HQ's, a pushed dish with no price goes on the till at NPR 0 (no such group live) | P2 | 2 | Q25 | yes |
 | GAP-OUTLETS-3 | The Group Console counts takeaway and delivery bills as guests (REPORTS-3's rule), cuts the month at 05:45 Nepal time, and its Revenue tip over-promises | P2 | 3 | — | yes |
 | GAP-OPERATOR-2 | Inside a client's POS the operator gets every module on, whatever the client bought, so the operator's till behaves unlike the restaurant's | P3 | 4 | — | no |
@@ -384,7 +383,7 @@ changed.
 | # | IDs | Migration | Edge Function | Decisions |
 | --- | --- | --- | --- | --- |
 | 1a ✅ | RESERVATIONS-1, RESERVATIONS-12 (shipped 2026-10-08, `20261008120000` live) | hold guard, composite FKs, `order_id` same-client trigger, `created_by` stamp | — | — |
-| 1b | GAP-RELEASE-1 | `min_pos_build` check (part 2) | — | Q27 |
+| 1b ✅ | GAP-RELEASE-1 (shipped 2026-10-09, `20261009100000` live) | `pos_min_till_build()` floor (NULL) + `pos_till_build_gate` statement triggers; the till reloads itself | — | Q27 |
 | 1c | CHECKOUT-2, CHECKOUT-8, CREDIT-NOTES-6 | `guard_pos_order_close` A+B, `pos_orders` CHECK, `guard_pos_credit_note` | — | — |
 | 1d | DATABASE-1, ORDER-FLOW-2 | `pos_kot_log` / `pos_kot_removals` guards, `save_pos_order_items`, `guard_pos_item_price` | — | Q1 |
 | 1e | ACCESS-1, ACCESS-2 | none | — | Q4 |

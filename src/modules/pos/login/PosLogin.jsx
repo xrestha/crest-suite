@@ -5,6 +5,12 @@ import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 import { withTimeout } from '../../../utils/withTimeout'
 import { listLockedCarts } from '../posLockedCart'
+import { useReleaseReload } from '../../../shared/releaseWatch'
+
+// The PIN screen is every till's resting state, so it is where a new release is picked up (S809 1b).
+// A few quiet seconds first, so a reload never lands under a waiter typing a PIN. Locked carts are in
+// localStorage and survive it.
+const RELEASE_IDLE_MS = 10 * 1000
 
 // The exact `error` strings pos-staff-login returns on a 401 (supabase/functions/pos-staff-login).
 const ERR_INVALID_CREDENTIALS = 'Invalid credentials'
@@ -42,6 +48,8 @@ export default function PosLogin() {
   const [signingIn, setSigningIn] = useState(false)
   // The device key was refused by the picker itself — revoked from Till Devices, or never registered.
   const [deviceDead, setDeviceDead] = useState(false)
+
+  useReleaseReload(!signingIn, RELEASE_IDLE_MS)
 
   useEffect(() => {
     // No silent bounce — an unactivated device shows its own explanatory screen below

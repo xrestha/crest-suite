@@ -543,6 +543,31 @@ Three shapes are worth copying:
 tests the RAW `pos_role`/`ims_role` columns because `caller_can_set_menu_price()` does. Using
 `hasPosAccess` there would also have required the module to be on, which the database does not.
 
+## A till takes a release by itself, and the database can refuse one too old (S809 1b)
+
+A till is one long-lived page: the lock, a PIN sign-in and the KDS move by `navigate()`, and a
+`CACHE_NAME` bump replaces the worker's cache, never the page running. So until S809 a tablet ran the
+code it opened with until someone reloaded it. The defence was keeping every changed RPC callable by
+an old page (`p_expected_version DEFAULT NULL`), which protects only the changes someone remembered.
+
+- **`useReleaseReload(safe, idleMs, beforeReload)`** (`src/shared/releaseWatch.js`) is on the PIN
+  screen, the order screen and the KDS. They ask the browser to re-check the worker on arrival and
+  every 10 minutes; `controllerchange` after a first install means a release, and the screen reloads
+  at its next safe moment (quiet for `idleMs`, no `[role="dialog"]`, its own `safe` true, online). A
+  new till screen that sits for hours calls it too.
+- **Every `/rest/v1/` call carries `x-crest-build: <APP_VERSION>`** (`buildHeaderFetch.js`, inside
+  `supabaseClient.js`'s fetch). Never on auth, storage or Edge Function calls: an Edge Function's
+  CORS list refuses a preflight for a header it does not name.
+- **`pos_till_build_gate`** (BEFORE STATEMENT on `pos_orders` insert/update and `pos_order_items`
+  insert/update/delete, `20261009100000`) refuses a signed-in browser's write from a page older than
+  `pos_min_till_build()`, with `pos_till_build_too_old`. NULL is no floor. Anon, the service role and
+  no-JWT calls pass. The till that hears it keeps its cart (`reason: 'update'`) and reloads within
+  seconds, at most once per 3 minutes.
+- **Raising the floor is a migration that replaces `pos_min_till_build()`, and it goes live only
+  AFTER that release is deployed.** Raised first, every till is refused with nothing newer to load.
+  Raise it only for a release that changes what a till must send; a slice that only refuses REST
+  abuse leaves it alone. A new table a till writes under a changed contract can attach the same gate.
+
 ## Still open
 
 Open POS work is tracked in `POS_TODO.md` A2; payment-QR auto-confirm is still blocked on FonePay/eSewa merchant onboarding. The phase-6 critique record (what S575–S767 closed) moved word for word to `docs/rules-archive/pos-billing.md`.

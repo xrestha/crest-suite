@@ -162,6 +162,13 @@ describe('errorText', () => {
       expect(errorText(hinted('pos_shift_closed', 'pos_shift_closed: this shift is closed…'), 'operator')).toMatch(/reload/i)
     })
 
+    it('a till too old for the database is told it reloads itself and keeps its unsent items (S809 1b)', () => {
+      const err = hinted('pos_till_build_too_old', 'pos_till_build_too_old: this page runs crest-v412, and bills now need crest-v413 or newer; reload the page', 'P0001')
+      expect(errorText(err, 'staff')).toMatch(/reloads itself/i)
+      expect(errorText(err, 'staff')).toMatch(/not sent/i)
+      expect(errorText(err, 'operator')).toMatch(/reload the page/i)
+    })
+
     it('every code the two migrations raise has its own sentence in both audiences', () => {
       const generic = { staff: errorText({ code: '42501' }, 'staff'), operator: errorText({ code: '42501' }, 'operator') }
       const fallback = { staff: errorText({ message: 'x' }, 'staff'), operator: errorText({ message: 'x' }, 'operator') }
@@ -171,7 +178,9 @@ describe('errorText', () => {
         'loyalty_enrol_rank', 'pos_shift_closed', 'pos_shift_locked', 'pos_cash_movement_locked',
         'pos_cash_movement_shift_closed', 'pos_cash_refund_over', 'pos_table_has_open_order',
         // S755
-        'table_hold_overlap', 'credit_note_amounts']
+        'table_hold_overlap', 'credit_note_amounts',
+        // S809 1b
+        'pos_till_build_too_old']
       for (const c of codes) {
         for (const aud of ['staff', 'operator']) {
           const text = errorText({ code: '42501', hint: c, message: 'refused' }, aud)

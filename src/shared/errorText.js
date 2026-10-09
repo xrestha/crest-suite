@@ -132,6 +132,14 @@ const rules = [
     staff: 'This order was changed on another device since you opened it. Nothing was saved — reload the order and add your changes again.',
     operator: 'This order was changed on another device since it was opened here, so this save was refused rather than overwrite theirs. Nothing was saved — reload the order and make the change again.',
   },
+  // S809 1b: pos_till_build_gate refuses a bill write from a page older than the database's floor.
+  // It raises before writing anything, so "nothing was saved" is earned. A till screen reloads itself
+  // a few seconds later (releaseWatch.js), the order screen keeping its unsent items first.
+  {
+    test: e => hasCode(e, 'pos_till_build_too_old'),
+    staff: 'This till is on an old version of Crest, so nothing was saved. It reloads itself in a few seconds and keeps any items you had not sent. Then try again.',
+    operator: 'This page runs an older version of Crest than bills now need, so nothing was saved. A till reloads itself in a few seconds and keeps its unsent items; on any other screen, reload the page. Then try again. If it is refused again straight after a reload, contact Crest support.',
+  },
   {
     test: e => hasCode(e, 'order_not_open'),
     staff: 'This bill has already been closed, so it cannot be changed. Nothing was changed — reload the floor.',

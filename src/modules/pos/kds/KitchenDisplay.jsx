@@ -13,6 +13,9 @@ import ArrivalAlert from '../../../components/ArrivalAlert'
 import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
+import { useReleaseReload } from '../../../shared/releaseWatch'
+
+const KDS_RELEASE_IDLE_MS = 60 * 1000
 
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
@@ -163,6 +166,9 @@ export default function KitchenDisplay() {
   // touchscreens could otherwise fire two overlapping updates whose responses arrive out of
   // order, leaving the row reverted to an earlier stage than what was actually tapped.
   const [advancing, setAdvancing] = useState(() => new Set())
+  // A wall screen is never reloaded by hand, so it takes a new release by itself once nobody has
+  // touched it for a minute and no ticket is mid-update (S809 1b).
+  useReleaseReload(advancing.size === 0, KDS_RELEASE_IDLE_MS)
   // advance() previously never checked the write's result, so a failed update (RLS denial,
   // network blip) left the optimistic status showing on screen for up to POLL_MS with no
   // indication the DB write never landed — a busy kitchen could believe a ticket was done when

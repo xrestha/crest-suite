@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { makeAuthTimeoutFetch } from './utils/authFetchTimeout'
+import { makeBuildHeaderFetch } from './utils/buildHeaderFetch'
 
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -21,7 +22,9 @@ const noOpLock = async (_name, _acquireTimeout, fn) => fn()
 // depends on them: tokens live 1 hour and users sit on data-entry screens for longer than that.
 // Note that auth-js's refresh ticker only runs while the tab is awake — src/utils/sessionKeepAlive.js
 // covers the backgrounded/asleep case that this alone does not (S458).
+// makeBuildHeaderFetch adds the running build to /rest/v1/ calls only, so the database can refuse a
+// till too old for its rules (S809 1b, src/utils/buildHeaderFetch.js).
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { lock: noOpLock, autoRefreshToken: true, persistSession: true },
-  global: { fetch: makeAuthTimeoutFetch((...args) => fetch(...args)) },
+  global: { fetch: makeAuthTimeoutFetch(makeBuildHeaderFetch((...args) => fetch(...args))) },
 })
