@@ -180,6 +180,17 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 2, slice 2a: ORDER-FLOW-1 (= CHECKOUT-9, P1), CHECKOUT-1 till half (P1), CHECKOUT-5
+  (P2), owner decisions Q8 (a), Q9 (a)~~ — **shipped S809, 2026-10-09**, app only (crest-v417). The till
+  bills only on settings from a read that answered in this visit: a failed or stalled read is never used
+  or cached, the offline copy keeps ticket routing, a red line offers Retry, and Charge, Complimentary,
+  the Billing station's Bill and a reprint wait. A cached copy never opens Payment: it can be days old,
+  and tills before crest-v417 may hold the empty copy this bug wrote. The Bill Register's view refuses a
+  failed settings read. **Q8 (a):** an emptied order is refused for Charge and Complimentary; a login
+  without Allow Void is told to ask someone with Void; Void is unchanged. The database backstop is slice
+  2b. Revisit with table move. **Q9 (a):** a VAT bill above NPR 10,000, measured on what the guest pays,
+  needs the buyer's name and address; PAN optional; PAN-bill outlets unaffected. Original rows:
+  `CHECKOUT.md`, `ORDER-FLOW.md`.
 - [x] ~~S809 stage 1, slice 1g: ACCESS-4 (P2), GAP-OUTLETS-1 (P2), owner decision Q24 (a)~~ — **shipped
   S809, 2026-10-09**, migration `20261009130000` applied live (crest-v416). A till PIN login works only at
   its own outlet: `set_active_outlet` refuses it any other and `set_outlet_access` refuses to grant one,

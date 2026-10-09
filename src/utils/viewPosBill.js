@@ -35,12 +35,15 @@ export async function viewPosBill(clientId, row) {
   const w = window.open('', '_blank')
   if (w) w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Loading…</p>')
 
-  const [{ data: order, error: orderErr }, { data: settings }, { data: client }] = await Promise.all([
+  const [{ data: order, error: orderErr }, { data: settings, error: settingsErr }, { data: client, error: clientErr }] = await Promise.all([
     scopedFrom('pos_orders', clientId).eq('id', orderId).single(),
     supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
     supabase.from('clients').select('name').eq('id', clientId).single(),
   ])
-  if (orderErr || !order) {
+  // The settings decide the document itself — TAX INVOICE or BILL, the seller's VAT/PAN number, the
+  // prefix, the address — so a failed read of them is a failed read of the bill (S809 2a, CHECKOUT-9).
+  // Before this, it fell back to "VAT-registered, no number" and showed a PAN outlet a Tax Invoice.
+  if (orderErr || !order || settingsErr || clientErr) {
     writeLoadFailure(w)
     return
   }

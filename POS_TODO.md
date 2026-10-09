@@ -55,21 +55,19 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P1 (3 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e)
+### P1 (2 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e, ORDER-FLOW-1 in 2a)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers | 2 | Q8 | yes |
-| ORDER-FLOW-1 (= CHECKOUT-9) | If the till's settings read fails or stalls, every bill until a reload prints as a TAX INVOICE without the VAT/PAN number, prefix or address. Bar items go on the kitchen ticket, and the bad copy overwrites the offline settings. The reprint path has the same gap | 2 | — | no |
+| CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers. The till half shipped in 2a; the database backstop is 2b | 2 | Q8 | yes |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (53 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1)
+### P2 (52 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 | CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
 | CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
-| CHECKOUT-5 | A Tax Invoice above NPR 10,000 closes with blank buyer name, address and PAN, though the till's own tip says they are needed | 2 | Q9 | no |
 | CHECKOUT-6 | After an outlet deregisters from VAT, every reprint or view of an old Tax Invoice prints a smaller total (KNOWN, now with the reprint effect) | 2 | — | yes |
 | CHECKOUT-7 | When a close's first try lands late, the bill prints and posts with the cashier's later changes, not the stored payment | 2 | — | no |
 | CHECKOUT-10 | A comp left by a failed, cancelled close reloads as a second plain line, and comping again comps more than was ordered | 2 | — | yes |
@@ -224,7 +222,10 @@ Each has a recommended answer. Answering "all as recommended" is enough to start
 different.
 
 **Answered 2026-10-08 (S809): every stage-1 question, all as recommended.** Q1 (b), Q2 (a), Q3 (a),
-Q4 (a), Q5 (a), Q6 (a), Q7 (a), Q24 (a), Q26 (a), Q27 (c). Q8–Q23 and Q25 are still open.
+Q4 (a), Q5 (a), Q6 (a), Q7 (a), Q24 (a), Q26 (a), Q27 (c).
+
+**Answered 2026-10-09 (S809): every stage-2 question, all as recommended** (asked in plain words).
+Q8 (a), Q9 (a), Q10 (a), Q25 (a). Q11–Q23 are still open.
 
 **Stage 1**
 
@@ -373,6 +374,22 @@ changed.
 ACCESS-8 needs a migration (it drops `get_pos_device_secret`), although the index above says no. If 1l is
 too big for one chat, split it: SHIFTS-2 with the operator change for the two shift guards, then the
 remaining guards.
+
+**Stage 2 slices (owner approved 2026-10-09; Q8, Q9, Q10, Q25 all (a)).** 2a goes first: it fixes both P1s
+in the browser with no migration. `guard_pos_order_close` changes in 2b, 2c and 2g, so those three ship in
+that order and each starts from the live body the one before left. Two P3s and three S809.4 items are pulled
+forward because their functions are rebuilt here anyway.
+
+| # | IDs | Migration | Decisions |
+| --- | --- | --- | --- |
+| 2a ✅ | CHECKOUT-1 (till half), ORDER-FLOW-1 (= CHECKOUT-9), CHECKOUT-5 (shipped 2026-10-09, app only, crest-v417) | none: the till's settings read, the Bill Register view, `closeBlocker` | Q8, Q9 |
+| 2b | CHECKOUT-1 (server half), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4, CHECKOUT-10, SHIFTS-1 (database half), SHIFTS-7 (P3); S809.4: `apply_pos_item_comps`' skipped partial row | `guard_pos_order_close` (empty bill, open shift `FOR SHARE`, invoice year from the Nepal date), `guard_pos_credit_note` (year), `apply_pos_item_comps` (year, `comped` filter), `pos_cash_movements_guard` (`FOR SHARE`), `pos_shifts_guard` (`closed_at := now()`) | Q8 |
+| 2c | CHECKOUT-6, REPORTS-1, CREDIT-NOTES-5 (P3) | `pos_orders.vat_registered`, stamped at the close (after 2b) | — |
+| 2d | CHECKOUT-7 | none: the close read-back path | — |
+| 2e | CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3 | link trigger on `pos_credit_notes`; a restock `sales_entries` source and `ims_stock_movements_guard` | Q10 |
+| 2f | IMS-HANDOFF-2, IMS-HANDOFF-3 | `sales_entries` stamp trigger (and BLOOM bill 40's stamp); DEFINER depletion and comp-cost reads | — |
+| 2g | CUSTOMERS-PARKING-1, -2, -3 | `award_loyalty_points` / `redeem_loyalty_points`; `guard_pos_order_close` (a standing Loyalty leg, after 2c); point value > 0; BLOOM's 188 partner points zeroed | — |
+| 2h | CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2 | `save_pos_order_items` (a must-choose dish with no choices, an unpriced new line), `push_master_data` (the branch keeps On POS and Active) | Q25 |
 
 ## S809.3 Outside POS, filed here
 

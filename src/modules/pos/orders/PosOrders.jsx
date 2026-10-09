@@ -37,6 +37,11 @@ import {
 } from '../../../utils/offlineQueue'
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
 import BillingStation from './BillingStation'
+import {
+  TILL_SETTINGS_READ_MS, TILL_SETTINGS_RETRY_MS, tillSettingsReadOutcome, cacheCarriesRouting, tillSettingsNotice,
+  tillSettingsBlockText, tillSettingsReprintText, closeStartRefusal, fullInvoiceRequired, fullInvoiceRefusal,
+  optionalBuyerTip, FULL_INVOICE_TIP, ABBREVIATED_INVOICE_LIMIT,
+} from './tillBillChecks'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { playChime } from '../posChime'
 import { errorText, isNetworkError } from '../../../shared/errorText'
@@ -242,6 +247,18 @@ export default function PosOrders({ billingStation = false } = {}) {
     is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '', payment_qr_data: '',
     delivery_partners: [],
   })
+  // S809 2a (ORDER-FLOW-1 / CHECKOUT-9): whether the settings above came from a read that ANSWERED in
+  // this visit. Charge, Complimentary, the Billing station's Bill and a Recent Bills reprint wait for it
+  // (closeStartRefusal in tillBillChecks.js says why a cached copy does not count). `settingsFailure`
+  // is `{ cachedRouting }` once a read has failed or stalled, and drives the notice on the floor and
+  // the order screen; the till keeps asking until a read lands (the retry effect below).
+  const [billingSettingsLoaded, setBillingSettingsLoaded] = useState(false)
+  const [settingsFailure, setSettingsFailure] = useState(null)
+  const [settingsReading, setSettingsReading] = useState(false)
+  const settingsReqSeq = useRef(0)
+  const settingsInFlightRef = useRef(null)
+  const cacheAppliedForRef = useRef(null)
+  const loadTillSettingsRef = useRef(null)
 
   /* ── Billing modal ── */
   const [billingOpen, setBillingOpen] = useState(false)
@@ -428,51 +445,100 @@ export default function PosOrders({ billingStation = false } = {}) {
   useEffect(() => {
     if (!clientId) return
     loadFloor()
-    if (!navigator.onLine) {
-      getCachedPosSettings(clientId).then(data => {
-        if (!data) return
-        const arr = data.pos_bot_categories
-        if (arr?.length) setBotCategories(new Set(arr))
-        setNotePresets(data.pos_note_presets || [])
-        setDiscountReasons(data.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
-        setBillingSettings({
-          is_vat_registered: data.is_vat_registered ?? true,
-          invoice_prefix:    data.invoice_prefix || '',
-          vat_number:        data.vat_number || '',
-          property_address:  data.property_address || '',
-          property_phone:    data.property_phone || '',
-          payment_qr_data:   data.payment_qr_data || '',
-          delivery_partners: data.pos_delivery_partners || [],
-        })
-        setOutletName(data.outlet_name || '')
-      })
-    } else {
-      Promise.all([
-        supabase.from('settings')
-          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data, pos_delivery_partners, pos_reservation_settings')
-          .eq('client_id', clientId).maybeSingle(),
-        supabase.from('clients').select('name').eq('id', clientId).single(),
-      ]).then(([{ data }, { data: clientData }]) => {
-        const arr = data?.pos_bot_categories
-        if (arr?.length) setBotCategories(new Set(arr))
-        setReservationSettings(normalizeReservationSettings(data?.pos_reservation_settings))
-        setNotePresets(data?.pos_note_presets || [])
-        setDiscountReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
-        setBillingSettings({
-          is_vat_registered: data?.is_vat_registered ?? true,
-          invoice_prefix:    data?.invoice_prefix || '',
-          vat_number:        data?.vat_number || '',
-          property_address:  data?.property_address || '',
-          property_phone:    data?.property_phone || '',
-          payment_qr_data:   data?.payment_qr_data || '',
-          delivery_partners: data?.pos_delivery_partners || [],
-        })
-        setOutletName(clientData?.name || '')
-        cachePosSettings(clientId, { ...data, outlet_name: clientData?.name || '' })
-      })
-    }
+    // S809 2a: another client's settings (an admin's "view as" switch) are not this one's.
+    setBillingSettingsLoaded(false); setSettingsFailure(null)
+    cacheAppliedForRef.current = null
+    loadTillSettings()
     if (navigator.onLine) flushRef.current?.()
   }, [clientId]) // eslint-disable-line
+
+  // Puts one settings row on the till: a read that answered, or the offline copy. An empty routing
+  // list is the built-in default (Beverage to the bar), as at first load — so a fresh read after the
+  // offline copy cannot leave the copy's routing standing.
+  function applyTillSettings(data, outlet) {
+    const arr = data?.pos_bot_categories
+    setBotCategories(new Set(arr?.length ? arr : ['Beverage']))
+    setReservationSettings(normalizeReservationSettings(data?.pos_reservation_settings))
+    setNotePresets(data?.pos_note_presets || [])
+    setDiscountReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
+    setBillingSettings({
+      is_vat_registered: data?.is_vat_registered ?? true,
+      invoice_prefix:    data?.invoice_prefix || '',
+      vat_number:        data?.vat_number || '',
+      property_address:  data?.property_address || '',
+      property_phone:    data?.property_phone || '',
+      payment_qr_data:   data?.payment_qr_data || '',
+      delivery_partners: data?.pos_delivery_partners || [],
+    })
+    setOutletName(outlet || '')
+  }
+
+  // The offline copy, applied once per client: it carries ticket routing and the screen's totals
+  // while no read has answered. Never Payment (billingSettingsLoaded stays false). Returns whether
+  // the copy carries the outlet's routing, for the notice's wording.
+  async function applyCachedTillSettings(forClient, seq) {
+    const cached = await getCachedPosSettings(forClient).catch(() => null)
+    if (!cached || seq !== settingsReqSeq.current) return false
+    if (cacheAppliedForRef.current !== forClient) {
+      cacheAppliedForRef.current = forClient
+      applyTillSettings(cached, cached.outlet_name)
+    }
+    return cacheCarriesRouting(cached)
+  }
+
+  // S809 2a (ORDER-FLOW-1 / CHECKOUT-9). Both errors are read and both reads are bounded. Only a
+  // read that answered is applied as fresh and cached; a failed or stalled one leaves the offline
+  // copy in use, raises the notice and keeps Payment refused, and the retry effect asks again.
+  // Offline is not a failure: billing is refused offline anyway, and the Offline banner says so.
+  async function loadTillSettings() {
+    const forClient = clientId
+    if (!forClient || settingsInFlightRef.current === forClient) return
+    const seq = ++settingsReqSeq.current
+    settingsInFlightRef.current = forClient
+    try {
+      if (!navigator.onLine) { await applyCachedTillSettings(forClient, seq); return }
+      setSettingsReading(true)
+      const [settingsRes, clientRes] = await Promise.all([
+        bounded(supabase.from('settings')
+          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data, pos_delivery_partners, pos_reservation_settings')
+          .eq('client_id', forClient).maybeSingle(), 'Loading the till settings', TILL_SETTINGS_READ_MS),
+        bounded(supabase.from('clients').select('name').eq('id', forClient).single(), 'Loading the outlet name', TILL_SETTINGS_READ_MS),
+      ])
+      if (seq !== settingsReqSeq.current) return
+      const read = tillSettingsReadOutcome(settingsRes, clientRes)
+      if (!read.ok) {
+        console.error('POS till settings read failed:', read.error)
+        const cachedRouting = await applyCachedTillSettings(forClient, seq)
+        if (seq !== settingsReqSeq.current) return
+        // The same failure again keeps the same object, so each 15 s retry does not rebuild the notice.
+        setSettingsFailure(prev => (prev?.cachedRouting === cachedRouting ? prev : { cachedRouting }))
+        return
+      }
+      applyTillSettings(read.settings, read.outletName)
+      setBillingSettingsLoaded(true)
+      setSettingsFailure(null)
+      // A refusal this state put on screen (Payment, the Billing station's Bill) is no longer true.
+      const stale = [true, false].map(f => `error:${tillSettingsBlockText(f)}`)
+      setMsg(m => (stale.includes(m) ? '' : m))
+      setFloorMsg(m => (stale.includes(m) ? '' : m))
+      cachePosSettings(forClient, { ...read.settings, outlet_name: read.outletName })
+        .catch(err => console.error('POS settings offline copy not saved:', err))
+    } finally {
+      if (seq === settingsReqSeq.current) { settingsInFlightRef.current = null; setSettingsReading(false) }
+    }
+  }
+  loadTillSettingsRef.current = loadTillSettings
+
+  // Until a settings read lands, the till keeps asking: every 15 s on any screen, on arriving at
+  // another screen, and the moment the connection comes back. Through the ref, as the floor poll is.
+  useEffect(() => {
+    if (billingSettingsLoaded || !clientId) return
+    const retry = () => { if (navigator.onLine) loadTillSettingsRef.current?.() }
+    if (settingsFailure) retry()
+    const poll = setInterval(retry, TILL_SETTINGS_RETRY_MS)
+    window.addEventListener('online', retry)
+    return () => { clearInterval(poll); window.removeEventListener('online', retry) }
+  }, [billingSettingsLoaded, clientId, view]) // eslint-disable-line
 
   // Keeps the floor-view Sent/Started/Ready badges live while a staff member is just looking at
   // the board (not tapping into a table, which is the only other time loadFloor/loadKotStatus run).
@@ -637,6 +703,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Buyer Name + Phone become compulsory (not just optional) whenever a discount is applied, or
   // when the bill is going on Credit — both cases need an identifiable, audited record.
   const requireBuyerId = discountAmt > 0 || payMethod === 'Credit'
+  // S809 2a (CHECKOUT-5, owner Q9 a): a VAT bill above the abbreviated-invoice limit names its buyer.
+  const requireFullInvoice = fullInvoiceRequired({ vatReg, payTotal })
 
   // Split payment — running total of tenders collected so far against payTotal, and what's left.
   const tendersTotal = tenders.reduce((s, t) => s + t.amount, 0)
@@ -1889,6 +1957,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       setFloorMsg('error:That order has not uploaded yet — it has no invoice number to bill against. It will sync on its own; try again in a moment.')
       return
     }
+    // S809 2a (ORDER-FLOW-1): the bill prints from the till's settings, so no read, no bill.
+    if (!billingSettingsLoaded) {
+      setFloorMsg(`error:${tillSettingsBlockText(!!settingsFailure)}`)
+      loadTillSettings()
+      return
+    }
     billOnOpenRef.current = true
     try {
       if (row.kind === 'table') {
@@ -3025,6 +3099,13 @@ export default function PosOrders({ billingStation = false } = {}) {
   // payments exceed); `field` is the control the cashier is taken to.
   function closeBlocker(closeType) {
     const block = (text, label, field = null) => ({ text, label, field })
+    // S809 2a: no Charge or Complimentary before the till's settings have answered (ORDER-FLOW-1),
+    // or on an emptied cart (CHECKOUT-1, owner Q8 a). Void is not held back by either.
+    const start = closeStartRefusal({
+      closeType, settingsLoaded: billingSettingsLoaded, settingsFailed: !!settingsFailure,
+      itemCount: orderItems.length, canVoid: isAdmin || isOwner || !!profile?.pos_allow_void,
+    })
+    if (start) return block(start.text, start.label)
     if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) {
       return block('Select a reason.', 'Choose a reason first', closeType === 'void' ? 'pos-orders-reason' : 'pos-orders-reason-2')
     }
@@ -3034,6 +3115,9 @@ export default function PosOrders({ billingStation = false } = {}) {
       return block('Buyer Name + Phone are required for a discount or Credit sale.', "Enter the buyer's name and phone first",
         !buyerName.trim() ? 'pos-orders-buyer-name' : 'pos-orders-buyer-phone')
     }
+    // S809 2a (CHECKOUT-5, owner Q9 a): above the IRD abbreviated-invoice limit a VAT bill names its buyer.
+    const fullInvoice = fullInvoiceRefusal({ vatReg, payTotal, buyerName, buyerAddress })
+    if (fullInvoice) return block(fullInvoice.text, fullInvoice.label, fullInvoice.field)
     if (splitMode && (remaining > 0 || tenders.length === 0)) return block('Split payment is not fully collected yet.', null, 'pos-orders-amount')
     if (tendersOverpaid) {
       return block(`The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Undo the payments and take them again against the new total.`, null)
@@ -3062,7 +3146,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const blocker = closeBlocker(closeType)
     if (blocker?.field) {
       if (blocker.field === 'pos-orders-comp-reason') setItemsExpanded(true)
-      if (blocker.field === 'pos-orders-buyer-name' || blocker.field === 'pos-orders-buyer-phone') setBuyerExpanded(true)
+      if (blocker.field.startsWith('pos-orders-buyer-')) setBuyerExpanded(true)
       setTimeout(() => {
         const el = document.getElementById(blocker.field)
         if (!el) return
@@ -3856,6 +3940,8 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   async function reprintBill(orderRow) {
     if (!hasPosAccess('supervisor')) return // S754: Recent Bills is Supervisor+ — see loadRecentBills
+    // S809 2a (CHECKOUT-9): a reprint takes its heading, VAT/PAN number and address from the settings.
+    if (!billingSettingsLoaded) { window.alert(tillSettingsReprintText(!!settingsFailure)); loadTillSettings(); return }
     // Same reason as reprintItemCompSlip above: independent reads, so one round trip rather than
     // two with a customer standing at the counter.
     const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
@@ -4569,6 +4655,16 @@ The tables were left occupied rather than freed with their orders still open.`)
               <span style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(total)}</span>
             </div>
 
+            {/* S809 2a (ORDER-FLOW-1): a standing condition, not a message — it stays until a read lands. */}
+            {settingsFailure && (
+              <p role="alert" style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.45, color: 'var(--theme-red-text)' }}>
+                {tillSettingsNotice(settingsFailure)}{' '}
+                <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadTillSettings()} disabled={settingsReading}>
+                  {settingsReading ? 'Trying…' : 'Retry'}
+                </button>
+              </p>
+            )}
+
             {/* The order screen's message, directly above the button that caused it (S776). A failure is an
                 ActionError; a confirmation ("Order sent!") a status line. */}
             {msg && (msg.startsWith('error:')
@@ -4590,7 +4686,8 @@ The tables were left occupied rather than freed with their orders still open.`)
                 // not yet sent the button simply did nothing. It stays pressable and says why.
                 const payBlocker = !orderId
                   ? 'Send or save the order first — a bill is charged against a saved order.'
-                  : !isOnline ? 'Reconnect to take payment — the bill number comes from the server.' : null
+                  : !isOnline ? 'Reconnect to take payment — the bill number comes from the server.'
+                  : !billingSettingsLoaded ? tillSettingsBlockText(!!settingsFailure) : null
                 const payDisabled = saving || !!payBlocker
                 return (
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -4612,7 +4709,15 @@ The tables were left occupied rather than freed with their orders still open.`)
                         opacity: saving ? 0.5 : payDisabled ? 0.6 : 1,
                         cursor: payDisabled ? 'default' : 'pointer',
                       }}
-                      onClick={() => { if (payBlocker) { setMsg(`error:${payBlocker}`); return } openBilling() }}
+                      onClick={() => {
+                        if (payBlocker) {
+                          // S809 2a: unread settings — the press asks again, and a failed read's notice already
+                          // sits above this button, so it is not said twice.
+                          if (orderId && isOnline && !billingSettingsLoaded) { loadTillSettings(); if (settingsFailure) return }
+                          setMsg(`error:${payBlocker}`); return
+                        }
+                        openBilling()
+                      }}
                       disabled={saving} aria-disabled={payBlocker ? true : undefined}>
                       Payment
                     </button>
@@ -4729,11 +4834,14 @@ The tables were left occupied rather than freed with their orders still open.`)
 
             {billingTab === 'pay' && (
               <div style={{ marginBottom: 16 }}>
-                {requireBuyerId ? (
+                {requireBuyerId || requireFullInvoice ? (
                   <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
                     Buyer details <span style={{ color: 'var(--theme-red-text)', textTransform: 'none', letterSpacing: 'normal' }}>
-                      <Tip text="Name and Phone are required whenever a discount is applied or the bill goes on Credit, so there's an identifiable record.">
-                        {payMethod === 'Credit' ? '(Name + Phone required for Credit)' : '(Name + Phone required for this discount)'}
+                      <Tip text={!requireBuyerId ? FULL_INVOICE_TIP
+                        : `Name and Phone are required whenever a discount is applied or the bill goes on Credit, so there's an identifiable record.${requireFullInvoice ? ` ${FULL_INVOICE_TIP}` : ''}`}>
+                        {requireBuyerId && requireFullInvoice ? '(Name, Phone + Address required)'
+                          : requireFullInvoice ? `(Name + Address required above ${fmtNpr(ABBREVIATED_INVOICE_LIMIT)})`
+                          : payMethod === 'Credit' ? '(Name + Phone required for Credit)' : '(Name + Phone required for this discount)'}
                       </Tip>
                     </span>
                   </p>
@@ -4746,20 +4854,21 @@ The tables were left occupied rather than freed with their orders still open.`)
                     padding: 0, marginBottom: buyerExpanded ? 8 : 0, cursor: 'pointer', textAlign: 'left',
                   }}>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      {buyerExpanded ? '▾' : '▸'} Buyer details <Tip text="Optional for transactions ≤ NPR 10,000 (IRD abbreviated-invoice exemption). Fill in if the customer requests a full invoice with their own PAN.">(optional)</Tip>
+                      {buyerExpanded ? '▾' : '▸'} Buyer details <Tip text={optionalBuyerTip(vatReg)}>(optional)</Tip>
                     </span>
                   </button>
                 )}
-                {(requireBuyerId || buyerExpanded) && (
+                {(requireBuyerId || requireFullInvoice || buyerExpanded) && (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                       {/* Placeholder text is not a label (it vanishes on the first keystroke), and a
                           red border is reinforcement, not the message — so each field carries its
-                          name and the two mandatory ones carry aria-invalid (S682). */}
-                      <input id="pos-orders-buyer-name" placeholder="Name" aria-label="Buyer name" aria-invalid={requireBuyerId && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
-                        style={{ ...billInput, borderColor: requireBuyerId && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                          name and the mandatory ones carry aria-invalid (S682). */}
+                      <input id="pos-orders-buyer-name" placeholder="Name" aria-label="Buyer name" aria-invalid={(requireBuyerId || requireFullInvoice) && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
+                        style={{ ...billInput, borderColor: (requireBuyerId || requireFullInvoice) && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                       <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
-                      <input placeholder="Address" aria-label="Buyer address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} style={billInput} />
+                      <input id="pos-orders-buyer-address" placeholder="Address" aria-label="Buyer address" aria-invalid={requireFullInvoice && !buyerAddress.trim() ? true : undefined} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)}
+                        style={{ ...billInput, borderColor: requireFullInvoice && !buyerAddress.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                       <input id="pos-orders-buyer-phone" placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
                         style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                     </div>
@@ -5183,8 +5292,8 @@ The tables were left occupied rather than freed with their orders still open.`)
             )}
             {billingTab === 'writeoff' && (
               <button className="btn amber-action-btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
-                onClick={() => pressClose('writeoff')} disabled={closing} aria-disabled={!closing && !closeReason ? true : undefined}>
-                {closing ? (closeStep || 'Processing…') : closeReason ? 'Mark Complimentary (₨0 collected)' : 'Choose a reason first'}
+                onClick={() => pressClose('writeoff')} disabled={closing} aria-disabled={!closing && closeBlocker('writeoff') ? true : undefined}>
+                {closing ? (closeStep || 'Processing…') : closeBlocker('writeoff')?.label || 'Mark Complimentary (₨0 collected)'}
               </button>
             )}
             <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 8, fontSize: 13 }}
@@ -5656,6 +5765,15 @@ The tables were left occupied rather than freed with their orders still open.`)
         <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
           Couldn't refresh the floor. {floorLoadError}{tables.length > 0 ? ' Tables below are as last loaded and may be out of date.' : ''}{' '}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadFloor()}>Retry</button>
+        </p>
+      )}
+      {/* S809 2a (ORDER-FLOW-1): a line like the one above, for the same reason — the till retries on its own. */}
+      {settingsFailure && (
+        <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
+          {tillSettingsNotice(settingsFailure)}{' '}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadTillSettings()} disabled={settingsReading}>
+            {settingsReading ? 'Trying…' : 'Retry'}
+          </button>
         </p>
       )}
 
