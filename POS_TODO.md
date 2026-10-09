@@ -55,24 +55,19 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P1 (2 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e, ORDER-FLOW-1 in 2a)
+### P1 (1 open; CHECKOUT-2, DATABASE-1, ORDER-FLOW-2 shipped in slices 1c–1d, ACCESS-1 in 1e, ORDER-FLOW-1 in 2a, CHECKOUT-1 in 2a–2b)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CHECKOUT-1 | An order emptied on screen can be "paid" at NPR 0. An empty, numbered Tax Invoice prints, while the stored lines still count as revenue in Sales Report and Covers. The till half shipped in 2a; the database backstop is 2b | 2 | Q8 | yes |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (51 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7)
+### P2 (46 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CHECKOUT-3 | A bill can be charged onto an already-closed shift, or onto none, so it lands on no Z-report; "charge needs an open shift" is browser-only | 2 | — | yes |
-| CHECKOUT-4 | The fiscal year that picks an invoice's numbered series comes from the tablet's clock, and a REST close can name any year | 2 | — | yes |
 | CHECKOUT-6 | After an outlet deregisters from VAT, every reprint or view of an old Tax Invoice prints a smaller total (KNOWN, now with the reprint effect) | 2 | — | yes |
-| CHECKOUT-10 | A comp left by a failed, cancelled close reloads as a second plain line, and comping again comps more than was ordered | 2 | — | yes |
 | CREDIT-NOTES-1 | Crediting a bill to re-ring it, as the guide says, or any "Duplicate bill" note, leaves the food counted twice in Inventory usage and that month's Variance | 2 | Q10 | yes |
 | CREDIT-NOTES-2 | A dropped connection mid-note leaves the bill unlinked for good. The note doesn't print, the cash refund and points reversal never run, and nothing can run them later | 2 | — | yes |
-| CREDIT-NOTES-4 | A note's fiscal year, and the day its Inventory reversal lands on, come from the device clock; a REST insert can name any year | 2 | — | yes |
 | CUSTOMERS-PARKING-1 | Delivery platforms earn loyalty points on their own Credit bills. Live: BLOOM CAFE's only award went to a partner, 188 points = NPR 1,880 | 2 | — | yes |
 | CUSTOMERS-PARKING-2 | Points redeemed on a payment attempt that never finished stay spent after a reload, a till lock or a second till | 2 | — | yes |
 | CUSTOMERS-PARKING-3 | A failed read of the point value is taken as NPR 1 a point, and the till never checks what the server charged | 2 | — | no |
@@ -81,7 +76,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | IMS-HANDOFF-2 | A bill whose sales reached Inventory but whose "posted" mark did not stays "not posted" for good. Live: BLOOM CAFE bill 40, NPR 1,880 | 2 | — | yes |
 | IMS-HANDOFF-3 | Bills closed on a Staff PIN ignore trim loss in the stock ledger, and their comps are costed NPR 0 on screen and on the slip | 2 | — | yes |
 | REPORTS-1 | After a VAT deregistration, Sales Report, Covers and the 1L+ tab recompute past Tax Invoices without their VAT (KNOWN root, new reach) | 2 | — | yes |
-| SHIFTS-1 | A bill charged, or cash recorded, while "Drawer is short by …" is on screen is left out of the signed Z-report and every later one | 2 | — | no |
 | SHIFTS-3 | A Credit Note's cash refund always takes the whole bill out of the drawer, even when part was paid by card, eSewa or points | 2 | — | yes |
 | ACCESS-5 | Deleting a cashier's POS login wipes their name from past bills, shifts and credit notes, though the confirm says names stay | 3 | Q17 | no |
 | ACCESS-6 | A page reload restarts the idle lock with 3 fresh minutes in the absent waiter's session | 3 | — | no |
@@ -118,7 +112,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
 | SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (83 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13)
+### P3 (82 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -200,7 +194,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-11 | A booking whose table is deleted or made inactive is flagged nowhere | 4 | — | no |
 | SHIFTS-5 | The Z-report's Voided Value includes VAT; Exceptions excludes it | 4 | — | no |
 | SHIFTS-6 | A void is stamped with the till's cached shift, which may be closed | 4 | — | no |
-| SHIFTS-7 | A shift's close time comes from the tablet clock | 4 | — | yes |
 | SHIFTS-8 | Shift History shows no dates | 4 | — | no |
 | SHIFTS-9 | Shift open/close and cash entries have no time limit, and a lost Open reply reads "not opened" | 4 | — | no |
 | SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
@@ -382,7 +375,7 @@ forward because their functions are rebuilt here anyway.
 | # | IDs | Migration | Decisions |
 | --- | --- | --- | --- |
 | 2a ✅ | CHECKOUT-1 (till half), ORDER-FLOW-1 (= CHECKOUT-9), CHECKOUT-5 (shipped 2026-10-09, app only, crest-v417) | none: the till's settings read, the Bill Register view, `closeBlocker` | Q8, Q9 |
-| 2b | CHECKOUT-1 (server half), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4, CHECKOUT-10, SHIFTS-1 (database half), SHIFTS-7 (P3); S809.4: `apply_pos_item_comps`' skipped partial row | `guard_pos_order_close` (empty bill, open shift `FOR SHARE`, invoice year from the Nepal date), `guard_pos_credit_note` (year), `apply_pos_item_comps` (year, `comped` filter), `pos_cash_movements_guard` (`FOR SHARE`), `pos_shifts_guard` (`closed_at := now()`) | Q8 |
+| 2b ✅ | CHECKOUT-1 (server half), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4, CHECKOUT-10, SHIFTS-1 (database half), SHIFTS-7 (P3); S809.4: `apply_pos_item_comps`' skipped partial row (shipped 2026-10-09, `20261009190000` live, crest-v419) | `guard_pos_order_close` (empty bill, open shift `FOR SHARE`, invoice year from the Nepal date), `guard_pos_credit_note` (year), `apply_pos_item_comps` (year, `comped` filter), `pos_cash_movements_guard` (`FOR SHARE`), `pos_shifts_guard` (`closed_at := now()`) | Q8 |
 | 2c | CHECKOUT-6, REPORTS-1, CREDIT-NOTES-5 (P3) | `pos_orders.vat_registered`, stamped at the close (after 2b) | — |
 | 2d ✅ | CHECKOUT-7 (shipped 2026-10-09, app only, crest-v418) | none: the close read-back path | — |
 | 2e | CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3 | link trigger on `pos_credit_notes`; a restock `sales_entries` source and `ims_stock_movements_guard` | Q10 |
@@ -413,8 +406,9 @@ forward because their functions are rebuilt here anyway.
   `retire_pos_legacy_device_key`, `pos_legacy_device_key_status` (after the deploys; `auth-and-pins.md`).
 - `settings_guard_staff_roles`' HR, IMS, travel-claim and weather-city lines still test raw ranks, so a
   settlement-blocked login passes them for the hour its token lives (1j did the POS lines).
-- `apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
-  NC number, so the till could print an empty comp slip (1j).
+- ~~`apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
+  NC number, so the till could print an empty comp slip (1j).~~ Fixed in 2b: the whole call is refused
+  (`pos_comp_line_missing`).
 - `pos_payment_confirmations.matched_order_id` is NO ACTION: once auto-confirm is live, Clear Occupied of a
   bill holding an unused matched confirmation is refused by that key. `pos-payment-webhook` drops the error
   of both its reads (1k).
@@ -428,9 +422,9 @@ forward because their functions are rebuilt here anyway.
   can be shaded (1d).
 - Admin → Guest Menu Preview quotes "This menu isn't available right now"; the guest page says "This menu
   isn't available" (1h).
-- One-line pulls-forward, now that their functions were rebuilt: SHIFTS-7 (`NEW.closed_at := now()` in
+- ~~One-line pulls-forward, now that their functions were rebuilt: SHIFTS-7 (`NEW.closed_at := now()` in
   `pos_shifts_guard`) and SHIFTS-1's database half (`FOR SHARE` on the shift read in
-  `pos_cash_movements_guard`) (1l).
+  `pos_cash_movements_guard`) (1l).~~ Both shipped in 2b.
 - Sign-out scope: the Owner's and admin's account-menu Sign out, and Crest Staff's (shared with
   hss-suite), are still `global`, so signing out on a shared device ends that login on every device
   (ACCESS-7's shape). An Owner left on a wall KDS never locks, and its Exit opens the till as the
@@ -456,6 +450,19 @@ forward because their functions are rebuilt here anyway.
     database may still commit it (2d).
   - The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
     "reprint it from Recent Bills" (2d).
+  - A Split bill's payment legs are inserted in a request after the close, so 2b's shift lock does not
+    cover them: a Close Shift between the two can freeze a report without that bill's cash leg. Fix:
+    `pos_shifts_guard` refuses a close while a Split bill closed in the last 10 minutes on that shift has
+    legs short of `paid_amount` ("press Close Shift again in a moment") (2b).
+  - A Credit Note inserted by a client session keeps a sent `created_at`, which backdates its printed
+    date: set `NEW.created_at := now()` on the non-restore path, with slice 2e (2b).
+  - `save_pos_order_items` leaves comped rows out of `before_sent` and `stored_sent`, so after a cancelled
+    close the folded, already-sent comped dish reads as not sent and could print on a KOT again. Count
+    comped rows in both, with slice 2h, which owns that function (main session, 2b review).
+  - Raise `pos_min_till_build()` to crest-v417 so a till older than 2a cannot charge an emptied cart, but
+    only after checking that `x-crest-build` reaches `request.headers` through PostgREST in production
+    (1b's open check); every till would be refused otherwise (2b).
+  - On a server `no_open_shift` the till keeps its cached shift id until the next press (cosmetic, 2b).
   - `viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
     no time limit; `reprintItemCompSlip` drops both read errors and prints nothing silently (2a).
 - A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,

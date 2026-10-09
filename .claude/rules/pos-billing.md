@@ -140,7 +140,14 @@ eight cash figures are missing or more than NPR 0.01 off, and (`pos_shift_count_
 rather than rewrites, because the slip prints from what the page sent. **Expected Cash is now a JS/SQL
 pair: change `expectedCashOf`/`loadShiftReport`'s cash rules and the guard in one commit**
 (`expectedCashTwin.test.js`), or every honest close is refused. A NULL report is allowed. Not
-covered: display figures, the close time (SHIFTS-7), a same-instant write (SHIFTS-1/CHECKOUT-3).
+covered: display figures.
+
+**A bill and a cash entry lock their shift (S809 2b, `20261009190000`).** `guard_pos_order_close`
+stamps `shift_id` from the outlet's open shift read `FOR SHARE` on every Charge/Complimentary (refuses
+`no_open_shift`), and `pos_cash_movements_guard` reads its shift `FOR SHARE`. A Close Shift waits for a
+bill or entry holding the lock and then counts it (1l refuses the stale report); one arriving after the
+Close locked the row is refused. A shift's `closed_at` and the report's `capturedAt` are `now()`. Not
+covered: a Split bill's legs, inserted in a later request (POS_TODO S809.4).
 
 **`salesTotal` is "Total Sales", not "Total Collection"** — it includes Credit bills, which are
 billed but not collected. The screen had this right and the signed paper slip had it wrong.
@@ -296,6 +303,12 @@ Privilege invariant #3 in its POS form.
 choose to call it and leaves the open policy in place; a trigger sees every write to the table,
 through PostgREST or anywhere else, now and for any path added later. Same reasoning, same
 `current_user NOT IN ('anon','authenticated')` seam, as `guard_profiles_privileged_columns()`.
+
+**S809 2b (`20261009190000`):** a Charge needs a stored non-comped line and a Complimentary a line
+(`pos_bill_empty`, Q8 a; the emptied-CART case is `closeBlocker`'s), and `invoice_fy` is
+`pos_invoice_fy(now())` on bills, Credit Notes and NC comps, the request's ignored. That function is
+Nepal's date through `bs_months`, the SQL twin of `getBsFiscalYear`: change both together. It returns
+NULL past the table's end (2031-04-13) and every caller then refuses (`pos_fiscal_year_unknown`).
 
 Three things to know before touching it:
 
@@ -454,7 +467,10 @@ Results, all confirmed live on 2026-08-19:
 ## Item-level comp is enforced server-side too (S579)
 
 The last member of the family, and the one with the most to lose: a comp is the single action whose
-purpose is to make revenue disappear on purpose. Three holes, all in the same act:
+purpose is to make revenue disappear on purpose. (S809 2b: the whole-recipe path skips comped lines,
+and an entry that comps nothing refuses the whole call, `pos_comp_line_missing`; a comped row on an
+open order is a cancelled close's leftover, and `foldCompedSplits` folds it into its line on load.)
+Three holes, all in the same act:
 
 - **Nothing guarded the columns.** A till JWT could PATCH `comped = true` onto any of its client's
   lines — the line leaves the bill (`payableOrderItems`, SalesReport, demandForecastData and both

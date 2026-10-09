@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { getBsToday, getBsFiscalYear, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
+import { getBsFiscalYear, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalBs } from '../../../shared/nepalTime'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
@@ -245,8 +246,11 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     // original bill's period. A CN issued after a fiscal-year rollover would otherwise number
     // itself into that old, already-closed FY's sequence. The original bill stays fully
     // traceable regardless via original_invoice_no/original_invoice_label/original_invoice_date_bs.
-    const today = getBsToday()
-    const issuance_fy = getBsFiscalYear(today.year, today.month)
+    // S809 2b (CREDIT-NOTES-4): Nepal's date, not the tablet's clock and time zone. The database sets
+    // the note's year itself (guard_pos_credit_note) and ignores this one; the printed note reads the
+    // stored year back (`created`). The Inventory reversal below lands on this Nepal day.
+    const today = nepalBs(new Date())
+    const issuance_fy = today ? getBsFiscalYear(today.year, today.month) : null
 
     const payload = {
       order_id: order.id,

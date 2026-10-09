@@ -43,9 +43,10 @@ export const lineOptionIds = i => {
 
 // Every read that puts an OPEN order on the order screen selects exactly this, so the three paths
 // (table tile, takeaway card, offline-conflict recovery) and the stale-order reload cannot drift on
-// what an order carries. items_version and sent_qty need migration 20260916100000.
+// what an order carries. items_version and sent_qty need migration 20260916100000. `comped` is read
+// so foldCompedSplits (below) can put a comp left by a cancelled close back into its line (S809 2b).
 export const OPEN_ORDER_SELECT =
-  'id, order_no, covers, status, items_version, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, ' +
+  'id, order_no, covers, status, items_version, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, comped, ' +
   // Crest Customization (S758, migration 20260919130000): the line's selection and its frozen choices.
   'selection_key, base_unit_price, options_delta, option_summary, ' +
   'pos_order_item_options(option_id, group_id, group_name, group_kind, option_name, kitchen_name, is_removal, price_delta, included, ingredient_deltas, sort))'
@@ -60,6 +61,31 @@ export const cartLineFromStored = i => {
   if (line.selection_key) {
     out.option_ids = String(line.selection_key).split('+').filter(Boolean)
     out.options = [...(snap || line.options || [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+  }
+  return out
+}
+
+// The stored lines of an OPEN order, with each comped row folded back into the line it was split
+// from (S809 2b, CHECKOUT-10). A comp is applied only as a bill closes (apply_pos_item_comps runs
+// just before the close write), so a comped row on an order that is still open is what a close that
+// failed and was cancelled left behind. The cart has no comped state: shown as a second plain line
+// of the same dish, "comp 1" then marked both lines and the bill was charged for less than it held.
+// Folded, the dish is whole again, and the next save (every close saves first) rewrites the line,
+// which hands the comp back. Its NC number was never printed: the slip prints after the close.
+// A comped row with no uncomped row of its line comes back as that line, uncomped. sent_qty is added
+// up as cartLineFromStored reads it, and the line counts as sent only if both rows were. Every row
+// comes back without the `comped` flag, so a cart line has the shape it always had.
+export function foldCompedSplits(rows) {
+  const list = rows || []
+  const sentOf = r => Number(r.sent_qty) || (r.sent_to_kot ? Number(r.qty) || 0 : 0)
+  const out = list.filter(r => !r.comped).map(({ comped, ...r }) => r)
+  for (const { comped, ...c } of list.filter(r => r.comped)) {
+    const into = out.find(r => lineKeyOf(r) === lineKeyOf(c))
+    if (!into) { out.push({ ...c }); continue }
+    const sent = sentOf(into) + sentOf(c)
+    into.qty = (Number(into.qty) || 0) + (Number(c.qty) || 0)
+    into.sent_to_kot = !!(into.sent_to_kot && c.sent_to_kot)
+    into.sent_qty = sent
   }
   return out
 }

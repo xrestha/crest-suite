@@ -180,6 +180,18 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 2, slice 2b: CHECKOUT-1 server half (P1), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4,
+  CHECKOUT-10, SHIFTS-1 (P2), SHIFTS-7 (P3), owner decision Q8 (a)~~ — **shipped S809, 2026-10-09**,
+  migration `20261009190000` applied live (crest-v419). The database decides each close: a Charge needs a
+  stored line that is not comped and a Complimentary a line (`pos_bill_empty`); the bill goes on the
+  outlet's open shift, read `FOR SHARE` (`no_open_shift`), and cash entries lock their shift the same way,
+  so nothing lands between a Z-report's figures and its close; the invoice, NC and Credit Note year is
+  `pos_invoice_fy(now())`, Nepal's date via `bs_months`, never the request's; a comp never re-comps a
+  comped line and a comp that finds nothing refuses the whole call (`pos_comp_line_missing`); a shift's
+  close time is `now()`, extending S754's "closed_at is the server's" from bills to shifts. The till folds a
+  cancelled close's leftover comp back into its line. A comp hand-back on Cancel was left out on purpose:
+  since 2d, Cancel keeps an unanswered close alive. Original rows: `CHECKOUT.md`, `CREDIT-NOTES.md`,
+  `SHIFTS.md`.
 - [x] ~~S809 stage 2, slice 2d: CHECKOUT-7 (P2)~~ — **shipped S809, 2026-10-09**, app only (crest-v418).
   A close whose answer was lost stays unknown until nothing of it can still land (30 s after its last
   unanswered write, over the live 8 s statement and lock timeouts). Meanwhile its payment controls stay

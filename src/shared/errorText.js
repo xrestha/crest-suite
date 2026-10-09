@@ -159,6 +159,29 @@ const rules = [
     staff: 'This bill could not be closed that way. A bill is closed as paid, complimentary or void, and nothing was changed. Reload the bill and close it from the Payment screen.',
     operator: 'A bill closes as Paid, Complimentary or Void, and its status has to say the same. This close did not, so it was refused and the bill is still open. Nothing was changed. Close it from the Payment screen; if a till sent this, reload that till.',
   },
+  // S809 2b (migration 20261009190000). guard_pos_order_close decides what a Charge or a Complimentary
+  // close stands on. Each is raised by the BEFORE trigger on the still-open order, so the bill is
+  // still open and nothing was charged or numbered. pos_bill_empty is owner decision Q8 (a): an emptied
+  // bill is refused, and clearing it is a Void. no_open_shift is the shift a till read a moment ago
+  // having been closed on another device before the bill landed.
+  {
+    test: e => hasCode(e, 'pos_bill_empty'),
+    staff: 'There is nothing on this bill, so it was not closed and nothing was charged. Add the items back, or ask someone with Void to void it.',
+    operator: 'This bill has nothing on it to charge (no items, or only complimentary ones), so it was not closed and no number was used. Add the items back, or void it: voiding needs a login with Allow Void, or the Owner.',
+  },
+  {
+    test: e => hasCode(e, 'no_open_shift'),
+    staff: 'No shift is open on this till\'s outlet, so the bill was not closed and nothing was charged. Open a shift in Shifts, then charge the bill again.',
+    operator: 'Every bill is charged onto the open shift so its money lands on a drawer count, and no shift is open at this outlet (it may have been closed on another device a moment ago). The bill is still open and nothing was charged. Open a shift in POS → Shifts, then charge it again.',
+  },
+  // Raised by guard_pos_order_close, guard_pos_credit_note and apply_pos_item_comps before they write,
+  // when Nepal's date is past the end of the bs_months table (2031-04-13 as of 2026), so no year can
+  // be given to number a bill, an NC slip or a Credit Note. Retrying cannot help.
+  {
+    test: e => hasCode(e, 'pos_fiscal_year_unknown'),
+    staff: 'Crest\'s Nepali calendar does not reach today\'s date, so this could not be numbered and nothing was saved. Tell your manager to contact Crest support.',
+    operator: 'Today\'s date is past the end of Crest\'s Nepali calendar, so no bill, complimentary or Credit Note number can be given and nothing was saved. Trying again will not help: contact Crest support to extend the calendar.',
+  },
   {
     test: e => hasCode(e, 'option_edit_rank'),
     staff: 'Only the Owner or a manager can change the customization options. Nothing was changed.',
@@ -241,6 +264,15 @@ const rules = [
     test: e => hasCode(e, 'pos_comp_qty_invalid'),
     staff: 'The number of complimentary items did not match the bill, so nothing was made complimentary. Check the Items list on the payment screen and confirm again.',
     operator: 'Part of a dish can be made complimentary from 1 up to one less than the number on the bill (the dish and numbers are in the detail below), so nothing was made complimentary and no NC number was used. To make a whole dish complimentary, set it to the full number. If the numbers look right, the bill may have changed on another device — reopen it and try again.',
+  },
+  // S809 2b (migration 20261009190000). apply_pos_item_comps refuses the whole call when a dish it was
+  // asked to comp is not on the bill as a line it can still comp. It used to skip it and still return
+  // an NC number, so the till printed an empty Complimentary Slip and charged the bill short. Raised
+  // inside the one transaction that comps every line of the call, so nothing was made complimentary.
+  {
+    test: e => hasCode(e, 'pos_comp_line_missing'),
+    staff: 'A dish you chose to make complimentary is not on this bill as it was (it may have been changed on another device), so nothing was made complimentary. Go back to the floor, open the bill again and check the items.',
+    operator: 'A dish chosen to be made complimentary (named in the detail below) is not on this bill as an item that can still be made complimentary, so nothing was made complimentary and no NC number was used. The bill may have changed on another device: reopen it, check the items, and try again.',
   },
   {
     test: e => hasCode(e, 'pos_cash_refund_rank'),

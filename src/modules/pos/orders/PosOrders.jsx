@@ -55,7 +55,7 @@ import {
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
-  OPEN_ORDER_SELECT, cartLineFromStored, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
+  OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
   storedLinesMatchPayload, lineKeyOf, selectionKeyOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
@@ -1799,7 +1799,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // sent_qty comes from the stored/queued line (it used to be re-derived from sent_to_kot alone, which
   // lost a "2 of 3 sent" line's count on every reload); itemsVersion is what the next save expects.
   function showLoadedOrder(table, { id, orderNo: no, covers: cv, items, itemsVersion }) {
-    const lines = (items || []).map(cartLineFromStored)
+    // S809 2b (CHECKOUT-10): a comp a cancelled close left behind folds back into its line.
+    const lines = foldCompedSplits(items).map(cartLineFromStored)
     itemsVersionRef.current = Number.isInteger(itemsVersion) ? itemsVersion : null
     setStaleRecovery(null)
     setActiveTable(table)
@@ -3516,7 +3517,11 @@ export default function PosOrders({ billingStation = false } = {}) {
       }
 
       const isSplit = closeType === 'paid' && splitMode && tenders.length > 0
-      const today = getBsToday()
+      // S809 2b (CHECKOUT-4): the database now sets the invoice year and the comp year itself, from
+      // Nepal's date, and ignores what is sent. Sent from Nepal's date too (not the tablet's clock and
+      // time zone) so nothing on this screen disagrees with it; the print reads the stored year back.
+      // Outside the BS table nepalBs is null, and the database refuses the close there anyway.
+      const today = nepalBs(new Date()) || getBsToday()
 
       // Item-level comp is applied BEFORE the order is marked billed, via one atomic RPC
       // (apply_pos_item_comps, see migration 20260706170000) that reserves the shared NC-series

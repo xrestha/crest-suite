@@ -714,14 +714,16 @@ export default function PosShifts() {
   async function commitClose(freshReport, closing_cash, expected) {
     setSaving(true)
     setConfirmShort(null)
-    const closedAt = new Date()
     // .eq('status', 'open') + .select() together detect a double-close: the DB's only relevant
     // constraint (pos_shifts_one_open_per_client) guards concurrent opens, not closes, so without
     // this a second supervisor closing the same shift on another terminal would silently overwrite
     // the first person's real cash count with no error (a WHERE clause matching zero rows isn't a
     // Postgres error — it just updates nothing).
+    // S809 2b (SHIFTS-7): no close time is sent. pos_shifts_guard stamps closed_at and the report's
+    // capturedAt from the server clock, and the slip below prints the time the row came back with,
+    // so a tablet whose clock reset cannot date the shift (or the paper) to another day.
     const { data: closed, error } = await scopedUpdate('pos_shifts', {
-      status: 'closed', closed_at: closedAt.toISOString(), closed_by: profile?.id || null,
+      status: 'closed', closed_by: profile?.id || null,
       closing_cash,
       closing_denominations: Object.fromEntries(DENOMINATIONS.map(d => [d, parseInt(denomCounts[d]) || 0])),
       // Frozen at close, never recomputed — the same capture-once principle the Monthly Owner
@@ -733,7 +735,6 @@ export default function PosShifts() {
         closingCash: closing_cash,
         expectedCash: expected,
         variance: closing_cash - expected,
-        capturedAt: closedAt.toISOString(),
       },
     }).eq('id', openShift.id).eq('status', 'open').select()
     setSaving(false)
@@ -757,7 +758,7 @@ export default function PosShifts() {
       mode: 'close', outletName, propertyAddress,
       label: openShift.label || 'Shift',
       openedByName: staffNames[openShift.opened_by], closedByName: profile?.full_name,
-      openedAt: openShift.opened_at, closedAt,
+      openedAt: openShift.opened_at, closedAt: closed[0].closed_at,
       denomCounts, opening: openShift.opening_cash, closing: closing_cash, report: freshReport,
     }))
     setModal(null)
