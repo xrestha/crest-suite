@@ -18,9 +18,13 @@ const fmtNpr = npr
 
 // pos_credit_notes.refund_method (S755). NULL on notes issued before it existed.
 const REFUND_LABEL = { cash: 'Cash', other: 'Card / QR / bank', none: 'None' }
+// pos_credit_notes.restock (S809 2e, Q10 a): the note said the bill's food was not served on it, so
+// the food went back into Inventory. false on every note issued before the question was asked — and
+// for those the food did stay used, so "Used" is what happened to their stock.
+const stockLabel = n => (n.restock === true ? 'Put back' : 'Used')
 
 export default function CreditNotes() {
-  const { clientId, hasPosAccess } = useAuth()
+  const { clientId, hasPosAccess, imsEnabled } = useAuth()
   const { scopedFrom } = useScopedDb()
 
   const [tab, setTab] = useState('issue') // 'issue' | 'book'
@@ -134,10 +138,15 @@ export default function CreditNotes() {
 
   async function reprintNote(note) {
     setBookMsg(null)
-    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary').eq('order_id', note.order_id)
+    // With the lines, the credited bill's own tax status (S809 2c, CREDIT-NOTES-5): the note reprints
+    // as a Tax Invoice or a PAN bill correction because its bill was one, not by today's setting.
+    const [{ data: items, error: itemsErr }, { data: bill, error: billErr }] = await Promise.all([
+      scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary').eq('order_id', note.order_id),
+      scopedFrom('pos_orders', 'vat_registered').eq('id', note.order_id).maybeSingle(),
+    ])
     // S754: a failed read here printed a numbered Credit Note with no lines on it, and still
     // advanced its copy counter. Refuse instead — nothing has printed, so a retry is safe.
-    if (itemsErr) { setBookMsg(asActionError(itemsErr, 'operator')); return }
+    if (itemsErr || billErr) { setBookMsg(asActionError(itemsErr || billErr, 'operator')); return }
     // Same exclusion as the original issuance (IssueCreditNoteModal.jsx) — item-level comps were
     // never billed, so they were never on this Credit Note in the first place.
     const payableItems = (items || []).filter(i => !i.comped)
@@ -148,7 +157,7 @@ export default function CreditNotes() {
       if (hscErr) { setBookMsg(asActionError(hscErr, 'operator')); return }
       hscMap = Object.fromEntries((data || []).map(r => [r.id, r.hsc_code]))
     }
-    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap)
+    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap, bill?.vat_registered ?? null)
     if (!printed) {
       setBookMsg(`The print window for CN${note.credit_note_no} was blocked by the browser, so nothing printed. Allow pop-ups for this site and press Reprint again.`)
       return
@@ -172,6 +181,7 @@ export default function CreditNotes() {
         'Buyer': n.buyer_name || 'CASH SALES',
         'Reason': n.reason,
         'Money Back': REFUND_LABEL[n.refund_method] || 'Not recorded',
+        ...(imsEnabled ? { 'Food (Inventory)': stockLabel(n) } : {}),
         'Gross (NPR)': Math.round(n.gross_amount * 100) / 100,
         'VAT (NPR)': Math.round(n.vat_amount * 100) / 100,
         'Net (NPR)': Math.round(n.net_amount * 100) / 100,
@@ -294,6 +304,13 @@ export default function CreditNotes() {
                         Money Back
                       </Tip>
                     </th>
+                    {imsEnabled && (
+                      <th>
+                        <Tip width={300} text="What the note did to Inventory. Used = the food was served, so it stays counted as used. Put back = the bill was billed again on a new bill or was a duplicate, so its food went back into Inventory and is not counted twice. Notes issued before this question was asked show Used.">
+                          Food
+                        </Tip>
+                      </th>
+                    )}
                     <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
                     <th>Issued By</th><th></th>
                   </tr>
@@ -310,7 +327,7 @@ export default function CreditNotes() {
                               column, select('*')) marks nothing rather than every note (S747). */}
                           {'ims_posted_at' in n && n.ims_posted_at == null && (
                             <Tip width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
-                              text="This note has not yet taken its bill's revenue back out of Inventory, because no Inventory period was open for the month it was issued in. Open that month in Periods and press Post POS bills to Inventory on it.">
+                              text="This note has not yet taken its bill's revenue back out of Inventory — usually because no Inventory period was open for the month it was issued in, or because its bill had not reached Inventory yet. Open that month in Periods and press Post POS bills to Inventory on it.">
                               <span className="badge-amber">Not in Inventory</span>
                             </Tip>
                           )}
@@ -325,12 +342,22 @@ export default function CreditNotes() {
                             ? <span className="badge-gray" style={{ whiteSpace: 'nowrap' }}>{REFUND_LABEL[n.refund_method]}</span>
                             : <span style={{ color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>Not recorded</span>}
                         </td>
+                        {imsEnabled && <td><span className="badge-gray" style={{ whiteSpace: 'nowrap' }}>{stockLabel(n)}</span></td>}
                         <td style={{ textAlign: 'right' }}>{fmtNpr(n.gross_amount)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtNpr(n.vat_amount)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(n.net_amount)}</td>
                         <td>{staffNames[n.issued_by] || '—'}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintNote(n)}>Reprint</button>
+                          {/* S809 2e (CREDIT-NOTES-2): a note that never printed (the connection dropped
+                              after it was issued, or the pop-up was blocked) prints its original here. */}
+                          {(Number(n.print_count) || 0) > 0
+                            ? <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintNote(n)}>Reprint</button>
+                            : (
+                              <Tip width={260} style={{ display: 'inline-flex', borderBottom: 'none' }}
+                                text="This note was issued but has never been printed — the connection dropped or the pop-up was blocked. Print gives the original; everything else about the note is already done.">
+                                <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintNote(n)}>Print</button>
+                              </Tip>
+                            )}
                         </td>
                       </tr>
                     )
@@ -338,7 +365,7 @@ export default function CreditNotes() {
                 </tbody>
                 <tfoot>
                   <tr style={{ fontWeight: 700 }}>
-                    <td colSpan={6}>TOTAL</td>
+                    <td colSpan={imsEnabled ? 7 : 6}>TOTAL</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(totals.gross)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(totals.vat)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(totals.net)}</td>

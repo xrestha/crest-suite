@@ -127,6 +127,17 @@ describe('Stock Report usage goes through the shared depletion rule', () => {
     expect(usage.rice).toBeCloseTo(2)
   })
 
+  // S809 2e (CREDIT-NOTES-1, Q10 a): a bill credited because it is billed again (or was a duplicate)
+  // says its food was not served on it, so the re-rung bill's plates are not counted twice.
+  test('a credit note whose food was not served puts its plates back', () => {
+    const usage = buildUsageMap([
+      { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos' },                  // the wrong bill
+      { recipe_id: 'dish', qty_sold: -2, bs_day: 3, source: 'pos_credit_restock' },  // its credit note
+      { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos' },                  // rung again, right
+    ], dish)
+    expect(usage.rice).toBeCloseTo(0.4)   // 2 plates × 0.2, not 4
+  })
+
   test('legacy rows with a NULL source still count as manual', () => {
     const usage = buildUsageMap([{ recipe_id: 'dish', qty_sold: 5, bs_day: 2, source: null }], dish)
     expect(usage.rice).toBeCloseTo(1)

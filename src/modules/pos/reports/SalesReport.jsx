@@ -19,7 +19,7 @@ import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate, nepalHour } from '../../../shared/nepalTime'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import {
   NOT_RECORDED, SPLIT_NO_BREAKDOWN, zeroAmounts, addAmounts, buildSalesEntries, paymentSharesOf,
   buildPaymentRows, sortByMethodOrder, buildGroupedRows, partyNameKey, mergeNameOnlyParties,
@@ -151,7 +151,9 @@ const TABS = [
 // points redemption is applied, not picked (S290->S291 learned the same with Foodmandu/Pathao).
 const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
 
-const ORDER_COLUMNS = 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, opened_at, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name'
+// `vat_registered` (S809 2c, REPORTS-1): the tax status each bill was issued under. The figures read
+// it per bill (salesReportMath.js), so a past Tax Invoice keeps its VAT after a deregistration.
+const ORDER_COLUMNS = 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, opened_at, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name, vat_registered'
 const CREDIT_NOTE_COLUMNS = 'id, order_id, credit_note_no, invoice_fy, reason, gross_amount, discount_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount, buyer_name, buyer_pan, issued_by, created_at'
 
 // What a delivery row adds to Outstanding: an unsettled bill its amount; a credit note its (minus)
@@ -662,9 +664,10 @@ export default function SalesReport() {
   // Non-Veg to a single 'Not set' row until someone has actually set the flag on a recipe.
   const productAxes = useMemo(() => [
     { key: 'station', label: 'Kitchen / Bar' },
-    ...(vatReg ? [{ key: 'vat', label: 'VAT Mode' }] : []),
+    // S809 2c: also when a bill in the range was issued as a Tax Invoice, though the outlet is not now.
+    ...(vatReg || orders.some(o => o.vat_registered === true) ? [{ key: 'vat', label: 'VAT Mode' }] : []),
     ...(hasVegData ? [{ key: 'veg', label: 'Veg / Non-Veg' }] : []),
-  ], [vatReg, hasVegData])
+  ], [vatReg, orders, hasVegData])
   useEffect(() => {
     if (!productAxes.some(a => a.key === productAxis)) setProductAxis('station')
   }, [productAxes, productAxis])
@@ -765,7 +768,7 @@ export default function SalesReport() {
       // bill from the fiscal year it was sold in even when its credit note was issued in the next
       // one. Now every bill counts in its own year, and the returns issued in the year are netted
       // off below — the same bills-plus-minus-rows rule as the date-range tabs.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan, discount_amount')
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan, discount_amount, vat_registered')
         .eq('status', 'billed').eq('close_type', 'paid').eq('invoice_fy', selectedFy)
         .order('id')),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
@@ -828,7 +831,9 @@ export default function SalesReport() {
       return grouped[key] = grouped[key] || { key, name: name || 'CASH SALES / WALK-IN', pan, walkIn: key === WALKIN_KEY, bills: 0, returns: 0, gross: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 }
     }
     for (const o of list) {
-      const amounts = computeOrderAmounts(o, byOrder[o.id] || [], vr)
+      // S809 2c (REPORTS-1): as the bill was issued, so a party billed in a registered year stays
+      // over one lakh after a deregistration; today's flag only for a bill with no stamp.
+      const amounts = computeOrderAmounts(o, byOrder[o.id] || [], billVatRegistered(o, vr))
       const g = partyRow(o)
       g.bills += 1
       g.gross += amounts.grossAmt

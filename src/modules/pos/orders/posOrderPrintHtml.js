@@ -2,7 +2,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalTime, nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { npr2 } from '../../../shared/nepalMoney'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 
 // A line's Crest Customization choices (S758), in either shape a caller holds them: the cart/server
@@ -87,7 +87,10 @@ function billOptionRow(i) {
 }
 
 export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmount, outletName, billingSettings, hscMap, tableName, cashierName }) {
-  const vatReg      = billingSettings.is_vat_registered
+  // S809 2c (CHECKOUT-6): a closed bill prints as the type it was issued as, from its own stamp, so a
+  // reprint after the outlet's VAT registration changed keeps its heading, its VAT and its total.
+  // Today's setting decides only an order with no stamp (the live preview of an open order).
+  const vatReg      = billVatRegistered(order, billingSettings.is_vat_registered)
   const prefix      = esc(billingSettings.invoice_prefix || '')
   const invoiceNo   = order.invoice_no != null
     ? `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${esc(order.invoice_fy || '')}`

@@ -7,7 +7,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import RowDisclosure from '../../../components/RowDisclosure'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
 import { IDENTITY_BADGE } from '../posSignals'
 import { normalizePhone } from '../../../utils/phone'
@@ -21,10 +21,11 @@ import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 const SETTLE_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Cheque', 'Bank Transfer']
 const fmtNpr = npr
 
+// TI or PB as the bill was issued (S809 2c): its own stamp, today's flag only for a bill with none.
 function invoiceLabel(order, vatReg, prefix) {
   if (order.invoice_no == null) return `#${order.order_no ?? ''}`
   if (order.close_type === 'writeoff') return `NC-${String(order.invoice_no).padStart(2, '0')}`
-  return `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
+  return `${billVatRegistered(order, vatReg) ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
 }
 
 // S754: these dates were `new Date(ts).toLocaleDateString()` — AD, in the VIEWER's locale and
@@ -197,7 +198,7 @@ export default function PosCustomers() {
     setCreditLoading(true)
     // Paged: unbounded by date — every Credit bill ever — so this is the read that gets worse
     // the longer the system is used, and outstandingTotal below is the figure an owner chases.
-    const { data, error } = await fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_method, credit_note_id')
+    const { data, error } = await fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_method, credit_note_id, vat_registered')
       .eq('payment_method', 'Credit').eq('status', 'billed')
       .order('closed_at', { ascending: false }).order('id'))
     setCreditLoading(false)
@@ -220,7 +221,7 @@ export default function PosCustomers() {
     // A cached failure is not a result — re-expanding retries it (S754).
     if (historyMap[cust.id] && !historyMap[cust.id].error) return
     setHistoryMap(m => ({ ...m, [cust.id]: 'loading' }))
-    const { data, error } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id')
+    const { data, error } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id, vat_registered')
       .eq('status', 'billed').eq('buyer_phone', cust.phone)
       .order('closed_at', { ascending: false }).limit(50)
     // S754: a failed read said "No billed orders found for this phone number".

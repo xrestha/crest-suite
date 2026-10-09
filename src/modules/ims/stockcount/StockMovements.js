@@ -27,6 +27,13 @@ const ITEM_SORTS = {
   source:   { label: 'Source',       get: r => r.source || '' },
   value:    { label: 'Value',        get: r => r.value },
 }
+// One label per ledger source, for the badge, the filter and the Excel column. 'pos_credit_restock'
+// (S809 2e) is stock a Credit Note put back because the bill's food was not served on it: it ADDS
+// stock, so its value is subtracted from Value Depleted rather than added to it.
+const SOURCE_LABEL = { pos_sale: 'POS Sale', pos_comp: 'POS Comp', manual: 'Manual Entry', pos_credit_restock: 'Credit Note — put back' }
+const sourceLabel = s => SOURCE_LABEL[s] || 'POS Sale'
+const isPutBack = s => s === 'pos_credit_restock'
+
 const SUB_SORTS = {
   name:      { label: 'Sub-Recipe',    get: r => r.name || '' },
   qty:       { label: 'Qty Used',      get: r => r.qty },
@@ -194,7 +201,8 @@ export default function StockMovements() {
       const item = m.items || {}
       const order = m.pos_orders || null
       const qtyAbs = Math.abs(parseFloat(m.qty) || 0)
-      const value = qtyAbs * (parseFloat(item.per_uom_rate) || 0)
+      // Stock put back by a Credit Note counts against the period's depletion (S809 2e).
+      const value = (isPutBack(m.source) ? -1 : 1) * qtyAbs * (parseFloat(item.per_uom_rate) || 0)
       return {
         id: m.id, item_id: m.item_id, ref_id: m.ref_id, item, order, qtyAbs, value,
         source: m.source, bsDay: m.bs_day,
@@ -293,8 +301,8 @@ export default function StockMovements() {
       'Item': r.item.name || '',
       'Category': r.category,
       'UOM': r.item.uom || '',
-      'Qty Depleted': parseFloat(r.qtyAbs.toFixed(3)),
-      'Source': r.source === 'pos_comp' ? 'POS Comp' : r.source === 'manual' ? 'Manual Entry' : 'POS Sale',
+      'Qty Depleted': (isPutBack(r.source) ? -1 : 1) * parseFloat(r.qtyAbs.toFixed(3)),
+      'Source': sourceLabel(r.source),
       'Order #': r.order?.order_no || '',
       'Staff': (r.order && staffNames[r.order.closed_by]) || '',
       'Value (NPR)': parseFloat(r.value.toFixed(0)),
@@ -398,7 +406,7 @@ export default function StockMovements() {
           <div className="stat-sub">depletion entries this period</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value this period's sales consumed. Covers POS sales and comps AND manual Sales Entry, which has written depletion movements since 2026-07-30." width={300}>Value Depleted</Tip></div>
+          <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value this period's sales consumed. Covers POS sales and comps AND manual Sales Entry, which has written depletion movements since 2026-07-30, less any stock a Credit Note put back because a bill's food was not served on it." width={300}>Value Depleted</Tip></div>
           <div className="stat-value" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">POS + manual entry, at cost</div>
         </div>
@@ -445,6 +453,7 @@ export default function StockMovements() {
           <option value="pos_sale">POS Sale</option>
           <option value="pos_comp">POS Comp</option>
           <option value="manual">Manual Entry</option>
+          <option value="pos_credit_restock">Credit Note — put back</option>
         </select>
         {/* Day range is Raw Items only — the sub-recipe rollup includes Bulk sales rows, which
             carry bs_day 0 and belong to no single day, so filtering it by day would silently
@@ -639,7 +648,7 @@ export default function StockMovements() {
                 <tr>
                   <th>Day</th><th>Item</th><th>Category</th><th>UOM</th>
                   <th style={{ textAlign: 'right' }}>Qty Depleted</th>
-                  <th><Tip text="POS Sale = billed and paid for. POS Comp = given away complimentary — zero revenue, but the food cost was still consumed. Manual Entry = depleted from a manual Sales Entry save (Bulk/Daily), not a POS bill." width={280}>Source</Tip></th>
+                  <th><Tip text="POS Sale = billed and paid for. POS Comp = given away complimentary — zero revenue, but the food cost was still consumed. Manual Entry = depleted from a manual Sales Entry save (Bulk/Daily), not a POS bill. Credit Note — put back = a bill was credited because its food was not served on it (billed again, or a duplicate), so its stock came back; shown with a minus, and taken off Value Depleted." width={300}>Source</Tip></th>
                   <th><Tip text="Click to open the exact original bill or complimentary slip this depletion came from." width={240}>Order #</Tip></th>
                   <th>Staff</th>
                   <th style={{ textAlign: 'right' }}>Value (NPR)</th>
@@ -655,10 +664,10 @@ export default function StockMovements() {
                     </td>
                     <td><span className="badge badge-gray">{r.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{r.qtyAbs.toFixed(3)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{isPutBack(r.source) ? '−' : ''}{r.qtyAbs.toFixed(3)}</td>
                     <td>
-                      <span className={`badge ${r.source === 'pos_comp' ? 'badge-amber' : r.source === 'manual' ? 'badge-gray' : 'badge-green'}`}>
-                        {r.source === 'pos_comp' ? 'POS Comp' : r.source === 'manual' ? 'Manual Entry' : 'POS Sale'}
+                      <span className={`badge ${r.source === 'pos_comp' ? 'badge-amber' : r.source === 'manual' || isPutBack(r.source) ? 'badge-gray' : 'badge-green'}`}>
+                        {sourceLabel(r.source)}
                       </span>
                     </td>
                     <td>

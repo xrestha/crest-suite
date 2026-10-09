@@ -13,7 +13,7 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { computeRecipeCosts } from '../../../utils/recipeCost'
+import { posFoodCosts } from '../orders/posRecipeBook'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
@@ -285,7 +285,9 @@ async function loadShiftReport(clientId, shiftId) {
   const compRecipeIds = [...new Set((items || [])
     .filter(i => closeTypeById.get(i.order_id) === 'writeoff')
     .map(i => i.recipe_id).filter(Boolean))]
-  const costMap = compRecipeIds.length > 0 ? await computeRecipeCosts(supabase, compRecipeIds) : {}
+  // The till's own read (S809 IMS-HANDOFF-3): a supervisor closing the shift on a PIN cannot read
+  // `items`, so the Z-report froze each Complimentary bill at its typed Cost Price (usually NPR 0).
+  const costMap = compRecipeIds.length > 0 ? await posFoodCosts(supabase, clientId, compRecipeIds) : {}
 
   const byMethod = Object.fromEntries(PAY_METHODS.map(m => [m, 0]))
   let discountTotal = 0, voidTotal = 0, compTotal = 0, salesTotal = 0, orderCount = 0

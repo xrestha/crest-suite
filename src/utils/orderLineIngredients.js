@@ -34,10 +34,13 @@ export function lineIngredientDeltas(options) {
  * Reads what turning a set of stored deltas into raw items needs: each item's yield %, and each
  * sub-recipe exploded per ONE output unit. Throws on a failed read, like explodeRecipeTree — a
  * missing explosion is a zero usage, which reads as over-consumption rather than as an error.
+ * `opts.book` (a recipe book: recipeCost.loadRecipeBook, or the till's posRecipeBook.loadPosRecipeBook)
+ * takes the yields and the sub-recipes from the book instead of reading them — the same assembly
+ * below, fed differently, so a till on a Staff PIN (which cannot read `items`) gets the yields too.
  * @param {object} supabase
  * @param {Array<Array|null>} deltaLists  any number of ingredient_deltas arrays
  */
-export async function loadDeltaExplosion(supabase, deltaLists) {
+export async function loadDeltaExplosion(supabase, deltaLists, { book } = {}) {
   const itemIds = new Set()
   const subIds = new Set()
   for (const list of deltaLists || []) {
@@ -49,19 +52,27 @@ export async function loadDeltaExplosion(supabase, deltaLists) {
   const explosion = { itemYield: {}, subPerUnit: {} }
   if (itemIds.size === 0 && subIds.size === 0) return explosion
 
-  const [itemsRes, subsRes] = await Promise.all([
-    fetchAllRowsChunked([...itemIds], ids => supabase.from('items').select('id, yield_pct').in('id', ids).order('id')),
-    fetchAllRowsChunked([...subIds], ids => supabase.from('recipes').select('id, yield_qty').in('id', ids).order('id')),
-  ])
-  throwFirstError([itemsRes, subsRes])
-  for (const r of itemsRes.data || []) explosion.itemYield[r.id] = parseFloat(r.yield_pct) || 100
+  let itemRows, subRows
+  if (book) {
+    itemRows = [...itemIds].filter(id => book.items.has(id)).map(id => ({ id, yield_pct: book.items.get(id).yield_pct }))
+    subRows = [...subIds].filter(id => book.recipes.has(id)).map(id => book.recipes.get(id))
+  } else {
+    const [itemsRes, subsRes] = await Promise.all([
+      fetchAllRowsChunked([...itemIds], ids => supabase.from('items').select('id, yield_pct').in('id', ids).order('id')),
+      fetchAllRowsChunked([...subIds], ids => supabase.from('recipes').select('id, yield_qty').in('id', ids).order('id')),
+    ])
+    throwFirstError([itemsRes, subsRes])
+    itemRows = itemsRes.data || []
+    subRows = subsRes.data || []
+  }
+  for (const r of itemRows) explosion.itemYield[r.id] = parseFloat(r.yield_pct) || 100
 
   if (subIds.size > 0) {
     // explodeRecipeIngredients returns a sub-recipe's items for ONE BATCH (its own ingredient
     // quantities); a batch makes yield_qty output units, so per unit is batch ÷ yield_qty — the same
     // scaling explode() applies when a recipe line names a sub-recipe.
-    const perBatch = await explodeRecipeIngredients(supabase, [...subIds])
-    const yieldOf = Object.fromEntries((subsRes.data || []).map(r => [r.id, parseFloat(r.yield_qty) || 1]))
+    const perBatch = await explodeRecipeIngredients(supabase, [...subIds], { book })
+    const yieldOf = Object.fromEntries(subRows.map(r => [r.id, parseFloat(r.yield_qty) || 1]))
     for (const id of subIds) {
       const y = yieldOf[id] || 1
       explosion.subPerUnit[id] = (perBatch[id] || []).map(({ item_id, qty }) => ({ item_id, qty: qty / y }))

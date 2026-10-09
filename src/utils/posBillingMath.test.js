@@ -1,4 +1,28 @@
-import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts, computeGroupAmounts } from './posBillingMath'
+import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts, computeGroupAmounts, billVatRegistered } from './posBillingMath'
+
+// S809 2c (CHECKOUT-6 / REPORTS-1): a bill keeps the tax status its close stamped on it.
+describe('billVatRegistered', () => {
+  test('a stamped bill answers for itself, whatever today\'s setting says', () => {
+    expect(billVatRegistered({ vat_registered: true }, false)).toBe(true)
+    expect(billVatRegistered({ vat_registered: false }, true)).toBe(false)
+  })
+
+  test('no stamp (an open order, a bill restored from before 2c, a select without the column) falls back to today\'s setting', () => {
+    expect(billVatRegistered({ vat_registered: null }, true)).toBe(true)
+    expect(billVatRegistered({ vat_registered: null }, false)).toBe(false)
+    expect(billVatRegistered({}, false)).toBe(false)
+    expect(billVatRegistered(null, true)).toBe(true)
+    expect(billVatRegistered(undefined, false)).toBe(false)
+  })
+
+  test('TI880 (1,000 + 130 VAT) reprinted after the outlet switched VAT off still totals 1,130', () => {
+    const bill = { discount_amount: 0, vat_registered: true }
+    const items = [{ qty: 1, unit_price: 1000, vat_rate: 0.13 }]
+    expect(computeOrderAmounts(bill, items, billVatRegistered(bill, false)).net).toBe(1130)
+    // What the reprint used to print, from today's setting alone:
+    expect(computeOrderAmounts(bill, items, false).net).toBe(1000)
+  })
+})
 
 describe('computeOrderAmounts', () => {
   test('no discount, uniform VAT rate', () => {

@@ -29,6 +29,24 @@ describe('selectDepletingSales (single period)', () => {
     expect(out).toEqual([])
   })
 
+  // S809 2e (CREDIT-NOTES-1, Q10 a): the note said the food was not served on the bill (billed again,
+  // or a duplicate), so its negative rows DO count — the plates come back out of usage.
+  test('a credit note whose food was not served takes its plates back out', () => {
+    const sale = { recipe_id: 'r1', qty_sold: 2, bs_day: 5, source: 'pos' }
+    const rering = { recipe_id: 'r1', qty_sold: 2, bs_day: 5, source: 'pos' }
+    const back = { recipe_id: 'r1', qty_sold: -2, bs_day: 5, source: 'pos_credit_restock' }
+    const out = selectDepletingSales([sale, back, rering])
+    expect(out).toEqual([sale, back, rering])
+    expect(out.reduce((s, r) => s + r.qty_sold, 0)).toBe(2)   // one pair of plates served, not two
+  })
+
+  test('a restock row is not a till sale, so it never supersedes a manual row', () => {
+    const manual = { recipe_id: 'r1', qty_sold: 3, bs_day: 5, source: 'manual' }
+    const back = { recipe_id: 'r1', qty_sold: -1, bs_day: 5, source: 'pos_credit_restock' }
+    expect(selectDepletingSales([manual, back])).toEqual([manual, back])
+    expect(posSupersedesManual('r1', 5, buildPosIndex([back]))).toBe(false)
+  })
+
   test('a NULL source counts as manual', () => {
     const out = selectDepletingSales([{ recipe_id: 'r1', qty_sold: 3, bs_day: 5, source: null }])
     expect(out).toHaveLength(1)

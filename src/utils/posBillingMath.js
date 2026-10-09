@@ -2,6 +2,15 @@
 // PosOrders.jsx's buildBillHtml so the Credit Note print layout and the One Lakh Above Report
 // compute amounts identically to the original bill instead of re-deriving the formula.
 
+// The tax status a bill was ISSUED under (S809 2c). The close stamps pos_orders.vat_registered from
+// the outlet's setting at that moment (guard_pos_order_close), so a reprint, a report or a Credit
+// Note reads a past bill as it was issued: TAX INVOICE or BILL, with or without its VAT. `current`
+// (today's settings flag) answers only for an order with no stamp: one still open, or a bill closed
+// before 2c and restored from an older backup. Pass it as the `vatReg` of the functions below.
+export function billVatRegistered(order, current) {
+  return typeof order?.vat_registered === 'boolean' ? order.vat_registered : current
+}
+
 export function computeOrderAmounts(order, items, vatReg) {
   const subEx    = items.reduce((s, i) => s + i.qty * i.unit_price, 0)
   const vatAmtRaw = vatReg ? items.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0

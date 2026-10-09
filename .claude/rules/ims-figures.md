@@ -749,6 +749,10 @@ because it needed per-period totals anyway, so the grouping fell out of what it 
 `salesDepletion.test.js` pins the collision in both directions and asserts the year-wide form
 under-counts (36 against a true 46 on its fixture).
 
+**A `pos_credit_restock` row (S809 2e) DOES deplete, negatively**, where `pos_credit` never does: a
+Credit Note that said its bill's food was not served takes those plates back out of theoretical usage
+(`isRestockSource`), and Stock Movements subtracts its positive put-back rows from Value Depleted.
+
 **Generally: when a helper's correctness depends on the SHAPE of what it is handed — one period, one
 day, one bill — say so in its own doc comment, because the next caller will widen the window and
 the function will keep returning a plausible answer.**

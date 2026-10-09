@@ -20,6 +20,8 @@ import { throwFirstError } from '../../../shared/queryError'
 function ledgerSource(source) {
   if (source === 'pos') return 'pos_sale'
   if (source === 'pos_comp') return 'pos_comp'
+  // S809 2e: a credit note's "not served" reversal, negative — its own bucket, never Manual Entry's.
+  if (source === 'pos_credit_restock') return 'pos_credit_restock'
   return 'manual' // manual, or a legacy NULL (see salesDepletion.js)
 }
 

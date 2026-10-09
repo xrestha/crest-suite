@@ -52,3 +52,8 @@ but sat beside the other IMS transactions in `RESTORE_ORDER` — so the first ch
 was refused and, the loop breaking a table on its first failure, a POS client's entire sales history
 dropped out of the restore. **Adding an FK to a table in `RESTORE_ORDER` is a change to its
 position**: check the order in the same edit.
+
+**Columns the server stamps ride along with `select('*')` (S809).** `pos_orders.vat_registered` (2c)
+is kept by a restore, and a pre-2c backup restores bills unstamped, read under today's setting.
+`pos_credit_notes.restock` (2e) restores as stored; the note's settle trigger links its bill and adds
+no refund or points on a restore, because the cash and points ledgers come back themselves.

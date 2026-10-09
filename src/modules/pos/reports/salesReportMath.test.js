@@ -171,6 +171,42 @@ describe('grouped rows (Category / Item / Product Type)', () => {
   })
 })
 
+// S809 2c (REPORTS-1): the outlet switched VAT off after these bills. `vatReg: false` is today's
+// setting; each bill's own stamp says what it was issued as.
+describe('a past Tax Invoice keeps its VAT after the outlet deregisters', () => {
+  const TI = { ...BILL_B, id: 'TI', vat_registered: true }       // 400 + 52 VAT = 452
+  const PB = { ...BILL_C, id: 'PB', vat_registered: false }      // a PAN bill: its lines say 0 %
+  const ITEMS_PB = [{ order_id: 'PB', recipe_id: 'r3', name: 'Tea', category: 'Beverage', qty: 3, unit_price: 50, vat_rate: 0 }]
+  const byOrder = { TI: ITEMS_B, PB: ITEMS_PB }
+
+  test('a stamped bill reports as issued; an unstamped one falls back to today\'s setting', () => {
+    expect(billAmounts(TI, ITEMS_B, false)).toMatchObject({ vat: 52, net: 452, taxable: 400, nonTaxable: 0 })
+    expect(billAmounts(PB, ITEMS_PB, true)).toMatchObject({ vat: 0, net: 150, nonTaxable: 150 })
+    expect(billAmounts(BILL_B, ITEMS_B, false)).toMatchObject({ vat: 0, net: 400 }) // no stamp: today's flag
+  })
+
+  test('a Tax Invoice and its own credit note still net to zero, on Daily and on Category Wise', () => {
+    const note = noteFor(TI, ITEMS_B, 'n2')
+    const entries = buildSalesEntries({ orders: [TI], creditNotes: [note], orderById: { TI }, itemsByOrder: byOrder, vatReg: false })
+    expect(entries.reduce((s, e) => s + e.amounts.net, 0)).toBeCloseTo(0, 9)
+    expect(entries.reduce((s, e) => s + e.amounts.vat, 0)).toBeCloseTo(0, 9)
+    const rows = buildGroupedRows({ orders: [TI], creditNotes: [note], orderById: { TI }, itemsByOrder: byOrder,
+      vatReg: false, keyOf: i => i.category, labelOf: i => i.category })
+    expect(sum(rows, 'vat')).toBeCloseTo(0, 9)
+    expect(sum(rows, 'gross')).toBeCloseTo(0, 9)
+  })
+
+  test('grouped rows keep the VAT each bill was issued with', () => {
+    const rows = buildGroupedRows({ orders: [TI, PB], creditNotes: [], orderById: { TI, PB }, itemsByOrder: byOrder,
+      vatReg: false, keyOf: i => i.category, labelOf: i => i.category })
+    const by = Object.fromEntries(rows.map(r => [r.key, r]))
+    expect(by.Food.vat).toBeCloseTo(52, 9)
+    expect(by.Food.taxable).toBeCloseTo(400, 9)
+    expect(by.Beverage.vat).toBeCloseTo(0, 9)
+    expect(by.Beverage.nonTaxable).toBeCloseTo(150, 9)
+  })
+})
+
 describe('1L+ name merge', () => {
   const row = (key, name, pan, net, extra = {}) => ({ key, name, pan, walkIn: false, bills: 1, returns: 0, gross: net, taxable: net, nonTaxable: 0, vat: 0, net, ...extra })
 

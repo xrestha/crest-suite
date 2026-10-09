@@ -5,13 +5,14 @@ import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { getBsFiscalYear, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBs } from '../../../shared/nepalTime'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { errorLine, errorText, isNetworkError } from '../../../shared/errorText'
 import { postCreditNoteToIms } from './creditNotePosting'
+import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
 
 // "Was money returned to the customer?" (S754, owner decision). Asked on every note, because a
 // Credit Note corrects the VAT register and says nothing about the drawer: a cash refund handed
@@ -23,7 +24,18 @@ import { postCreditNoteToIms } from './creditNotePosting'
 const REFUND_OPTIONS = [
   { value: 'cash',  label: 'Cash',  hint: 'Paid out of the till — recorded as a Refund on the open shift, so the drawer count expects it.' },
   { value: 'other', label: 'Other (card, QR, bank)', hint: 'Returned outside the till. Nothing is taken off the drawer count.' },
-  { value: 'none',  label: 'None',  hint: 'No money went back — e.g. the bill was re-issued to the right customer.' },
+  { value: 'none',  label: 'None',  hint: 'No money went back — e.g. the bill is billed again to the right customer, or it is a Credit bill nobody has paid yet.' },
+]
+
+// "Was the food on this bill served?" (S809 2e, owner decision Q10 a). Every bill counts its dishes as
+// used in Inventory. When a bill is cancelled because it is billed again on a new bill, or because it
+// was a duplicate, the same food would be counted twice — so "No" puts it back
+// (pos_credit_notes.restock; creditNotePosting.js). Asked only where Inventory is on.
+const FOOD_OPTIONS = [
+  { value: 'served',     label: 'Yes — the guest had it',
+    hint: 'Inventory keeps this food as used. Right for money back on food that was eaten, sent back or taken away.' },
+  { value: 'not_served', label: 'No — billed again on a new bill, or a duplicate',
+    hint: "This food goes back into this month's Inventory, so it is not counted twice (once here and once on the other bill)." },
 ]
 
 // A credit note here always credits the WHOLE bill (decision 2026-08-18 — partial credits are not
@@ -44,11 +56,14 @@ function invoiceLabel(order, vatReg, prefix) {
 // settings/outlet/HSC data rather than depending on the caller's cached state, so it works
 // identically from either page.
 export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
-  const { clientId, profile, hasPosAccess } = useAuth()
+  const { clientId, profile, hasPosAccess, imsEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
 
   const [items, setItems] = useState([])
   const [settings, setSettings] = useState({ is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '' })
+  // The bill's own tax-status stamp (S809 2c), read here rather than taken from the caller's row so
+  // neither entry point can leave it out.
+  const [billStamp, setBillStamp] = useState(null)
   const [outletName, setOutletName] = useState('')
   const [hscMap, setHscMap] = useState({})
   const [loading, setLoading] = useState(true)
@@ -67,10 +82,15 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   // read, null when no shift is open; `shiftError` a read that failed (which is not "none open").
   const [refundMode, setRefundMode] = useState('')
   const [refundShift, setRefundShift] = useState({ loading: false, shift: undefined, error: null })
-  const [loyaltyRetrying, setLoyaltyRetrying] = useState(false)
+  // S809 2e: the answer to "Was the food on this bill served?" ('served' | 'not_served').
+  const [foodAnswer, setFoodAnswer] = useState('')
+  // S809 2e (SHIFTS-3): the cash this bill brought into the drawer — the server's own figure
+  // (pos_bill_cash_taken), the same one the note's refund is recorded with.
+  const [cashTaken, setCashTaken] = useState(null)
 
   async function readOpenShift() {
-    const { data, error } = await scopedFrom('pos_shifts', 'id, label, opened_at').eq('status', 'open').maybeSingle()
+    const { data, error } = await settleWithin(
+      scopedFrom('pos_shifts', 'id, label, opened_at').eq('status', 'open').maybeSingle(), 15000, 'Checking for an open shift')
     return { shift: error ? undefined : (data || null), error: error || null }
   }
 
@@ -84,6 +104,21 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     return () => { cancelled = true }
   }, [refundMode, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // S809 2e (SHIFTS-3): how much of this bill came into the drawer in cash, as the server works it out
+  // (pos_bill_cash_taken — the figure the note's refund is recorded with). A read of its own, beside
+  // the bill's load below. A failed read stops the note like any failed load: the refund is unknown.
+  useEffect(() => {
+    if (!clientId) return
+    let cancelled = false
+    settleWithin(supabase.rpc('pos_bill_cash_taken', { p_order_id: order.id }), 20000, 'Reading the cash on this bill')
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) { setLoadError(error); setLoading(false); return }
+        setCashTaken(Number(data) || 0)
+      })
+    return () => { cancelled = true }
+  }, [clientId, order.id])
+
   useEffect(() => {
     if (!clientId) return
     let cancelled = false
@@ -92,6 +127,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
         scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary, pos_order_item_options(option_name, price_delta, ingredient_deltas, sort)').eq('order_id', order.id),
         supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
         supabase.from('clients').select('name').eq('id', clientId).single(),
+        scopedFrom('pos_orders', 'vat_registered').eq('id', order.id).maybeSingle(),
       ])
       if (cancelled) return
       // S754: all three reads dropped `error`. A failed item read computed NPR 0 and still let a
@@ -99,7 +135,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       // `?? true` below and printed a PAN-bill client's note as a VAT Tax Invoice correction.
       const failed = results.find(r => r.error)
       if (failed) { setLoadError(failed.error); setLoading(false); return }
-      const [{ data: its }, { data: st }, { data: cl }] = results
+      const [{ data: its }, { data: st }, { data: cl }, { data: billRow }] = results
       // Awaited before Issue is enabled, and checked: it used to land after loading cleared, so a
       // quick Issue (or a failed read) printed a permanent document with every HSC column blank.
       const recipeIds = [...new Set((its || []).map(i => i.recipe_id).filter(Boolean))]
@@ -119,6 +155,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
         property_phone: st?.property_phone || '',
       })
       setOutletName(cl?.name || '')
+      setBillStamp(billRow || null)
       setHscMap(hsc)
       setLoading(false)
     })().catch(err => { if (!cancelled) { setLoadError(err); setLoading(false) } })
@@ -133,7 +170,12 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     )
   }
 
-  const vatReg = settings.is_vat_registered
+  // S809 2c (CREDIT-NOTES-5): the note is worked out, labelled (TI or PB, stored for good in
+  // original_invoice_label) and printed as the bill was issued. A PAN bill credited after the outlet
+  // registers stays a PB reference with no VAT; a Tax Invoice credited after it deregisters keeps its
+  // VAT, so the note's figures equal the bill's and guard_pos_credit_note accepts it. Today's setting
+  // decides only for a bill with no stamp.
+  const vatReg = billVatRegistered(billStamp, settings.is_vat_registered)
   // Item-level comps were never billed at menu price (they printed on their own Complimentary
   // Slip — see PosOrders.jsx), so a Credit Note correcting this bill's revenue must exclude them
   // too, or its face value overstates what the party actually paid. The sales_entries reversal
@@ -145,84 +187,37 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   // S754: a note crediting nothing is still a permanent, numbered document in the VAT register.
   const nothingToCredit = !loading && !loadError && (payableItems.length === 0 || !(amounts?.net > 0))
 
-  // The note's side-effects (S754): the cash refund on the open shift, then the loyalty reversal.
-  // Returns the warnings to show; never throws.
-  async function settleAfterIssue(note, cashShift) {
-    const warnings = []
-    const noteLabel = `Credit Note ${note.credit_note_no ?? ''}`.trim()
+  // S809 2e (SHIFTS-3): what a Cash refund takes out of the drawer — the cash this bill took, never more
+  // than the note. The database records exactly this (pos_credit_note_settle), so the sentence and the
+  // drawer cannot disagree. 0 for a card, QR or points bill, and for a Credit bill nobody has paid yet.
+  const cashOut = amounts ? Math.min(Number(cashTaken) || 0, amounts.net) : 0
+  const askFood = imsEnabled !== false
+  // The food goes back in the month the note is issued in, beside its revenue reversal. For a bill
+  // billed again now that is right (the new bill uses the food again this month). For a duplicate
+  // charged in an earlier month it is not: that month's stock count has already settled its food.
+  const billBs = order.closed_at ? nepalBs(new Date(order.closed_at)) : null
+  const nowBs = nepalBs(new Date())
+  const billFromEarlierMonth = !!(billBs && nowBs && (billBs.year !== nowBs.year || billBs.month !== nowBs.month))
 
-    if (refundMode === 'cash' && cashShift) {
-      // At most the note's net (the database refuses more), and exactly one per note
-      // (pos_cash_movements_one_refund_per_note) — so a double tap cannot pay out twice.
-      const refundAmt = Math.round((Number(note.net_amount ?? amounts.net) || 0) * 100) / 100
-      if (refundAmt > 0) {
-        try {
-          const { error: refundErr } = await scopedInsert('pos_cash_movements', {
-            shift_id: cashShift.id,
-            direction: 'out',
-            kind: 'refund',
-            amount: refundAmt,
-            pos_credit_note_id: note.id,
-            order_id: order.id,
-            reason: `${noteLabel} refund — ${reason.trim()}`.slice(0, 500),
-            created_by: profile?.id || null,
-          })
-          if (refundErr) throw refundErr
-        } catch (err) {
-          // Not "was not recorded": a dropped response can follow a landed write.
-          warnings.push({
-            kind: 'cash',
-            text: `The cash refund of ${fmtNpr(refundAmt)} could not be confirmed on the open shift. Check Shifts → Current Shift → Cash In / Out: if there is no Refund line for ${noteLabel}, the drawer will read short by that amount at close — record it there as a Cash Out.`,
-            detail: errorLine(err),
-          })
-        }
-      }
-    }
-
-    const loyalty = await reverseLoyalty(note)
-    if (loyalty) warnings.push(loyalty)
-    return warnings
-  }
-
-  // Takes back the points this bill earned and returns the points spent on it (S754, owner
-  // decision). Idempotent on the server, so the notice's retry button is safe to press twice.
-  async function reverseLoyalty(note) {
-    try {
-      const { error: lErr } = await supabase.rpc('reverse_loyalty_for_credit_note', { p_credit_note_id: note.id })
-      if (lErr) throw lErr
-      return null
-    } catch (err) {
-      return {
-        kind: 'loyalty',
-        text: "This bill's loyalty points could not be reversed just now, so the customer's balance may still include points the bill earned, or be missing points spent on it. Try again below; if it keeps failing, the Owner can correct the balance.",
-        detail: errorLine(err),
-      }
-    }
-  }
-
-  async function retryLoyalty() {
-    if (!imsNotice?.created) return
-    setLoyaltyRetrying(true)
-    const w = await reverseLoyalty(imsNotice.created)
-    setLoyaltyRetrying(false)
-    setImsNotice(n => ({
-      ...n,
-      warnings: [...(n.warnings || []).filter(x => x.kind !== 'loyalty'), ...(w ? [w] : [])],
-      loyaltyRetried: !w,
-    }))
-  }
+  // The note's side-effects (S754) — the bill marked credited, the cash refund on the open shift and the
+  // loyalty reversal — happen in the database, in the same transaction as the note itself (S809 2e,
+  // CREDIT-NOTES-2: pos_credit_note_settle). They used to be three more requests from this screen, and a
+  // dropped connection after the note landed left the bill "owed", the drawer short and the points
+  // unreversed, with nothing that could run them later. What is left here: the print and Inventory.
 
   async function handleConfirm() {
     if (loading || loadError || !amounts) return
     if (nothingToCredit) { setMsg('error:This bill has no charged lines to credit, so no Credit Note can be issued against it.'); return }
     if (!reason.trim()) { setMsg('error:Enter a reason for this Credit Note.'); return }
+    if (askFood && !foodAnswer) { setMsg('error:Say whether the food on this bill was served — Yes or No.'); return }
     if (!refundMode) { setMsg('error:Say whether money was returned to the customer — Cash, Other or None.'); return }
+    if (refundMode === 'cash' && !(cashOut > 0)) { setMsg('error:No cash was taken for this bill, so none can go back out of the drawer. Choose Other or None.'); return }
     setSubmitting(true); setMsg('')
 
     // S754: a cash refund needs an OPEN shift to go on, and that is checked again here rather than
     // trusted from when Cash was picked — the shift can close while the reason is being typed.
-    // Refused before anything is written, so "nothing was issued" is true on both branches.
-    let cashShift = null
+    // Refused before anything is written, so "nothing was issued" is true on both branches. (Since
+    // S809 2e the database refuses the note too when no shift is open: credit_note_refund_no_shift.)
     if (refundMode === 'cash') {
       const r = await readOpenShift()
       setRefundShift({ loading: false, ...r })
@@ -234,7 +229,6 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
         setMsg('error:No shift is open, so a cash refund has nowhere to be recorded and no Credit Note was issued. Open a shift to record a cash refund, or choose Other or None.')
         setSubmitting(false); return
       }
-      cashShift = r.shift
     }
 
     const bs = adToBsSafe(new Date(order.closed_at))
@@ -262,6 +256,8 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       // S755: its own column, off the printed note. The database checks the amounts below against
       // the bill (guard_pos_credit_note, HINT credit_note_amounts) — they are not trusted as sent.
       refund_method: refundMode,
+      // S809 2e (Q10 a): the food was not served on this bill, so its stock goes back in Inventory.
+      restock: askFood && foodAnswer === 'not_served',
       gross_amount: amounts.grossAmt,
       discount_amount: amounts.discount,
       taxable_amount: amounts.taxableBase,
@@ -275,53 +271,48 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       issued_by: profile?.id || null,
     }
 
-    const { data: created, error } = await scopedInsert('pos_credit_notes', payload, { single: true })
+    // S809 2e (CREDIT-NOTES-2): one request does it all — the note, the bill marked credited, the cash
+    // refund and the loyalty reversal land together or not at all (pos_credit_note_settle). Bounded,
+    // because a hung request would leave "Issuing…" up for good.
+    const { data: created, error } = await settleWithin(scopedInsert('pos_credit_notes', payload, { single: true }), 20000, 'Issuing the Credit Note')
     if (error) {
       // S754. Three different facts, three sentences. credit_note_exists is the guard refusing a
       // second note on this bill (another manager, or a retry after a lost response that did land).
-      // A dropped connection proves nothing about whether the note was written, so it must not say
-      // "nothing has changed"; the guard makes a retry safe, and the Credit Note Book is the place
-      // that can tell them. Any other refusal is raised before the insert, so it may say so.
+      // A dropped connection (or no answer in time) proves nothing about whether the note was
+      // written, so it must not say "nothing has changed"; the guard makes a retry safe, and the
+      // Credit Note Book is the place that can tell them. Any other refusal is raised inside the
+      // insert's own transaction, which rolled back whole, so it may say so.
       const text = error.hint === 'credit_note_exists' || /credit_note_exists/.test(error.message || '')
         ? `error:${errorText(error, 'operator')} (${[error.code, error.message].filter(Boolean).join(' · ')})`
-        : isNetworkError(error)
-          ? 'error:The connection dropped, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again — if it is there, it is valid, and a second one for this bill will be refused. ' + errorLine(error)
+        : isNetworkError(error) || isTimeout(error)
+          ? 'error:The connection dropped, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again. If it is there, it is complete — the bill is marked credited, any cash refund is on the shift and any points are reversed — and only its printing is left: press Print on it there. A second note for this bill would be refused. ' + errorLine(error)
           : 'error:The credit note was not issued — nothing has changed. ' + errorLine(error)
       setMsg(text); setSubmitting(false); return
     }
 
-    // This link is what stops the same bill being credited twice — CreditNotes.jsx offers only
-    // orders with `credit_note_id IS NULL`. Its error used to go unchecked, so a failed write left
-    // a real credit note issued against a bill the list still presented as un-credited.
-    const { error: linkErr } = await scopedUpdate('pos_orders', { credit_note_id: created.id }).eq('id', order.id)
+    // S809 2e: printed first, while the press that issued it still counts as the manager's own (a
+    // browser blocks a pop-up opened long after the tap) — the bill's order since S776: print, then
+    // everything else. It used to wait behind up to eight round trips.
 
-    // S754: what went back to the customer, and the loyalty the bill moved. Both run whether or not
-    // the link landed — the note is issued, numbered and valid either way, and the money and the
-    // points follow the NOTE, not the link. Both are after-the-fact: a failure is a warning that
-    // names what now reads wrong and where to fix it, never a reason to withhold the document.
-    const warnings = await settleAfterIssue(created, cashShift)
-
-    if (linkErr) {
-      setMsg(`error:Credit note ${created.credit_note_no ?? ''} was created, but linking it to the bill failed (${errorLine(linkErr)}). Do NOT issue another one for this bill — contact support to link it, or the same bill can be credited twice.` +
-        (warnings.length ? ' Also: ' + warnings.map(w => w.text).join(' ') : ''))
-      setSubmitting(false)
-      return
-    }
-
-    // Revenue correction into TODAY's open period (the period the correction is discovered in), not
-    // the original bill's. Stock/ingredient depletion is deliberately NOT reversed — the food was
-    // already served; this corrects billing/tax, not stock. It used to skip silently with no open
-    // period and never read its insert's error (S747); now a note that could not post is stamped
-    // "waiting", said so here, counted on the POS floor and posted from Periods.
-    const ims = await postCreditNoteToIms({ supabase, scopedFrom, scopedUpdate, note: created, order, items, today })
-
-    const print = await printCreditNote(clientId, created, payableItems, settings, outletName, hscMap)
+    const print = await printCreditNote(clientId, created, payableItems, settings, outletName, hscMap, vatReg)
     // S754: a blocked pop-up printed nothing, and the modal closed as though it had.
     const printText = print.printed ? ''
-      : 'The print window was blocked by the browser, so nothing printed. Allow pop-ups for this site, then print it from Credit Notes → Credit Note Book → Reprint.'
+      : 'The print window was blocked by the browser, so nothing printed. Allow pop-ups for this site, then print it from Credit Notes → Credit Note Book → Print.'
+
+    // Revenue correction into TODAY's open period (the period the correction is discovered in), not
+    // the original bill's. Stock comes back only when the food was not served on this bill (S809 2e,
+    // Q10 a); otherwise the food was used and this corrects money and tax only. It used to skip
+    // silently with no open period and never read its insert's error (S747); now a note that could
+    // not post is stamped "waiting", said so here, counted on the POS floor and posted from Periods.
+    let ims
+    try {
+      ims = await withTimeout(postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note: created, order, items, today }), 30000, 'Posting to Inventory')
+    } catch (err) {
+      ims = { posted: false, reason: 'write', error: err }
+    }
 
     setSubmitting(false)
-    if (ims.posted && print.printed && warnings.length === 0) { onIssued?.(created); return }
+    if (ims.posted && print.printed) { onIssued?.(created); return }
     // The note is issued, numbered and printed whatever happens here, so this is a notice with one
     // button, not an error with a retry: Periods' backfill is the retry.
     const month = `${BS_MONTHS[today.month - 1]} ${today.year}`
@@ -330,23 +321,22 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       printed: print.printed,
       imsPosted: ims.posted,
       printText,
-      warnings,
       text: ims.posted ? '' : ims.reason === 'no_period'
         ? `There is no Inventory period for ${month} yet, so this credit note has not been taken off Inventory sales. Once ${month} is opened in Periods, a manager presses "Post POS bills to Inventory" on it and the note is posted then.`
         : ims.reason === 'closed'
           ? `${month} is closed in Inventory, so this credit note has not been taken off Inventory sales. An admin can post it from Periods with "Post POS bills to Inventory" on ${month}.`
-          : `This credit note could not be taken off Inventory sales just now (the connection or the database refused it). It is marked as waiting — a manager can post it from Periods with "Post POS bills to Inventory" on ${month}.`,
+          : ims.reason === 'bill_waiting'
+            ? `This bill has not reached Inventory yet, so this credit note waits for it: its food can only go back once the bill's own sale is in. In Periods, press "Post POS bills to Inventory" on the month the bill was charged in, then on ${month}; the note is posted then.`
+            : `This credit note could not be taken off Inventory sales just now (the connection or the database refused it). It is marked as waiting — a manager can post it from Periods with "Post POS bills to Inventory" on ${month}.`,
       detail: ims.error ? errorLine(ims.error) : '',
     })
   }
 
   if (imsNotice) {
-    const noticeWarnings = imsNotice.warnings || []
+    // S809 2e: the refund and the points can no longer be left behind — they land with the note.
     const problems = [
       !imsNotice.printed && 'did not print',
       !imsNotice.imsPosted && 'is not yet in Inventory',
-      noticeWarnings.some(w => w.kind === 'cash') && 'its cash refund needs checking',
-      noticeWarnings.some(w => w.kind === 'loyalty') && 'its loyalty points are not reversed',
     ].filter(Boolean)
     return (
       <Modal title="Credit Note issued" onClose={() => onIssued?.(imsNotice.created)} maxWidth={480}>
@@ -363,20 +353,8 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
           {imsNotice.printText && <div style={{ marginBottom: imsNotice.text ? 8 : 0 }}>{imsNotice.printText}</div>}
           {imsNotice.text}
           {imsNotice.detail && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{imsNotice.detail}</div>}
-          {noticeWarnings.map(w => (
-            <div key={w.kind} style={{ marginTop: 8 }}>
-              {w.text}
-              {w.detail && <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{w.detail}</div>}
-            </div>
-          ))}
-          {imsNotice.loyaltyRetried && <div role="status" style={{ marginTop: 8, color: 'var(--theme-green-text)' }}>✓ Loyalty points reversed.</div>}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          {noticeWarnings.some(w => w.kind === 'loyalty') && (
-            <button className="btn btn-ghost" onClick={retryLoyalty} disabled={loyaltyRetrying} aria-busy={loyaltyRetrying || undefined}>
-              {loyaltyRetrying ? 'Reversing…' : 'Retry loyalty reversal'}
-            </button>
-          )}
           <button className="btn btn-primary" onClick={() => onIssued?.(imsNotice.created)}>Done</button>
         </div>
       </Modal>
@@ -386,7 +364,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   return (
     <Modal title="Issue Credit Note" onClose={onClose} maxWidth={520}>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
-          Corrects {order.invoice_no != null ? invoiceLabel(order, vatReg, settings.invoice_prefix) : `Order #${order.order_no}`}. This is a formal VAT-Rules Credit Note — it reduces revenue for this fiscal month but does not touch stock.
+          Corrects {order.invoice_no != null ? invoiceLabel(order, vatReg, settings.invoice_prefix) : `Order #${order.order_no}`}. This is a formal VAT-Rules Credit Note — it reduces revenue for this fiscal month{askFood ? ', and puts the food back into stock only if you say it was not served' : ''}.
         </p>
 
         {loading ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading bill…</p> : loadError ? (
@@ -439,23 +417,67 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               <div><label style={labelStyle} htmlFor="issue-credit-note-modal-phone">Phone</label><input id="issue-credit-note-modal-phone" style={inputStyle} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} /></div>
             </div>
 
+            {/* S809 2e (owner decision Q10 a): required before Issue where Inventory is on. A radio
+                group like the money question below — one answer, readable back as the answer given. */}
+            {askFood && (
+              <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
+                <legend style={{ ...labelStyle, padding: 0 }}>
+                  <Tip text="Every bill counts its dishes as used in Inventory. If this bill is being billed again on a new bill, or was a duplicate of another bill, the same food would be counted twice — answer No and this note puts it back, so Stock Report, the Reorder list and this month's Variance stay right. If the guest ate the food, or it was cooked and sent back, answer Yes: it was used, even though the money comes back. Kept with the note in the Credit Note Book; not printed on it." width={340}>
+                    Was the food on this bill served?
+                  </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
+                </legend>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+                  {FOOD_OPTIONS.map(o => (
+                    <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
+                      <input type="radio" name="icn-food" value={o.value} checked={foodAnswer === o.value}
+                        onChange={() => { setFoodAnswer(o.value); setMsg('') }} />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+                {foodAnswer && (
+                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                    {FOOD_OPTIONS.find(o => o.value === foodAnswer)?.hint}
+                  </p>
+                )}
+                {foodAnswer === 'not_served' && billFromEarlierMonth && (
+                  <p role="note" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
+                    △ This bill was charged in {BS_MONTHS[billBs.month - 1]} {billBs.year}. If it was a duplicate, that month's stock count has
+                    already settled its food — answer Yes. Answer No only if the food is being billed again on a new bill now.
+                  </p>
+                )}
+              </fieldset>
+            )}
+
             {/* S754 (owner decision): required before Issue. A radio group, not chips — exactly one
                 answer, and it has to be readable back as the answer given. */}
             <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
               <legend style={{ ...labelStyle, padding: 0 }}>
-                <Tip text="A Credit Note corrects the VAT register; it does not move money by itself. Cash is recorded as a Refund on the open shift so the drawer count expects it. Other and None take nothing off the drawer. The answer is kept with the note in the Credit Note Book and is not printed on it." width={320}>
+                <Tip text="A Credit Note corrects the VAT register; it does not move money by itself. Cash takes back out of the drawer only the cash this bill brought in — the part paid by card or QR goes back that way, and points spent on it return as points — and records it as a Refund on the open shift, so the drawer count expects it. Other and None take nothing off the drawer. The answer is kept with the note in the Credit Note Book and is not printed on it." width={340}>
                   Was money returned to the customer?
                 </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
               </legend>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-                {REFUND_OPTIONS.map(o => (
-                  <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
-                    <input type="radio" name="icn-refund" value={o.value} checked={refundMode === o.value}
-                      onChange={() => { setRefundMode(o.value); setMsg('') }} />
-                    {o.label}
-                  </label>
-                ))}
+                {REFUND_OPTIONS.map(o => {
+                  // S809 2e (SHIFTS-3): no cash came in for this bill, so none can go out for it.
+                  const off = o.value === 'cash' && !(cashOut > 0)
+                  return (
+                    <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: off ? 'var(--theme-text3)' : 'var(--theme-text1)', cursor: off ? 'not-allowed' : 'pointer' }}>
+                      <input type="radio" name="icn-refund" value={o.value} checked={refundMode === o.value} disabled={off}
+                        onChange={() => { setRefundMode(o.value); setMsg('') }} />
+                      {o.label}
+                    </label>
+                  )
+                })}
               </div>
+              {cashTaken === null ? (
+                <p role="status" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>Checking how much of this bill was paid in cash…</p>
+              ) : !(cashOut > 0) && (
+                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                  No cash was taken for this bill (it was paid by card, QR or points, or it is a Credit bill nobody has paid yet), so Cash is off.
+                  Choose Other if the money went back by card, QR or bank. If you hand cash over anyway, record it in Shifts as a Cash Out.
+                </p>
+              )}
               {refundMode && (
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
                   {REFUND_OPTIONS.find(o => o.value === refundMode)?.hint}
@@ -474,7 +496,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
                   </p>
                 ) : refundShift.shift ? (
                   <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>
-                    {fmtNpr(amounts.net)} goes out of the drawer on the open shift{refundShift.shift.label ? ` (${refundShift.shift.label})` : ''}.
+                    {cashOut < amounts.net
+                      ? `${fmtNpr(cashOut)} of this bill was paid in cash — that much goes out of the drawer`
+                      : `${fmtNpr(cashOut)} goes out of the drawer`} on the open shift{refundShift.shift.label ? ` (${refundShift.shift.label})` : ''}.
                   </p>
                 ) : null
               )}
@@ -497,6 +521,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
             {(() => {
               const issueBlocker = nothingToCredit ? { label: 'Nothing to credit on this bill' }
                 : !reason.trim() ? { label: 'Enter a reason first', focus: () => document.getElementById('icn-reason')?.focus() }
+                : askFood && !foodAnswer ? { label: 'Say whether the food was served', focus: () => document.querySelector('input[name="icn-food"]')?.focus() }
                 : !refundMode ? { label: 'Say whether money was returned', focus: () => document.querySelector('input[name="icn-refund"]')?.focus() }
                 : refundMode === 'cash' && refundShift.shift === null ? { label: 'Open a shift, or choose Other or None' }
                 : null

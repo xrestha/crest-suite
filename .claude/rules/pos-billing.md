@@ -34,6 +34,15 @@ post**, the POS floor shows a standing count of unposted bills, and Periods carr
 bills to Inventory** per period (`src/modules/pos/orders/backfillPosToIms.js`). The bill still
 closes either way — refusing a sale mid-service is not acceptable.
 
+**Since S809 2f (`20261009220000`) the database sets the mark with the rows.**
+`sales_entries_stamp_pos_source` (AFTER INSERT statement trigger, DEFINER) marks a bill from its
+`pos`/`pos_comp` rows and a credit note from its `pos_credit`/`pos_credit_restock` rows, in the same
+transaction. Outside the operator's restore it locks the bill `FOR NO KEY UPDATE` and refuses a till
+sale row naming no bill, an open bill or another outlet's (`pos_sale_unlinked`), and rows for a bill
+that already has till sale rows from an earlier statement (`pos_bill_already_posted`). **A bill's till
+sale rows go in ONE statement** (the till's insert and the backfill's per-bill retry both do). The
+till's and Periods' own mark writes stay, for a bill with nothing to post.
+
 **That backfill could not finish the months it exists for (fixed S629).** It wrote three sequential
 round trips per bill — `sales_entries` insert, `stock_movements` insert, `ims_posted_at` stamp —
 plus one update per already-posted bill, so an 800-bill month was ~2,400 requests against the 120 s
@@ -67,6 +76,14 @@ Stock Movements page says so in its own banner. Don't read an empty movements li
 post.
 
 ## Table-scoping traps in this module
+
+**`items` is fenced from a POS PIN login, and a fenced read is `[]`, not an error (S809 2f).** On a
+PIN every yield read 100% and every comp its typed Cost Price. The till's comp costs and a closing
+bill's stock lines now read through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
+the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`,
+`posStockLines`), which feed `recipeCost.js`' `{ book }` walk, never a SQL copy of it. A till or shift
+screen that costs or depletes uses those two. Not switched yet: Sales Report's and Sales Exceptions'
+comp cost, `viewPosBill`, the Customization report (POS_TODO S809.4).
 
 **`sales_entries` is period-scoped, not client-scoped**, so it is deliberately absent from
 `CLIENT_SCOPED_TABLES` and `scopedDb` throws for it — use plain `supabase.from()`, as
@@ -310,6 +327,13 @@ through PostgREST or anywhere else, now and for any path added later. Same reaso
 Nepal's date through `bs_months`, the SQL twin of `getBsFiscalYear`: change both together. It returns
 NULL past the table's end (2031-04-13) and every caller then refuses (`pos_fiscal_year_unknown`).
 
+**S809 2c (`20261009200000`):** the close stamps `pos_orders.vat_registered` from
+`COALESCE(settings.is_vat_registered, true)`. An open-order write clears it, a closed bill keeps OLD's
+value (ignored, not refused), and `guard_pos_order_insert` drops it on a new order. A paid close that
+SENT the other status is refused (`pos_vat_status_changed`; tills before crest-v420 send none) and the
+till reloads its settings. **Every reader of a past bill uses `billVatRegistered(order, current)`**
+(`posBillingMath.js`); never pass today's flag into a closed bill's arithmetic.
+
 Three things to know before touching it:
 
 - **~~It fires only when `close_type`, `status` or `discount_amount` actually change.~~ Superseded
@@ -528,6 +552,7 @@ the same four rules:
   is ignored, not refused, so a till a reprint behind is not told its print failed; a CHECK keeps
   them ≥ 0), and `ims_posted_at` is set only on a closed bill, at POS Supervisor or above, and then
   stands. The next column added to `pos_orders` is locked by default (invariant #1's reason).
+  `vat_registered` (S809 2c) is not on the list and is not refused either: the guard keeps OLD's value.
 - **The child tables need their own lock.** Locking `pos_orders` did nothing for its lines and
   payments. Statement-level AFTER triggers (`guard_pos_order_items_closed`,
   `guard_pos_order_payments_closed`) look the order up once per statement, not once per row, on the
@@ -578,7 +603,7 @@ sends those columns, and a new screen must not.
 | Settle a Credit bill | Supervisor, once, `credit_settled_by` stamped |
 | Open or close a shift | Supervisor. A **closed shift is immutable**, and a client cannot DELETE one |
 | Cash In / Cash Out | Supervisor, against an OPEN shift. **Never edited or deleted**: a mistake is a second movement |
-| Cash refund on a credit note (`kind = 'refund'`) | Manager. One per note, no more than the note's net |
+| Cash refund on a credit note (`kind = 'refund'`) | Manager. One per note, written by the note's own trigger: the cash the bill took (`pos_bill_cash_taken`), no more than the note's net (S809 2e) |
 | Issue or link a Credit Note | Manager. Never edited or deleted |
 | Menu price, VAT rate, `pos_enabled` (`guard_recipe_menu_price`) | POS manager, IMS manager or Owner |
 | Till setup `settings` columns (discount reasons, note presets, ticket routing, delivery partners, reservation settings, opening hours, loyalty point value) | POS manager |
@@ -653,7 +678,8 @@ tests passed untouched; the invariant they assert — buckets sum back to `compu
 now covers any key.
 
 One level up, `SalesReport.jsx`'s `buildGroupedRows(keyOf, labelOf)` is the same consolidation for
-the row builders.
+the row builders. Each bill goes through it under its own stamped status (`billVatRegistered`, S809
+2c), never one report-wide flag.
 
 **The credit-note branch changed in S754 (owner decision).** Until then a credit-noted bill
 contributed returned quantity only and never revenue, and simply vanished from Daily. That removed
@@ -806,12 +832,11 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
   updated the invoice number is minted and the close cannot be refused, so `warnWrite()` + the floor
   banner carries what failed afterwards: the split-tender breakdown (the Z-report reconciles against
   a payment mix missing that bill's legs), the table-occupied write (a table shown free with a live
-  order gets seated twice), the `ims_posted_at` stamp, missing HSC codes, reprint counters. **Each
+  order gets seated twice), missing HSC codes, reprint counters. **Each
   sentence names the downstream consequence and the recovery, never the error.**
-- **`ims_posted_at` failing is NOT a double-post** for anything closed after migration
-  `20260818170000` — the Periods backfill re-checks `sales_entries.pos_order_id` before posting and
-  re-stamps what it finds. It is a false "not posted" alarm, and the banner says so rather than
-  letting the existing banner blame a missing period.
+- **`ims_posted_at` is the database's (S809 2f).** A bill whose rows landed is marked in the same
+  transaction, so the till's own mark write failing is logged, not shown (a voided bill's too: no
+  screen counts it). A post that lands after its wait marks the bill then; a second post is refused.
 - **Not everything was made loud, deliberately.** A till that throws red at a cashier holding up a
   queue is worse than a stale reprint counter. The QR-confirmation poll, the `order_no` backfill,
   the co-occurrence suggestions and the Recent Bills comp lookup log and move on. The test is
@@ -999,7 +1024,8 @@ be best-effort and silent — no open period for today, nothing written and noth
 insert never read — so a printed note left Inventory revenue overstated by the whole bill with no
 way to post it afterwards.
 
-- **`pos_credit_notes.ims_posted_at` is stamped only after the rows land**, and every reversal row
+- **`pos_credit_notes.ims_posted_at` is stamped only after the rows land** (since S809 2f by the
+  database, in the same transaction), and every reversal row
   carries **`sales_entries.pos_credit_note_id`**. The backfill asks the link, never the stamp alone —
   the same reason bills carry `pos_order_id` (above).
 - **The reversal takes back what the bill POSTED**: comped lines skipped, the bill discount spread by
@@ -1025,8 +1051,24 @@ happens" rule** (owner decisions).
   rewritten.
 - **The bill's loyalty is reversed** through `reverse_loyalty_for_credit_note`.
 
-Both run whether or not the bill link landed, because the money and the points follow the NOTE. A
-failure of either is a warning naming what now reads wrong, never a reason to withhold the document.
+**Since S809 2e (`20261009210000`) the link, the refund and the points are the note's own
+transaction.** `pos_credit_note_settle` (AFTER INSERT, INVOKER) links the bill through
+`guard_pos_order_close` (no link refuses the note, `credit_note_link_failed`), writes a Cash refund of
+`LEAST(pos_bill_cash_taken(order), net)` on the open shift (`credit_note_refund_no_shift` without one),
+and calls `reverse_loyalty_for_credit_note`. SHIFTS-3: the refund is only the cash the bill took (a
+Split bill's Cash legs; nothing for card, QR, points or unpaid Credit, where the modal switches Cash
+off); cash handed back for a card bill is a Cash Out (owner, 2026-10-09). The operator's restore and
+non-client sessions get the link only. The modal prints first, then posts to Inventory; a note never
+printed has Print in the Book. **A change to the close guard's link rule, or to
+`reverse_loyalty_for_credit_note`, that can refuse will refuse every note.**
+
+**A note says whether its food was served (S809 2e, Q10 a).** `pos_credit_notes.restock`, locked once
+issued. A "not served" note posts its reversal as `pos_credit_restock` (counted, negatively, by
+`selectDepletingSales`) plus positive `stock_movements` `pos_credit_restock` rows that negate the
+bill's own `pos_sale` depletion (one per bill and item, a unique index), in the note's month. It waits
+(`bill_waiting`) until the bill's own sale is in Inventory. `ims_sales_entries_guard` refuses a
+`pos_credit` row for a restock note (`credit_note_restock_mismatch`, an older page) and a malformed
+restock row (`pos_credit_restock_invalid`), the Owner included.
 
 **Issuing is manager-only in the table too** (`guard_pos_credit_note`): `issued_by` is stamped,
 a note is never edited except its print count (only upward) and its Inventory stamp (set once, by
@@ -1036,9 +1078,10 @@ without a second copy of the VAT formula. The note's gross must equal the bill's
 its discount the bill's discount, taxable + non-taxable must equal gross − discount, and net must
 equal taxable + non-taxable + VAT within the rupee rounding and `paid_amount` within NPR 1. VAT needs
 a taxable base. `paid_amount` is `payTotal`, the same expression as `computeOrderAmounts().net`,
-which is why pinning net to it pins VAT too. A client whose VAT registration changed between the
-bill and the note is refused, correctly, from every login since S809 1l, the operator's screen
-included. **A Credit bill with a credit note against it is no longer owed**, so
+which is why pinning net to it pins VAT too. Since S809 2c the note is worked out under its bill's
+stamp (`billVatRegistered`), so a bill from before a VAT change is credited as issued and passes;
+only an unstamped bill (restored from a pre-2c backup) can still meet today's setting and be refused.
+**A Credit bill with a credit note against it is no longer owed**, so
 it leaves Customers → Outstanding. A bill settled before it was credited stays in Collected,
 because that money really changed hands.
 

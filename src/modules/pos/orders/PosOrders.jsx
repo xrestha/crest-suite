@@ -14,8 +14,8 @@ import QRCode from 'qrcode'
 import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
-import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
-import { lineIngredientDeltas, loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
+import { posFoodCosts, posStockLines } from './posRecipeBook'
+import { lineIngredientDeltas, deltaItems } from '../../../utils/orderLineIngredients'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
@@ -2868,8 +2868,9 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (hscErr) warnWrite('HSC codes could not be loaded, so the next bill will print without them.', hscErr)
       setHscMap(Object.fromEntries((data || []).map(r => [r.id, r.hsc_code])))
       // Food-cost map, needed up front for item-level comp in the Pay tab (not just the
-      // Complimentary tab, which used to be the only consumer — see openCompTab).
-      const costMap = await computeRecipeCosts(supabase, recipeIds)
+      // Complimentary tab, which used to be the only consumer — see openCompTab). Through the till's
+      // own read (S809 IMS-HANDOFF-3): a PIN login cannot read `items`, so its rates came back 0.
+      const costMap = await posFoodCosts(supabase, clientId, recipeIds)
       setCompCostMap(costMap)
     }
   }
@@ -2877,7 +2878,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   async function openCompTab() {
     setBillingTab('writeoff'); setCloseMsg('')
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
-    const map = await computeRecipeCosts(supabase, recipeIds)
+    const map = await posFoodCosts(supabase, clientId, recipeIds)
     setCompCostMap(map)
   }
 
@@ -3115,10 +3116,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     try {
       const recipeIds = [...new Set(soldItems.map(i => i.recipe_id))]
       if (recipeIds.length > 0) {
-        const [breakdown, explosion] = await Promise.all([
-          explodeRecipeIngredients(supabase, recipeIds),
-          loadDeltaExplosion(supabase, Object.values(deltasByLine)),
-        ])
+        // One read the till is allowed to make (S809 IMS-HANDOFF-3): a PIN login cannot read `items`,
+        // so every yield came back 100% and the ledger took too little of any trimmed ingredient.
+        const { breakdown, explosion } = await posStockLines(supabase, clientId, recipeIds, Object.values(deltasByLine))
         const aggBySource = { pos_sale: {}, pos_comp: {} }
         qtySplit.forEach(line => {
           const { recipe_id, saleQty, compQty } = line
@@ -3670,6 +3670,9 @@ export default function PosOrders({ billingStation = false } = {}) {
         buyer_pan:        buyerPan.trim() || null,
         buyer_phone:      buyerPhone.trim() || null,
         bill_remarks:     billRemarks.trim() || null,
+        // S809 2c: the tax status this total was worked out under. guard_pos_order_close stamps the bill's
+        // own from settings, and refuses a Charge that assumed the other one (pos_vat_status_changed).
+        vat_registered:   vatReg,
         // closed_by, closed_at and invoice_no are NOT sent (S754): guard_pos_order_close stamps closed_by
         // from the session and closed_at from the server clock (a tablet clock could backdate a bill
         // into a closed month), and clears any invoice_no a request carries so the numbering trigger
@@ -3723,6 +3726,13 @@ export default function PosOrders({ billingStation = false } = {}) {
         if (error.hint === HINT.rank) {
           setCloseMsg('error:This login cannot close bills — it needs POS Supervisor access or above. Nothing was charged; ask a supervisor to take the payment.')
           return false
+        }
+        // S809 2c: the Owner switched the outlet's VAT registration after this till read its settings,
+        // so the total on screen assumed the other one. Nothing was charged. Payment waits while the
+        // settings are read again; the server's sentence below tells the cashier to charge the new total.
+        if (error.hint === 'pos_vat_status_changed') {
+          setBillingSettingsLoaded(false)
+          loadTillSettings()
         }
         // guard_pos_order_close() (migration 20260819120000) refuses an over-cap discount or a void
         // from an account without Allow Void, and phrases the refusal for the person holding the
@@ -3877,8 +3887,8 @@ export default function PosOrders({ billingStation = false } = {}) {
 
     // Stamp only on a confirmed post. A void has nothing to post, so it is marked done rather
     // than left looking like a failure the floor banner should chase. A post that timed out counts as
-    // not posted: rows it did land carry pos_order_id, which the Periods backfill checks before
-    // posting, so the chase cannot double-post.
+    // not posted here; if its rows land later, the database marks the bill then, and it refuses a
+    // second post of the same bill (S809 2f), so the chase cannot double-post.
     if (closeType !== 'void') {
       // A settled close posts its STORED lines (S809); one in the background, or one whose lines could
       // not be read, is left unposted for Periods → Post POS bills, which the floor banner points to.
@@ -3886,17 +3896,17 @@ export default function PosOrders({ billingStation = false } = {}) {
         : await withTimeout(writeSalesEntries(closeType, compQtyByLine, stored), CLOSE_STEP_MS + 10000, 'Posting to Inventory')
           .catch(e => { console.error('IMS post did not finish — bill left for backfill:', e); return false })
       if (posted) {
-        // The stamp is the only thing separating "posted" from "needs backfilling". If it
-        // fails the revenue IS in IMS, so the floor banner will chase a bill that is fine.
-        // Not a double-post risk: the Periods backfill re-checks sales_entries.pos_order_id
-        // before posting anything and re-stamps what it finds — but say so rather than let
-        // someone hunt a phantom.
+        // S809 2f (IMS-HANDOFF-2): the database marks a bill posted in the same transaction as its
+        // Inventory rows, so a bill whose rows landed is marked whatever happens here. This write
+        // only marks a bill with nothing to post (no recipe line, so no row), and the database keeps
+        // the first mark. A failure is logged, not shown: the cashier has nothing to do about it.
         const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', updated.id), 'Marking the bill posted')
-        if (stampErr) warnWrite('The bill just closed did reach Inventory, but saving its "posted" mark failed — it will keep showing as not posted until a backfill from Periods clears it.', stampErr)
+        if (stampErr) console.error('ims_posted_at mark failed (a bill with Inventory rows is already marked by the database):', stampErr)
       } else setImsPostWarning(w => w + 1)
     } else {
       const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', updated.id), 'Marking the bill settled')
-      if (stampErr) warnWrite('The voided bill could not be marked as settled with Inventory — it will show as not posted until a backfill from Periods clears it.', stampErr)
+      // No screen counts a voided bill as not posted (each counts billed bills only), so this is logged.
+      if (stampErr) console.error('ims_posted_at mark on a voided bill failed (nothing counts it):', stampErr)
     }
 
     // Settled before the loyalty award below, and that ordering is load-bearing rather than
@@ -4026,7 +4036,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // document, not a partial one. Bounded (S776); null means not printed, and the floor banner says so.
   async function slipCosts(recipeIds) {
     try {
-      return await withTimeout(computeRecipeCosts(supabase, recipeIds), CLOSE_STEP_MS, 'Reading food costs')
+      return await withTimeout(posFoodCosts(supabase, clientId, recipeIds), CLOSE_STEP_MS, 'Reading food costs')
     } catch (e) {
       warnWrite('A Complimentary Slip was not printed — its food cost could not be read in time. Reprint it from Recent Bills.', e)
       return null
@@ -6267,7 +6277,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     </Tip>
                   )}
                   {o.close_type === 'paid' && !o.credit_note_id && hasPosAccess('manager') && (
-                    <Tip text="Issue a formal Credit Note against this bill — corrects revenue for a billing/price/tax error. Does not affect stock.">
+                    <Tip text="Issue a formal Credit Note that cancels this whole bill — e.g. the wrong customer, a duplicate, or a tax correction. It asks whether the food was served: if not (billed again, or a duplicate), the food goes back into Inventory.">
                       <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => setCreditNoteOrder(o)}>Credit Note</button>
                     </Tip>
                   )}

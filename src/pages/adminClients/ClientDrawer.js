@@ -58,8 +58,10 @@ function generateWebhookSecret() {
   return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// The two settings resolved at PRINT time, so a change reaches bills already issued (S739/S747).
-// Same sentences as Settings.js's retroWarnings(); `loaded` is the row as this drawer read it.
+// The two settings a save asks about (S739/S747): the prefix is resolved at PRINT time, so a change
+// reaches bills already issued; since S809 2c each bill keeps its own VAT status, so that one reaches
+// new bills, open tills and menu prices. Same sentences as Settings.js's retroWarnings(); `loaded` is
+// the row as this drawer read it.
 function retroBillWarnings(loaded, patch) {
   const out = []
   if ('invoice_prefix' in patch && (patch.invoice_prefix || '') !== (loaded?.invoice_prefix || '')) {
@@ -70,9 +72,10 @@ function retroBillWarnings(loaded, patch) {
       : `If this client has already issued bills without a code, every one of them reprints with ${now} added to its number from now on, because the number is assembled when a bill is printed, not when it is billed.`)
   }
   if ('is_vat_registered' in patch && (patch.is_vat_registered ?? true) !== (loaded?.is_vat_registered ?? true)) {
+    // S809 2c: same sentence as Settings.js's retroWarnings() — each bill keeps the type it was issued as.
     out.push((patch.is_vat_registered ?? true)
-      ? 'Past bills printed as plain PAN bills will reprint as Tax Invoices (PB→TI) with a VAT breakdown added, since the bill type is decided when a bill is printed.'
-      : 'Past Tax Invoices will reprint as plain PAN bills (TI→PB) with the VAT breakdown removed, since the bill type is decided when a bill is printed.')
+      ? 'Bills already issued stay PAN bills: they reprint the same and their figures in the reports do not change. Bills charged from now on are Tax Invoices. A till that is open while you save stops its next Charge once, loads this setting, and asks the cashier to charge the new total.'
+      : 'Tax Invoices already issued keep their VAT: they reprint as Tax Invoices with the same total, and the reports keep their VAT. Bills charged from now on are plain PAN bills. A till that is open while you save stops its next Charge once, loads this setting, and asks the cashier to charge the new total.')
     // S792 (D31): same sentence as Settings.js's retroWarnings().
     out.push((patch.is_vat_registered ?? true)
       ? 'Menu prices entered while this outlet gave PAN bills carry no VAT, so the till adds no VAT to those dishes until each price is entered again on Menu Pricing.'

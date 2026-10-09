@@ -544,7 +544,7 @@ export default function Periods() {
         confirmLabel: `Post ${parts.join(' and ')}`,
         body: [
           waiting > 0 && `${waiting} POS bill${waiting === 1 ? '' : 's'} from ${label} post${waiting === 1 ? 's' : ''} into Inventory — their revenue and ingredient usage are added to this period, so Inventory reports and stock levels catch up with what the till already sold.`,
-          waitingNotes > 0 && `${waitingNotes} credit note${waitingNotes === 1 ? '' : 's'} issued in ${label} ${waitingNotes === 1 ? 'takes its bill' : 'take their bills'}' revenue back out of this period. Stock is not touched — the food was served.`,
+          waitingNotes > 0 && `${waitingNotes} credit note${waitingNotes === 1 ? '' : 's'} issued in ${label} ${waitingNotes === 1 ? 'takes its bill' : 'take their bills'}' revenue back out of this period. Where a note said the food was not served (billed again, or a duplicate), that food also goes back into this period's stock.`,
         ].filter(Boolean).join(' '),
         run: () => performPosBackfill(period, label),
       })
@@ -567,7 +567,7 @@ export default function Periods() {
       if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
       // After the bills, so a credit note is never posted into a month its own bill has not reached.
       const notes = await withTimeout(
-        backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period }), 60000, 'Posting credit notes')
+        backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }), 60000, 'Posting credit notes')
       if (notes.error) { fail(`Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}, but its credit notes were not posted — re-running picks up wherever it stopped.`, notes.error); return }
       // The frozen snapshot does not follow the write (closed-periods.md): revenue just landed
       // in a month whose Monthly Report was minted at close, and the Purchases banner names the

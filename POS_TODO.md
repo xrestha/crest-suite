@@ -61,22 +61,15 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | --- | --- | --- | --- | --- |
 | GUEST-1 | A guest's "Note for the kitchen", an allergy for example, never reaches the kitchen: it shows grey on the waiter's banner and Accept drops it | 3 | Q11 | no |
 
-### P2 (46 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1)
+### P2 (39 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CHECKOUT-6 | After an outlet deregisters from VAT, every reprint or view of an old Tax Invoice prints a smaller total (KNOWN, now with the reprint effect) | 2 | — | yes |
-| CREDIT-NOTES-1 | Crediting a bill to re-ring it, as the guide says, or any "Duplicate bill" note, leaves the food counted twice in Inventory usage and that month's Variance | 2 | Q10 | yes |
-| CREDIT-NOTES-2 | A dropped connection mid-note leaves the bill unlinked for good. The note doesn't print, the cash refund and points reversal never run, and nothing can run them later | 2 | — | yes |
 | CUSTOMERS-PARKING-1 | Delivery platforms earn loyalty points on their own Credit bills. Live: BLOOM CAFE's only award went to a partner, 188 points = NPR 1,880 | 2 | — | yes |
 | CUSTOMERS-PARKING-2 | Points redeemed on a payment attempt that never finished stay spent after a reload, a till lock or a second till | 2 | — | yes |
 | CUSTOMERS-PARKING-3 | A failed read of the point value is taken as NPR 1 a point, and the till never checks what the server charged | 2 | — | no |
 | CUSTOMIZATION-1 | Option Groups treats the outlet as no-VAT when settings are missing or failed, so a choice price saved then is charged 13% over what was typed on a VAT outlet | 2 | — | no |
 | CUSTOMIZATION-3 | The server takes a must-choose dish with no choices and bills the plain price, while the QR path refuses it (KNOWN, new evidence) | 2 | — | yes |
-| IMS-HANDOFF-2 | A bill whose sales reached Inventory but whose "posted" mark did not stays "not posted" for good. Live: BLOOM CAFE bill 40, NPR 1,880 | 2 | — | yes |
-| IMS-HANDOFF-3 | Bills closed on a Staff PIN ignore trim loss in the stock ledger, and their comps are costed NPR 0 on screen and on the slip | 2 | — | yes |
-| REPORTS-1 | After a VAT deregistration, Sales Report, Covers and the 1L+ tab recompute past Tax Invoices without their VAT (KNOWN root, new reach) | 2 | — | yes |
-| SHIFTS-3 | A Credit Note's cash refund always takes the whole bill out of the drawer, even when part was paid by card, eSewa or points | 2 | — | yes |
 | ACCESS-5 | Deleting a cashier's POS login wipes their name from past bills, shifts and credit notes, though the confirm says names stay | 3 | Q17 | no |
 | ACCESS-6 | A page reload restarts the idle lock with 3 fresh minutes in the absent waiter's session | 3 | — | no |
 | ACCESS-7 | Locking one till signs that waiter out of every other till, and the other till loses its unsent order | 3 | Q18 | yes |
@@ -112,7 +105,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
 | SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (82 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7)
+### P3 (81 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -123,11 +116,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | CHECKOUT-13 | A PAN bill's Net Amount doesn't add up on paper (no Round Off line), and a Credit bill prints a "Tender" | 4 | — | no |
 | CHECKOUT-14 | The Complimentary tab says the slip shows no outlet name; it does | 4 | — | no |
 | CHECKOUT-15 | A save refused while split payments are recorded closes the payment window and silently drops them | 4 | — | no |
-| CREDIT-NOTES-5 | A note names and reprints its bill under today's tax settings (TI vs PB after a VAT change) (KNOWN root) | 4 | — | yes |
 | CREDIT-NOTES-7 | Searching notes by invoice number lists every fiscal year's match with no year shown | 4 | — | no |
 | CREDIT-NOTES-8 | The printed note loses a customized line's choices | 4 | — | no |
 | CREDIT-NOTES-9 | The Credit Notes page and the note's "Invoice Date" use the viewer's clock zone | 4 | — | no |
-| CREDIT-NOTES-10 | An unconfirmed cash refund's warning sends the manager to record it on the wrong shift | 4 | — | no |
+| CREDIT-NOTES-10 | An unconfirmed cash refund's warning sends the manager to record it on the wrong shift. Since 2e the refund is written with the note, so only a page older than crest-v420 can still show that warning | 4 | — | no |
 | CUSTOMERS-PARKING-9 | An unpaid Credit bill earns spendable points at close, though the guide says points follow payment | 4 | Q19 | yes |
 | CUSTOMERS-PARKING-10 | Nothing shows what points are worth per bill, and changing the point value re-prices every balance unwarned (BLOOM CAFE's test schemes give back 100% and 400%) | 4 | — | no |
 | CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
@@ -376,10 +368,10 @@ forward because their functions are rebuilt here anyway.
 | --- | --- | --- | --- |
 | 2a ✅ | CHECKOUT-1 (till half), ORDER-FLOW-1 (= CHECKOUT-9), CHECKOUT-5 (shipped 2026-10-09, app only, crest-v417) | none: the till's settings read, the Bill Register view, `closeBlocker` | Q8, Q9 |
 | 2b ✅ | CHECKOUT-1 (server half), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4, CHECKOUT-10, SHIFTS-1 (database half), SHIFTS-7 (P3); S809.4: `apply_pos_item_comps`' skipped partial row (shipped 2026-10-09, `20261009190000` live, crest-v419) | `guard_pos_order_close` (empty bill, open shift `FOR SHARE`, invoice year from the Nepal date), `guard_pos_credit_note` (year), `apply_pos_item_comps` (year, `comped` filter), `pos_cash_movements_guard` (`FOR SHARE`), `pos_shifts_guard` (`closed_at := now()`) | Q8 |
-| 2c | CHECKOUT-6, REPORTS-1, CREDIT-NOTES-5 (P3) | `pos_orders.vat_registered`, stamped at the close (after 2b) | — |
+| 2c ✅ | CHECKOUT-6, REPORTS-1, CREDIT-NOTES-5 (P3) (shipped 2026-10-09, `20261009200000` live, crest-v420) | `pos_orders.vat_registered`, stamped at the close (after 2b) | — |
 | 2d ✅ | CHECKOUT-7 (shipped 2026-10-09, app only, crest-v418) | none: the close read-back path | — |
-| 2e | CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3 | link trigger on `pos_credit_notes`; a restock `sales_entries` source and `ims_stock_movements_guard` | Q10 |
-| 2f | IMS-HANDOFF-2, IMS-HANDOFF-3 | `sales_entries` stamp trigger (and BLOOM bill 40's stamp); DEFINER depletion and comp-cost reads | — |
+| 2e ✅ | CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3; S809.4: a note's `created_at` is the server's (shipped 2026-10-09, `20261009210000` live, crest-v420) | link trigger on `pos_credit_notes`; a restock `sales_entries` source and `ims_stock_movements_guard` | Q10 |
+| 2f ✅ | IMS-HANDOFF-2, IMS-HANDOFF-3 (shipped 2026-10-09, `20261009220000` live, crest-v420; BLOOM's bill 40 was gone, so the repair marked 0) | `sales_entries` stamp trigger (and BLOOM bill 40's stamp); DEFINER depletion and comp-cost reads | — |
 | 2g | CUSTOMERS-PARKING-1, -2, -3 | `award_loyalty_points` / `redeem_loyalty_points`; `guard_pos_order_close` (a standing Loyalty leg, after 2c); point value > 0; BLOOM's 188 partner points zeroed | — |
 | 2h | CUSTOMIZATION-1, CUSTOMIZATION-3, GAP-OUTLETS-2 | `save_pos_order_items` (a must-choose dish with no choices, an unpriced new line), `push_master_data` (the branch keeps On POS and Active) | Q25 |
 
@@ -454,8 +446,8 @@ forward because their functions are rebuilt here anyway.
     cover them: a Close Shift between the two can freeze a report without that bill's cash leg. Fix:
     `pos_shifts_guard` refuses a close while a Split bill closed in the last 10 minutes on that shift has
     legs short of `paid_amount` ("press Close Shift again in a moment") (2b).
-  - A Credit Note inserted by a client session keeps a sent `created_at`, which backdates its printed
-    date: set `NEW.created_at := now()` on the non-restore path, with slice 2e (2b).
+  - ~~A Credit Note inserted by a client session keeps a sent `created_at`, which backdates its printed
+    date: set `NEW.created_at := now()` on the non-restore path, with slice 2e (2b).~~ Fixed in 2e.
   - `save_pos_order_items` leaves comped rows out of `before_sent` and `stored_sent`, so after a cancelled
     close the folded, already-sent comped dish reads as not sent and could print on a KOT again. Count
     comped rows in both, with slice 2h, which owns that function (main session, 2b review).
@@ -465,6 +457,38 @@ forward because their functions are rebuilt here anyway.
   - On a server `no_open_shift` the till keeps its cached shift id until the next press (cosmetic, 2b).
   - `viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
     no time limit; `reprintItemCompSlip` drops both read errors and prints nothing silently (2a).
+- **Found while drafting stage 2, wave 2 (2c, 2e, 2f; 2026-10-09, not fixed):**
+  - The Owner Report's POS section (`computeMonthlyReport.js`) still works out past bills with the VAT
+    flag read when the report is generated, so a month generated after a VAT change loses its VAT. Fix:
+    add `vat_registered` to its `pos_orders` select and pass `billVatRegistered(o, vatReg)` (2c).
+  - CREDIT-NOTES-5's server half: `guard_pos_credit_note` accepts any sent `original_invoice_no`,
+    `original_invoice_label` and `original_invoice_date_bs`. Set them from the bill (`v_order.invoice_no`,
+    the TI/PB label from `v_order.vat_registered`); no note column needed (2c).
+  - `PosCustomers.jsx`' settings comment says `is_vat_registered` moves the delivery commission base by
+    about 13 points. It does not: taxable + non-taxable is ex-VAT under either flag (2c).
+  - Do not switch an outlet's VAT status before every till has reloaded to crest-v420: an older till
+    prints under its old setting while the bill is stamped with the new one (2c).
+  - `openBilling` and `openCompTab` never catch a failed cost read, so the comp cost silently shows
+    NPR 0 (S695 says callers must) (2f).
+  - `imsPostWarning` is a local counter that never goes down: a timed-out post that later lands (now
+    marked by the database) still shows "1 not posted" until the page reloads (2f).
+  - `writeSalesEntries` links rows by the screen's `orderId`, not `updated.id`; equal on every path that
+    posts today, but fragile (2f).
+  - Same cause as IMS-HANDOFF-3, not switched: Sales Report's and Sales Exceptions' comp food cost (one
+    line each, `posFoodCosts`), `viewPosBill.js` (also opened by IMS logins with no POS rank, which
+    `pos_recipe_book` refuses, so it needs a fallback) and the Customization report (`loadDeltaExplosion`)
+    (2f).
+  - A note's takeback has the race bills had (a late post after a Periods post); no refusal for notes
+    yet. `creditNotePosting.js`' comment at its mark write and `posted: true` when only the mark failed
+    are moot now (2f).
+  - "Manual Sales by Category" (`useSalesPivotData.js`) excludes only `pos`/`pos_comp`, so it counts
+    `pos_credit` and `pos_credit_restock` rows as hand-entered sales (2e, predates it).
+  - `buildUsageMap` clamps a recipe's net sold at 0 for the base recipe but not for choice extras
+    (`ingredient_deltas`); matters only for a negative month (2e).
+  - A "not served" note on a bill from an earlier Inventory month puts the food back in the note's
+    month; the screen warns that the earlier month's count already settled it, but does not block (2e).
+  - Drafting briefs should give each parallel drafter its own scratchpad subfolder and local Postgres
+    port: two drafters overwrote each other's replica scripts (2c, 2e).
 - A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
   and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client). The
   cart save on an outlet move also tries to cancel a standing points redemption, which fails once the

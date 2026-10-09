@@ -13,6 +13,10 @@
 // The rule itself:
 //   - 'pos' / 'pos_comp' rows always deplete — PosOrders.jsx writes movements on every close.
 //   - 'pos_credit' rows never deplete — a credit note reverses revenue, not stock.
+//   - 'pos_credit_restock' rows DO count, with their negative qty_sold (S809 2e, owner decision Q10 a):
+//     the credit note said the bill's food was not served on it (billed again, or a duplicate), so
+//     its plates come back out of usage. They are never a till sale, so they never supersede a
+//     manual row.
 //   - a Daily manual row depletes only if POS did not sell that recipe on the same bs_day. Two
 //     different facts about the same recipe/day must not both deplete stock for it.
 //   - a Bulk manual row (bs_day 0) is the owner-decision D35 case (S792), below.
@@ -42,6 +46,11 @@ export function isManualSource(source) {
 
 export function isPosSource(source) {
   return source === 'pos' || source === 'pos_comp'
+}
+
+// A credit note's reversal of food that was not served (S809 2e). Negative qty_sold.
+export function isRestockSource(source) {
+  return source === 'pos_credit_restock'
 }
 
 // Bulk rows carry bs_day 0; a NULL bs_day is treated as Bulk rather than as day 0's own dated row,
@@ -177,6 +186,7 @@ export function selectDepletingSales(rows) {
   const posIndex = periodIndex(rows)
   return (rows || []).filter(r => {
     if (isPosSource(r.source)) return true
+    if (isRestockSource(r.source)) return true // takes the plates back out (negative qty_sold)
     if (!isManualSource(r.source)) return false // pos_credit, and anything added later
     return !posSupersedesManual(r.recipe_id, dayOf(r), posIndex)
   })

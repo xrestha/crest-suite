@@ -156,6 +156,10 @@ describe('finishing from the stored bill', () => {
       [{ qty: 1, unit_price: 1000, vat_rate: 0.13 }], true)).toBe(true)
     expect(storedLinesMatchPaid({ close_type: 'writeoff', paid_amount: 0 }, compWiped, false)).toBe(true)
     expect(storedLinesMatchPaid(row, null, false)).toBe(true) // unread lines are reported elsewhere
+    // S809 2c: the stored bill's own stamp decides, as on the printed bill, not the till's flag.
+    const stampedVat = { close_type: 'paid', paid_amount: 1130, discount_amount: 0, vat_registered: true }
+    expect(storedLinesMatchPaid(stampedVat, [{ qty: 1, unit_price: 1000, vat_rate: 0.13 }], false)).toBe(true)
+    expect(storedLinesMatchPaid({ ...stampedVat, vat_registered: false }, [{ qty: 1, unit_price: 1000, vat_rate: 0.13 }], true)).toBe(false)
   })
 
   test('the comp slip is the latest comp number on the stored bill', () => {

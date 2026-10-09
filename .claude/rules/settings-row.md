@@ -103,11 +103,12 @@ by branching on `isAdmin`:
 `pos_orders` stores only `invoice_no` and `invoice_fy`. The printed document number and the bill
 TYPE are both assembled when a bill is printed, from the settings row current at that moment
 (`posOrderPrintHtml.js`: `${vatReg ? 'TI' : 'PB'}${invoice_no}-${prefix}-${fy}`). So two ordinary
-fields on the Property tab are retroactive:
+fields on the Property tab were retroactive, and the first still is:
 
 - **`invoice_prefix`** — change CAC to CASA and every past invoice reprints as `TI2238-CASA-82/83`.
-- **`is_vat_registered`** — switch it off and past Tax Invoices reprint as PAN bills, prefix changed
-  and VAT breakdown gone.
+- **`is_vat_registered`** — until S809 2c, switching it off reprinted past Tax Invoices as PAN bills.
+  Since 2c each bill stores the status it was charged under (`pos_orders.vat_registered`), so the
+  switch reaches new bills, open tills and menu prices only.
 
 Both are legitimate edits (a client registers for VAT; the code was typed wrong on day one), so the
 answer is a confirmation naming the consequence, not a refusal. **The general test is whether the

@@ -1,5 +1,5 @@
 import { fmtNpr } from './posOrdersConstants'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 
 // A bill close whose answer was lost (S776) — the pure half of S809 CHECKOUT-7.
 //
@@ -68,9 +68,10 @@ export function paymentDifferenceNote(where, row, screen) {
 // They can disagree when a second press's save replaced the lines (comps included) after the first
 // try went out and before it landed. The printed Net Amount is computed from the lines, so the paper
 // would then disagree with the money taken — the till cannot correct a closed bill, but it must say so.
+// The bill's own tax status decides, as it does on the paper (S809 2c); `vatReg` only for a row with none.
 export function storedLinesMatchPaid(row, items, vatReg) {
   if (!row || row.close_type !== 'paid' || !items) return true
-  const { net } = computeOrderAmounts(row, items.filter(i => !i.comped), vatReg)
+  const { net } = computeOrderAmounts(row, items.filter(i => !i.comped), billVatRegistered(row, vatReg))
   return Math.abs(net - (Number(row.paid_amount) || 0)) < 1
 }
 

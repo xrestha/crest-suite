@@ -548,8 +548,10 @@ export default function Settings() {
   // printed document number is assembled at PRINT time from the settings row that is current when
   // the bill is reprinted (posOrderPrintHtml.js), so neither of these edits is forward-only:
   //   * `invoice_prefix` — every past bill's number changes with it, TI2238-CAC-82/83 → …-CASA-….
-  //   * `is_vat_registered` — the TI/PB prefix AND the VAT breakdown are both resolved the same
-  //     way, so switching it off reprints a tax invoice as a PAN bill, number included.
+  //   * `is_vat_registered` — until S809 2c the TI/PB prefix AND the VAT breakdown were resolved the
+  //     same way. Since 2c the close stamps each bill's own status (pos_orders.vat_registered) and
+  //     every reprint, report and Credit Note reads that, so this edit reaches new bills only; it
+  //     still asks, for the open tills and the menu prices (S792 D31).
   // Changing either is legitimate (a client registers for VAT, or the code was typed wrong on day
   // one); doing it without being told it reaches history is not.
   function retroWarnings(patch) {
@@ -565,9 +567,11 @@ export default function Settings() {
         : `If this client has already issued bills without a code, every one of them reprints with ${now} added to its number from now on, because the number is assembled when a bill is printed, not when it is billed.`)
     }
     if ('is_vat_registered' in patch) {
+      // S809 2c: every bill keeps the type it was issued as (pos_orders.vat_registered), so this
+      // sentence is about new bills and open tills, no longer about reprints.
       out.push(patch.is_vat_registered
-        ? 'Past bills printed as plain PAN bills will reprint as Tax Invoices (PB→TI) with a VAT breakdown added, since the bill type is decided when a bill is printed.'
-        : 'Past Tax Invoices will reprint as plain PAN bills (TI→PB) with the VAT breakdown removed, since the bill type is decided when a bill is printed.')
+        ? 'Bills already issued stay PAN bills: they reprint the same and their figures in the reports do not change. Bills charged from now on are Tax Invoices. A till that is open while you save stops its next Charge once, loads this setting, and asks the cashier to charge the new total.'
+        : 'Tax Invoices already issued keep their VAT: they reprint as Tax Invoices with the same total, and the reports keep their VAT. Bills charged from now on are plain PAN bills. A till that is open while you save stops its next Charge once, loads this setting, and asks the cashier to charge the new total.')
       // S792 (D31): a PAN outlet stores the typed menu price whole with no VAT rate, so the switch
       // changes what the till charges for dishes priced under the other setting.
       out.push(patch.is_vat_registered
@@ -1242,7 +1246,7 @@ export default function Settings() {
               </div>
             ))}
             <div className="form-field">
-              <label htmlFor="set-is-vat-registered"><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). The bill type is decided when a bill is PRINTED, so switching this also changes how every past bill reprints — a save asks before committing it. Match whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
+              <label htmlFor="set-is-vat-registered"><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Each bill keeps the type it was issued as, so switching this changes new bills only; bills already issued reprint and report the same. A save asks before committing it. Match whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
               <label className="form-check">
                 <input id="set-is-vat-registered" type="checkbox" checked={form.is_vat_registered ?? true}
                   onChange={e => update('is_vat_registered', e.target.checked)} />

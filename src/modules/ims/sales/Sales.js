@@ -56,8 +56,9 @@ const READ_ONLY_TAB = 'summary'
 const isComp = row => row.source === 'pos_comp'
 // What Daily Entry shows in its locked "From POS" column: real till sales and the credit notes
 // that reverse them. Comps are excluded here for the same reason they are excluded everywhere on
-// this page — a comped dish was never sold, and every figure here means real sales.
-const isPosRow = row => row.source === 'pos' || row.source === 'pos_credit'
+// this page — a comped dish was never sold, and every figure here means real sales. A credit note
+// whose food was not served (S809 2e, 'pos_credit_restock') reverses the sale just like any other.
+const isPosRow = row => row.source === 'pos' || row.source === 'pos_credit' || row.source === 'pos_credit_restock'
 
 // The price snapshot each recipe's STORED manual rows already carry (S756, owner decision D8).
 //

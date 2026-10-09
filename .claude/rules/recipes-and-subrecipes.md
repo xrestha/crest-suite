@@ -182,7 +182,9 @@ POS_TODO.md).
 `loadRecipeBook(scopedFrom)`: the client's recipes with their ingredient rows embedded, one request
 (the embed names `recipe_ingredients_recipe_id_fkey`, since the table points at `recipes` twice).
 Both feeds run the same `walkRecipeTree`, and `recipeCost.test.js` asserts deep-equal output on
-every fixture. Stock Movements, its Sub-Recipes tab and Variance use the book; the POS write paths
+every fixture. Stock Movements, its Sub-Recipes tab and Variance use the book; since S809 2f so does
+the till (comp costs, slips, the Z-report, a closing bill's stock lines), through the DEFINER read
+`pos_recipe_book` (`posRecipeBook.js`), because a PIN login cannot read `items`. The Periods backfill
 and the other readers still fetch level by level. A new multi-walk page should take the book.
 
 ## The walk is a PAGED read, and its seed list is the client's whole recipe book (S711)

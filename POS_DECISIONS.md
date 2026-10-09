@@ -180,6 +180,34 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 2, slice 2f: IMS-HANDOFF-2, IMS-HANDOFF-3 (P2)~~ — **shipped S809, 2026-10-09**,
+  migration `20261009220000` applied live (crest-v420). The database marks a bill posted to Inventory in
+  the same transaction as its sales rows (`sales_entries_stamp_pos_source`), and a credit note from its
+  `pos_credit` or `pos_credit_restock` rows; the frontend-only alternative (stamp from the Periods
+  counts) was rejected because it leaves the two writes able to come apart. The double-post refusal
+  (`pos_bill_already_posted`, the bill locked first) was pulled in from "considered and not filed"; the
+  operator's restore is exempt (the Q26 a shape). The till reads the recipe book through a DEFINER
+  function (`pos_recipe_book`) and the existing JS walk; a SQL walk was rejected as a third engine.
+  **Decided (owner, 2026-10-09, as recommended):** a supervisor's till receives the rates of the
+  ingredients in the dishes it bills; they are not shown on screen. Original rows: `IMS-HANDOFF.md`.
+- [x] ~~S809 stage 2, slice 2e: CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3 (P2), owner decision Q10 (a)~~
+  — **shipped S809, 2026-10-09**, migration `20261009210000` applied live (crest-v420). **Q10 (a):** a
+  Credit Note asks whether the bill's food was served; "No, billed again or a duplicate" puts it back
+  into the note's month (`pos_credit_notes.restock`, source `pos_credit_restock`, positive stock
+  movements negating the bill's own depletion), and waits until the bill's own sale is in Inventory.
+  The bill link, the cash refund and the points reversal are one transaction with the note
+  (`pos_credit_note_settle`); the planned "Finish" action shrank to the Book's Print for a note never
+  printed. A cash refund takes only the cash the bill brought in (`pos_bill_cash_taken`). **Decided
+  (owner, 2026-10-09, as recommended):** cash handed back for a card bill is a Cash Out on Shifts, never
+  a figure typed on the note. A note's `created_at` is the server's (S809.4). Original rows:
+  `CREDIT-NOTES.md`, `SHIFTS.md`.
+- [x] ~~S809 stage 2, slice 2c: CHECKOUT-6, REPORTS-1 (P2), CREDIT-NOTES-5 (P3)~~ — **shipped S809,
+  2026-10-09**, migration `20261009200000` applied live (crest-v420). Each bill stores its tax status,
+  stamped by the server at the close (`pos_orders.vat_registered`); reprints, every report and the bill's
+  Credit Note read it, and today's setting answers only for a bill with no stamp. A Charge from a till
+  whose settings predate a VAT switch is refused once and the till reloads. Credit Notes take the bill's
+  stamp in the app; the server half (`guard_pos_credit_note` trusting a sent `original_invoice_*`) is
+  filed in S809.4. Original rows: `CHECKOUT.md`, `REPORTS.md`, `CREDIT-NOTES.md`.
 - [x] ~~S809 stage 2, slice 2b: CHECKOUT-1 server half (P1), CHECKOUT-3, CHECKOUT-4, CREDIT-NOTES-4,
   CHECKOUT-10, SHIFTS-1 (P2), SHIFTS-7 (P3), owner decision Q8 (a)~~ — **shipped S809, 2026-10-09**,
   migration `20261009190000` applied live (crest-v419). The database decides each close: a Charge needs a

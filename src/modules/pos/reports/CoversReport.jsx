@@ -18,7 +18,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
 import ChartCard from '../../../components/ChartCard'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { nepalHour, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
 import { turnoverByBand, isDineIn, dineInOnly, coversTotals, addReturnsByBand } from './coversMath'
@@ -122,7 +122,7 @@ export default function CoversReport() {
     const results = await Promise.all([
       // Paged: every figure on this page (covers, RevPASH, turnover) divides by a count taken
       // from this read, so a truncation doesn't just shrink a total — it skews the averages.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id')
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id, vat_registered')
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .order('id')),
@@ -239,7 +239,8 @@ export default function CoversReport() {
 
   /* ── derived rows ── */
 
-  const netOf = useCallback(o => computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg).net, [itemsByOrder, vatReg])
+  // Each bill's net as it was issued (S809 2c, REPORTS-1): today's VAT flag only for a bill with no stamp.
+  const netOf = useCallback(o => computeOrderAmounts(o, itemsByOrder[o.id] || [], billVatRegistered(o, vatReg)).net, [itemsByOrder, vatReg])
   // Dine-in bills only — the population every cover figure below is built from (S754).
   const dineInOrders = useMemo(() => dineInOnly(orders), [orders])
   const dineInReturns = useMemo(() => returns.filter(r => isDineIn(r.order)), [returns])

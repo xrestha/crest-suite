@@ -127,6 +127,18 @@ const rules = [
     staff: 'This bill has already been credited, so no second Credit Note was issued.',
     operator: 'This bill already has a Credit Note — a bill is credited once — so no second note was issued and nothing was numbered. Find the existing note in the Credit Note Book; another manager may have issued it a moment ago.',
   },
+  // S809 2e (migration 20261009210000). Raised by pos_credit_note_settle, the trigger that finishes a
+  // note inside its own INSERT, so the note rolled back with it: nothing was issued or numbered.
+  {
+    test: e => hasCode(e, 'credit_note_refund_no_shift'),
+    staff: 'No shift is open, so the cash refund has nowhere to go. No Credit Note was issued — ask a supervisor to open a shift, or choose Other or None.',
+    operator: 'No shift is open, so a cash refund has no drawer count to come out of, and no Credit Note was issued (nothing was numbered). Open a shift and issue it again, or choose Other or None if the money did not come out of the till.',
+  },
+  {
+    test: e => hasCode(e, 'credit_note_link_failed'),
+    staff: 'The bill could not be marked as credited, so no Credit Note was issued. Close this, open the bill again and try again.',
+    operator: 'The bill could not be marked as credited, so no Credit Note was issued and nothing was numbered. Reload the bill and issue it again; if it happens again, contact Crest support.',
+  },
   {
     test: e => hasCode(e, 'stale_order'),
     staff: 'This order was changed on another device since you opened it. Nothing was saved — reload the order and add your changes again.',
@@ -173,6 +185,14 @@ const rules = [
     test: e => hasCode(e, 'no_open_shift'),
     staff: 'No shift is open on this till\'s outlet, so the bill was not closed and nothing was charged. Open a shift in Shifts, then charge the bill again.',
     operator: 'Every bill is charged onto the open shift so its money lands on a drawer count, and no shift is open at this outlet (it may have been closed on another device a moment ago). The bill is still open and nothing was charged. Open a shift in POS → Shifts, then charge it again.',
+  },
+  // S809 2c (migration 20261009200000). The close stamps the bill's VAT status from settings, and a
+  // till that loaded its settings before the Owner switched VAT registration worked the total out
+  // under the other one. Raised by the BEFORE trigger on the still-open order: nothing was charged.
+  {
+    test: e => hasCode(e, 'pos_vat_status_changed'),
+    staff: 'The restaurant\'s VAT setting was changed since this till loaded it, so the bill was not charged. The till is loading the new setting — check the new total with the guest, then charge again.',
+    operator: 'This outlet\'s VAT registration was switched in Settings after this till loaded it, so the total on screen was worked out the other way and the bill was not charged. Nothing was charged or numbered. Wait for the till to reload its settings (or reload the page), check the new total, then charge again.',
   },
   // Raised by guard_pos_order_close, guard_pos_credit_note and apply_pos_item_comps before they write,
   // when Nepal's date is past the end of the bs_months table (2031-04-13 as of 2026), so no year can
@@ -691,6 +711,32 @@ const rules = [
     test: e => hasCode(e, 'item_other_client'),
     staff: 'That item belongs to another business, so it cannot be used here. Nothing was saved.',
     operator: 'That item belongs to another business on Crest, so this business cannot record it. Nothing was saved. Reload the page and pick the item again from this business\'s own list.',
+  },
+  // S809 2f (migration 20261009220000, sales_entries_stamp_pos_source): a till bill's sales reach
+  // Inventory once, under the closed bill they came from. 23505 / 23514, so being above the generic
+  // constraint rules at the end is what matters.
+  {
+    test: e => hasCode(e, 'pos_bill_already_posted'),
+    staff: "This bill's sales are already in Inventory, so they were not added again. Nothing needs doing.",
+    operator: "This bill's sales were already in Inventory — another device or Post POS bills got there first — so they were not added a second time, and the bill is marked posted. Nothing needs doing.",
+  },
+  {
+    test: e => hasCode(e, 'pos_sale_unlinked'),
+    staff: 'This sale did not name the closed bill it came from, so it was not added to Inventory. Tell your manager.',
+    operator: "A till sale is added to Inventory under the closed bill it came from, at this outlet, and this one was not, so nothing was added. Use Periods → Post POS bills to Inventory, which posts each closed bill from what is stored on it.",
+  },
+  // S809 2e (migration 20261009210000): a Credit Note's Inventory posting must follow the note's own
+  // answer to "was the food served?". Both raised by a BEFORE trigger (42501), so above the generic
+  // 42501 rule below; nothing was written.
+  {
+    test: e => hasCode(e, 'credit_note_restock_mismatch'),
+    staff: 'This Credit Note said its food was not served, and this page is older than that, so nothing was posted to Inventory. Reload the page and post it again.',
+    operator: 'This Credit Note said its food was not served (billed again, or a duplicate), so posting it to Inventory must also put that food back — and this page is older than that rule. Nothing was posted and the note is still waiting: reload the page, then post it again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_credit_restock_invalid'),
+    staff: 'Stock can only be put back by a Credit Note that said its food was not served. Nothing was recorded.',
+    operator: 'Food goes back into Inventory only through a Credit Note that said the bill\'s food was not served, and only as stock added back. Nothing was recorded.',
   },
 
   // RLS refused, or EXECUTE was never granted on a new function signature.

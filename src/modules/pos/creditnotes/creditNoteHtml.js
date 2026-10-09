@@ -18,8 +18,13 @@ import { COPY_LABEL } from '../orders/posOrdersConstants'
 import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 export { COPY_LABEL }
 
-export function buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, copyLabel) {
-  const vatReg = settings.is_vat_registered
+// `billVat` (S809 2c, CREDIT-NOTES-5): the tax status of the BILL this note credits, from its own
+// stamp (pos_orders.vat_registered). A note corrects a Tax Invoice or a PAN bill because its bill was
+// one, so its VAT/PAN label and its Taxable/VAT lines follow the bill, not today's setting: a VAT
+// note reprinted after a deregistration keeps the VAT its Net Credited includes. Today's setting
+// answers only when the bill has no stamp (null).
+export function buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, copyLabel, billVat = null) {
+  const vatReg = typeof billVat === 'boolean' ? billVat : settings.is_vat_registered
   const prefix = esc(settings.invoice_prefix || '')
   const cnNo   = `CN${creditNote.credit_note_no}-${prefix}${prefix ? '-' : ''}${esc(creditNote.invoice_fy || '')}`
   const now       = new Date(creditNote.created_at || Date.now())
@@ -116,9 +121,9 @@ export function printCreditNoteHtml(html, onPopupBlocked) {
 // was opened and whatever it returned, so a blocked pop-up still advanced print_count and the next
 // real print came out labelled as a later copy than any that had ever existed. The window is opened
 // first now, and the count only moves when it actually did.
-export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap) {
+export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap, billVat = null) {
   const newCount = (creditNote.print_count || 0) + 1
-  const printed = printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, COPY_LABEL(newCount)))
+  const printed = printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, COPY_LABEL(newCount), billVat))
   if (!printed) return { printed: false, newCount: creditNote.print_count || 0, countError: null }
   const { error } = await scopedUpdate('pos_credit_notes', clientId, { print_count: newCount }).eq('id', creditNote.id)
   return { printed: true, newCount, countError: error || null }

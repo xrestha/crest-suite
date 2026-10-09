@@ -1,4 +1,4 @@
-import { computeOrderAmounts, computeGroupAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, computeGroupAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 
 // The Sales Report's row arithmetic, lifted out of SalesReport.jsx (S754) so the two owner
 // decisions it carries can be asserted rather than eyeballed:
@@ -14,6 +14,11 @@ import { computeOrderAmounts, computeGroupAmounts } from '../../../utils/posBill
 //
 // Every figure here is built from computeOrderAmounts / computeGroupAmounts (posBillingMath.js),
 // never a second copy of the discount-and-VAT rule.
+//
+// `vatReg` is today's settings flag, and since S809 2c (REPORTS-1) it decides only a bill with no
+// tax-status stamp. Each bill is otherwise read as it was issued (`billVatRegistered`): a Tax Invoice
+// keeps its VAT after the outlet deregisters, so a past month still matches its VAT return and its
+// Z-reports, a party that crossed one lakh stays over it, and a bill still cancels against its note.
 
 export const NOT_RECORDED = 'Not recorded'
 export const SPLIT_NO_BREAKDOWN = 'Split (breakdown missing)'
@@ -28,7 +33,7 @@ export function zeroAmounts() {
 
 /** A bill's figures in the report's vocabulary. `items` must already exclude comped lines. */
 export function billAmounts(order, items, vatReg) {
-  const a = computeOrderAmounts(order, items || [], vatReg)
+  const a = computeOrderAmounts(order, items || [], billVatRegistered(order, vatReg))
   return {
     gross: a.grossAmt, discount: a.discount, taxable: a.taxableBase, nonTaxable: a.nonTaxableBase,
     vat: a.vatAmt, net: a.net, qty: a.totalQty,
@@ -174,7 +179,7 @@ export function buildGroupedRows({ orders, creditNotes, orderById, itemsByOrder,
   const grouped = {}
   const ensure = (key, name) => (grouped[key] = grouped[key] || { key, name, qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
   const add = (order, items, sign) => {
-    const byKey = computeGroupAmounts(order, items || [], vatReg, keyOf, i => ({ name: labelOf(i) }))
+    const byKey = computeGroupAmounts(order, items || [], billVatRegistered(order, vatReg), keyOf, i => ({ name: labelOf(i) }))
     for (const [key, v] of Object.entries(byKey)) {
       const b = ensure(key, v.name)
       if (sign > 0) b.qtySales += v.qty
