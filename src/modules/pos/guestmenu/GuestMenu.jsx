@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Plus, Minus, X, Search, SlidersHorizontal, ChevronRight } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 import { DEFAULT_RECIPE_CATS } from '../../../context/SettingsContext'
 import Modal from '../../../components/Modal'
 import { useGuestDocumentIdentity } from './guestDocument'
@@ -16,6 +16,7 @@ import { playChime } from '../posChime'
 import {
   tidyName, orderCategories, matchesSearch, SEARCH_THRESHOLD,
   STAGES, STAGE_SHORT, stageFromProgress, laterStage,
+  newRequestKey, orderSignature, cartWithout,
 } from './guestMenuHelpers'
 // The page's structure, the order tracker, the choice sheet and the touch tier. Colour comes from the
 // app theme, which ThemeContext pins to the default preset on this route (S767) — see the header
@@ -60,6 +61,29 @@ function playStageChangeChime() { playChime([660, 880], 0.15) }
 // The submit is bounded. A stalled call used to leave "Placing order…" on screen indefinitely with
 // no way out (measured past 25 s in the critique); the booking page already bounds its submit at 20.
 const SUBMIT_TIMEOUT_MS = 20000
+// GUEST-6 (S809 3b): the menu's first read is bounded too. A stalled read on café Wi-Fi used to leave
+// the guest on the loading skeleton with nothing to press.
+const MENU_TIMEOUT_MS = 20000
+
+// GUEST-2 (S809 3b): an order whose answer never came back (a dropped connection or a timeout), kept
+// per table so a reload does not lose it: { key, sig, items, lines, covers, note }. The resend of the
+// same order carries the same key, and the server answers it with the order that landed.
+const attemptKey = tableId => `guestOrderAttempt:${tableId}`
+function loadStoredAttempt(tableId) {
+  try {
+    const raw = sessionStorage.getItem(attemptKey(tableId))
+    const a = raw ? JSON.parse(raw) : null
+    return a?.key ? a : null
+  } catch {
+    return null
+  }
+}
+function saveStoredAttempt(tableId, attempt) {
+  try { sessionStorage.setItem(attemptKey(tableId), JSON.stringify(attempt)) } catch { /* the resend then goes as a new order */ }
+}
+function clearStoredAttempt(tableId) {
+  try { sessionStorage.removeItem(attemptKey(tableId)) } catch { /* nothing stored */ }
+}
 
 const sessionKey = tableId => `guestOrderReq:${tableId}`
 function loadStoredRequest(tableId) {
@@ -259,7 +283,9 @@ export default function GuestMenu() {
 
   useEffect(() => {
     let cancelled = false
-    supabase.rpc('get_guest_menu', { p_table_id: tableId }).then(({ data, error: err }) => {
+    // GUEST-6 (S809 3b): a read that outruns MENU_TIMEOUT_MS is the failed-load card, whose Try again
+    // reads again.
+    settleWithin(supabase.rpc('get_guest_menu', { p_table_id: tableId }), MENU_TIMEOUT_MS, 'Loading the menu').then(({ data, error: err }) => {
       if (cancelled) return
       if (err) { setError(true); setRows([]); return }
       setRows(data || [])
@@ -269,7 +295,9 @@ export default function GuestMenu() {
   }, [tableId, retryToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function loadOptions(isCancelled = () => false) {
-    return supabase.rpc('get_guest_menu_options', { p_table_id: tableId }).then(({ data, error: err }) => {
+    // Bounded like the menu (GUEST-6): a stalled read is a failed one, which keeps the menu and says
+    // sizes and extras did not load.
+    return settleWithin(supabase.rpc('get_guest_menu_options', { p_table_id: tableId }), MENU_TIMEOUT_MS, 'Loading sizes and extras').then(({ data, error: err }) => {
       if (isCancelled()) return null
       // PGRST202 is "no such function": the frontend deployed before migration 20260919140000. That
       // is every outlet's menu, not a failed read of one, so it reads as "no choices" rather than
@@ -649,12 +677,40 @@ export default function GuestMenu() {
     const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, ...(l.option_ids.length ? { options: l.option_ids } : {}) }))
     const itemsSnapshot = cartLines.map(l => ({ name: l.summary ? `${l.name} (${l.summary})` : l.name, qty: l.qty }))
     const linesSnapshot = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, option_ids: l.option_ids }))
+    // GUEST-2 (S809 3b): the same order sent again carries the key of the send whose answer never
+    // came back, so the server hands back that order if it landed. An order changed since then first
+    // asks whether the earlier one landed, and takes it up if it did (adoptEarlierOrder).
+    const sig = orderSignature(linesSnapshot, guestNote, covers)
+    let attempt = loadStoredAttempt(tableId)
+    if (attempt && attempt.sig !== sig) {
+      const landed = await earlierOrderLanded(attempt.key)
+      if (landed === null) {
+        setSubmitting(false)
+        setSubmitError("We still can't tell if your earlier order was sent. Check your connection and try again, or ask a member of staff.")
+        return
+      }
+      if (landed) {
+        setSubmitting(false)
+        adoptEarlierOrder(attempt)
+        return
+      }
+      clearStoredAttempt(tableId)
+      attempt = null
+    }
+    let key = attempt?.key || newRequestKey()
+    const args = { p_table_id: tableId, p_items: payload, p_notes: guestNote || null, p_covers: covers }
     let data, err
     try {
       ;({ data, error: err } = await withTimeout(
-        supabase.rpc('submit_guest_order', { p_table_id: tableId, p_items: payload, p_notes: guestNote || null, p_covers: covers }),
+        supabase.rpc('submit_guest_order', key ? { ...args, p_request_id: key } : args),
         SUBMIT_TIMEOUT_MS, 'Sending your order',
       ))
+      // PGRST202: the database is older than this page (no p_request_id yet), so nothing ran. Sent
+      // again the old way, without the key.
+      if (key && err?.code === 'PGRST202') {
+        key = null
+        ;({ data, error: err } = await withTimeout(supabase.rpc('submit_guest_order', args), SUBMIT_TIMEOUT_MS, 'Sending your order'))
+      }
     } catch (e) {
       err = e
     }
@@ -666,6 +722,10 @@ export default function GuestMenu() {
       // for every refusal, so each gets its own sentence (guestOrderRefusal.js).
       console.error('submit_guest_order failed', err)
       const refusal = guestOrderRefusal(err, displayName, { online: navigator.onLine !== false })
+      // An unknown outcome keeps the key for the resend. A refusal stored nothing under this key; an
+      // earlier unanswered send stays kept, because its own outcome is still not known.
+      if (refusal.resetKey) clearStoredAttempt(tableId)
+      else if (refusal.unknown && key && !attempt) saveStoredAttempt(tableId, { key, sig, items: itemsSnapshot, lines: linesSnapshot, covers, note: guestNote })
       setSubmitError(refusal.text)
       // The menu on screen offered a dish the server no longer has. Re-read it in place — not via
       // retryLoadMenu, which blanks the page to its loading state and would close the sheet the
@@ -695,6 +755,7 @@ export default function GuestMenu() {
       }
       return
     }
+    clearStoredAttempt(tableId)
     try {
       sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, lines: linesSnapshot, covers }))
     } catch { /* the tracker still works for this session */ }
@@ -713,6 +774,32 @@ export default function GuestMenu() {
     try { sessionStorage.removeItem(sessionKey(tableId)) } catch { /* nothing stored */ }
     setRequestId(null)
     setRequestSnapshot(null)
+  }
+
+  // GUEST-2 (S809 3b): did the send whose answer never came back reach the restaurant? true / false,
+  // or null when that cannot be told now (the read failed too). get_guest_order_progress answers with
+  // a row for an order that exists, and with none for one that never landed.
+  async function earlierOrderLanded(key) {
+    const { data, error: err } = await settleWithin(
+      supabase.rpc('get_guest_order_progress', { p_request_id: key }), SUBMIT_TIMEOUT_MS, 'Checking your earlier order')
+    if (err) return null
+    return Array.isArray(data) && data.length > 0
+  }
+
+  // The earlier order did land: its tracker takes over, its dishes come off the cart, and anything the
+  // guest added after it stays for their next order (the table holds one waiting order at a time).
+  function adoptEarlierOrder(attempt) {
+    clearStoredAttempt(tableId)
+    try {
+      sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: attempt.key, items: attempt.items, lines: attempt.lines, covers: attempt.covers }))
+    } catch { /* the tracker still works for this session */ }
+    setRequestId(attempt.key)
+    setRequestSnapshot({ items: attempt.items || [], lines: attempt.lines || [], covers: attempt.covers || 1 })
+    setCart(prev => cartWithout(prev, attempt.lines, cartKey))
+    if ((guestNote || '').trim() === (attempt.note || '').trim()) setGuestNote('')
+    setReviewOpen(false)
+    setRestoreNote('Your earlier order did reach the restaurant. Anything you added after it is still in your order.')
+    setJustPlaced(true)
   }
 
   // "Order again" after staff could not take an order puts that order back in the cart and opens it,

@@ -46,10 +46,24 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
         <div style={{ fontSize: 13, color: 'var(--theme-text2)', marginBottom: 8 }}>
           {(ticket.items || []).map((i, idx) => {
             const note = typeof i?.notes === 'string' ? i.notes.trim() : ''
+            // S809 3d (FLOOR-KITCHEN-2): the estimate is for what is left to make. A dish taken off the
+            // order since the ticket was sent is struck through (the board's own `removals`), a reduced
+            // one shows its new count, and each dish shows its choices as the card does.
+            const removed = (ticket.removals?.[idx] || []).reduce((n, e) => n + (Number(e.qty) || 0), 0)
+            const left = Math.max(0, (Number(i.qty) || 0) - removed)
             return (
               <div key={idx}>
-                {i.qty}× {i.name}
-                {note && <div style={{ fontSize: 13, color: 'var(--theme-text1)' }}>↳ {note}</div>}
+                {removed > 0 && left === 0
+                  ? <span><s style={{ color: 'var(--theme-text3)' }}>{i.qty}× {i.name}</s> <span style={{ color: 'var(--theme-red-text)' }}>cancelled</span></span>
+                  : removed > 0
+                    ? <span><s style={{ color: 'var(--theme-text3)' }}>{i.qty}</s> → {left}× {i.name}</span>
+                    : <span>{i.qty}× {i.name}</span>}
+                {left > 0 && (i.options || []).map((o, n) => (
+                  <div key={n} style={{ fontSize: 13, color: o.is_removal ? 'var(--theme-red-text)' : 'var(--theme-text1)', fontWeight: o.is_removal ? 700 : 400 }}>
+                    {o.is_removal ? `NO ${String(o.kitchen || '').replace(/^no\s+/i, '')}` : `+ ${o.kitchen}`}
+                  </div>
+                ))}
+                {left > 0 && note && <div style={{ fontSize: 13, color: 'var(--theme-text1)' }}>↳ {note}</div>}
               </div>
             )
           })}

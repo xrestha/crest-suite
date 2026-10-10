@@ -8,8 +8,10 @@
 //
 // Every one of these refusals is raised inside the function before its INSERT, so each may say
 // the order was not sent. A dropped connection is not one of them: it proves nothing about whether
-// the request landed, so it says so. Resending is still safe — a table holds one waiting request
-// (the unique index behind `pending`), so a resend of an order that did land is refused, not doubled.
+// the request landed, so it says so, and marks it `unknown`. Resending is safe because of the order
+// key (S809 3b, GUEST-2): the page sends the same key again, and the server answers a key that landed
+// with that same order. The one-waiting-order rule alone never made it safe — it stops a second order
+// only while the first still waits, so a resend after staff had accepted the first was a second round.
 
 // `timed out` is withTimeout's own wording (S767): the page bounds the submit at 20 s, and a request
 // that outran it is exactly as unknown as one whose connection dropped.
@@ -81,18 +83,23 @@ export function guestOrderRefusal(err, outletName, { online = true } = {}) {
       return { text: 'That order has more than 30 different dishes, so it was not sent. Send part of it now and the rest as a second order.', refreshMenu: false }
     case 'pending':
       return { text: `This table already has an order waiting for ${who} to accept, so this one was not sent. Please wait for that one first.`, refreshMenu: false }
+    // S809 3b: the order key belongs to another table's order (only a hand-made request, or a phone
+    // that moved tables mid-send, can do this). Nothing was sent; the page makes a new key.
+    case 'request_key_conflict':
+      return { text: "We couldn't send that order. Try again, or ask a member of staff.", refreshMenu: false, resetKey: true }
     default:
       break
   }
 
   // Held to the guest menu's copy rule (S767, PRODUCT.md): two short sentences, no subclause —
   // most guests read English as a second or third language, and this is read mid-panic. Sending
-  // again stays safe without saying so: while the first order waits, a second is refused as
-  // `pending` above rather than doubled.
+  // again is safe without saying so: the page resends under the same order key (S809 3b), so an
+  // order that did land comes back as itself rather than as a second one.
   if (!online || NETWORK_RE.test(err?.message || '')) {
     return {
       text: "The connection dropped, so we can't tell if your order was sent. Try again, or ask a member of staff.",
       refreshMenu: false,
+      unknown: true,
     }
   }
   return { text: "We couldn't send that order. Try again, or ask a member of staff.", refreshMenu: false }

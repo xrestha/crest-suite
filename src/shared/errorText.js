@@ -453,6 +453,13 @@ const rules = [
     staff: 'Only a supervisor can cancel a kitchen ticket. Nothing was changed — to stop the food, a supervisor voids the order.',
     operator: 'A kitchen ticket is cancelled when its order is voided, or by a POS supervisor or above, and this login is neither — so the ticket was left as it was.',
   },
+  // S809 3d (migration 20261010130000): a kitchen login's Clear is checked against the ORDER, not the
+  // board. Raised by the BEFORE trigger, so nothing changed.
+  {
+    test: e => hasCode(e, 'pos_kot_clear_food_left'),
+    staff: 'The order still has some of the food on this ticket, so it was not cleared. Nothing was changed — make what is still ordered, or ask a supervisor to clear it.',
+    operator: 'The kitchen can clear a ticket only once every dish on it has been taken off the order, and this order still holds some of what the ticket carries (or food that never reached a ticket), so nothing was changed. Check the order on the till: take the dish off there with a reason, or clear the ticket with a supervisor login.',
+  },
   {
     test: e => hasCode(e, 'pos_kot_status_backwards'),
     staff: 'A kitchen ticket only moves forward, and a cancelled one stays cancelled. Nothing was changed — reload the screen.',
@@ -472,6 +479,25 @@ const rules = [
     test: e => hasCode(e, 'pos_tables_rank'),
     staff: 'Only the owner or a POS manager can add, rename, move or delete tables. Nothing was changed.',
     operator: 'Only the Owner or a POS manager can add, rename, move or delete tables, so nothing was changed. Marking a table occupied or free from the floor is unaffected.',
+  },
+  // S809 3b (migration 20261010120000): guard_pos_guest_order_request, a BEFORE UPDATE trigger, so the
+  // statement rolled back and each may say nothing was changed. The till writes an answer only while a
+  // guest order still waits, so it meets none of these in normal service; they are what an older till
+  // (a second answer to the same order) or a hand-made request meets.
+  {
+    test: e => hasCode(e, 'pos_guest_order_decided'),
+    staff: 'That guest order was already answered on another till, so nothing was changed. Check this table’s order before you send anything.',
+    operator: 'This guest QR order was already accepted or turned away. A guest order is answered once and that answer stands, so nothing was changed. If it was turned away by mistake, add the dishes on the till, or ask the guest to send it again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_guest_order_frozen'),
+    staff: 'A guest’s QR order can’t be changed once it is sent — staff only accept it or turn it away. Nothing was changed.',
+    operator: 'A guest’s QR order stays exactly as the guest sent it — dishes, table, covers and note — so this change was refused and nothing was changed. Accept it and change the order on the till, or turn it away.',
+  },
+  {
+    test: e => hasCode(e, 'pos_guest_order_other_outlet'),
+    staff: 'That guest order belongs to another outlet’s table, so it was not added to this bill. Go back to the floor and open the table again.',
+    operator: 'A guest QR order can only go onto a bill of its own outlet, and this one named another outlet’s bill, so nothing was changed. Reload the till; if it happens again, the till is signed in to a different outlet than the table it shows.',
   },
   {
     test: e => hasCode(e, 'pos_setup_rank'),
@@ -767,6 +793,13 @@ const rules = [
     test: e => hasCode(e, 'pos_bill_already_posted'),
     staff: "This bill's sales are already in Inventory, so they were not added again. Nothing needs doing.",
     operator: "This bill's sales were already in Inventory — another device or Post POS bills got there first — so they were not added a second time, and the bill is marked posted. Nothing needs doing.",
+  },
+  // S809 3j (migration 20261010140000): a Credit Note's Inventory reversal goes in once, as a bill's
+  // sales do. 23505, so above the generic duplicate rule too.
+  {
+    test: e => hasCode(e, 'pos_credit_note_already_posted'),
+    staff: 'This credit note is already taken off Inventory sales, so it was not taken off again. Nothing needs doing.',
+    operator: 'This credit note was already taken off Inventory sales — another device, or Post to Inventory on the floor or in Periods, got there first — so it was not taken off a second time, and the note is marked posted. Nothing needs doing.',
   },
   {
     test: e => hasCode(e, 'pos_sale_unlinked'),

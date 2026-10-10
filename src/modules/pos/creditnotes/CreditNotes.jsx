@@ -327,7 +327,7 @@ export default function CreditNotes() {
                               column, select('*')) marks nothing rather than every note (S747). */}
                           {'ims_posted_at' in n && n.ims_posted_at == null && (
                             <Tip width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
-                              text="This note has not yet taken its bill's revenue back out of Inventory — usually because no Inventory period was open for the month it was issued in, or because its bill had not reached Inventory yet. Open that month in Periods and press Post POS bills to Inventory on it.">
+                              text="This note has not yet taken its bill's revenue back out of Inventory — usually because its month was not open in Inventory when it was issued, or because its bill had not reached Inventory yet. Press Post to Inventory on the Orders floor while its month is open; a closed month is posted by the Owner, from Periods.">
                               <span className="badge-amber">Not in Inventory</span>
                             </Tip>
                           )}

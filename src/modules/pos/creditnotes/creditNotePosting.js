@@ -127,6 +127,11 @@ export async function postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, 
   if (rows.length > 0) {
     // Plain supabase.from: sales_entries is period-scoped, not in CLIENT_SCOPED_TABLES.
     const { error } = await supabase.from('sales_entries').insert(rows)
+    // S809 3j: another post got there first (a manager's Post to Inventory on the floor, or the
+    // Owner's in Periods, in the same moment). The database took the note off Inventory sales once,
+    // marked it, and refused this second reversal, so the note IS posted; its stock, if any, went
+    // back with that post.
+    if (error && (error.hint === 'pos_credit_note_already_posted' || /pos_credit_note_already_posted/.test(error.message || ''))) return { posted: true }
     if (error) return { posted: false, reason: 'write', error }
   }
   await writeRestockMovements({ scopedInsert, rows: restockRows })

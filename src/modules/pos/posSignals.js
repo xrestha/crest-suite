@@ -36,6 +36,8 @@
 //      "you have not fired these three dishes" was a thin amber pill and a 20-minute-late ticket
 //      was a 2px border.
 
+import { isChangeLine } from './kitchenNotes'
+
 // ---------------------------------------------------------------------------------------------
 // Table status — a CATEGORY. Available / Occupied / Reserved are three states of a table and
 // none of them is a problem, so none of them takes a signal colour. Occupied is the live one and
@@ -108,6 +110,20 @@ export function ticketSummaryChip(summary) {
     return { label: summary.ready === summary.open ? 'Ready' : `${summary.ready} ready`, className: KOT_STATUS_BADGE.ready }
   }
   return { label: KOT_STATUS_LABEL[summary.stage], className: KOT_STATUS_BADGE[summary.stage] }
+}
+
+// A ticket with nothing left on it to make (S809 3d, FLOOR-KITCHEN-2): every dish it sent was taken off
+// the order again. `removedByLine` is the Kitchen Display's per-line list of pulls attributed to this
+// ticket ({ [lineIndex]: [{ qty, … }] }). A CHANGE line (kitchenNotes.js) is no dish, and a ticket with
+// no dish is never "all taken off": a CHANGE card is cleared by Seen. Such a ticket's one button is
+// Clear (→ cancelled), and guard_pos_kot_log checks the same thing against the ORDER before it lets a
+// kitchen login clear it, so a board that attributed a pull wrongly is refused, never believed.
+export function ticketAllPulled(items, removedByLine) {
+  const dishes = (Array.isArray(items) ? items : [])
+    .map((item, idx) => [item, idx])
+    .filter(([item]) => !isChangeLine(item) && (Number(item?.qty) || 0) > 0)
+  return dishes.length > 0 && dishes.every(([item, idx]) =>
+    (removedByLine?.[idx] || []).reduce((n, e) => n + (Number(e?.qty) || 0), 0) >= (Number(item.qty) || 0))
 }
 
 // ---------------------------------------------------------------------------------------------

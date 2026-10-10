@@ -49,6 +49,23 @@ describe('guestOrderRefusal', () => {
     expect(r.text).not.toMatch(/was not sent/)
   })
 
+  it('marks a dropped connection or a timeout as an unknown outcome, and a refusal as not (S809 3b)', () => {
+    // `unknown` is what keeps the order key for the resend; a refusal sent nothing under it.
+    expect(guestOrderRefusal({ message: 'TypeError: Failed to fetch' }, 'X').unknown).toBe(true)
+    expect(guestOrderRefusal(new Error('Sending your order timed out after 20s'), 'X').unknown).toBe(true)
+    expect(guestOrderRefusal({ message: 'anything' }, 'X', { online: false }).unknown).toBe(true)
+    for (const hint of ['pending', 'unavailable_items', 'unavailable_options', 'not_accepting', 'inactive', 'request_key_conflict']) {
+      expect([hint, guestOrderRefusal(refused(hint), 'X').unknown]).toEqual([hint, undefined])
+    }
+  })
+
+  it('an order key of another table asks for a new key and claims nothing about the order (S809 3b)', () => {
+    const r = guestOrderRefusal(refused('request_key_conflict'), 'X')
+    expect(r.resetKey).toBe(true)
+    expect(r.refreshMenu).toBe(false)
+    expect(r.text).not.toMatch(/key|table/i)
+  })
+
   it('keeps the network sentence short enough to read mid-service (S767)', () => {
     const words = guestOrderRefusal({ message: 'Failed to fetch' }, 'X').text.split(/\s+/).length
     expect(words).toBeLessThanOrEqual(20)

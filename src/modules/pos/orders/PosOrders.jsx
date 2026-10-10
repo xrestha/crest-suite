@@ -38,6 +38,7 @@ import {
 } from '../../../utils/offlineQueue'
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
 import BillingStation from './BillingStation'
+import PosImsPostingBanner from './PosImsPostingBanner'
 import {
   TILL_SETTINGS_READ_MS, TILL_SETTINGS_RETRY_MS, tillSettingsReadOutcome, cacheCarriesRouting, tillSettingsNotice,
   tillSettingsBlockText, tillSettingsReprintText, closeStartRefusal, fullInvoiceRequired, fullInvoiceRefusal,
@@ -108,8 +109,9 @@ const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated'
 // the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
 export default function PosOrders({ billingStation = false } = {}) {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled, outlets } = useAuth()
-  // Who the floor's Inventory-posting banners are for (S776): the recovery is Periods → Post POS bills
-  // to Inventory, an owner/manager job. hasPosAccess resolves admin and Owner to manager already.
+  // Who the floor's Inventory-posting banner is for (S776): since S809 3j it posts the open month itself
+  // (Post to Inventory); a closed month stays the Owner's, in Periods. hasPosAccess resolves admin and
+  // Owner to manager already.
   const canSeeImsPosting = isAdmin || isOwner || hasPosAccess('manager')
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   // Rendered in BOTH returns (this file has two — S578). One pending ask at a time, drawn by
@@ -184,6 +186,20 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Request ids currently mid-decision — guards a rapid double-tap on Accept/Dismiss from
   // double-merging the same items or firing the decision write twice.
   const [decidingGuestReqIds, setDecidingGuestReqIds] = useState(new Set())
+  // S809 3b. The 5 s poll runs the loadPendingGuestOrders of the render its interval started in, so it
+  // reads this screen's accepted ids through a ref (ORDER-FLOW-11). What each accepted request put in
+  // the cart, so a reload from another device can tell whether its dishes survived (ORDER-FLOW-18).
+  // And requests whose dishes are saved on a bill but whose "accepted" mark has not landed yet: id →
+  // that bill (GUEST-3). Those stay off the banner, where Accept would add the dishes a second time,
+  // and are marked again from the poll (markGuestAccepts).
+  const acceptedGuestReqIdsRef = useRef(pendingAcceptedGuestReqIds)
+  acceptedGuestReqIdsRef.current = pendingAcceptedGuestReqIds
+  const acceptedGuestItemsRef = useRef(new Map())
+  const unmarkedGuestAcceptsRef = useRef(new Map())
+  const markingGuestAcceptsRef = useRef(false)
+  // Requests whose dishes a reload from another device left off, held off the banner while the
+  // "changed on another device" box is open (ORDER-FLOW-18).
+  const staleGuestReqIdsRef = useRef(new Set())
 
   /* ── covers modal ── */
   const [coversModal,      setCoversModal]      = useState(false)
@@ -638,6 +654,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     const poll = setInterval(() => loadPendingGuestOrders(), 5000)
     return () => clearInterval(poll)
   }, [view, clientId]) // eslint-disable-line
+
+  // ORDER-FLOW-18 (S809 3b): once the "changed on another device" box is answered (or abandoned), a
+  // guest order whose dishes were left off goes back on the banner for an Accept or a Dismiss.
+  useEffect(() => {
+    if (staleRecovery || staleGuestReqIdsRef.current.size === 0) return
+    staleGuestReqIdsRef.current = new Set()
+    loadPendingGuestOrders()
+  }, [staleRecovery]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bookings change on the scale of minutes, not seconds — 60 s, not the 5 s the kitchen needs.
   // The once-a-minute clock tick beside it is what moves a tile's booking chip from quiet to
@@ -1230,15 +1254,23 @@ export default function PosOrders({ billingStation = false } = {}) {
     seenGuestRequestIds.current = new Set(rows.map(r => r.id))
     guestOrdersLoadedOnce.current = true
 
+    // ORDER-FLOW-11 (S809 3b): a request this screen accepted is already in the cart, so it stays off
+    // the banner, the floor chip and the covers shortcut. The poll used to put it back within 5 s with
+    // Accept live, and a second tap doubled the dishes. One whose dishes are saved but whose mark has
+    // not landed is marked again from here.
+    if (unmarkedGuestAcceptsRef.current.size > 0) void markGuestAccepts()
+    const hidden = id => acceptedGuestReqIdsRef.current.has(id) || unmarkedGuestAcceptsRef.current.has(id) || staleGuestReqIdsRef.current.has(id)
     const map = {}
     for (const r of rows) {
+      if (hidden(r.id)) continue
       if (!map[r.table_id]) map[r.table_id] = []
       map[r.table_id].push(r)
     }
     // Every 5 s, and the answer is almost always the same one. Without the bail-out this poll
     // alone re-rendered the whole order/floor screen twelve times a minute for the length of a
     // service. A request row is immutable once created — Accept/Dismiss changes its status, which
-    // takes it out of this query entirely — so the set of ids is the whole state.
+    // takes it out of this query entirely — so the set of ids is the whole state. The database holds
+    // it to that since S809 3b (guard_pos_guest_order_request).
     setIfChanged(setPendingGuestOrders, map, m => mapSignature(m, list => (list || []).map(r => r.id).join(',')))
   }
 
@@ -1305,12 +1337,14 @@ export default function PosOrders({ billingStation = false } = {}) {
   // writes immediately, since there's nothing to lose by navigating away afterward.
   async function decideGuestOrder(request, decision) {
     if (decidingGuestReqIds.has(request.id)) return
+    // ORDER-FLOW-11 (S809 3b): its dishes are already in this cart (or saved on a bill).
+    if (decision === 'accepted' && (acceptedGuestReqIdsRef.current.has(request.id) || unmarkedGuestAcceptsRef.current.has(request.id))) return
     setDecidingGuestReqIds(prev => new Set(prev).add(request.id))
     try {
       if (decision === 'accepted') {
         for (const it of (request.items || [])) mergeGuestItem(it, request.guest_notes)
         if ((request.guest_notes || '').trim()) setMsg('ok:The guest\'s note is on each of their dishes and prints on the kitchen ticket when you send.')
-        setPendingAcceptedGuestReqIds(prev => new Set(prev).add(request.id))
+        rememberAcceptedGuestReq(request)
         // Hide it from the banner/floor badge now (it's already reflected in the cart) — restored
         // by loadPendingGuestOrders() if the staff navigates away before saving (backToFloor).
         setPendingGuestOrders(prev => {
@@ -1321,17 +1355,86 @@ export default function PosOrders({ billingStation = false } = {}) {
           return next
         })
       } else {
-        const { error: decErr } = await scopedUpdate('pos_guest_order_requests', {
+        // GUEST-3 (S809 3b): only a request still waiting is turned away (the database refuses a second
+        // answer anyway). If another till answered first, nothing changes and the waiter is told, rather
+        // than the guest being told "not taken" for food that is on its way.
+        const { data: answered, error: decErr } = await bounded(scopedUpdate('pos_guest_order_requests', {
           status: decision, decided_at: new Date().toISOString(), decided_by: profile?.id || null,
-        }).eq('id', request.id)
+        }).eq('id', request.id).eq('status', 'pending').select('id'), 'Dismissing the guest order')
         // loadPendingGuestOrders() below puts the request straight back on screen if this failed,
         // which looks like the button did nothing. Name it instead.
-        if (decErr) setMsg('error:Could not dismiss that guest order — try again.')
+        if (decErr) setMsg(`error:Could not dismiss that guest order. ${errorText(decErr, 'staff')}`)
+        else if (!answered?.length) setMsg('error:That guest order was already answered — on another till, or by an earlier tap that did go through — so nothing was changed. Check this table\'s order before you send anything.')
+        forgetAcceptedGuestReqs([request.id])
         loadPendingGuestOrders()
       }
     } finally {
       setDecidingGuestReqIds(prev => { const next = new Set(prev); next.delete(request.id); return next })
     }
+  }
+
+  // ORDER-FLOW-11 / -18 (S809 3b): the guest requests this screen has accepted into its cart, with
+  // the dishes each put there. The ref moves at once, so a poll landing before the next render already
+  // leaves the request off the banner.
+  function rememberAcceptedGuestReq(request) {
+    // backToFloor empties the set without this map; what it left behind goes here.
+    for (const id of acceptedGuestItemsRef.current.keys()) if (!acceptedGuestReqIdsRef.current.has(id)) acceptedGuestItemsRef.current.delete(id)
+    acceptedGuestReqIdsRef.current = new Set(acceptedGuestReqIdsRef.current).add(request.id)
+    acceptedGuestItemsRef.current.set(request.id, request.items || [])
+    setPendingAcceptedGuestReqIds(prev => new Set(prev).add(request.id))
+  }
+  function forgetAcceptedGuestReqs(ids) {
+    if (!ids.length) return
+    const drop = new Set(ids)
+    acceptedGuestReqIdsRef.current = new Set([...acceptedGuestReqIdsRef.current].filter(id => !drop.has(id)))
+    for (const id of ids) acceptedGuestItemsRef.current.delete(id)
+    setPendingAcceptedGuestReqIds(prev => (ids.some(id => prev.has(id)) ? new Set([...prev].filter(id => !drop.has(id))) : prev))
+  }
+
+  // GUEST-3 (S809 3b): marks guest requests accepted once their dishes are saved on a bill — only a
+  // request still waiting (the database refuses a second answer anyway). One that comes back unmarked
+  // is read once to say why: this till's own earlier try landed (a lost reply), another till accepted
+  // it, or another till turned it away while this one had it — its dishes are on this bill now, so the
+  // waiter is told. A failed write keeps it for the next poll; its dishes are saved, so it never goes
+  // back on the banner, where Accept would add them a second time.
+  async function markGuestAccepts() {
+    if (markingGuestAcceptsRef.current || unmarkedGuestAcceptsRef.current.size === 0) return
+    markingGuestAcceptsRef.current = true
+    try {
+      const byBill = new Map()
+      for (const [id, oid] of unmarkedGuestAcceptsRef.current) byBill.set(oid, [...(byBill.get(oid) || []), id])
+      for (const [oid, ids] of byBill) {
+        const { data: marked, error } = await bounded(scopedUpdate('pos_guest_order_requests', {
+          status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null, order_id: oid,
+        }).in('id', ids).eq('status', 'pending').select('id'), 'Marking the guest order accepted')
+        if (error) { console.error('guest request accept failed — kept for the next poll (its dishes are saved):', error); continue }
+        for (const r of marked || []) unmarkedGuestAcceptsRef.current.delete(r.id)
+        const rest = ids.filter(id => !(marked || []).some(r => r.id === id))
+        if (rest.length === 0) continue
+        const { data: current, error: readErr } = await bounded(scopedFrom('pos_guest_order_requests', 'id, status, order_id').in('id', rest), 'Reading the guest order')
+        if (readErr) { console.error('guest request read failed — kept for the next poll:', readErr); continue }
+        // A request that is no longer there (a restore, a clear) needs nothing more.
+        for (const id of rest) unmarkedGuestAcceptsRef.current.delete(id)
+        for (const r of current || []) {
+          if (r.status === 'accepted' && r.order_id === oid) continue
+          if (r.status === 'dismissed') setMsg('error:Another till turned this guest\'s QR order away while you had it, but its dishes are saved on this order. Tell the guest their food is coming — their phone says it was not taken — or take the dishes off.')
+          else if (r.status === 'accepted') setMsg('error:Another till had already accepted this guest\'s QR order. Check this order does not have their dishes twice.')
+          // Still waiting means the write was refused for another reason: try again at the next poll.
+          else unmarkedGuestAcceptsRef.current.set(r.id, oid)
+        }
+      }
+    } finally {
+      markingGuestAcceptsRef.current = false
+    }
+  }
+
+  // ORDER-FLOW-18 (S809 3b): the accepted guest requests whose dishes are among the lines a reload from
+  // another device left off.
+  function guestReqsLeftOff(missing) {
+    const keys = new Set((missing || []).map(lineKeyOf))
+    return [...acceptedGuestItemsRef.current]
+      .filter(([id, items]) => acceptedGuestReqIdsRef.current.has(id) && items.some(it => keys.has(lineKeyOf(it))))
+      .map(([id, items]) => ({ id, items }))
   }
 
   // Per table, a summary of the tickets sent for its currently open order (summarizeTicketStages in
@@ -1412,11 +1515,14 @@ export default function PosOrders({ billingStation = false } = {}) {
   async function markOrderServed() {
     if (!orderId || !navigator.onLine || servingTickets) return
     setServingTickets(true)
-    const { data, error } = await scopedUpdate('pos_kot_log', {
+    // S809 3d (FLOOR-KITCHEN-6): bounded, so a stalled request cannot leave ✓ Served stuck on
+    // "Marking…" and refusing every table on this till. served_at is the server's since 3d.
+    const { data, error } = await bounded(scopedUpdate('pos_kot_log', {
       status: 'served', served_at: new Date().toISOString(), status_updated_by: profile?.id || null,
-    }).eq('order_id', orderId).eq('status', 'ready').select('id')
+    }).eq('order_id', orderId).eq('status', 'ready').select('id'), 'Marking served', 15000)
     setServingTickets(false)
-    if (error) setMsg(`error:Not marked as served — the kitchen still shows it ready. ${errorText(error, 'staff')}`)
+    if (error && isTimeout(error)) setMsg('error:The server took too long to answer, so it may or may not be marked served. Check your signal, then look at the order again in a moment.')
+    else if (error) setMsg(`error:Not marked as served — the kitchen still shows it ready. ${errorText(error, 'staff')}`)
     else if (!data?.length) setMsg('ok:Nothing was waiting — it was already marked served.')
     else setMsg(`ok:${data.length === 1 ? 'Ticket' : `${data.length} tickets`} marked served.`)
     loadOrderKotTickets(orderId)
@@ -2442,25 +2548,20 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
 
     // Only now — the merged items are actually persisted — mark any Accepted-locally guest
-    // requests as accepted in the DB too. Best-effort/non-blocking (matches the rest of this
-    // file's guest-ordering writes); if it fails the request just stays 'pending' and can be
-    // Accepted again next save. Not attempted in the offline branch above — an offline device
-    // has no way to reach this table anyway, and the ids stay pending until a later online save.
+    // requests as accepted in the DB too. Not attempted in the offline branch above — an offline
+    // device has no way to reach this table anyway, and the ids stay pending until a later online save.
+    // S767: `order_id` is the bill this guest order went onto — the guest's own tracker reads it
+    // (get_guest_order_progress) so it can follow THIS order rather than the table's, and end when
+    // this bill closes. GUEST-3 (S809 3b): the ids are the ones this save's cart carried (the closure's,
+    // like `snapshot`), so a request accepted while the save was in flight waits for the next save.
+    // markGuestAccepts writes only while a request still waits, and a failed write is retried from the
+    // poll instead of putting the request back on the banner, where Accept would double its dishes.
+    // Not awaited: the save has landed, and a bill close waits on this function with a time limit.
     if (pendingAcceptedGuestReqIds.size > 0) {
       const ids = Array.from(pendingAcceptedGuestReqIds)
-      setPendingAcceptedGuestReqIds(new Set())
-      const accepted = { status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null }
-      // S767: `order_id` is the bill this guest order went onto — the guest's own tracker reads it
-      // (get_guest_order_progress) so it can follow THIS order rather than the table's, and end when
-      // this bill closes. A till running ahead of migration 20260921100000 gets PGRST204 for the
-      // unknown column; the accept is retried without it, because refusing an accept mid-service
-      // over a tracker detail is the wrong trade (the migration hot-path rule).
-      let { error: gErr } = await scopedUpdate('pos_guest_order_requests', { ...accepted, order_id: oid }).in('id', ids)
-      if (gErr?.code === 'PGRST204') ({ error: gErr } = await scopedUpdate('pos_guest_order_requests', accepted).in('id', ids))
-      // Non-fatal as described above — the request simply stays 'pending' and can be Accepted
-      // again on the next save. Same correction as the two blocks above: the try/catch it
-      // replaces never fired, so this failure had no trace at all.
-      if (gErr) console.error('guest request accept failed (non-fatal):', gErr)
+      for (const id of ids) unmarkedGuestAcceptsRef.current.set(id, oid)
+      forgetAcceptedGuestReqs(ids)
+      void markGuestAccepts()
       loadPendingGuestOrders()
     }
 
@@ -2528,12 +2629,25 @@ export default function PosOrders({ billingStation = false } = {}) {
       cachePosOrderForTable(activeTable.id, { orderId: fresh.id, orderNo: fresh.order_no || null, covers: fresh.covers || 1, items: lines, itemsVersion: itemsVersionRef.current })
     }
     const missing = missingFromServer(snapshot, fresh.pos_order_items)
-    if (missing.length > 0) setStaleRecovery({ where, missing })
+    // ORDER-FLOW-18 (S809 3b): an accepted guest order whose dishes the reload left off is no longer
+    // in this cart, so the next save must not mark it accepted. "Add them back" accepts it again with
+    // its dishes; otherwise it goes back on the banner once the box is answered.
+    const leftOff = guestReqsLeftOff(missing)
+    if (leftOff.length > 0) {
+      staleGuestReqIdsRef.current = new Set([...staleGuestReqIdsRef.current, ...leftOff.map(r => r.id)])
+      forgetAcceptedGuestReqs(leftOff.map(r => r.id))
+    }
+    if (missing.length > 0) setStaleRecovery({ where, missing, guestReqs: leftOff })
     setMsg(`error:${where} was changed on another device — here is the latest.${missing.length > 0 ? ' Add your items again.' : ' Check it, then save again.'}`)
   }
 
   function addBackStaleItems() {
     const pending = staleRecovery
+    // ORDER-FLOW-18 (S809 3b): the guest's dishes come back, so their order is accepted again.
+    for (const r of pending?.guestReqs || []) {
+      staleGuestReqIdsRef.current.delete(r.id)
+      rememberAcceptedGuestReq(r)
+    }
     setStaleRecovery(null)
     if (!pending?.missing?.length) return
     setOrderItems(prev => mergeUnsentLines(prev, pending.missing))
@@ -3071,7 +3185,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // unposted banner. But the banner's sentence blames a missing open period, so say when the
     // real cause was a failed read instead: the period may be open and fine.
     if (perErr) {
-      warnWrite('Could not check which Inventory period is open, so the bill just closed was not posted to Inventory. Backfill it from Periods once the connection is back.', perErr)
+      warnWrite('Could not check which Inventory period is open, so the bill just closed was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', perErr)
       return false
     }
     const open = (periods || []).find(p => p.status === 'open')
@@ -3115,7 +3229,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       const { data: snapRows, error: snapErr } = await scopedFrom('pos_order_items', 'recipe_id, selection_key, pos_order_item_options(ingredient_deltas)')
         .eq('order_id', orderId).neq('selection_key', '')
       if (snapErr) {
-        warnWrite('Could not read the choices on this bill, so it was not posted to Inventory. Backfill it from Periods once the connection is back.', snapErr)
+        warnWrite('Could not read the choices on this bill, so it was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', snapErr)
         return false
       }
       for (const r of snapRows || []) {
@@ -4017,7 +4131,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (background) {
       warnWrite(closeType === 'void'
         ? `The first try to void ${where} went through after all — no bill was issued.`
-        : `The first payment try for ${where} went through after all: ${closedStatement(closeType, updated, where).replace(/\.$/, '')}. It was not printed, because the till had moved on — reprint it from Recent Bills. Its Inventory posting is left to Periods → Post POS bills to Inventory.${note ? ` ${note}` : ''}`)
+        : `The first payment try for ${where} went through after all: ${closedStatement(closeType, updated, where).replace(/\.$/, '')}. It was not printed, because the till had moved on — reprint it from Recent Bills. It is not in Inventory yet: a POS manager posts it with Post to Inventory on the floor.${note ? ` ${note}` : ''}`)
       void withTimeout(loadFloor({ quiet: true }), CLOSE_STEP_MS, 'Reloading the floor')
         .catch(e => console.error('floor reload after a late close did not finish (non-fatal):', e))
       return true
@@ -6006,42 +6120,15 @@ The tables were left occupied rather than freed with their orders still open.`)
         </div>
       )}
 
-      {/* The two Inventory-posting banners are for whoever can act on them (S776): the fix is Periods →
-          Post POS bills to Inventory, which a waiter cannot reach, and on a Staff login they were two
-          standing amber blocks above the floor grid with nothing to do about either. */}
-      {canSeeImsPosting && (unpostedCount > 0 || imsPostWarning > 0) && (
-        <div role="alert" style={{
-          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
-          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
-          color: 'var(--theme-text2)',
-        }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>
-            ⚠ {Math.max(unpostedCount, imsPostWarning)} bill{Math.max(unpostedCount, imsPostWarning) === 1 ? '' : 's'} not posted to Inventory
-          </strong>
-          <div style={{ marginTop: 4 }}>
-            These bills closed normally and are valid, but there was no open Inventory period for
-            their date — so their revenue and ingredient usage are missing from Inventory reports.
-            Open the matching period in <strong>Periods</strong>, then use <strong>Post POS bills to Inventory</strong> there to backfill them.
-          </div>
-        </div>
-      )}
-      {canSeeImsPosting && unpostedNotes > 0 && (
-        <div role="alert" style={{
-          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
-          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
-          color: 'var(--theme-text2)',
-        }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>
-            ⚠ {unpostedNotes} credit note{unpostedNotes === 1 ? '' : 's'} not yet taken off Inventory sales
-          </strong>
-          <div style={{ marginTop: 4 }}>
-            {unpostedNotes === 1 ? 'It is' : 'They are'} valid and printed, but no Inventory period was open for the
-            month {unpostedNotes === 1 ? 'it was' : 'they were'} issued in — so Inventory still counts that revenue.
-            Open the month in <strong>Periods</strong>, then use <strong>Post POS bills to Inventory</strong> there.
-          </div>
-        </div>
+      {/* Waiting till bills and credit notes (S809 3j, owner decision Q12 c) are for whoever can post
+          them: the Owner, the operator and a POS manager. The banner posts the open month's itself,
+          because Periods does not open for a POS manager, and says who posts the rest. */}
+      {canSeeImsPosting && (
+        <PosImsPostingBanner
+          bills={Math.max(unpostedCount, imsPostWarning)}
+          notes={unpostedNotes}
+          onPosted={() => { setImsPostWarning(0); loadFloor({ quiet: true }) }}
+        />
       )}
       {conflictOrders.map(c => (
         <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>

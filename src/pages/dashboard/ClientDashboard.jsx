@@ -3123,7 +3123,8 @@ export default function ClientDashboard({ scope = 'home' }) {
         <HomeAttention
           clientId={effectiveClientId}
           showIms={showIms} showHr={showHr} showPos={showPos} posIsStationTeam={posIsStationTeam}
-          // Posting POS bills into Inventory is done from Periods, which opens for these (Periods.js).
+          // Who is shown waiting till bills (S809 3j): the Owner and the operator, who post them from
+          // Periods, and an IMS supervisor, who is told who posts them (HomeAttention).
           canSeeImsPosting={isAdmin || isOwner || hasImsAccess('supervisor')}
           canHrApprove={hasHrAccess('supervisor')}
           hrApprovals={hrApprovals}

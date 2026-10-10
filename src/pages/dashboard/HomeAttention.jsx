@@ -9,6 +9,9 @@ import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 import { ticketSummary } from '../../modules/pos/dashboard/posDashboardMath'
 import { closingCountPreflight } from '../periods/closePeriod'
 import { BS_MONTHS, daysInBsMonth, getBsToday } from '../../utils/bsCalendar'
+import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../supabaseClient'
+import { loadImsWaiting, summarizeWaiting } from '../../modules/pos/orders/posImsWaiting'
 
 // Home's "Needs attention" list (S800 stage C) — the first thing a multi-module Home says.
 //
@@ -26,6 +29,9 @@ import { BS_MONTHS, daysInBsMonth, getBsToday } from '../../utils/bsCalendar'
 // the reader wants, so a failed read must not be able to give it.
 
 const REFRESH_MS = 60 * 1000
+
+// Bills plus credit notes waiting for Inventory, every month (pos_ims_waiting_counts rows).
+const waitingTotal = rows => { const s = summarizeWaiting(rows); return s.bills + s.notes }
 
 function Row({ count, failed, text, to, linkText, tone = 'amber' }) {
   if (!failed && !(count > 0)) return null
@@ -45,10 +51,17 @@ export default function HomeAttention({
   hrApprovals, reorderCount, canReorder, bookingRequests, clientId, activePeriod, periodExpired,
 }) {
   const { scopedFrom } = useScopedDb()
+  const { isAdmin, isOwner, clientModules } = useAuth()
   const latest = useLatestRequest()
   const imsMode = mode === 'ims'
   const posFront = !imsMode && showPos && !posIsStationTeam
-  const wantPosting = showIms && showPos && canSeeImsPosting
+  // Waiting till bills (S809 3j, IMS-HANDOFF-1, owner decision Q12 c). The row follows the CLIENT
+  // having POS, not this login's POS rank: an IMS supervisor has none, and was never shown the row.
+  // The count is the server's (pos_ims_waiting_counts): an IMS login reads pos_orders through
+  // no_ims_staff, which hands it an empty table with no error, so its own count was always 0. The
+  // Owner and the operator post them (Periods); anyone else here is told who does.
+  const wantPosting = showIms && !!clientModules?.pos && canSeeImsPosting
+  const postsTillBills = isAdmin || isOwner
   // The month-end count, IMS mode only: from three days before the open month ends.
   const today = getBsToday()
   const daysLeft = activePeriod && activePeriod.bs_year === today.year && activePeriod.bs_month === today.month
@@ -65,8 +78,8 @@ export default function HomeAttention({
         posFront ? scopedFrom('pos_guest_order_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending') : none,
         // Same read as the POS Dashboard's, a CHANGE ticket (S809 3a) left out the same way.
         posFront ? scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart).not('items', 'cs', KOT_CHANGE_ITEMS) : none,
-        // The floor's own count (PosOrders.jsx): billed and never confirmed into Inventory.
-        wantPosting ? scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').is('ims_posted_at', null) : none,
+        // Bills and credit notes waiting for Inventory, all months (never throws: { rows, error }).
+        wantPosting ? loadImsWaiting(supabase, clientId) : none,
         // null when it could not check — the close dialog says the same.
         wantCount ? closingCountPreflight(activePeriod.id, clientId) : Promise.resolve(undefined),
       ]), 20000, 'Needs attention')
@@ -74,7 +87,7 @@ export default function HomeAttention({
       setCounts({
         guest: posFront ? (guest.error ? null : guest.count || 0) : undefined,
         late: posFront ? (kot.error ? null : ticketSummary(kot.data, KDS_LATE_MS).late) : undefined,
-        unposted: wantPosting ? (unposted.error ? null : unposted.count || 0) : undefined,
+        unposted: wantPosting ? (unposted.error || !unposted.rows ? null : waitingTotal(unposted.rows)) : undefined,
         uncounted: wantCount ? (count ? Math.max(0, count.items - count.counted) : null) : undefined,
         countTotal: wantCount && count ? count.items : undefined,
       })
@@ -105,8 +118,11 @@ export default function HomeAttention({
       text: 'table bookings waiting for you to accept', to: '/pos/reservations', linkText: 'Reservations' },
     hrCount !== undefined && { key: 'hr', count: hrCount, failed: hrCount === null,
       text: 'leave, overtime, travel or shift-swap requests waiting for a decision', to: '/hr/dashboard', linkText: 'HR Dashboard' },
-    wantPosting && { key: 'post', count: counts?.unposted, failed: counts?.unposted === null,
-      text: 'paid POS bills not yet in Inventory, so the month’s sales and stock use are short', to: '/periods', linkText: 'Post them from Periods' },
+    wantPosting && (postsTillBills
+      ? { key: 'post', count: counts?.unposted, failed: counts?.unposted === null,
+          text: 'till bills or credit notes not yet in Inventory, so the month’s sales and stock use are off', to: '/periods', linkText: 'Post them from Periods' }
+      : { key: 'post', count: counts?.unposted, failed: counts?.unposted === null,
+          text: 'till bills or credit notes not yet in Inventory, so the month’s sales and stock use are off. The Owner posts them from Periods, or a POS manager from POS → Orders' }),
     showIms && canReorder && { key: 'par', count: reorderCount, failed: false,
       text: 'stock items below their par level', to: '/reorder', linkText: 'Reorder Report' },
   ].filter(Boolean)

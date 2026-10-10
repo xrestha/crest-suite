@@ -41,7 +41,17 @@ transaction. Outside the operator's restore it locks the bill `FOR NO KEY UPDATE
 sale row naming no bill, an open bill or another outlet's (`pos_sale_unlinked`), and rows for a bill
 that already has till sale rows from an earlier statement (`pos_bill_already_posted`). **A bill's till
 sale rows go in ONE statement** (the till's insert and the backfill's per-bill retry both do). The
-till's and Periods' own mark writes stay, for a bill with nothing to post.
+till's and Periods' own mark writes stay, for a bill with nothing to post. Since S809 3j
+(`20261010140000`) a credit note's reversal meets the same rule: the note is locked and a second
+reversal statement is refused (`pos_credit_note_already_posted`), so a note's rows go in one statement.
+
+**The floor posts too (S809 3j, Q12 c).** `PosImsPostingBanner` → `postWaitingFromTill`
+(`posImsWaiting.js`): a POS manager, the Owner or the operator posts the OPEN month's waiting bills,
+then notes, through the same two functions, with the recipe book read through `pos_recipe_book`
+(`loadStockLines`). Never a closed month (`ims_closed_period_guard` admits only the Owner and the
+operator, who post those from Periods). Periods' button is the Owner's and the operator's only. An IMS
+login cannot read till bills (`no_ims_staff`), so it reads `pos_ims_waiting_counts` (DEFINER, numbers
+per Nepali month) and is told who posts. **Never word a count an IMS login made itself.**
 
 **That backfill could not finish the months it exists for (fixed S629).** It wrote three sequential
 round trips per bill — `sales_entries` insert, `stock_movements` insert, `ims_posted_at` stamp —
@@ -261,6 +271,13 @@ table's food.
   function not deployed yet) reads as "no choices", not a warning to every guest.
 - **Every public guest function gates on `pos_enabled` AND `client_access_open()` (S809 1h).** A
   new one copies both, and its locked answer must equal its POS-off answer.
+- **A guest order is sent once and answered once (S809 3b, `20261010120000`).** `submit_guest_order`
+  takes `p_request_id`, the page's key per order: a key that landed returns that order before any
+  menu check (keep one overload; the 4-key call resolves through the default).
+  `guard_pos_guest_order_request` allows only status/order_id/decided_*, a decided status is final,
+  `decided_by`/`decided_at` are the server's and the bill must be the request's outlet's. The till
+  answers with `.eq('status','pending').select('id')` and never puts a saved-but-unmarked request back
+  on the banner. Guest stage reads leave CHANGE and cancelled tickets out.
 
 ### A size scales the picks after it (S760, build-your-own dishes)
 
@@ -407,7 +424,10 @@ name against it.
   deleting its order (DELETE revoked too); the order must be the outlet's; `sent_at` and the stage
   are stamped; `sent_by` is kept only when it is a POS login of the outlet, else the uploader (Q1 b);
   an UPDATE moves only the stage, forward, with `status_updated_by` stamped; `cancelled` needs a
-  voided order or Supervisor and is final. **A DEFINER function that writes either table on a
+  voided order, Supervisor, or (S809 3d, Clear) any unblocked POS login once the ORDER no longer holds
+  the ticket's dishes (its sent count per line key ≤ what its other uncancelled tickets carry), and is
+  final. Stage times and the estimate are the server's (`now()` on entering the stage; the estimate
+  only at Start; a skipped stage gets no time). **A DEFINER function that writes either table on a
   client's behalf is checked like the client**: give it its own transaction flag.
 - The 2-arg `save_pos_order_items` signature was **dropped**, against the standing keep-the-old-
   arity rule in `.claude/rules/supabase-sql.md`. PostgREST resolves by argument name, so keeping
@@ -626,7 +646,7 @@ sends those columns, and a new screen must not.
 | Add or take off loyalty points by hand (`adjust_loyalty_points`, S809 3k) | POS manager; reason required, never below 0 |
 | Block / Unblock / Delete a till login (admin-user-ops, S809 3i) | POS manager, as a PIN reset (never a peer manager, own login, or a stronger login). Delete only a login with no rows in `pos_login_recorded_rows` |
 | Parking slips (`pos_parking_slips_guard`, S809 1k) | Issue: Supervisor. Reprint, Mark Exited, the day's auto-close: any POS rank. Number (UNIQUE per outlet), issuer, Time In, the linked bill's number, close time and closer are the server's. Never edited; a closed slip stays closed; auto-close only before today's 6 AM Nepal |
-| Cancel a kitchen ticket | Supervisor, or its order voided; final (S809 1d) |
+| Cancel a kitchen ticket | Supervisor, or its order voided, or any POS login once every dish on it was taken off the order (Clear, S809 3d); final |
 
 Three shapes are worth copying:
 
@@ -868,7 +888,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 - **The till's settings come from a read that answered, or billing waits (S809 2a).** `loadTillSettings` bounds the `settings` and `clients` reads, applies and caches only an answer, keeps the offline copy for routing on a failure, and never caches a failure. `billingSettingsLoaded` gates `payBlocker`, `closeBlocker`, `billOrder` and `reprintBill`; a cached copy never opens Payment. Never fall back to defaults in silence: `is_vat_registered ?? true` made every PAN outlet a VAT one on a dropped read.
 - **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar. Measured S776: 0 of 32 controls under 44px at 820px touch (was 24 of 36).
 - **Till text is `errorText(err, 'staff')`, never `err.message`** — the floor alerts, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
-- **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banners render only for `canSeeImsPosting` (admin, Owner, POS manager). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till (the 9px chips were raised). Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
+- **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till (the 9px chips were raised). Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
 - **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. A KDS estimate preset starts the ticket in one tap.
 
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
@@ -1067,8 +1087,8 @@ way to post it afterwards.
   the same `discRatio` `backfillPosToIms` uses, a `writeoff` bill reverses nothing. It used raw
   `unit_price`, so a discounted bill's note removed more revenue than the bill ever added.
 - **The note issues whatever happens**, so failure is a notice with one button, not an error with a
-  retry. Recovery is Periods → Post POS bills to Inventory, which now posts waiting notes after the
-  bills; the floor counts them (`unpostedNotes`, head-count, keeps last value on a failed poll) and
+  retry. Recovery is the floor banner's Post to Inventory (open month) or Periods → Post POS bills to
+  Inventory (the Owner; any month), each posting waiting notes after the bills; the floor counts them (`unpostedNotes`, head-count, keeps last value on a failed poll) and
   the Credit Note Book badges them.
 - **Pre-migration notes were stamped as posted when their client had any `pos_credit` row** — NULL
   on an old row means "unknown", and treating unknown as unposted is how bills double-posted.

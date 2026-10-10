@@ -229,6 +229,7 @@ History: docs/rules-archive/dashboards.md#s683-branch-said-out-loud
 
 - `ClientDashboard`'s `showIms` / `showHr` / `showPos` each need `clientModules.x` (the client bought it) AND `hasXAccess('staff')` (this login may see it). HR employee and payroll tiles also need `hasHrAccess('supervisor')`, because `no_hr_staff_rank` empties those reads for staff rank.
 - When a fence is added to a table a tile reads, gate the tile at the same rank in the same change.
+- HomeAttention's till-bills row follows the client having POS and `canSeeImsPosting`, and counts bills and credit notes through `pos_ims_waiting_counts` (S809 3j), because an IMS login reads `pos_*` as empty. The Owner and operator get the Periods link; an IMS supervisor is told who posts.
 
 Why: the staff-isolation policies return an empty read, not an error, so an HR-only login saw POS Revenue NPR 0, 0 bills, 0 tables as a quiet day (S750).
 

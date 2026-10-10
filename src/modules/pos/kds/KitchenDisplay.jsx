@@ -7,7 +7,7 @@ import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import EstimateTimeModal from './EstimateTimeModal'
-import { ticketStripColor, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
+import { ticketStripColor, ticketAllPulled, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
 import { isChangeLine, isChangeTicket, changeNoteText } from '../kitchenNotes'
 import { POS_IDLE_LOCK_MS, posIdleLockApplies } from '../usePosIdleLock'
 import { playGuestAlert } from '../posChime'
@@ -16,6 +16,8 @@ import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
 import { useReleaseReload } from '../../../shared/releaseWatch'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 
 const KDS_RELEASE_IDLE_MS = 60 * 1000
 
@@ -106,13 +108,21 @@ function attachRemovals(tickets, removals) {
     const sig = lines
       ? Object.keys(lines).sort().map(k => `${k}:${lines[k].map(e => `${e.qty}@${e.removed_at}@${e.reason || ''}`).join(',')}`).join(';')
       : ''
-    return { ...t, removals: lines, removalSig: sig }
+    // FLOOR-KITCHEN-2 (S809 3d): nothing left on it to make, so its one button is Clear. Derived from
+    // `removals`, so `removalSig` already repaints it.
+    return { ...t, removals: lines, removalSig: sig, allPulled: ticketAllPulled(t.items, lines) }
   })
 }
 
 // A ticket sitting in Ready for longer than this drops off the board (still in the DB, still
 // counted by KOT Register/Reconciliation — this is display-only decluttering, not a delete).
+// FLOOR-KITCHEN-5 (S809 3d): and the board marks it served as it drops it (see load), or the floor
+// went on calling the table's food "Ready" for the rest of the meal.
 const READY_VISIBLE_MS = 10 * 60 * 1000
+// FLOOR-KITCHEN-6 (S809 3d): how long a board read or a tap may take before the board stops waiting
+// for it. One stalled request on kitchen Wi-Fi froze that ticket's button until the page was reloaded.
+const KDS_READ_MS = 15000
+const KDS_TAP_MS = 15000
 // Elapsed-time flag thresholds, matching the "flag the outlier" pattern used elsewhere in POS
 // (Sales Exceptions, KOT Reconciliation) — a ticket sitting too long gets visually called out.
 const WARN_MS = KDS_WARN_MS
@@ -192,8 +202,29 @@ export default function KitchenDisplay() {
   // was told is cancelled must not quietly become uncancelled) and says the list may be stale.
   const lastRemovals = useRef([])
   const [removalsError, setRemovalsError] = useState('')
+  // FLOOR-KITCHEN-6 (S809 3d). On slow kitchen Wi-Fi a poll that left before a Start landed came back
+  // after it and put the card back in New (and rang for it), and one for the station just left painted
+  // its tickets under the new heading. So: a read for another station is dropped (stationReq), a read
+  // older than one already shown is dropped (loadSeq/appliedSeq), a tick is skipped while a read is
+  // out (loadsInFlight), and a ticket this screen moved keeps the stage it was moved to over any read
+  // that left before the move was confirmed (localMoves: id → { status, est, at, gen }; gen Infinity while
+  // the write is in flight, then the boardGen it was confirmed at).
+  const stationReq = useLatestRequest()
+  const loadSeq = useRef(0)
+  const appliedSeq = useRef(0)
+  const loadsInFlight = useRef(0)
+  const boardGen = useRef(0)
+  const localMoves = useRef(new Map())
+  // FLOOR-KITCHEN-5 (S809 3d): Ready tickets this screen has asked the server to mark served as they
+  // left the board, so each is asked once (again only after a failure); and when this screen first
+  // saw each Ready ticket (id → Date.now()), which is what the 10 minutes are counted from.
+  const autoServing = useRef(new Set())
+  const readySince = useRef(new Map())
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current
+    const gen = boardGen.current
+    loadsInFlight.current += 1
     const serviceDayStart = serviceDayStartIso()
     // 'cancelled' (set by PosOrders.jsx's closeOrder when the parent order is voided) and 'served'
     // (S754) are excluded entirely rather than shown as a 4th column — there's nothing left for
@@ -203,18 +234,21 @@ export default function KitchenDisplay() {
     // truncated read drops the newest tickets: precisely the ones the kitchen is waiting on, with
     // no error to say anything was dropped. `.order('id')` is the unique tiebreaker paging needs.
     const [{ data, error }, removalsRes] = await Promise.all([
-      fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
+      settleWithin(fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
         .eq('station', station)
         .in('status', BOARD_STATUSES)
         .gte('sent_at', serviceDayStart)
-        .order('sent_at', { ascending: true }).order('id')),
+        .order('sent_at', { ascending: true }).order('id')), KDS_READ_MS, 'Refreshing the board'),
       // S754: today's pulled/reduced lines, over the same service-day window as the tickets. Read by
       // window rather than `.in(order_id, …)` — the board's order list would ride in the URL — and
       // narrowed to the orders on the board in attachRemovals. Paged: one row per pulled line.
-      fetchAllRows(() => scopedFrom('pos_kot_removals', 'id, order_id, recipe_id, item_name, qty_removed, reason, removed_at, selection_key')
+      settleWithin(fetchAllRows(() => scopedFrom('pos_kot_removals', 'id, order_id, recipe_id, item_name, qty_removed, reason, removed_at, selection_key')
         .gte('removed_at', serviceDayStart)
-        .order('removed_at', { ascending: true }).order('id')),
-    ])
+        .order('removed_at', { ascending: true }).order('id')), KDS_READ_MS, 'Checking for cancelled dishes'),
+    ]).finally(() => { loadsInFlight.current -= 1 })
+    // FLOOR-KITCHEN-6 (S809 3d): an answer for the station this board has left, or older than one
+    // already on screen, is dropped before it touches anything; the next poll is at most 4 s away.
+    if (!stationReq.isCurrent(station) || seq < appliedSeq.current) return
     if (removalsRes.error) {
       setRemovalsError('Could not check for cancelled items — cancellations shown are from the last successful check, and newer ones may be missing. ' + errorText(removalsRes.error, 'staff'))
     } else {
@@ -231,7 +265,19 @@ export default function KitchenDisplay() {
       return
     }
     setPollError('')
-    const rows = attachRemovals(data || [], lastRemovals.current)
+    appliedSeq.current = seq
+    // FLOOR-KITCHEN-6 (S809 3d): a move this screen made after this read left wins over what the read
+    // says; once a read that left after the move was confirmed lands, the server's answer is the truth.
+    for (const [id, m] of localMoves.current) if (m.gen <= gen) localMoves.current.delete(id)
+    const read = (data || []).map(t => {
+      const m = localMoves.current.get(t.id)
+      return m ? {
+        ...t, status: m.status,
+        ...(m.status === 'in_progress' ? { estimated_prep_minutes: m.est } : {}),
+        ...(m.status === 'ready' && !t.ready_at ? { ready_at: m.at } : {}),
+      } : t
+    }).filter(t => BOARD_STATUSES.includes(t.status))
+    const rows = attachRemovals(read, lastRemovals.current)
     const newTickets = rows.filter(t => t.status === 'new')
     if (loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
       playNewTicketChime()
@@ -248,7 +294,35 @@ export default function KitchenDisplay() {
     setIfChanged(setTickets, rows,
       rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes', 'removalSig']))
     setLoading(false)
-  }, [scopedFrom, station])
+
+    // FLOOR-KITCHEN-5 (S809 3d): a ticket left in Ready for 10 minutes (when the board stops showing it)
+    // is marked served, the step a runner skipped, so the floor stops calling that table's food "Ready". Conditional on 'ready', so
+    // a ticket served or cleared meanwhile is left alone; the server stamps the time and this login.
+    // A ticket whose dishes were all taken off stays up for its Clear instead (see `visible`). Only a
+    // Ready the server has confirmed counts, never one this screen has just moved, and the 10 minutes
+    // are measured by this screen watching it (readySince), not by comparing the server's ready time
+    // with the tablet's clock: a tablet whose clock runs fast must not mark food served within seconds.
+    const nowMs = Date.now()
+    const readyIds = new Set(rows.filter(t => t.status === 'ready').map(t => t.id))
+    for (const id of readySince.current.keys()) if (!readyIds.has(id)) readySince.current.delete(id)
+    for (const id of readyIds) if (!readySince.current.has(id)) readySince.current.set(id, nowMs)
+    const dropIds = rows
+      .filter(t => t.status === 'ready' && t.ready_at && !t.allPulled
+        && !autoServing.current.has(t.id) && !localMoves.current.has(t.id)
+        && nowMs - readySince.current.get(t.id) >= READY_VISIBLE_MS)
+      .map(t => t.id)
+    if (dropIds.length > 0) {
+      dropIds.forEach(id => autoServing.current.add(id))
+      void settleWithin(scopedUpdate('pos_kot_log', { status: 'served', served_at: new Date().toISOString() })
+        .in('id', dropIds).eq('status', 'ready').select('id'), KDS_TAP_MS, 'Marking Ready tickets served')
+        .then(({ error: serveErr }) => {
+          if (!serveErr) return
+          // Asked again on a later poll. Nothing on screen depends on it: the board already hides them.
+          dropIds.forEach(id => autoServing.current.delete(id))
+          console.error('KDS could not mark Ready tickets served, will try again:', serveErr)
+        })
+    }
+  }, [scopedFrom, scopedUpdate, station, stationReq])
 
   // A wall-mounted KDS screen is the one place in POS most likely to not be looked at
   // continuously, and until S763 it said so with one quiet two-tone beep — the same beep the floor
@@ -267,7 +341,9 @@ export default function KitchenDisplay() {
   useEffect(() => { loadedOnce.current = false; seenTicketIds.current = new Set() }, [station])
   useEffect(() => { setLoading(true); load() }, [load])
   useEffect(() => {
-    const poll = setInterval(load, POLL_MS)
+    // S809 3d (FLOOR-KITCHEN-6): a tick waits while a read is still out, so a slow link never piles
+    // reads up behind each other. A station switch and a refused tap still read at once.
+    const poll = setInterval(() => { if (loadsInFlight.current === 0) load() }, POLL_MS)
     return () => clearInterval(poll)
   }, [load])
   useEffect(() => {
@@ -276,6 +352,7 @@ export default function KitchenDisplay() {
   }, [])
 
   function selectStation(s) {
+    stationReq.begin(s) // S809 3d: a read still out for the station being left is dropped when it lands
     setStation(s)
     setKdsError('')
     localStorage.setItem('pos_kds_station', s)
@@ -285,11 +362,18 @@ export default function KitchenDisplay() {
     if (advancing.has(ticket.id)) return
     setAdvancing(prev => new Set(prev).add(ticket.id))
     const prevStatus = ticket.status
+    // S809 3d (FLOOR-KITCHEN-6): no read can put this ticket back while the write is out (see load).
+    // `at` stands in for the server's ready time until a read brings it, so a ticket sent more than
+    // 10 minutes ago does not vanish from Ready the instant it is tapped (the filter fell back to sent_at).
+    const at = new Date().toISOString()
+    localMoves.current.set(ticket.id, { status: nextStatus, est: estimatedMinutes, at, gen: Infinity })
     // Optimistic — reverted below if the write actually fails; otherwise the next poll (≤4s)
     // reconciles with the server as before.
     setTickets(prev => prev.map(t => t.id === ticket.id
-      ? { ...t, status: nextStatus, ...(nextStatus === 'in_progress' ? { estimated_prep_minutes: estimatedMinutes } : {}) }
+      ? { ...t, status: nextStatus, ...(nextStatus === 'in_progress' ? { estimated_prep_minutes: estimatedMinutes } : {}), ...(nextStatus === 'ready' ? { ready_at: at } : {}) }
       : t))
+    // The stage times sent here are only for a database older than S809 3d: guard_pos_kot_log now
+    // stamps each one with the server's clock when the ticket enters that stage and ignores these.
     const patch = { status: nextStatus, status_updated_by: profile?.id || null }
     if (nextStatus === 'in_progress') { patch.started_at = new Date().toISOString(); patch.estimated_prep_minutes = estimatedMinutes }
     if (nextStatus === 'ready') patch.ready_at = new Date().toISOString()
@@ -298,20 +382,34 @@ export default function KitchenDisplay() {
     // a ticket whose order had been voided (closeOrder sets 'cancelled') and two screens advancing
     // the same ticket silently overwrote each other. `.select('id')` because a write whose filter
     // matches nothing returns no error — only the empty result says it did not land.
-    const { data: moved, error } = await scopedUpdate('pos_kot_log', patch)
-      .eq('id', ticket.id).eq('status', prevStatus).select('id')
-    const revert = () => setTickets(prev => prev.map(t => t.id === ticket.id
-      ? { ...t, status: prevStatus, estimated_prep_minutes: ticket.estimated_prep_minutes }
-      : t))
-    if (error) {
+    // S809 3d: time-limited, so a stalled request frees the button instead of freezing it ("…") until
+    // the page is reloaded. A late landing is harmless: the write is conditional on the old stage.
+    const { data: moved, error } = await settleWithin(scopedUpdate('pos_kot_log', patch)
+      .eq('id', ticket.id).eq('status', prevStatus).select('id'), KDS_TAP_MS, 'Moving the ticket')
+    const revert = () => {
+      localMoves.current.delete(ticket.id)
+      setTickets(prev => prev.map(t => t.id === ticket.id
+        ? { ...t, status: prevStatus, estimated_prep_minutes: ticket.estimated_prep_minutes, ready_at: ticket.ready_at }
+        : t))
+    }
+    if (error && isTimeout(error)) {
+      // No answer, so whether it moved is not known: put it back and read the board again, which
+      // shows where the ticket really is.
+      revert()
+      setKdsError(`${ticket.table_name || 'This ticket'} may not have ${nextStatus === 'cancelled' ? 'cleared' : 'moved'} — the board is being checked again. ${errorLine(error, 'staff')}`)
+      load()
+    } else if (error) {
       revert()
       // errorLine, not error.message: the reader is a cook, and "Failed to fetch" is not a
       // sentence they can act on (S683). The ticket is back where it was; say so.
-      setKdsError(`${ticket.table_name || 'This ticket'} was not moved — it is back where it was. ${errorLine(error, 'staff')}`)
+      setKdsError(`${ticket.table_name || 'This ticket'} was not ${nextStatus === 'cancelled' ? 'cleared' : 'moved'} — it is back where it was. ${errorLine(error, 'staff')}`)
     } else if (!moved?.length) {
       revert()
       setKdsError('This ticket was already moved, served from the floor, or cancelled')
       load()
+    } else {
+      // Confirmed: kept over any read that left before now (load drops it once a newer read lands).
+      localMoves.current.set(ticket.id, { status: nextStatus, est: estimatedMinutes, at, gen: ++boardGen.current })
     }
     setAdvancing(prev => { const next = new Set(prev); next.delete(ticket.id); return next })
   }
@@ -339,15 +437,24 @@ export default function KitchenDisplay() {
     .filter(t => t.status === 'new')
     .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime())
   const oldestNewMs = newTickets.length > 0 ? Math.max(0, now - new Date(newTickets[0].sent_at).getTime()) : 0
-  const alertWarn = oldestNewMs > WARN_MS
-  const alertUrgent = oldestNewMs > LATE_MS
+  // FLOOR-KITCHEN-2 (S809 3d): a ticket whose every dish was taken off holds the alert until someone
+  // taps Clear, as a CHANGE card does until Seen (the kitchen has to see that the food is off), but it
+  // is not food running late, so it never turns the banner amber or red.
+  const newFood = newTickets.filter(t => !t.allPulled)
+  const oldestFoodMs = newFood.length > 0 ? Math.max(0, now - new Date(newFood[0].sent_at).getTime()) : 0
+  const alertWarn = oldestFoodMs > WARN_MS
+  const alertUrgent = oldestFoodMs > LATE_MS
   const alertMuted = alertMutedUntil > now
   const alertOn = newTickets.length > 0
   // A CHANGE card (S809 3a, ORDER-FLOW-9) holds the alert like any New ticket: a changed instruction
   // is often an allergy, the last thing to leave unread. Its one button, Seen, clears it, so it is loud
   // until someone has read it and never after.
   const newChanges = newTickets.filter(isChangeTicket).length
-  const takeHint = newChanges === 0 ? 'Tap Start on the card to take it.'
+  const newPulled = newTickets.length - newFood.length
+  const takeHint = newPulled > 0 && newPulled === newTickets.length
+    ? (newPulled === 1 ? 'Every dish on it was taken off the order — tap Clear on the card.' : 'Every dish on them was taken off the order — tap Clear on each card.')
+    : newPulled > 0 ? 'Tap Start on a new ticket, Seen on a change, or Clear on one whose dishes were taken off.'
+    : newChanges === 0 ? 'Tap Start on the card to take it.'
     : newChanges === newTickets.length ? 'Read the change, then tap Seen on the card.'
     : 'Tap Start on a new ticket, or Seen once you have read a change.'
 
@@ -364,7 +471,8 @@ export default function KitchenDisplay() {
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
   const visible = tickets.filter(t => {
-    if (t.status !== 'ready') return true
+    // S809 3d: a Ready ticket whose dishes were all taken off stays up until it is cleared.
+    if (t.status !== 'ready' || t.allPulled) return true
     const readyAt = t.ready_at ? new Date(t.ready_at).getTime() : new Date(t.sent_at).getTime()
     return now - readyAt < READY_VISIBLE_MS
   })
@@ -396,8 +504,8 @@ export default function KitchenDisplay() {
           muted={alertMuted}
           onMute={() => setAlertMutedUntil(Date.now() + MUTE_MS)}
           title={newTickets.length === 1
-            ? `${newChanges ? 'Changed instruction' : 'New ticket'} — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
-            : `${newTickets.length} tickets waiting${newChanges ? ` — ${newChanges} with a changed instruction` : ' to start'}`}
+            ? `${newChanges ? 'Changed instruction' : newPulled ? 'Dishes taken off' : 'New ticket'} — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
+            : `${newTickets.length} tickets waiting${newChanges ? ` — ${newChanges} with a changed instruction` : newPulled ? ` — ${newPulled} with every dish taken off` : ' to start'}`}
           detail={oldestNewMs < 30000
             ? `Just in. ${takeHint}`
             : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. ${takeHint}`}
@@ -512,12 +620,15 @@ export default function KitchenDisplay() {
 function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, isStartAction, advancing }) {
   const sentMs = new Date(ticket.sent_at).getTime()
   const elapsedMin = Math.max(0, Math.round((now - sentMs) / 60000))
-  const isLate = ticket.status !== 'ready' && (now - sentMs) > LATE_MS
-  const isWarn = ticket.status !== 'ready' && !isLate && (now - sentMs) > WARN_MS
+  // FLOOR-KITCHEN-2 (S809 3d): every dish on it was taken off the order, so there is nothing to make
+  // and nothing to be late with. Its one button is Clear (→ cancelled), never Start/Ready/Served.
+  const pulledAll = !!ticket.allPulled
+  const isLate = !pulledAll && ticket.status !== 'ready' && (now - sentMs) > LATE_MS
+  const isWarn = !pulledAll && ticket.status !== 'ready' && !isLate && (now - sentMs) > WARN_MS
   const borderColor = isLate ? 'var(--theme-red)' : isWarn ? 'var(--theme-amber)' : 'var(--theme-border)'
   // Strip and border encode the same fact deliberately — redundant reinforcement of the one thing
   // on this card that needs someone, not two different facts competing for the same two hues.
-  const stripColor = ticketStripColor({ status: ticket.status, isLate, isWarn })
+  const stripColor = ticketStripColor({ status: pulledAll ? null : ticket.status, isLate, isWarn }) // S809 3d: never "ready" green
   // ORDER-FLOW-9 (S809 3a): a CHANGE card. A waiter changed the instruction on a dish this station
   // already has, so there is nothing new to cook: its one button, Seen, moves it straight to served
   // (guard_pos_kot_log allows any forward move) and it leaves the board.
@@ -526,7 +637,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
   // Estimated-vs-actual readout, shown once a ticket has an estimate on it (set via the Start
   // popup) — a live "time left" while in progress, then a settled comparison once Ready.
   let etaNode = null
-  if (ticket.status === 'in_progress' && ticket.started_at && ticket.estimated_prep_minutes) {
+  if (!pulledAll && ticket.status === 'in_progress' && ticket.started_at && ticket.estimated_prep_minutes) {
     const startedMs = new Date(ticket.started_at).getTime()
     const remainingMin = Math.round((startedMs + ticket.estimated_prep_minutes * 60000 - now) / 60000)
     const over = remainingMin < 0
@@ -555,6 +666,13 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
       {change && (
         <div style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text1)', marginBottom: 6 }}>
           Changed instruction — nothing new to cook
+        </div>
+      )}
+      {pulledAll && (
+        <div style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-red-text)', marginBottom: 6 }}>
+          <Tip text="Every dish on this ticket was taken off the order on the till, with the reason shown under it. Clear takes the ticket off the board without marking anything as cooked, so the floor stops showing it.">
+            <span>Taken off the order — do not make</span>
+          </Tip>
         </div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
@@ -619,9 +737,9 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
         {action && (
           <button
             className="btn btn-primary" style={{ fontSize: 16, padding: '10px 20px' }} disabled={advancing}
-            onClick={() => change ? onAdvance(ticket, 'served') : isStartAction ? onRequestEstimate(ticket) : onAdvance(ticket, next)}
+            onClick={() => pulledAll ? onAdvance(ticket, 'cancelled') : change ? onAdvance(ticket, 'served') : isStartAction ? onRequestEstimate(ticket) : onAdvance(ticket, next)}
           >
-            {advancing ? '…' : change ? 'Seen' : action}
+            {advancing ? '…' : pulledAll ? 'Clear' : change ? 'Seen' : action}
           </button>
         )}
       </div>

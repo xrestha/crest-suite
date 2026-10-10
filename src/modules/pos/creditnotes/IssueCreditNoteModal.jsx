@@ -321,13 +321,16 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       printed: print.printed,
       imsPosted: ims.posted,
       printText,
+      // S809 3j (CREDIT-NOTES-3, Q12 c): who posts a waiting note. A POS manager (who issues notes),
+      // the Owner and the operator post from the Orders floor's "Post to Inventory"; a closed month
+      // only the Owner (or the operator), from Periods. Periods does not open for a POS manager.
       text: ims.posted ? '' : ims.reason === 'no_period'
-        ? `There is no Inventory period for ${month} yet, so this credit note has not been taken off Inventory sales. Once ${month} is opened in Periods, a manager presses "Post POS bills to Inventory" on it and the note is posted then.`
+        ? `${month} has not been started in Inventory yet, so this credit note has not been taken off Inventory sales. Once ${month} is started there, press "Post to Inventory" on the Orders floor and the note is posted then.`
         : ims.reason === 'closed'
-          ? `${month} is closed in Inventory, so this credit note has not been taken off Inventory sales. An admin can post it from Periods with "Post POS bills to Inventory" on ${month}.`
+          ? `${month} is closed in Inventory, so this credit note has not been taken off Inventory sales. Only the Owner can post into a closed month: Periods → "Post POS bills to Inventory" on ${month}.`
           : ims.reason === 'bill_waiting'
-            ? `This bill has not reached Inventory yet, so this credit note waits for it: its food can only go back once the bill's own sale is in. In Periods, press "Post POS bills to Inventory" on the month the bill was charged in, then on ${month}; the note is posted then.`
-            : `This credit note could not be taken off Inventory sales just now (the connection or the database refused it). It is marked as waiting — a manager can post it from Periods with "Post POS bills to Inventory" on ${month}.`,
+            ? `This bill has not reached Inventory yet, so this credit note waits for it: its food can only go back once the bill's own sale is in. "Post to Inventory" on the Orders floor posts the bill first and then this note, while their month is open in Inventory; for a closed month the Owner posts them from Periods.`
+            : `This credit note could not be taken off Inventory sales just now (the connection or the database refused it). It is marked as waiting: press "Post to Inventory" on the Orders floor to post it.`,
       detail: ims.error ? errorLine(ims.error) : '',
     })
   }

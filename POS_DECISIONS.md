@@ -180,6 +180,43 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 3, slice 3j: CREDIT-NOTES-3, IMS-HANDOFF-1 (P2), DOCS-9 (P3), owner decision Q12 (c);
+  plus the S809.4 note double-post~~ — **shipped S809, 2026-10-10**, migration `20261010140000` applied
+  live (crest-v426). **Q12 (c):** a POS manager (or the Owner, or the operator) posts waiting till bills
+  and credit notes into Inventory from the Orders floor (Post to Inventory, the open month only), through
+  the same browser post Periods uses, with the recipe book read through `pos_recipe_book`; a closed month
+  stays the Owner's and the operator's, in Periods, whose button is now theirs only. An Inventory login
+  cannot read till bills (`no_ims_staff`, left untouched), so Periods and Home read the new DEFINER
+  `pos_ims_waiting_counts` (numbers per Nepali month) and tell it how many wait and who posts, never
+  "nothing is waiting". `sales_entries_stamp_pos_source` now refuses a credit note's reversal a second
+  time (`pos_credit_note_already_posted`), since two places can post at once. Built as option (A), the
+  existing browser post, because every read and write it needs already passes for a POS manager; a
+  server-side post was not needed. Original rows: `CREDIT-NOTES.md`, `IMS-HANDOFF.md`, `DOCS.md`.
+- [x] ~~S809 stage 3, slice 3d: FLOOR-KITCHEN-2 (P2), FLOOR-KITCHEN-5, FLOOR-KITCHEN-6 (P3); plus the
+  S809.4 tablet-clock stage times~~ — **shipped S809, 2026-10-10**, migration `20261010130000` applied
+  live (crest-v426). A ticket whose every dish was taken off shows "Taken off the order — do not make"
+  and one button, Clear: `guard_pos_kot_log` lets any unblocked POS login cancel it once the ORDER no
+  longer counts that food as sent beyond what its other tickets carry (judged on the order, never the
+  board's own attribution), otherwise Supervisor. Start/Ready/Served times are the server's, the
+  estimate is fixed at Start, and nothing an older tablet sends is refused. The board marks a Ready
+  ticket served when it drops off after 10 minutes of watching it. The KDS poll ignores late answers and
+  every tap gives up after 15 s and re-reads. **Decided (owner, 2026-10-10, as recommended):** a fully
+  pulled ticket rings until Clear, like a CHANGE card until Seen, but never turns amber or red.
+  Original rows: `FLOOR-KITCHEN.md`.
+- [x] ~~S809 stage 3, slice 3b: GUEST-2, GUEST-3, ORDER-FLOW-11 (P2), ORDER-FLOW-18, GUEST-5, GUEST-6
+  (P3); plus the S809.4 CHANGE-ticket tracker item~~ — **shipped S809, 2026-10-10**, migration
+  `20261010120000` applied live (crest-v426). `submit_guest_order` takes the guest page's order key
+  (`p_request_id`, 4-argument form dropped; old pages resolve through the default), so a resend after a
+  lost reply returns the same order. `guard_pos_guest_order_request` makes a guest order answered once:
+  a decided status is final, what the guest sent cannot be edited, the bill must be the outlet's, and
+  who answered and when are the server's; the till answers only while the order still waits. An
+  accepted order stays off the banner, a second Accept does nothing, and dishes left off after a stale
+  reload put the order back on the banner. A paid choice for a dish with no choices left is refused, not
+  dropped; the menu's first load gives up after 20 s with Try again. Guest tracker and table badge leave
+  CHANGE and cancelled tickets out. The till build floor stays NULL (nothing a till writes to
+  `pos_orders`/`pos_order_items` changed). **Decided (owner, 2026-10-10, as recommended):** when two
+  tablets answer one guest order differently, the first answer stands and the other tablet is told; the
+  operator is held to the same rule. Original rows: `GUEST.md`, `ORDER-FLOW.md`.
 - [x] ~~S809 stage 3, slice 3k: CUSTOMERS-PARKING-4, -5, -8 (P2), CUSTOMERS-PARKING-12 (P3), owner
   decision Q13 (b); plus two S809.4 items (the customer book's audit trail, a delivery partner's row
   offered for enrolment)~~ — **shipped S809, 2026-10-09**, migration `20261010110000` applied live

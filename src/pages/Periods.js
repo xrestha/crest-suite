@@ -18,6 +18,7 @@ import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { backfillCreditNotesToIms, countUnpostedCreditNotesForPeriod } from '../modules/pos/creditnotes/creditNotePosting'
+import { loadImsWaiting, waitingForPeriod, countPhrase } from '../modules/pos/orders/posImsWaiting'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
 import { errorInfo, errorLine } from '../shared/errorText'
@@ -42,6 +43,35 @@ const yearRangeError = `Enter a valid BS year (${YEAR_MIN}–${YEAR_MAX}).`
 function createdLabel(ts) {
   const bs = nepalBs(ts)
   return bs ? `${formatBsDay(bs.day, bs.month)} ${bs.year}` : nepalDateAd(ts)
+}
+
+// What an Inventory login is told about a month's waiting till bills, in place of a Post button it
+// cannot use (S809 3j, owner decision Q12 c: told who can post, never "nothing is waiting"). The
+// counts are the server's (pos_ims_waiting_counts). A failed read says "couldn't check" on the open
+// month, never 0 (S734); a month with nothing waiting shows nothing.
+function TillWaitingNote({ waiting, period }) {
+  if (!waiting) return null
+  if (waiting.error) {
+    return period.status === 'open'
+      ? <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Till bills waiting for Inventory: couldn't check</span>
+      : null
+  }
+  const { bills, notes } = waitingForPeriod(waiting.rows, period.id)
+  if (bills + notes === 0) return null
+  const what = countPhrase(bills, notes)
+  const closed = period.status === 'closed'
+  return (
+    <Tip
+      text={`${what} from this month ${bills + notes === 1 ? 'is' : 'are'} not in Inventory yet, so its sales and stock use are off until ${bills + notes === 1 ? 'it is' : 'they are'} posted. ${closed
+        ? 'The month is closed, so only the Owner can post them, from this page.'
+        : 'The Owner posts them from this page, or a POS manager from POS → Orders with Post to Inventory.'} An Inventory login cannot read till bills, so it cannot post them.`}
+      width={300}
+    >
+      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-amber-text)' }}>
+        {what} waiting · {closed ? 'only the Owner can post them' : 'the Owner or a POS manager posts them'}
+      </span>
+    </Tip>
+  )
 }
 
 export default function Periods() {
@@ -121,6 +151,22 @@ export default function Periods() {
     else if (clientId) loadPeriods()
     else setLoading(false)
   }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Who posts till bills from this page (S809 3j, IMS-HANDOFF-1 / CREDIT-NOTES-3, owner decision
+  // Q12 c): the Owner and the operator. An IMS supervisor or manager also opens Periods, but reads
+  // pos_orders and pos_credit_notes through no_ims_staff, which hands any IMS login an empty table
+  // with no error, so the backfill's own counts read 0 and the page told them everything was already
+  // in Inventory. They get no Post button; each month says how many till bills wait (the server's
+  // count, pos_ims_waiting_counts) and who posts them: the Owner here, or a POS manager on the floor.
+  const postsTillBills = isAdmin || isOwner
+  const wantTillWaiting = posEnabled && !postsTillBills && !!clientId
+  const [tillWaiting, setTillWaiting] = useState(null) // { rows, error } once read
+  useEffect(() => {
+    if (!wantTillWaiting) { setTillWaiting(null); return }
+    let live = true
+    loadImsWaiting(supabase, clientId).then(r => { if (live) setTillWaiting(r) })
+    return () => { live = false }
+  }, [wantTillWaiting, clientId])
 
   async function loadAllClientPeriods() {
     setAllLoading(true)
@@ -573,8 +619,10 @@ export default function Periods() {
       // in a month whose Monthly Report was minted at close, and the Purchases banner names the
       // repair for exactly this — so does this notice, rather than reporting a clean success
       // over a report that is now stale.
+      // S809 DOCS-9: this button shows on a closed month only for the Owner and the operator, and
+      // both hold Regenerate Snapshot (MonthlyOwnerReport), so the notice names the reader's own step.
       const frozenNote = (posted > 0 || notes.posted > 0) && period.status === 'closed'
-        ? ` ${label} is closed, so its frozen Monthly Report does not include these bills until an admin uses Regenerate Snapshot on it.`
+        ? ` ${label} is closed, so its frozen Monthly Owner Report does not include these until you press Regenerate Snapshot on that month's report.`
         : ''
       ok(
         `Posted ${posted} bill${posted === 1 ? '' : 's'}${notes.posted > 0 ? ` and ${notes.posted} credit note${notes.posted === 1 ? '' : 's'}` : ''} into ${label}.` +
@@ -1168,15 +1216,14 @@ export default function Periods() {
                                 </Tip>
                               )}
                               {/* Backfills POS bills whose revenue and stock never reached IMS
-                                  because no period was open for their date (S573). Available on
-                                  any period for admin, open or closed — the whole point is that
-                                  the period didn't exist when the bills were rung. For everyone
-                                  else it follows the lock every IMS entry page spells
-                                  (`!isAdmin && closed` — closed-periods.md): this writes
-                                  sales_entries and stock_movements, and it was the one control
-                                  on the page that let an Owner or an IMS supervisor write into a
-                                  closed month (S738). */}
-                              {posEnabled && (isAdmin || isOwner || p.status === 'open') && (
+                                  because no period was open for their date (S573). The Owner and
+                                  the operator, on any month, open or closed (the Owner joined the
+                                  closed-month carve-out in S756, and the database admits both).
+                                  Not an IMS login (S809 3j, Q12 c): no_ims_staff hides every till
+                                  bill from it, so its post found nothing and said "already in
+                                  Inventory". It gets TillWaitingNote below instead; a POS manager
+                                  posts from the floor (PosImsPostingBanner). */}
+                              {posEnabled && postsTillBills && (
                                 <Tip text="Posts POS bills from this month that closed while no Inventory period existed — their revenue and ingredient usage are missing from Inventory reports until this runs — and credit notes issued that month that could not take their bill's revenue back out. Safe to run more than once; anything already posted is skipped." width={300}>
                                   <button
                                     className="btn btn-ghost"
@@ -1188,6 +1235,7 @@ export default function Periods() {
                                   </button>
                                 </Tip>
                               )}
+                              {wantTillWaiting && <TillWaitingNote waiting={tillWaiting} period={p} />}
                               {/* Close / Reopen — admin. A closed month's Add missing bills and Resync
                                   are the Owner's too (S756): the Owner now edits a closed month in
                                   place, and a capability with no way in is not a capability. */}

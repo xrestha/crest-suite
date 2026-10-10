@@ -244,3 +244,36 @@ describe('countUnpostedForPeriod', () => {
       .rejects.toThrow('boom')
   })
 })
+
+// S809 3j: the till floor's Post to Inventory runs this as a POS manager, often on a Staff PIN, which
+// cannot read `items`; it hands in loadStockLines (posStockLines, through pos_recipe_book) so the
+// trim loss is the book's, and the direct table walk is not used at all.
+describe('backfillPosOrdersToIms — a recipe book handed in (S809 3j)', () => {
+  test('the stock lines come from loadStockLines, asked once for every recipe', async () => {
+    const asked = []
+    const loadStockLines = async (recipeIds, deltaLists) => {
+      asked.push({ recipeIds, deltaLists })
+      // 3 base units per plate, where the mocked table walk above gives 2.
+      return { breakdown: Object.fromEntries(recipeIds.map(id => [id, [{ item_id: `book-${id}`, qty: 3 }]])), explosion: { itemYield: {}, subPerUnit: {} } }
+    }
+    const h = harness({ orders: [order('a', { lines: 2 }), order('b')] })
+    const res = await backfillPosOrdersToIms({ ...h, period: PERIOD, loadStockLines })
+
+    expect(res).toEqual({ posted: 2, skipped: 0 })
+    expect(asked).toHaveLength(1)
+    expect([...asked[0].recipeIds].sort()).toEqual(['r0', 'r1'])
+    const moves = h.calls.filter(c => c.kind === 'insert' && c.table === 'stock_movements').flatMap(c => c.rows)
+    // Bill a: r0 and r1, 2 plates each at 3 units; bill b: r0, 2 plates. All from the book.
+    expect(moves.every(m => m.item_id.startsWith('book-'))).toBe(true)
+    expect(moves.filter(m => m.ref_id === 'a').map(m => m.qty)).toEqual([-6, -6])
+    expect(moves.filter(m => m.ref_id === 'b').map(m => m.qty)).toEqual([-6])
+  })
+
+  test('a failed book read stops the run before anything is written', async () => {
+    const loadStockLines = async () => { throw Object.assign(new Error('refused'), { hint: 'rank_required' }) }
+    const h = harness({ orders: [order('a')] })
+    await expect(backfillPosOrdersToIms({ ...h, period: PERIOD, loadStockLines })).rejects.toThrow('refused')
+    expect(h.count('insert', 'sales_entries')).toBe(0)
+    expect(h.count('update', 'pos_orders')).toBe(0)
+  })
+})

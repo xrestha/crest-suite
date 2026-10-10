@@ -113,6 +113,57 @@ export function laterStage(previous, next) {
   return (STAGE_RANK[next] ?? 0) >= (STAGE_RANK[previous] ?? 0) ? next : previous
 }
 
+// ── Sending an order once (S809 3b, GUEST-2) ─────────────────────────────────────────────────────
+// The page makes one key per order and sends it with every retry of that order. The server stores the
+// order under the key, and a key that already landed answers with that order instead of a second one —
+// so a guest whose reply was lost on bad Wi-Fi can press Place order again without doubling anything.
+
+/** A fresh order key (a v4 uuid), or null on a browser with no crypto (the order then goes without
+ *  one, as every order did before S809 3b). */
+export function newRequestKey(cryptoObj = (typeof window !== 'undefined' ? window.crypto : undefined)) {
+  try {
+    if (typeof cryptoObj?.randomUUID === 'function') return cryptoObj.randomUUID()
+    if (typeof cryptoObj?.getRandomValues === 'function') {
+      const b = cryptoObj.getRandomValues(new Uint8Array(16))
+      b[6] = (b[6] & 0x0f) | 0x40
+      b[8] = (b[8] & 0x3f) | 0x80
+      const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
+      return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+    }
+  } catch { /* no usable crypto */ }
+  return null
+}
+
+/**
+ * What an order is, whatever order its lines were added in: the dishes with their choices and
+ * quantities, the kitchen note and the covers. Two sends with the same signature are the same order,
+ * so the second may carry the first one's key.
+ */
+export function orderSignature(lines, note, covers) {
+  const parts = (lines || [])
+    .map(l => `${l.recipe_id}#${[...(l.option_ids || [])].sort().join('+')}x${Number(l.qty) || 0}`)
+    .sort()
+  return JSON.stringify([parts, String(note || '').trim(), Number(covers) || 0])
+}
+
+/**
+ * The cart once an order that did reach the restaurant is taken out of it: each of that order's lines
+ * comes off by the quantity it sent, and anything the guest added since stays. `keyOf(recipeId,
+ * optionIds)` is the page's own cart key.
+ */
+export function cartWithout(cart, sentLines, keyOf) {
+  const out = { ...(cart || {}) }
+  for (const l of sentLines || []) {
+    const k = keyOf(l.recipe_id, l.option_ids || [])
+    const line = out[k]
+    if (!line) continue
+    const left = (Number(line.qty) || 0) - (Number(l.qty) || 0)
+    if (left > 0) out[k] = { ...line, qty: left }
+    else delete out[k]
+  }
+  return out
+}
+
 // ── Choice rules ─────────────────────────────────────────────────────────────────────────────────
 // Rule wording for a guest: sentence case, no "Optional ·" prefix. A maximum above the number of
 // choices the group actually offers is capped to it — "Pick 2 to 10" for a group of three reads as

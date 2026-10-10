@@ -41,9 +41,15 @@ function bsMonthRangeIso(bsYear, bsMonth) {
 const WRITE_BATCH = 40
 
 /**
+ * `loadStockLines(recipeIds, deltaLists)` (S809 3j, optional) is how the recipe book is read: it
+ * returns `{ breakdown, explosion }` as explodeRecipeIngredients and loadDeltaExplosion do. The till's
+ * floor passes posStockLines (pos_recipe_book), because a POS manager on a Staff PIN cannot read
+ * `items` and every trim loss would read as 100%; Periods (the Owner, the operator) leaves it out
+ * and reads the tables directly, as before.
+ *
  * @returns {{ posted: number, skipped: number, error?: string }}
  */
-export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }) {
+export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period, loadStockLines = null }) {
   if (!period?.id) return { posted: 0, skipped: 0, error: 'No period given' }
 
   const { fromIso, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)
@@ -107,10 +113,15 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
 
   // One explosion for every recipe across every order, rather than per order.
   const recipeIds = [...new Set(list.flatMap(o => (o.pos_order_items || []).map(i => i.recipe_id).filter(Boolean)))]
-  const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
   const lineDeltas = i => (i.selection_key ? lineIngredientDeltas(i.pos_order_item_options) : null)
   const allDeltas = list.flatMap(o => (o.pos_order_items || []).map(lineDeltas).filter(Boolean))
-  const explosion = allDeltas.length > 0 ? await loadDeltaExplosion(supabase, allDeltas) : null
+  let breakdown, explosion
+  if (loadStockLines) {
+    ;({ breakdown, explosion } = await loadStockLines(recipeIds, allDeltas))
+  } else {
+    breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    explosion = allDeltas.length > 0 ? await loadDeltaExplosion(supabase, allDeltas) : null
+  }
 
   // Everything each bill contributes, derived up front so the write pass below is pure batching.
   // An order with no recipe lines (an all-non-recipe bill) has nothing to post and is stamped so
@@ -235,6 +246,10 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
 }
 
 // Exported for the caller's confirm dialog — how many bills are waiting for this period.
+//
+// It reads as the signed-in login, so it is only for a login that can read till bills (the Owner,
+// the operator, a POS login): an IMS login meets no_ims_staff, reads an empty table with no error,
+// and would get 0 here (IMS-HANDOFF-1). An IMS login asks pos_ims_waiting_counts (posImsWaiting.js).
 export async function countUnpostedForPeriod({ supabase, scopedFrom, period }) {
   if (!period?.id) return 0
   const { fromIso, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)

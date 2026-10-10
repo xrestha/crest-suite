@@ -646,3 +646,38 @@ describe('till PIN outlet refusals (S809 ACCESS-4)', () => {
     expect(errorText(err, 'operator')).toMatch(/PIN of their own/)
   })
 })
+
+describe('a guest QR order is answered once (S809 3b)', () => {
+  const raised = {
+    pos_guest_order_decided: { code: '42501', hint: 'pos_guest_order_decided', message: 'pos_guest_order_decided: this guest QR order was already accepted — a guest order is accepted or turned away once, and that answer stands' },
+    pos_guest_order_frozen: { code: '42501', hint: 'pos_guest_order_frozen', message: "pos_guest_order_frozen: a guest's QR order cannot be changed once it is sent" },
+    pos_guest_order_other_outlet: { code: '23503', hint: 'pos_guest_order_other_outlet', message: 'pos_guest_order_other_outlet: a guest QR order can only go onto a bill of its own outlet' },
+  }
+
+  it('every code has its own sentence in both audiences, ahead of the generic ones', () => {
+    const seen = new Set()
+    for (const [c, err] of Object.entries(raised)) {
+      for (const aud of ['staff', 'operator']) {
+        const text = errorText(err, aud)
+        expect([c, text]).not.toEqual([c, errorText({ code: err.code }, aud)])
+        expect([c, text]).not.toEqual([c, errorText({ message: 'x' }, aud)])
+        // A BEFORE UPDATE trigger: the statement rolled back, so each may say so.
+        expect([c, text]).toEqual([c, expect.stringMatching(/[Nn]othing was changed|was not added/)])
+        seen.add(text)
+      }
+    }
+    expect(seen.size).toBe(Object.keys(raised).length * 2)
+  })
+
+  it('matches on the message alone, where the hint was lost', () => {
+    for (const err of Object.values(raised)) {
+      expect(errorText({ message: err.message }, 'operator')).toBe(errorText(err, 'operator'))
+    }
+  })
+
+  it('a second answer names the other till, and an other-outlet bill is not read as the table-delete refusal', () => {
+    expect(errorText(raised.pos_guest_order_decided, 'staff')).toMatch(/another till/)
+    expect(errorText(raised.pos_guest_order_other_outlet, 'operator'))
+      .not.toBe(errorText({ code: '23503', message: 'violates foreign key constraint "pos_guest_order_requests_table_id_fkey" on table "pos_guest_order_requests"' }, 'operator'))
+  })
+})
