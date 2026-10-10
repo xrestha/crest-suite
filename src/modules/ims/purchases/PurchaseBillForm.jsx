@@ -115,6 +115,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // header so a restored draft brings it back; it is never saved — the stored rate is ex-VAT either way.
   const totalsBasis = totalsBasisOf(billHeader)
   const totalsBeforeVat = totalsBasis === TOTALS_BEFORE_VAT
+  // A bill with no VAT line, typically a PAN bill (the supplier is not VAT-registered), has no use
+  // for that choice: it only moves a TICKED line's Rate. The row says so instead (S811).
+  const billHasVat = billLines.some(l => l.vat_inclusive)
   const [draftRestoredAt, setDraftRestoredAt] = useState(() => restoredDraft?.savedAt || null)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
@@ -634,22 +637,34 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       {/* How the supplier's paper prints each line (S801). It sits directly above the Total column
           it governs rather than in the header grid, and each option says what it looks like on the
           paper: a tax invoice that adds VAT once at the foot is the case D34's after-VAT reading got
-          wrong. Radios rather than a switch — two named states, neither of them "off". */}
+          wrong. Radios rather than a switch — two named states, neither of them "off".
+          With no line ticked (a PAN bill) the choice changes nothing, and showing it read as if the
+          bill's amounts were being taken as VAT-inclusive, so a note stands in its place (S811). The
+          note keeps the row, so ticking the first VAT box does not push the table out from under
+          the pointer, and the choice comes back as it was left. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px 20px', flexWrap: 'wrap', marginBottom: 14, fontSize: 13 }}>
-        <span id="pb-totals-basis" style={{ color: 'var(--theme-text2)' }}>
-          <Tip text="Look at the supplier's bill. If VAT appears once near the bottom (Taxable, VAT 13%, Grand Total) and the line amounts add up to the Taxable figure, choose Before VAT — supermarket tax invoices usually print this way. If each line's amount already has VAT in it, choose After VAT. This only matters for lines with VAT ticked and a figure typed into Total; a Rate is always before VAT. Switching keeps every Total you typed and changes its Rate." width={340}>Line totals on this bill are</Tip>
-        </span>
-        <div role="radiogroup" aria-labelledby="pb-totals-basis" style={{ display: 'flex', gap: '0 20px', flexWrap: 'wrap' }}>
-          {[
-            { key: TOTALS_AFTER_VAT, label: 'After VAT', hint: 'each line already includes VAT' },
-            { key: TOTALS_BEFORE_VAT, label: 'Before VAT', hint: 'VAT is added once at the bottom' },
-          ].map(o => (
-            <label key={o.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', cursor: 'pointer', color: 'var(--theme-text1)' }}>
-              <input type="radio" name="pb-totals-basis" value={o.key} checked={totalsBasis === o.key} onChange={() => setTotalsBasis(o.key)} />
-              <span><strong style={{ fontWeight: 600 }}>{o.label}</strong> <span style={{ color: 'var(--theme-text2)' }}>— {o.hint}</span></span>
-            </label>
-          ))}
-        </div>
+        {billHasVat ? (
+          <>
+            <span id="pb-totals-basis" style={{ color: 'var(--theme-text2)' }}>
+              <Tip text="Look at the supplier's bill. If VAT appears once near the bottom (Taxable, VAT 13%, Grand Total) and the line amounts add up to the Taxable figure, choose Before VAT — supermarket tax invoices usually print this way. If each line's amount already has VAT in it, choose After VAT. This only matters for lines with VAT ticked and a figure typed into Total; a Rate is always before VAT. Switching keeps every Total you typed and changes its Rate." width={340}>Line totals on this bill are</Tip>
+            </span>
+            <div role="radiogroup" aria-labelledby="pb-totals-basis" style={{ display: 'flex', gap: '0 20px', flexWrap: 'wrap' }}>
+              {[
+                { key: TOTALS_AFTER_VAT, label: 'After VAT', hint: 'each line already includes VAT' },
+                { key: TOTALS_BEFORE_VAT, label: 'Before VAT', hint: 'VAT is added once at the bottom' },
+              ].map(o => (
+                <label key={o.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', cursor: 'pointer', color: 'var(--theme-text1)' }}>
+                  <input type="radio" name="pb-totals-basis" value={o.key} checked={totalsBasis === o.key} onChange={() => setTotalsBasis(o.key)} />
+                  <span><strong style={{ fontWeight: 600 }}>{o.label}</strong> <span style={{ color: 'var(--theme-text2)' }}>— {o.hint}</span></span>
+                </label>
+              ))}
+            </div>
+          </>
+        ) : (
+          <span style={{ padding: '6px 0', color: 'var(--theme-text2)' }}>
+            <strong style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>No VAT on this bill</strong> — each line's Total is used exactly as printed, as on a PAN bill. Tick VAT on any line the supplier charged VAT on.
+          </span>
+        )}
       </div>
 
       {/* Line items table — mirrors a vendor bill: Item | Qty | Rate | Total | VAT | Amount */}
@@ -671,9 +686,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                   sits where it is read: after the figure taken off the bill, before the Amount it
                   changes, so ticking it and watching Amount move is one glance left to right. */}
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
-                <Tip text="Enter this line's amount exactly as the bill prints it. Whether a VAT line's amount includes VAT is the bill's choice, set above the lines. Rate is worked out automatically. Ticking VAT, or switching the bill between After and Before VAT, keeps this Total and changes the Rate where it has to. Example: Qty 10, Total 1,130, VAT ticked — After VAT gives Rate 100 and Amount 1,130; Before VAT gives Rate 113 and Amount 1,276.90." width={300}>Total (NPR)</Tip>
+                <Tip text="Enter this line's amount exactly as the bill prints it. Whether a VAT line's amount includes VAT is the bill's choice, set above the lines once a line has VAT ticked; with no VAT ticked, Rate is simply Total ÷ Qty. Rate is worked out automatically. Ticking VAT, or switching the bill between After and Before VAT, keeps this Total and changes the Rate where it has to. Example: Qty 10, Total 1,130, VAT ticked — After VAT gives Rate 100 and Amount 1,130; Before VAT gives Rate 113 and Amount 1,276.90." width={300}>Total (NPR)</Tip>
                 <span style={{ display: 'block', marginTop: 2, fontSize: 10, textTransform: 'none', letterSpacing: 0, color: 'var(--theme-text2)' }}>
-                  {totalsBeforeVat ? 'before VAT' : 'after VAT'}
+                  {!billHasVat ? 'no VAT' : totalsBeforeVat ? 'before VAT' : 'after VAT'}
                 </span>
               </th>
               <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 40 }}>
