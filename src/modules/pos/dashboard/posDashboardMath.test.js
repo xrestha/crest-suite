@@ -6,14 +6,31 @@ import {
 const bill = (over) => ({ close_type: 'paid', credit_note_id: null, paid_amount: 1000, covers: 2, discount_amount: 0, table_id: 't1', ...over })
 
 describe('summariseBills', () => {
-  test('counts paid bills only, leaves out a credit-noted bill, and counts voids and comps apart', () => {
+  test('counts paid bills only, leaves a credit-noted bill out of sales but keeps its guests, and counts voids and comps apart', () => {
     const s = summariseBills([
       bill({ paid_amount: 1200, covers: 3, discount_amount: 100 }),
       bill({ paid_amount: 800, covers: 1 }),
       bill({ paid_amount: 500, credit_note_id: 'cn1' }),
-      { close_type: 'void' }, { close_type: 'writeoff' }, { close_type: 'writeoff' },
+      { close_type: 'void', table_id: 't1', covers: 4 }, { close_type: 'writeoff', table_id: 't1', covers: 2 }, { close_type: 'writeoff' },
     ])
-    expect(s).toMatchObject({ sales: 2000, bills: 2, covers: 4, discount: 100, avgBill: 1000, avgCover: 500, voids: 1, comps: 2 })
+    // Covers 3 + 1 + the credited bill's 2 (the Covers Report's count); a void or comp seats nobody.
+    expect(s).toMatchObject({ sales: 2000, bills: 2, covers: 6, discount: 100, avgBill: 1000, voids: 1, comps: 2 })
+    expect(s.avgCover).toBeCloseTo(2000 / 6)
+  })
+
+  // S809 3n (REPORTS-3): the review's own example. 12 dine-in bills, 30 guests, NPR 18,000; 20
+  // takeaway and delivery bills, NPR 9,000. The Covers Report says 30 covers at NPR 600 a cover.
+  test('covers are dine-in guests only: takeaway and delivery are sales and bills, never guests', () => {
+    const dineIn = Array.from({ length: 12 }, (_, i) => bill({ paid_amount: 1500, covers: i < 6 ? 3 : 2 }))
+    const takeaway = Array.from({ length: 14 }, () => bill({ paid_amount: 450, covers: 1, table_id: null }))
+    const delivery = Array.from({ length: 6 }, () => bill({ paid_amount: 450, covers: 1, table_id: null, delivery_partner: 'Foodmandu' }))
+    const s = summariseBills([...dineIn, ...takeaway, ...delivery])
+    expect(s).toMatchObject({ sales: 27000, bills: 32, covers: 30, avgCover: 600 })
+  })
+
+  test('a takeaway-only day has no guests and no average per cover', () => {
+    const s = summariseBills([bill({ table_id: null, covers: 1 }), bill({ table_id: null, covers: 2, delivery_partner: 'Pathao' })])
+    expect(s).toMatchObject({ bills: 2, sales: 2000, covers: 0, avgCover: null })
   })
 
   test('no covers is no average per cover, never zero', () => {

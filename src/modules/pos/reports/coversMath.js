@@ -60,6 +60,21 @@ export function dineInOnly(orders) {
 }
 
 /**
+ * Guests seated, over a set of PAID bills: the covers of every dine-in bill, a credit-noted one
+ * included (a credit note corrects billing, it does not un-seat the guests). The one count behind the
+ * Covers Report's headline (coversTotals below), the POS Dashboard's Covers tile and Home's Covers
+ * Served, so none of them can drift from the report they link to (S809 3n, REPORTS-3). The Group
+ * Console's SQL, get_group_summary, carries the same rule: close_type 'paid' AND table_id IS NOT NULL.
+ *
+ * The caller passes paid bills only: a void or a complimentary bill counts no guests on any of them.
+ */
+export function seatedCovers(paidOrders) {
+  let covers = 0
+  for (const o of paidOrders || []) if (isDineIn(o)) covers += parseInt(o.covers, 10) || 0
+  return covers
+}
+
+/**
  * The Covers Report's headline figures.
  *
  *   orders   paid bills closed in the range — credit-noted ones INCLUDED: a credit note corrects
@@ -73,10 +88,10 @@ export function dineInOnly(orders) {
  * Takeaway/delivery is reported beside dine-in as bills and revenue only; it has no covers.
  */
 export function coversTotals(orders, netOf = () => 0, returns = []) {
-  const dineIn = { bills: 0, covers: 0, net: 0, returns: 0 }
+  const dineIn = { bills: 0, covers: seatedCovers(orders), net: 0, returns: 0 }
   const takeaway = { bills: 0, net: 0, returns: 0 }
   for (const o of orders || []) {
-    if (isDineIn(o)) { dineIn.bills += 1; dineIn.covers += (o.covers || 0); dineIn.net += netOf(o) }
+    if (isDineIn(o)) { dineIn.bills += 1; dineIn.net += netOf(o) }
     else { takeaway.bills += 1; takeaway.net += netOf(o) }
   }
   for (const r of returns || []) {

@@ -1,4 +1,4 @@
-import { PARTY_BANDS, bandFor, turnoverByBand, isDineIn, dineInOnly, coversTotals, addReturnsByBand } from './coversMath'
+import { PARTY_BANDS, bandFor, turnoverByBand, isDineIn, dineInOnly, seatedCovers, coversTotals, addReturnsByBand } from './coversMath'
 
 // Verbatim copy of the loop CoversReport.jsx carried before S677 lifted it out. The helper must
 // produce the same rows for the same input — this is the guard that the extraction changed
@@ -100,6 +100,16 @@ describe('dine-in only (S754)', () => {
     expect(t.returns).toBe(1)
     expect(t.takeaway.net).toBe(700)
     expect(t.takeaway.returns).toBe(1)
+  })
+
+  test('seatedCovers counts the guests of dine-in bills only, a credit-noted one included (S809 3n)', () => {
+    expect(seatedCovers(BILLS)).toBe(6)                                   // d1 4 + d2 2; the takeaways' default 1s are out
+    expect(seatedCovers(BILLS)).toBe(coversTotals(BILLS, netOf).covers)   // the report's headline is this count
+    expect(seatedCovers([{ table_id: 't1', covers: 3, credit_note_id: 'cn1' }])).toBe(3)
+    expect(seatedCovers([{ table_id: null, covers: 2, delivery_partner: 'Foodmandu' }])).toBe(0)
+    expect(seatedCovers([{ table_id: 't1', covers: '2' }, { table_id: 't1', covers: null }])).toBe(2)
+    expect(seatedCovers([])).toBe(0)
+    expect(seatedCovers(null)).toBe(0)
   })
 
   test('turnover over dine-in only never sees a takeaway bill', () => {

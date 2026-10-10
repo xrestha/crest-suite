@@ -135,7 +135,9 @@ export default function Modal({
         // A sheet scrolls inside its own panel, so the overlay must not scroll too — two nested
         // scrollers on a phone means the backdrop drags out from under the sheet.
         overflowY: sheet ? 'hidden' : 'auto',
-        padding: sheet ? 0 : (unstyled ? 16 : '40px 16px'),
+        // The guest-order banner (ArrivalAlert, z-index 3000) is fixed over every layer and publishes
+        // its measured height, 0 without it; without this it covers a dialog's title and ✕ (S809 3c).
+        padding: sheet ? 0 : (unstyled ? 'calc(16px + var(--arrival-alert-h, 0px)) 16px 16px' : 'calc(40px + var(--arrival-alert-h, 0px)) 16px 40px'),
         display: 'flex',
         alignItems: sheet ? 'flex-end' : (unstyled ? 'center' : 'flex-start'),
         justifyContent: 'center',

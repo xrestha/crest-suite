@@ -324,3 +324,20 @@ export const billInput = {
 // hand that has paused sees the bill immediately — the same 400 ms-class trade the loyalty
 // lookup on the same modal already makes, tightened because this one is purely visual.
 export const PREVIEW_DEBOUNCE_MS = 200
+
+// The sent count a cart line carries once its quantity is set to `qty` (PosOrders' applyQty): what the
+// next ticket prints its "+N", "↓N (now X)" or "CHANGE ONLY" against. A line flagged sent keeps its
+// old quantity as the count. A line cut below what the kitchen had keeps that higher count, which is
+// what a later KOT's "↓1 (now 2)" needs. `pullSaved` is true when that cut is SAVED on the server
+// (the pull is recorded there, and the Kitchen Display strikes the plate): adding the dish back then
+// counts from the saved quantity, so the ticket reads "+1" and the plate is made again. Before S809
+// (ORDER-FLOW-13) it counted from the old figure and printed "CHANGE ONLY", while the server stored the
+// line as sent in full: the guest was billed for a plate the kitchen had been told to stop. A cut not
+// yet saved keeps the old count, because the kitchen was never told to stop.
+export function sentQtyAfterQtyChange(item, qty, pullSaved = false) {
+  const was = Number(item?.qty) || 0
+  if (item?.sent_to_kot && was !== qty) return was
+  const sent = Number(item?.sent_qty) || 0
+  if (pullSaved && !item?.sent_to_kot && sent > was && qty > was) return was
+  return sent
+}

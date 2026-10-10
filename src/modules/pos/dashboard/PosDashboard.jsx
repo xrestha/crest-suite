@@ -298,10 +298,11 @@ export default function PosDashboard() {
                 <Tile label="Sales" value={npr(t.sales)} sub={<CompareLine cmp={compareToLastWeek(t.sales, lw.sales, { floor: 100 })} then={lw.sales} money />}
                   to={canReports ? '/pos/sales-report' : null} />
                 <Tile label="Bills" value={t.bills} sub={<CompareLine cmp={compareToLastWeek(t.bills, lw.bills, { floor: 1 })} then={lw.bills} />} />
-                <Tile label="Covers" tip="Guests seated at tables, as entered when the table was opened. Takeaway and delivery bills have none."
+                <Tile label="Covers" tip="Guests seated at tables on today's paid bills, as entered when the table was opened: the Covers Report's count. Takeaway and delivery bills seat no guests, so they are not counted here; a bill later credit-noted still counts its guests."
                   value={t.covers} sub={<CompareLine cmp={compareToLastWeek(t.covers, lw.covers, { floor: 1 })} then={lw.covers} />}
                   to={canReports ? '/pos/covers-report' : null} />
-                <Tile label="Avg per cover" value={nprOrDash(t.avgCover)}
+                <Tile label="Avg per cover" tip="What today's dine-in bills charged, VAT included, divided by the guests seated at them. A bill later credit-noted gives its money back but keeps its guests, as on the Covers Report. Takeaway and delivery sales are left out: they have no guests to divide by."
+                  value={nprOrDash(t.avgCover)}
                   sub={<CompareLine cmp={compareToLastWeek(t.avgCover, lw.avgCover, { floor: 20 })} then={lw.avgCover} money />} />
                 <Tile label="Discounts" tip="Bill discounts given today. Here less is the better direction, so a rise shows red."
                   value={npr(t.discount)} sub={<CompareLine cmp={compareToLastWeek(t.discount, lw.discount, { goodDirection: -1, floor: 100 })} then={lw.discount} money />}

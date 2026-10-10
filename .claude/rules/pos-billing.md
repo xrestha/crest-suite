@@ -208,7 +208,8 @@ it returns `{inserted, items_version, items}`. Four rules it enforces:
   already ordered. Comped rows count in the pulled-item record and the sent floor (S809 2h).
 - **`p_expected_version` against `pos_orders.items_version`** refuses a save from a tablet that
   loaded the order before another one saved it (`stale_order`). The screen reloads the order and
-  says it changed on another device. NULL keeps the old behaviour for a stale bundle.
+  says it changed on another device, unless this till holds an unanswered save of that order (S809
+  3e, below). NULL keeps the old behaviour for a stale bundle.
 - **`sent_qty`** — how much of a line the kitchen already has — is stored, not held only in memory.
 
 `guard_pos_item_price` refuses any browser write to a line's price, quantity or identity outside
@@ -890,6 +891,15 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 - **Till text is `errorText(err, 'staff')`, never `err.message`** — the floor alerts, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
 - **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till (the 9px chips were raised). Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
 - **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. A KDS estimate preset starts the ticket in one tap.
+
+## A send whose answer is lost is read back too (S809 3e)
+
+- **Every send step is bounded** (`SEND_STEP_MS` for the order insert and line save, `SEND_READ_MS` for read-backs and small writes, `sendAttempt.js`); the saving flags clear in a `finally`, and the line save is cancelled with `.abortSignal()`.
+- **Each online save leaves a mark until its answer is known** (`newSendAttempt`, per order in `sendAttemptRef`, memory only like close marks); `noAnswer` (timeout, dropped connection, 5xx) keeps it. A landed mark prints and logs from its own record (`finishLandedSend`), settled after the press, on reopening and by a 15 s poll.
+- **A stale refusal is this till's own save only while it holds an unanswered mark for that order** (`judgeSendAttempts`); otherwise it reloads and prints nothing. A ticket another login logged for the same dishes (`firedElsewhere`) means that till fired them: no second ticket.
+- **A late answer never writes onto another order's screen** (`watchScreen`; `backToFloor` moves the screen token): its message goes to the floor with the order's name, and `performSave` reads `itemsVersionRef` once.
+- **The one `saved.unknown` branch per send path is where 3f routes to the offline queue**; drop that order's marks first.
+- **The cover count is written after the line save and only when changed on this tablet** (ORDER-FLOW-14). A saved take-off re-added prints +1 (`sentQtyAfterQtyChange`, ORDER-FLOW-13).
 
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
 

@@ -19,6 +19,7 @@ import { outletMovedText, outletHeldText } from '../shared/outletWatch'
 import { isTillPath, readTillDevice, tillStop } from '../modules/pos/tillOutlet'
 import { withTimeout, isTimeout } from '../utils/withTimeout'
 import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
+import { useTillGuestView, shellGuestAlertPlan, guestAlertTitle, guestAlertDetail } from '../shared/guestAlertBridge'
 import ArrivalAlert from './ArrivalAlert'
 import SetupStepStrip from './SetupStepStrip'
 import { viewerOf as setupGuideViewerOf } from '../shared/onboarding/setupViewer'
@@ -972,24 +973,31 @@ export default function Layout() {
   // had to already be looking at — so an owner working in IMS, which is where an owner mostly is,
   // was told nothing at all. That is the whole bug: the alert lived on the page, not in the app.
   //
-  // Two routes suppress it, and both already answer it better than a banner could:
-  //   /pos/orders — has the floor banner, the per-table 🔔 chip and its own chime.
-  //   /pos/kds    — the kitchen cannot Accept a guest order, and a kitchen-team login cannot even
-  //                 reach Orders (KITCHEN_TEAM_ALLOWED_PATHS), so the button would be a dead end.
-  //                 That board raises its own loud alert for the thing the kitchen CAN act on.
-  const guestAlertRoute = location.pathname !== '/pos/orders' && location.pathname !== '/pos/kds'
-  const guestAlerts = useGuestOrderAlerts(posVisible && !tillStoppedHere)
-  const guestAlertOn = guestAlertRoute && guestAlerts.requests.length > 0
+  // Where it stands aside (S809 3c, FLOOR-KITCHEN-1; shellGuestAlertPlan in guestAlertBridge.js):
+  //   /pos/kds    — silent and hidden. The kitchen cannot Accept a guest order, and a kitchen-team
+  //                 login cannot even reach Orders (KITCHEN_TEAM_ALLOWED_PATHS), so the button would
+  //                 be a dead end. That board raises its own loud alert for what the kitchen CAN act on.
+  //   the Orders FLOOR — the banner only. The floor has its own banner and glowing table (with this
+  //                 alert's Mute), so the sound still repeats there; it used to chime once and stop.
+  // The order screen gets the banner: it shows guest orders for the table on screen only, so the
+  // banner is the one thing that says another table is waiting (until S809 3c the whole of
+  // /pos/orders was suppressed, on the reading that "Orders already shows it", which is true of the
+  // floor alone). A waiting order this till has already accepted into its cart is not announced at
+  // all: it waits in the database only until the save marks it (S809.4).
+  const tillGuestView = useTillGuestView()
+  const onTillScreen = !!tillGuestView && (location.pathname === '/pos/orders' || location.pathname === '/pos/billing')
+  const guestAlerts = useGuestOrderAlerts(posVisible && !tillStoppedHere, { heldIds: onTillScreen ? tillGuestView.heldIds : null })
+  const guestPlan = shellGuestAlertPlan({ pathname: location.pathname, till: onTillScreen ? tillGuestView : null, requests: guestAlerts.requests })
+  const guestAlertOn = guestPlan.banner
+  const guestAlertSound = guestPlan.sound
   useEffect(() => {
-    if (!guestAlertOn || guestAlerts.muted) return
+    if (!guestAlertSound || guestAlerts.muted) return
     // Sound immediately, then keep sounding. A guest order nobody accepts is food nobody is
     // cooking, so one chime into an empty room is exactly the failure this replaces.
     playGuestAlert({ urgent: guestAlerts.urgent })
     const id = setInterval(() => playGuestAlert({ urgent: guestAlerts.urgent }), REPEAT_MS)
     return () => clearInterval(id)
-  }, [guestAlertOn, guestAlerts.muted, guestAlerts.urgent])
-  const guestAlertTables = [...new Set(guestAlerts.requests.map(r => r.tableName))]
-  const guestWaitMins = Math.floor(guestAlerts.waitedMs / 60000)
+  }, [guestAlertSound, guestAlerts.muted, guestAlerts.urgent])
   // Per-route counts rendered on the nav row itself, so a number waiting on one page is visible
   // from every other page in the module. Keyed by route because NAV is a module-level constant.
   // Amber while something needs a decision (a request); grey when it is only news (S687).
@@ -1373,14 +1381,10 @@ export default function Layout() {
           urgent={guestAlerts.urgent}
           muted={guestAlerts.muted}
           onMute={guestAlerts.mute}
-          title={guestAlerts.requests.length === 1
-            ? `New guest order — ${guestAlertTables[0]}`
-            : `${guestAlerts.requests.length} new guest orders — ${guestAlertTables.join(', ')}`}
-          detail={guestWaitMins < 1
-            ? 'Just in. Nothing reaches the kitchen until a staff member accepts it.'
-            : `Waiting ${guestWaitMins} min. Nothing reaches the kitchen until a staff member accepts it.`}
-          actionLabel="Open Orders"
-          onAction={() => navigate('/pos/orders')}
+          title={guestAlertTitle(guestAlerts.requests)}
+          detail={guestAlertDetail({ waitedMs: guestAlerts.waitedMs, where: guestPlan.where })}
+          actionLabel={guestPlan.where === 'shell' ? 'Open Orders' : undefined}
+          onAction={guestPlan.where === 'shell' ? () => navigate('/pos/orders') : undefined}
         />
       )}
       {/* WCAG 2.4.1 — 41 sidebar controls precede the first control in <main> on every route. */}

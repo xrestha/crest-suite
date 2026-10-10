@@ -7,6 +7,10 @@ import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/a
 import { withTimeout } from '../../../utils/withTimeout'
 import { listLockedCarts } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
+import ArrivalAlert from '../../../components/ArrivalAlert'
+import { useGuestOrderAlerts, REPEAT_MS } from '../../../shared/hooks/useGuestOrderAlerts'
+import { guestAlertTitle, guestAlertDetail } from '../../../shared/guestAlertBridge'
+import { playGuestAlert, soundBlocked, unlockAudio } from '../posChime'
 
 // The PIN screen is every till's resting state, so it is where a new release is picked up (S809 1b).
 // A few quiet seconds first, so a reload never lands under a waiter typing a PIN. Locked carts are in
@@ -106,6 +110,32 @@ export default function PosLogin() {
     }, e => console.error('Could not sign out the login left on this tablet:', e))
   }, [staleSession, signOut])
   const holdForSignOut = staleSession || clearing
+
+  // ── A guest's QR order, announced on the locked till (S809 3c, FLOOR-KITCHEN-1; owner Q14 1) ──
+  // This screen is every PIN till's resting state: three idle minutes and it is back here, outside
+  // the app shell and its alert, with nobody signed in. A guest order placed then was heard nowhere
+  // (the Kitchen Display leaves guest orders to the floor by design). It now asks through this
+  // tablet's own key, as the staff picker above does, and gets table names and times only; a tablet
+  // on the pre-S754 shared key (no device id) is not asked about. Same banner, repeat and Mute as
+  // the shell's, and the Mute is the same one (guestAlertBridge.js).
+  const guestAlerts = useGuestOrderAlerts(!!(clientId && deviceId && deviceSecret) && !deviceDead, { device: { clientId, deviceId, deviceSecret } })
+  const guestWaiting = guestAlerts.requests.length > 0
+  useEffect(() => {
+    if (!guestWaiting || guestAlerts.muted) return
+    playGuestAlert({ urgent: guestAlerts.urgent })
+    const id = setInterval(() => playGuestAlert({ urgent: guestAlerts.urgent }), REPEAT_MS)
+    return () => clearInterval(id)
+  }, [guestWaiting, guestAlerts.muted, guestAlerts.urgent])
+  // This screen reloads itself to take a release, and a page nobody has touched since loading may
+  // not play sound. Any tap or key here lets it; until one comes, the banner says the sound is off.
+  useEffect(() => {
+    window.addEventListener('pointerdown', unlockAudio)
+    window.addEventListener('keydown', unlockAudio)
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('keydown', unlockAudio)
+    }
+  }, [])
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
@@ -280,8 +310,19 @@ const pinDots = Math.max(4, pin.length)
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: 24,
+      // The guest-order banner is fixed at the top and publishes its measured height; 0 without it.
+      padding: 'calc(24px + var(--arrival-alert-h, 0px)) 24px 24px',
     }}>
+    {guestWaiting && (
+      <ArrivalAlert
+        reserveSpace
+        urgent={guestAlerts.urgent}
+        muted={guestAlerts.muted}
+        onMute={guestAlerts.mute}
+        title={guestAlertTitle(guestAlerts.requests)}
+        detail={guestAlertDetail({ waitedMs: guestAlerts.waitedMs, where: 'pin', soundOff: soundBlocked() })}
+      />
+    )}
     <div className="card" style={{
       padding: '40px 36px', borderRadius: 0,
       display: 'flex', flexDirection: 'column', alignItems: 'center',

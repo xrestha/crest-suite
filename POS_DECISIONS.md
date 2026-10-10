@@ -180,6 +180,40 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 3, slice 3n: REPORTS-3, GAP-OUTLETS-3 (P2), REPORTS-8 (P3)~~ — **shipped S809,
+  2026-10-10**, migration `20261010170000` applied live (crest-v427). Covers on the POS Dashboard, Home and
+  the Group Console are guests SEATED, the Covers Report's count (`coversMath.seatedCovers`; in SQL
+  `close_type='paid' AND table_id IS NOT NULL`): takeaway and delivery bills stay in Sales and Bills and
+  are never guests, a credit-noted bill keeps its guests, and Avg per cover divides dine-in money only.
+  `get_group_summary` takes the BS month from `bs_months` cut at Nepal midnight (it began at 05:45). The
+  Group Revenue tip now says a till bill counts once it is posted to Inventory (the figure was kept, not
+  the tip: Revenue is the Inventory base every ratio on that page divides by). Home's POS and kitchen
+  cards keep the last good figure of a failed read, or show "—", and never cache a failed load. Live on
+  apply: Ashwin 2083 guests BLOOM CAFE 1,521 → 1,314, BLOOM CAFE - PKR 996 → 903, revenue unchanged.
+  **Decided (owner, 2026-10-10, as recommended):** the Owner Report counts seated guests too, from the
+  next report on, in slice 3m. Original rows: `REPORTS.md`, `GAPS.md`.
+- [x] ~~S809 stage 3, slice 3e: ORDER-FLOW-3, ORDER-FLOW-4, ORDER-FLOW-5 (P2), ORDER-FLOW-13,
+  ORDER-FLOW-14 (P3)~~ — **shipped S809, 2026-10-10**, app only (crest-v427). Every send waits at most
+  about 20 s; a send with no answer is "not known yet", never "nothing printed", and the till reads the
+  order back (at once, on reopening, every 15 s) and prints and logs a landed send once, under its own
+  table. A stale refusal is this till's own landed save only while it holds an unanswered mark for that
+  order, and a ticket another login logged for the same dishes means no second ticket, so two tablets
+  pressing KOT for the same dishes print once. ORDER-FLOW-4 took the app-only form; a save id stored by
+  `save_pos_order_items` stays the fix if the residual (the same login on two tablets, or the other
+  till's ticket log failing) ever shows. The cover count is written after the line save and only when
+  changed on that tablet. **Decided (owner, 2026-10-10, as recommended):** a dish taken off and saved,
+  then added back, prints "+1" so the kitchen makes it again; a KOT without re-adding still prints
+  "↓1 (now 2)". Original rows: `ORDER-FLOW.md`.
+- [x] ~~S809 stage 3, slice 3c: FLOOR-KITCHEN-1 (P2), FLOOR-KITCHEN-10, DOCS-6 (P3); plus the S809.4 "the
+  alert rings on the till that accepted" item~~ — **shipped S809, 2026-10-10**, migration
+  `20261010150000` applied live (crest-v427). A waiting guest QR order is announced on every till
+  screen: the floor's alarm repeats, the order screen shows the app-wide bar for another table (padded,
+  as are dialogs), and a locked till's PIN screen shows and sounds it through the tablet's own key
+  (`get_pos_device_guest_alerts`: table names and times only; silent with POS off or the account locked;
+  a revoked tablet is refused). A till that accepted an order stops hearing it; one Mute per device.
+  **Decided (owner, 2026-10-09, Q14 (1)):** a locked till announces a waiting guest order through the
+  tablet's own key. Built as drafted: anyone may press Mute on a locked till without a PIN, because Mute
+  only silences the sound and the bar stays. Original rows: `FLOOR-KITCHEN.md`, `DOCS.md`.
 - [x] ~~S809 stage 3, slice 3j: CREDIT-NOTES-3, IMS-HANDOFF-1 (P2), DOCS-9 (P3), owner decision Q12 (c);
   plus the S809.4 note double-post~~ — **shipped S809, 2026-10-10**, migration `20261010140000` applied
   live (crest-v426). **Q12 (c):** a POS manager (or the Owner, or the operator) posts waiting till bills

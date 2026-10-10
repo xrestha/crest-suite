@@ -6,6 +6,7 @@
 // their home screens; comparing a part-day against a whole prior day would read every lunchtime as
 // a collapse, so the earlier day is cut off at this moment's time of day before it is summed.
 import { paymentSharesOf } from '../reports/salesReportMath'
+import { dineInOnly, seatedCovers } from '../reports/coversMath'
 import { nepalHour } from '../../../shared/nepalTime'
 import { compareFigures } from '../../../shared/compareFigures'
 
@@ -19,14 +20,18 @@ export const countsAsSale = o => o?.close_type === 'paid' && !o.credit_note_id
 export function summariseBills(orders) {
   const paid = (orders || []).filter(countsAsSale)
   const sales = paid.reduce((s, o) => s + num(o.paid_amount), 0)
-  const covers = paid.reduce((s, o) => s + (parseInt(o.covers, 10) || 0), 0)
+  // S809 3n (REPORTS-3): covers are guests SEATED, the Covers Report's own count (seatedCovers):
+  // dine-in bills only, and a since-credit-noted bill keeps its guests. A takeaway or delivery bill
+  // is in Sales and Bills, never a guest, so Avg per cover divides only what the dine-in bills charged.
+  const covers = seatedCovers((orders || []).filter(o => o?.close_type === 'paid'))
+  const dineInSales = dineInOnly(paid).reduce((s, o) => s + num(o.paid_amount), 0)
   const discount = paid.reduce((s, o) => s + num(o.discount_amount), 0)
   const bills = paid.length
   return {
     sales, bills, covers, discount,
     avgBill: bills > 0 ? sales / bills : null,
     // Covers are entered at the table; a takeaway-only day has none, which is not an average of 0.
-    avgCover: covers > 0 ? sales / covers : null,
+    avgCover: covers > 0 ? dineInSales / covers : null,
     voids: (orders || []).filter(o => o?.close_type === 'void').length,
     comps: (orders || []).filter(o => o?.close_type === 'writeoff').length,
   }

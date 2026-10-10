@@ -80,3 +80,23 @@ export function playGuestAlert({ urgent = false } = {}) {
     }
   } catch (_) { /* audio blocked or unsupported — the banner still shows */ }
 }
+
+// ── Whether the browser is letting this page play sound (S809 3c) ───────────────────────────
+//
+// A page that loaded without anyone touching it (the PIN screen reloads itself to take a release,
+// S809 1b; a power cut; a restored tab) gets its context 'suspended', and every note above plays
+// into nothing until a person taps the page. These two let a screen say so and let that tap unlock
+// it. Neither creates a context: one exists once an alert has tried to sound.
+
+// True only when a context exists and the browser is holding it ('suspended', or Safari's
+// 'interrupted'). False before any sound was tried, and where the browser has no Web Audio.
+export function soundBlocked() {
+  return !!sharedCtx && sharedCtx.state !== 'running' && sharedCtx.state !== 'closed'
+}
+
+// Call from inside a tap or key handler: that is the one place a browser lets a held context start.
+export function unlockAudio() {
+  if (sharedCtx && sharedCtx.state !== 'running' && sharedCtx.state !== 'closed') {
+    sharedCtx.resume().catch(() => {})
+  }
+}

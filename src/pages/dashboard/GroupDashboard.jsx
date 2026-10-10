@@ -116,7 +116,9 @@ export default function GroupDashboard() {
     setLoading(true)
     setError('')
     // pos_orders has no period_id or BS columns — only AD closed_at — so the BS month is
-    // converted here and passed through, matching SalesReport.jsx's own convention.
+    // converted here and passed through, matching SalesReport.jsx's own convention. Since S809 3n
+    // the server takes the month's days from its own bs_months and cuts them at Nepal's midnight;
+    // these dates are used only for a month bs_months does not hold.
     //
     // formatAd, NOT .toISOString(). bsToAd returns a Date at local midnight; .toISOString() then
     // converts using the runtime's offset, which at Nepal's +05:45 lands on the PREVIOUS day and
@@ -348,7 +350,7 @@ export default function GroupDashboard() {
                 models-arguing the class comment warns about. dash-section for the mobile rhythm. */}
             {!error && <div className="stat-grid dash-section">
               <div className="stat-card">
-                <div className="stat-label"><Tip text="Sum of every included outlet's revenue for this BS month. For a POS-enabled outlet this already includes POS revenue, since PosOrders stamps a sales_entries row per closed bill.">Group Revenue</Tip></div>
+                <div className="stat-label"><Tip text="Sum of every included outlet's Inventory sales for this BS month: before VAT, after discounts, complimentary dishes left out, credit notes taken off once they reach Inventory. A till bill is in it once it has been posted to Inventory, which happens as it is paid while the month is open there. A bill still waiting to be posted (the till floor's Post to Inventory, or Periods → Post POS bills to Inventory) is not in it yet." width={300}>Group Revenue</Tip></div>
                 <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
               </div>
               <div className="stat-card">
@@ -366,7 +368,7 @@ export default function GroupDashboard() {
                 )}
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></div>
+                <div className="stat-label"><Tip text="Guests seated at tables across included outlets, from paid POS bills closed within this BS month, Nepal time: each outlet's Covers Report count. Takeaway and delivery bills seat no guests, so they are not counted; a bill later credit-noted still counts its guests. Outlets without POS contribute zero." width={300}>Group Covers</Tip></div>
                 {/* Zero covers is a COUNT, not a missing figure — an em-dash here says "we could not
                     work this out" about a group whose outlets simply took no POS bills, on a page
                     whose coverage banner above already explains any real gap (S734). */}

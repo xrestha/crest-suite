@@ -107,6 +107,10 @@ when one was last used.
   The picker is `get_pos_device_staff`, which RAISES on a dead key rather than returning no rows, so
   "revoked" and "no staff" are different screens. It leaves out a POS-blocked login (S809 3i), whose
   PIN then gets `user_banned` from GoTrue.
+- **Two anon reads take the tablet key**: the picker `get_pos_device_staff` and, since S809 3c,
+  `get_pos_device_guest_alerts` (table names and times of waiting guest orders). Both call
+  `pos_device_key_valid` and raise `pos_device_not_active`/28000 on a dead key; neither stamps
+  `last_used_at`.
 
 **The shared key is retired explicitly, never automatically when the first tablet registers.** An
 outlet with three tills that re-activates one would otherwise lose the other two mid-service.

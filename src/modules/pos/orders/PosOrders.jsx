@@ -46,6 +46,7 @@ import {
 } from './tillBillChecks'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { playChime } from '../posChime'
+import { publishTillGuestView, clearTillGuestView, useGuestAlertMute } from '../../../shared/guestAlertBridge'
 import { errorText, isNetworkError } from '../../../shared/errorText'
 import { withTimeout, isTimeout } from '../../../utils/withTimeout'
 import { keepLockedCart, takeLockedCart, lockedCartWhere, POS_BEFORE_LOCK_EVENT } from '../posLockedCart'
@@ -56,10 +57,14 @@ import {
   storedDiscountRatio, legsToRecord, customerRowFromBill, latestCompRows,
 } from './closeAttempt'
 import {
+  SEND_STEP_MS, SEND_READ_MS, noAnswer, newSendAttempt, stopWaiting, sendLinesOf, firesTickets, stationsOf,
+  judgeSendAttempts, unknownSendText,
+} from './sendAttempt'
+import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, lineKeyOf, selectionKeyOf,
+  storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
 } from './posOrdersConstants'
@@ -475,6 +480,36 @@ export default function PosOrders({ billingStation = false } = {}) {
   // can enter performSave twice with orderId still null and insert two pos_orders rows. A ref for
   // the same reason as closingRef above: it needs to be readable/settable synchronously mid-call.
   const savingRef = useRef(false)
+  // S809 ORDER-FLOW-3, -4 (3e): saves of an order whose answer has not come back, by order id, oldest
+  // first (sendAttempt.js). Each save is marked just before it goes out and the mark is dropped once its
+  // answer is known, so a stale refusal, a reopened order and the 15 s poll below can tell this till's
+  // own landed save from another device's change. Memory only, like closeAttemptRef: a lock or a reload
+  // forgets them. The count is of saves that got no answer, so the poll runs only while one is waiting.
+  const sendAttemptRef = useRef(new Map())
+  const [unsettledSendCount, setUnsettledSendCount] = useState(0)
+  const sendAttemptsFor = oid => (oid && sendAttemptRef.current.get(oid)) || []
+  const putSendAttempts = (oid, list) => {
+    if (list.length > 0) sendAttemptRef.current.set(oid, list)
+    else sendAttemptRef.current.delete(oid)
+    setUnsettledSendCount([...sendAttemptRef.current.values()].flat().filter(a => a.finalAfter != null).length)
+  }
+  const sendSettlingRef = useRef(new Set())
+  const sendPollBusyRef = useRef(false)
+  const sendPollRef = useRef(null)
+  sendPollRef.current = pollUnsettledSends
+  useEffect(() => {
+    if (unsettledSendCount === 0) return
+    const poll = setInterval(() => sendPollRef.current?.(), 15000)
+    return () => clearInterval(poll)
+  }, [unsettledSendCount])
+  // ORDER-FLOW-5 (3e): moves on every return to the floor, so a save that answers after the waiter left
+  // its order leaves the screen now showing alone (watchScreen); and the order the order screen showed at
+  // the last render, for a settle that ends later.
+  const screenTokenRef = useRef(0)
+  const screenOrderRef = useRef(null)
+  screenOrderRef.current = view === 'order' ? orderId : null
+  // ORDER-FLOW-14 (3e): the cover count as last loaded or saved, and for which order.
+  const coversSavedRef = useRef({ orderId: null, covers: null })
   // Billing station handoff (S762). billOnOpenRef is armed by billOrder() and consumed inside
   // showLoadedOrder — the ONE funnel every "put an existing order on screen" path goes through, so
   // no branch of openTable/openOrderById can arm it by accident. It is a ref (read/written
@@ -654,6 +689,21 @@ export default function PosOrders({ billingStation = false } = {}) {
     const poll = setInterval(() => loadPendingGuestOrders(), 5000)
     return () => clearInterval(poll)
   }, [view, clientId]) // eslint-disable-line
+
+  // S809 3c (FLOOR-KITCHEN-1, S809.4): the app-wide guest-order alert hears from this screen which
+  // view is up and which waiting guest orders this till holds (accepted into the cart, saved but not
+  // marked yet, or held while the "changed on another device" box is open). Some of those live in
+  // refs, so this runs after every render; a publish that changes nothing notifies nobody.
+  useEffect(() => {
+    publishTillGuestView({
+      view,
+      openTableId: view === 'order' ? activeTable?.id : null,
+      heldIds: [...acceptedGuestReqIdsRef.current, ...unmarkedGuestAcceptsRef.current.keys(), ...staleGuestReqIdsRef.current],
+    })
+  })
+  useEffect(() => clearTillGuestView, [])
+  // The floor's banner carries the alert's Mute, since the shell's banner stands aside there.
+  const guestAlertMute = useGuestAlertMute()
 
   // ORDER-FLOW-18 (S809 3b): once the "changed on another device" box is answered (or abandoned), a
   // guest order whose dishes were left off goes back on the banner for an Accept or a Dismiss.
@@ -1936,6 +1986,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     setOrderId(id)
     setOrderNo(no || null)
     setCovers(cv || 1)
+    coversSavedRef.current = { orderId: id, covers: cv || 1 }
     setOrderItems(lines)
     markCartSaved(lines)
     setMsg(''); setView('order'); loadMenu()
@@ -1946,6 +1997,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     // The same funnel brings back what a till lock kept for this login (S776), measured against the
     // order AS IT NOW STANDS — anything another device saved meanwhile is not added twice.
     if (lockedCartRef.current) applyLockedCart(items, id)
+    // S809 ORDER-FLOW-3 (3e): a save of this order the till never heard back from is settled now — a
+    // send that landed prints the ticket the kitchen never got.
+    if (sendAttemptsFor(id).length > 0) void settleSendAttempts(id)
     return lines
   }
 
@@ -2366,6 +2420,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     applyQty(idx, qty)
   }
 
+  // ORDER-FLOW-13 (S809 3e): the line as it stands is what the server holds — saved online, not waiting
+  // in the offline queue — so a pull on it is already recorded there (sentQtyAfterQtyChange).
+  const pullIsSaved = item => !pendingOrderIds.has(orderId)
+    && savedItemsRef.current.get(lineKeyOf(item)) === `${item.qty}|${(item.notes || '').trim()}`
+
   function applyQty(idx, qty) {
     if (qty <= 0) {
       setOrderItems(prev => prev.filter((_, i) => i !== idx))
@@ -2375,7 +2434,7 @@ export default function PosOrders({ billingStation = false } = {}) {
             ...item,
             qty,
             sent_to_kot: item.qty === qty ? item.sent_to_kot : false,
-            sent_qty: (item.sent_to_kot && item.qty !== qty) ? item.qty : (item.sent_qty || 0),
+            sent_qty: sentQtyAfterQtyChange(item, qty, pullIsSaved(item)),
           }
         : item))
     }
@@ -2452,34 +2511,48 @@ export default function PosOrders({ billingStation = false } = {}) {
       return { ok: true, oid, oNo: null, items: null }
     }
 
+    // ORDER-FLOW-5 (S809 3e): every wait below is bounded, and a save that answers after the waiter went
+    // back to the floor finishes for its own order — its tickets print and log from this call's own
+    // values — but leaves the screen now showing alone (watchScreen). The version this save expects is
+    // read once, here: the ref belongs to whatever order is on screen when an answer comes back.
+    const { here } = watchScreen()
+    let expectedVersion = itemsVersionRef.current
+
     if (isNewOrder) {
-      const { data: newOrder, error } = await scopedInsert('pos_orders', {
+      const insertRes = await bounded(scopedInsert('pos_orders', {
         table_id:   activeTable?.id   || null,
         table_name: activeTable?.name || 'Takeaway',
         status:     'open',
         covers,
         opened_by:  profile?.id || null,
-      }, { single: true })
+      }, { single: true }), 'Opening the order', SEND_STEP_MS)
+      const { data: newOrder, error } = insertRes
       // 23505 is pos_orders_one_open_per_table (S754): another device opened this table between the
       // tap that showed it free and this insert. Put this cart onto THAT order, unsent.
       if (error?.code === '23505' && activeTable?.id) {
         seatReservationRef.current = null
-        await adoptOpenOrderOnTable(activeTable, snapshot)
+        if (here()) await adoptOpenOrderOnTable(activeTable, snapshot)
         return { ok: false, handled: true, error }
       }
+      // No answer: the order row may exist, but no line was saved, so nothing went to a station.
+      if (noAnswer(insertRes)) return { ok: false, unknown: true, stage: 'order', error }
       if (error || !newOrder) return { ok: false, handled: false, error }
       oid = newOrder.id
       oNo = newOrder.order_no || null
-      itemsVersionRef.current = Number.isInteger(newOrder.items_version) ? newOrder.items_version : null
-      setOrderId(oid)
-      setOrderNo(oNo)
+      expectedVersion = Number.isInteger(newOrder.items_version) ? newOrder.items_version : null
+      coversSavedRef.current = { orderId: oid, covers }
+      if (here()) {
+        itemsVersionRef.current = expectedVersion
+        setOrderId(oid)
+        setOrderNo(oNo)
+      }
       // Link a seated booking to the order it just became. The status guard means a booking
       // decided elsewhere in the meantime (cancelled, seated on another device) is left alone.
       const seatRes = seatReservationRef.current
       seatReservationRef.current = null
       if (seatRes?.id) {
-        const { error: linkErr } = await scopedUpdate('pos_reservations', { ...stampFor('seated'), order_id: oid })
-          .eq('id', seatRes.id).in('status', ['booked', 'confirmed', 'arrived'])
+        const { error: linkErr } = await bounded(scopedUpdate('pos_reservations', { ...stampFor('seated'), order_id: oid })
+          .eq('id', seatRes.id).in('status', ['booked', 'confirmed', 'arrived']), 'Linking the booking', SEND_READ_MS)
         if (linkErr) warnWrite(`The booking for ${seatRes.customer_name} still shows as waiting in Reservations though its order was saved — mark it Seated there.`, linkErr)
         else loadFloorReservations()
       }
@@ -2488,15 +2561,10 @@ export default function PosOrders({ billingStation = false } = {}) {
         // floor keeps showing the tile as free. The optimistic repaint is deliberately inside
         // the success branch — loadFloor() re-reads from the server moments later, so painting
         // it occupied on a failed write would only lie until the next refresh.
-        const { error: occErr } = await scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', activeTable.id)
+        const { error: occErr } = await bounded(scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', activeTable.id), 'Marking the table occupied', SEND_READ_MS)
         if (occErr) warnWrite(`${activeTable.name} still shows as free on the floor, though its order was saved — set its status by hand so it is not seated twice.`, occErr)
         else setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
       }
-    } else {
-      // Covers is the Covers Report's whole input, so a dropped update quietly understates
-      // guest counts for the day rather than failing anything visible.
-      const { error: covErr } = await scopedUpdate('pos_orders', { covers }).eq('id', oid)
-      if (covErr) warnWrite('The cover count for this order did not save — the Covers Report will be short for it.', covErr)
     }
 
     // Replace this order's lines atomically. This used to be a DELETE followed by a separate
@@ -2513,38 +2581,101 @@ export default function PosOrders({ billingStation = false } = {}) {
     // saved; another tablet's save in between is refused, not overwritten. The prices, VAT, names and
     // categories in p_rows are not trusted — the server keeps an existing line's stored values and
     // prices a new line from the recipe, and returns the lines as stored.
+    //
+    // S809 ORDER-FLOW-3, -4 (3e): the save is marked until its answer is known (sendAttempt.js). The
+    // lines it marks sent are routed the way the KOT and BOT buttons route them, so a landed save found
+    // later prints exactly the tickets its own answer would have.
+    const sendLines = snapshot.filter(isSent)
+    const toBar = i => botCategories.has(i.category || 'Other')
+    const attempt = newSendAttempt({
+      orderId: oid, orderNo: oNo, where: activeTable?.name || (oNo ? `Takeaway #${oNo}` : 'This takeaway'),
+      tableName: activeTable?.name || 'Takeaway', covers, expectedVersion, payload: itemsPayload, snapshot,
+      kot: sendLines.filter(i => !toBar(i)), bot: sendLines.filter(toBar),
+      guestReqIds: Array.from(pendingAcceptedGuestReqIds), knownTicketIds: orderKotTickets.map(t => t.id),
+      screenToken: screenTokenRef.current,
+    })
+    putSendAttempts(oid, [...sendAttemptsFor(oid), attempt])
     const saveArgs = { p_order_id: oid, p_rows: itemsPayload, p_removal_reason: kotPullReason || null }
-    if (Number.isInteger(itemsVersionRef.current)) saveArgs.p_expected_version = itemsVersionRef.current
-    let { data: saveData, error: rpcErr } = await supabase.rpc('save_pos_order_items', saveArgs)
-    // A stale refusal is read against the order as it now stands. If its lines are exactly what this
-    // save would store, the "other device" was THIS one: an earlier attempt landed and its response
-    // was lost, so the version here never advanced. That retry is a success — treating it as a
-    // conflict would leave lines the server holds as sent with no ticket ever printed for them.
+    if (Number.isInteger(expectedVersion)) saveArgs.p_expected_version = expectedVersion
+    // Cancelled when the till stops waiting, so nothing more of it is sent (the close write's rule).
+    const saveAbort = new AbortController()
+    const saveRes = await bounded(supabase.rpc('save_pos_order_items', saveArgs).abortSignal(saveAbort.signal), 'Saving the order', SEND_STEP_MS)
+    let { data: saveData, error: rpcErr } = saveRes
+    const unanswered = noAnswer(saveRes)
+    if (unanswered) {
+      saveAbort.abort()
+      stopWaiting(attempt, Date.now())
+      putSendAttempts(oid, sendAttemptsFor(oid))
+    } else {
+      putSendAttempts(oid, sendAttemptsFor(oid).filter(a => a !== attempt))
+    }
+    // The order is read back after a send that got no answer, and after a stale refusal while this till
+    // still holds an unanswered save of it — and only those marks can make what is stored this till's
+    // own. A stale refusal with none is another device's change, even one that stored exactly these
+    // lines: two tablets firing the same unsent dishes (ORDER-FLOW-4). It reloads, and nothing prints.
     let staleRead = null
-    if (rpcErr?.hint === HINT.stale) {
-      staleRead = await scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle()
-      const cur = staleRead.data
-      if (!staleRead.error && cur?.status === 'open' && storedLinesMatchPayload(cur.pos_order_items, itemsPayload)) {
-        saveData = { items_version: cur.items_version, items: cur.pos_order_items }
+    if (unanswered ? sendLines.length > 0 : (rpcErr?.hint === HINT.stale && sendAttemptsFor(oid).length > 0)) {
+      staleRead = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Checking the order', SEND_READ_MS)
+      const cur = staleRead.error ? null : staleRead.data
+      const judged = staleRead.error ? null : await judgeOrderRead(oid, cur)
+      const settled = judged && judged.verdict !== 'pending' && judged.verdict !== 'none'
+      if (settled) putSendAttempts(oid, [])
+      if (settled && judged.verdict === 'landed' && judged.exact && storedLinesMatchPayload(cur.pos_order_items, itemsPayload)) {
+        // What is stored is exactly this save: it, or an identical earlier try, landed and the answer
+        // was lost. A success — the caller prints, once. (Read rows carry their choices as an embed.)
+        saveData = { items_version: cur.items_version, items: (cur.pos_order_items || []).map(cartLineFromStored) }
         rpcErr = null
+      } else if (settled && judged.verdict === 'landed') {
+        // An earlier save of this order landed: its tickets print now, and this press is not sent on
+        // top of it. The screen shows what landed; the waiter presses again for anything still unsent.
+        finishLandedSend(judged.attempt, cur, judged.exact, { fromPress: true })
+        return { ok: false, handled: true, error: rpcErr }
+      } else if (settled) {
+        // Lost, fired from another till, or the bill closed: none of this till's tries landed, and
+        // none can any more. The screen shows the order as it stands.
+        if (here()) {
+          if (judged.verdict === 'closed') showClosedElsewhere()
+          else await reloadAfterStale(oid, snapshot, staleRead)
+        }
+        tellSendSettled(judged, { fromPress: here() })
+        return { ok: false, handled: true, error: rpcErr }
       }
     }
-    if (rpcErr) return handleSaveRefusal(rpcErr, oid, snapshot, staleRead)
-    if (Number.isInteger(saveData?.items_version)) itemsVersionRef.current = saveData.items_version
+    // No answer, and nothing yet says whether it landed. The caller says "not known yet"; the poll keeps
+    // reading the order, and the next press reads it first. Slice 3f routes this case to the offline queue.
+    if (rpcErr && unanswered) return { ok: false, unknown: true, stage: 'lines', error: rpcErr }
+    // Once the waiter has left the order, its refusal is said on the floor by the caller (watchScreen).
+    if (rpcErr) return here() ? handleSaveRefusal(rpcErr, oid, snapshot, staleRead) : { ok: false, handled: false, error: rpcErr }
+    // This save landed at the version it expected, so no earlier save of this order made here at that
+    // version can land any more.
+    if (expectedVersion !== null) putSendAttempts(oid, sendAttemptsFor(oid).filter(a => a.expectedVersion !== expectedVersion))
+    const moved = !here()
+    const savedVersion = Number.isInteger(saveData?.items_version) ? saveData.items_version : null
+    if (!moved && savedVersion !== null) itemsVersionRef.current = savedVersion
     const serverItems = Array.isArray(saveData?.items) ? saveData.items : null
     // What the screen shows is what was stored: a new line's price and VAT are the menu's as of this
     // save. Only those four fields move — a line tapped in while the save was in flight keeps its qty.
-    if (serverItems) setOrderItems(prev => withServerLineFields(prev, serverItems))
+    if (serverItems && !moved) setOrderItems(prev => withServerLineFields(prev, serverItems))
     // Consumed by that save; a later edit asks again rather than silently reusing this one.
-    if (kotPullReason) setKotPullReason('')
+    if (kotPullReason && !moved) setKotPullReason('')
     // What was just stored — the pre-await snapshot, so a line tapped in while this save was in
     // flight still counts as unsaved (S754).
-    markCartSaved(snapshot)
+    if (!moved) markCartSaved(snapshot)
     if (activeTable?.id) {
       cachePosOrderForTable(activeTable.id, {
-        orderId: oid, orderNo: oNo, covers, itemsVersion: itemsVersionRef.current,
+        orderId: oid, orderNo: oNo, covers, itemsVersion: savedVersion,
         items: serverItems ? withServerLineFields(savedLines, serverItems) : savedLines,
       })
+    }
+    // ORDER-FLOW-14 (S809 3e): the cover count is written only when it changed on this screen, and only
+    // after the version-checked line save landed. It used to go first on every save, outside that check,
+    // so a tablet holding an old count put it back over another tablet's correction. Covers is the
+    // Covers Report's whole input, so a write that fails still says so — unless the bill closed
+    // meanwhile, which then carries its own count. Awaited: a bill close writes right after this.
+    if (!isNewOrder && !(coversSavedRef.current.orderId === oid && coversSavedRef.current.covers === covers)) {
+      const { error: covErr } = await bounded(scopedUpdate('pos_orders', { covers }).eq('id', oid), 'Saving the cover count', SEND_READ_MS)
+      if (!covErr) coversSavedRef.current = { orderId: oid, covers }
+      else if (covErr.hint !== HINT.notOpen && covErr.hint !== HINT.locked) warnWrite('The cover count for this order did not save — the Covers Report will be short for it.', covErr)
     }
 
     // Only now — the merged items are actually persisted — mark any Accepted-locally guest
@@ -2615,7 +2746,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // does not carry is listed, with a one-tap "add them back as unsent".
   async function reloadAfterStale(oid, snapshot, alreadyRead = null) {
     const where = orderLabel()
-    const { data: fresh, error } = alreadyRead || await scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle()
+    const { data: fresh, error } = alreadyRead || await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Loading the latest order', SEND_READ_MS)
     if (error) {
       setMsg(`error:${where} was changed on another device, and the latest version could not be loaded — nothing was saved. Go back to the floor and open it again.`)
       return
@@ -2673,8 +2804,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // (23505, S754). Load that order and put this cart onto it as unsent lines — the same rule as the
   // offline-conflict recovery — so nothing typed here is lost and nothing is fired twice.
   async function adoptOpenOrderOnTable(table, snapshot) {
-    const { data: existing, error } = await scopedFrom('pos_orders', OPEN_ORDER_SELECT)
-      .eq('status', 'open').eq('table_id', table.id).maybeSingle()
+    const { data: existing, error } = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT)
+      .eq('status', 'open').eq('table_id', table.id).maybeSingle(), 'Loading that order', SEND_READ_MS)
     if (error || !existing) {
       setMsg(`error:${table.name} was just opened on another device, so this order was not saved${error ? ' — and that order could not be loaded' : ''}. Go back to the floor and open the table again; your items are still here.`)
       return
@@ -2684,6 +2815,129 @@ export default function PosOrders({ billingStation = false } = {}) {
     })
     setOrderItems(mergeUnsentLines(lines, snapshot.map(i => ({ ...i, sent_to_kot: false, sent_qty: 0 }))))
     setMsg(`ok:${table.name} was opened on another device first — your items were added to that order, unsent. Review them, then Update Order.`)
+  }
+
+  // ── A save whose answer was lost (S809 ORDER-FLOW-3, -4, -5, slice 3e) ──
+
+  // The order screen a send was pressed on (ORDER-FLOW-5). `here()` stays true until the waiter goes back
+  // to the floor (backToFloor moves the token); `say` puts a sentence on that screen, or — once the
+  // waiter has moved on — on the floor, with the order's name in front.
+  function watchScreen() {
+    const token = screenTokenRef.current
+    const where = orderLabel()
+    const here = () => screenTokenRef.current === token
+    return { here, say: text => (here() ? setMsg(text) : setFloorMsg(text.replace(/^(ok|error):/, `$1:${where}: `))) }
+  }
+
+  // What the order as read says about this till's unanswered saves of it (judgeSendAttempts). Its tickets
+  // are read too when a landed send could have been another till's. Null when a read failed.
+  async function judgeOrderRead(oid, cur) {
+    const attempts = sendAttemptsFor(oid)
+    let tickets = []
+    if (cur?.status === 'open' && attempts.some(a => firesTickets(a) && a.expectedVersion !== cur.items_version)) {
+      const { data, error } = await bounded(scopedFrom('pos_kot_log', 'id, items, sent_by')
+        .eq('order_id', oid).neq('status', 'cancelled').not('items', 'cs', KOT_CHANGE_ITEMS), 'Checking the tickets', SEND_READ_MS)
+      if (error) return null
+      tickets = data || []
+    }
+    return judgeSendAttempts(attempts, cur, { tickets, profileId: profile?.id || null, now: Date.now() })
+  }
+
+  // A save of this order the till never heard back from turned out to have landed: what its answer would
+  // have done, from its own record. Its tickets print and are logged under its own table and number,
+  // whatever the screen shows now, so the kitchen gets the order it never heard of. The screen takes what
+  // landed only if it is still the screen the save was pressed on, holding that order as it was then; a
+  // screen opened since already shows the order as stored.
+  function finishLandedSend(attempt, cur, exact, { fromPress = false } = {}) {
+    const oNo = cur?.order_no ?? attempt.orderNo
+    const onIt = screenOrderRef.current === attempt.orderId
+    const asSent = attempt.screenToken === screenTokenRef.current && itemsVersionRef.current === attempt.expectedVersion
+    // Another device saved on top of it since, or a press on a screen opened later was refused for it:
+    // the order as it stands, with what this screen had and it lacks offered back.
+    const reload = !(asSent && exact) && (asSent || (fromPress && onIt))
+    if (asSent && exact) {
+      itemsVersionRef.current = Number.isInteger(cur.items_version) ? cur.items_version : null
+      setOrderItems(prev => withServerLineFields(prev, (cur.pos_order_items || []).map(cartLineFromStored)))
+      markCartSaved(attempt.snapshot)
+      markLinesSent(sendLinesOf(attempt))
+    } else if (reload) {
+      void reloadAfterStale(attempt.orderId, orderItems, { data: cur, error: null })
+    }
+    // Its accepted guest orders are on the bill (GUEST-3's mark). On a reload, ORDER-FLOW-18's own check
+    // decides instead, from whether their dishes survived.
+    if (attempt.guestReqIds.length > 0 && (exact || !asSent)) {
+      for (const id of attempt.guestReqIds) unmarkedGuestAcceptsRef.current.set(id, attempt.orderId)
+      if (asSent) forgetAcceptedGuestReqs(attempt.guestReqIds)
+      void markGuestAccepts()
+      loadPendingGuestOrders()
+    }
+    const ticket = { tableName: attempt.tableName, covers: attempt.covers }
+    const kotPrinted = attempt.kot.length > 0 ? printTicket('KOT', attempt.kot, oNo, ticket) : true
+    const botPrinted = attempt.bot.length > 0 ? printTicket('BOT', attempt.bot, oNo, ticket) : true
+    logKotSend('KOT', attempt.kot, attempt.orderId, oNo, attempt.tableName)
+    logKotSend('BOT', attempt.bot, attempt.orderId, oNo, attempt.tableName)
+    loadFloor()
+    const what = stationsOf(attempt)
+    const both = attempt.kot.length > 0 && attempt.bot.length > 0
+    const after = `${reload ? ' The order is shown as it stands now.' : ''}${fromPress ? ' Check the order, then press again for anything still unsent.' : ''}`
+    const text = !what ? `ok:The earlier save did go through.${after}`
+      : kotPrinted && botPrinted ? `ok:The earlier ${what} did go through — ${both ? 'their tickets have' : 'its ticket has'} printed now.${after}`
+      : `error:The earlier ${what} did go through, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.${after}`
+    if (onIt) setMsg(text)
+    else setFloorMsg(text.replace(/^(ok|error):/, `$1:${attempt.where}: `))
+  }
+
+  // What the waiter hears when this till's unanswered saves of an order are settled without landing.
+  // From a press, "lost" says nothing more: the press's own reload already shows the order as it stands.
+  function tellSendSettled({ verdict, attempt }, { fromPress = false } = {}) {
+    if (!attempt) return
+    const what = stationsOf(attempt)
+    const station = attempt.kot.length > 0 && attempt.bot.length > 0 ? 'kitchen or bar' : attempt.bot.length > 0 ? 'bar' : 'kitchen'
+    const say = text => (screenOrderRef.current === attempt.orderId ? setMsg(text) : setFloorMsg(text.replace(/^(ok|error):/, `$1:${attempt.where}: `)))
+    if (verdict === 'elsewhere') {
+      say(`ok:These dishes were already sent from another till, so no second ${what} printed. If the ${station} has no ticket for them, press Reprint KOT/BOT.`)
+    } else if (verdict === 'closed' && what) {
+      warnWrite(`${attempt.where}'s bill was closed before this till heard whether its last ${what} went through — check with the ${station} that everything on that bill was made.`)
+    } else if (verdict === 'lost' && !fromPress) {
+      say(what
+        ? `error:The ${what} did not go through — nothing reached the ${station}. Check the order and send what is missing.`
+        : 'error:Your last changes did not save. Check the order, then press Update Order again.')
+    }
+  }
+
+  // Reads an order this till holds unanswered saves of, and settles them: a save that landed finishes as
+  // its answer would have; one that did not, and no longer can, is forgotten and the waiter told; one that
+  // may still land is kept. One order at a time, and never while a send is in flight (that send reads the
+  // order itself, with its own press in mind).
+  async function settleSendAttempts(oid) {
+    const attempts = sendAttemptsFor(oid)
+    if (attempts.length === 0 || sendSettlingRef.current.has(oid) || savingRef.current || !navigator.onLine) return
+    sendSettlingRef.current.add(oid)
+    try {
+      const { data: cur, error } = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Checking the order', SEND_READ_MS)
+      if (error) return
+      const judged = await judgeOrderRead(oid, cur)
+      // A press may have settled them, or added one, while the reads were out.
+      if (!judged || savingRef.current || sendAttemptsFor(oid) !== attempts) return
+      if (judged.verdict === 'pending' || judged.verdict === 'none') return
+      putSendAttempts(oid, [])
+      if (judged.verdict === 'landed') finishLandedSend(judged.attempt, cur, judged.exact)
+      else tellSendSettled(judged)
+    } finally {
+      sendSettlingRef.current.delete(oid)
+    }
+  }
+
+  // Every 15 s while a save of this till has no answer, its order is read again, wherever the till is —
+  // so a send that landed while the Wi-Fi was down still reaches the kitchen once it is back.
+  async function pollUnsettledSends() {
+    if (sendPollBusyRef.current || savingRef.current || !navigator.onLine) return
+    sendPollBusyRef.current = true
+    try {
+      for (const oid of [...sendAttemptRef.current.keys()]) await settleSendAttempts(oid)
+    } finally {
+      sendPollBusyRef.current = false
+    }
   }
 
   // S754 (owner decision): Update Order on an order that already exists, with lines not yet sent to
@@ -2727,26 +2981,32 @@ export default function PosOrders({ billingStation = false } = {}) {
     const botItems = unsentItems.filter(i =>  botCategories.has(i.category || 'Other'))
     savingRef.current = true
     setSaving(true); setMsg('')
-    const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)) })
-    if (!saved.ok) {
-      savingRef.current = false; setSaving(false)
-      // Nothing printed. Whether the save landed is not known on a dropped connection — pressing Send
-      // again is safe either way: a save that did land is recognised and simply prints (performSave).
-      if (!saved.handled) setMsg(`error:That did not go through — nothing printed. Press Update Order again. ${errorText(saved.error, 'staff')}`)
-      return
-    }
-    const { oid, oNo } = saved
+    const screen = watchScreen()
+    try {
+      const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)) })
+      // No answer (S809 ORDER-FLOW-3, -5): not known whether it landed, so nothing prints yet — the till
+      // finds out (the poll, or the next press reads the order first). Slice 3f queues this case offline.
+      if (saved.unknown) { screen.say(unknownSendText({ stage: saved.stage, what: 'the new items', press: 'Update Order' })); return }
+      if (!saved.ok) {
+        // A refusal is an answer: nothing landed, so nothing printed.
+        if (!saved.handled) screen.say(`error:That did not go through — nothing printed. Press Update Order again. ${errorText(saved.error, 'staff')}`)
+        return
+      }
+      const { oid, oNo } = saved
 
-    markLinesSent(unsentItems)
-    savingRef.current = false
-    setSaving(false)
-    const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo) : true
-    const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo) : true
-    logKotSend('KOT', kotItems, oid, oNo)
-    logKotSend('BOT', botItems, oid, oNo)
-    setMsg(kotPrinted && botPrinted
-      ? 'ok:Order updated and sent!'
-      : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.')
+      if (screen.here()) markLinesSent(unsentItems)
+      const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo) : true
+      const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo) : true
+      logKotSend('KOT', kotItems, oid, oNo)
+      logKotSend('BOT', botItems, oid, oNo)
+      screen.say(kotPrinted && botPrinted
+        ? 'ok:Order updated and sent!'
+        : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.')
+    } finally {
+      // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
+      savingRef.current = false
+      setSaving(false)
+    }
   }
 
   async function commitSaveOrder() {
@@ -2755,40 +3015,49 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (savingRef.current) return
     savingRef.current = true
     setSaving(true); setMsg('')
+    const screen = watchScreen()
 
     const wasNew = !orderId
-    // A NEW order auto-sends every line on its first save, so its lines are marked sent in that same
-    // save (sendKeys 'all'). sent_to_kot/sent_qty are what make "already sent" true for every other
-    // device, and for this one after a reload; the print below runs only once the save returned ok,
-    // so a ticket can never print for lines the server still counts as unsent (S654).
-    const saved = await performSave(wasNew ? { sendKeys: 'all' } : {})
-    if (!saved.ok) {
-      savingRef.current = false; setSaving(false)
-      if (!saved.handled) setMsg(`error:That did not go through${wasNew ? ' — nothing printed' : ''}. Press ${wasNew ? 'Send Order' : 'Update Order'} again. ${errorText(saved.error, 'staff')}`)
-      return
-    }
-    const { oid, oNo } = saved
+    try {
+      // A NEW order auto-sends every line on its first save, so its lines are marked sent in that same
+      // save (sendKeys 'all'). sent_to_kot/sent_qty are what make "already sent" true for every other
+      // device, and for this one after a reload; the print below runs only once the save returned ok,
+      // so a ticket can never print for lines the server still counts as unsent (S654).
+      const saved = await performSave(wasNew ? { sendKeys: 'all' } : {})
+      // No answer (S809 ORDER-FLOW-3, -5): not known whether it landed. Slice 3f queues this case offline.
+      // Once the new order itself exists, its button reads Update Order.
+      if (saved.unknown) {
+        screen.say(unknownSendText({ stage: saved.stage, what: wasNew ? 'the order' : 'your changes', press: wasNew && saved.stage === 'order' ? 'Send Order' : 'Update Order', fires: wasNew }))
+        return
+      }
+      if (!saved.ok) {
+        if (!saved.handled) screen.say(`error:That did not go through${wasNew ? ' — nothing printed' : ''}. Press ${wasNew ? 'Send Order' : 'Update Order'} again. ${errorText(saved.error, 'staff')}`)
+        return
+      }
+      const { oid, oNo } = saved
 
-    if (wasNew) {
-      const kotItems = orderItems.filter(i => !botCategories.has(i.category || 'Other'))
-      const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
-      markLinesSent(orderItems)
-      const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo) : true
-      const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo) : true
-      logKotSend('KOT', kotItems, oid, oNo)
-      logKotSend('BOT', botItems, oid, oNo)
-      // A blocked pop-up used to be overwritten by "Order sent!" one line later (S754), so the
-      // waiter walked away believing a ticket had printed. The send itself did land — the lines
-      // are marked sent and the KDS has them — so the recovery is a reprint, never a re-send.
-      setMsg(kotPrinted && botPrinted
-        ? 'ok:Order sent!'
-        : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.')
-    } else {
-      setMsg('ok:Saved.')
+      if (wasNew) {
+        const kotItems = orderItems.filter(i => !botCategories.has(i.category || 'Other'))
+        const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
+        if (screen.here()) markLinesSent(orderItems)
+        const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo) : true
+        const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo) : true
+        logKotSend('KOT', kotItems, oid, oNo)
+        logKotSend('BOT', botItems, oid, oNo)
+        // A blocked pop-up used to be overwritten by "Order sent!" one line later (S754), so the
+        // waiter walked away believing a ticket had printed. The send itself did land — the lines
+        // are marked sent and the KDS has them — so the recovery is a reprint, never a re-send.
+        screen.say(kotPrinted && botPrinted
+          ? 'ok:Order sent!'
+          : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.')
+      } else {
+        screen.say('ok:Saved.')
+      }
+    } finally {
+      // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
+      savingRef.current = false
+      setSaving(false)
     }
-
-    savingRef.current = false
-    setSaving(false)
   }
 
   /* ── KOT / BOT ── */
@@ -2811,30 +3080,36 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (savingRef.current) return
     savingRef.current = true
     setSaving(true); setMsg('')
-    // This station's unsent lines are marked sent IN the save (matched by line key — recipe plus
-    // customization), so the print below is gated on the server holding them as sent, exactly as the
-    // first-save auto-send is: a printed ticket the server does not consider sent is the shape that
-    // gets a dish cooked twice. Online and offline alike — the queued payload is the same rows.
-    const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)) })
-    if (!saved.ok) {
-      savingRef.current = false; setSaving(false)
-      if (!saved.handled) setMsg(`error:${station} did not go through — nothing printed. Press ${station} again. ${errorText(saved.error, 'staff')}`)
-      return
+    const screen = watchScreen()
+    try {
+      // This station's unsent lines are marked sent IN the save (matched by line key — recipe plus
+      // customization), so the print below is gated on the server holding them as sent, exactly as the
+      // first-save auto-send is: a printed ticket the server does not consider sent is the shape that
+      // gets a dish cooked twice. Online and offline alike — the queued payload is the same rows.
+      const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)) })
+      // No answer (S809 ORDER-FLOW-3, -5): not known whether it landed. Slice 3f queues this case offline.
+      if (saved.unknown) { screen.say(unknownSendText({ stage: saved.stage, what: `the ${station}`, press: station })); return }
+      if (!saved.ok) {
+        if (!saved.handled) screen.say(`error:${station} did not go through — nothing printed. Press ${station} again. ${errorText(saved.error, 'staff')}`)
+        return
+      }
+      const { oid, oNo } = saved
+
+      // The on-screen cart is updated separately from what was saved, because lines may have been
+      // tapped in while the save was awaiting — and not at all once the waiter has left this order.
+      if (screen.here()) markLinesSent(unsentItems)
+
+      const printed = printTicket(station, unsentItems, oNo)
+      logKotSend(station, unsentItems, oid, oNo)
+      // Same as saveOrder: the send landed, only the paper did not (S754).
+      screen.say(printed
+        ? `ok:${station} sent!`
+        : `error:${station} sent to the station, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.`)
+    } finally {
+      // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
+      savingRef.current = false
+      setSaving(false)
     }
-    const { oid, oNo } = saved
-
-    // The on-screen cart is updated separately from what was saved, because lines may have been
-    // tapped in while the save was awaiting.
-    markLinesSent(unsentItems)
-
-    savingRef.current = false
-    setSaving(false)
-    const printed = printTicket(station, unsentItems, oNo)
-    logKotSend(station, unsentItems, oid, oNo)
-    // Same as saveOrder: the send landed, only the paper did not (S754).
-    setMsg(printed
-      ? `ok:${station} sent!`
-      : `error:${station} sent to the station, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.`)
   }
 
   // Flips the sent flag on exactly the lines that went out, matched by line key AND the quantity and
@@ -2855,12 +3130,13 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Best-effort, non-blocking (matches writeSalesEntries' own error-swallow pattern) — logs
   // exactly what was printed on the ticket (delta-aware qty) so the KOT Register/Reconciliation
   // reports reflect the real kitchen/bar send history, not just the current live order state.
-  async function logKotSend(station, items, oid, oNo) {
+  // `tableName` is given when the ticket is for an order the screen no longer shows (S809 3e).
+  async function logKotSend(station, items, oid, oNo, tableName = activeTable?.name || 'Takeaway') {
     if (items.length === 0) return
     const payload = {
       order_id: oid,
       order_no: oNo,
-      table_name: activeTable?.name || 'Takeaway',
+      table_name: tableName,
       station,
       items: items.map(i => ({
         recipe_id: i.recipe_id, name: i.name, category: i.category,
@@ -2904,12 +3180,13 @@ export default function PosOrders({ billingStation = false } = {}) {
   }
 
   // Returns printHtml's answer — false when the pop-up was blocked and nothing printed (S754).
-  function printTicket(station, items, ticketNo, { reprint = false } = {}) {
+  // `tableName` and `covers` are given for an order the screen no longer shows (S809 3e).
+  function printTicket(station, items, ticketNo, { reprint = false, tableName = activeTable?.name || 'Takeaway', covers: ticketCovers = covers } = {}) {
     const html = buildKotBotHtml({
       station, items, ticketNo, outletName,
-      tableName: activeTable?.name || 'Takeaway',
+      tableName,
       takenBy: profile?.full_name || '',
-      covers, reprint,
+      covers: ticketCovers, reprint,
     })
     return printHtml(html)
   }
@@ -4451,6 +4728,8 @@ The tables were left occupied rather than freed with their orders still open.`)
     // On /pos/billing the cashier never saw the floor plan — dropping them onto it would be a
     // different screen than the one they left.
     setBillOnLoad(false)
+    // S809 ORDER-FLOW-5 (3e): a send still in flight finishes for its own order and leaves the next one alone.
+    screenTokenRef.current += 1
     setView(billingStation ? 'bills' : 'floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); setMsg('')
     setCartOpen(false)
     setSuggestions([])
@@ -4632,12 +4911,16 @@ The tables were left occupied rather than freed with their orders still open.`)
     }}>
 
       {/* ── Top bar ── */}
+      {/* S809 3c (FLOOR-KITCHEN-10): the guest-order banner is fixed above this layer and publishes its
+          measured height; the bar starts below it, or the banner covers ← Table, the order number and
+          the covers. The banner covers the status bar itself, and its height includes that inset, so
+          the bar takes the larger of the two rather than both (the KDS header and S797's shell bars). */}
       <div style={{
         display: 'flex', alignItems: 'center', columnGap: narrowTill ? 8 : 12, rowGap: 6, flexWrap: 'wrap',
         padding: narrowTill
-          ? 'calc(6px + env(safe-area-inset-top, 0px)) 12px 6px'
-          : 'env(safe-area-inset-top, 0px) 16px 0',
-        minHeight: 'calc(52px + env(safe-area-inset-top, 0px))', flexShrink: 0,
+          ? 'calc(6px + max(env(safe-area-inset-top, 0px), var(--arrival-alert-h, 0px))) 12px 6px'
+          : 'max(env(safe-area-inset-top, 0px), var(--arrival-alert-h, 0px)) 16px 0',
+        minHeight: 'calc(52px + max(env(safe-area-inset-top, 0px), var(--arrival-alert-h, 0px)))', flexShrink: 0,
         background: 'var(--theme-card)', borderBottom: '1px solid var(--theme-border)',
       }}>
         <button onClick={requestBackToFloor} className="till-hit--row" style={{
@@ -6058,6 +6341,12 @@ The tables were left occupied rather than freed with their orders still open.`)
             <span style={{ fontSize: 18 }}>🔔</span>
             <span>{total} new guest order{total !== 1 ? 's' : ''} — {tableNames.join(', ')}</span>
             <span style={{ marginLeft: 'auto', fontWeight: 600 }}>Tap to review →</span>
+            {/* S809 3c: the app-wide alert keeps sounding here until someone answers; its banner stands
+                aside for this one, so its Mute is here. Mute keeps this banner up (S763). */}
+            <button type="button" className="btn btn-ghost btn-sm" disabled={guestAlertMute.muted}
+              onClick={e => { e.stopPropagation(); guestAlertMute.mute() }}>
+              {guestAlertMute.muted ? 'Muted' : 'Mute 5 min'}
+            </button>
           </div>
         )
       })()}

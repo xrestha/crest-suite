@@ -6,6 +6,8 @@ paths:
   - "src/modules/pos/posChime.js"
   - "src/modules/pos/orders/PosOrders.jsx"
   - "src/shared/reservationSeen.js"
+  - "src/shared/guestAlertBridge.js"
+  - "src/shared/hooks/useGuestOrderAlerts.js"
   - "src/components/ArrivalAlert.jsx"
   - "src/components/ArrivalAlert.css"
 ---
@@ -183,10 +185,16 @@ load-bearing:
 - **The pulse is a class**, never an inline `animation`, which is unreachable from
   `prefers-reduced-motion`.
 
-**Two routes suppress the shell banner**, and the reason is who can act rather than what is on
-screen: `/pos/orders` answers it better already, and `/pos/kds` because the kitchen cannot Accept a
-guest order and a kitchen-team login cannot even reach Orders
-(`KITCHEN_TEAM_ALLOWED_PATHS`), so the button would be a dead end.
+**Where the shell's guest alert steps aside is decided per VIEW, not per route** (S809 3c,
+`shellGuestAlertPlan` in `src/shared/guestAlertBridge.js`): `/pos/kds` is silent and hidden; the
+Orders floor hides only the bar (its own banner carries the shared Mute, one per device, and the
+sound repeats); the order screen shows the bar, padded below it. `PosOrders` publishes its view,
+open table and HELD request ids to the bridge after every render, and the shell leaves held ids
+out. The PIN screen announces too (Q14) through `get_pos_device_guest_alerts` with the tablet key,
+table names and times only, silent with POS off or the account locked; while `soundBlocked()` it
+says the sound is off and unlocks on the first tap. Anything fixed over the whole screen pads by
+`--arrival-alert-h` (`.layout-root`, the KDS header, the order screen's top bar, the PIN screen,
+`Modal`'s overlay).
 
 **The KDS's own standing alert fires on ANY ticket in New, and clears on Start** (owner decision), or
 on Seen for a CHANGE card (S809 3a, owner 2026-10-09: an allergy change rings until it is read), or

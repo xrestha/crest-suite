@@ -60,6 +60,8 @@ import { dashboardModules, IMS_DASHBOARD_PATH } from '../../shared/dashboardHome
 import { npr } from '../../shared/nepalMoney'
 import { KDS_LATE_MS } from '../../modules/pos/posSignals'
 import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
+import { dineInOnly, seatedCovers } from '../../modules/pos/reports/coversMath'
+import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUnavailable } from './homePosStats'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -379,7 +381,9 @@ export default function ClientDashboard({ scope = 'home' }) {
     const myId = ++loadIdRef.current
     if (section === 'ims') loadStats(myId)
     else if (section === 'hr') loadHrStats(myId)
-    else if (section === 'pos') loadPosStats(myId)
+    // A kitchen or bar login's POS section is its station card (S809 3n): Retry reloads that, not
+    // the front-of-house figures, which would replace the station card with tiles it cannot show.
+    else if (section === 'pos') { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) }
     else if (section === 'fcTrend') loadFcTrend(activePeriod, myId)
   }
 
@@ -1003,7 +1007,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single()
 
-    let orders = [], ordersErr = null
+    let orders = [], ordersErr = null, coversTotal = 0, dineInBills = 0
     if (period) {
       const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
       const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
@@ -1017,18 +1021,21 @@ export default function ClientDashboard({ scope = 'home' }) {
       // have disagreed with them without either screen saying why. `.order('id')` is the unique
       // tiebreaker fetchAllRows requires.
       const { data, error } = await fetchAllRows(() =>
-        scopedFrom('pos_orders', 'id, covers, paid_amount, credit_note_id, close_type, closed_at')
+        scopedFrom('pos_orders', 'id, table_id, covers, paid_amount, credit_note_id, close_type, closed_at')
           .eq('close_type', 'paid')
           .gte('closed_at', fromTs).lte('closed_at', toTs)
           .order('id'))
       ordersErr = error
-      // Same exclusion as Sales/Covers Report — a since-Credit-Noted bill's revenue correction
-      // posts on the day the Credit Note is issued, not retroactively here.
+      // Revenue, Bills and Avg Check leave a since-credit-noted bill out (whether they should follow
+      // the Sales Report's rule instead, the bill on its day and the note a minus on its own, is
+      // REPORTS-5). Covers Served is the Covers Report's count, which it links to (S809 3n,
+      // REPORTS-3): guests seated at tables only, and a credit-noted bill keeps its guests.
       orders = (data || []).filter(o => !o.credit_note_id)
+      coversTotal = seatedCovers(data || [])
+      dineInBills = dineInOnly(data).length
     }
 
     const revenueTotal = orders.reduce((s, o) => s + (parseFloat(o.paid_amount) || 0), 0)
-    const coversTotal   = orders.reduce((s, o) => s + (o.covers || 0), 0)
     const billCount     = orders.length
     const avgCheck      = billCount > 0 ? revenueTotal / billCount : 0
 
@@ -1061,7 +1068,12 @@ export default function ClientDashboard({ scope = 'home' }) {
     const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || tablesErr || bookingsErr || requestsErr
     setLoadErrors(prev => ({ ...prev, pos: hadRealError ? 'POS data failed to load — figures below may be incomplete or stale.' : '' }))
 
-    setAndCache(setPosStats, 'posStats', { revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal, bookingsTonight, coversToCome, requestsPending })
+    // S809 3n (REPORTS-8): a failed read is not an empty period. Its tiles keep the last good figures
+    // (or show "—" when there are none), and nothing from a failed load is cached.
+    const fresh = { revenueTotal, coversTotal, dineInBills, billCount, avgCheck, tablesOccupied, tablesTotal, bookingsTonight, coversToCome, requestsPending }
+    const failed = { sales: !!((periodErr && periodErr.code !== 'PGRST116') || ordersErr), tables: !!tablesErr, bookings: !!(bookingsErr || requestsErr) }
+    if (anyReadFailed(failed)) setPosStats(prev => keepLastGood(prev, fresh, failed, HOME_POS_READS))
+    else setAndCache(setPosStats, 'posStats', fresh)
   }
 
   // Kitchen/bar-team variant (S431) — today's pos_kot_log activity for just this team's own
@@ -1103,7 +1115,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     const completedToday = readyRows.length
 
     setLoadErrors(prev => ({ ...prev, pos: error ? `${kdsStation === 'BOT' ? 'Bar' : 'Kitchen'} data failed to load — figures below may be incomplete or stale.` : '' }))
-    setAndCache(setPosStats, 'posStats', { kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday })
+    // S809 3n (REPORTS-8): a failed read never says "0 open, 0 late"; it keeps the last good tickets
+    // (or shows "—") and is not cached.
+    const fresh = { kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday }
+    if (error) setPosStats(prev => keepLastGood(prev, fresh, { tickets: true }, HOME_KITCHEN_READS))
+    else setAndCache(setPosStats, 'posStats', fresh)
   }
 
   // The ASK half of period close: run both preflights, then open the ConfirmModal below with
@@ -2020,15 +2036,19 @@ export default function ClientDashboard({ scope = 'home' }) {
     </>
   )
 
+  // A tile whose own read failed with no last good figure to keep (S809 3n, REPORTS-8, homePosStats.js)
+  // shows "—" and says so: a zero here would read as a quiet night or an empty pass.
+  const posGone = read => readUnavailable(posStats, read)
   const posKitchenHeadlineCard = (
     <div {...kpiCard(() => navigate('/pos/kds'))}>
       <div style={kpiLabelStyle}>Open Tickets</div>
-      <div style={kpiValueStyle(22, 800)}>
-        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.openNow}
+      <div style={{ ...kpiValueStyle(22, 800), ...(posGone('tickets') ? { color: 'var(--theme-text2)' } : null) }}>
+        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tickets') ? '—' : posStats.openNow}
       </div>
       <div style={kpiSubtextStyle}>
         {!posStats
           ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+          : posGone('tickets') ? <>Couldn&apos;t load — open the Kitchen Display →</>
           : <>New + In Progress →</>}
       </div>
     </div>
@@ -2040,17 +2060,17 @@ export default function ClientDashboard({ scope = 'home' }) {
         <div style={kpiLabelStyle}>
           <Tip text="Open tickets sent more than 15 minutes ago — same threshold the ticket display itself flags." width={220}>Late</Tip>
         </div>
-        <div style={{ ...kpiValueStyle(18), color: posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.lateCount}
+        <div style={{ ...kpiValueStyle(18), color: posGone('tickets') ? 'var(--theme-text2)' : posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tickets') ? '—' : posStats.lateCount}
         </div>
-        <div style={kpiSubtextStyle}>&gt; 15 min →</div>
+        <div style={kpiSubtextStyle}>{posGone('tickets') ? <>Couldn&apos;t load →</> : <>&gt; 15 min →</>}</div>
       </div>
       <div {...kpiCard(() => navigate('/pos/kds'))}>
         <div style={kpiLabelStyle}>Ready &amp; Waiting</div>
-        <div style={kpiValueStyle(18)}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.readyWaiting}
+        <div style={{ ...kpiValueStyle(18), ...(posGone('tickets') ? { color: 'var(--theme-text2)' } : null) }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tickets') ? '—' : posStats.readyWaiting}
         </div>
-        <div style={kpiSubtextStyle}>Last 20 min →</div>
+        <div style={kpiSubtextStyle}>{posGone('tickets') ? <>Couldn&apos;t load →</> : <>Last 20 min →</>}</div>
       </div>
       <div {...kpiCard(null)}>
         <div style={kpiLabelStyle}>Avg Prep Time</div>
@@ -2062,6 +2082,7 @@ export default function ClientDashboard({ scope = 'home' }) {
         <div style={kpiSubtextStyle}>
           {!posStats
             ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : posGone('tickets') ? <>Couldn&apos;t load</>
             : <>{posStats.completedToday} completed today</>}
         </div>
       </div>
@@ -2075,10 +2096,10 @@ export default function ClientDashboard({ scope = 'home' }) {
       <div style={kpiLabelStyle}>
         <Tip text="Total billed on paid POS orders closed in this period, as tendered — VAT included, credit notes excluded. The Inventory section's Revenue tile counts the same sales before VAT, so the two will not match." width={280}>Revenue</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
-        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
+      <div style={{ ...kpiValueStyle(22, 800), color: posGone('sales') ? 'var(--theme-text2)' : 'var(--theme-green-text)' }}>
+        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
       </div>
-      <div style={kpiSubtextStyle}>{periodLabel} · billed, incl. VAT →</div>
+      <div style={kpiSubtextStyle}>{posGone('sales') ? <>Couldn&apos;t load — open the Sales Report →</> : <>{periodLabel} · billed, incl. VAT →</>}</div>
     </div>
   )
 
@@ -2086,30 +2107,32 @@ export default function ClientDashboard({ scope = 'home' }) {
     <>
       <div {...kpiCard(() => navigate('/pos/covers-report'))}>
         <div style={kpiLabelStyle}>
-          <Tip text="Total covers (guests) served across all billed orders this period." width={220}>Covers Served</Tip>
+          <Tip text="Guests seated at tables on paid bills closed this period: the Covers Report's count. Takeaway and delivery bills seat no guests, so they are not counted here; a bill later credit-noted still counts its guests." width={260}>Covers Served</Tip>
         </div>
-        <div style={kpiValueStyle(18)}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.coversTotal}
+        <div style={{ ...kpiValueStyle(18), ...(posGone('sales') ? { color: 'var(--theme-text2)' } : null) }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : posStats.coversTotal}
         </div>
         <div style={kpiSubtextStyle}>
           {!posStats
             ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : posGone('sales') ? <>Couldn&apos;t load — open the Covers Report →</>
+            : posStats.dineInBills != null ? <>{posStats.dineInBills} dine-in bill{posStats.dineInBills === 1 ? '' : 's'} →</>
             : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
         </div>
       </div>
       <div {...kpiCard(null)}>
         <div style={kpiLabelStyle}>Avg Check</div>
-        <div style={kpiValueStyle(18)}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-IN')}`}
+        <div style={{ ...kpiValueStyle(18), ...(posGone('sales') ? { color: 'var(--theme-text2)' } : null) }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-IN')}`}
         </div>
-        <div style={kpiSubtextStyle}>Revenue ÷ bills</div>
+        <div style={kpiSubtextStyle}>{posGone('sales') ? <>Couldn&apos;t load</> : 'Revenue ÷ bills'}</div>
       </div>
       <div {...kpiCard(hasPosAccess('manager') ? () => navigate('/pos/tables') : null)}>
         <div style={kpiLabelStyle}>Tables Occupied</div>
-        <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
+        <div style={{ ...kpiValueStyle(18), color: posGone('tables') ? 'var(--theme-text2)' : posStats?.tablesOccupied > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tables') ? '—' : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
         </div>
-        <div style={kpiSubtextStyle}>{hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
+        <div style={kpiSubtextStyle}>{posGone('tables') ? <>Couldn&apos;t load</> : hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
       </div>
       {/* Tonight's bookings (S677) — what is still walking through the door, beside what has
           already been served. Amber only when public requests are waiting on a staff Accept:
@@ -2119,12 +2142,13 @@ export default function ClientDashboard({ scope = 'home' }) {
         <div style={kpiLabelStyle}>
           <Tip text="Bookings for tonight's service that are still expected or already seated, from the Reservations page. 'To come' is the guest count not yet seated — the covers the floor should be ready for on top of what is already served." width={280}>Bookings Tonight</Tip>
         </div>
-        <div style={{ ...kpiValueStyle(18), color: (posStats?.requestsPending ?? 0) > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (posStats.bookingsTonight ?? 0)}
+        <div style={{ ...kpiValueStyle(18), color: posGone('bookings') ? 'var(--theme-text2)' : (posStats?.requestsPending ?? 0) > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('bookings') ? '—' : (posStats.bookingsTonight ?? 0)}
         </div>
         <div style={kpiSubtextStyle}>
           {!posStats
             ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : posGone('bookings') ? <>Couldn&apos;t load — open Reservations →</>
             : (posStats.requestsPending ?? 0) > 0
               ? <>{posStats.requestsPending} request{posStats.requestsPending === 1 ? '' : 's'} to accept →</>
               : <>{posStats.coversToCome ?? 0} cover{(posStats.coversToCome ?? 0) === 1 ? '' : 's'} to come →</>}

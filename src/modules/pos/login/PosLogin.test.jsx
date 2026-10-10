@@ -16,11 +16,19 @@ const STAFF = [
   { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
 ]
 
+// The staff picker's answer for either picker; the guest-order poll's answer is set per test (S809 3c).
+// Plain functions, not jest.fn: CRA resets mock implementations before every test.
+let mockGuestAnswer = { data: [], error: null }
+const mockRpcCalls = []
 jest.mock('../../../supabaseClient', () => ({
-  supabase: { rpc: () => Promise.resolve({ data: [
-    { id: 'p-ram', full_name: 'Ram', pos_job_title: 'Waiter' },
-    { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
-  ], error: null }) },
+  supabase: { rpc: (name, args) => {
+    mockRpcCalls.push([name, args])
+    if (name === 'get_pos_device_guest_alerts') return Promise.resolve(mockGuestAnswer)
+    return Promise.resolve({ data: [
+      { id: 'p-ram', full_name: 'Ram', pos_job_title: 'Waiter' },
+      { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
+    ], error: null })
+  } },
 }))
 jest.mock('../../../context/ThemeContext', () => ({ useTheme: () => ({ colors: { bg: '#111111' } }) }))
 // No session unless a test puts one there. `signOut` is created in beforeEach (CRA resets mocks).
@@ -34,6 +42,8 @@ const renderPin = () => render(<MemoryRouter><PosLogin /></MemoryRouter>)
 
 beforeEach(() => {
   mockAuth = { session: null, ready: true, signOut: jest.fn(() => Promise.resolve(true)) }
+  mockGuestAnswer = { data: [], error: null }
+  mockRpcCalls.length = 0
   localStorage.clear()
   localStorage.setItem('pos_device_client_id', 'c-1')
   localStorage.setItem('pos_device_secret', 'secret')
@@ -106,5 +116,49 @@ describe('a login left signed in on the tablet (S809 ACCESS-1)', () => {
     renderPin()
     expect(await screen.findByRole('button', { name: /Ram/ })).toBeTruthy()
     expect(mockAuth.signOut).not.toHaveBeenCalled()
+  })
+})
+
+// A locked till hears a guest's QR order (S809 3c, FLOOR-KITCHEN-1; owner decision Q14 1). This
+// screen is every PIN till's resting state, and nothing announced a guest order here before.
+describe('a guest order waiting while the till is locked', () => {
+  const guestCalls = () => mockRpcCalls.filter(([name]) => name === 'get_pos_device_guest_alerts')
+
+  it('is announced, asking through this tablet\'s own key', async () => {
+    mockGuestAnswer = { data: [{ table_name: 'Table 7', waiting_since: new Date(Date.now() - 125000).toISOString() }], error: null }
+    renderPin()
+    expect(await screen.findByText('New guest order — Table 7')).toBeTruthy()
+    expect(screen.getByText('Waiting 2 min. Nothing reaches the kitchen until a staff member signs in and accepts it.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Mute 5 min' })).toBeTruthy()
+    expect(guestCalls()[0][1]).toEqual({ p_client_id: 'c-1', p_device_id: 'd-1', p_device_secret: 'secret' })
+  })
+
+  it('counts several tables in one banner', async () => {
+    const at = new Date(Date.now() - 30000).toISOString()
+    mockGuestAnswer = { data: [{ table_name: 'Table 7', waiting_since: at }, { table_name: 'Table 3', waiting_since: at }], error: null }
+    renderPin()
+    expect(await screen.findByText('2 new guest orders — Table 7, Table 3')).toBeTruthy()
+  })
+
+  it('says nothing when nothing waits', async () => {
+    renderPin()
+    expect(await screen.findByRole('button', { name: /Ram/ })).toBeTruthy()
+    await waitFor(() => expect(guestCalls().length).toBeGreaterThan(0))
+    expect(screen.queryByText(/new guest order/i)).toBeNull()
+  })
+
+  it('says nothing on a tablet whose key was refused', async () => {
+    mockGuestAnswer = { data: null, error: { message: 'pos_device_not_active', code: '28000' } }
+    renderPin()
+    expect(await screen.findByRole('button', { name: /Ram/ })).toBeTruthy()
+    await waitFor(() => expect(guestCalls().length).toBeGreaterThan(0))
+    expect(screen.queryByText(/new guest order/i)).toBeNull()
+  })
+
+  it('is not asked about on a tablet still on the restaurant\'s old shared key', async () => {
+    localStorage.removeItem('pos_device_id')
+    renderPin()
+    expect(await screen.findByRole('button', { name: /Ram/ })).toBeTruthy()
+    expect(guestCalls()).toEqual([])
   })
 })
