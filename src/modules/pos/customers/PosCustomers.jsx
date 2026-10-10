@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { Fragment, useState, useEffect, useMemo } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -15,6 +15,9 @@ import { errorText } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { settleWithin } from '../../../utils/withTimeout'
+import { settleCreditBill, SETTLE_READ_MS } from './settleCredit'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -75,9 +78,18 @@ export default function PosCustomers() {
   // PosOrders.jsx). settleExVatBase is fetched once per Settle click (this order's ex-VAT,
   // post-discount value, same basis computeOrderAmounts already uses elsewhere), so the % just
   // typed can be turned into a live preview amount without a second network round trip per keystroke.
+  // S809 CUSTOMERS-PARKING-16: held as { orderId, base }, and a load is keyed on its bill. A late
+  // answer for the bill opened before used to become this bill's base, and settleBill stored that
+  // commission and posted the wrong cash.
   const [settleCommissionPct, setSettleCommissionPct] = useState('')
   const [settleExVatBase, setSettleExVatBase] = useState(null)
   const [settleExVatLoading, setSettleExVatLoading] = useState(false)
+  const settleBaseReq = useLatestRequest()
+  // S809 CUSTOMERS-PARKING-6: this page's unanswered Settle presses (settleCredit.js), and the names
+  // that say who settled a bill (Collected's By column, and "already settled by …").
+  const settleTriesRef = useRef(new Map())
+  const [staffNames, setStaffNames] = useState({})
+  const [namesFailed, setNamesFailed] = useState(false)
 
   const [billingSettings, setBillingSettings] = useState({
     is_vat_registered: true, invoice_prefix: '', delivery_partners: [],
@@ -198,9 +210,15 @@ export default function PosCustomers() {
     setCreditLoading(true)
     // Paged: unbounded by date — every Credit bill ever — so this is the read that gets worse
     // the longer the system is used, and outstandingTotal below is the figure an owner chases.
-    const { data, error } = await fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_method, credit_note_id, vat_registered')
-      .eq('payment_method', 'Credit').eq('status', 'billed')
-      .order('closed_at', { ascending: false }).order('id'))
+    // Names beside it (S809 CUSTOMERS-PARKING-6): bounded, and a failure only marks the By column.
+    const [{ data, error }, names] = await Promise.all([
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_by, credit_settled_method, credit_note_id, vat_registered')
+        .eq('payment_method', 'Credit').eq('status', 'billed')
+        .order('closed_at', { ascending: false }).order('id')),
+      settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), SETTLE_READ_MS, 'Reading staff names'),
+    ])
+    if (names.error) { console.error('staff names read failed, By shows ?:', names.error); setNamesFailed(true) }
+    else { setNamesFailed(false); setStaffNames(Object.fromEntries((names.data || []).map(p => [p.id, p.full_name]))) }
     setCreditLoading(false)
     // S754: a failed read rendered NPR 0 outstanding and "all Credit bills have been collected 🎉".
     // The error card replaces the whole tab; left un-loaded so reopening the tab retries.
@@ -243,18 +261,21 @@ export default function PosCustomers() {
   // the commission % from the client's configured rate so it's a starting point to confirm/adjust
   // against the platform's real remittance, not a silent default.
   async function openSettle(order) {
+    settleBaseReq.begin(order.id) // before any await: a bill opened earlier no longer owns the panel
     setSettleMsg('')
     const blocked = settingsBlockReason()
     if (blocked) { setSettlingId(null); setSettleMsg(blocked); return }
     setSettlingId(order.id)
     setSettleCommissionPct('')
     setSettleExVatBase(null)
+    setSettleExVatLoading(false)
     if (!order.delivery_partner) return
     const partner = billingSettings.delivery_partners.find(p => p.name === order.delivery_partner)
     const defaultPct = partner?.commission_pct
     setSettleCommissionPct(defaultPct != null ? String(defaultPct) : '')
     setSettleExVatLoading(true)
-    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items', 'qty, unit_price, vat_rate, comped').eq('order_id', order.id)
+    const { data: items, error: itemsErr } = await settleWithin(scopedFrom('pos_order_items', 'qty, unit_price, vat_rate, comped').eq('order_id', order.id), SETTLE_READ_MS, "Reading the bill's lines")
+    if (!settleBaseReq.isCurrent(order.id)) return // another bill was opened meanwhile
     if (itemsErr) {
       // A dropped read here used to give an ex-VAT base of 0, and settleBill then STORED
       // commission_amount = 0 on the settlement with no warning (S682). settleBill refuses while
@@ -266,84 +287,54 @@ export default function PosCustomers() {
     // Excludes comped items — commission has nothing to withhold on a line that was never
     // actually charged, same exclusion every other revenue calc in this codebase applies.
     const amounts = computeOrderAmounts(order, (items || []).filter(i => !i.comped), vatReg)
-    setSettleExVatBase(amounts.taxableBase + amounts.nonTaxableBase)
+    setSettleExVatBase({ orderId: order.id, base: amounts.taxableBase + amounts.nonTaxableBase })
     setSettleExVatLoading(false)
   }
 
   async function settleBill(order, method) {
     const blocked = settingsBlockReason()
     if (blocked) { setSettleMsg(blocked); return }
-    if (order.delivery_partner && settleExVatBase == null) {
+    // S809 CUSTOMERS-PARKING-16: only this bill's own base, never one a late load left for another.
+    const base = settleExVatBase?.orderId === order.id ? settleExVatBase.base : null
+    if (order.delivery_partner && base == null) {
       setSettleMsg('error:This bill\'s commission base has not loaded, so it cannot be settled yet — close this and try Settle again.')
       return
     }
     setSettleBusy(true); setSettleMsg('')
-    const patch = {
-      credit_settled_at:     new Date().toISOString(),
-      credit_settled_by:     profile?.id || null,
-      credit_settled_method: method,
+    // The write, the read-back of a lost answer, and the Cash In (paid − commission for a delivery
+    // partner, S754) are settleCredit.js (S809 CUSTOMERS-PARKING-6, SHIFTS-4). S754's
+    // `.is('credit_settled_at', null)` + `.select('id')` stay: a bill is settled once however often
+    // it is pressed, and zero rows is now read back to say who settled it.
+    const db = {
+      settle: (id, patch, signal) => scopedUpdate('pos_orders', patch).eq('id', id).is('credit_settled_at', null).select('id').abortSignal(signal),
+      readBill: id => scopedFrom('pos_orders', 'id, paid_amount, commission_amount, credit_settled_at, credit_settled_by, credit_settled_method').eq('id', id).maybeSingle(),
+      openShift: () => scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle(),
+      cashFor: id => scopedFrom('pos_cash_movements', 'id').eq('order_id', id).eq('kind', 'credit_settlement').limit(1),
+      addCash: row => scopedInsert('pos_cash_movements', row),
     }
-    if (order.delivery_partner && settleExVatBase != null) {
-      const pct = parseFloat(settleCommissionPct) || 0
-      patch.commission_amount = Math.round(settleExVatBase * pct / 100)
+    let out
+    try {
+      out = await settleCreditBill({
+        db, order, method, profileId: profile?.id || null, tries: settleTriesRef.current, names: staffNames,
+        commission: order.delivery_partner ? Math.round(base * (parseFloat(settleCommissionPct) || 0) / 100) : null,
+      })
+    } catch (err) {
+      console.error('settle failed unexpectedly:', err)
+      out = { msg: 'warn:Something went wrong while settling, so it is not known whether this bill was settled. Do not hand any money back: reload the page and see whether it is under Collected. ' + errorText(err, 'operator'), closePanel: false, reload: false }
+    } finally {
+      setSettleBusy(false)
     }
-    // S754: `.is('credit_settled_at', null)` + `.select('id')` make a double-settle visible. Two
-    // terminals (or a double tap) settling the same bill used to both "succeed" — the second
-    // overwrote the first's method and commission and posted the cash to the drawer a second time.
-    // Zero rows back is proof nothing was written, so it may say so.
-    const { data: settledRows, error } = await scopedUpdate('pos_orders', patch)
-      .eq('id', order.id).is('credit_settled_at', null).select('id')
-    setSettleBusy(false)
-    if (error) { setSettleMsg('error:The bill was not marked as settled. ' + errorText(error, 'operator')); return }
-    if (!settledRows || settledRows.length === 0) {
-      setSettleMsg('error:This bill had already been settled — nothing was changed and no cash was added to the drawer. The list below has been refreshed.')
-      setSettlingId(null)
-      await loadCredit()
-      return
-    }
-    // What actually reached us. A delivery partner remits the bill LESS its commission, so a Cash
-    // settlement puts paid_amount − commission in the drawer, not paid_amount — posting the gross
-    // left every such shift reading "short" by the commission (S754). Direct customers have no
-    // commission_amount on the patch and pay the whole bill.
-    const collected = (order.paid_amount || 0) - (patch.commission_amount || 0)
-
-    // A CASH settlement puts real money in the drawer, but the order's payment_method stays
-    // 'Credit' forever — so the shift's cash bucket never saw it and the drawer read as "over"
-    // by the settled amount, with no way for the supervisor to explain it (S573). Post it to the
-    // open shift's cash ledger. Best-effort: a failed ledger write must not undo a settlement the
-    // customer has already paid for, so it warns rather than rolling back.
-    let ledgerWarning = ''
-    if (method === 'Cash') {
-      const { data: openShift, error: shiftErr } = await scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle()
-      if (shiftErr) {
-        // A failed read is not "no shift is open" — that instruction sent the operator to record
-        // a Cash In next shift while a shift was in fact open (S682).
-        ledgerWarning = ` Could not check whether a shift is open, so this cash may not be on the drawer count — check the current shift's Cash In entries. ${errorText(shiftErr, 'operator')}`
-      } else if (!openShift) {
-        ledgerWarning = ' No shift is open, so this cash is not on any drawer reconciliation — record it as a Cash In when you open the next shift.'
-      } else {
-        const { error: mErr } = await scopedInsert('pos_cash_movements', {
-          shift_id: openShift.id,
-          direction: 'in',
-          kind: 'credit_settlement',
-          amount: collected,
-          reason: `Credit bill settled — ${order.buyer_name || 'customer'}`,
-          order_id: order.id,
-          created_by: profile?.id || null,
-        })
-        // S754: the sentence, not the raw Postgres message.
-        if (mErr) ledgerWarning = ` Warning: it could not be added to the open shift's cash count, so the drawer will read short by this amount — add it as a Cash In on the shift. ${errorText(mErr, 'operator')}`
-      }
-    }
-
-    setSettleMsg(`ok:${fmtNpr(collected)} collected from ${order.buyer_name || 'customer'} via ${method}.${ledgerWarning}`)
-    setSettlingId(null)
-    await loadCredit()
+    setSettleMsg(out.msg)
+    // Only this bill's panel: another bill opened while this one was settling stays open.
+    if (out.closePanel) setSettlingId(id => (id === order.id ? null : id))
+    if (out.reload) await loadCredit()
   }
 
   const vatReg = billingSettings.is_vat_registered
   const prefix = billingSettings.invoice_prefix
-  const settleCommissionAmt = settleExVatBase != null ? Math.round(settleExVatBase * (parseFloat(settleCommissionPct) || 0) / 100) : 0
+  const settleCommissionAmt = settleExVatBase != null ? Math.round(settleExVatBase.base * (parseFloat(settleCommissionPct) || 0) / 100) : 0
+  // A settle that needs action shows amber (warn:), a refusal red, a settlement green.
+  const settleMsgColor = settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : settleMsg.startsWith('warn:') ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'
 
   const q = search.trim().toLowerCase()
   const filteredCustomers = q
@@ -534,8 +525,8 @@ export default function PosCustomers() {
               {/* A settle that succeeded and was followed by a failed refresh must still say it
                   succeeded — the message sits above the card, not inside the hidden list. */}
               {settleMsg && (
-                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                  {settleMsg.replace(/^(error|ok):/, '')}
+                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsgColor }}>
+                  {settleMsg.replace(/^(error|warn|ok):/, '')}
                 </p>
               )}
               <ReportLoadError error={creditError} />
@@ -623,8 +614,8 @@ export default function PosCustomers() {
               )}
 
               {settleMsg && (
-                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                  {settleMsg.replace(/^(error|ok):/, '')}
+                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsgColor }}>
+                  {settleMsg.replace(/^(error|warn|ok):/, '')}
                 </p>
               )}
 
@@ -697,7 +688,7 @@ export default function PosCustomers() {
                                 </div>
                                 {settleExVatLoading ? (
                                   <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Calculating…</span>
-                                ) : settleExVatBase != null && (
+                                ) : settleExVatBase?.orderId === b.id && (
                                   <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                                     = {fmtNpr(settleCommissionAmt)} commission → net {fmtNpr((b.paid_amount || 0) - settleCommissionAmt)}
                                   </span>
@@ -732,6 +723,9 @@ export default function PosCustomers() {
                           <th style={{ textAlign: 'right' }}>Net Received</th>
                           <th>Collected</th>
                           <th>Via</th>
+                          <th>
+                            <Tip text="The login that recorded the settlement. A ? means the names could not be read — reload to see them" width={240}>By</Tip>
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -750,6 +744,7 @@ export default function PosCustomers() {
                             <td style={{ textAlign: 'right' }}>{b.delivery_partner ? fmtNpr((b.paid_amount || 0) - (b.commission_amount || 0)) : '—'}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>{bsDate(b.credit_settled_at)}</td>
                             <td><span className={IDENTITY_BADGE} style={{ fontSize: 11 }}>{b.credit_settled_method}</span></td>
+                            <td>{namesFailed ? '?' : (staffNames[b.credit_settled_by] || '—')}</td>
                           </tr>
                         ))}
                       </tbody>

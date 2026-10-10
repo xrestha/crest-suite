@@ -13,24 +13,47 @@
 //                    Split by sign into `extrasEarned` (the positive picks — add-ons) and
 //                    `sizeAdjustments` (the negative ones — a Half priced below the dish), because a
 //                    net figure hid a size discount inside the add-on income (S759).
-//   group kind       from the option catalog as it is TODAY (`kindByOptionId`); a snapshot whose
-//                    option has since been deleted, or written by a bundle that stored no option
-//                    id, is 'unknown'. `listPriceDelta` is the option's list price the same way —
-//                    null when unknown — so the Margin tab can tell a free-by-design choice from
-//                    a paid one that lost money.
-//   cost per plate   the choice's frozen stock lines valued at TODAY's item rate. The lines are what
-//                    was on the plate; the rate is the only one available and moves with purchases,
-//                    which the page says.
+//   group kind       AS BILLED (S809 3o, REPORTS-12): the snapshot's `group_kind`, the kind most of
+//                    the choice's plates were billed under. Today's catalog (`kindByOptionId`) only
+//                    fills in a snapshot row that has none; with neither it is 'unknown'. Until S809
+//                    the catalog decided, so a size deleted after a month of sales became 'unknown'
+//                    and could win "Most added".
+//   list price       AS BILLED, the same way: the snapshot's `list_price_delta` (the choice's own
+//                    price on that bill, scaled to the size for a 'stock_and_price' group), averaged
+//                    over the plates as `listPriceDelta`, with today's catalog price only for a row
+//                    that carries none. `freePicks` (plates inside a group's "first N free", the
+//                    snapshot's `included`) and `compedPicks` say why some plates paid less, and
+//                    `freeByDesign` is a choice whose every plate was billed at a list price of 0.
+//                    Judged against today's catalog, a mid-month price rise read as "incl. free
+//                    picks" and a choice made free on the last day hid a month of losses in grey.
+//   cost per plate   each plate's OWN frozen stock lines (S809 3o, REPORTS-4), valued at TODAY's item
+//                    rate and averaged over the plates whose choice carried stock lines. A size
+//                    scales a topping's lines on the bill (S760), so one bill's lines are one size's
+//                    portion: the report used to cost every plate at whichever bill the read
+//                    returned first, a loss or a healthy margin by chance. Picks are grouped by
+//                    their stock lines (`deltaSets`), so each distinct set is costed once. A pick
+//                    whose choice had no stock lines yet (`[]`) is left out of the average, not
+//                    taken as the choice's answer. The rate is the only one available and moves
+//                    with purchases, which the page says.
 
 const num = v => Number(v) || 0
+const has = (obj, k) => k != null && Object.prototype.hasOwnProperty.call(obj || {}, k)
+
+// The kind most of a choice's plates were billed under; ties go to the kind seen first.
+const billedKind = kindPlates => {
+  let best = null
+  for (const [k, n] of Object.entries(kindPlates)) if (best == null || n > kindPlates[best]) best = k
+  return best
+}
 
 /**
  * @param {{ lines, snapshots, attachedRecipeIds, kindByOptionId?, listPriceByOptionId? }} input
  *   lines      [{ id, recipe_id, name, qty, comped, selection_key }] — paid bills in range
- *   snapshots  [{ order_item_id, option_id, group_name, option_name, is_removal, price_delta }]
+ *   snapshots  [{ order_item_id, option_id, group_name, group_kind, option_name, is_removal,
+ *                price_delta, list_price_delta, included, ingredient_deltas }] — as billed
  *   attachedRecipeIds  Set of recipe ids with a group attached today
- *   kindByOptionId     { [option_id]: 'size' | 'addon' | 'choice' } from today's catalog
- *   listPriceByOptionId { [option_id]: number } today's list price_delta per option
+ *   kindByOptionId     { [option_id]: 'size' | 'addon' | 'choice' } today's catalog, for a row with no kind
+ *   listPriceByOptionId { [option_id]: number } today's list price_delta, for a row with no list price
  */
 export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, kindByOptionId = {}, listPriceByOptionId = {} }) {
   const byLine = new Map()
@@ -71,12 +94,31 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
       const charged = l.comped ? 0 : num(p.price_delta) * plates
       const o = options.get(key) || {
         key, option_id: p.option_id || null, option_name: p.option_name, group_name: p.group_name,
-        is_removal: !!p.is_removal, picks: 0, charged: 0, dishes: new Set(), sampleDeltas: p.ingredient_deltas || null,
+        is_removal: !!p.is_removal, picks: 0, charged: 0, dishes: new Set(),
+        kindPlates: {}, listSum: 0, listPlates: 0, pricedPlates: 0, freePicks: 0, compedPicks: 0, deltaSets: new Map(),
       }
       o.picks += plates
       o.charged += charged
       o.dishes.add(l.name)
-      if (!o.sampleDeltas && p.ingredient_deltas) o.sampleDeltas = p.ingredient_deltas
+      // REPORTS-12: the kind and list price this plate was billed with; today's catalog only fills a gap.
+      const kind = p.group_kind || (p.option_id != null ? kindByOptionId?.[p.option_id] : null)
+      if (kind) o.kindPlates[kind] = (o.kindPlates[kind] || 0) + plates
+      const list = p.list_price_delta != null ? num(p.list_price_delta)
+        : has(listPriceByOptionId, p.option_id) ? num(listPriceByOptionId[p.option_id]) : null
+      if (list != null) {
+        o.listSum += list * plates
+        o.listPlates += plates
+        if (list !== 0) o.pricedPlates += plates
+      }
+      if (p.included) o.freePicks += plates
+      if (l.comped) o.compedPicks += plates
+      // REPORTS-4: every plate's own stock lines, grouped by identical sets.
+      if (Array.isArray(p.ingredient_deltas) && p.ingredient_deltas.length > 0) {
+        const sig = JSON.stringify(p.ingredient_deltas)
+        const set = o.deltaSets.get(sig) || { deltas: p.ingredient_deltas, plates: 0 }
+        set.plates += plates
+        o.deltaSets.set(sig, set)
+      }
       options.set(key, o)
       if (charged > 0) extrasEarned += charged
       else sizeAdjustments += charged
@@ -92,16 +134,16 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
   for (const r of removalsByDish.values()) r.dishPlates = dishes.get(r.recipe_id)?.plates || 0
 
   const optionRows = [...options.values()]
-    .map(o => {
-      const known = o.option_id != null && Object.prototype.hasOwnProperty.call(listPriceByOptionId || {}, o.option_id)
-      return {
-        ...o,
-        dishes: [...o.dishes].sort(),
-        chargedPerPick: o.picks ? o.charged / o.picks : 0,
-        group_kind: (o.option_id != null && kindByOptionId?.[o.option_id]) || 'unknown',
-        listPriceDelta: known ? num(listPriceByOptionId[o.option_id]) : null,
-      }
-    })
+    .map(({ kindPlates, listSum, listPlates, pricedPlates, deltaSets, ...o }) => ({
+      ...o,
+      dishes: [...o.dishes].sort(),
+      chargedPerPick: o.picks ? o.charged / o.picks : 0,
+      group_kind: billedKind(kindPlates) || 'unknown',
+      // The average list price per plate as billed; null when no plate's list price is known.
+      listPriceDelta: listPlates ? listSum / listPlates : null,
+      freeByDesign: listPlates > 0 && listPlates === o.picks && pricedPlates === 0,
+      deltaSets: [...deltaSets.values()],
+    }))
     .sort((a, b) => b.picks - a.picks || String(a.option_name).localeCompare(String(b.option_name)))
 
   return {
@@ -131,19 +173,32 @@ export function mostAddedOf(optionRows) {
 }
 
 /**
- * Cost per plate of each choice: its frozen stock lines through the delta explosion, valued at the
- * given per-base-unit rates. Null when the choice has no stock lines (it changes nothing in stock),
- * which the page shows as "no stock lines" rather than a cost of 0.
+ * Cost per plate of each choice: every plate's own frozen stock lines through the delta explosion,
+ * valued at the given per-base-unit rates, averaged over the plates that carried stock lines
+ * (S809 3o, REPORTS-4: a Large bowl's granola is costed as a Large bowl's, a Regular's as a
+ * Regular's). `costedPicks` is how many plates that average covers. Null when no plate of the
+ * choice carried stock lines (it changes nothing in stock), which the page shows as "no stock
+ * lines" rather than a cost of 0.
  * @param {object[]} optionRows  from buildCustomizationReport
  * @param {(deltas) => Array<{item_id, qty}>} toItems  deltaItems bound to an explosion
  * @param {Record<string, number>} rateByItem
  */
 export function withOptionCosts(optionRows, toItems, rateByItem) {
   return (optionRows || []).map(o => {
-    if (!o.sampleDeltas?.length) return { ...o, costPerPick: null }
-    const cost = toItems(o.sampleDeltas).reduce((s, { item_id, qty }) => s + qty * num(rateByItem?.[item_id]), 0)
-    return { ...o, costPerPick: cost }
+    let total = 0
+    let costedPicks = 0
+    for (const { deltas, plates } of o.deltaSets || []) {
+      const perPlate = toItems(deltas).reduce((s, { item_id, qty }) => s + qty * num(rateByItem?.[item_id]), 0)
+      total += perPlate * plates
+      costedPicks += plates
+    }
+    return { ...o, costPerPick: costedPicks > 0 ? total / costedPicks : null, costedPicks }
   })
+}
+
+/** Every distinct set of stock lines in a report, for one delta explosion (REPORTS-4). */
+export function allDeltaSets(optionRows) {
+  return (optionRows || []).flatMap(o => (o.deltaSets || []).map(s => s.deltas))
 }
 
 /**

@@ -180,6 +180,84 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 3, slice 3o: CUSTOMIZATION-2, REPORTS-4 (P2), REPORTS-12 (P3); plus the S809.4
+  `option_count` message item~~ — **shipped S809, 2026-10-10**, app only (crest-v428). A choice hidden as
+  sold out, or deleted, mid-service no longer blocks a table's order unseen: the choice window starts
+  from, and Same as last restores, only the picks the dish still offers, and names what it took off; an
+  unsaved cart line whose choice is gone, or whose picks no longer fit, is marked in red; a choices
+  refusal names the dish(es) the server names. A saved line keeps its exemption and is not marked. The
+  Customization Report judges each choice as billed (kind, list price, free and comped plates, from the
+  snapshot) and costs each plate's own frozen stock lines, so a size-scaled topping is costed at the
+  size sold. **Decided (owner, 2026-10-10, Q3 (b), later):** a dish saved but not yet sent whose choice
+  was hidden since gets a grey "Granola is no longer offered" note, blocking nothing — a stage-4 item,
+  not built. Original rows: `CUSTOMIZATION.md`, `REPORTS.md`.
+- [x] ~~S809 stage 3, slice 3m: REPORTS-2, FLOOR-KITCHEN-3, IMS-HANDOFF-4 (P2), owner decision Q15 (1);
+  plus two S809.4 items (the Owner Report's covers and credit-noted bills, and its VAT flag)~~ —
+  **shipped S809, 2026-10-10**, app only (crest-v428), Owner Report schema 15. **Q15 (1), as built:** an
+  empty bar list means no bar: every dish prints on the kitchen ticket, the till hides its BOT button,
+  and Ticket Routing says "No bar: every dish prints on the kitchen ticket."; a list never set (NULL)
+  still means `['Beverage']`; a Settings category rename never adds a bar category. Every reader goes
+  through `barCategoriesOf` (`ticketRouting.js`). Sales Report's 1L+ year list runs from the first
+  bill's fiscal year, read when the tab opens, with its own error card; a year reads up to 2,00,000
+  bills. The Owner Report's POS section follows the Sales Report (`posSalesFigures` over
+  `salesReportMath.js`): a credited bill stays in the month it was sold, its credit note comes off the
+  month it was issued, a Split bill is spread over its legs, each bill is valued under its own VAT stamp,
+  and the month runs on Nepal's day edges. **Decided (owner, 2026-10-10):** the Owner Report's covers
+  count seated guests only, from the next report (schema 15), and Avg Check / Cover = dine-in sales
+  (after dine-in returns) ÷ seated guests, kept as built. An older report keeps its count and says so.
+  Original rows: `REPORTS.md`, `FLOOR-KITCHEN.md`, `IMS-HANDOFF.md`.
+- [x] ~~S809 stage 3, slice 3l: CUSTOMERS-PARKING-6, SHIFTS-4, DOCS-2 (P2), CUSTOMERS-PARKING-16 (P3)~~ —
+  **shipped S809, 2026-10-10**, app only (crest-v428). A Credit settle whose answer is lost, or that
+  matched nothing, reads the bill back (`settleCredit.js`): this page's own unanswered press is finished
+  (its Cash In added once, after checking the bill has none), anyone else's settlement is named with
+  when and how, and an unreadable bill says "not known", never "not settled". Collected has a By column.
+  The Cash In carries a minted id, so a resend after a lost answer lands once. With no shift open, the
+  page says to keep the cash out of the next shift's float and record it as a Cash In there, or count it
+  in the float and record nothing — never both. Help no longer tells a cashier to void and re-ring to fix
+  a split payment: ↩ Undo steps back, and closing the payment window discards every tender. A delivery
+  bill's commission is always worked out from its own lines. Original rows: `CUSTOMERS-PARKING.md`,
+  `SHIFTS.md`, `DOCS.md`.
+- [x] ~~S809 stage 3, slice 3h: ACCESS-6, ACCESS-7 (P2), ACCESS-11, ACCESS-12 (P3), owner decision
+  Q18 (a); plus the legacy shared-key code and two S809.4 items (the Release reload's idle clock, a
+  blocked login's answer)~~ — **shipped S809, 2026-10-10**, migration `20261010180000` applied live,
+  `pos-staff-login` v10 and `admin-user-ops` v66 deployed (crest-v428). **Q18 (a), as built:** a till
+  lock (idle or Lock POS) ends only that tablet's session; Revoke in Till Devices ends the sessions
+  opened on that tablet, within the hour at most (`pos-staff-login` files each session under its tablet
+  in `pos_device_sessions` before the tokens leave, and `revoke_pos_device` ends them); Archive, Clear
+  and Delete Client sign out every till login of the outlet (`pos_revoke_till_sessions`); a sign-in that
+  cannot be recorded against its tablet is refused. The idle clock survives a reload, a restart or a
+  release (the last real input is kept per session on the device). A blocked or settled login picked
+  from a stale list gets "This login is switched off", not counted as a wrong PIN. A PIN login that
+  deactivates its own tablet is signed out of it, and a correct PIN whose session cannot be stored says
+  the server could not be reached instead of landing on the email login. The shared key's app code and
+  Edge Function branch are gone; its four functions are dropped by `20261010190500`, applied a day after
+  the release. Original rows: `ACCESS.md`.
+- [x] ~~S809 stage 3, slice 3g: ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5 (P2), ORDER-FLOW-12 (P3);
+  plus two S809.4 items (notes joined on a merge, a guest Accept offered again after a lock)~~ —
+  **shipped S809, 2026-10-10**, app only (crest-v428). A till lock's kept cart gives back only what the
+  till had not saved (`keptLinesToRestore`), so food billed or taken off elsewhere never returns as "not
+  sent"; it is never merged into a different open order on that table (the screen lists it instead);
+  accepted guest QR orders come back accepted; and when the restore cannot finish, the items are kept
+  again and the floor says so. Merged lines keep both notes. A party marked Arrived is seated by tapping
+  its table whatever the clock, and a Seated booking whose bill closed without completing it is ended
+  with Mark done, its covers staying booked; the recovery instructions name controls that exist.
+  Original rows: `ORDER-FLOW.md`, `RESERVATIONS.md`.
+- [x] ~~S809 stage 3, slice 3f: ORDER-FLOW-6, ORDER-FLOW-7, ORDER-FLOW-8 (P2), ORDER-FLOW-15,
+  ORDER-FLOW-16 (P3), owner decision Q16; plus four S809.4 items (a ticket whose log insert failed, a new
+  takeaway's lost insert, the send marks, a reloaded laptop's queue)~~ — **shipped S809, 2026-10-10**,
+  app only (crest-v428). **Q16 (yes), as built:** a send with no answer (Wi-Fi up, internet down) is
+  kept on the till and prints; the till then treats the internet as down for 30 s; billing always waits
+  for the server; an order still waiting to upload opens from the till's own copy and cannot be billed
+  until it uploads. One upload at a time; each ticket is logged once, under the id it was queued with;
+  each entry carries its outlet (another outlet's are left alone, and the operator cannot switch client
+  away from changes still waiting); a conflict's printed dishes are logged and named before the waiter
+  decides; a refusal no retry changes is a conflict carrying the server's sentence. An offline-queued
+  customized dish keeps its choices on upload and on reopening. **Decided (owner, 2026-10-10, new Q2,
+  "yes"):** after an offline mix-up, dishes this till already printed that are put back onto the SAME
+  open order ("Start new order with these" on a stale, off-menu or refused notice, or the table's order
+  being that same order) come back marked as already sent, so Update Order does not print them again; a
+  bill that closed, or another party's order, keeps them unsent and the waiter is told which printed.
+  Original rows: `ORDER-FLOW.md`.
 - [x] ~~S809 stage 3, slice 3n: REPORTS-3, GAP-OUTLETS-3 (P2), REPORTS-8 (P3)~~ — **shipped S809,
   2026-10-10**, migration `20261010170000` applied live (crest-v427). Covers on the POS Dashboard, Home and
   the Group Console are guests SEATED, the Covers Report's count (`coversMath.seatedCovers`; in SQL
@@ -478,7 +556,8 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   commits** (`c287f0da` → `e2de401d`, crest-v328 → v335; snapshot
   `.impeccable/critique/2026-09-17T07-02-03Z__src-modules-pos.md`). Owner decisions:
   (1) **a till lock keeps the unsent cart** for the login that typed it, restores it when that PIN
-  signs in, and says so on the PIN screen — not "never lock", not "just warn louder";
+  signs in, and says so on the PIN screen — not "never lock", not "just warn louder" (S809 3g: only
+  units not saved come back, never onto a different open order on that table);
   (2) **the bill prints first**, straight after the close write and the Split legs, with Inventory
   posting, the customer book and loyalty after it and non-blocking;
   (3) **a new POS login starts with a 0% discount limit** (set from POS Staff; existing logins untouched);

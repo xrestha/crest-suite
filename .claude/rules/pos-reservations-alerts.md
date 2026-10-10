@@ -31,7 +31,10 @@ are load-bearing, each with the reason it exists:
   not state, for the same reason `savingRef` exists. `closeOrder` completes it beside the table
   release through `warnWrite()`. The Covers Report's booked-vs-walk-in split reads that link, so a
   booking contributes covers exactly once, via its order. `completed` is reachable from
-  `booked/confirmed/arrived` too (a party seated offline or by hand): kept, but no covers.
+  `booked/confirmed/arrived` too (a party seated offline or by hand): kept, but no covers. Mark done
+  is offered on a Seated row too (S809 3g), for a booking its bill close did not complete; `order_id`
+  stays, so its covers stay booked. The floor tap picks in the tile's own order
+  (`bookingToSeatOnTap`): due now, then arrived whatever the clock.
 - **The handoff from the page to the floor carries the FULL `pos_tables` row**, because
   `table_name` is snapshotted onto the order at first save and printed on every KOT and bill.
 - **Today's floor window is the BS day plus six hours**, so a 12:15 AM booking is on tonight's

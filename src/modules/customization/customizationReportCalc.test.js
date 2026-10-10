@@ -1,4 +1,4 @@
-import { buildCustomizationReport, withOptionCosts, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES } from './customizationReportCalc'
+import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES } from './customizationReportCalc'
 import { bsMonthRangeIso, shiftBsMonth } from '../pos/reports/reportRange'
 
 const MOMO = 'r-momo'
@@ -107,6 +107,122 @@ describe('withOptionCosts', () => {
     const costed = withOptionCosts(r.options, toItems, { cheese: 2 })
     expect(costed.find(o => o.option_id === 'o-cheese').costPerPick).toBe(60)
     expect(costed.find(o => o.option_id === 'o-half').costPerPick).toBeNull()
+  })
+})
+
+// S809 3o. The acai bowl of REPORTS-4: Small ×0.75, Regular ×1, Large ×1.5; Granola is a NPR 60
+// add-on in a 'stock' scaling group, 40 g at NPR 1.20/g on a Regular bowl.
+describe('a size-scaled choice is costed plate by plate (REPORTS-4)', () => {
+  const BOWL = 'r-bowl'
+  const toItems = deltas => deltas.map(d => ({ item_id: d.item_id, qty: d.qty }))
+  const rates = { granola: 1.2 }
+  const bowl = (id, qty) => ({ id, recipe_id: BOWL, name: 'Acai bowl', qty, comped: false, selection_key: 'o-granola' })
+  const granola = (order_item_id, grams) => ({
+    order_item_id, option_id: 'o-granola', group_name: 'Toppings', group_kind: 'addon', option_name: 'Granola',
+    is_removal: false, price_delta: 60, list_price_delta: 60, included: false,
+    ingredient_deltas: grams == null ? [] : [{ item_id: 'granola', qty: grams }],
+  })
+  const costOf = (ls, ss) => withOptionCosts(buildCustomizationReport({ lines: ls, snapshots: ss, attachedRecipeIds: new Set([BOWL]) }).options, toItems, rates)
+    .find(o => o.option_id === 'o-granola')
+
+  test('100 Regular and 20 Large bowls cost NPR 52 a plate, whichever bill is read first', () => {
+    const ls = [bowl('large', 20), bowl('regular', 100)]
+    const ss = [granola('large', 60), granola('regular', 40)]
+    const a = costOf(ls, ss)
+    const b = costOf([...ls].reverse(), [...ss].reverse())
+    expect(a.costPerPick).toBeCloseTo(52, 6)       // (100 × 48 + 20 × 72) ÷ 120
+    expect(b.costPerPick).toBeCloseTo(52, 6)
+    expect(a.chargedPerPick - a.costPerPick).toBeCloseTo(8, 6)
+    expect(a.costedPicks).toBe(120)
+  })
+
+  test('identical stock lines are one set to cost, with their plates added up', () => {
+    const r = buildCustomizationReport({
+      lines: [bowl('a', 3), bowl('b', 4), bowl('c', 1)],
+      snapshots: [granola('a', 40), granola('b', 40), granola('c', 60)],
+      attachedRecipeIds: new Set([BOWL]),
+    })
+    const g = r.options.find(o => o.option_id === 'o-granola')
+    expect(g.deltaSets).toHaveLength(2)
+    expect(g.deltaSets.map(s => s.plates).sort()).toEqual([1, 7])
+    expect(allDeltaSets(r.options)).toHaveLength(2)
+  })
+
+  test('a first plate with no stock lines yet does not make the choice "no stock lines"', () => {
+    const c = costOf([bowl('early', 10), bowl('later', 30)], [granola('early', null), granola('later', 40)])
+    expect(c.costPerPick).toBeCloseTo(48, 6)        // the 10 plates with [] are left out, not costed at 0
+    expect(c.costedPicks).toBe(30)
+    expect(c.picks).toBe(40)
+  })
+
+  test('a choice no plate of which carried stock lines is null, not 0', () => {
+    expect(costOf([bowl('a', 2)], [granola('a', null)]).costPerPick).toBeNull()
+  })
+})
+
+describe('kind and list price are taken as billed (REPORTS-12)', () => {
+  const DISH = 'r-pizza'
+  const line = (id, qty, comped = false) => ({ id, recipe_id: DISH, name: 'Pizza', qty, comped, selection_key: 'x' })
+  const pick = (order_item_id, over) => ({
+    order_item_id, option_id: 'o-cheese', group_name: 'Extras', group_kind: 'addon', option_name: 'Extra cheese',
+    is_removal: false, price_delta: 50, list_price_delta: 50, included: false, ingredient_deltas: [], ...over,
+  })
+  const build = (ls, ss, catalog = {}) => buildCustomizationReport({ lines: ls, snapshots: ss, attachedRecipeIds: new Set([DISH]), ...catalog })
+  const cheeseOf = r => r.options.find(o => o.option_id === 'o-cheese')
+
+  test('a mid-month price rise is an average list price, not "free picks"', () => {
+    const r = build([line('a', 100), line('b', 100)], [pick('a'), pick('b', { price_delta: 60, list_price_delta: 60 })],
+      { listPriceByOptionId: { 'o-cheese': 60 } })
+    const c = cheeseOf(r)
+    expect(c.listPriceDelta).toBeCloseTo(55, 6)     // as billed, not today's 60
+    expect(c.chargedPerPick).toBeCloseTo(55, 6)
+    expect(c.freePicks).toBe(0)
+    expect(c.compedPicks).toBe(0)
+  })
+
+  test('a choice made free since its sales is not "free by design"', () => {
+    const r = build([line('a', 30), line('b', 1)], [pick('a', { price_delta: 30, list_price_delta: 30 }), pick('b', { price_delta: 0, list_price_delta: 0 })],
+      { listPriceByOptionId: { 'o-cheese': 0 } })
+    expect(cheeseOf(r).freeByDesign).toBe(false)
+  })
+
+  test('a choice billed at 0 on every plate is free by design', () => {
+    const r = build([line('a', 3)], [pick('a', { price_delta: 0, list_price_delta: 0 })])
+    expect(cheeseOf(r).freeByDesign).toBe(true)
+    expect(cheeseOf(r).listPriceDelta).toBe(0)
+  })
+
+  test('free picks and comped plates are counted, so the note can say which', () => {
+    const r = build([line('a', 4), line('b', 2), line('c', 1, true)],
+      [pick('a'), pick('b', { price_delta: 0, included: true }), pick('c')])
+    const c = cheeseOf(r)
+    expect(c.freePicks).toBe(2)
+    expect(c.compedPicks).toBe(1)
+    expect(c.listPriceDelta).toBe(50)
+    expect(c.chargedPerPick).toBeCloseTo(200 / 7, 6)
+  })
+
+  test('a size deleted since keeps its billed kind, so it cannot win "Most added"', () => {
+    const r = build([line('a', 40), line('b', 5)], [
+      { order_item_id: 'a', option_id: 'o-large', group_name: 'Size', group_kind: 'size', option_name: 'Large', is_removal: false, price_delta: 100, list_price_delta: 100, included: false },
+      pick('b'),
+    ], { kindByOptionId: { 'o-cheese': 'addon' }, listPriceByOptionId: { 'o-cheese': 50 } })   // o-large is not in today's catalog
+    expect(r.options.find(o => o.option_id === 'o-large').group_kind).toBe('size')
+    expect(mostAddedOf(r.options).option_name).toBe('Extra cheese')
+  })
+
+  test('the billed kind wins over today\'s catalog; the catalog only fills a row with none', () => {
+    const billed = build([line('a', 2)], [pick('a', { group_kind: 'choice' })], { kindByOptionId: { 'o-cheese': 'size' } })
+    expect(cheeseOf(billed).group_kind).toBe('choice')
+    const gap = build([line('a', 2)], [pick('a', { group_kind: null, list_price_delta: undefined })],
+      { kindByOptionId: { 'o-cheese': 'addon' }, listPriceByOptionId: { 'o-cheese': 45 } })
+    expect(cheeseOf(gap).group_kind).toBe('addon')
+    expect(cheeseOf(gap).listPriceDelta).toBe(45)
+  })
+
+  test('a choice billed under two kinds takes the one most plates had', () => {
+    const r = build([line('a', 1), line('b', 9)], [pick('a', { group_kind: 'size' }), pick('b', { group_kind: 'addon' })])
+    expect(cheeseOf(r).group_kind).toBe('addon')
   })
 })
 

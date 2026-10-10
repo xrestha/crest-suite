@@ -840,7 +840,7 @@ export default function Periods() {
                       <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
                         <td>
                           <button
-                            onClick={() => { switchAdminClient(c.id, c.name); navigate('/periods') }}
+                            onClick={async () => { if (await switchAdminClient(c.id, c.name)) navigate('/periods') }}
                             style={{ background: 'none', border: 'none', color: 'var(--theme-text1)', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0, textAlign: 'left' }}
                           >
                             {c.name}

@@ -7,8 +7,8 @@ import { withTimeout } from '../../../utils/withTimeout'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 
 // "Tablets" on Till Devices (S754): every till that has its own device key, who activated it, when it
-// last reached the sign-in screen, and Revoke. Below the list, the restaurant's shared key from
-// before per-tablet keys, and the one control that switches it off.
+// last reached the sign-in screen, and Revoke. The restaurant's shared key from before per-tablet
+// keys, and its Switch off, are gone (S809 3h): it was off at every client.
 //
 // Data comes in from usePosDevices (Pos.js reads it too, to tell this tablet whether its own key is
 // still live). Actions happen here and hand back through `onChanged`.
@@ -25,7 +25,7 @@ function loadErrorOf(error) {
   return { text: `Couldn't load the tablet list. ${text}`, detail }
 }
 
-export default function PosDevicesPanel({ clientId, clientName, devices, legacy, loading, error, thisDeviceId, onChanged }) {
+export default function PosDevicesPanel({ clientName, devices, loading, error, thisDeviceId, onChanged }) {
   const { ask, confirmEl } = useConfirm()
   const [actionError, setActionError] = useState(null)
   const [notice, setNotice] = useState('')
@@ -41,9 +41,9 @@ export default function PosDevicesPanel({ clientId, clientName, devices, legacy,
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            That tablet will be signed out of PIN login and must be activated again. Staff can no
-            longer sign in on it, and anyone already signed in there is returned to the PIN screen
-            the next time the till locks.
+            That tablet must be activated again before staff can sign in on it. Anyone signed in on
+            it with a PIN is signed out too: a till in use goes back to its PIN screen within the
+            hour, and no PIN works there.
           </p>
           {isThis && (
             <p style={{ margin: 0, color: 'var(--theme-amber-text)' }}>
@@ -62,37 +62,6 @@ export default function PosDevicesPanel({ clientId, clientName, devices, legacy,
         } catch (e) { error = e }
         if (error) { setActionError(asActionError(error, 'operator')); return }
         setNotice(`“${device.name}” was revoked. It must be activated again before staff can sign in on it.`)
-        onChanged()
-      },
-    })
-  }
-
-  function askRetireLegacy() {
-    setActionError(null); setNotice('')
-    ask({
-      title: 'Switch off the shared key?',
-      body: (
-        <>
-          <p style={{ margin: '0 0 8px' }}>
-            Any tablet still signing in with {clientName}&rsquo;s shared key stops showing staff at once,
-            and must be activated again by a manager before it can be used as a till.
-          </p>
-          <p style={{ margin: 0 }}>
-            The {active.length} tablet{active.length === 1 ? '' : 's'} in the list above {active.length === 1 ? 'has' : 'have'} its own
-            key and {active.length === 1 ? 'is' : 'are'} not affected. The shared key cannot be switched back on.
-          </p>
-        </>
-      ),
-      confirmLabel: 'Switch it off',
-      busyLabel: 'Switching off…',
-      danger: true,
-      run: async () => {
-        let error
-        try {
-          ({ error } = await withTimeout(supabase.rpc('retire_pos_legacy_device_key', { p_client_id: clientId }), 20000, 'Switch off'))
-        } catch (e) { error = e }
-        if (error) { setActionError(asActionError(error, 'operator')); return }
-        setNotice('The shared key is off. Only tablets in the list above can sign staff in now.')
         onChanged()
       },
     })
@@ -173,35 +142,6 @@ export default function PosDevicesPanel({ clientId, clientName, devices, legacy,
             </tbody>
           </table>
         </div>
-      )}
-
-      {/* The pre-S754 shared key. Hidden while its state is unknown, so a failed read never shows
-          a switch-off button beside a guess. */}
-      {legacy && !legacy.none && (
-        legacy.retired_at ? (
-          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '16px 0 0' }}>
-            The restaurant&rsquo;s shared key was switched off {formatMoment(legacy.retired_at)}.
-          </p>
-        ) : (
-          <div style={{
-            marginTop: 20, padding: '14px 16px',
-            border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
-            background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
-          }}>
-            <div style={{ fontWeight: 600, color: 'var(--theme-amber-text)', marginBottom: 4 }}>
-              The shared key is still on
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 10px', lineHeight: 1.6 }}>
-              Tills activated before tablets had their own keys still sign in with one key shared by
-              the whole restaurant, and it cannot be revoked for one tablet alone. Activate each of
-              those tills again so it appears in the list above, then switch the shared key off.
-              {' '}Last used by a tablet: <strong>{legacy.last_used_at ? formatMoment(legacy.last_used_at) : 'not since this update'}</strong>.
-            </p>
-            <button type="button" className="btn btn-danger btn-sm" onClick={askRetireLegacy}>
-              Switch off the shared key
-            </button>
-          </div>
-        )
       )}
 
       {confirmEl}

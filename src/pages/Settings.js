@@ -8,6 +8,7 @@ import { useTheme, PRESETS, SYSTEM_KEY } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_INK, DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
 import { assignMissingProductCodes, productCodePrefix, SUB_RECIPE_CATEGORY } from '../shared/productCode'
+import { barCategoriesOf } from '../modules/pos/ticketRouting'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { Navigate, Link } from 'react-router-dom'
 import SupportContactLine from '../components/SupportContactLine'
@@ -419,8 +420,9 @@ export default function Settings() {
     setCatMsg('')
     const n = catUsage?.[from]
     const joining = catUsage?.[to] || 0
-    // What the till routes to the bar today: a missing or empty list means ['Beverage'] there.
-    const bot = settings?.pos_bot_categories?.length ? settings.pos_bot_categories : ['Beverage']
+    // What the till routes to the bar today: a list never set means ['Beverage'] there, and an empty
+    // one means no bar (S809 3m, Q15), so a rename never adds a bar category to an outlet without one.
+    const bot = barCategoriesOf(settings?.pos_bot_categories)
     const onBot = posEnabled && bot.includes(from)
     const oldPrefix = productCodePrefix(from)
     const newPrefix = productCodePrefix(to)
@@ -468,7 +470,7 @@ export default function Settings() {
               setRenameErr({ text: `Nothing was renamed. The bar-ticket routing could not be read, and renaming without it could send "${from}" dishes to the kitchen ticket.`, detail: asActionError(botErr).detail })
               return
             }
-            const live = row?.pos_bot_categories?.length ? row.pos_bot_categories : ['Beverage']
+            const live = barCategoriesOf(row?.pos_bot_categories)
             if (live.includes(from)) botPatch = { pos_bot_categories: [...new Set(live.map(c => (c === from ? to : c)))] }
           }
           // Recipes first. If the list save then fails, the recipes already carry the new name, it shows

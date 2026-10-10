@@ -5,6 +5,7 @@ import {
   ruleText, describeSelection, selectionProblems, defaultSelection, inclFromEx, signedPrice, scaledDelta,
 } from '../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
+import { offeredPicks, goneChoicesText } from '../../shared/offeredPicks'
 import { DIET_LABEL } from './customizationData'
 
 // Crest Customization (S758 stage 5, reshaped S759): the choice window a waiter sees for a dish
@@ -24,6 +25,13 @@ import { DIET_LABEL } from './customizationData'
 // `lastIds` is the selection this recipe was last added with on this till; when it differs from
 // the starting selection a one-tap "Same as last" restores it. `initialQty` seeds the quantity
 // stepper (a Change call passes the line's qty). `onConfirm(selected, qty)`.
+//
+// S809 3o (CUSTOMIZATION-2): the window starts from, and "Same as last" restores, only the picks
+// the dish still offers (`offeredPicks`). A pick hidden as sold out, deleted, or in a group hidden
+// or taken off the dish used to ride along unseen — the window lists offered options only, so it
+// could neither show nor remove it — and every save of the order was refused for it. What was
+// dropped is named at the top; `lineOptions` (the line's own choices) names one the catalog no
+// longer has. With no group left to offer (`dishGroups` empty), Update dish makes the line plain.
 
 const SAME_AS_LAST_MAX = 60
 
@@ -35,10 +43,11 @@ function sameIds(a, b) {
 }
 
 export default function OptionPickerModal({
-  recipe, dishGroups, catalog, vatRate = 0, initialIds, initialQty, lastIds = null,
+  recipe, dishGroups, catalog, vatRate = 0, initialIds, initialQty, lastIds = null, lineOptions = null,
   confirmLabel = 'Add to order', onConfirm, onClose, zIndex = 1100,
 }) {
-  const [selected, setSelected] = useState(() => initialIds ?? defaultSelection(dishGroups))
+  const [start] = useState(() => offeredPicks(initialIds ?? defaultSelection(dishGroups), dishGroups))
+  const [selected, setSelected] = useState(start.kept)
   const [qty, setQty] = useState(() => Math.max(1, Number(initialQty) || 1))
   const [tried, setTried] = useState(false)
   const fieldsetRefs = useRef({})
@@ -47,14 +56,15 @@ export default function OptionPickerModal({
     () => Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment])), [dishGroups])
   const fullCatalog = useMemo(() => ({ ...catalog, attachByGroup }), [catalog, attachByGroup])
   const desc = useMemo(() => describeSelection(selected, fullCatalog), [selected, fullCatalog])
+  const lastOffered = useMemo(() => (lastIds ? offeredPicks(lastIds, dishGroups).kept : null), [lastIds, dishGroups])
   const lastDesc = useMemo(
-    () => (lastIds && lastIds.length ? describeSelection(lastIds, fullCatalog) : null), [lastIds, fullCatalog])
+    () => (lastOffered && lastOffered.length ? describeSelection(lastOffered, fullCatalog) : null), [lastOffered, fullCatalog])
   const problems = selectionProblems(dishGroups, selected)
   const unit = (Number(recipe.selling_price) || 0) + desc.delta
   const incl = n => Math.round(inclFromEx(n, vatRate))
   // The picks that fall under a group's first-N-free allowance, as the server would price them.
   const freeIds = useMemo(() => new Set(desc.options.filter(o => o.included).map(o => String(o.option_id))), [desc])
-  const showSameAsLast = lastDesc && !sameIds(lastIds, selected)
+  const showSameAsLast = lastDesc && !sameIds(lastOffered, selected)
 
   function toggle(group, rule, optionId) {
     setSelected(prev => {
@@ -96,9 +106,17 @@ export default function OptionPickerModal({
     <Modal onClose={onClose} title={recipe.name} maxWidth={520} zIndex={zIndex}
       panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 18, paddingRight: 2 }}>
+        {start.gone.length > 0 && (
+          <div role="status" className="note-banner" style={{ margin: 0 }}>
+            <strong>Taken off, no longer offered:</strong> {goneChoicesText(start.gone, catalog?.optionsById, lineOptions)}.{' '}
+            {dishGroups.length > 0
+              ? 'Pick again if the guest wants something else.'
+              : `${recipe.name} has no choices on the menu right now, so it goes as the plain dish.`}
+          </div>
+        )}
         {showSameAsLast && (
           <div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected([...lastIds])}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected([...lastOffered])}
               title={lastDesc.summary}>
               Same as last: {summaryOfLast}
             </button>

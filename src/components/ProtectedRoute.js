@@ -25,7 +25,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
     )
   }
 
-  if (!session) return <Navigate to="/login" replace />
+  // S809 ACCESS-7: on an activated till, a session that ends by itself (its tablet revoked, the login
+  // blocked, a refresh refused) goes back to that till's PIN screen, never to the owner's email login.
+  if (!session) return <Navigate to={localStorage.getItem('pos_device_client_id') ? '/pos/login' : '/login'} replace />
   if (adminOnly && profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
   if (!profile) return <Navigate to="/login" replace />
   // An HR self-service account's whole app is /hr/self-service (outside this Layout) — it has

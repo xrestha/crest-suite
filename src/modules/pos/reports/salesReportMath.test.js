@@ -2,6 +2,7 @@ import {
   NOT_RECORDED, SPLIT_NO_BREAKDOWN, AMOUNT_KEYS,
   billAmounts, creditNoteAmounts, buildSalesEntries, paymentSharesOf, allocateAmounts,
   buildPaymentRows, sortByMethodOrder, buildGroupedRows, partyNameKey, mergeNameOnlyParties, zeroAmounts, addAmounts,
+  fiscalYearsSince,
 } from './salesReportMath'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 
@@ -246,5 +247,36 @@ describe('1L+ name merge', () => {
     expect(out.map(p => p.key)).toEqual(['pan:1', 'name:b'])
     expect(sum(out, 'net')).toBe(sum(input, 'net'))
     expect(out.find(p => p.key === 'name:b').multiplePans).toBe(false)
+  })
+})
+
+// S809 3m (REPORTS-2): the 1L+ year list is built from the first bill's year, not by reading every bill.
+describe('fiscalYearsSince', () => {
+  const ASHWIN_2083 = { year: 2083, month: 6, day: 24 }   // FY 83/84
+  const ASHADH_2083 = { year: 2083, month: 3, day: 10 }   // FY 82/83
+
+  test('every year from the first bill to this one, newest first, in the stamped form', () => {
+    expect(fiscalYearsSince('80/81', ASHWIN_2083)).toEqual(['83/84', '82/83', '81/82', '80/81'])
+  })
+  test('a first bill in this year gives this year alone', () => {
+    expect(fiscalYearsSince('83/84', ASHWIN_2083)).toEqual(['83/84'])
+  })
+  test('Ashadh is still the year that began last Shrawan', () => {
+    expect(fiscalYearsSince('81/82', ASHADH_2083)).toEqual(['82/83', '81/82'])
+  })
+  test('a year with no bills between two that have them is still offered', () => {
+    expect(fiscalYearsSince('81/82', ASHWIN_2083)).toContain('82/83')
+  })
+  test('no bill, or an unreadable label, gives this year alone', () => {
+    expect(fiscalYearsSince(undefined, ASHWIN_2083)).toEqual(['83/84'])
+    expect(fiscalYearsSince('', ASHWIN_2083)).toEqual(['83/84'])
+    expect(fiscalYearsSince('2082/83', ASHWIN_2083)).toEqual(['83/84'])
+    expect(fiscalYearsSince('82/84', ASHWIN_2083)).toEqual(['83/84'])
+  })
+  test('the century turns: "99/0" and "0/1" follow each other', () => {
+    expect(fiscalYearsSince('98/99', { year: 2100, month: 5, day: 1 })).toEqual(['0/1', '99/0', '98/99'])
+  })
+  test("a first bill numbered ahead of this device's date starts the list, never a century back", () => {
+    expect(fiscalYearsSince('83/84', ASHADH_2083)).toEqual(['83/84', '82/83'])
   })
 })

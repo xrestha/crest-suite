@@ -1,6 +1,7 @@
 import {
   STATUSES, LIVE_STATUSES, FLOOR_STATUSES, TRANSITIONS, canTransition, stampFor, canRevive,
   isDue, isLate, waitingMinutes, windowOf, tableIdsOf, CANCEL_REASONS, DECLINE_REASONS,
+  bookingToSeatOnTap,
 } from './reservationStatus'
 
 test('every status has a transition entry; completed is terminal, no-show and cancelled reverse one step', () => {
@@ -112,4 +113,23 @@ test('windowOf falls back to 90 minutes and tableIdsOf reads the embedded join',
   expect(w.end - w.start).toBe(90 * 60000)
   expect(tableIdsOf({ pos_reservation_tables: [{ id: 'x', table_id: 't1' }, { id: 'y', table_id: 't2' }] })).toEqual(['t1', 't2'])
   expect(tableIdsOf({})).toEqual([])
+})
+
+// S809 RESERVATIONS-2: Sharma ×4, booked 7:00 PM (13:15 UTC) for 90 minutes on Table 5, arrive at 6:55
+// and wait while the last party lingers past 8:30. Tapping Table 5 must still offer to seat them.
+test('bookingToSeatOnTap offers an arrived party whatever the clock says, after a booking due now', () => {
+  const on5 = { pos_reservation_tables: [{ id: 'j', table_id: 't5' }] }
+  const sharma = res({ id: 'sharma', status: 'arrived', reserved_for: '2026-09-04T13:15:00.000Z', ...on5 })
+  // 8:40 PM: the window ended at 8:30, they are still waiting.
+  expect(bookingToSeatOnTap([sharma], 't5', T('2026-09-04T14:55:00.000Z'), 45)?.id).toBe('sharma')
+  // An hour early and marked arrived (booked 8:00 PM, here at 7:00 PM, past the 45-minute seat window).
+  const early = res({ id: 'early', status: 'arrived', reserved_for: '2026-09-04T14:15:00.000Z', ...on5 })
+  expect(bookingToSeatOnTap([early], 't5', T('2026-09-04T13:15:00.000Z'), 45)?.id).toBe('early')
+  // A booking due now on the same table comes first, as on the tile.
+  const gupta = res({ id: 'gupta', status: 'confirmed', reserved_for: '2026-09-04T14:45:00.000Z', ...on5 })
+  expect(bookingToSeatOnTap([sharma, gupta], 't5', T('2026-09-04T14:55:00.000Z'), 45)?.id).toBe('gupta')
+  // Not on this table, or a booking whose window ended and who never arrived: nobody.
+  expect(bookingToSeatOnTap([sharma], 't6', T('2026-09-04T14:55:00.000Z'), 45)).toBeNull()
+  expect(bookingToSeatOnTap([{ ...sharma, status: 'confirmed' }], 't5', T('2026-09-04T14:55:00.000Z'), 45)).toBeNull()
+  expect(bookingToSeatOnTap(undefined, 't5')).toBeNull()
 })

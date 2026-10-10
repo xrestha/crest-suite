@@ -39,8 +39,8 @@ export default function PosLogin() {
   const clientName   = localStorage.getItem('pos_device_client_name') || 'Crest POS'
   const deviceSecret = localStorage.getItem('pos_device_secret')
   // S754: a tablet activated since per-tablet keys holds its own device id beside its secret. One
-  // activated before holds only the restaurant's shared secret, and keeps using the old picker and
-  // the legacy branch of pos-staff-login until a manager activates it again or retires that key.
+  // activated before holds only the restaurant's shared secret, which is off at every client (S809 1j)
+  // and no longer read at all (S809 3h): that tablet is activated again, like a revoked one.
   const deviceId     = localStorage.getItem('pos_device_id')
 
   const [staff,     setStaff]     = useState([])
@@ -60,6 +60,8 @@ export default function PosLogin() {
     // No silent bounce — an unactivated device shows its own explanatory screen below
     // instead of instantly redirecting to /login with no indication of why.
     if (!clientId || !deviceSecret) { setLoading(false); return }
+    // S809 3h: only the restaurant's old shared key, no key of its own. Nothing can sign in with it.
+    if (!deviceId) { setDeviceDead(true); setLoading(false); return }
     setLoadError('')
     setDeviceDead(false)
     setLoading(true)
@@ -67,9 +69,7 @@ export default function PosLogin() {
     // copy — a till mid-service was told "No staff accounts found. Ask your manager to add staff",
     // which sends the manager to the wrong page to fix a problem that isn't there. Self-Service's
     // equivalent screen already separated these two; this is that fix ported back.
-    const request = deviceId
-      ? supabase.rpc('get_pos_device_staff', { p_client_id: clientId, p_device_id: deviceId, p_device_secret: deviceSecret })
-      : supabase.rpc('get_pos_staff', { p_client_id: clientId, p_device_secret: deviceSecret })
+    const request = supabase.rpc('get_pos_device_staff', { p_client_id: clientId, p_device_id: deviceId, p_device_secret: deviceSecret })
     request.then(({ data, error }) => {
       // get_pos_device_staff RAISES on a dead key (rather than returning no rows) precisely so this
       // screen can say "activate again" instead of "no staff accounts found", which would send the
@@ -168,12 +168,12 @@ export default function PosLogin() {
       // record_pos_pin_attempt — which made the lockout advisory: the PIN literally IS the Supabase
       // Auth password, so anyone holding a pos_email could call signInWithPassword in a loop and
       // walk the 4-digit keyspace with those two RPCs never on the path. And pos_email itself no
-      // longer comes back from get_pos_staff at all, so the browser never holds a working login
+      // longer comes back from the staff picker at all, so the browser never holds a working login
       // identifier — same fix S464 applied to HR Self-Service. See the Edge Function's comment.
       // withTimeout: a supabase-js call can stall before it reaches fetch (utils/withTimeout.js),
       // which would leave "Signing in…" on screen with no way back but a reload.
       const { data, error: err } = await withTimeout(supabase.functions.invoke('pos-staff-login', {
-        body: { client_id: clientId, device_id: deviceId || undefined, device_secret: deviceSecret, staff_id: selected.id, pin },
+        body: { client_id: clientId, device_id: deviceId, device_secret: deviceSecret, staff_id: selected.id, pin },
       }), 20000, 'Sign-in')
 
       if (err) {
@@ -205,6 +205,13 @@ export default function PosLogin() {
         } else if (status === 401 && body?.error === ERR_INVALID_CREDENTIALS) {
           setError('Incorrect PIN. Try again.')
           setPin('')
+        } else if (status === 403 && body?.switched_off) {
+          // S809 3h: a login POS Staff blocked, or a leaver's after Final Settlement, picked from a list
+          // read before the block. Not a wrong PIN, and the try is not counted toward the lockout. The
+          // list is read again, so the name is gone when the waiter steps back.
+          setError('This login is switched off. Ask a manager or the owner.')
+          setPin('')
+          setRetryToken(t => t + 1)
         } else {
           // A 4xx this screen does not recognise. Not a wrong PIN, so don't say it is.
           setError(`Couldn't sign in${body?.error ? ` (${body.error})` : ''}. Ask your manager.`)
@@ -215,10 +222,18 @@ export default function PosLogin() {
 
       // From here the session on this tablet is the one this screen signed in (S809 ACCESS-1).
       ownSessionRef.current = true
-      await supabase.auth.setSession({
+      const { error: sessionErr } = await supabase.auth.setSession({
         access_token: data.access_token,
         refresh_token: data.refresh_token,
       })
+      // S809 ACCESS-12: setSession checks the tokens over the network before it keeps them, and
+      // resolves { error } rather than throwing. Unread, a dropped connection here stored no session,
+      // and the next screen bounced a waiter who typed the right PIN to the owner's email login.
+      if (sessionErr) {
+        ownSessionRef.current = false
+        setError(UNREACHABLE_MSG)
+        return
+      }
       // S754: /pos is Till Devices, manager-only, and bounced every waiter to /dashboard. The till is
       // /pos/orders; a kitchen/bar station account is sent on to its KDS by ModuleGate
       // (canReachPosPath → STATION_TEAM_HOME), so no team check is needed here.
@@ -250,10 +265,11 @@ const pinDots = Math.max(4, pin.length)
   // Device not yet activated for any client — explain why, instead of silently bouncing
   // to /login. Activation itself happens from Till Devices (/pos) by an owner/manager.
   // Also catches a device activated before device-secret verification was introduced — its
-  // stored client_id is still present but there's no secret to authorize get_pos_staff with,
-  // so it needs a one-time re-activation rather than silently showing "no staff found".
-  // Its key was refused — revoked, or the restaurant's shared key was switched off. Same screen
-  // shape as never activated, because the way out is the same: a manager, on this tablet, in /pos.
+  // stored client_id is still present but there's no secret to show staff with, so it needs a
+  // one-time re-activation rather than silently showing "no staff found".
+  // Its key was refused — revoked — or it holds only the restaurant's old shared key, which is off
+  // (S809 3h). Same screen shape as never activated, because the way out is the same: activating
+  // this tablet again in /pos.
   if (deviceDead) {
     return (
       <main style={{
@@ -265,7 +281,7 @@ const pinDots = Math.max(4, pin.length)
             This till needs to be activated again by a manager
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
-            Its device key was revoked, so staff can't sign in on it. An owner or POS manager can sign
+            Its device key no longer works, so staff can't sign in on it. An owner or POS manager can sign
             in here, open <strong>POS → Admin → Till Devices</strong>, activate this tablet again, then
             press <strong>Sign out and open the PIN screen</strong>.
           </p>
@@ -373,9 +389,6 @@ const pinDots = Math.max(4, pin.length)
           ) : staff.length === 0 ? (
             <p style={{ color: 'var(--theme-text3)', textAlign: 'center', maxWidth: 300 }}>
               No staff accounts found. Ask your manager to add staff in POS → POS Staff.
-              {/* A tablet on the pre-S754 shared key cannot tell "no staff" from "the shared key was
-                  switched off" — get_pos_staff answers both with no rows. */}
-              {!deviceId && ' If staff were showing here before, this till may need to be activated again by a manager.'}
             </p>
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'center', maxWidth: 500 }}>

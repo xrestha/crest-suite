@@ -17,6 +17,48 @@ export const POS_IDLE_LOCK_MS = 3 * 60 * 1000
 // Warn shortly before locking, so a lock is never a surprise mid-task.
 export const POS_IDLE_WARN_MS = 20 * 1000
 
+// ── The last real input survives a page load (S809 ACCESS-6) ──────────────────────────────────────
+// The idle clock lived only in memory, so any new page load started a fresh period: a tablet left
+// signed in at night whose browser was killed, or that restarted, or a till taking a release (S809
+// 1b), came back inside the absent waiter's session with three new minutes that every tap renewed.
+// Now the time of the last real input is kept on this device beside the session it belongs to, and a
+// page load measures from it. A new sign-in is a new session, so it starts a full period.
+export const IDLE_INPUT_KEY = 'crest_idle_last_input'
+
+// pointerdown/keydown/touchstart rather than mousemove: see the lock's own listener below.
+const INPUT_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'wheel']
+
+/** The session an access token belongs to: its `session_id` claim (auth.sessions.id), or null. */
+export function sessionIdFromToken(accessToken) {
+  try {
+    const part = String(accessToken || '').split('.')[1]
+    if (!part) return null
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=')
+    const sid = JSON.parse(atob(b64))?.session_id
+    return typeof sid === 'string' && sid ? sid : null
+  } catch (_) {
+    return null
+  }
+}
+
+/** When this session last had real input on this device (epoch ms), or null if not known here. */
+export function readLastInput(sessionKey, storage) {
+  if (!sessionKey) return null
+  try {
+    const v = JSON.parse((storage || window.localStorage).getItem(IDLE_INPUT_KEY) || 'null')
+    const at = Number(v?.at)
+    return v?.session === sessionKey && Number.isFinite(at) && at > 0 ? at : null
+  } catch (_) {
+    return null
+  }
+}
+
+export function writeLastInput(sessionKey, at, storage) {
+  if (!sessionKey) return
+  // Blocked storage: a page load restarts the period, as it did before.
+  try { (storage || window.localStorage).setItem(IDLE_INPUT_KEY, JSON.stringify({ session: sessionKey, at })) } catch (_) { /* see above */ }
+}
+
 /**
  * Whether the till idle lock runs for this login, here. One test, read by Layout (which runs the lock)
  * and by the Kitchen Display (which says so).
@@ -48,8 +90,11 @@ export function posIdleLockApplies({ pinStaff, boundTablet, stationTeam, path })
  * @param {Function} onWarn  called with seconds remaining, then null when the user returns
  * @param {Function} onLock  called once when the idle period elapses
  * @param {number}   [lockMs] idle period; the till's POS_IDLE_LOCK_MS by default
+ * @param {string}   [sessionKey] the signed-in session's id (sessionIdFromToken). Given, the last real
+ *   input is kept on this device, even while the lock is off (a Kitchen login's taps on the KDS), and
+ *   a page load measures from it (S809 ACCESS-6). Without it the clock lives in memory, as before.
  */
-export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_MS) {
+export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_MS, sessionKey = null) {
   const warnRef = useRef(null)
   const lockRef = useRef(null)
   const onWarnRef = useRef(onWarn)
@@ -59,6 +104,15 @@ export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_M
   const lastActivityRef = useRef(Date.now())
   onWarnRef.current = onWarn
   onLockRef.current = onLock
+
+  // S809 ACCESS-6: every real input of this session is noted on the device, whether or not the lock is
+  // running, so the period a page load resumes is measured from the last time someone was there.
+  useEffect(() => {
+    if (!sessionKey) return
+    const note = () => writeLastInput(sessionKey, Date.now())
+    INPUT_EVENTS.forEach(e => window.addEventListener(e, note, { passive: true }))
+    return () => INPUT_EVENTS.forEach(e => window.removeEventListener(e, note))
+  }, [sessionKey])
 
   useEffect(() => {
     if (!enabled) return
@@ -108,7 +162,7 @@ export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_M
     // pointerdown/keydown/touchstart rather than mousemove: a mouse nudged by a passing tray, or
     // a cable brushing a touchscreen, should not count as someone being present. Every one of
     // these requires a deliberate act.
-    const EVENTS = ['pointerdown', 'keydown', 'touchstart', 'wheel']
+    const EVENTS = INPUT_EVENTS
     EVENTS.forEach(e => window.addEventListener(e, onActivity, { passive: true }))
 
     // S754: returning to the tab used to call a full reset, so a tablet that slept for an hour
@@ -124,13 +178,22 @@ export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_M
     }
     document.addEventListener('visibilitychange', onVisible)
 
-    lastActivityRef.current = Date.now()
-    arm(lockMs)
+    // S809 ACCESS-6: a page load inside a session that already had input here (a killed tab, a
+    // restart, a release reload) resumes from that input, the S754 rule across a reload: past the
+    // period it locks at once, otherwise only what is left is armed. A new session, or no record of
+    // this one, starts a full period from now.
+    const now = Date.now()
+    const stored = readLastInput(sessionKey)
+    lastActivityRef.current = stored != null ? Math.min(stored, now) : now
+    if (stored == null) writeLastInput(sessionKey, now)
+    const remaining = lockMs - (now - lastActivityRef.current)
+    if (remaining <= 0) lock()
+    else arm(remaining)
     return () => {
       clearAll()
       EVENTS.forEach(e => window.removeEventListener(e, onActivity))
       document.removeEventListener('visibilitychange', onVisible)
       onWarnRef.current?.(null)
     }
-  }, [enabled, lockMs])
+  }, [enabled, lockMs, sessionKey])
 }

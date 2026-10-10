@@ -76,6 +76,7 @@ can have revenue and no movements. A backfill guard that inferred "already poste
 `stock_movements` was therefore **wrong**, not merely incomplete, and double-posted two bills'
 revenue on real data. Both tables now carry a link to the order (`stock_movements.ref_id`,
 `sales_entries.pos_order_id`); ask the table you actually mean.
+History: docs/rules-archive/pos-billing.md#two-writes-diverge
 
 **`ims_posted_at IS NULL` means "unknown" on any row closed before that column existed**, not
 "unposted". Treating unknown as unposted is what caused the double-post. On a client that predates
@@ -264,6 +265,11 @@ table's food.
   already on the order keeps its exemption.
 - **A sent line's choices are never edited in place** (owner decision): remove it with a pull reason
   and add it again, so the kitchen gets a fresh ticket. Change exists only on an unsent line.
+- **A choice hidden or deleted mid-service never blocks the order unseen (S809 3o).** The choice
+  window starts from, and Same as last restores, only offered picks (`src/shared/offeredPicks.js`); the
+  cart marks unsent lines whose key is not on the saved order (`lineChoiceTrouble`); the refusal
+  sentence parses `option_not_on_menu`/`option_count` (`choiceRefusal.js`): change the RAISE text and
+  its regexes together.
 - **Stock at close reads the SERVER snapshot, never the cart.** The cart's choices are built by the
   till and carry no stock lines; `writeSalesEntries` reads `pos_order_item_options.ingredient_deltas`
   per line key and stops (unposted, chased by the backfill) on a failed read.
@@ -291,7 +297,9 @@ table's food.
   Change the rule in all three, and extend the fixture shared by `optionPricing.test.js` and the
   migration's verification block.
 - **The scaled quantity is frozen at order time.** `ingredient_deltas` already holds it, so no IMS
-  reader multiplies anything and a later factor edit never rewrites a sent line. There is no factor
+  reader multiplies anything and a later factor edit never rewrites a sent line. A snapshot reader
+  costs every pick's own `ingredient_deltas` and takes kind and list price from the snapshot
+  (`group_kind`, `list_price_delta`, `included`), the catalog only filling a gap (S809 3o). There is no factor
   column on the snapshot on purpose: `apply_pos_item_comps` copies the snapshot's columns by name.
 - **`recipes.is_build_your_own` is a mark, not a category.** Category drives KOT/BOT routing, the
   product code prefix and the category splits. The mark makes the till always open the choice window
@@ -324,11 +332,15 @@ table's food.
   timer, and timers do not run while a tablet sleeps. So a tablet that slept for an hour handed
   whoever woke it three more minutes of the absent waiter's session, under that waiter's name on
   every bill. Idle time is measured from the last real input: past the lock period it locks at
-  once, otherwise only what is left of the period is re-armed.
+  once, otherwise only what is left of the period is re-armed. Since S809 3h it survives a page load
+  (`crest_idle_last_input` per session id, written even while the lock is off), a lock is `scope:
+  'local'`, and a session ending by itself on an activated tablet goes to `/pos/login`.
   **A lock keeps the unsent cart (S776, owner decision).** `handleSignOut` runs `runBeforePosLock()`
   for a PIN session; `PosOrders` keeps the unsaved units for that login in `posLockedCart.js`
   (localStorage, never the replaying offline queue) and restores them once, as unsent, through
-  `showLoadedOrder`/`startFreshOrder` (`applyLockedCart`, `missingFromServer`). The PIN screen names
+  `showLoadedOrder`/`startFreshOrder` (`applyLockedCart`; `keptLinesToRestore`: what the server lacks,
+  capped at each line's `unsaved_qty`, S809 3g), never into another open order (listed instead), with
+  accepted guest request ids (`guestReqs`); what is not consumed is kept again. The PIN screen names
   them. The countdown toast is `zIndex: 1100`, above the till's 1000 layer — at 400 it was invisible.
 - **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
   sales value*) — one coherent unit, **all ex-VAT since S754**. Comp food cost stays in its own
@@ -385,6 +397,8 @@ Three things to know before touching it:
   button never gated on a dirty cart. That also closed a quieter divergence that predates the
   trigger: `writeSalesEntries` posts revenue from the in-memory cart, so an unsaved line was
   already reaching IMS revenue and the printed bill while never existing in `pos_order_items`.
+
+History: docs/rules-archive/pos-billing.md#pos-write-guards-copy
 
 ## Pulling an already-fired item is now on the record (S577)
 
@@ -748,14 +762,16 @@ menu price ex-VAT, comp potential sales value is ex-VAT, and discounts were alre
 a sale that never happened was never revenue, and counting it made a void look ~13% larger than a
 discount of the same food. **1L+ merges a name-only party into the same-name PAN party**
 (`mergeNameOnlyParties`, which refuses the one ambiguous case), and the walk-in aggregate row
-carries no Annexure 13 flag.
+carries no Annexure 13 flag. 1L+ lists years from the first bill's (`fiscalYearsSince`), read when
+the tab opens, with its own error slot; a year reads up to 2,00,000 bills (S809 3m).
 
 **The Product Type tab's axes come from data that already existed and nothing was reading:**
-`settings.pos_bot_categories` (Kitchen/Bar — the same set `sendTicket()` routes BOT by, same
-`['Beverage']` fallback, so the report and the tickets cannot disagree), `pos_order_items.vat_rate`
-(as billed), and `recipes.is_veg`. An axis that could only ever produce one row is **hidden, not
-rendered empty**. When verifying that, note a hidden axis and a broken lookup look identical on
-screen — confirm the fetch returned 200 before concluding the client simply has no data.
+`settings.pos_bot_categories` (Kitchen/Bar — the same set `sendTicket()` routes BOT by, read through
+`barCategoriesOf` (NULL = ['Beverage'], empty = no bar and no BOT button, S809 3m), so the report and
+the tickets cannot disagree), `pos_order_items.vat_rate` (as billed), and `recipes.is_veg`. An axis
+that could only ever produce one row is **hidden, not rendered empty**. When verifying that, note a
+hidden axis and a broken lookup look identical on screen — confirm the fetch returned 200 before
+concluding the client simply has no data.
 
 ## A delivery platform is a party, not a tag on a bill (S596)
 
@@ -898,8 +914,14 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 - **Each online save leaves a mark until its answer is known** (`newSendAttempt`, per order in `sendAttemptRef`, memory only like close marks); `noAnswer` (timeout, dropped connection, 5xx) keeps it. A landed mark prints and logs from its own record (`finishLandedSend`), settled after the press, on reopening and by a 15 s poll.
 - **A stale refusal is this till's own save only while it holds an unanswered mark for that order** (`judgeSendAttempts`); otherwise it reloads and prints nothing. A ticket another login logged for the same dishes (`firedElsewhere`) means that till fired them: no second ticket.
 - **A late answer never writes onto another order's screen** (`watchScreen`; `backToFloor` moves the screen token): its message goes to the floor with the order's name, and `performSave` reads `itemsVersionRef` once.
-- **The one `saved.unknown` branch per send path is where 3f routes to the offline queue**; drop that order's marks first.
+- **A send with no answer is kept and prints (S809 3f, Q16).** Only the three send paths pass `performSave({ queue: true })`; a close never queues. A no-answer drops the order's marks, queues the save, marks the link down for `LINK_DOWN_MS` (`tillOffline()`) and returns `keptOnTill`; `unknown` is left for an IndexedDB failure or a floor conflict on that order. A held order opens from its queued copy (`screenQueueRef`), saves through the queue, and is never billed until uploaded. Upload rules: `offline-and-cache.md`.
 - **The cover count is written after the line save and only when changed on this tablet** (ORDER-FLOW-14). A saved take-off re-added prints +1 (`sentQtyAfterQtyChange`, ORDER-FLOW-13).
+
+## A Credit settle whose answer is lost is read back too (S809 3l)
+
+- `settleCredit.js`: the write waits 20 s (then aborted), reads 8 s. No answer or zero rows reads the bill back; only a server refusal says "not settled".
+- It is this page's own press only if `credit_settled_by` is this login with the pressed method while the page holds an unanswered press (memory, 15 min); its Cash In follows once the bill has none. Anyone else's settlement is named, never posted.
+- The Cash In has a minted id (no answer: sent once more, 23505 = landed); a refusal reads OVER. No shift: keep the cash out of the next float and record it, or count it and record nothing. The commission base is `{ orderId, base }` under `useLatestRequest`.
 
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
 
@@ -1073,14 +1095,8 @@ Reservations as a promise about a future table (S677), and the repeating arrival
 Migrated from the root `CLAUDE.md` (S663).
 
 - `pos_orders.order_no` is assigned by a **BEFORE INSERT trigger** (per-client sequential) — never set it from the frontend; read it back via `.select('id, order_no')` after insert. Same pattern for `pos_orders.invoice_no` (BEFORE UPDATE, partitioned by `client_id + invoice_fy + close_type`) and `pos_credit_notes.credit_note_no` (BEFORE INSERT, partitioned by `client_id + invoice_fy`) — never set these from the frontend either. Item-level comps (`pos_order_items.comp_no`) share the **same NC-series** as a whole-order Complimentary Slip — `apply_pos_item_comps` reserves the number under the shared advisory lock and writes every comped row in the same transaction (one number per comp event, not per line); `get_next_pos_comp_slip_no` was dropped in S809 1j, since its lock released before the number was used; `assign_pos_invoice_no()`'s `close_type='writeoff'` branch locks on and considers that same pool, so the two paths can never collide.
-- The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes automatically on reconnect. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. This was a real bug (S440): `saveOrder` fires `logKotSend('KOT')` + `logKotSend('BOT')` un-awaited, both routing through `enqueuePosOrder`, which silently dropped one station's queued KOT send offline until the merge was made atomic. POS billing is hard-gated offline (`payBlocker` includes `!isOnline` and unread settings), so the offline surface is order-taking only — no money path is ever reachable without a live server.
+- The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes on reconnect, on mount and every 15 s while anything waits. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. This was a real bug (S440): `saveOrder` fires `logKotSend('KOT')` + `logKotSend('BOT')` un-awaited, both routing through `enqueuePosOrder`, which silently dropped one station's queued KOT send offline until the merge was made atomic. POS billing is hard-gated offline (`payBlocker` includes `!isOnline` and unread settings), so the offline surface is order-taking only — no money path is ever reachable without a live server.
 - `settings` was, until S290 (`20260707150000_settings_rls_same_client_write.sql`), the one client-scoped table whose INSERT/UPDATE RLS policies were **admin-only** with no same-client allowance — every settings-writing tab in `PosTableManagement.jsx` (Discounts, Quick Notes, Ticket Routing, Delivery Partners) had been silently no-op'ing for any real (non-admin) client login, since an RLS-blocked write returns zero rows changed with no error rather than throwing. Now follows the standard `is_admin() OR client_id = my_client_id()` pattern like every other table; the `client_id IS NULL` global-defaults row (`app_name`, `app_tagline`, etc.) stays admin-only automatically since a real client's `client_id` can never equal `NULL`. Still stays on raw `supabase.from()` rather than `scopedDb` (see the `scopedDb` note above) — that's about the nullable `client_id`, unrelated to this RLS fix.
-
-## The POS write-guards (S531 invariant 3, S576, S579)
-
-Migrated from the root `CLAUDE.md` (S663). The invariant itself — *a lockout the client calls around an operation is not a lockout* — stays resident there; this is the full POS-side detail behind it.
-
-The invariant itself (a PIN lockout the browser calls around the login is not a lockout: attempts are recorded inside `pos-staff-login` / `hr-selfservice-login`, and the frontend must not also call `record_*_pin_attempt`) is stated once, in `.claude/rules/supabase-sql.md`, invariant 3. **The POS close was the same shape and was fixed the same way in S576** — the discount cap (`pos_discount_limit`) and the void permission (`pos_allow_void`) were both React, over a plain same-client `FOR ALL` policy that hands every till session UPDATE on its own orders. It is now `guard_pos_order_close()`, a BEFORE UPDATE trigger rather than the `close_pos_order(...)` RPC the critique proposed: an RPC protects only the callers that choose to call it and leaves the open policy in place, while a trigger sees every write to the table. Note what it deliberately does *not* enforce — `paid_amount`, because re-deriving the bill total in SQL would be a second copy of the VAT-and-rounding arithmetic, and a drifted copy would reject real bills mid-service rather than merely misreport a number. **Item-level comp was the third and last of the family (S579)**: `guard_pos_item_comp()` fences the comp columns on `pos_order_items` while `apply_pos_item_comps` stays `SECURITY DEFINER` and so remains the only write path — and that RPC now checks Supervisor *rank* (it had only ever checked client) and derives `comped_by` from `auth.uid()` instead of a caller-supplied parameter. **Attribution the subject of the attribution can choose is not attribution**; `comped_by` is what the Sales Exception Report ranks staff by, so a caller able to pass any uuid could comp under a colleague's name.
 
 ## A credit note that cannot reach Inventory is marked and posted later, like a bill (S747)
 
@@ -1149,16 +1165,3 @@ only an unstamped bill (restored from a pre-2c backup) can still meet today's se
 **A Credit bill with a credit note against it is no longer owed**, so
 it leaves Customers → Outstanding. A bill settled before it was credited stays in Collected,
 because that money really changed hands.
-
-## Two writes in one function can diverge, so one is never evidence of the other (S573)
-
-Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
-
-A pattern worth recognising beyond POS. `writeSalesEntries` writes revenue to `sales_entries` and
-then depletion to `stock_movements` inside a try/catch that swallows failures — deliberately, so a
-depletion problem never blocks a bill closing. The consequence is that **a bill can have revenue
-and no movements**, and a later guard that inferred "has this already posted?" from
-`stock_movements` was therefore *wrong* rather than merely incomplete: it re-posted two bills'
-revenue on real data (S573). Whenever a best-effort second write follows a primary one, the second
-one's absence proves nothing — give each table its own link back to the source row and ask the
-table you actually mean.

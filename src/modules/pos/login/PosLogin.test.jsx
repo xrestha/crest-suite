@@ -8,7 +8,7 @@
 
 import React from 'react'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { keepLockedCart } from '../posLockedCart'
 
 const STAFF = [
@@ -20,15 +20,23 @@ const STAFF = [
 // Plain functions, not jest.fn: CRA resets mock implementations before every test.
 let mockGuestAnswer = { data: [], error: null }
 const mockRpcCalls = []
+// pos-staff-login's answer and setSession's, set per test (S809 3h).
+let mockSignInAnswer = { data: null, error: null }
+let mockSetSessionAnswer = { data: {}, error: null }
+const mockInvokeCalls = []
 jest.mock('../../../supabaseClient', () => ({
-  supabase: { rpc: (name, args) => {
-    mockRpcCalls.push([name, args])
-    if (name === 'get_pos_device_guest_alerts') return Promise.resolve(mockGuestAnswer)
-    return Promise.resolve({ data: [
-      { id: 'p-ram', full_name: 'Ram', pos_job_title: 'Waiter' },
-      { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
-    ], error: null })
-  } },
+  supabase: {
+    rpc: (name, args) => {
+      mockRpcCalls.push([name, args])
+      if (name === 'get_pos_device_guest_alerts') return Promise.resolve(mockGuestAnswer)
+      return Promise.resolve({ data: [
+        { id: 'p-ram', full_name: 'Ram', pos_job_title: 'Waiter' },
+        { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
+      ], error: null })
+    },
+    functions: { invoke: (name, opts) => { mockInvokeCalls.push([name, opts]); return Promise.resolve(mockSignInAnswer) } },
+    auth: { setSession: () => Promise.resolve(mockSetSessionAnswer) },
+  },
 }))
 jest.mock('../../../context/ThemeContext', () => ({ useTheme: () => ({ colors: { bg: '#111111' } }) }))
 // No session unless a test puts one there. `signOut` is created in beforeEach (CRA resets mocks).
@@ -44,6 +52,9 @@ beforeEach(() => {
   mockAuth = { session: null, ready: true, signOut: jest.fn(() => Promise.resolve(true)) }
   mockGuestAnswer = { data: [], error: null }
   mockRpcCalls.length = 0
+  mockSignInAnswer = { data: null, error: null }
+  mockSetSessionAnswer = { data: {}, error: null }
+  mockInvokeCalls.length = 0
   localStorage.clear()
   localStorage.setItem('pos_device_client_id', 'c-1')
   localStorage.setItem('pos_device_secret', 'secret')
@@ -158,7 +169,70 @@ describe('a guest order waiting while the till is locked', () => {
   it('is not asked about on a tablet still on the restaurant\'s old shared key', async () => {
     localStorage.removeItem('pos_device_id')
     renderPin()
-    expect(await screen.findByRole('button', { name: /Ram/ })).toBeTruthy()
+    expect(await screen.findByText('This till needs to be activated again by a manager')).toBeTruthy()
     expect(guestCalls()).toEqual([])
+  })
+})
+
+// S809 3h: the shared key's picker is gone; the sign-in's own answers.
+describe('signing in', () => {
+  const renderAt = () => render(
+    <MemoryRouter initialEntries={['/pos/login']}>
+      <Routes>
+        <Route path="/pos/login" element={<PosLogin />} />
+        <Route path="/pos/orders" element={<p>ORDERS</p>} />
+      </Routes>
+    </MemoryRouter>
+  )
+  const typePinAndLogin = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: /Ram/ }))
+    for (const k of ['1', '2', '3', '4']) fireEvent.click(screen.getByRole('button', { name: k }))
+    fireEvent.click(screen.getByRole('button', { name: /Login/ }))
+  }
+  const httpError = (status, body) => ({
+    name: 'FunctionsHttpError',
+    context: { status, json: () => Promise.resolve(body) },
+  })
+
+  it('a tablet holding only the old shared key asks nothing and says it needs activating again', async () => {
+    localStorage.removeItem('pos_device_id')
+    renderPin()
+    expect(await screen.findByText('This till needs to be activated again by a manager')).toBeTruthy()
+    expect(mockRpcCalls.map(([name]) => name).filter(n => n !== 'get_pos_device_guest_alerts')).toEqual([])
+  })
+
+  it('sends this tablet\'s own key, and opens the till once the session is kept', async () => {
+    mockSignInAnswer = { data: { access_token: 'a', refresh_token: 'r' }, error: null }
+    renderAt()
+    await typePinAndLogin()
+    expect(await screen.findByText('ORDERS')).toBeTruthy()
+    expect(mockInvokeCalls[0][0]).toBe('pos-staff-login')
+    expect(mockInvokeCalls[0][1].body).toEqual({ client_id: 'c-1', device_id: 'd-1', device_secret: 'secret', staff_id: 'p-ram', pin: '1234' })
+  })
+
+  it('a right PIN whose session could not be kept stays on the PIN pad with the PIN, and says why (ACCESS-12)', async () => {
+    mockSignInAnswer = { data: { access_token: 'a', refresh_token: 'r' }, error: null }
+    mockSetSessionAnswer = { data: { session: null }, error: { message: 'Failed to fetch', status: 0 } }
+    renderAt()
+    await typePinAndLogin()
+    expect((await screen.findByRole('alert')).textContent).toBe("Couldn't reach the server — check the connection")
+    expect(screen.queryByText('ORDERS')).toBeNull()
+    expect(screen.getByText('Enter PIN for Ram')).toBeTruthy()
+    expect(screen.getByText('4 digits entered')).toBeTruthy()
+  })
+
+  it('a switched-off login gets its own answer, not "Incorrect PIN", and the list is read again', async () => {
+    mockSignInAnswer = { data: null, error: httpError(403, { error: 'This login is switched off', switched_off: true }) }
+    renderAt()
+    await typePinAndLogin()
+    expect((await screen.findByRole('alert')).textContent).toBe('This login is switched off. Ask a manager or the owner.')
+    await waitFor(() => expect(mockRpcCalls.filter(([name]) => name === 'get_pos_device_staff').length).toBe(2))
+  })
+
+  it('a wrong PIN still reads as one', async () => {
+    mockSignInAnswer = { data: null, error: httpError(401, { error: 'Invalid credentials', locked: false }) }
+    renderAt()
+    await typePinAndLogin()
+    expect((await screen.findByRole('alert')).textContent).toBe('Incorrect PIN. Try again.')
   })
 })

@@ -160,9 +160,10 @@ obey the same write rules as the live path, or it is the way around them.**
 ## `navigator.onLine` is a claim about a network interface, not about the server (S731)
 
 It is true on a restaurant wifi with no upstream, and it stays true when the signal dies between
-pressing Save and the request landing. So a page that branches on it — Stock Count is the only one
-that does — takes the DIRECT path, fails, and reports a lost count while the offline queue that
-exists for exactly this situation is never consulted.
+pressing Save and the request landing. So a page that branches on it takes the DIRECT path, fails,
+and reports a lost count while the offline queue that exists for exactly this situation is never
+consulted. Stock Count and, since S809 3f, POS order-taking both queue on the failure
+(`isNetworkError`/timeout), not the flag.
 
 The fix is to treat the failure, not the flag: catch the write, ask `isNetworkError(err)` from
 `src/shared/errorText.js` (exported as a predicate so the queue decision and the sentence shown to
@@ -182,3 +183,18 @@ Two things make this safe to do, and both are worth checking before copying the 
   And because the browser still believes it is online, the amber offline banner never renders — so
   the pending count needs its own banner with a **Sync Now** button, or the held entries are
   invisible from every screen and nothing sends them until the next page load.
+
+## The POS order upload (S809 3f)
+
+- **One upload at a time** (`posUpload`, module-level single flight). Entries carry `client_id`; another
+  outlet's are left alone, and `switchAdminClient`/`pendingOfflineChanges` count only this outlet's.
+  Each queued ticket carries its `pos_kot_log` id, so a 23505 on the insert means it landed.
+- **A stale refusal reads the order back**: stored lines == the entry's `items` → it landed; ==
+  `first_items` → replay on top; anything else → conflict. A created-here order replays at version 0;
+  covers are skipped when `covers_set` is false (an older entry, which lacks it, still writes them).
+- **A conflict logs its tickets first** (a closed bill's go to served); an unmapped refusal is
+  `'refused'`, carrying the server's sentence, never retried.
+- **Ticket-only entries live under `posTicketsKey` (`kot:<orderId>`), NEVER under the order id**: an
+  older till uploads every entry as an order save, and an empty entry there would delete every dish.
+- **The replay sends the rows as queued (`replayRows`), never through `toItemPayload` again**: that
+  dropped a customized dish's choices.

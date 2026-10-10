@@ -12,7 +12,8 @@ import PosDevicesPanel from './devices/PosDevicesPanel'
 // What this tablet holds in localStorage. `pos_device_client_id` keeps its meaning — "this browser
 // is a bound till" — because App.js, Layout.js's idle lock and its sign-out routing all read it.
 // S754 adds `pos_device_id` (+ its name): a tablet holding one signs in with its own key; a tablet
-// holding only `pos_device_secret` is on the restaurant's pre-S754 shared key.
+// holding only `pos_device_secret` is on the restaurant's pre-S754 shared key, which is off at every
+// client and no longer read (S809 3h), so it is shown as needing activation again.
 const LS = {
   clientId: 'pos_device_client_id',
   clientName: 'pos_device_client_name',
@@ -47,15 +48,15 @@ export default function Pos() {
   const [leaving, setLeaving] = useState(false)
 
   const canManage = hasPosAccess('manager')
-  const { devices, legacy, loading: devicesLoading, error: devicesError, reload } = usePosDevices(canManage ? clientId : null)
+  const { devices, loading: devicesLoading, error: devicesError, reload } = usePosDevices(canManage ? clientId : null)
 
   const activated    = !!stored.clientId
   const boundToOther = activated && stored.clientId !== clientId
-  const onLegacyKey  = activated && !boundToOther && !stored.deviceId
   // Only claim "revoked" once the list has actually loaded: a failed or pending read proves nothing.
+  // A tablet with no key of its own (only the old shared key, S809 3h) needs activating again too.
   const thisDevice   = stored.deviceId ? devices.find(d => d.id === stored.deviceId) : null
-  const keyRevoked   = activated && !boundToOther && !!stored.deviceId && !devicesLoading && !devicesError &&
-                       (!thisDevice || !!thisDevice.revoked_at)
+  const keyRevoked   = activated && !boundToOther && (!stored.deviceId || (!devicesLoading && !devicesError &&
+                       (!thisDevice || !!thisDevice.revoked_at)))
 
   // Issues this tablet its own key (register_pos_device, migration 20260916120000). The secret comes
   // back exactly once — only its hash is kept on the server — so it goes straight into
@@ -129,21 +130,33 @@ export default function Pos() {
         </p>
       ) : (
         <p style={{ margin: 0 }}>
-          This tablet forgets the restaurant&rsquo;s shared key. Staff will no longer be able to sign in
-          with a PIN here until it is activated again.
+          This tablet forgets its old key. Staff will no longer be able to sign in with a PIN here
+          until it is activated again.
         </p>
       ),
       confirmLabel: 'Deactivate',
       busyLabel: 'Deactivating…',
       danger: true,
       run: async () => {
+        // S809 ACCESS-11: a PIN login deactivating the tablet it is signed in on is signed out of it
+        // straight after. Without the tablet's binding its idle lock stopped and Sign out no longer led
+        // to the PIN screen, so the session stayed open on a shared tablet. While the key cannot be
+        // revoked, the tablet stays as it was (bound, locking) and says so, since this login could not
+        // read the error on the PIN screen.
+        const pinSession = !!profile?.pos_role
         if (stored.deviceId) {
           let error
           try {
             ({ error } = await withTimeout(
               supabase.rpc('revoke_pos_device', { p_device_id: stored.deviceId }), 20000, 'Revoke'))
           } catch (err) { error = err }
+          if (error && pinSession) {
+            const { detail } = asActionError(error, 'operator')
+            setActivateError({ text: `This tablet was not deactivated: the key for “${name}” could not be revoked. Check the connection and try again.`, detail })
+            return
+          }
           forgetLocally()
+          if (pinSession) { await openPinScreen(); return }
           if (error) {
             const { detail } = asActionError(error, 'operator')
             setActivateError({
@@ -157,6 +170,7 @@ export default function Pos() {
           return
         }
         forgetLocally()
+        if (pinSession) { await openPinScreen(); return }
         setNotice('This tablet is deactivated.')
       },
     })
@@ -216,7 +230,9 @@ export default function Pos() {
           </h3>
           <p style={{ fontSize: 13, color: keyRevoked ? 'var(--theme-red-text)' : 'var(--theme-text3)', marginBottom: 20, lineHeight: 1.6 }}>
             {keyRevoked
-              ? `The key for “${stored.deviceName || 'this tablet'}” was revoked, so staff cannot sign in here. Activating it again issues a new key.`
+              ? (stored.deviceId
+                ? `The key for “${stored.deviceName || 'this tablet'}” was revoked, so staff cannot sign in here. Activating it again issues a new key.`
+                : 'This tablet still holds the restaurant’s old shared key, which is switched off, so staff cannot sign in here. Activating it gives it a key of its own.')
               : 'Once activated, staff can log in on this device with their name and PIN — no email or password needed. This tablet gets its own key, which you can revoke on its own.'}
           </p>
           {activationForm(`Activate for ${clientName}`)}
@@ -239,15 +255,6 @@ export default function Pos() {
               This device is bound to a different client. Deactivate first to rebind.
             </p>
           )}
-          {onLegacyKey && (
-            <div style={{ marginBottom: 16 }}>
-              <p style={{ fontSize: 13, color: 'var(--theme-amber-text)', margin: '0 0 12px', lineHeight: 1.6 }}>
-                This tablet still signs in with the restaurant&rsquo;s shared key, which can only be
-                switched off for every tablet at once. Give it its own key:
-              </p>
-              {activationForm('Give this tablet its own key')}
-            </div>
-          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={openPinScreen} disabled={leaving}>
               {leaving ? 'Signing out…' : 'Sign out and open the PIN screen'}
@@ -260,15 +267,13 @@ export default function Pos() {
             Your login is signed out on this tablet only, so nobody can tap Back into it. You stay
             signed in on your other devices.
           </p>
-          {!onLegacyKey && <ActionError error={activateError} />}
+          <ActionError error={activateError} />
         </div>
       )}
 
       {clientId && <PosDevicesPanel
-        clientId={clientId}
         clientName={clientName}
         devices={devices}
-        legacy={legacy}
         loading={devicesLoading}
         error={devicesError}
         thisDeviceId={boundToOther ? null : stored.deviceId}

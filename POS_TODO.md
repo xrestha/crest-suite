@@ -60,34 +60,16 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P2 (16 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3; in stage 3: ORDER-FLOW-9, ACCESS-5, DATABASE-2, DATABASE-3, CUSTOMERS-PARKING-4, CUSTOMERS-PARKING-5, CUSTOMERS-PARKING-8, GUEST-2, GUEST-3, ORDER-FLOW-11, FLOOR-KITCHEN-2, CREDIT-NOTES-3, IMS-HANDOFF-1, FLOOR-KITCHEN-1, ORDER-FLOW-3, ORDER-FLOW-4, ORDER-FLOW-5, REPORTS-3)
+### P2 (0 open; shipped in stage 1: CHECKOUT-8, GUEST-4, RESERVATIONS-3, RESERVATIONS-4, DATABASE-4, DATABASE-5, CUSTOMERS-PARKING-7, SHIFTS-2, ACCESS-2, ACCESS-3, ACCESS-4, DOCS-1; in stage 2: CHECKOUT-5, CHECKOUT-7, CHECKOUT-3, CHECKOUT-4, CHECKOUT-10, CREDIT-NOTES-4, SHIFTS-1, CHECKOUT-6, REPORTS-1, CREDIT-NOTES-1, CREDIT-NOTES-2, SHIFTS-3, IMS-HANDOFF-2, IMS-HANDOFF-3, CUSTOMERS-PARKING-1, CUSTOMERS-PARKING-2, CUSTOMERS-PARKING-3, CUSTOMIZATION-1, CUSTOMIZATION-3; in stage 3: ORDER-FLOW-9, ACCESS-5, DATABASE-2, DATABASE-3, CUSTOMERS-PARKING-4, CUSTOMERS-PARKING-5, CUSTOMERS-PARKING-8, GUEST-2, GUEST-3, ORDER-FLOW-11, FLOOR-KITCHEN-2, CREDIT-NOTES-3, IMS-HANDOFF-1, FLOOR-KITCHEN-1, ORDER-FLOW-3, ORDER-FLOW-4, ORDER-FLOW-5, REPORTS-3, ORDER-FLOW-6, ORDER-FLOW-7, ORDER-FLOW-8, ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5, ACCESS-6, ACCESS-7, CUSTOMERS-PARKING-6, SHIFTS-4, DOCS-2, REPORTS-2, FLOOR-KITCHEN-3, IMS-HANDOFF-4, CUSTOMIZATION-2, REPORTS-4)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-6 | A page reload restarts the idle lock with 3 fresh minutes in the absent waiter's session | 3 | — | no |
-| ACCESS-7 | Locking one till signs that waiter out of every other till, and the other till loses its unsent order | 3 | Q18 | yes |
-| CUSTOMERS-PARKING-6 | A lost Settle reply ends in "already settled", so the cashier believes a colleague took the money | 3 | — | no |
-| CUSTOMIZATION-2 | Hiding a sold-out choice mid-service blocks the whole table's order on the till | 3 | — | no |
-| DOCS-2 | Help tells a cashier to void and re-ring to fix a split payment, which re-sends the food and books a void; ↩ Undo already does it | 3 | — | no |
-| FLOOR-KITCHEN-3 | An all-Kitchen ticket routing is saved but ignored: Beverage still goes to the Bar ticket and board | 3 | Q15 | no |
-| IMS-HANDOFF-4 | The Owner Report's POS section fails above roughly 200–400 bills a month, and drops credit-noted bills | 3 | — | no |
-| ORDER-FLOW-6 | Wi-Fi up but internet down: the till can't send anything, because offline mode waits for the browser to say offline (KNOWN B3) | 3 | Q16 | no |
-| ORDER-FLOW-7 | A table opened offline gets its kitchen tickets logged twice when two uploads overlap | 3 | — | no |
-| ORDER-FLOW-8 | Dishes fired offline onto a bill another till closed leave no trace once the conflict is dismissed | 3 | — | no |
-| ORDER-FLOW-10 | If the order a till lock interrupted was billed meanwhile, the whole old cart returns as "not sent" | 3 | — | no |
-| REPORTS-2 | 1L+ (Annexure 13) loses past fiscal years once an outlet passes about 1,00,000 bills, and a failure is wiped by the tab's own load | 3 | — | yes |
-| REPORTS-4 | The Customization Report costs a size-scaled choice from one arbitrary bill's portion | 3 | — | no |
-| RESERVATIONS-2 | An Arrived party seen outside its booking window gets no "Seat" prompt, stays Arrived for good and counts as walk-in | 3 | — | no |
-| RESERVATIONS-5 | Three recovery instructions send staff to controls that don't exist, or say closing the bill completes a booking | 3 | — | no |
-| SHIFTS-4 | When a Credit-bill cash settlement misses the drawer, Customers' instructions make the drawer read wrong | 3 | — | no |
 
-### P3 (68 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8)
+### P3 (61 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 | ACCESS-10 | A dead till says a POS manager can re-activate it, but a POS manager can't sign in on a dead tablet | 4 | — | no |
-| ACCESS-11 | Deactivating the tablet you are signed in on with a PIN turns its idle lock off | 4 | — | no |
-| ACCESS-12 | A correct PIN can land the waiter on the Owner's email login with no message | 4 | — | no |
 | CHECKOUT-11 | A reprint from Recent Bills takes HSC codes and "Cashier" from the wrong bill | 4 | — | no |
 | CHECKOUT-13 | A PAN bill's Net Amount doesn't add up on paper (no Round Off line), and a Credit bill prints a "Tender" | 4 | — | no |
 | CHECKOUT-14 | The Complimentary tab says the slip shows no outlet name; it does | 4 | — | no |
@@ -101,7 +83,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
 | CUSTOMERS-PARKING-14 | A blocked pop-up loses the parking token silently; the guest's only token reads "REPRINT #2" | 4 | — | no |
 | CUSTOMERS-PARKING-15 | Parking re-reads every slip ever issued on each open and Mark Exited | 4 | — | no |
-| CUSTOMERS-PARKING-16 | An overlapping Settle load can store the previous bill's commission and post the wrong cash | 4 | — | no |
 | CUSTOMIZATION-4 | The till's price for a size-scaled topping is a paisa off the server's on about 1 price in 25 | 4 | — | no |
 | CUSTOMIZATION-5 | A "No …" choice uses up a free pick and a place under the maximum | 4 | Q20 | yes |
 | CUSTOMIZATION-6 | Sizes are stored as a difference from the dish price, so a dish price rise silently raises every size | 4 | — | yes |
@@ -129,9 +110,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | IMS-HANDOFF-8 | A till bill is filed in Inventory under the tablet's date at post time, not its close time (KNOWN, IMS_TODO) | 4 | — | no |
 | IMS-HANDOFF-9 | A till on a client without IMS writes Inventory rows in month one, then says every bill "was not posted" | 4 | — | no |
 | IMS-HANDOFF-10 | Inventory takes a closing bill's lines from the till's screen, not the stored bill | 4 | — | no |
-| ORDER-FLOW-12 | Unsent items kept by the till lock are lost if the order can't be read at sign-in | 4 | — | no |
-| ORDER-FLOW-15 | A queued offline order carries no outlet and replays into whichever client is signed in | 4 | — | no |
-| ORDER-FLOW-16 | An offline upload finishing after the waiter moved tables stamps its version onto the table on screen | 4 | — | no |
 | ORDER-FLOW-17 | A cart line's kitchen timer is matched by dish, not line | 4 | — | no |
 | ORDER-FLOW-19 | The order-delete pulled-item record groups by dish, not line | 4 | — | yes |
 | REPORTS-5 | The POS Dashboard and Home drop a credited bill from its own day and never subtract the note | 4 | Q22 | no |
@@ -140,7 +118,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | REPORTS-9 | POS Sales by Category names no month or basis, follows the open Inventory month and never refreshes. Its arithmetic (credited bills dropped, bill discount ignored, days by the viewer's clock, `useSalesPivotData.js:67-111`) also belongs here: REPORTS and IMS-HANDOFF each handed it to the other | 4 | — | no |
 | REPORTS-10 | Covers' RevPASH divides by inactive tables' seats | 4 | — | no |
 | REPORTS-11 | Between midnight and 6 AM the dashboards drop tickets the KDS still shows late | 4 | — | no |
-| REPORTS-12 | The Customization Report judges choices against today's menu, not as billed | 4 | — | no |
 | RESERVATIONS-6 | "Clear every occupied table" with a booking-seated table deletes lines, then fails | 4 | — | no |
 | RESERVATIONS-7 | A booking cancelled by mistake can't be restored before its day, though the dialog says it can | 4 | Q23 | no |
 | RESERVATIONS-8 | At midnight a late booking still in play vanishes from the floor and the default views | 4 | — | no |
@@ -370,22 +347,23 @@ needs a migration since 1d made cancelling a ticket Supervisor-only.
 | 3c ✅ | FLOOR-KITCHEN-1 [FLOOR-KITCHEN-10, DOCS-6; S809.4: the alert rang on the till that accepted] (shipped 2026-10-10, `20261010150000` live, crest-v427) | a tablet-key read of waiting guest orders for the PIN screen | Q14 |
 | 3d ✅ | FLOOR-KITCHEN-2 [FLOOR-KITCHEN-5, FLOOR-KITCHEN-6] (shipped 2026-10-10, `20261010130000` live, crest-v426) | `guard_pos_kot_log`: a kitchen login may cancel a ticket whose every line was pulled; stage times are the server's | — |
 | 3e ✅ | ORDER-FLOW-3, -4, -5 [ORDER-FLOW-13, -14] (shipped 2026-10-10, app only, crest-v427; ORDER-FLOW-4 took the app-only form) | none | — |
-| 3f | ORDER-FLOW-6, -7, -8 [ORDER-FLOW-15, -16] | none (ORDER-FLOW-8's pulled-item record can't be written from the browser since 1d) | Q16 |
-| 3g | ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5 [ORDER-FLOW-12] | none | — |
-| 3h | ACCESS-6, ACCESS-7 [ACCESS-11, ACCESS-12; the legacy shared-key code, its DROPs in a later migration] | sessions recorded per tablet, `revoke_pos_device` ends them; `pos-staff-login` deploy | Q18 |
+| 3f ✅ | ORDER-FLOW-6, -7, -8 [ORDER-FLOW-15, -16; owner decision Q2 of 2026-10-10] (shipped 2026-10-10, app only, crest-v428) | none (ORDER-FLOW-8's pulled-item record can't be written from the browser since 1d) | Q16 |
+| 3g ✅ | ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5 [ORDER-FLOW-12] (shipped 2026-10-10, app only, crest-v428) | none | — |
+| 3h ✅ | ACCESS-6, ACCESS-7 [ACCESS-11, ACCESS-12; the legacy shared-key code, its DROPs in a later migration] (shipped 2026-10-10, `20261010180000` live, pos-staff-login v10, admin-user-ops v66, crest-v428; the DROP file `20261010190500` waits a day after the release) | sessions recorded per tablet, `revoke_pos_device` ends them; `pos-staff-login` deploy | Q18 |
 | 3i ✅ | ACCESS-5, DATABASE-2, DATABASE-3 [DATABASE-6] (shipped 2026-10-09, `20261010100000` live, admin-user-ops v65, crest-v424) | a POS block marker read by `pos_caller_has_rank`; `admin-user-ops` deploy | Q17 |
 | 3j ✅ | CREDIT-NOTES-3, IMS-HANDOFF-1 [DOCS-9] (shipped 2026-10-10, `20261010140000` live, crest-v426) | maybe: whatever a POS manager needs to post from the POS side | Q12 |
 | 3k ✅ | CUSTOMERS-PARKING-4, -5, -8 [CUSTOMERS-PARKING-12] (shipped 2026-10-09, `20261010110000` live, crest-v424) | `award_`/`redeem_loyalty_points` match `phone_canonical`, a unique key on it (the raw-phone key kept for older tills), new `adjust_loyalty_points` | Q13 |
-| 3l | CUSTOMERS-PARKING-6, SHIFTS-4, DOCS-2 [CUSTOMERS-PARKING-16] | none | — |
-| 3m | REPORTS-2, FLOOR-KITCHEN-3, IMS-HANDOFF-4 (credit-noted bills) [the Owner Report's covers count seated guests from the next report, owner 2026-10-10; a `CURRENT_SCHEMA_VERSION` bump] | none | Q15 |
+| 3l ✅ | CUSTOMERS-PARKING-6, SHIFTS-4, DOCS-2 [CUSTOMERS-PARKING-16] (shipped 2026-10-10, app only, crest-v428) | none | — |
+| 3m ✅ | REPORTS-2, FLOOR-KITCHEN-3, IMS-HANDOFF-4 (credit-noted bills) [the Owner Report's covers count seated guests from the next report, owner 2026-10-10; a `CURRENT_SCHEMA_VERSION` bump] (shipped 2026-10-10, app only, crest-v428; Owner Report schema 15) | none | Q15 |
 | 3n ✅ | REPORTS-3, GAP-OUTLETS-3 [REPORTS-8] (shipped 2026-10-10, `20261010170000` live, crest-v427) | `get_group_summary` | — |
-| 3o | CUSTOMIZATION-2, REPORTS-4 [REPORTS-12] | none | — |
+| 3o ✅ | CUSTOMIZATION-2, REPORTS-4 [REPORTS-12] (shipped 2026-10-10, app only, crest-v428) | none | — |
 
 Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k — all shipped 2026-10-09.
-Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shipped 2026-10-10. Next: wave 4
-(3f after 3e, 3h after 3c; 3e and 3f share the send paths, so they are never drafted together).
+Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shipped 2026-10-10. Wave 4: 3f,
+3g, 3h, 3l, 3m, 3o — all shipped 2026-10-10 (crest-v428). **STAGE 3 COMPLETE**, except applying
+`20261010190500` (the shared key's four functions) a day after the release, and committing it.
 
-**Added to stage 4 by the owner (2026-10-09):**
+**Added to stage 4 by the owner (2026-10-09, 2026-10-10):**
 
 - **One-tap "add the points this bill earned"** on a bill whose award did not land (the till said
   points were not added): works out the exact points from the bill and its scheme, and is reversed by
@@ -393,6 +371,9 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
   into Adjust, and a later Credit Note does not take those hand-added points back (3k).
 - **"Move points" for a regular's new number**: one action that takes the balance off the old number
   and puts it on the new one, recorded as a pair. Today it is two hand corrections in Adjust (3k).
+- **A grey "no longer offered" note on a saved-but-unsent dish** whose choice was hidden since (owner
+  2026-10-10, Q3 (b), later): "Granola is no longer offered", blocking nothing. 3o marks only lines not
+  yet saved, because a saved line keeps its exemption on the server.
 
 ## S809.3 Outside POS, filed here
 
@@ -411,10 +392,11 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
 
 ## S809.4 Found while fixing stage 1 (2026-10-09, not fixed)
 
-- **Legacy shared-key code** (1j): every client's shared key is now off, so delete `pos-staff-login`'s
+- **Legacy shared-key code** (1j): ~~every client's shared key is now off, so delete `pos-staff-login`'s
   legacy branch and PGRST202 fallback, PosLogin's `get_pos_staff` path, the Pos.js legacy notice and the
-  Till Devices shared-key panel, then drop `get_pos_staff`, `verify_pos_legacy_device`,
-  `retire_pos_legacy_device_key`, `pos_legacy_device_key_status` (after the deploys; `auth-and-pins.md`).
+  Till Devices shared-key panel,~~ fixed in 3h; then drop `get_pos_staff`, `verify_pos_legacy_device`,
+  `retire_pos_legacy_device_key`, `pos_legacy_device_key_status` (written in 3h as `20261010190500`,
+  applied a day after the release; `auth-and-pins.md`).
 - `settings_guard_staff_roles`' HR, IMS, travel-claim and weather-city lines still test raw ranks, so a
   settlement-blocked login passes them for the hour its token lives (1j did the POS lines).
 - ~~`apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
@@ -440,8 +422,8 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
   hss-suite), are still `global`, so signing out on a shared device ends that login on every device
   (ACCESS-7's shape). An Owner left on a wall KDS never locks, and its Exit opens the till as the
   Owner; Help should steer wall screens onto a Kitchen login (1e).
-- A Release reload restarts the idle clock, so a till locks at about 4 minutes once per release
-  (ACCESS-6, stage 3) (1e).
+- ~~A Release reload restarts the idle clock, so a till locks at about 4 minutes once per release
+  (ACCESS-6, stage 3) (1e).~~ Fixed in 3h: the last real input is kept per session on the device.
 - The Owner cannot see who reset a PIN: the new `staff_pin_vault` UPDATE row is in the admin-only
   Audit Log. The page labels its field "Pin Reset" (`FIELD_LABELS` in `AuditLog.js`). The till's
   lockout line now differs from `SelfServiceLogin.jsx`'s (HR, shared with hss-suite) (1f).
@@ -478,9 +460,10 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
   - `viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
     no time limit; `reprintItemCompSlip` drops both read errors and prints nothing silently (2a).
 - **Found while drafting stage 2, wave 2 (2c, 2e, 2f; 2026-10-09, not fixed):**
-  - The Owner Report's POS section (`computeMonthlyReport.js`) still works out past bills with the VAT
+  - ~~The Owner Report's POS section (`computeMonthlyReport.js`) still works out past bills with the VAT
     flag read when the report is generated, so a month generated after a VAT change loses its VAT. Fix:
-    add `vat_registered` to its `pos_orders` select and pass `billVatRegistered(o, vatReg)` (2c).
+    add `vat_registered` to its `pos_orders` select and pass `billVatRegistered(o, vatReg)` (2c).~~ Fixed
+    in 3m: the section now goes through `salesReportMath.js`' `billAmounts`.
   - CREDIT-NOTES-5's server half: `guard_pos_credit_note` accepts any sent `original_invoice_no`,
     `original_invoice_label` and `original_invoice_date_bs`. Set them from the bill (`v_order.invoice_no`,
     the TI/PB label from `v_order.vat_registered`); no note column needed (2c).
@@ -509,8 +492,9 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     month; the screen warns that the earlier month's count already settled it, but does not block (2e).
   - Drafting briefs should give each parallel drafter its own scratchpad subfolder and local Postgres
     port: two drafters overwrote each other's replica scripts (2c, 2e).
-- A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
-  and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client) (1g).
+- ~~A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
+  and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client) (1g).~~
+  Fixed in 3f: each entry carries its outlet, and another outlet's are left alone.
   ~~The cart save on an outlet move also tries to cancel a standing points redemption, which fails once
   the login has moved.~~ Fixed in 2g: an outlet move leaves the points for that bill's own close.
 - **Found while drafting stage 2, wave 3 (2g, 2h; 2026-10-09, not fixed):**
@@ -526,13 +510,13 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     overwritten when Selling prices is ticked; its plan table has no `DROP … IF EXISTS`, so two calls in
     one transaction fail with 42P07 (tests only) (2h).
   - The till's menu read requires `is_active`/`pos_enabled = true` while `save_pos_order_items` accepts
-    NULL (0 NULL rows, latent), and the till's `option_count` message names no dish though the server
-    sends one (CUSTOMIZATION-2 would help) (2h).
+    NULL (0 NULL rows, latent)~~, and the till's `option_count` message names no dish though the server
+    sends one (CUSTOMIZATION-2 would help)~~ (2h). The message half is fixed in 3o (`choiceRefusal.js`).
 - **Found while drafting stage 3, wave 1 (3a, 3i, 3k; 2026-10-09, not fixed):**
-  - `mergeUnsentLines` (`posOrdersConstants.js`) keeps the base line's note and drops the incoming one,
+  - ~~`mergeUnsentLines` (`posOrdersConstants.js`) keeps the base line's note and drops the incoming one,
     so on the lock restore, stale recovery, adopt-open-order and offline-conflict paths a note typed on
     this device (a guest's allergy note included) vanishes when the other copy has any note. Fix:
-    `notes: joinNote(l.notes, inc.notes) || null`. Belongs in 3g (3a).
+    `notes: joinNote(l.notes, inc.notes) || null`. Belongs in 3g (3a).~~ Fixed in 3g.
   - ~~`get_guest_order_progress` and `get_guest_table_status` count a CHANGE ticket until it is Seen, so a
     guest's tracker can sit below "Ready" and a table badge read "Sent" meanwhile. Fix: `AND NOT
     (k.items @> '[{"change":true}]'::jsonb)` in each ticket loop. Fold into 3b's migration (3a).~~ Fixed
@@ -541,9 +525,10 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     made never hear of it, on paper or on the KDS (P3, 3a).
   - The cart's note box shows every note, an allergy note included, in grey italic (`--theme-text3`)
     (P3, 3a).
-  - **For 3h (`pos-staff-login`):** a blocked login, or a settled leaver, picked from a stale till list
+  - ~~**For 3h (`pos-staff-login`):** a blocked login, or a settled leaver, picked from a stale till list
     gets "Invalid credentials" (shown as a wrong PIN), and each try counts toward the lockout. Filter
-    `pos_blocked_at` and `settlement_blocked_by` in its staff lookup, or give its own answer (3i).
+    `pos_blocked_at` and `settlement_blocked_by` in its staff lookup, or give its own answer (3i).~~
+    Fixed in 3h: its own 403 (`switched_off`, "This login is switched off"), not counted.
   - Deleting an IMS or HR staff login (`delete_ims_staff` / `delete_hr_staff`) also SET NULLs its name
     on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i).
   - Live `pos_parking_slips_guard` still lets any operator INSERT through unchanged; its comment says 1l
@@ -552,7 +537,8 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     "setup kept" heading mentions (3i).
   - After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
     stays un-depleted until that day is re-saved (3i).
-  - The retired shared-key picker `get_pos_staff` still lists blocked logins (3h drops it), and the Audit
+  - The retired shared-key picker `get_pos_staff` still lists blocked logins (nothing calls it since 3h;
+    `20261010190500` drops it), and the Audit
     Log shows `pos_blocked_at` under its raw column name (`FIELD_LABELS` in AuditLog.js) (3i).
   - Recorded-rows counts are full table scans per Delete press; the Unblock leaver check reads
     `hr_employee_id` only, not the S798 3f-1 employee links (3i).
@@ -594,32 +580,78 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
   - `pos-billing.md`'s "Periods backfill … re-stamps what it finds" sentence (IMS-HANDOFF-2) is still out
     of date (3j).
 - **Found while drafting stage 3, wave 3 (3c, 3e, 3n; 2026-10-10, not fixed):**
-  - A till lock keeps the cart, a guest's accepted dishes included, but not the accepted request ids, so
+  - ~~A till lock keeps the cart, a guest's accepted dishes included, but not the accepted request ids, so
     the request still waits (the PIN screen now announces it, correctly). When the waiter signs back in,
     the cart returns with those dishes and the table's banner offers Accept again: pressing it doubles
-    the dishes (since S776 plus guest Accept). Belongs in 3g (3c).
+    the dishes (since S776 plus guest Accept). Belongs in 3g (3c).~~ Fixed in 3g: the accepted request
+    ids ride with the kept cart (`guestReqs`).
   - On the Billing station, "Open Orders" from an open bill leaves it with no unsaved-changes guard (no
     `useBlocker` or `beforeunload` in `PosOrders.jsx`, since S762/S763) (3c).
-  - A save that answered but whose `pos_kot_log` insert failed is only logged to the console, so the food
+  - ~~A save that answered but whose `pos_kot_log` insert failed is only logged to the console, so the food
     has no ticket. Suggested for 3f with ORDER-FLOW-7: a client-minted ticket id, the failed insert kept
-    and retried with the same id, a duplicate-key answer read as "it landed" (3e).
-  - A new takeaway whose order insert gets no answer can leave an empty open takeaway order when Send
+    and retried with the same id, a duplicate-key answer read as "it landed" (3e).~~ Fixed in 3f, as
+    suggested (the ticket waits in its own queue entry, `posTicketsKey`).
+  - ~~A new takeaway whose order insert gets no answer can leave an empty open takeaway order when Send
     Order is pressed again (a table is protected by the one-open-order index). Fix: a client-minted order
-    id, as the offline path already does (3e).
+    id, as the offline path already does (3e).~~ Fixed in 3f: the id is minted before the insert, and a
+    no-answer is queued under it.
   - The ← "Discard N unsaved items?" prompt during an in-flight send still says "nothing reaches the
     kitchen", but the send still lands and now prints; and a second take-off after a saved one (3→2
     saved, then 2→1) prompts "2 × already sent" while the server records 1 (3e).
-  - For 3f: when the unknown-send branch queues and prints offline, drop that order's send marks first
-    (`putSendAttempts(oid, [])`), or the poll can print the same dishes again if the lost save landed (3e).
+  - ~~For 3f: when the unknown-send branch queues and prints offline, drop that order's send marks first
+    (`putSendAttempts(oid, [])`), or the poll can print the same dishes again if the lost save landed (3e).~~
+    Fixed in 3f.
   - ORDER-FLOW-4's residual: a double ticket is still possible when this till's unanswered send did not
     land, another tablet fired the identical full cart meanwhile, AND that tablet is the same login or
     its ticket-log insert failed. The fix if it shows up: a client-minted save id stored by
     `save_pos_order_items` (3e).
-  - The Owner Report (`computeMonthlyReport.js`) counts takeaway as covers and drops credited bills from
-    them (now owner-decided, slice 3m). `hr_labour_actuals` counts every paid bill as at least 1 cover and
+  - ~~The Owner Report (`computeMonthlyReport.js`) counts takeaway as covers and drops credited bills from
+    them (now owner-decided, slice 3m).~~ Fixed in 3m (schema 15: seated guests, credited bills kept).
+    `hr_labour_actuals` counts every paid bill as at least 1 cover and
     Demand Forecast does `o.covers || 1` over all channels; possibly intended for staffing, but the Roster
     calls the figure "covers". `ClientDashboard.jsx` keeps its own copy of `bsDayBoundaryIso` (correct
     today) (3n).
+- **Found while drafting stage 3, wave 4 (3f, 3g, 3h, 3l, 3m, 3o; 2026-10-10, not fixed):**
+  - Ticket Routing lists only categories with a dish on the till, so a bar category with no dish (the
+    default Beverage where the drinks are "Drinks") cannot be moved to KOT there, and that till keeps a
+    greyed BOT (3m).
+  - The 1L+ year's line read fires every 150-bill chunk at once (about 730 requests for a 1,09,500-bill
+    year) (3m).
+  - The KOT button's Tip still says "food items"; Avg Bill Value on the Owner Report has no Tip; a no-bar
+    till shows BOT for a moment on load (3m).
+  - The stock-count tablet's lock still signs out on every device (`scope: 'local'` would be safe there:
+    `ims_revoke_count_sessions` covers a lost counting tablet) (3h).
+  - `pos-staff-login` still carries the dead pre-S791 fallback for a missing `reserve_pos_pin_attempt`
+    (3h).
+  - `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at` and `pos_legacy_key_last_used_at`
+    are read by nothing (`revokeClientTablets` still writes the first two, `AuditLog.js` lists
+    `pos_device_secret`): a later column drop (3h).
+  - A session that ends by itself does not keep the till's unsent cart (`runBeforePosLock` is not run);
+    `ProtectedRoute`'s `!profile` branch still sends a profile-less session on an activated tablet to
+    `/login` (3h).
+  - A guest QR order still waiting when its table's bill closes is never answered by anything
+    (`get_pos_device_guest_alerts` has no age limit), so it rings on and the next party's screen offers
+    its Accept (3g).
+  - A table tapped while the sign-in restore's reads are running takes the kept lines (since S776);
+    offline between the restore's two reads on a free table, the covers numpad hides the floor message;
+    a takeaway closed between the two reads is kept under "could not be read" wording (3g).
+  - A customized line reopened from a crest-v427 queue entry has no snapshot (the KOT prints without
+    choices, the cart says "No choices picked") (3f).
+  - Tickets for an order created offline are logged with `order_no` null (3f).
+  - A send whose lost save landed, followed by another tablet saving on top before the upload, shows a
+    "NOT applied" conflict though the lines landed (3f).
+  - After one no-answer, sends queue for 30 s even if the link recovered sooner; an older (v427) tab
+    draws a `kot:` entry as a 0-item takeaway (3f).
+  - `credit_settled_at` is still the settling tablet's clock: one line, `NEW.credit_settled_at := now()`
+    in `guard_pos_order_close`'s settlement branch, needs a migration (3l).
+  - A unique partial index on `pos_cash_movements(order_id) WHERE kind = 'credit_settlement'` would make
+    a settle's Cash In once-only across devices (live duplicates: 0) (3l).
+  - PosCustomers' settings read, `loadCustomers` and `toggleHistory` have no time limit (3l).
+  - `handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
+    fails; the server's `option_count` counts picks of hidden options (harmless while
+    `option_not_on_menu` fires first) (3o).
+  - On a POS manager's PIN the Customization Report's Margin `items` read is fenced, so costs read NPR 0:
+    the 2f item above ("the Customization report (`loadDeltaExplosion`)"), not a new one (3o).
 
 ---
 
@@ -726,10 +758,13 @@ when these were filed. Every item below assumes they are.
   for ever. **Stock Count is the worked precedent, S731/S732**: collect the failures rather than
   dropping them, convert with `asActionError` at the call site, and surface them where the person
   is looking, keeping `console.error` as the floor for anything they cannot act on. Two things
-  from that fix apply here and one does not — POS orders already carry a `client_id` through
-  `scopedUpsert`, so the shared-device replay problem does not arise, but `navigator.onLine` is
+  from that fix apply here and one does not — ~~POS orders already carry a `client_id` through
+  `scopedUpsert`, so the shared-device replay problem does not arise~~ (untrue: queue entries carried
+  none until S809 3f added `client_id`), ~~but `navigator.onLine` is
   just as unreliable on the floor as it is in the storeroom, and `save_pos_order_items` is an
-  atomic RPC, so a network failure around it is as safe to re-queue as Stock Count's upserts.
+  atomic RPC, so a network failure around it is as safe to re-queue as Stock Count's upserts.~~
+  The re-queue is done in S809 3f: a send with no answer is queued and prints, and a refusal no retry
+  changes becomes a floor conflict carrying the server's sentence.
   Closes the POS half of `DOCS-REMEDIATION.md` T6 item 3.
 - [ ] 🟢 **The Crest Suite tab's UNENTITLED branch was never seen (S763).** `suiteEntitled` is
   `isAdmin || suitePlan === 'pro'`, so an admin session is entitled by definition and cannot reach

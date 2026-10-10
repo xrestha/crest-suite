@@ -503,11 +503,14 @@ export function AuthProvider({ children }) {
 
   // Offline changes this browser still has to send, in either queue. Stock ops write against the
   // current tenant just as POS orders do. 0 where there is no offline store: nothing to protect.
+  // S809 3f: only this window's outlet's (or one from before changes carried their outlet). Another
+  // outlet's changes wait for that outlet and move with nothing, so they never hold a switch to it.
   async function pendingOfflineChanges() {
     try {
       const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
       const [stockOps, posOrders] = await Promise.all([getQueue(), getPosOrderQueue()])
-      return (stockOps?.length || 0) + (posOrders?.length || 0)
+      const here = c => !c || c === clientId
+      return (stockOps || []).filter(op => here(op.clientId)).length + (posOrders || []).filter(q => here(q.client_id)).length
     } catch {
       return 0
     }
@@ -661,7 +664,25 @@ export function AuthProvider({ children }) {
     return (HR_RANK[hrRole] || 0) >= (HR_RANK[minLevel] || 0)
   }
 
-  function switchAdminClient(id, name) {
+  // S809 ORDER-FLOW-15 (3f): offline changes this browser still holds for the client on screen (a till
+  // order, a stock count) upload only while that client is on screen — each carries the client it was
+  // made for. So, like switchOutlet, a "view as" switch away from them is refused until they have
+  // uploaded, rather than leaving them waiting unseen. One made before changes carried their client
+  // counts as the client on screen's. A store that cannot be read in 3 s refuses nothing.
+  async function switchAdminClient(id, name) {
+    if ((id || null) !== (adminViewClientId || null)) {
+      let waiting = 0
+      try {
+        const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
+        const [ops, orders] = await withTimeout(Promise.all([getQueue(), getPosOrderQueue()]), 3000, 'Offline check')
+        const here = c => !c || c === adminViewClientId
+        waiting = (ops || []).filter(op => here(op.clientId)).length + (orders || []).filter(q => here(q.client_id)).length
+      } catch { /* no offline store, or it did not answer */ }
+      if (waiting > 0) {
+        window.alert(`${waiting} offline change${waiting === 1 ? '' : 's'} on this browser for ${adminViewClientName || 'the client on screen'} (orders taken or stock counted while the connection was down) ${waiting === 1 ? 'has' : 'have'} not uploaded yet. Stay on this client until ${waiting === 1 ? 'it uploads' : 'they upload'} — POS Orders or Stock Count sends them once the connection is back, and an order the POS floor lists as NOT applied needs its Start new order or Discard — then switch.`)
+        return false
+      }
+    }
     setAdminViewClientId(id)
     setAdminViewClientName(name)
     if (id) {
@@ -671,6 +692,7 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('crest_admin_client_id')
       localStorage.removeItem('crest_admin_client_name')
     }
+    return true
   }
 
   // When admin "views as" a client, fetch that client's actual module subscription so the

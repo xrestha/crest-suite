@@ -49,7 +49,7 @@ Worth generalising: **a fix that removes a constraint does not go back and updat
 
 **A POS PIN reset ends the lockout (S809 1f).** `reset_pos_pin` calls `record_pos_pin_attempt(true)` AFTER the password change, never before, and writes a `staff_pin_vault` / `UPDATE` audit row (who, which login, `lockout_ended`; never the PIN). `reset_ims_pin` does not yet (S809.3).
 
-**The PIN screen never sits on top of a live login (S809 1e).** Till Devices' button signs out first ("Sign out and open the PIN screen"), and on an activated tablet `PosLogin` signs out any session it finds once auth is `ready`, showing no staff until done. Its own PIN sign-in is exempt (`ownSessionRef`, set before `setSession`), and no sign-out starts while a sign-in is in flight. Both pass `scope: 'local'` (`signOut` → `signOutThisDevice`), because supabase-js defaults to `'global'`, which ends every session of the login; the till lock still uses the default until ACCESS-7 (Q18).
+**The PIN screen never sits on top of a live login (S809 1e).** Till Devices' button signs out first ("Sign out and open the PIN screen"), and on an activated tablet `PosLogin` signs out any session it finds once auth is `ready`, showing no staff until done. Its own PIN sign-in is exempt (`ownSessionRef`, set before `setSession`), and no sign-out starts while a sign-in is in flight. Both pass `scope: 'local'` (`signOut` → `signOutThisDevice`), because supabase-js defaults to `'global'`, which ends every session of the login; the till lock passes it too since S809 3h (Q18 a).
 
 **PINs are no longer auth passwords.** `supabase/functions/_shared/pinPassword.ts` derives the stored password as `HMAC-SHA256(PIN_PEPPER, "<email>:<pin>")`, base64url. The account's own generated `pos_email`/`hr_self_service_email` is the salt (both the create side and the login side have it); `PIN_PEPPER` is an Edge Function secret. This also closes a hole `pos-staff-login`'s own header had already described and that S531/S532 did not fix: because the PIN *was* the password, anyone with an account's email could brute-force GoTrue's `/token` endpoint directly with the anon key, where our lockout RPCs are simply not on the path — hiding `pos_email` (`20260810180000`) raised the cost of starting but changed nothing about the mechanism. With a pepper the password is no longer computable off-server, so that route stops existing and **every** path to a POS/Self-Service session runs through the Edge Function that enforces the lockout.
 
@@ -76,7 +76,7 @@ Three things worth knowing before touching it:
 - **The login functions' legacy-PIN branch is the only place a pre-existing account's plaintext PIN is ever observable**, so it doubles as the backfill: it writes the vault row alongside the password upgrade. Accounts that never sign in and are never reset simply stay unrecoverable, which `rederive_pin_passwords` reports (`unrecoverable` count) rather than hides.
 - **Viewing is platform-admin only** (`view_staff_pin` gates on `isCallerAdmin`), surfaced in Admin → Clients → Staff PINs, deliberately *not* on `PosStaff.jsx` where Owners and POS managers would see it. A forgotten PIN is still the Owner's one-click Reset PIN. Widening the gate is one line, but it exposes every PIN to every client login.
 
-### A key per POS tablet, and the shared key retired by hand (S754)
+### A key per POS tablet (S754), and the sessions filed under it (S809 3h)
 
 Migration `20260916120000` and `pos-staff-login` were applied and deployed live on 2026-09-14. **Until S754 every till of a client held one value, `client_secrets.pos_device_secret`,
 copied into the localStorage of every tablet ever activated.** A lost, sold or stolen tablet could
@@ -98,44 +98,36 @@ when one was last used.
   page renders it.
 - **Not exported, not restored.** A backup is a file on someone's disk, and a device credential must
   not come back to life from one. A restored client re-activates each tablet in one tap.
-- **The sign-in gate.** `pos-staff-login` calls `verify_pos_device` (a per-tablet key) or
-  `verify_pos_legacy_device` (the shared key). Both are service-role only, and each is one UPDATE
-  that matches and stamps last use. **It fails CLOSED with a 503**, unlike the lockout RPCs: a read
+- **The sign-in gate.** `pos-staff-login` calls `verify_pos_device` only (service role, one UPDATE
+  that matches and stamps last use); a request with no `device_id` gets the same dead-key 401 (S809
+  3h). **It fails CLOSED with a 503**, unlike the lockout RPCs: a read
   error is a refusal, but `PosLogin` reads a 5xx as "couldn't reach the server" and keeps the PIN,
-  rather than telling the floor to re-activate the till over a blip. Both refusals return the
-  same 401 string, because which half failed is not something to tell a caller holding a dead key.
+  rather than telling the floor to re-activate the till over a blip. Every dead-key refusal returns
+  the same 401 string, because which half failed is not something to tell a caller holding a dead key.
   The picker is `get_pos_device_staff`, which RAISES on a dead key rather than returning no rows, so
-  "revoked" and "no staff" are different screens. It leaves out a POS-blocked login (S809 3i), whose
-  PIN then gets `user_banned` from GoTrue.
+  "revoked" and "no staff" are different screens. It leaves out a POS-blocked login (S809 3i); one
+  picked from a stale list gets its own 403 `switched_off`, before the PIN and uncounted (3h).
+- **Revoking a tablet ends the sessions opened on it (S809 3h, `20261010180000`).** `pos-staff-login`
+  files each new session in `pos_device_sessions` through `pos_record_device_session` before the
+  tokens leave, and fails closed (503, attempt given back). `revoke_pos_device` deletes them;
+  `pos_revoke_till_sessions` (service role) is admin-user-ops' whole-outlet sweep. An issued access
+  token lives out its hour. A PIN login deactivating its own tablet is signed out of it (ACCESS-11).
 - **Two anon reads take the tablet key**: the picker `get_pos_device_staff` and, since S809 3c,
   `get_pos_device_guest_alerts` (table names and times of waiting guest orders). Both call
   `pos_device_key_valid` and raise `pos_device_not_active`/28000 on a dead key; neither stamps
   `last_used_at`.
 
-**The shared key is retired explicitly, never automatically when the first tablet registers.** An
-outlet with three tills that re-activates one would otherwise lose the other two mid-service.
-`pos-staff-login` stamps `pos_legacy_key_last_used_at` on every legacy sign-in, and Till Devices shows
-that stamp. A manager presses Switch off once the tablets have moved.
-`retire_pos_legacy_device_key` then **rotates** `client_secrets.pos_device_secret` to a value no
-tablet holds, so every path still comparing against it stops matching at once. That includes
-`get_pos_staff` and a stale `pos-staff-login`, so neither had to be redefined. **S809 1j
-(`20261009160000`, owner decision Q7 a) switched it off at every client and made a new
-`client_secrets` row born switched off (`pos_legacy_key_retired_at DEFAULT now()`);
-`get_pos_device_secret` is dropped.** Deactivating a tablet that has its own key revokes that key,
-not just the localStorage copy.
-
-**`pos-staff-login` falls back to the pre-S754 check only on `PGRST202`** (the verify function is
-not in the schema cache, i.e. the function deployed ahead of the migration), so a deploy-order slip
-does not lock out every tablet already on a floor. Any other error refuses. **Every client has now
-switched the shared key off (S809 1j), so the follow-up is due**: delete `pos-staff-login`'s legacy
-branch and its PGRST202 fallback, PosLogin's `get_pos_staff` path, Pos.js's legacy notice and the
-Till Devices shared-key panel, then drop `get_pos_staff`, `verify_pos_legacy_device`,
-`retire_pos_legacy_device_key` and `pos_legacy_device_key_status`, in that order, after the deploys
-(`POS_TODO.md` A2). A stale bundle on a legacy tablet calls `get_pos_staff`, so the drop goes last. **Archive, Clear Client Data, Delete Client and the trial purge revoke every
-tablet key and rotate/retire the shared key (S755)**. `revokeClientTablets` runs first inside
-`deleteClientDataFor`, with the service role, because `revoke_pos_device` and
-`retire_pos_legacy_device_key` refuse a caller with no session. The caller is recorded as
-`revoked_by`. A restore brings neither back, so each tablet is re-activated from Till Devices.
+**The shared key is gone.** S809 1j (`20261009160000`, Q7 a) switched it off at every client (a new
+`client_secrets` row is born switched off; `get_pos_device_secret` dropped), and 3h removed its app
+code and `pos-staff-login`'s branch with the PGRST202 fallback. Its four functions (`get_pos_staff`,
+`verify_pos_legacy_device`, `retire_pos_legacy_device_key`, `pos_legacy_device_key_status`) are dropped
+by `20261010190500`, applied after the release; its `client_secrets` columns stay, read by nothing.
+Deactivating a tablet that has its own key revokes that key, not just the localStorage copy.
+**Archive, Clear Client Data, Delete Client and the trial purge revoke every tablet key (S755) and end
+every till session (S809 3h)**: `revokeClientTablets` runs first inside `deleteClientDataFor`, with
+the service role, because `revoke_pos_device` refuses a caller with no session. The caller is
+recorded as `revoked_by`. A restore brings neither back, so each tablet is re-activated from Till Devices.
+History: docs/rules-archive/auth-and-pins.md#shared-key-retirement
 
 ### Login and sign-up page UX (moved)
 

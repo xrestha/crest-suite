@@ -169,6 +169,13 @@ export async function clearCachedPosOrderForTable(tableId) {
 // enqueue — every later offline edit to the same order builds on that same server state, and a later
 // patch must not move the base forward to a version this device never saw. An order created offline
 // has no version (the server row does not exist yet).
+//
+// S809 3f: an entry also carries `client_id`, the outlet it was taken for — the store is shared by every
+// account that uses the device, and an upload leaves another outlet's entries alone (ORDER-FLOW-15).
+// Each queued ticket (`kot_sends`) carries the pos_kot_log id it was minted with, so an upload that runs
+// twice logs it once (ORDER-FLOW-7). Tickets whose order is already on the server and whose log insert
+// has still to land wait in an entry of their own (posTicketsKey, `tickets_for`). `rev` counts the writes
+// to an entry, so an upload can tell whether it changed while it ran (settlePosOrderUpload).
 
 export async function enqueuePosOrder(orderId, patch) {
   // The read (get) and the write (put) MUST live in one readwrite transaction. IndexedDB
@@ -195,7 +202,12 @@ export async function enqueuePosOrder(orderId, patch) {
         order_id: orderId,
         kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
         updated_at: Date.now(),
+        rev: (Number(existing?.rev) || 0) + 1,
       }
+      // S809 3f: the lines of the entry's FIRST queued save, kept like its version. The rest were built on
+      // it, and it may be on the server already (a send whose answer was lost, then queued), so an upload
+      // refused as stale can tell this till's own landed save from another device's change.
+      if (!Array.isArray(existing?.items) && Array.isArray(patch.items)) merged.first_items = patch.items
       if (baseVersion === undefined) delete merged.items_version
       else merged.items_version = baseVersion
       store.put(merged)
@@ -214,4 +226,152 @@ export async function getQueuedPosOrder(orderId) {
 }
 export async function dequeuePosOrder(orderId) {
   await idbDelete('pos_order_queue', orderId)
+}
+
+/** Which queued ticket a key names: its id, or — for one queued before tickets carried an id — its
+ *  contents. */
+export const queuedSendKey = send => send?.id || JSON.stringify(send)
+
+/** The key of the entry that holds an order's tickets only (S809 3f): tickets whose log insert has yet to
+ *  land, for an order whose lines are already on the server. Never the order's own id: a till still on an
+ *  older version uploads every entry as an order to save, and an entry with no lines under the order's
+ *  id would save the order with none — every dish deleted. Under this key it finds no order (an invalid
+ *  id) and leaves the entry alone; `items` is empty for the same till's floor, which reads it. */
+export const posTicketsKey = orderId => `kot:${orderId}`
+
+/** A ticket-only entry with `patch`'s tickets (and outlet, table name) added (pure). */
+export function mergedTicketsEntry(existing, orderId, patch = {}) {
+  return {
+    ...(existing || {}),
+    ...patch,
+    order_id: posTicketsKey(orderId),
+    tickets_for: orderId,
+    items: [],
+    kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
+    updated_at: Date.now(),
+    rev: (Number(existing?.rev) || 0) + 1,
+  }
+}
+
+/** Queues tickets the till printed but could not log yet (S809 3f, S809.4) — `patch` is { client_id,
+ *  table_name, kot_sends }. While the order's own entry still holds lines to upload they go with it, and
+ *  are logged once those are saved (not for an entry the floor holds as a conflict: `ontoOrder` false);
+ *  otherwise the order is on the server and they go to its ticket-only entry. Decided and written in ONE
+ *  readwrite transaction, so an upload that settles the order meanwhile cannot leave them in an entry
+ *  with no lines under the order's own id. */
+export async function enqueuePosTickets(orderId, patch, { ontoOrder = true } = {}) {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('pos_order_queue', 'readwrite')
+    const store = tx.objectStore('pos_order_queue')
+    const getReq = store.get(orderId)
+    let merged
+    getReq.onsuccess = () => {
+      const order = getReq.result
+      if (ontoOrder && Array.isArray(order?.items) && !order.tickets_for) {
+        merged = {
+          ...order,
+          kot_sends: [...(order.kot_sends || []), ...(patch.kot_sends || [])],
+          updated_at: Date.now(),
+          rev: (Number(order.rev) || 0) + 1,
+        }
+        store.put(merged)
+        return
+      }
+      const tReq = store.get(posTicketsKey(orderId))
+      tReq.onsuccess = () => {
+        merged = mergedTicketsEntry(tReq.result, orderId, patch)
+        store.put(merged)
+      }
+      tReq.onerror = e => reject(e.target.error)
+    }
+    getReq.onerror = e => reject(e.target.error)
+    tx.oncomplete  = () => resolve(merged)
+    tx.onerror     = e => reject(e.target.error)
+    tx.onabort     = e => reject(e.target.error)
+  })
+}
+
+const sameItems = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null)
+
+/** What is left of a queued entry after an upload (S809 3f) — the pure half of settlePosOrderUpload.
+ *  `rev` and `items` are the entry as the upload read it; `lines` is true when those lines are now on the
+ *  server at `version`; `doneKeys` are the tickets that need no further try (logged, or refused for good).
+ *  Returns { entry, tickets }: what stays under the entry's key (null: delete it), and the tickets still
+ *  to log that move to the order's ticket-only entry (posTicketsKey).
+ *   - its lines landed and it is unchanged since it was read: tickets not yet logged move;
+ *   - changed meanwhile (a newer offline edit, or a ticket, of the same order): the newer edit stays and
+ *     now builds on the lines that landed — the order exists, at `version`. Only tickets were added
+ *     when its lines are still the ones that landed, so those move too. */
+export function settledEntry(entry, { rev, items, lines = false, version = null, doneKeys = [] } = {}) {
+  if (!entry) return { entry: null, tickets: [] }
+  const done = new Set(doneKeys)
+  const logged = new Set(entry.logged_ids || [])
+  const left = (entry.kot_sends || []).filter(s => !logged.has(queuedSendKey(s)) && !done.has(queuedSendKey(s)))
+  if (!lines) {
+    // A ticket-only entry (or one from before them, with no lines): gone once nothing is left to log.
+    const keep = { ...entry, kot_sends: left }
+    const holdsLines = Array.isArray(entry.items) && !entry.tickets_for
+    return { entry: holdsLines || left.length > 0 ? keep : null, tickets: [] }
+  }
+  if (entry.rev === rev || sameItems(entry.items, items)) return { entry: null, tickets: left }
+  const next = { ...entry, kot_sends: left, created_offline: false, first_items: items }
+  if (Number.isInteger(version)) next.items_version = version
+  else delete next.items_version
+  return { entry: next, tickets: [] }
+}
+
+/** Applies settledEntry in ONE readwrite transaction (the S440 rule above), so an edit queued while the
+ *  upload ran is never deleted with it, and tickets still to log move to the order's ticket-only entry
+ *  in the same transaction. `key` is the entry's key; `outcome.orderId` the order it belongs to.
+ *  Resolves with what stays under `key` (null: gone). */
+export async function settlePosOrderUpload(key, outcome) {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('pos_order_queue', 'readwrite')
+    const store = tx.objectStore('pos_order_queue')
+    const getReq = store.get(key)
+    let kept = null
+    getReq.onsuccess = () => {
+      const entry = getReq.result
+      const { entry: next, tickets } = settledEntry(entry, outcome)
+      kept = next
+      if (next) store.put(next)
+      else if (entry) store.delete(key)
+      if (tickets.length === 0 || !outcome?.orderId) return
+      const tReq = store.get(posTicketsKey(outcome.orderId))
+      tReq.onsuccess = () => store.put(mergedTicketsEntry(tReq.result, outcome.orderId, {
+        client_id: entry.client_id, table_name: entry.table_name, kot_sends: tickets,
+      }))
+      tReq.onerror = e => reject(e.target.error)
+    }
+    getReq.onerror = e => reject(e.target.error)
+    tx.oncomplete  = () => resolve(kept)
+    tx.onerror     = e => reject(e.target.error)
+    tx.onabort     = e => reject(e.target.error)
+  })
+}
+
+/** Marks queued tickets as logged without removing them (S809 3f, ORDER-FLOW-8): an entry the upload
+ *  could not apply stays on the floor as a conflict, and says which of its lines already printed. The
+ *  marks are a list on the entry (`logged_ids`), never a field on a ticket: a till on an older version
+ *  inserts its queued tickets as they are, and an unknown column would refuse the insert. */
+export async function markQueuedSendsLogged(orderId, keys) {
+  const done = new Set(keys || [])
+  if (done.size === 0) return
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('pos_order_queue', 'readwrite')
+    const store = tx.objectStore('pos_order_queue')
+    const getReq = store.get(orderId)
+    getReq.onsuccess = () => {
+      const entry = getReq.result
+      if (!entry) return
+      store.put({ ...entry, logged_ids: [...new Set([...(entry.logged_ids || []), ...done])] })
+    }
+    getReq.onerror = e => reject(e.target.error)
+    tx.oncomplete  = () => resolve()
+    tx.onerror     = e => reject(e.target.error)
+    tx.onabort     = e => reject(e.target.error)
+  })
 }

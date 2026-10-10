@@ -108,3 +108,35 @@ Recorded so they aren't rediscovered from scratch:
 _Original lines 1136–1136:_
 
 **A lockout the client calls around an operation is not a lockout.** POS and HR Self-Service both had `check_*_pin_lock` before and `record_*_pin_attempt` after, in the browser, with nothing server-side consulting them — so skipping the two RPCs walked a 4-digit PIN unimpeded. Both now run **inside** `pos-staff-login` / `hr-selfservice-login`, on the same request that signs in. Corollary: the frontend must **not** also call `record_*_pin_attempt`, or every failure double-counts and locks a fat-fingered employee out in 3 attempts instead of 5. Same reasoning applies to any future server-side check — if the browser can skip the call, it is advisory.
+---
+
+## S809 stage 3 wave 4 move (2026-10-10)
+
+Two sections that repeated rules this file states elsewhere (the S577/S579 close and comp guards, and the IMS handoff's "`sales_entries` and `stock_movements` can diverge"), moved word for word when wave 4's additions took the POS rules load past its +15% warning. Line numbers refer to the rules file before the move.
+
+## POS write-guards copy
+
+_Original lines 1096–1101:_
+
+## The POS write-guards (S531 invariant 3, S576, S579)
+
+Migrated from the root `CLAUDE.md` (S663). The invariant itself — *a lockout the client calls around an operation is not a lockout* — stays resident there; this is the full POS-side detail behind it.
+
+The invariant itself (a PIN lockout the browser calls around the login is not a lockout: attempts are recorded inside `pos-staff-login` / `hr-selfservice-login`, and the frontend must not also call `record_*_pin_attempt`) is stated once, in `.claude/rules/supabase-sql.md`, invariant 3. **The POS close was the same shape and was fixed the same way in S576** — the discount cap (`pos_discount_limit`) and the void permission (`pos_allow_void`) were both React, over a plain same-client `FOR ALL` policy that hands every till session UPDATE on its own orders. It is now `guard_pos_order_close()`, a BEFORE UPDATE trigger rather than the `close_pos_order(...)` RPC the critique proposed: an RPC protects only the callers that choose to call it and leaves the open policy in place, while a trigger sees every write to the table. Note what it deliberately does *not* enforce — `paid_amount`, because re-deriving the bill total in SQL would be a second copy of the VAT-and-rounding arithmetic, and a drifted copy would reject real bills mid-service rather than merely misreport a number. **Item-level comp was the third and last of the family (S579)**: `guard_pos_item_comp()` fences the comp columns on `pos_order_items` while `apply_pos_item_comps` stays `SECURITY DEFINER` and so remains the only write path — and that RPC now checks Supervisor *rank* (it had only ever checked client) and derives `comped_by` from `auth.uid()` instead of a caller-supplied parameter. **Attribution the subject of the attribution can choose is not attribution**; `comped_by` is what the Sales Exception Report ranks staff by, so a caller able to pass any uuid could comp under a colleague's name.
+
+## Two writes diverge
+
+_Original lines 1170–1181:_
+
+## Two writes in one function can diverge, so one is never evidence of the other (S573)
+
+Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
+
+A pattern worth recognising beyond POS. `writeSalesEntries` writes revenue to `sales_entries` and
+then depletion to `stock_movements` inside a try/catch that swallows failures — deliberately, so a
+depletion problem never blocks a bill closing. The consequence is that **a bill can have revenue
+and no movements**, and a later guard that inferred "has this already posted?" from
+`stock_movements` was therefore *wrong* rather than merely incomplete: it re-posted two bills'
+revenue on real data (S573). Whenever a best-effort second write follows a primary one, the second
+one's absence proves nothing — give each table its own link back to the source row and ask the
+table you actually mean.

@@ -102,9 +102,16 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       'Net Sales (NPR)': round2(pos.totalNetSales), 'Gross (NPR)': round2(pos.totalGross),
       'Discount (NPR)': round2(pos.totalDiscount), 'VAT (NPR)': round2(pos.totalVat),
       Bills: pos.billCount, 'Qty Sold': pos.totalQty,
+      // v15 (S809 3m): the credit notes issued in the month, which Net Sales is after.
+      ...(pos.creditNotes ? { 'Credit Notes': pos.creditNotes.count, 'Credit Notes Value (NPR)': round2(pos.creditNotes.net) } : {}),
       'Comped Bills': pos.compedBillsTotal?.count ?? 0, 'Comped Potential Value (NPR)': round2(pos.compedBillsTotal?.potentialValue),
       'Voids/Writeoffs': pos.voidsWriteoffsTotal?.count ?? 0, 'Voids/Writeoffs Value (NPR)': round2(pos.voidsWriteoffsTotal?.amount),
-      'Total Covers': pos.covers?.totalCovers ?? 0, 'Avg Check/Cover (NPR)': round2(pos.covers?.avgCheckPerCover),
+      'Total Covers': pos.covers?.totalCovers ?? 0,
+      // What "covers" counted in this report (owner decision 2026-10-10), so the sheet says it too.
+      'Covers Counted': pos.covers?.basis === 'seated'
+        ? 'Guests seated at tables'
+        : 'Every bill, takeaway included; credit-noted bills left out',
+      'Avg Check/Cover (NPR)': round2(pos.covers?.avgCheckPerCover),
       'Avg Bill Value (NPR)': round2(pos.covers?.avgBillValue),
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - POS Summary', bizInfo, periodLabel, posRows), 'POS Summary')

@@ -6,7 +6,7 @@ import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
-import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
+import { bsToAd, daysInBsMonth, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
 import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
@@ -15,7 +15,8 @@ import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportC
 import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
 import { periodRevenue, periodStockMaps, valuePeriodItems, periodWastageValue, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
 import { findUncountedItems, UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
-import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
+import { zeroAmounts, addAmounts, billAmounts, buildSalesEntries, buildGroupedRows, buildPaymentRows } from '../pos/reports/salesReportMath'
+import { coversTotals } from '../pos/reports/coversMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
@@ -421,71 +422,128 @@ async function computeHrSection(clientId, period) {
 }
 
 // ── POS section ─────────────────────────────────────────────────────────────
-// pos_orders has no period_id/BS columns — only AD closed_at/opened_at — so the BS period must
-// be converted to an AD range first. Filters/exclusions mirror SalesReport.jsx exactly
-// (close_type='paid' at fetch time, credit-noted orders excluded from rollups at aggregation
-// time, comped items split out) so this section's totals reconcile with that report's own tabs
-// for the same range. This is a summary artifact — aggregated rollups only, not a bill ledger.
+// pos_orders has no period_id/BS columns — only AD closed_at/opened_at — so the BS month becomes a
+// range of NEPAL days first (bsDayBoundaryIso, +05:45). It was `bsToAd(...).toISOString()`, which
+// reads the date as the generating device's midnight: a report made on a laptop outside Nepal moved
+// both month edges by the zone difference (S809 3m, with IMS-HANDOFF-4).
+//
+// Since schema v15 (S809 3m, IMS-HANDOFF-4) the figures follow the Sales Report's own rules, through
+// its own arithmetic (salesReportMath.js, S754): every paid bill CLOSED in the month counts at full
+// value, a credit-noted one included, each valued as it was issued (billVatRegistered); every credit
+// note ISSUED in the month is a minus at its own stored figures, whichever month its bill was in; a
+// Split bill is spread over its payment legs. Until v15 a credited bill was dropped from its month
+// and its note never subtracted, so a bill credited in a later month left both months' Net Sales,
+// and the bill count, covers, average check and payment mix left the bill out where Sales Report
+// keeps it. Covers are the guests SEATED at tables (coversMath.seatedCovers via coversTotals, owner
+// decision 2026-10-10), as on the Covers Report, the POS Dashboard and Home. This is a summary
+// artifact — aggregated rollups only, not a bill ledger.
+const POS_ORDER_COLUMNS = 'id, discount_amount, closed_at, payment_method, covers, table_id, vat_registered'
+const POS_NOTE_COLUMNS = 'id, order_id, gross_amount, discount_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount, created_at'
+
+// The section's sales figures from rows already read, so the rules above can be asserted without a
+// database. `orders`: the month's paid bills. `creditNotes`: the notes issued in the month.
+// `orderById`: those bills AND every bill a note credits (some closed before the month).
+// `itemsByOrder`: each bill's charged lines, comped ones left out. `paymentsByOrder`: Split legs.
+export function posSalesFigures({ orders, creditNotes, orderById = {}, itemsByOrder = {}, paymentsByOrder = {}, vatReg }) {
+  const bills = orders || []
+  const notes = creditNotes || []
+  const entries = buildSalesEntries({ orders: bills, creditNotes: notes, orderById, itemsByOrder, vatReg })
+  const total = zeroAmounts()
+  let returnsNet = 0
+  for (const e of entries) {
+    addAmounts(total, e.amounts)
+    if (e.kind === 'return') returnsNet += e.amounts.net
+  }
+  // Category Wise's rows: a note returns its bill's lines in the month it was issued.
+  const categoryBreakdown = buildGroupedRows({
+    orders: bills, creditNotes: notes, orderById, itemsByOrder, vatReg,
+    keyOf: i => i.category || 'Uncategorized', labelOf: i => i.category || 'Uncategorized',
+  }).map(r => ({ category: r.name, qty: r.qtySales - r.qtyReturn, net: r.gross - r.discount + r.vat }))
+  // Payment Summary's rows: a note comes off the method(s) its bill was paid with.
+  const paymentMix = buildPaymentRows(entries, paymentsByOrder)
+    .map(p => ({ method: p.method, net: p.net, pctOfNet: total.net > 0 ? (p.net / total.net) * 100 : 0 }))
+    .sort((a, b) => b.net - a.net)
+  // The Covers Report's headline: guests seated, and dine-in Net Sales after dine-in returns.
+  const netOf = o => billAmounts(o, itemsByOrder[o.id], vatReg).net
+  const returns = notes.map(n => ({ order: orderById[n.order_id] || null, net: -(Number(n.net_amount) || 0) }))
+  const seated = coversTotals(bills, netOf, returns)
+  return {
+    totalNetSales: total.net, totalGross: total.gross, totalDiscount: total.discount, totalVat: total.vat,
+    billCount: bills.length, totalQty: total.qty,
+    creditNotes: { count: notes.length, net: returnsNet },
+    categoryBreakdown,
+    paymentMix,
+    covers: {
+      // Present from v15: its absence says covers were every bill's, takeaway included.
+      basis: 'seated',
+      totalCovers: seated.covers,
+      dineInBills: seated.bills,
+      takeawayBills: seated.takeaway.bills,
+      avgCheckPerCover: seated.covers > 0 ? seated.net / seated.covers : null,
+      avgBillValue: bills.length > 0 ? total.net / bills.length : null,
+    },
+  }
+}
+
 async function computePosSection(clientId, period) {
   const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
-  const fromDate = bsToAd(period.bs_year, period.bs_month, 1)
-  const toDate = bsToAd(period.bs_year, period.bs_month, monthDays)
-  toDate.setHours(23, 59, 59, 999)
-  const fromTs = fromDate.toISOString()
-  const toTs = toDate.toISOString()
+  const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
+  const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, monthDays, true)
+  if (!fromTs || !toTs) throw new Error(`No calendar dates for ${period.bs_year}-${period.bs_month}`)
 
   const posResults = await Promise.all([
     supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
     // Paged: a busy month passes 1,000 paid bills, and a bare select stopped there with no error,
     // freezing a short POS section into the snapshot.
-    fetchAllRows(() => scopedFrom('pos_orders', clientId, 'id, discount_amount, closed_at, credit_note_id, payment_method, covers')
+    fetchAllRows(() => scopedFrom('pos_orders', clientId, POS_ORDER_COLUMNS)
       .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs).order('id')),
+    // Credit notes by the moment they were ISSUED, on the same Nepal-day bounds as the bills.
+    fetchAllRows(() => scopedFrom('pos_credit_notes', clientId, POS_NOTE_COLUMNS)
+      .gte('created_at', fromTs).lte('created_at', toTs).order('id')),
   ])
   throwFirstError(posResults)
-  const [{ data: settings }, { data: orderData }] = posResults
+  const [{ data: settings }, { data: orderData }, { data: noteData }] = posResults
   const vatReg = settings?.is_vat_registered ?? true
-  const orders = (orderData || []).filter(o => !o.credit_note_id)
+  const orders = orderData || []
+  const creditNotes = noteData || []
+  const inMonth = new Set(orders.map(o => o.id))
 
-  const orderIds = orders.map(o => o.id)
-  const itemRowsRes = orderIds.length > 0
+  // The bills this month's notes credit that closed BEFORE it: a minus needs its bill's lines, table
+  // and payment method. Chunked, like every `.in()` read here.
+  const outsideIds = [...new Set(creditNotes.map(n => n.order_id).filter(id => id && !inMonth.has(id)))]
+  const outsideRes = await fetchAllRowsChunked(outsideIds,
+    ids => scopedFrom('pos_orders', clientId, POS_ORDER_COLUMNS).in('id', ids).order('id'))
+  throwFirstError([outsideRes])
+  const allOrders = [...orders, ...(outsideRes.data || [])]
+  const orderById = Object.fromEntries(allOrders.map(o => [o.id, o]))
+
+  const splitIds = allOrders.filter(o => o.payment_method === 'Split').map(o => o.id)
+  const lineResults = await Promise.all([
     // Paged: a month of bill lines runs to thousands. This one is written into a FROZEN snapshot,
     // so a truncated read wouldn't just be wrong once — it would be preserved as the permanent
     // record of that period, with no later recompute to correct it (S529).
     // Chunked as well: every paid bill's id goes in the URL, and a month of a few hundred bills
     // was a 400 Bad Request that froze the POS section as failed.
-    ? await fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', ids).order('id'))
-    : { data: [] }
-  throwFirstError([itemRowsRes])
-  const { data: itemRows } = itemRowsRes
+    fetchAllRowsChunked(allOrders.map(o => o.id),
+      ids => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', ids).order('id')),
+    // The legs of every Split bill, the read Sales Report's Payment Summary and the Z-report make.
+    fetchAllRowsChunked(splitIds,
+      ids => scopedFrom('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
+  ])
+  throwFirstError(lineResults)
+  const [{ data: itemRows }, { data: legRows }] = lineResults
 
-  const byOrder = {}
+  const itemsByOrder = {}
   const compedItems = []
   ;(itemRows || []).forEach(i => {
-    if (i.comped) { compedItems.push(i); return }
-    ;(byOrder[i.order_id] = byOrder[i.order_id] || []).push(i)
+    // A comp belongs to the month its bill closed in, so a bill pulled in for a note brings none.
+    if (i.comped) { if (inMonth.has(i.order_id)) compedItems.push(i); return }
+    ;(itemsByOrder[i.order_id] = itemsByOrder[i.order_id] || []).push(i)
   })
+  const paymentsByOrder = {}
+  ;(legRows || []).forEach(p => { (paymentsByOrder[p.order_id] = paymentsByOrder[p.order_id] || []).push(p) })
 
-  let totalNetSales = 0, totalGross = 0, totalDiscount = 0, totalVat = 0, totalQty = 0, totalCovers = 0
-  const categoryTotals = {}
-  const paymentTotals = {}
-  orders.forEach(o => {
-    const items = byOrder[o.id] || []
-    const amounts = computeOrderAmounts(o, items, vatReg)
-    totalNetSales += amounts.net; totalGross += amounts.grossAmt; totalDiscount += amounts.discount
-    totalVat += amounts.vatAmt; totalQty += amounts.totalQty; totalCovers += parseInt(o.covers || 0, 10)
-
-    const byCat = computeCategoryAmounts(o, items, vatReg)
-    Object.entries(byCat).forEach(([cat, v]) => {
-      const c = categoryTotals[cat] = categoryTotals[cat] || { category: cat, qty: 0, net: 0 }
-      c.qty += v.qty
-      c.net += v.gross - v.discount + v.vat
-    })
-
-    const method = o.payment_method || 'Cash'
-    const p = paymentTotals[method] = paymentTotals[method] || { method, net: 0 }
-    p.net += amounts.net
-  })
-  const paymentMix = Object.values(paymentTotals).map(p => ({ ...p, pctOfNet: totalNetSales > 0 ? (p.net / totalNetSales) * 100 : 0 }))
+  const figures = posSalesFigures({ orders, creditNotes, orderById, itemsByOrder, paymentsByOrder, vatReg })
 
   let compedCount = 0, compedFoodCost = 0, compedPotentialValue = 0
   if (compedItems.length > 0) {
@@ -512,16 +570,9 @@ async function computePosSection(clientId, period) {
   }
 
   return {
-    totalNetSales, totalGross, totalDiscount, totalVat, billCount: orders.length, totalQty,
-    categoryBreakdown: Object.values(categoryTotals).sort((a, b) => b.net - a.net),
-    paymentMix,
+    ...figures,
     compedBillsTotal: { count: compedCount, foodCost: compedFoodCost, potentialValue: compedPotentialValue },
     voidsWriteoffsTotal: { count: voidOrderIds.length, amount: voidsAmount },
-    covers: {
-      totalCovers,
-      avgCheckPerCover: totalCovers > 0 ? totalNetSales / totalCovers : null,
-      avgBillValue: orders.length > 0 ? totalNetSales / orders.length : null,
-    },
   }
 }
 
@@ -787,7 +838,28 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   (`estimatedEmployerSsf`, labourSource.js, shared with the Owner Dashboard). v13 charged it on
 //   basic + allowances, so an estimated v14 labour is lower by 20% of the SSF staff's allowances.
 //   A finalized-run labour is unchanged. No Trend marker: an estimate corrected, as at v12.
-export const CURRENT_SCHEMA_VERSION = 14
+// 15 (S809 3m): the Crest POS section.
+//   - IMS-HANDOFF-4: credit notes follow the Sales Report's rule (salesReportMath.js, S754). Every
+//     paid bill closed in the month counts at full value, a credit-noted one included, and every
+//     credit note ISSUED in the month is a minus at its own stored figures, whichever month its bill
+//     was in (`pos.creditNotes` = { count, net }, new; `net` is negative). v1–v14 dropped a credited
+//     bill from its month and never subtracted the note, so a bill credited in a later month was in
+//     neither month's Net Sales, and a credited bill was missing from the bill count, covers, average
+//     check, payment mix and category quantities. A month whose notes all credit its own bills has
+//     the same Net Sales either way, give or take rounding; its bill count is higher.
+//   - With it, Sales Report's other two rules: each bill is valued as it was issued
+//     (`billVatRegistered`, S809 2c) where v14 used today's VAT flag, and a Split bill is spread over
+//     its payment legs (a blank method is "Not recorded") where v14 kept 'Split' whole and called a
+//     blank method Cash. Comped Bills now include a comp on a bill that was later credited.
+//   - Covers are guests SEATED at tables (coversMath.seatedCovers; owner decision 2026-10-10), and
+//     Avg Check / Cover is dine-in Net Sales, after the notes on dine-in bills, ÷ those guests: the
+//     Covers Report's Revenue per cover. v1–v14 added every bill's covers, a takeaway's default 1
+//     included, and divided ALL Net Sales by them. `pos.covers.basis: 'seated'` marks it, with
+//     `dineInBills` and `takeawayBills`; the report page and the workbook say so on an older report.
+//   - The month runs on Nepal's day edges (bsDayBoundaryIso), not the generating device's clock zone.
+//   No Trend marker: POS Net Sales differs across the line only by a note that credits another
+//   month's bill.
+export const CURRENT_SCHEMA_VERSION = 15
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

@@ -4,7 +4,10 @@
  */
 
 import { renderHook, act } from '@testing-library/react'
-import { usePosIdleLock, posIdleLockApplies, POS_IDLE_LOCK_MS } from './usePosIdleLock'
+import {
+  usePosIdleLock, posIdleLockApplies, POS_IDLE_LOCK_MS,
+  sessionIdFromToken, readLastInput, writeLastInput, IDLE_INPUT_KEY,
+} from './usePosIdleLock'
 
 describe('who the lock applies to (S809 ACCESS-2, owner decision Q4 a)', () => {
   const pin = { pinStaff: true, boundTablet: true }
@@ -92,4 +95,76 @@ it('does nothing while disabled, and starts a full period when enabled', () => {
   expect(onLock).not.toHaveBeenCalled()
   act(() => { jest.advanceTimersByTime(1) })
   expect(onLock).toHaveBeenCalledTimes(1)
+})
+
+// S809 ACCESS-6: the idle clock survives a page load. A tablet left signed in whose browser was killed,
+// that restarted, or that took a release came back with three fresh minutes in the absent waiter's name.
+describe('a page load inside a session (S809 ACCESS-6)', () => {
+  beforeEach(() => { window.localStorage.clear() })
+
+  const tokenWith = claims => `h.${btoa(JSON.stringify(claims)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}.s`
+
+  test('the session id is read from the access token, and nothing else counts as one', () => {
+    expect(sessionIdFromToken(tokenWith({ sub: 'u-1', session_id: 'sid-1' }))).toBe('sid-1')
+    expect(sessionIdFromToken(tokenWith({ sub: 'u-1' }))).toBeNull()
+    expect(sessionIdFromToken('not a token')).toBeNull()
+    expect(sessionIdFromToken(undefined)).toBeNull()
+  })
+
+  test('the last input is kept per session, and another session reads nothing', () => {
+    writeLastInput('sid-1', 1234)
+    expect(readLastInput('sid-1')).toBe(1234)
+    expect(readLastInput('sid-2')).toBeNull()
+    expect(readLastInput(null)).toBeNull()
+    window.localStorage.setItem(IDLE_INPUT_KEY, 'not json')
+    expect(readLastInput('sid-1')).toBeNull()
+  })
+
+  it('resumes from the last input: only what is left of the period is armed', () => {
+    writeLastInput('sid-1', Date.now() - (LOCK - 30 * 1000))
+    const onLock = jest.fn()
+    renderHook(() => usePosIdleLock(true, noWarn, onLock, LOCK, 'sid-1'))
+    act(() => { jest.advanceTimersByTime(30 * 1000 - 1) })
+    expect(onLock).not.toHaveBeenCalled()
+    act(() => { jest.advanceTimersByTime(1) })
+    expect(onLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('locks at once when the period was already spent before the page loaded', () => {
+    writeLastInput('sid-1', Date.now() - LOCK - 60 * 60 * 1000)
+    const onLock = jest.fn()
+    renderHook(() => usePosIdleLock(true, noWarn, onLock, LOCK, 'sid-1'))
+    expect(onLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a new sign-in starts a full period, whatever an earlier session left', () => {
+    writeLastInput('sid-old', Date.now() - LOCK * 10)
+    const onLock = jest.fn()
+    renderHook(() => usePosIdleLock(true, noWarn, onLock, LOCK, 'sid-new'))
+    act(() => { jest.advanceTimersByTime(LOCK - 1) })
+    expect(onLock).not.toHaveBeenCalled()
+    expect(readLastInput('sid-new')).not.toBeNull()
+    act(() => { jest.advanceTimersByTime(1) })
+    expect(onLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a touch is kept even while the lock is off, so leaving the Kitchen Display starts from it', () => {
+    const onLock = jest.fn()
+    const { rerender } = renderHook(({ on }) => usePosIdleLock(on, noWarn, onLock, LOCK, 'sid-1'), { initialProps: { on: false } })
+    act(() => { jest.advanceTimersByTime(LOCK * 3) })
+    tap()
+    expect(readLastInput('sid-1')).toBe(Date.now())
+    rerender({ on: true })
+    act(() => { jest.advanceTimersByTime(LOCK - 1) })
+    expect(onLock).not.toHaveBeenCalled()
+    act(() => { jest.advanceTimersByTime(1) })
+    expect(onLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('without a session id nothing is kept, as before', () => {
+    const onLock = jest.fn()
+    renderHook(() => usePosIdleLock(true, noWarn, onLock))
+    tap()
+    expect(window.localStorage.getItem(IDLE_INPUT_KEY)).toBeNull()
+  })
 })

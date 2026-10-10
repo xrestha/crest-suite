@@ -17,7 +17,8 @@ const CORS = {
  * counter of a client who had left could still sign a waiter in. Delete Client cascades the rows
  * away eventually; Archive and Clear never did.
  *
- * The same two writes as `revoke_pos_device` and `retire_pos_legacy_device_key`, done here with the
+ * The same two writes as `revoke_pos_device` and `retire_pos_legacy_device_key` (dropped in S809 3h,
+ * with nothing left that reads the shared key), done here with the
  * service role because both functions refuse a caller with no session (`pos_device_caller_may_manage`
  * keys on auth.uid(), which is NULL under the service role). The legacy key is ROTATED, not just
  * stamped, exactly as the SQL function does, so every comparison against the old value — a tablet
@@ -41,6 +42,11 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     .is('revoked_at', null)
     .select('id, client_id, name, created_by, created_at, last_used_at, revoked_at, revoked_by')
   if (devErr) throw new Error(`Failed to revoke this client's POS tablet keys: ${devErr.message}`)
+  // S809 3h (owner decision Q18 a): revoking a tablet ends the sessions opened on it. A till lock now
+  // ends only its own tablet's session, so the till logins still signed in are ended here, as the
+  // counting tablets' are below (pos_revoke_till_sessions, migration 20261010180000, service role only).
+  const { error: posSessErr } = await admin.rpc('pos_revoke_till_sessions', { p_client_id: clientId })
+  if (posSessErr) throw new Error(`Failed to sign out this client's POS tills: ${posSessErr.message}`)
 
   const { data: retired, error: keyErr } = await admin
     .from('client_secrets')
@@ -940,7 +946,7 @@ Deno.serve(async (req) => {
     //
     // The marker per module mirrors that module's own RESTRICTIVE RLS predicate exactly, so
     // "is a POS staff account" means the same thing here as it does to the database:
-    //   pos -> pos_email IS NOT NULL   (same filter as get_pos_staff / is_pos_pin_staff())
+    //   pos -> pos_email IS NOT NULL   (same filter as get_pos_device_staff / is_pos_pin_staff())
     //   ims -> ims_role  IS NOT NULL   (same filter as is_ims_staff())
     //   hr  -> hr_role   IS NOT NULL   (same filter as is_hr_role_staff())
     const STAFF_MARKER: Record<string, (t: Record<string, unknown>) => boolean> = {

@@ -17,13 +17,15 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
 import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
-import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
+import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, todayNepalBs, bsSlash } from './reportRange'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate, nepalHour } from '../../../shared/nepalTime'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import {
   NOT_RECORDED, SPLIT_NO_BREAKDOWN, zeroAmounts, addAmounts, buildSalesEntries, paymentSharesOf,
-  buildPaymentRows, sortByMethodOrder, buildGroupedRows, partyNameKey, mergeNameOnlyParties,
+  buildPaymentRows, sortByMethodOrder, buildGroupedRows, partyNameKey, mergeNameOnlyParties, fiscalYearsSince,
 } from './salesReportMath'
+import { barCategoriesOf, NO_BAR_TEXT } from '../ticketRouting'
+import { settleWithin } from '../../../utils/withTimeout'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
@@ -155,6 +157,9 @@ const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
 // it per bill (salesReportMath.js), so a past Tax Invoice keeps its VAT after a deregistration.
 const ORDER_COLUMNS = 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, opened_at, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name, vat_registered'
 const CREDIT_NOTE_COLUMNS = 'id, order_id, credit_note_no, invoice_fy, reason, gross_amount, discount_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount, buyer_name, buyer_pan, issued_by, created_at'
+// The 1L+ tab's ceiling on one fiscal year's bills, as PurchaseOneLakhAboveReport.js has for
+// purchases (S809 3m, REPORTS-2). Reaching it is a row-cap failure, never a short year.
+const ONE_LAKH_READ_MAX_ROWS = 200000
 
 // What a delivery row adds to Outstanding: an unsettled bill its amount; a credit note its (minus)
 // amount only while the bill it credits is still unsettled — a credit note cannot un-remit money.
@@ -245,9 +250,9 @@ export default function SalesReport() {
   const [vatReg, setVatReg] = useState(true)
   // For the credit note number on a minus row, as the Credit Note Book prints it.
   const [invoicePrefix, setInvoicePrefix] = useState('')
-  // The same Kitchen/Bar split the tills route tickets by (POS Setup → Ticket Routing),
-  // and the same ['Beverage'] fallback PosOrders.jsx and PosTableManagement.jsx use — if this
-  // page disagreed with them, the Bar figure would not match the BOT tickets it came from.
+  // The same Kitchen/Bar split the tills route tickets by (POS Setup → Ticket Routing), read through
+  // the same barCategoriesOf as PosOrders.jsx and PosTableManagement.jsx (empty = no bar, S809 3m) —
+  // if this page disagreed with them, the Bar figure would not match the BOT tickets it came from.
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
   const [staffNames, setStaffNames] = useState({})
   const [rangeLoading, setRangeLoading] = useState(true)
@@ -303,8 +308,7 @@ export default function SalesReport() {
     const [{ data: orderData }, { data: settings }, { data: profs }, { data: noteData }] = results
     setVatReg(settings?.is_vat_registered ?? true)
     setInvoicePrefix(settings?.invoice_prefix || '')
-    setBotCategories(new Set(Array.isArray(settings?.pos_bot_categories) && settings.pos_bot_categories.length > 0
-      ? settings.pos_bot_categories : ['Beverage']))
+    setBotCategories(new Set(barCategoriesOf(settings?.pos_bot_categories)))
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     const orderList = orderData || []
     const noteList = noteData || []
@@ -731,23 +735,36 @@ export default function SalesReport() {
   const [oneLakhLoading, setOneLakhLoading] = useState(true)
   const [oneLakhError, setOneLakhError] = useState(null)
 
+  // The fiscal-year list (S809 3m, REPORTS-2) runs from the year of the outlet's FIRST bill to this
+  // one. It used to read every bill ever given a fiscal year, on every visit whatever the tab: about
+  // 100 requests in a row for a busy outlet, and past 1,00,000 bills a row-cap failure that left only
+  // this year to pick, so last year's Annexure 13 could not be opened. Now it is one row, read when
+  // the 1L+ tab opens. Its failure has its own slot (an error object, worded by errorInfo): it shared
+  // oneLakhError, which loadOneLakh clears on its first line, so the tab's own load wiped it off the
+  // screen, or a late failure replaced a correct year's parties with "Could not load" (S699 shape).
+  const [fyListError, setFyListError] = useState(null)
+  const [fyListFor, setFyListFor] = useState(null)
   useEffect(() => {
-    if (!clientId) return
-    // Paged: this builds the fiscal-year dropdown, so a truncated read makes older fiscal years
-    // simply not appear as options — the 1L+ report for a past year then can't be opened at all.
-    // One narrow column, once per page load, so the extra round trips are cheap.
-    fetchAllRows(() => scopedFrom('pos_orders', 'invoice_fy').not('invoice_fy', 'is', null).order('id'))
+    if (!clientId || tab !== 'onelakh' || fyListFor === clientId) return
+    let live = true
+    setFyListError(null)
+    settleWithin(scopedFrom('pos_orders', 'invoice_fy').not('invoice_fy', 'is', null)
+      .order('closed_at', { ascending: true }).order('id').limit(1), 20000, 'Listing the fiscal years')
       .then(({ data, error }) => {
-        // S612 silent-zero rule: a failed read here silently drops past fiscal years from the picker.
-        if (error) { setOneLakhError(error.message || String(error)); return }
-        const fys = [...new Set((data || []).map(r => r.invoice_fy))].sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
-        if (fys.length > 0) {
-          setFyOptions(fys.includes(currentFy) ? fys : [currentFy, ...fys])
-          if (!fys.includes(selectedFy)) setSelectedFy(fys[0])
-        }
+        if (!live) return
+        // S612 silent-zero rule: a failed read must say so, not quietly offer this year alone.
+        // The picker then holds this year alone, never a list left from another client.
+        if (error) { setFyListError(error); setFyOptions([currentFy]); setSelectedFy(currentFy); return }
+        const listed = fiscalYearsSince(data?.[0]?.invoice_fy, todayNepalBs())
+        const fys = listed.includes(currentFy) ? listed : [currentFy, ...listed]
+        setFyOptions(fys)
+        setSelectedFy(prev => (fys.includes(prev) ? prev : fys[0]))
+        setFyListFor(clientId)
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
+    // Leaving the tab drops a read still in flight; opening the tab again asks again.
+    return () => { live = false }
+  }, [clientId, tab, fyListFor, currentFy, scopedFrom])
+  const fyListErrorInfo = tab === 'onelakh' && fyListError ? errorInfo(fyListError, 'operator') : null
 
   // Separate from rangeReq: the two pipelines are independent, and one shared guard would have each
   // cancelling the other. Keyed on the fiscal year, which is what arrowing the FY <select> moves.
@@ -768,9 +785,12 @@ export default function SalesReport() {
       // bill from the fiscal year it was sold in even when its credit note was issued in the next
       // one. Now every bill counts in its own year, and the returns issued in the year are netted
       // off below — the same bills-plus-minus-rows rule as the date-range tabs.
+      //
+      // Up to 2,00,000 bills (S809 3m, REPORTS-2), the purchase twin's ceiling: an outlet billing
+      // 300 a day closes 1,09,500 in a year, past fetchAllRows' default of 1,00,000.
       fetchAllRows(() => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan, discount_amount, vat_registered')
         .eq('status', 'billed').eq('close_type', 'paid').eq('invoice_fy', selectedFy)
-        .order('id')),
+        .order('id'), { maxRows: ONE_LAKH_READ_MAX_ROWS }),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
       // Credit notes ISSUED in this fiscal year. A note's own invoice_fy is the year it was issued
       // in (IssueCreditNoteModal numbers it into that year's sequence), not the credited bill's.
@@ -1167,6 +1187,19 @@ export default function SalesReport() {
             switched off and those columns are blank rather than real. Reload the page to try again.
           </p>
           {bizErrorInfo.detail && <p className="action-error-detail">{bizErrorInfo.detail}</p>}
+        </div>
+      )}
+      {/* S809 3m (REPORTS-2): the fiscal-year list has its own notice, so the tab's own load cannot
+          clear it, and a failed list never replaces a year's parties that did load. */}
+      {fyListErrorInfo && (
+        <div className="card report-error" role="alert" style={{ marginBottom: 16 }}>
+          <div className="report-error-title">Could not list the earlier fiscal years</div>
+          <p className="report-error-body">{fyListErrorInfo.text}</p>
+          <p className="report-error-hint">
+            Until they load, only FY {currentFy} can be picked above. Open another tab and come back
+            to 1L+ to try again.
+          </p>
+          {fyListErrorInfo.detail && <p className="action-error-detail">{fyListErrorInfo.detail}</p>}
         </div>
       )}
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
@@ -1778,7 +1811,9 @@ export default function SalesReport() {
               ))}
             </div>
             <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
-              {productAxis === 'station'
+              {productAxis === 'station' && botCategories.size === 0
+                ? `${NO_BAR_TEXT} That is how POS Setup → Ticket Routing is set today, so every line here is Kitchen (KOT).`
+                : productAxis === 'station'
                 ? `Bar (BOT) is every line in a bar category (${[...botCategories].join(', ')}) — the same split the tills print BOT tickets from, set in POS Setup → Ticket Routing. Everything else is Kitchen (KOT).`
                 : productAxis === 'vat'
                 ? 'Taxable is every line billed at a VAT rate above zero, Non-Taxable everything else — as billed, not as the item is configured today.'

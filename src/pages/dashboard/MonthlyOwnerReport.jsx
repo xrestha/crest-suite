@@ -276,6 +276,9 @@ export default function MonthlyOwnerReport() {
   // The figures some rows describe changed meaning at a version (the S696 par rule at v4, the
   // Wastage item set at v10); a frozen row keeps its own, so its tip must describe its own.
   const schemaVersion = report?.schema_version ?? snapshot?.schemaVersion ?? 0
+  // v15 (S809 3m): the till section counts seated guests and nets credit notes by issue month. Read
+  // from the section's own marker, the way foodCostBasisOf reads the combined one.
+  const posSeated = snapshot?.pos?.covers?.basis === 'seated'
 
   // Color bands match Owner Dashboard's live KPI cards exactly, so the same rough magnitude
   // never reads as a different "health" color depending on which page you're looking at.
@@ -663,17 +666,39 @@ export default function MonthlyOwnerReport() {
                     <Row label="Net Sales" value={fmt(snapshot.pos.totalNetSales)}
                       tip="Independently derived from the Bill Register — will not tie out to the penny with Revenue above, which comes from Sales Entries instead. Different discount/VAT rounding basis, same underlying bills." />
                     <Row label="Bills / Qty Sold" value={`${num(snapshot.pos.billCount)} / ${num(snapshot.pos.totalQty)}`} />
+                    {/* v15 (S809 3m): the credit notes Net Sales is after. Absent on an older report. */}
+                    {snapshot.pos.creditNotes?.count > 0 && (
+                      <Row label="Credit Notes" value={`${num(snapshot.pos.creditNotes.count)} — ${fmt(snapshot.pos.creditNotes.net)}`}
+                        tip="Credit notes issued this month, taken off Net Sales in the month they were issued. The bill each one cancels still counts in the month it was sold, as on the Sales Report." />
+                    )}
                     <Row label="Discount Given" value={fmt(snapshot.pos.totalDiscount)} />
                     <Row label="Comped Bills" value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value`}
                       tip="Bills given away free (staff meals, goodwill, promo) — 'potential value' is what they would have cost the guest at full price." />
                     <Row label="Voids / Write-offs" value={`${num(snapshot.pos.voidsWriteoffsTotal?.count)} — ${fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}`}
                       color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red-text)' : undefined}
                       tip="Void = cancelled before payment (e.g. a wrong order). Write-off = billed but never collected. Both are lost potential revenue." />
+                    {/* v15 (S809 3m, owner decision 2026-10-10): covers are guests seated at tables. An
+                        older report keeps its own count and its own tip, with the note below. */}
+                    {posSeated && (
+                      <Row label="Guests Seated" value={num(snapshot.pos.covers.totalCovers)}
+                        tip="Guests seated at tables this month: the covers entered for each table's order, a bill later cancelled by a credit note included. Takeaway and delivery bills have no guests, so they are not counted. The same count as the Covers Report." />
+                    )}
                     <Row label="Avg Check / Cover" value={fmt(snapshot.pos.covers?.avgCheckPerCover)}
-                      tip="Average spend per guest ('cover' = one seated diner), not per bill — a table of 4 sharing one bill counts as 4 covers." />
+                      tip={posSeated
+                        ? 'Average spend per seated guest: dine-in Net Sales (after any credit notes on dine-in bills) ÷ guests seated. Takeaway and delivery are left out of both, as on the Covers Report.'
+                        : "Average spend per guest ('cover' = one seated diner), not per bill — a table of 4 sharing one bill counts as 4 covers."} />
                     <Row label="Avg Bill Value" value={fmt(snapshot.pos.covers?.avgBillValue)} />
                   </tbody></table>
                 </div>
+                {!posSeated && (
+                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+                    This report was made before Crest changed how the till section counts. Its covers include
+                    one for each takeaway and delivery bill, and a bill later cancelled by a credit note is left
+                    out of the month altogether. Reports made since count only guests seated at tables, and
+                    keep a cancelled bill in the month it was sold, taking its credit note off in the month it
+                    was issued.
+                  </p>
+                )}
 
                 {snapshot.pos.categoryBreakdown?.length > 0 && (
                   <div className="table-wrap" style={{ marginBottom: 8 }}>

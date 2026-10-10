@@ -699,7 +699,7 @@ export default function AdminDashboardOverview() {
                               View as
                             </button>
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-                              onClick={() => { switchAdminClient(c.id, c.name); navigate('/periods') }}>
+                              onClick={async () => { if (await switchAdminClient(c.id, c.name)) navigate('/periods') }}>
                               Periods
                             </button>
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}

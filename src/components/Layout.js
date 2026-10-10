@@ -11,7 +11,7 @@ import AppErrorBoundary from './AppErrorBoundary'
 // Aliased — `Calculator` is already taken in this file by the lucide icon used for the HR
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
-import { usePosIdleLock, posIdleLockApplies } from '../modules/pos/usePosIdleLock'
+import { usePosIdleLock, posIdleLockApplies, sessionIdFromToken, POS_IDLE_LOCK_MS } from '../modules/pos/usePosIdleLock'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { prefetchHrPages } from '../shared/prefetchHrPages'
@@ -393,7 +393,7 @@ export default function Layout() {
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
           outletMoved, dismissOutletMoved, checkOutlet, outletHeld, returnToOutlet,
           hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
-          imsCountOnly, isStationTeam,
+          imsCountOnly, isStationTeam, session,
           suitePlan } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
@@ -646,8 +646,12 @@ export default function Layout() {
     // A counting tablet goes back to its PIN screen (S792, D39): the email /login page is a door
     // the next counter has no key for, so the tablet read as broken until a manager came.
     const to = imsCountOnly ? IMS_COUNT_LOGIN : isPosDevice && isPinStaff ? '/pos/login' : '/login'
+    // S809 ACCESS-7 (owner decision Q18 a): a till lock, idle or Lock POS, ends THIS tablet's session
+    // only. The library's default ('global') ended every session of the login, so a waiter's second
+    // till dropped to the email login within the hour and lost its unsent order. A lost tablet is cut
+    // off by revoking it in Till Devices, which ends the sessions opened on it (20261010180000).
     // false: the network sign-out failed and the device is already reloading there (S798).
-    if (!(await signOut({ to }))) return
+    if (!(await signOut({ to, scope: isPinStaff ? 'local' : undefined }))) return
     navigate(to)
   }
 
@@ -678,12 +682,15 @@ export default function Layout() {
     stationTeam: !!isStationTeam,
     path: location.pathname,
   })
-  usePosIdleLock(idleLockEnabled, setIdleLockSecs, handleSignOut)
+  // S809 ACCESS-6: a PIN session's last input is kept on the device under its session id, so a page
+  // load (a killed tab, a restart, a release) resumes the idle clock instead of starting it again.
+  const idleSessionKey = useMemo(() => sessionIdFromToken(session?.access_token), [session?.access_token])
+  usePosIdleLock(idleLockEnabled, setIdleLockSecs, handleSignOut, POS_IDLE_LOCK_MS, isPinStaff ? idleSessionKey : null)
   // The counting tablet's lock (S792, owner decision D39): the same mechanics, ten minutes, for a
   // count PIN session only — `imsCountOnly` keys on the raw `ims_email` column, so an Owner or an
   // IMS staff email login counting on a laptop is never locked. The two locks never both run: a
   // count PIN account carries no pos_role.
-  usePosIdleLock(!!imsCountOnly, setIdleLockSecs, handleSignOut, IMS_COUNT_IDLE_LOCK_MS)
+  usePosIdleLock(!!imsCountOnly, setIdleLockSecs, handleSignOut, IMS_COUNT_IDLE_LOCK_MS, imsCountOnly ? idleSessionKey : null)
 
   // Single source of truth for "can this user see this destination" — used by the rendered nav,
   // the command palette's search index, and pinned favorites, so gating can never drift between

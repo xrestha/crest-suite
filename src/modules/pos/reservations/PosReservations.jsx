@@ -400,7 +400,7 @@ export default function PosReservations() {
         items={[
           r.status === 'booked' && canTransition(r.status, 'arrived') && { key: 'arrived', label: 'Arrived', onSelect: () => transition(r, 'arrived') },
           r.status !== 'arrived' && canTransition(r.status, 'seated') && { key: 'seat', label: 'Seat…', onSelect: () => setSeatTarget(r) },
-          canTransition(r.status, 'completed') && r.status !== 'seated' && { key: 'done', label: 'Mark done…', onSelect: () => setDoneTarget(r) },
+          canTransition(r.status, 'completed') && { key: 'done', label: 'Mark done…', onSelect: () => setDoneTarget(r) },
           '-',
           canTransition(r.status, 'no_show') && { key: 'noshow', label: 'No-show…', danger: true, onSelect: () => setNoShowTarget(r) },
           canTransition(r.status, 'cancelled') && { key: 'cancel', label: 'Cancel booking…', danger: true, onSelect: () => { setCancelTarget(r); setCancelReason('') } },
@@ -804,9 +804,16 @@ export default function PosReservations() {
           onConfirm={confirmDone}
           onCancel={() => setDoneTarget(null)}
         >
+          {/* S809 RESERVATIONS-5: a Seated row offers this too, for a booking its closed bill did not
+              complete; the till's warning sends the cashier here. */}
           <ul style={{ margin: 0, paddingLeft: 18 }}>
-            <li>Records the visit as kept, with no order linked: it counts as a kept booking on the Covers Report but adds no covers.</li>
-            <li>For a party seated by hand or while the till was offline. If their order is open on the floor, close the bill instead — that completes the booking on its own.</li>
+            {doneTarget.status === 'seated' ? (<>
+              <li>Records the visit as finished. Its bill stays linked, so its guests still count as booked covers on the Covers Report.</li>
+              <li>Closing their bill does this on its own. Use it when the bill has closed and the booking still shows Seated.</li>
+            </>) : (<>
+              <li>Records the visit as kept, with no order linked: it counts as a kept booking on the Covers Report but adds no covers.</li>
+              <li>For a party seated by hand or while the till was offline. Closing their bill will not complete it: only a booking seated with Seat completes when its bill closes.</li>
+            </>)}
             <li>This cannot be undone.</li>
           </ul>
         </ConfirmModal>

@@ -173,3 +173,14 @@ export function waitingMinutes(res, nowMs = Date.now()) {
 export function tableIdsOf(res) {
   return (res.pos_reservation_tables || []).map(t => t.table_id).filter(Boolean)
 }
+
+/**
+ * The booking a host seats by tapping this table on the floor, or null (S809 RESERVATIONS-2). The
+ * floor tile's own order: a booking due now, then a party marked arrived whatever the clock says. A
+ * party who waited past their booking's window, or came very early, is still the one standing there;
+ * the tap used to give them the covers numpad, so the booking stayed Arrived for good.
+ */
+export function bookingToSeatOnTap(rows, tableId, nowMs = Date.now(), seatWindowMinutes = 45) {
+  const onTable = (rows || []).filter(r => tableIdsOf(r).includes(tableId))
+  return onTable.find(r => isDue(r, nowMs, seatWindowMinutes)) || onTable.find(r => r.status === 'arrived') || null
+}

@@ -13,6 +13,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBsSafe, formatBsDay, formatAd } from '../../../utils/bsCalendar'
 import { turnoverByBand, dineInOnly, PARTY_BANDS } from '../reports/coversMath'
+import { barCategoriesOf, NO_BAR_TEXT } from '../ticketRouting'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -352,8 +353,9 @@ export default function PosTableManagement() {
     if (rErr || sErr) { setRoutingLoadError(loadFailedError('the ticket routing', rErr || sErr)); setRoutingLoading(false); return }
     const cats = Array.from(new Set((recipeData || []).map(r => r.category).filter(Boolean))).sort()
     setCategories(cats)
-    const botArr = settingsData?.pos_bot_categories ?? ['Beverage']
-    setBotCats(new Set(botArr))
+    // Never set means the Beverage default; an empty list is a saved "no bar" (S809 3m, Q15), and
+    // every till reads it the same way now (ticketRouting.js).
+    setBotCats(new Set(barCategoriesOf(settingsData?.pos_bot_categories)))
     setRoutingLoading(false)
     setRoutingLoaded(true)
   }
@@ -886,6 +888,13 @@ export default function PosTableManagement() {
                   )
                 })}
               </div>
+
+              {/* S809 3m (Q15): every category on KOT is a real choice, saved as an empty bar list;
+                  the tills then print every dish on the kitchen ticket and hide their BOT button.
+                  The till's own test (an empty list), so the line and the tills cannot disagree. */}
+              {botCats.size === 0 && (
+                <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>{NO_BAR_TEXT}</p>
+              )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18 }}>
                 <button className="btn btn-primary" onClick={saveRouting} disabled={routingSaving || !routingLoaded}>

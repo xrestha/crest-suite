@@ -1,4 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
+import { joinNote } from '../kitchenNotes'
 // Pure constants and tiny pure helpers for PosOrders.jsx — no React, no Supabase, no closures.
 // Split out so the main component file is just state + data flow.
 
@@ -55,12 +56,20 @@ export const OPEN_ORDER_SELECT =
 // a line flagged sent before the column existed (its sent_qty defaulted to 0). The embedded options
 // snapshot becomes `options` (in display order) and the selection key's ids `option_ids`, so a
 // reopened customized line is the same shape the choice window builds.
+//
+// S809 3f: a line read back from the offline queue is a save's payload — its `options` are the option
+// ids, and the choices the cart showed ride beside them (`option_snapshot`, `option_summary`; see
+// offlineUpload.queuedRows). Read as a plain dish, its next save dropped the choices and a conflict
+// recovery doubled it.
 export const cartLineFromStored = i => {
-  const { pos_order_item_options: snap, ...line } = i
+  const { pos_order_item_options: snap, option_snapshot: kept, ...line } = i
   const out = { ...line, sent_qty: i.sent_qty || (i.sent_to_kot ? i.qty : 0) }
-  if (line.selection_key) {
-    out.option_ids = String(line.selection_key).split('+').filter(Boolean)
-    out.options = [...(snap || line.options || [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+  const queuedIds = !line.selection_key && Array.isArray(line.options) && line.options.length > 0
+    && line.options.every(o => typeof o === 'string') ? line.options : null
+  if (queuedIds) out.selection_key = selectionKeyOf(queuedIds)
+  if (out.selection_key) {
+    out.option_ids = String(out.selection_key).split('+').filter(Boolean)
+    out.options = [...(snap || kept || (queuedIds ? [] : line.options) || [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
   }
   return out
 }
@@ -143,13 +152,52 @@ export function mergeUnsentLines(base, incoming) {
         qty: (Number(l.qty) || 0) + (Number(inc.qty) || 0),
         sent_to_kot: false,
         sent_qty: l.sent_to_kot ? l.qty : (l.sent_qty || 0),
-        notes: l.notes || inc.notes || null,
+        // Both notes, part by part (S809 3g): a note typed on this device, a guest's allergy note
+        // included, used to vanish whenever the other copy of the line had any note at all.
+        notes: joinNote(l.notes, inc.notes) || null,
       }
     } else {
       merged.push({ ...inc, sent_to_kot: false, sent_qty: 0 })
     }
   }
   return merged
+}
+
+// mergeUnsentLines for lines that carry a sent count of their own (S809 3f, owner decision Q2,
+// 2026-10-10): dishes this till printed while offline, put back onto the SAME open order after a
+// conflict, are already at the kitchen or bar, so each merged line gains that count as sent and only
+// what never printed goes on the next ticket. An incoming line with no sent count merges as unsent.
+export function mergeRecoveredLines(base, incoming) {
+  let merged = (base || []).map(l => ({ ...l }))
+  for (const inc of incoming || []) {
+    const sent = Math.max(0, Math.min(Number(inc.sent_qty) || 0, Number(inc.qty) || 0))
+    const at = inc.recipe_id ? merged.findIndex(l => lineKeyOf(l) === lineKeyOf(inc)) : -1
+    const idx = at >= 0 ? at : merged.length // where mergeUnsentLines puts it: in place, or appended
+    merged = mergeUnsentLines(merged, [{ ...inc, sent_to_kot: false, sent_qty: 0 }])
+    if (sent <= 0) continue
+    const m = merged[idx]
+    const sentQty = (Number(m.sent_qty) || 0) + sent
+    merged[idx] = { ...m, sent_qty: sentQty, sent_to_kot: sentQty >= (Number(m.qty) || 0) }
+  }
+  return merged
+}
+
+// What a till lock kept (posLockedCart.js) puts back on the order as it now stands (S809
+// ORDER-FLOW-10): the units the order lacks (missingFromServer), but never more of a line than the till
+// had NOT saved when it locked (`unsaved_qty`). A dish saved before the lock (served, billed, or taken
+// off on another till since) therefore never comes back as "not sent". A cart kept by an older build
+// has no `unsaved_qty`; its line's unsent units cap it instead.
+export function keptLinesToRestore(keptLines, serverLines) {
+  const cap = new Map()
+  for (const i of keptLines || []) {
+    const qty = Number(i.qty) || 0
+    const n = i.unsaved_qty != null ? Number(i.unsaved_qty) || 0
+      : i.sent_to_kot ? 0 : qty - (Number(i.sent_qty) || 0)
+    cap.set(lineKeyOf(i), (cap.get(lineKeyOf(i)) || 0) + Math.max(0, Math.min(n, qty)))
+  }
+  return missingFromServer(keptLines, serverLines)
+    .map(m => ({ ...m, qty: Math.min(m.qty, cap.get(lineKeyOf(m)) || 0) }))
+    .filter(m => m.qty > 0)
 }
 
 // Whether the order's stored lines are exactly what `payload` (toItemPayload rows) would store — same

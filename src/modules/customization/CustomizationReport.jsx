@@ -17,7 +17,7 @@ import RangePresets from '../pos/reports/RangePresets'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { loadDeltaExplosion, deltaItems } from '../../utils/orderLineIngredients'
 import { loadOptionCatalog } from './customizationData'
-import { buildCustomizationReport, withOptionCosts, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS } from './customizationReportCalc'
+import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS } from './customizationReportCalc'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer } from 'recharts'
 import ChartCard from '../../components/ChartCard'
 import { compareFigures } from '../../shared/compareFigures'
@@ -184,6 +184,8 @@ export default function CustomizationReport() {
         // Today's catalog: which group a choice belongs to (a size is not an add-on) and its list
         // price (a free-by-design choice is not a loss). A failed catalog read is a failed report
         // read — without it the tiles and the Margin tab would state things they cannot know.
+        // S809 3o (REPORTS-12): each bill's own snapshot decides both now; the catalog only fills a
+        // snapshot row that carries no kind or list price.
         loadOptionCatalog(scopedFrom),
       ])
       const err1 = firstError([ordersRes, attachRes]) || catalog.error
@@ -197,7 +199,7 @@ export default function CustomizationReport() {
         fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', 'id, order_id, recipe_id, name, qty, comped, selection_key')
           .in('order_id', ids).order('id')),
         fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_item_options',
-          'id, order_item_id, option_id, group_name, option_name, is_removal, price_delta, ingredient_deltas')
+          'id, order_item_id, option_id, group_name, group_kind, option_name, is_removal, price_delta, list_price_delta, included, ingredient_deltas')
           .in('order_id', ids).order('id')),
       ])
       const err2 = firstError([linesRes, snapRes])
@@ -232,12 +234,15 @@ export default function CustomizationReport() {
 
       // Choice cost needs IMS (stock lines and item rates). A failure here costs the Margin tab
       // only, and says so there — the three sales tabs stand on their own reads.
+      // S809 3o (REPORTS-4): every distinct set of stock lines the range's plates carried, not one
+      // sample per choice, so each size's portion is costed as that size's.
       let costed = null
-      if (imsOn && report.options.some(o => o.sampleDeltas?.length)) {
+      const deltaSets = allDeltaSets(report.options)
+      if (imsOn && deltaSets.length > 0) {
         try {
-          const explosion = await loadDeltaExplosion(supabase, report.options.map(o => o.sampleDeltas))
+          const explosion = await loadDeltaExplosion(supabase, deltaSets)
           const toItems = d => deltaItems(d, explosion)
-          const itemIds = [...new Set(report.options.flatMap(o => (o.sampleDeltas?.length ? toItems(o.sampleDeltas) : []).map(x => x.item_id)))]
+          const itemIds = [...new Set(deltaSets.flatMap(d => toItems(d).map(x => x.item_id)))]
           const ratesRes = await fetchAllRowsChunked(itemIds, ids => scopedFrom('items', 'id, per_uom_rate').in('id', ids).order('id'))
           if (ratesRes.error) throw ratesRes.error
           const rateByItem = Object.fromEntries((ratesRes.data || []).map(r => [r.id, Number(r.per_uom_rate) || 0]))
@@ -309,9 +314,10 @@ export default function CustomizationReport() {
     })))
     if (marginSorted.length) {
       add('Choice margin', 'Customization — Choice margin', marginSorted.map(o => ({
-        Choice: o.option_name, 'List price (NPR)': o.listPriceDelta == null ? '' : Math.round(o.listPriceDelta),
+        Choice: o.option_name, 'List price as billed (NPR, average per plate)': o.listPriceDelta == null ? '' : Math.round(o.listPriceDelta),
         'Charged per plate (NPR)': Math.round(o.chargedPerPick),
         'Cost per plate (NPR, today\'s rates)': o.costPerPick == null ? '' : Math.round(o.costPerPick),
+        'Plates the cost is averaged over': o.costPerPick == null ? '' : o.costedPicks,
         'Margin per plate (NPR)': o.costPerPick == null ? '' : Math.round(o.chargedPerPick - o.costPerPick),
         'Times picked': o.picks,
       })))
@@ -325,7 +331,9 @@ export default function CustomizationReport() {
   const marginCell = o => {
     if (o.costPerPick == null) return <td style={{ textAlign: 'right' }}>—</td>
     const margin = o.chargedPerPick - o.costPerPick
-    const free = o.listPriceDelta === 0 || (o.listPriceDelta == null && o.chargedPerPick === 0)
+    // S809 3o (REPORTS-12): free only when every plate was BILLED at a list price of 0. A choice
+    // charged all month and made free since keeps its loss in red.
+    const free = o.freeByDesign || (o.listPriceDelta == null && o.chargedPerPick === 0)
     const sizeBelow = o.listPriceDelta != null && o.listPriceDelta < 0
     if (free || sizeBelow) {
       // Not an upsell that lost money: a choice priced at 0 by design (or a size priced below the
@@ -551,14 +559,21 @@ export default function CustomizationReport() {
                 <table className="data-table">
                   <thead><tr>
                     <SortTh label="Choice" sortKey="option_name" sort={sort} onSort={toggleSort} />
-                    <SortTh label="Charged / plate" tip="Average price this choice added per paid plate, ex-VAT. A free 'first N' pick or a comped plate lowers it below the list price." sortKey="chargedPerPick" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Cost / plate" tip="The choice's stock lines as they were on the bill, valued at today's item rates." sortKey="costPerPick" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Margin / plate" tip="Charged minus cost. A choice that is free by design is shown in grey — its cost belongs to the dish, not to an upsell." sortKey="margin" sort={sort} onSort={toggleSort} numeric />
+                    <SortTh label="Charged / plate" tip="Average price this choice added per plate, ex-VAT, at the price each bill charged. A free 'first N' pick or a comped plate lowers it below the list price." sortKey="chargedPerPick" sort={sort} onSort={toggleSort} numeric />
+                    <SortTh label="Cost / plate" tip="Each plate's own stock lines for this choice as they were on its bill (a Large bowl's bigger portion included), valued at today's item rates and averaged. Plates billed before the choice had stock lines are left out." sortKey="costPerPick" sort={sort} onSort={toggleSort} numeric />
+                    <SortTh label="Margin / plate" tip="Charged minus cost. A choice that was free on every bill is shown in grey — its cost belongs to the dish, not to an upsell." sortKey="margin" sort={sort} onSort={toggleSort} numeric />
                     <SortTh label="Times picked" sortKey="picks" sort={sort} onSort={toggleSort} numeric />
                   </tr></thead>
                   <tbody>
                     {marginSorted.map(o => {
-                      const belowList = o.listPriceDelta != null && o.listPriceDelta > 0 && o.chargedPerPick < o.listPriceDelta - 0.005
+                      // S809 3o (REPORTS-12): only when some plates WERE free picks or comped, against
+                      // the list price as billed. A price change since is not a free pick.
+                      const belowList = (o.freePicks > 0 || o.compedPicks > 0)
+                        && o.listPriceDelta != null && o.listPriceDelta > 0 && o.chargedPerPick < o.listPriceDelta - 0.005
+                      const whyLess = [
+                        o.freePicks > 0 ? `${nprInt(o.freePicks)} were inside the group's "first N free"` : null,
+                        o.compedPicks > 0 ? `${nprInt(o.compedPicks)} were comped` : null,
+                      ].filter(Boolean).join(' and ')
                       return (
                         <tr key={o.key}>
                           <td><span style={{ whiteSpace: 'nowrap' }}>{o.option_name}</span></td>
@@ -566,11 +581,18 @@ export default function CustomizationReport() {
                             {signed(o.chargedPerPick)}
                             {belowList && (
                               <div className="stat-sub" style={{ marginTop: 2 }}>
-                                <Tip text={`Listed at ${signed(o.listPriceDelta)}. Some plates paid less — a pick inside the group's "first N free", or a comped plate.`}>incl. free picks</Tip>
+                                <Tip text={`Billed at a list price of ${signed(o.listPriceDelta)} a plate on average. Of ${nprInt(o.picks)} plates, ${whyLess} — those paid nothing for it.`}>{o.freePicks > 0 ? 'incl. free picks' : 'incl. comped plates'}</Tip>
                               </div>
                             )}
                           </td>
-                          <td style={{ textAlign: 'right' }}>{o.costPerPick == null ? <Tip text="No stock lines on this choice.">—</Tip> : npr(Math.round(o.costPerPick))}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {o.costPerPick == null ? <Tip text="No stock lines on this choice.">—</Tip> : npr(Math.round(o.costPerPick))}
+                            {o.costPerPick != null && o.costedPicks < o.picks && (
+                              <div className="stat-sub" style={{ marginTop: 2 }}>
+                                <Tip text="The other plates were billed before this choice had stock lines, so they carry none and are left out of the average.">over {nprInt(o.costedPicks)} of {nprInt(o.picks)} plates</Tip>
+                              </div>
+                            )}
+                          </td>
                           {marginCell(o)}
                           <td style={{ textAlign: 'right' }}>{nprInt(o.picks)}</td>
                         </tr>

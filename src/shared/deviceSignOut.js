@@ -32,8 +32,9 @@ export function clearStoredAuthSession(storage = window.localStorage) {
 // `scope: 'local'` ends this device's session only (S809 ACCESS-1): /logout?scope=local revokes
 // the refresh token of the session this device holds and nothing else. With no scope, supabase-js
 // uses its documented default, 'global', which revokes every session of the login, so its phone and
-// laptop drop to the sign-in page within the hour. The till lock still passes no scope; whether it
-// should is ACCESS-7's decision (Q18).
+// laptop drop to the sign-in page within the hour. A till lock passes 'local' too (S809 ACCESS-7, owner
+// decision Q18 a, Layout.js), so a waiter's other tills stay signed in; a lost tablet is cut off by
+// revoking it, which ends the sessions opened on it. The Owner's own Sign out still uses the default.
 export async function signOutThisDevice({ scope } = {}) {
   try {
     const request = scope === 'local' ? supabase.auth.signOut({ scope: 'local' }) : supabase.auth.signOut()

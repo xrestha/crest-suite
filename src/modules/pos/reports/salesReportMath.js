@@ -1,4 +1,5 @@
 import { computeOrderAmounts, computeGroupAmounts, billVatRegistered } from '../../../utils/posBillingMath'
+import { getBsFiscalYear, getBsFiscalYearStart } from '../../../utils/bsCalendar'
 
 // The Sales Report's row arithmetic, lifted out of SalesReport.jsx (S754) so the two owner
 // decisions it carries can be asserted rather than eyeballed:
@@ -241,4 +242,29 @@ export function mergeNameOnlyParties(parties) {
     }
   }
   return out.filter(p => !merged.has(p.key))
+}
+
+/**
+ * The 1L+ tab's fiscal years, newest first: every year from the one the outlet's FIRST bill was
+ * numbered in to the one `todayBs` falls in (S809 3m, REPORTS-2). It replaces reading every bill the
+ * outlet ever closed to collect their distinct `invoice_fy`, which a busy outlet outgrew.
+ *
+ * Labels are getBsFiscalYear's "82/83", the form the database stamps (pos_invoice_fy). A label holds
+ * only two digits of its start year, so the century is taken from today: the latest year, up to
+ * this one, that ends in those digits. A year between with no bills is still offered; its report is
+ * empty, which is the truth about that year. No first bill, or a label that is not "NN/NN" with the
+ * second year following the first, gives this year alone.
+ */
+export function fiscalYearsSince(firstFy, todayBs) {
+  const thisStart = getBsFiscalYearStart(todayBs.year, todayBs.month)
+  const m = /^(\d{1,2})\/(\d{1,2})$/.exec(String(firstFy || '').trim())
+  const two = m ? parseInt(m[1], 10) : NaN
+  const follows = m && parseInt(m[2], 10) === (two + 1) % 100
+  const back = follows ? (((thisStart % 100) - two) % 100 + 100) % 100 : 0
+  // A first bill numbered AHEAD of today (this device's clock behind Nepal's at the turn of the year)
+  // would read as a century back; it is that many years ahead instead, and the list starts there.
+  const ahead = back > 50 ? 100 - back : 0
+  const out = []
+  for (let y = thisStart + ahead; y >= (ahead ? thisStart : thisStart - back); y--) out.push(getBsFiscalYear(y, 4))
+  return out
 }
