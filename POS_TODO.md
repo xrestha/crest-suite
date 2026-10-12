@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S815 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`); stages 5–7 outlined)
+Last updated: 2026-10-12 (S816 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`) and 4h (migration `20261012110000`); stages 5–7 outlined)
 
 ---
 
@@ -65,15 +65,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (26 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11; GUEST-7 closed as accepted, Q21 (c))
+### P3 (21 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8; GUEST-7 closed as accepted, Q21 (c))
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CUSTOMIZATION-4 | The till's price for a size-scaled topping is a paisa off the server's on about 1 price in 25 | 4 | — | no |
-| CUSTOMIZATION-5 | A "No …" choice uses up a free pick and a place under the maximum | 4 | Q20 | yes |
-| CUSTOMIZATION-6 | Sizes are stored as a difference from the dish price, so a dish price rise silently raises every size | 4 | — | yes |
-| CUSTOMIZATION-7 | Changing a group's kind keeps old per-dish pick rules, so a Size can be skipped or picked twice | 4 | — | yes |
-| CUSTOMIZATION-8 | Hiding options can leave a "must pick 2" group with one option, taking the dish off the till unwarned | 4 | — | no |
 | DATABASE-7 | Bills and lines have no FK to their client; a deleted client's open order is still in the live table (KNOWN) | 4 | — | yes |
 | DATABASE-8 | The floor, KDS and nav badges re-read the whole order and ticket history every poll; no index matches | 4 | — | yes |
 | DOCS-3 | Help gives six wrong answers about who may do what at the till | 4 | — | no |
@@ -350,13 +345,13 @@ that file.
 | 4e ✅ | IMS-HANDOFF-5, -6, -7, -8, -9, -10 [`imsPostWarning` never decreases; `writeSalesEntries` links by screen `orderId`] (shipped 2026-10-12, app only, crest-v430; owner D4–D7) | none | — |
 | 4f ✅ | CUSTOMERS-PARKING-14, -15, GUEST-8; GUEST-7 closed as accepted [Guest Menu Preview wording] (shipped 2026-10-12, app only, crest-v430; owner D8–D10) | none | Q21 |
 | 4g ✅ | CUSTOMERS-PARKING-9, -10, -11; owner additions: one-tap "add the points this bill earned", "Move points" [full points history; "+977" bill-history search] (shipped 2026-10-12, S815, migration `20261012100000` applied live, crest-v431; owner D11–D14) | yes | Q19 |
-| 4h | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note | yes | Q20 |
+| 4h ✅ | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note [`handleSaveRefusal` said "The menu has been reloaded" before the reload ran] (shipped 2026-10-12, S816, migration `20261012110000` applied live, crest-v432; owner D15–D17) | yes | Q20 |
 | 4i | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] | yes | — |
 | 4j | RESERVATIONS-6, -7, -8, -9, -10, -11 | yes | Q23 |
 | 4k | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT] | yes | — |
 | 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
 
-Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815).
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816).
 
 **After stage 4 (owner approved 2026-10-12):**
 
@@ -389,9 +384,10 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   into Adjust, and a later Credit Note does not take those hand-added points back (3k).
 - **"Move points" for a regular's new number**: one action that takes the balance off the old number
   and puts it on the new one, recorded as a pair. Today it is two hand corrections in Adjust (3k).
-- **A grey "no longer offered" note on a saved-but-unsent dish** whose choice was hidden since (owner
+- ~~**A grey "no longer offered" note on a saved-but-unsent dish** whose choice was hidden since (owner
   2026-10-10, Q3 (b), later): "Granola is no longer offered", blocking nothing. 3o marks only lines not
-  yet saved, because a saved line keeps its exemption on the server.
+  yet saved, because a saved line keeps its exemption on the server.~~ Shipped in 4h (S816,
+  `savedLineGoneNote`).
 
 ## S809.3 Outside POS, filed here
 
@@ -707,6 +703,19 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     them with a sentence (`pos_points_held`).
   - Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
     with no reason when the name is empty (S809.4, 3k): 4l or stage 6.
+- **Found while building stage 4, slice 4h (2026-10-12, not fixed):**
+  - The below-zero checks in the editors look at one option at a time. Two negative choices that only
+    go below zero together, or a hidden option shown again with Show again, are refused only by the
+    till's save (`option_price_below_zero`, naming the dish). 0 negative options live besides sizes.
+  - Put it on dishes checks only the dishes newly ticked, not ones already carrying the group.
+  - Menu Pricing's size line and refusal are advisory: on a failed option-catalog read they say
+    nothing and the price saves, and the till then refuses the below-zero line by name.
+  - A guest whose dish its choices price below zero hears the generic "choices no longer available"
+    (`unavailable_options`); the guest page cannot tell it from a hidden choice.
+  - A till on crest-v431 or older still numbers a "No …" removal as a free pick on screen and greys
+    other picks under its "Max"; the server prices the new rule (0 removals live).
+  - The server's `option_count` still counts picks of hidden options (harmless while
+    `option_not_on_menu` fires first), as filed in 3o.
 
 ---
 

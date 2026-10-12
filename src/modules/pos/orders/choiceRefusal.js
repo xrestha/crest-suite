@@ -38,11 +38,25 @@ export function lineChoiceTrouble(line, dishGroups, optionsById) {
   }
 }
 
-// The two refusal sentences, as save_pos_order_items raises them (live since S809 2h):
+/**
+ * S809 4h (owner, Q3 b): the grey note on a SAVED line not yet sent whose choice the menu no longer
+ * offers — "Granola is no longer offered". The save keeps its exemption (the line is already on the
+ * order), so it blocks nothing; it only tells the waiter before the guest hears it from the kitchen.
+ * @returns {string|null}
+ */
+export function savedLineGoneNote(line, dishGroups, optionsById) {
+  const { gone } = offeredPicks(lineOptionIds(line || {}), dishGroups)
+  if (!gone.length) return null
+  return `${goneChoicesText(gone, optionsById, line?.options)} ${gone.length === 1 ? 'is' : 'are'} no longer offered.`
+}
+
+// The refusal sentences, as save_pos_order_items raises them (live since S809 2h; the third 4h):
 //   option_not_on_menu: an option chosen for <dish>[, <dish>…] is no longer offered on it — …
 //   option_count: the choices do not fit what the dish allows (<dish>: <group>[; …]) — …
+//   option_price_below_zero: <dish>[, <dish>…] would cost less than nothing with the choices picked — …
 const NOT_OFFERED_RE = /an option chosen for (.+) is no longer offered/
 const COUNT_RE = /what the dish allows \((.+)\) — change/
+const BELOW_ZERO_RE = /option_price_below_zero: (.+) would cost less than nothing/
 
 const isCode = (err, code) => err?.hint === code || new RegExp(`^${code}:`).test(String(err?.message || ''))
 
@@ -73,6 +87,14 @@ export function choiceRefusalText(err) {
     })
     const one = named.length === 1
     return `${andList(named)} ${one ? 'has' : 'have'} too few or too many choices picked, so nothing on this order was saved. Tap Choices on ${one ? 'that dish' : 'each of those dishes'}, fix the picks, then save again.`
+  }
+  if (isCode(err, 'option_price_below_zero')) {
+    const m = msg.match(BELOW_ZERO_RE)
+    if (!m) return null
+    const dishes = m[1].split(', ').map(s => s.trim()).filter(Boolean)
+    if (!dishes.length) return null
+    const one = dishes.length === 1
+    return `${andList(dishes)} would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on ${one ? 'it' : 'each of them'} to pick other choices, or ask a manager to fix the price in Option Groups.`
   }
   return null
 }

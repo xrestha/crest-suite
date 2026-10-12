@@ -305,8 +305,10 @@ table's food.
   `src/shared/optionPricing.js`. The factor is the product of the chosen SIZE options'
   `portion_factor` (NULL = 1, `pos_selection_portion_factor` in SQL, `sizeFactor` in JS). A group's
   `size_scaling` decides the rest: `stock` multiplies its stock lines, `stock_and_price` its price as
-  well (`round(price × factor, 2)`, half away from zero on both sides). A size group is always
+  well (`round(price × factor, 2)`, half away from zero on both sides; JS in integer paisa, 4h). A size group is always
   `none`, so a size's own lines never scale. The free-picks rule runs first, so a free pick stays 0.
+  A "No …" removal is never a free pick and never counts toward the maximum, only the minimum (Q20 a,
+  D15), and a new line priced below zero is refused (`option_price_below_zero`).
   Change the rule in all three, and extend the fixture shared by `optionPricing.test.js` and the
   migration's verification block.
 - **The scaled quantity is frozen at order time.** `ingredient_deltas` already holds it, so no IMS

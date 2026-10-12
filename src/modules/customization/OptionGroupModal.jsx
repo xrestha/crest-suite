@@ -29,9 +29,10 @@ import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 // a database the S760 migration has not reached.
 
 // The three kinds differ in what they DO, and the hint says that rather than repeating the pick
-// rule twice: a size sets the dish's price, an add-on can add to it, a choice is usually free.
+// rule twice: a size prices the dish (as a difference that follows the dish's own price, S809 4h),
+// an add-on can add to it, a choice is usually free.
 const KINDS = [
-  { key: 'size',   title: 'Size',    example: 'Half / Full · Small / Large', hint: 'Picks one · each size sets the dish price', rule: { min: 1, max: 1 } },
+  { key: 'size',   title: 'Size',    example: 'Half / Full · Small / Large', hint: 'Picks one · each size prices the dish and moves with it', rule: { min: 1, max: 1 } },
   { key: 'addon',  title: 'Add-ons', example: 'Extra cheese · Add egg · No onion', hint: 'Picks several · each can add to the price', rule: { min: 0, max: null } },
   { key: 'choice', title: 'Choice',  example: 'Mild / Medium / Hot',         hint: 'Picks one · usually free',                   rule: { min: 1, max: 1 } },
 ]
@@ -119,7 +120,8 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
 
   const summary = ruleText({ min: effMin, max: effMax, included: effIncluded })
   // Changing a live group's kind resets its pick rule for every dish it is on. Said before Save,
-  // not discovered on the till.
+  // not discovered on the till. Since S809 4h (CUSTOMIZATION-7) the database clears each dish's own
+  // rule for the group in the same save (`pos_option_group_kind_resets_rules`), so this holds.
   const kindChangedLive = !!group && kind !== group.kind && attachedCount > 0
 
   return (
@@ -152,7 +154,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
           </div>
           {kindChangedLive && (
             <p role="alert" style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-              This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the pick rule to “{summary}” for all of them the moment you save; bills already rung are not affected.
+              This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the pick rule to “{summary}” for all of them the moment you save, including any rule a dish had of its own; bills already rung are not affected.
             </p>
           )}
         </div>
@@ -219,7 +221,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
               {kind === 'addon' && (
                 <div className="form-field" style={{ margin: 0 }}>
                   <label htmlFor="og-incl">
-                    <Tip width={300} text="For a deal like “2 toppings included, pay for each extra”. Of what the guest picks, the ones listed EARLIEST in this group are the free ones — not the cheapest — so put the options you are happy to give away at the top of the list (Move up on the Groups page). The till and guest menu show a pick as Included once it is free.">Free picks before charging</Tip>
+                    <Tip width={300} text="For a deal like “2 toppings included, pay for each extra”. Of what the guest picks, the ones listed EARLIEST in this group are the free ones — not the cheapest — so put the options you are happy to give away at the top of the list (Move up on the Groups page). The till and guest menu show a pick as Included once it is free. A “No …” option is never a free pick, and it takes no place under “up to”.">Free picks before charging</Tip>
                   </label>
                   <select id="og-incl" className="form-select" value={effIncluded} onChange={e => setIncluded(Number(e.target.value))} style={{ width: 'auto' }}>
                     {Array.from({ length: (effMax ?? 10) + 1 }, (_, n) => n).map(n => (

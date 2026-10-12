@@ -1,7 +1,7 @@
 import {
   exFromIncl, inclFromEx, effectiveRule, ruleText, countAllowed, optionsPriceDelta, signedPrice,
   describeSelection, groupsForDish, defaultSelection, selectionProblems, lowestDishPrice,
-  sizeFactor, scaledDelta, scaledQty, cheapestValidSelection,
+  sizeFactor, scaledDelta, scaledQty, cheapestValidSelection, optionsBelowZero, belowZeroText, groupShortfalls,
 } from './optionPricing'
 
 describe('VAT conversion', () => {
@@ -34,6 +34,13 @@ describe('pick rules', () => {
     expect(countAllowed(9, { min: 0, max: null })).toBe(true)
     expect(countAllowed(4, { min: 0, max: 3 })).toBe(false)
   })
+  it('lets a "No …" removal answer the minimum but not use a place under the maximum (S809 4h, D15)', () => {
+    // No onion + cheese + egg + bacon in "up to 3": four picks, three of them real.
+    expect(countAllowed(4, { min: 0, max: 3 }, 3)).toBe(true)
+    expect(countAllowed(4, { min: 0, max: 3 }, 4)).toBe(false)
+    // "No sauce" alone answers "pick exactly 1".
+    expect(countAllowed(1, { min: 1, max: 1 }, 0)).toBe(true)
+  })
 })
 
 describe('optionsPriceDelta', () => {
@@ -57,6 +64,13 @@ describe('optionsPriceDelta', () => {
   it('is 0 for no selection', () => {
     expect(optionsPriceDelta([], groups)).toBe(0)
     expect(optionsPriceDelta(null, groups)).toBe(0)
+  })
+
+  it('never spends a free pick on a "No …" removal, even listed first (S809 4h, Q20 a)', () => {
+    // Extras, first 2 free: No onion (listed first), Extra cheese +50, Add egg +40 — cheese and egg free.
+    const chosen = [{ id: 'no-onion', group_id: 'toppings', sort: 0, price_delta: 0, is_removal: true, name: 'No onion' },
+      t('cheese', 1, 50), t('egg', 2, 40)]
+    expect(optionsPriceDelta(chosen, groups)).toBe(0)
   })
 })
 
@@ -175,6 +189,37 @@ describe("size scaling (S760)", () => {
   it("rounds a half paisa away from zero, as Postgres does", () => {
     expect(scaledDelta({ price_delta: -0.05 }, { size_scaling: "stock_and_price" }, 0.5)).toBe(-0.03)
     expect(scaledDelta({ price_delta: 0.05 }, { size_scaling: "stock_and_price" }, 0.5)).toBe(0.03)
+  })
+
+  // S809 4h (CUSTOMIZATION-4): floating point put these a paisa under the server's exact numeric.
+  it("matches the server to the paisa where floating point fell a paisa short", () => {
+    const g = { size_scaling: "stock_and_price" }
+    expect(scaledDelta({ price_delta: 8.85 }, g, 1.5)).toBe(13.28)
+    expect(scaledDelta({ price_delta: 17.70 }, g, 0.75)).toBe(13.28)
+    expect(scaledDelta({ price_delta: 46.90 }, g, 0.75)).toBe(35.18)
+    expect(scaledDelta({ price_delta: -46.90 }, g, 0.75)).toBe(-35.18)
+  })
+
+  it("agrees with exact decimal arithmetic on every price from 0.01 to 500 at the usual factors", () => {
+    // The server: round(price_delta(12,2) × factor(6 places), 2), half away from zero — exact, so
+    // worked here in BigInt paisa × millionths.
+    const exact = (paisa, micro) => {
+      const prod = BigInt(paisa) * BigInt(micro)
+      const q = prod / 1000000n, r = prod % 1000000n
+      return Number(q + (r * 2n >= 1000000n ? 1n : 0n)) / 100
+    }
+    const g = { size_scaling: "stock_and_price" }
+    const misses = []
+    for (const f of [0.5, 0.75, 1.25, 1.5, 2, 0.333, 1.125]) {
+      const micro = Math.round(f * 1e6)
+      for (let paisa = 1; paisa <= 50000; paisa++) {
+        const got = scaledDelta({ price_delta: paisa / 100 }, g, f)
+        const want = exact(paisa, micro)
+        if (got !== want) misses.push({ paisa, f, got, want })
+        if (misses.length > 5) break
+      }
+    }
+    expect(misses).toEqual([])
   })
 
   it("\"From\" tries every size, since a size can reprice a required pick", () => {
@@ -300,7 +345,11 @@ describe('the cheapest valid build (S792, RECIPES-4)', () => {
       const included = int(0, max == null ? Math.min(n, 3) : max)
       groups.push({ id, name: `Group ${g}`, kind: pick(['addon', 'choice']), min_select: min, max_select: max, included_count: included, size_scaling: pick(SCALING) })
       // Sort ties on purpose, so display order falls through to the name and the id.
-      for (let i = 0; i < n; i++) options.push({ id: `${id}-o${i}`, group_id: id, name: pick(['Apple', 'Banana', 'Cherry', 'Date']) + i, price_delta: pick(PRICES), sort: int(0, 2), is_removal: false })
+      // S809 4h: some are "No …" removals (free, and outside the free picks and the maximum).
+      for (let i = 0; i < n; i++) {
+        const removal = rand() < 0.2
+        options.push({ id: `${id}-o${i}`, group_id: id, name: pick(['Apple', 'Banana', 'Cherry', 'Date']) + i, price_delta: removal ? 0 : pick(PRICES), sort: int(0, 2), is_removal: removal })
+      }
       attachments.push({ recipe_id: 'dish', group_id: id, sort: g + 1 })
     }
     return dishOf(groups, options, attachments)
@@ -312,7 +361,7 @@ describe('the cheapest valid build (S792, RECIPES-4)', () => {
       const out = []
       for (let mask = 0; mask < (1 << options.length); mask++) {
         const set = options.filter((_, i) => mask & (1 << i))
-        if (countAllowed(set.length, rule)) out.push(set)
+        if (countAllowed(set.length, rule, set.filter(o => !o.is_removal).length)) out.push(set)
       }
       return out
     })
@@ -360,5 +409,122 @@ describe('the cheapest valid build (S792, RECIPES-4)', () => {
       if (got !== want) misses.push({ t, got, want })
     }
     expect(misses).toEqual([])
+  })
+})
+
+describe('"No …" removals, free picks and the maximum (S809 4h, Q20 a, D15)', () => {
+  const groups = [{ id: 'extras', name: 'Extras', kind: 'addon', min_select: 0, max_select: 2, included_count: 2, sort: 0, is_active: true }]
+  const options = [
+    { id: 'no-onion', group_id: 'extras', name: 'No onion', price_delta: 0, is_removal: true, sort: 0, is_active: true, is_default: true },
+    { id: 'cheese', group_id: 'extras', name: 'Extra cheese', price_delta: 50, sort: 1, is_active: true, is_default: true },
+    { id: 'egg', group_id: 'extras', name: 'Add egg', price_delta: 40, sort: 2, is_active: true, is_default: true },
+  ]
+  const attachments = [{ recipe_id: 'dish', group_id: 'extras', sort: 0 }]
+  const dg = groupsForDish('dish', { groups, options, attachments })
+  const catalog = {
+    optionsById: Object.fromEntries(options.map(o => [o.id, o])),
+    groupsById: Object.fromEntries(groups.map(g => [g.id, g])),
+  }
+
+  it('frees the cheese and the egg, not the No onion listed above them', () => {
+    const d = describeSelection(['no-onion', 'cheese', 'egg'], catalog)
+    expect(d.delta).toBe(0)
+    expect(d.options.find(o => o.option_id === 'no-onion').included).toBe(false)
+    expect(d.options.filter(o => o.included).map(o => o.option_id)).toEqual(['cheese', 'egg'])
+  })
+
+  it('lets No onion sit beside the two extras "up to 2" allows', () => {
+    expect(selectionProblems(dg, ['no-onion', 'cheese', 'egg'])).toEqual([])
+  })
+
+  it('keeps a pre-selected No onion when trimming the defaults to the maximum', () => {
+    expect(defaultSelection(dg)).toEqual(['no-onion', 'cheese', 'egg'])
+  })
+
+  it('still counts No sauce as the answer to a required group', () => {
+    const sauce = groupsForDish('dish', {
+      groups: [{ id: 'sauce', name: 'Sauce', kind: 'choice', min_select: 1, max_select: 1, included_count: 0, is_active: true }],
+      options: [
+        { id: 'none', group_id: 'sauce', name: 'No sauce', price_delta: 0, is_removal: true, sort: 0, is_active: true },
+        { id: 'mayo', group_id: 'sauce', name: 'Mayo', price_delta: 0, sort: 1, is_active: true },
+      ],
+      attachments: [{ recipe_id: 'dish', group_id: 'sauce' }],
+    })
+    expect(selectionProblems(sauce, ['none'])).toEqual([])
+    expect(selectionProblems(sauce, []).map(p => p.count)).toEqual([0])
+  })
+
+  it('names the real picks over the maximum', () => {
+    const tight = groupsForDish('dish', { groups: [{ ...groups[0], max_select: 1, included_count: 1 }], options, attachments })
+    expect(selectionProblems(tight, ['no-onion', 'cheese', 'egg']).map(p => [p.count, p.real])).toEqual([[3, 2]])
+  })
+})
+
+describe('optionsBelowZero (S809 4h, CUSTOMIZATION-6)', () => {
+  const dishes = [{ id: 'veg', name: 'Veg Momo', selling_price: 247.79 }, { id: 'kids', name: 'Kids Momo', selling_price: 70.80 }]
+  it('names the dish a cheaper size takes below zero, ex-VAT as the server compares', () => {
+    const half = { id: 'half', name: 'Half', price_delta: -88.50 }
+    expect(optionsBelowZero(dishes, [half]).map(x => [x.dish.id, x.option.id, x.price])).toEqual([['kids', 'half', -17.70]])
+  })
+  it('passes a dish brought to exactly zero, a positive option, a hidden one and an unpriced dish', () => {
+    expect(optionsBelowZero(dishes, [{ id: 'z', price_delta: -70.80 }, { id: 'p', price_delta: 30 }, { id: 'h', price_delta: -500, is_active: false }])).toEqual([])
+    expect(optionsBelowZero([{ id: 'new', name: 'New dish', selling_price: 0 }], [{ id: 'half', price_delta: -88.5 }])).toEqual([])
+  })
+  it('words it as a guest would pay', () => {
+    const vat = [{ id: 'kids', name: 'Kids Momo', selling_price: 70.80, inclPrice: 80 }]
+    const found = optionsBelowZero(vat, [{ id: 'half', name: 'Half', price_delta: -88.50 }])
+    expect(belowZeroText(found)).toBe('Kids Momo would cost −NPR 20 as “Half”')
+    expect(belowZeroText([...found, ...found, ...found])).toBe('Kids Momo would cost −NPR 20 as “Half”, Kids Momo would cost −NPR 20 as “Half” and 1 more')
+  })
+})
+
+describe('groupShortfalls (S809 4h, CUSTOMIZATION-8)', () => {
+  const group = { id: 'top', is_active: true, min_select: 2, max_select: 10, included_count: 0 }
+  const opts = n => Array.from({ length: 9 }, (_, i) => ({ id: `t${i}`, group_id: 'top', is_active: i < n }))
+  const attachments = [{ recipe_id: 'bowl', group_id: 'top' }, { recipe_id: 'cup', group_id: 'top', min_override: 1 }]
+  it('flags a dish that must pick 2 from a group with 1 left', () => {
+    expect(groupShortfalls(group, opts(1), attachments)).toEqual([{ recipe_id: 'bowl', need: 2, offered: 1 }])
+  })
+  it('is quiet with enough left, with none left (the group drops off) and on a hidden group', () => {
+    expect(groupShortfalls(group, opts(2), attachments)).toEqual([])
+    expect(groupShortfalls(group, opts(0), attachments)).toEqual([])
+    expect(groupShortfalls({ ...group, is_active: false }, opts(1), attachments)).toEqual([])
+  })
+})
+
+// The S816 fixture, shared with the probe in migration 20261012110000 (S809 4h): the server priced
+// these exact plates there, so the till's twin must say the same to the paisa.
+describe('the S816 probe fixture (shared with the 4h migration)', () => {
+  const groups = [
+    { id: 'gs', name: 'S816 probe Size', kind: 'size', min_select: 1, max_select: 1, included_count: 0, size_scaling: 'none', sort: 900, is_active: true },
+    { id: 'gt', name: 'S816 probe Toppings', kind: 'addon', min_select: 0, max_select: 2, included_count: 1, size_scaling: 'stock_and_price', sort: 901, is_active: true },
+  ]
+  const options = [
+    { id: 'reg', group_id: 'gs', name: 'Regular', price_delta: 0, portion_factor: 1, sort: 0, is_active: true },
+    { id: 'large', group_id: 'gs', name: 'Large', price_delta: 8.85, portion_factor: 1.5, sort: 1, is_active: true },
+    { id: 'small', group_id: 'gs', name: 'Small', price_delta: -10, portion_factor: 0.75, sort: 2, is_active: true },
+    { id: 'half', group_id: 'gs', name: 'Half', price_delta: -88.50, portion_factor: 0.5, sort: 3, is_active: true },
+    { id: 'no', group_id: 'gt', name: 'No onion', price_delta: 0, is_removal: true, sort: 0, is_active: true },
+    { id: 'egg', group_id: 'gt', name: 'Egg', price_delta: 17.70, sort: 1, is_active: true },
+    { id: 'cheese', group_id: 'gt', name: 'Cheese', price_delta: 8.85, sort: 2, is_active: true },
+    { id: 'bacon', group_id: 'gt', name: 'Bacon', price_delta: 46.90, sort: 3, is_active: true },
+  ]
+  const attachments = [{ recipe_id: 'bowl', group_id: 'gs', sort: 0 }, { recipe_id: 'bowl', group_id: 'gt', sort: 1 }]
+  const catalog = {
+    optionsById: Object.fromEntries(options.map(o => [o.id, o])),
+    groupsById: Object.fromEntries(groups.map(g => [g.id, g])),
+  }
+  const dg = groupsForDish('bowl', { groups, options, attachments })
+  const dish = { id: 'bowl', name: 'S816 4h probe bowl', selling_price: 70.80 }
+
+  it('prices the three saved plates as the server did: 8.85, 22.13, 25.18', () => {
+    expect(describeSelection(['reg', 'no', 'egg', 'cheese'], catalog).delta).toBe(8.85)
+    expect(describeSelection(['large', 'egg', 'cheese'], catalog).delta).toBe(22.13)
+    expect(describeSelection(['small', 'egg', 'bacon'], catalog).delta).toBe(25.18)
+    expect(selectionProblems(dg, ['reg', 'no', 'egg', 'cheese'])).toEqual([])
+  })
+  it('refuses three real toppings, and finds the Half below zero', () => {
+    expect(selectionProblems(dg, ['reg', 'egg', 'cheese', 'bacon']).map(p => p.group.id)).toEqual(['gt'])
+    expect(optionsBelowZero([dish], options).map(x => [x.option.id, x.price])).toEqual([['half', -17.70]])
   })
 })

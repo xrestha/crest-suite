@@ -180,6 +180,27 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4h: CUSTOMIZATION-4, -5, -6, -7, -8 (P3); owner addition: the grey "no longer
+  offered" note; plus the S809.4 "The menu has been reloaded" wording~~ — **shipped S816, 2026-10-12**,
+  migration `20261012110000` applied live after a rolled-back probe as BLOOM CAFE's POS manager and the
+  migration role (crest-v432). CUSTOMIZATION-4: the till works a size-scaled price in whole paisa ×
+  millionths (`scaleMoney` in `optionPricing.js`), so it matches the server's exact numeric on every
+  price (a sweep of every price from 0.01 to 500 at seven factors agrees). **Q20 (a):** a "No …" removal
+  never takes a free pick or a place under a group's maximum, in both server pricers and the browser
+  twin, the choice window and the guest sheet; **D15 (owner, as recommended):** it still counts toward
+  the minimum, so "No sauce" answers a must-pick group. CUSTOMIZATION-6: `save_pos_order_items` refuses a
+  new line priced below zero (`option_price_below_zero`, naming the dish; `choiceRefusal.js` words it) and
+  `pos_price_selection` returns the same problem to the guest path; the option editor shows a negative
+  result as negative. **D17 (owner):** the option editor and both attach dialogs refuse a price that takes
+  an attached dish below zero, naming it. **D16 (owner):** Menu Pricing, both branches, shows what each
+  size becomes before Save and refuses a dish price that would put a choice below zero. The guides now say
+  a size follows its dish. CUSTOMIZATION-7: `pos_option_groups_kind_resets_rules` (AFTER UPDATE OF kind,
+  INVOKER) clears each dish's own rule for the group; `guard_pos_option_edit` clears a per-dish rule on a
+  Size attachment and refuses a "No …" option in a Size (`option_removal_in_size`) or a kind change to
+  Size while the group holds one (`group_kind_has_removals`). CUSTOMIZATION-8: Hide and Delete on an
+  option say first when a dish would be left unable to be ordered, or with nothing to pick in the group
+  (`groupShortfalls`), and the group card names any dish already short. The grey note:
+  `savedLineGoneNote` on a saved, unsent line. Original rows: `CUSTOMIZATION.md`.
 - [x] ~~S809 stage 4, slice 4g: CUSTOMERS-PARKING-9, -10, -11 (P3); owner additions "add the points this
   bill earned" and "Move points"; plus the S809.4 full points history and "+977" bill search~~ —
   **shipped S815, 2026-10-12**, migration `20261012100000` applied live after a rolled-back probe as

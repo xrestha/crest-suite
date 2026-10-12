@@ -17,6 +17,8 @@ import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
 import AttachGroupsModal from '../../customization/AttachGroupsModal'
 import { loadOptionCatalog } from '../../customization/customizationData'
+import { optionsBelowZero, belowZeroText } from '../../../shared/optionPricing'
+import { npr } from '../../../shared/nepalMoney'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
@@ -82,19 +84,46 @@ export default function MenuPricing() {
   // "2 pairings" — an 11px grey "Customize" with no count gave no way to tell from the menu which
   // dishes were customized (S759). Its own small load, so a failed read here costs only the labels.
   const [choiceNames, setChoiceNames] = useState({}) // recipe_id -> [group name]
+  // S809 4h (CUSTOMIZATION-6, D16): each dish's offered choices, so a new dish price can say what
+  // its sizes become and refuse one that puts a choice below zero. A size is stored as a difference
+  // from the dish, so it moves with the dish's price. Advisory: on a failed read this stays empty
+  // and the price saves as before, and the till then refuses the below-zero line by name.
+  const [dishOptions, setDishOptions] = useState({}) // recipe_id -> [{ name, price_delta, kind }]
   const loadChoiceNames = useCallback(async () => {
     if (!customizationOn || !effectiveClientId) return
     const cat = await loadOptionCatalog(scopedFrom)
     if (cat.error) return
-    const nameById = new Map(cat.groups.map(g => [g.id, g.name]))
+    const groupById = new Map(cat.groups.map(g => [g.id, g]))
     const map = {}
+    const opts = {}
     cat.attachments.slice().sort((a, b) => (a.sort || 0) - (b.sort || 0)).forEach(a => {
-      const n = nameById.get(a.group_id)
-      if (n) (map[a.recipe_id] = map[a.recipe_id] || []).push(n)
+      const g = groupById.get(a.group_id)
+      if (!g) return
+      ;(map[a.recipe_id] = map[a.recipe_id] || []).push(g.name)
+      if (g.is_active === false) return
+      cat.options.filter(o => o.group_id === g.id && o.is_active !== false).forEach(o => {
+        ;(opts[a.recipe_id] = opts[a.recipe_id] || []).push({ name: o.name, price_delta: o.price_delta, kind: g.kind, sort: o.sort ?? 0 })
+      })
     })
     setChoiceNames(map)
+    setDishOptions(opts)
   }, [customizationOn, effectiveClientId, scopedFrom])
   useEffect(() => { loadChoiceNames() }, [loadChoiceNames])
+  // What a new price does to the dish's sizes: "Half NPR 180 · Full NPR 280", and any choice it
+  // would take below zero. `stored` is storedFromMenuPrice's answer for the typed price.
+  const sizeEffect = (recipe, stored) => {
+    const opts = dishOptions[recipe?.id] || []
+    if (!stored || !opts.length) return { sizesText: '', below: [] }
+    const incl = ex => ex * (1 + (Number(stored.vat_rate) || 0))
+    const fmt = v => (v < 0 ? `−${npr(Math.abs(v))}` : npr(v))
+    const sizesText = opts.filter(o => o.kind === 'size').sort((a, b) => a.sort - b.sort)
+      .map(o => `${o.name} ${fmt(incl(stored.selling_price + (Number(o.price_delta) || 0)))}`).join(' · ')
+    const below = optionsBelowZero(
+      [{ id: recipe.id, name: recipe.name, selling_price: stored.selling_price, inclPrice: incl(stored.selling_price) }], opts)
+    return { sizesText, below }
+  }
+  const belowZeroRefusal = (name, below) =>
+    `“${name}” — not saved. ${belowZeroText(below)}, and the till refuses a dish priced below zero. Raise the price, or change that choice in Option Groups first.`
   const choicesLabel = r => (choiceNames[r.id]?.length ? choiceNames[r.id].join(' · ') : 'Add choices')
   const choicesColor = r => (choiceNames[r.id]?.length ? 'var(--theme-accent-ink)' : 'var(--theme-text3)')
   const [recipes, setRecipes]   = useState([])
@@ -377,6 +406,12 @@ export default function MenuPricing() {
       setPageError(`“${recipe.name}” — the new price was not saved. ${VAT_MODE_UNKNOWN_TEXT}`)
       return
     }
+    const { below } = sizeEffect(recipe, stored)
+    if (below.length) {
+      setErrors(e => ({ ...e, [recipe.id]: 'A choice would go below zero' }))
+      setPageError(belowZeroRefusal(recipe.name, below))
+      return
+    }
     const newExVat = stored.selling_price
     const patch = vatMode === 'pan' ? { selling_price: newExVat, vat_rate: 0 } : { selling_price: newExVat }
     setSaving(s => ({ ...s, [recipe.id]: true }))
@@ -415,6 +450,10 @@ export default function MenuPricing() {
     // PAN-bill outlet the VAT choice is not offered and the price is stored whole with vat_rate 0.
     const stored = storedFromMenuPrice(priceNum, addForm.vatRate, vatMode)
     if (!stored) { setAddError(`Nothing was saved. ${VAT_MODE_UNKNOWN_TEXT}`); return }
+    if (editingId) {
+      const { below } = sizeEffect({ id: editingId, name: addForm.name.trim() }, stored)
+      if (below.length) { setAddError(belowZeroRefusal(addForm.name.trim(), below)); return }
+    }
     const costPriceNum = parseFloat(addForm.costPrice)
     setAddSaving(true); setAddError('')
     const payload = {
@@ -558,13 +597,22 @@ export default function MenuPricing() {
     </div>
   )
   const addPriceLabel = pan ? `Menu Price (${PAN_LABEL}) *` : addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'
-  const addPriceNote = pan
+  const addPriceBasis = pan
     ? <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>What the guest pays — stored as typed.</div>
     : vatMode == null
       ? <div role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>△ {VAT_MODE_UNKNOWN_TEXT}</div>
       : addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0
         ? <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}</div>
         : null
+  const addSizes = editingId ? sizeEffect({ id: editingId }, storedFromMenuPrice(addForm.price, addForm.vatRate, vatMode)).sizesText : ''
+  const addPriceNote = (
+    <>
+      {addPriceBasis}
+      {addSizes && (
+        <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>Its sizes follow this price: {addSizes}</div>
+      )}
+    </>
+  )
   // A row still carrying a VAT rate on a PAN-bill outlet: the till charges the price shown, and the
   // mark says what the menu showed before, so the row can be found without the banner.
   const panMark = r => pan && r.storedVat > 0 && r.exVat > 0 ? (
@@ -1183,6 +1231,12 @@ export default function MenuPricing() {
                           The row's input is unlabelled in a table of ~100 rows, so the aria-label
                           names WHICH dish as well (S576's template-label rule). */}
                       <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
+                      {changed && draftNum > 0 && (() => {
+                        const { sizesText } = sizeEffect(r, storedFromMenuPrice(draftNum, r.storedVat, vatMode))
+                        return sizesText
+                          ? <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, maxWidth: 220, marginLeft: 'auto' }}>Sizes become {sizesText}</div>
+                          : null
+                      })()}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? newFcFig.style.color : 'var(--theme-text3)' }}
                       title={isByo ? 'A build-your-own dish is costed by size: open its row. The range moves with the new price once it is saved.' : (newFcFig.title || (r.cost > 0 ? undefined : NO_COST_TITLE))}>

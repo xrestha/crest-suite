@@ -7,7 +7,7 @@ import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { OPTION_COLS, DIET_LABEL, parseAllergens } from './customizationData'
-import { exFromIncl, inclFromEx, signedPrice } from '../../shared/optionPricing'
+import { exFromIncl, inclFromEx, signedPrice, optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
 import { VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import { npr } from '../../shared/nepalMoney'
 
@@ -77,6 +77,9 @@ export default function OptionModal({
 
   const priceNum = form.price === '' ? 0 : Number(form.price)
   const deltaIncl = fullPriceMode ? priceNum - basePrice : priceNum
+  // S809 4h (CUSTOMIZATION-6): a result below zero reads as one, never as NPR 0. Both server
+  // pricers add the difference as it is, and since 4h refuse a line that ends below zero.
+  const resultText = v => (v < 0 ? `−${npr(Math.abs(v))}` : npr(v))
   const choiceByRef = useMemo(() => new Map(itemChoices.map(c => [c.value, c])), [itemChoices])
   // What "More details" holds, said on the closed button so a folded section is not a hidden one.
   const detailSummary = [
@@ -92,6 +95,14 @@ export default function OptionModal({
     if (!form.name.trim()) e.name = 'Give the option a name, e.g. “Extra cheese”.'
     if (!form.is_removal && form.price !== '' && !Number.isFinite(Number(form.price))) e.price = 'Enter a number.'
     if (fullPriceMode && form.price !== '' && Number(form.price) < 0) e.price = 'A price cannot be below zero.'
+    // S809 4h (CUSTOMIZATION-6, D17): refused here rather than by the till mid-service. A hidden
+    // option is offered nowhere, so it is not checked until it is shown again.
+    if (!e.price && !form.is_removal && form.is_active && Number.isFinite(deltaIncl)) {
+      const found = optionsBelowZero(attachedDishes, [{ name: form.name.trim() || 'this option', price_delta: exFromIncl(deltaIncl, vat) }])
+      if (found.length) {
+        e.price = `${belowZeroText(found)}, and the till refuses a dish priced below zero. Raise the price, or take this group off ${found.length === 1 ? 'that dish' : 'those dishes'} first.`
+      }
+    }
     if (isSize && form.portion !== '' && !(Number(form.portion) > 0 && Number(form.portion) <= 10)) {
       e.portion = 'Enter a portion above 0 and up to 10 — 1 is a regular plate, 1.5 is half as much again.'
     }
@@ -229,9 +240,9 @@ export default function OptionModal({
           <div className="form-field">
             <label htmlFor="opt-price">
               <Tip width={300} text={fullPriceMode
-                ? 'Type the full menu price of this size. Every dish this group is on currently costs the same, so the difference is worked out for you.'
+                ? 'Type the full menu price of this size. Every dish this group is on currently costs the same, so the difference is worked out for you. The size keeps that difference: when the dish’s price changes on Menu Pricing, this size moves by the same amount.'
                 : isSize
-                  ? 'This group is on dishes with different prices, so enter how much this size adds or takes off (negative for a smaller portion). The result for each dish is shown below.'
+                  ? 'This group is on dishes with different prices, so enter how much this size adds or takes off (negative for a smaller portion). The result for each dish is shown below, and it follows the dish when the dish’s price changes.'
                   : 'How much this option adds to the dish. Leave blank or 0 if it is free.'}>
                 {priceLabel}
               </Tip>
@@ -241,12 +252,12 @@ export default function OptionModal({
             <FieldError id="opt-price" message={errors.price} />
             <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
               {fullPriceMode
-                ? <>Dish price {npr(basePrice)} → this size {npr(Math.max(0, basePrice + deltaIncl))} ({signedPrice(deltaIncl) || 'same price'}).</>
+                ? <>Dish price {npr(basePrice)} → this size {resultText(basePrice + deltaIncl)} ({signedPrice(deltaIncl) || 'same price'}).</>
                 : isSize && attachedDishes.length > 0
                   ? <>
-                      {attachedDishes.slice(0, 6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${npr(Math.max(0, d.inclPrice + deltaIncl))}`).join(' · ')}
+                      {attachedDishes.slice(0, 6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${resultText(d.inclPrice + deltaIncl)}`).join(' · ')}
                       {attachedDishes.length > 6 && (
-                        <Tip width={300} text={attachedDishes.slice(6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${npr(Math.max(0, d.inclPrice + deltaIncl))}`).join(' · ')}>
+                        <Tip width={300} text={attachedDishes.slice(6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${resultText(d.inclPrice + deltaIncl)}`).join(' · ')}>
                           <span> · +{attachedDishes.length - 6} more</span>
                         </Tip>
                       )}

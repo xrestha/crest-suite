@@ -36,13 +36,27 @@ export function sizeFactor(chosen, groupsById) {
   return Math.round(f * 1e6) / 1e6
 }
 
+// S809 4h (CUSTOMIZATION-4): a scaled price in whole paisa × millionths, as the server's exact
+// numeric works it. price_delta has 2 places and the factor 6, so the product is exact in integers
+// and is rounded half away from zero once. In floating point 8.85 × 1.5 is 13.27499…, a paisa under
+// the server's 13.28, and a Charge on an unsent bowl stopped with "Prices were updated from the menu".
+function scaleMoney(p, factor) {
+  const paisa = Math.round(Math.abs(p) * 100)
+  const micro = Math.round(factor * 1e6)
+  const product = paisa * micro
+  if (!Number.isSafeInteger(product)) return roundMoney(p * factor) // past any real menu price
+  const rem = product % 1e6
+  const q = (product - rem) / 1e6 + (rem * 2 >= 1e6 ? 1 : 0)
+  return q === 0 ? 0 : Math.sign(p) * q / 100
+}
+
 /**
  * S760: an option's price at a size — its price × the factor when its group scales price, as is
  * otherwise. A size option itself is never scaled (a size group's size_scaling is always 'none').
  */
 export function scaledDelta(option, group, factor = 1) {
   const p = Number(option?.price_delta) || 0
-  return group?.size_scaling === 'stock_and_price' ? roundMoney(p * (Number(factor) || 1)) : roundMoney(p)
+  return group?.size_scaling === 'stock_and_price' ? scaleMoney(p, Number(factor) || 1) : roundMoney(p)
 }
 
 /** S760: a stock line's quantity at a size, scaled when the group scales stock. */
@@ -91,15 +105,24 @@ export function ruleText({ min, max, included = 0 }) {
   return included > 0 ? `${base} · first ${included} free` : base
 }
 
-/** Whether a count of chosen options satisfies the rule. */
-export function countAllowed(count, { min, max }) {
-  return count >= (min || 0) && (max == null || count <= max)
+/**
+ * Whether a group's picks satisfy the rule. S809 4h (Q20 a, D15): a "No …" removal answers a
+ * required group but never takes a place under the maximum, so the minimum counts every pick
+ * (`count`) and the maximum only the real ones (`real`, the picks that are not removals).
+ */
+export function countAllowed(count, { min, max }, real = count) {
+  return count >= (min || 0) && (max == null || real <= max)
 }
+
+/** The picks a group's maximum counts: every pick but a "No …" removal (S809 4h, Q20 a). */
+const realPicks = opts => opts.filter(o => !o.is_removal)
 
 /**
  * The ex-VAT price change a selection adds to one plate. Within each group the first
  * `included_count` chosen options — in the group's display order (sort, then name) — are free.
- * @param {Array<{id, group_id, price_delta, sort?, name?}>} chosen
+ * A "No …" removal is never one of them (S809 4h, Q20 a): it costs nothing anyway, and counting
+ * it charged the guest for the topping it pushed out.
+ * @param {Array<{id, group_id, price_delta, sort?, name?, is_removal?}>} chosen
  * @param {Record<string, {included_count?: number}>} groupsById
  */
 export function optionsPriceDelta(chosen, groupsById) {
@@ -112,7 +135,7 @@ export function optionsPriceDelta(chosen, groupsById) {
   let total = 0
   for (const [groupId, opts] of byGroup) {
     const included = groupsById?.[groupId]?.included_count || 0
-    const ordered = [...opts].sort((a, b) =>
+    const ordered = realPicks(opts).sort((a, b) =>
       (a.sort ?? 0) - (b.sort ?? 0) || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id).localeCompare(String(b.id)))
     for (let i = included; i < ordered.length; i++) total += scaledDelta(ordered[i], groupsById?.[groupId], factor)
   }
@@ -126,7 +149,8 @@ const byDisplayOrder = (a, b) =>
  * A selection as a cart line carries it before the server has priced it — the same shape
  * save_pos_order_items returns, so the cart, the ticket and the bill read one thing either way.
  * Ordered as the server orders its summary: the dish's group order, then the group's own, then the
- * option's; the first `included_count` of each group are free and marked "(incl.)" when they had a price.
+ * option's; the first `included_count` real picks of each group (never a "No …" removal) are free
+ * and marked "(incl.)" when they had a price.
  * @param {string[]} optionIds
  * @param {{ optionsById, groupsById, attachByGroup }} catalog  attachByGroup: this dish's attachments by group id
  * @returns {{ delta: number, summary: string, options: object[] }}
@@ -143,8 +167,9 @@ export function describeSelection(optionIds, { optionsById, groupsById, attachBy
   for (const [groupId, opts] of byGroup) {
     const g = groupsById?.[groupId] || {}
     const included = g.included_count || 0
-    ;[...opts].sort(byDisplayOrder).forEach((o, i) => {
-      const free = i < included
+    let real = 0
+    ;[...opts].sort(byDisplayOrder).forEach(o => {
+      const free = !o.is_removal && real++ < included
       const list = scaledDelta(o, g, factor)
       rows.push({
         groupSort: attachByGroup[groupId]?.sort ?? 0, gSort: g.sort ?? 0, oSort: o.sort ?? 0,
@@ -193,7 +218,7 @@ export function groupsForDish(recipeId, { groups, options, attachments }) {
 
 /**
  * The picks a dish starts with: the dish's own default for a group, else the options marked
- * pre-selected, trimmed to the group's maximum.
+ * pre-selected, trimmed to the group's maximum (which a "No …" removal does not count toward).
  */
 export function defaultSelection(dishGroups) {
   const ids = []
@@ -201,19 +226,82 @@ export function defaultSelection(dishGroups) {
     let picks = attachment?.default_option_id && options.some(o => o.id === attachment.default_option_id)
       ? [attachment.default_option_id]
       : options.filter(o => o.is_default).map(o => o.id)
-    if (rule.max != null) picks = picks.slice(0, rule.max)
+    if (rule.max != null) {
+      let real = 0
+      picks = picks.filter(id => options.find(o => o.id === id)?.is_removal || real++ < rule.max)
+    }
     ids.push(...picks)
     void group
   }
   return ids
 }
 
-/** Groups whose pick count breaks the rule — [{ group, count, rule }]. Empty means the selection is valid. */
+/**
+ * Groups whose picks break the rule — [{ group, count, real, rule }], `real` being the picks that
+ * are not "No …" removals (countAllowed). Empty means the selection is valid.
+ */
 export function selectionProblems(dishGroups, optionIds) {
   const chosen = new Set(optionIds || [])
   return (dishGroups || [])
-    .map(({ group, rule, options }) => ({ group, rule, count: options.filter(o => chosen.has(o.id)).length }))
-    .filter(x => !countAllowed(x.count, x.rule))
+    .map(({ group, rule, options }) => {
+      const picked = options.filter(o => chosen.has(o.id))
+      return { group, rule, count: picked.length, real: realPicks(picked).length }
+    })
+    .filter(x => !countAllowed(x.count, x.rule, x.real))
+}
+
+/**
+ * S809 4h (CUSTOMIZATION-6): the dishes an option would take below zero. A size is stored as a
+ * difference from its dish's price, so a "Half" made NPR 100 cheaper sells a NPR 80 dish at
+ * NPR −20, and the server refuses that line. Ex-VAT on both sides, as the server compares. A dish
+ * with no price yet is skipped: it cannot be sold until Menu Pricing prices it, which checks then.
+ * @param {Array<{ id, name, selling_price, inclPrice? }>} dishes
+ * @param {Array<{ id, name, price_delta, is_active? }>} options  hidden ones are skipped
+ * @returns {Array<{ dish, option, price, incl }>}  the dish at that option, ex-VAT and as a guest
+ *          pays (through the dish's own `inclPrice` when given)
+ */
+export function optionsBelowZero(dishes, options) {
+  const out = []
+  for (const o of options || []) {
+    if (o.is_active === false) continue
+    const d = Number(o.price_delta) || 0
+    if (d >= 0) continue
+    for (const dish of dishes || []) {
+      const sp = Number(dish.selling_price) || 0
+      if (sp <= 0) continue
+      const price = round2(sp + d)
+      if (price < 0) out.push({ dish, option: o, price, incl: dish.inclPrice > 0 ? price * (dish.inclPrice / sp) : price })
+    }
+  }
+  return out
+}
+
+/** "Kids Momo would cost −NPR 20 as Half" for the first two found, then "and 3 more". */
+export function belowZeroText(found) {
+  const xs = found || []
+  const parts = xs.slice(0, 2).map(({ dish, option, incl }) =>
+    `${dish.name} would cost −NPR ${nprInt(Math.abs(Math.round(incl)))} as “${option.name}”`)
+  if (xs.length > 2) parts.push(`${xs.length - 2} more`)
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] || '')
+}
+
+/**
+ * S809 4h (CUSTOMIZATION-8): the dishes a group can no longer be ordered on — it has something
+ * to pick (so the server does not skip it) but fewer offered options than the dish must pick.
+ * A "No …" removal answers a required group, so it counts as offered (D15).
+ * @param {{ id, is_active, min_select, max_select, included_count }} group
+ * @param {Array<{ group_id, is_active }>} options  the catalog as it would stand
+ * @param {Array<{ group_id, recipe_id, min_override?, max_override? }>} attachments
+ * @returns {Array<{ recipe_id, need: number, offered: number }>}
+ */
+export function groupShortfalls(group, options, attachments) {
+  if (!group?.is_active) return []
+  const offered = (options || []).filter(o => o.group_id === group.id && o.is_active).length
+  if (offered === 0) return []
+  return (attachments || [])
+    .filter(a => a.group_id === group.id)
+    .map(a => ({ recipe_id: a.recipe_id, need: effectiveRule(group, a).min, offered }))
+    .filter(x => x.offered < x.need)
 }
 
 // ── The cheapest valid build (S792, RECIPES-4) ────────────────────────────────────────────────
@@ -242,12 +330,14 @@ export function selectionProblems(dishGroups, optionIds) {
 // capped search can only ever return a price a guest can actually pay — never one below it.
 const SIZE_COMBO_CAP = 256
 
-const pickCountRange = (rule, n) => {
+// lo: the picks of any kind the minimum asks for; hi: the real picks (not "No …" removals) the
+// maximum allows (S809 4h, Q20 a). `nReal` of the `n` options are real.
+const pickCountRange = (rule, n, nReal = n) => {
   // A group that asks for more picks than it has cannot be ordered (the server refuses it); take
   // every option, the nearest thing to a price, rather than no answer at all.
   const lo = Math.min(Math.max(Number(rule?.min) || 0, 0), n)
-  const max = rule?.max == null ? n : Math.min(Number(rule.max), n)
-  return { lo, hi: Math.max(lo, max) }
+  const max = rule?.max == null ? nReal : Math.min(Number(rule.max), nReal)
+  return { lo, hi: Math.max(lo - (n - nReal), max) }
 }
 
 // [paisa, picks, removals], compared in that order: the lowest price, then the fewest picks (an
@@ -263,28 +353,41 @@ const better = (a, b) => {
 function cheapestPicksInGroup({ group, rule, options }, factor) {
   const opts = [...(options || [])].sort(byDisplayOrder)
   const n = opts.length
-  const { lo, hi } = pickCountRange(rule, n)
+  const { lo, hi } = pickCountRange(rule, n, realPicks(opts).length)
   const free = group?.included_count || 0
   const paisa = opts.map(o => Math.round(scaledDelta(o, group, factor) * 100))
-  // best[i][c]: the best way to finish from option i when c are already picked (null = cannot).
-  const best = Array.from({ length: n + 1 }, () => new Array(hi + 1).fill(null))
-  for (let c = 0; c <= hi; c++) best[n][c] = c >= lo ? [0, 0, 0] : null
-  const takeFrom = (i, c) => {
-    const rest = c < hi ? best[i + 1][c + 1] : null
-    return rest && [rest[0] + (c < free ? 0 : paisa[i]), rest[1] + 1, rest[2] + (opts[i].is_removal ? 1 : 0)]
+  // best[i][c][t]: the best way to finish from option i when c real picks and t picks of any kind
+  // (counted up to lo, all the minimum needs) are already made (null = cannot). A "No …" removal
+  // costs nothing and takes no free pick and no place under the maximum, so it moves only t.
+  const best = Array.from({ length: n + 1 }, () => Array.from({ length: hi + 1 }, () => new Array(lo + 1).fill(null)))
+  for (let c = 0; c <= hi; c++) best[n][c][lo] = [0, 0, 0]
+  const takeFrom = (i, c, t) => {
+    const t2 = Math.min(t + 1, lo)
+    if (opts[i].is_removal) {
+      const rest = best[i + 1][c][t2]
+      return rest && [rest[0], rest[1] + 1, rest[2] + 1]
+    }
+    const rest = c < hi ? best[i + 1][c + 1][t2] : null
+    return rest && [rest[0] + (c < free ? 0 : paisa[i]), rest[1] + 1, rest[2]]
   }
   for (let i = n - 1; i >= 0; i--) {
     for (let c = 0; c <= hi; c++) {
-      const skip = best[i + 1][c]
-      const take = takeFrom(i, c)
-      // A tie goes to taking: of the equally cheap sets, the one listed first is chosen.
-      best[i][c] = take && (!skip || !better(skip, take)) ? take : skip
+      for (let t = 0; t <= lo; t++) {
+        const skip = best[i + 1][c][t]
+        const take = takeFrom(i, c, t)
+        // A tie goes to taking: of the equally cheap sets, the one listed first is chosen.
+        best[i][c][t] = take && (!skip || !better(skip, take)) ? take : skip
+      }
     }
   }
   const picked = []
-  for (let i = 0, c = 0; i < n; i++) {
-    const take = takeFrom(i, c)
-    if (take && best[i][c] && take.every((v, k) => v === best[i][c][k])) { picked.push(opts[i]); c++ }
+  for (let i = 0, c = 0, t = 0; i < n; i++) {
+    const take = takeFrom(i, c, t)
+    if (take && best[i][c][t] && take.every((v, k) => v === best[i][c][t][k])) {
+      picked.push(opts[i])
+      if (!opts[i].is_removal) c++
+      t = Math.min(t + 1, lo)
+    }
   }
   return picked
 }

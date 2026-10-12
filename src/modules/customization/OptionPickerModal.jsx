@@ -68,7 +68,8 @@ export default function OptionPickerModal({
 
   function toggle(group, rule, optionId) {
     setSelected(prev => {
-      const inGroup = new Set(dishGroups.find(d => d.group.id === group.id).options.map(o => o.id))
+      const groupOptions = dishGroups.find(d => d.group.id === group.id).options
+      const inGroup = new Set(groupOptions.map(o => o.id))
       const has = prev.includes(optionId)
       if (rule.max === 1) {
         const others = prev.filter(id => !inGroup.has(id))
@@ -77,8 +78,10 @@ export default function OptionPickerModal({
         return [...others, optionId]
       }
       if (has) return prev.filter(id => id !== optionId)
-      const count = prev.filter(id => inGroup.has(id)).length
-      if (rule.max != null && count >= rule.max) return prev
+      // S809 4h (Q20 a): a "No …" removal takes no place under the maximum.
+      const real = groupOptions.filter(o => !o.is_removal && prev.includes(o.id)).length
+      const isRemoval = groupOptions.some(o => o.id === optionId && o.is_removal)
+      if (!isRemoval && rule.max != null && real >= rule.max) return prev
       return [...prev, optionId]
     })
   }
@@ -125,6 +128,7 @@ export default function OptionPickerModal({
 
         {dishGroups.map(({ group, rule, options }) => {
           const count = options.filter(o => selected.includes(o.id)).length
+          const realCount = options.filter(o => !o.is_removal && selected.includes(o.id)).length
           const short = tried && problems.some(p => p.group.id === group.id)
           const labelId = `opt-group-${group.id}`
           const isRadio = rule.max === 1
@@ -154,7 +158,7 @@ export default function OptionPickerModal({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
                 {options.map((o, i) => {
                   const on = selected.includes(o.id)
-                  const full = !on && rule.max != null && !isRadio && count >= rule.max
+                  const full = !on && !o.is_removal && rule.max != null && !isRadio && realCount >= rule.max
                   // S760: at the size picked so far — a topping on a Large bowl reads its Large price.
                   const listPrice = incl(scaledDelta(o, group, desc.portion_factor))
                   const isFree = on && freeIds.has(String(o.id)) && listPrice !== 0

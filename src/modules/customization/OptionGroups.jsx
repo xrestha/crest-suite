@@ -13,7 +13,8 @@ import RowMenu from '../../components/RowMenu'
 import ReportLoadError from '../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { loadOptionCatalog, KIND_LABEL, DIET_LABEL } from './customizationData'
-import { STANDARD_VAT, inclFromEx, ruleText, signedPrice } from '../../shared/optionPricing'
+import { STANDARD_VAT, inclFromEx, ruleText, signedPrice, groupShortfalls } from '../../shared/optionPricing'
+import { andList } from '../../shared/offeredPicks'
 import { vatModeOf, VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import OptionGroupModal from './OptionGroupModal'
 import OptionModal from './OptionModal'
@@ -241,12 +242,46 @@ export default function OptionGroups() {
   }
 
   // ── Options ──
-  async function toggleOptionActive(o) {
+  // S809 4h (CUSTOMIZATION-8): what taking an offered option away does to the dishes its group is
+  // on, said before it happens. Too few left for a dish's minimum takes the dish off the till and
+  // the QR menu (the server refuses it); none left drops the group, and the dish sells without it.
+  // Only what THIS change causes is named: a dish already short is flagged on the group's card.
+  function optionLossText(o) {
+    const group = catalog.groups.find(g => g.id === o.group_id)
+    if (!o.is_active || !group?.is_active) return null
+    const after = catalog.options.map(x => (x.id === o.id ? { ...x, is_active: false } : x))
+    const before = new Set(groupShortfalls(group, catalog.options, catalog.attachments).map(x => x.recipe_id))
+    const short = groupShortfalls(group, after, catalog.attachments).filter(x => !before.has(x.recipe_id))
+    const nameOf = id => dishById.get(id)?.name || 'a dish'
+    const left = after.filter(x => x.group_id === group.id && x.is_active).length
+    if (short.length) {
+      return `${andList(short.map(x => `${nameOf(x.recipe_id)} must pick ${x.need}`))} from “${group.name}”, which would have ${left} left to pick. ${short.length === 1 ? 'It' : 'They'} can’t be ordered on the till or the QR menu until you show an option again or lower the rule.`
+    }
+    const on = catalog.attachments.filter(a => a.group_id === group.id)
+    if (left === 0 && on.length) {
+      return `Nothing would be left to pick in “${group.name}”, so ${andList(on.map(a => nameOf(a.recipe_id)))} would be ordered without it.`
+    }
+    return null
+  }
+
+  async function setOptionActive(o, active) {
     setPageError(null)
-    const { data, error } = await scopedUpdate('pos_options', { is_active: !o.is_active }).eq('id', o.id).select('id')
+    const { data, error } = await scopedUpdate('pos_options', { is_active: active }).eq('id', o.id).select('id')
     if (error) { setPageError(asActionError(error)); return }
     if (!data?.length) { setPageError('That option no longer exists — reload the page.'); return }
-    load({ quiet: true })
+    await load({ quiet: true })
+  }
+
+  function toggleOptionActive(o) {
+    const loss = optionLossText(o)
+    if (!loss) { setOptionActive(o, !o.is_active); return }
+    ask({
+      title: `Hide “${o.name}”?`,
+      confirmLabel: 'Hide it',
+      busyLabel: 'Hiding…',
+      body: <p style={{ margin: 0 }}>{loss}</p>,
+      run: () => setOptionActive(o, false),
+    })
   }
 
   function deleteOption(o) {
@@ -255,7 +290,12 @@ export default function OptionGroups() {
       danger: true,
       confirmLabel: 'Delete option',
       busyLabel: 'Deleting…',
-      body: <p style={{ margin: 0 }}>It stops being offered on every dish in its group{o.ingredients.length ? ', and its stock lines are deleted with it' : ''}. Bills already rung keep it. To stop offering it for now, use Hide instead.</p>,
+      body: (
+        <>
+          <p style={{ margin: 0 }}>It stops being offered on every dish in its group{o.ingredients.length ? ', and its stock lines are deleted with it' : ''}. Bills already rung keep it. To stop offering it for now, use Hide instead.</p>
+          {optionLossText(o) && <p style={{ margin: '8px 0 0' }}>{optionLossText(o)}</p>}
+        </>
+      ),
       run: async () => {
         setPageError(null)
         const { data, error } = await scopedDelete('pos_options').eq('id', o.id).select('id')
@@ -271,7 +311,11 @@ export default function OptionGroups() {
     const deltaIncl = inclFromEx(o.price_delta, entryVat)
     if (g.kind === 'size') {
       const prices = Array.from(new Set(dishesForGroup(g.id).map(d => Math.round(d.inclPrice))))
-      if (prices.length === 1) return npr(Math.max(0, prices[0] + deltaIncl))
+      // S809 4h (CUSTOMIZATION-6): below zero reads as below zero, never as NPR 0.
+      if (prices.length === 1) {
+        const v = prices[0] + deltaIncl
+        return v < 0 ? <span style={{ color: 'var(--theme-red-text)' }}>−{npr(Math.abs(v))}</span> : npr(v)
+      }
     }
     return signedPrice(deltaIncl) || <span style={{ color: 'var(--theme-text3)' }}>No charge</span>
   }
@@ -376,6 +420,8 @@ export default function OptionGroups() {
             {groupRows.map((g, gi) => {
               const onDishes = attachCountByGroup[g.id] || 0
               const freeN = g.kind === 'addon' ? (g.included_count || 0) : 0
+              // S809 4h (CUSTOMIZATION-8): dishes this group now makes unorderable, whatever caused it.
+              const shortfalls = groupShortfalls(g, catalog.options, catalog.attachments)
               return (
                 <section key={g.id} className="card" aria-labelledby={`grp-${g.id}`} style={{ margin: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -407,7 +453,13 @@ export default function OptionGroups() {
 
                   {freeN > 0 && g.options.length > 0 && (
                     <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
-                      The first {freeN} pick{freeN === 1 ? '' : 's'} a guest makes {freeN === 1 ? 'is' : 'are'} free — the <strong>earliest in this list</strong> among what they picked, not the cheapest. Put the options you are happy to give away first, with <em>Move up</em>.
+                      The first {freeN} pick{freeN === 1 ? '' : 's'} a guest makes {freeN === 1 ? 'is' : 'are'} free — the <strong>earliest in this list</strong> among what they picked, not the cheapest. Put the options you are happy to give away first, with <em>Move up</em>. A “No …” option is never one of them and takes no place under the maximum.
+                    </p>
+                  )}
+
+                  {shortfalls.length > 0 && (
+                    <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--theme-red-text)' }}>
+                      {andList(shortfalls.map(x => `${dishById.get(x.recipe_id)?.name || 'A dish'} must pick ${x.need}`))} from this group and {shortfalls[0].offered === 1 ? 'only 1 option is' : `only ${shortfalls[0].offered} options are`} offered, so {shortfalls.length === 1 ? 'it' : 'they'} can’t be ordered on the till or the QR menu. Show an option again, or lower the rule.
                     </p>
                   )}
 

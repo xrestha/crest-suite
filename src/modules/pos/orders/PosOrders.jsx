@@ -33,7 +33,7 @@ import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import OptionPickerModal from '../../customization/OptionPickerModal'
 import { loadOptionCatalog } from '../../customization/customizationData'
 import { groupsForDish, describeSelection, defaultSelection, selectionProblems } from '../../../shared/optionPricing'
-import { lineChoiceTrouble, choiceRefusalText } from './choiceRefusal'
+import { lineChoiceTrouble, choiceRefusalText, savedLineGoneNote } from './choiceRefusal'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
   cachePosSettings, getCachedPosSettings, cachePosOrderForTable, getCachedPosOrderForTable,
@@ -97,6 +97,8 @@ const HINT = {
   optionOff:  'option_not_on_menu',
   optionCount:'option_count',
   optionsOff: 'order_options_off',
+  // S809 4h (CUSTOMIZATION-6): a new line whose choices would price it below zero.
+  optionBelowZero: 'option_price_below_zero',
   rank:       'rank_required',     // the login's POS rank is too low for this write
 }
 // Postgres prefixes a RAISE message with the code word the function chose; the reader wants the
@@ -2054,8 +2056,10 @@ export default function PosOrders({ billingStation = false } = {}) {
   // `force` re-reads a menu already loaded — after a save refused a dish that is no longer on it
   // (S754), the menu on screen is exactly what is out of date. `menuLoaded` in this closure may be
   // stale-true, which is why it is an argument rather than a state reset.
+  // Resolves true only when the menu was read from the server just now (S809 4h): a caller that
+  // says "the menu has been reloaded" says it after this, and only on true.
   async function loadMenu({ force = false } = {}) {
-    if (!clientId || (menuLoaded && !force)) return
+    if (!clientId || (menuLoaded && !force)) return false
 
     if (!navigator.onLine) {
       const cached = await getCachedPosMenu(clientId)
@@ -2067,7 +2071,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         if (cached.optionCatalog) setOptionCatalog(cached.optionCatalog)
         setMenuLoaded(true)
       }
-      return
+      return false
     }
 
     const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog] = await Promise.all([
@@ -2094,14 +2098,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (menuErr) {
       console.error('loadMenu failed, keeping the last menu:', menuErr)
       setMenuLoadError(errorText(menuErr, 'staff'))
-      return
+      return false
     }
     // A failed options read is a failed menu read: without it a dish that must have a size could be
     // added plain. Same keep-last-good rule.
     if (catalog.error) {
       console.error('option catalog read failed, keeping the last menu:', catalog.error)
       setMenuLoadError(`The dish choices could not be read, so a dish that needs a size or choice cannot be added yet. (${catalog.error})`)
-      return
+      return false
     }
     setMenuLoadError('')
     const nextCatalog = { groups: catalog.groups, options: catalog.options, attachments: catalog.attachments, buildYourOwn: catalog.buildYourOwn || [] }
@@ -2119,6 +2123,19 @@ export default function PosOrders({ billingStation = false } = {}) {
     setMenuLoaded(true)
     // Only a complete read is worth keeping as the offline copy.
     if (!suggErr) cachePosMenu(clientId, data || [], suggMap, nextCatalog)
+    return true
+  }
+
+  // A refusal that means the menu on screen is stale: say it now, re-read the menu, and add "The
+  // menu has been reloaded." only once a reload has landed (S809 4h). It used to be said before the
+  // reload ran, and when the reload failed.
+  function refuseAndReloadMenu(text) {
+    const shown = `error:${text}`
+    setMsg(shown)
+    void loadMenu({ force: true }).then(
+      ok => { if (ok) setMsg(m => (m === shown ? `${shown} The menu has been reloaded.` : m)) },
+      e => console.error('menu reload after a refusal failed:', e),
+    )
   }
 
   // table_id → the booking that matters on that tile NOW, plus the bookings holding no table at
@@ -3154,14 +3171,14 @@ export default function PosOrders({ billingStation = false } = {}) {
       showClosedElsewhere()
       return { ok: false, handled: true, error: err }
     }
-    if (err?.hint === HINT.optionOff || err?.hint === HINT.optionCount || err?.hint === HINT.optionsOff) {
+    if (err?.hint === HINT.optionOff || err?.hint === HINT.optionCount || err?.hint === HINT.optionsOff
+        || err?.hint === HINT.optionBelowZero) {
       // Nothing was saved. The options on screen are what is out of date (an option hidden, a group
-      // re-ruled, the module switched off), so the menu and its options are re-read.
+      // re-ruled, a price changed, the module switched off), so the menu and its options are re-read.
       // S809 3o (CUSTOMIZATION-2): the sentence names the dish the server named, and once the menu is
       // back the cart marks the line to fix, with a Change that works even when no choice is left.
       const named = choiceRefusalText(err)
-      setMsg(`error:${named || `Not saved — ${errorText(err, 'staff')}`} The menu has been reloaded.`)
-      loadMenu({ force: true })
+      refuseAndReloadMenu(named || `Not saved — ${errorText(err, 'staff')}`)
       return { ok: false, handled: true, error: err }
     }
     if (err?.hint === HINT.offMenu) {
@@ -3169,8 +3186,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // from the order and save again"). Nothing was saved, and the menu on screen is what is out of
       // date, so it is re-read.
       const text = stripCodeWord(err.message, HINT.offMenu)
-      setMsg(`error:Not saved — ${text || 'a dish on this order is not on the till menu any more'}. The menu has been reloaded.`)
-      loadMenu({ force: true })
+      refuseAndReloadMenu(`Not saved — ${text || 'a dish on this order is not on the till menu any more'}.`)
       return { ok: false, handled: true, error: err }
     }
     return { ok: false, handled: false, error: err }
@@ -5799,9 +5815,14 @@ The tables were left occupied rather than freed with their orders still open.`)
                     // S809 3o (CUSTOMIZATION-2): a line the next save will check (its key is not on the
                     // saved order) whose choices the menu no longer offers, or no longer fit, is marked,
                     // and keeps its Change even when the dish has no choice left to offer.
-                    const trouble = unsent && menuLoaded && !savedItemsRef.current.has(lineKeyOf(item))
+                    const saved = savedItemsRef.current.has(lineKeyOf(item))
+                    const trouble = unsent && menuLoaded && !saved
                       ? lineChoiceTrouble(item, lineGroups, optionMaps.optionsById) : null
-                    if (!lineGroups && !item.option_summary && !trouble) return null
+                    // S809 4h (owner, Q3 b): a SAVED line not yet sent keeps its exemption, so a
+                    // choice hidden since is a grey note that blocks nothing, not a red mark.
+                    const goneNote = unsent && menuLoaded && saved
+                      ? savedLineGoneNote(item, lineGroups, optionMaps.optionsById) : null
+                    if (!lineGroups && !item.option_summary && !trouble && !goneNote) return null
                     const canChange = (!!lineGroups || !!trouble) && unsent
                     return (<>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
@@ -5827,6 +5848,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                       </div>
                       {trouble && (
                         <span style={{ fontSize: 11, color: 'var(--theme-red-text)', lineHeight: 1.35 }}>{trouble.text}</span>
+                      )}
+                      {goneNote && (
+                        <span style={{ fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.35 }}>{goneNote}</span>
                       )}
                     </>)
                   })()}

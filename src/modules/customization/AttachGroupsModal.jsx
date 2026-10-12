@@ -5,7 +5,7 @@ import ActionError, { asActionError } from '../../components/ActionError'
 import ReportLoadError from '../../components/ReportLoadError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { loadOptionCatalog, KIND_LABEL } from './customizationData'
-import { effectiveRule, ruleText } from '../../shared/optionPricing'
+import { effectiveRule, ruleText, optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
 
 // Which option groups one dish offers. Opened from two places that must behave identically — the
 // Dishes tab of Option Groups and the "Customize" button on Menu Pricing — so it loads its own data
@@ -64,6 +64,14 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   )
   const chosen = visibleGroups.filter(g => draft[g.id]?.on)
 
+  // S809 4h (CUSTOMIZATION-6, D17): a group newly put on this dish whose option takes it below
+  // zero is refused here, before the till refuses it mid-service. Option Groups passes the dish
+  // with `inclPrice`, Menu Pricing its row with `exVat` / `inclVat`.
+  const belowZero = optionsBelowZero(
+    [{ ...recipe, selling_price: recipe.selling_price ?? recipe.exVat, inclPrice: recipe.inclPrice ?? recipe.inclVat }],
+    chosen.filter(g => !existing.some(a => a.group_id === g.id)).flatMap(g => optionsByGroup[g.id] || []),
+  )
+
   const toggle = g => setDraft(d => {
     const cur = d[g.id]
     if (cur?.on) return { ...d, [g.id]: { ...cur, on: false } }
@@ -103,7 +111,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   }
 
   async function save() {
-    if (saving) return
+    if (saving || belowZero.length) return
     // The rule error is already under its own fields (inline, role="alert"); a second copy at the
     // bottom was two channels for one message. Take the reader to the field instead.
     const badGroup = chosen.find(g => overrideError(g))
@@ -233,11 +241,16 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
           </div>
         )}
       </div>
+      {belowZero.length > 0 && (
+        <p role="alert" className="field-error" style={{ margin: '12px 0 0' }}>
+          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Untick that group, or change the option’s price in Option Groups first.
+        </p>
+      )}
       <ActionError error={actionError} />
       <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
         <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save}
-          disabled={saving || loading || !!loadError} aria-busy={saving || undefined}>
+          disabled={saving || loading || !!loadError} aria-disabled={belowZero.length > 0 || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : `Save${chosen.length ? ` (${chosen.length} group${chosen.length === 1 ? '' : 's'})` : ''}`}
         </button>
       </div>

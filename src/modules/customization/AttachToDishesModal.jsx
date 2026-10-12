@@ -3,6 +3,7 @@ import Modal from '../../components/Modal'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { npr } from '../../shared/nepalMoney'
+import { optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
 
 // Attach ONE group to many dishes — the bulk half of attaching (S759).
 //
@@ -45,11 +46,19 @@ export default function AttachToDishesModal({ group, dishes, attachments, onClos
     return n
   }, [dishes, picked, initial])
 
+  // S809 4h (CUSTOMIZATION-6, D17): a dish newly ticked that one of this group's options takes
+  // below zero is refused here, before the till refuses it mid-service. "Select all" on a category
+  // is how a NPR 80 Kids Momo picks up a "Half" made NPR 100 cheaper.
+  const belowZero = useMemo(
+    () => optionsBelowZero(dishes.filter(d => picked.has(d.id) && !initial.has(d.id)), group.options || []),
+    [dishes, picked, initial, group.options],
+  )
+
   const toggle = id => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const setMany = (ids, on) => setPicked(p => { const n = new Set(p); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n })
 
   async function save() {
-    if (saving) return
+    if (saving || belowZero.length) return
     setSaving(true)
     setActionError(null)
     const nextSortByDish = {}
@@ -128,11 +137,16 @@ export default function AttachToDishesModal({ group, dishes, attachments, onClos
           )
         })}
       </div>
+      {belowZero.length > 0 && (
+        <p role="alert" className="field-error" style={{ margin: '12px 0 0' }}>
+          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Untick {belowZero.length === 1 ? 'it' : 'them'}, or change the option’s price first.
+        </p>
+      )}
       <ActionError error={actionError} />
       <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
         <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save}
-          disabled={saving || changed === 0} aria-busy={saving || undefined}>
+          disabled={saving || changed === 0} aria-disabled={belowZero.length > 0 || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : changed ? `Save (${changed} change${changed === 1 ? '' : 's'})` : 'No changes'}
         </button>
       </div>

@@ -1,4 +1,4 @@
-import { lineChoiceTrouble, choiceRefusalText } from './choiceRefusal'
+import { lineChoiceTrouble, choiceRefusalText, savedLineGoneNote } from './choiceRefusal'
 
 // S809 3o (CUSTOMIZATION-2): the waiter's 6:55 pm acai bowl, after Granola was hidden at 7 pm.
 const dishGroups = [
@@ -45,6 +45,22 @@ describe('lineChoiceTrouble', () => {
   })
 })
 
+// S809 4h (owner, Q3 b): the same bowl, saved at 6:55 but not sent when Granola was hidden.
+describe('savedLineGoneNote', () => {
+  test('names the hidden choice, and only that', () => {
+    const line = { option_ids: ['o-large', 'o-granola', 'o-banana'], selection_key: 'o-banana+o-granola+o-large' }
+    expect(savedLineGoneNote(line, dishGroups, optionsById)).toBe('Granola is no longer offered.')
+  })
+  test('two gone read as a list; a deleted one is named from the line', () => {
+    const line = { selection_key: 'o-granola+o-hot+o-large', options: [{ option_id: 'o-hot', option_name: 'Extra hot' }] }
+    expect(savedLineGoneNote(line, dishGroups, optionsById)).toBe('Granola and Extra hot are no longer offered.')
+  })
+  test('nothing to say when every pick is still offered, or the line has none', () => {
+    expect(savedLineGoneNote({ selection_key: 'o-banana+o-large' }, dishGroups, optionsById)).toBeNull()
+    expect(savedLineGoneNote({ recipe_id: 'r-tea' }, undefined, optionsById)).toBeNull()
+  })
+})
+
 describe('choiceRefusalText', () => {
   test('option_not_on_menu names the dish the server named', () => {
     const err = { hint: 'option_not_on_menu', message: 'option_not_on_menu: an option chosen for Acai Bowl is no longer offered on it — change the choices and save again' }
@@ -66,6 +82,13 @@ describe('choiceRefusalText', () => {
   test('the code in the message alone is enough (a wrapper that dropped the hint)', () => {
     const err = { message: 'option_not_on_menu: an option chosen for Acai Bowl is no longer offered on it — change the choices and save again' }
     expect(choiceRefusalText(err)).toMatch(/^A choice on Acai Bowl/)
+  })
+
+  test('option_price_below_zero names the dish (S809 4h)', () => {
+    const err = { hint: 'option_price_below_zero', message: 'option_price_below_zero: Kids Momo would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Option Groups' }
+    expect(choiceRefusalText(err)).toBe('Kids Momo would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on it to pick other choices, or ask a manager to fix the price in Option Groups.')
+    const two = { ...err, message: 'option_price_below_zero: Kids Momo, Mini Thali would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Option Groups' }
+    expect(choiceRefusalText(two)).toMatch(/^Kids Momo and Mini Thali would cost .* Tap Change on each of them/)
   })
 
   test('anything else, or a message with no names, falls back (null)', () => {

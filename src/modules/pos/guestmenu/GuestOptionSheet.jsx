@@ -142,7 +142,8 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
 
   function toggle(groupId, rule, optionId) {
     setSelected(prev => {
-      const inGroup = new Set(dishGroups.find(d => d.group.id === groupId).options.map(o => o.id))
+      const groupOptions = dishGroups.find(d => d.group.id === groupId).options
+      const inGroup = new Set(groupOptions.map(o => o.id))
       const has = prev.includes(optionId)
       if (rule.max === 1) {
         const others = prev.filter(id => !inGroup.has(id))
@@ -150,7 +151,10 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
         return [...others, optionId]
       }
       if (has) return prev.filter(id => id !== optionId)
-      if (rule.max != null && prev.filter(id => inGroup.has(id)).length >= rule.max) return prev
+      // S809 4h (Q20 a): a "No …" removal takes no place under the maximum.
+      const real = groupOptions.filter(o => !o.is_removal && prev.includes(o.id)).length
+      const isRemoval = groupOptions.some(o => o.id === optionId && o.is_removal)
+      if (!isRemoval && rule.max != null && real >= rule.max) return prev
       return [...prev, optionId]
     })
   }
@@ -237,6 +241,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
           const isSize = group.kind === 'size'
           const picked = options.filter(o => selected.includes(o.id))
           const count = picked.length
+          const realCount = picked.filter(o => !o.is_removal).length
           const short = tried && problems.some(p => p.group.id === group.id)
           const labelId = `g-opt-${group.id}`
           const usedFree = picked.filter(o => freeIds.has(o.id)).length
@@ -266,7 +271,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
               <div className="gm-options">
                 {options.map((o, i) => {
                   const on = selected.includes(o.id)
-                  const full = !on && rule.max != null && !single && count >= rule.max
+                  const full = !on && !o.is_removal && rule.max != null && !single && realCount >= rule.max
                   // S760: at the size picked so far.
                   const d = priceAt(o, group)
                   const free = on && freeIds.has(o.id) && d !== 0
@@ -320,7 +325,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
             <p role="alert" className="gm-error">
               {p.rule.min > p.count
                 ? `Choose ${p.rule.min - p.count} more from ${tidyName(p.group.name)}.`
-                : `Too many chosen in ${tidyName(p.group.name)}. Remove ${p.count - p.rule.max}.`}
+                : `Too many chosen in ${tidyName(p.group.name)}. Remove ${p.real - p.rule.max}.`}
             </p>
           )
         })()}
