@@ -1,4 +1,5 @@
 import { normalizePhone } from '../../../utils/phone'
+import { npr, nprExact } from '../../../shared/nepalMoney'
 
 /**
  * The loyalty earn arithmetic, in one place.
@@ -182,11 +183,135 @@ export function schemeNumberCommit(typed, stored) {
  */
 export function describeLedgerRow(row) {
   const o = row?.pos_orders || null
-  const bill = o ? (o.invoice_no != null ? `Bill #${o.invoice_no}` : (o.order_no != null ? `Order #${o.order_no}` : 'A bill')) : null
+  const bill = o ? billLabel(o) : null
   const note = String(row?.note || '').trim()
   let what
   if (row?.kind === 'earn') what = 'Earned'
   else if (row?.kind === 'redeem') what = 'Spent'
   else what = note || 'Corrected'
   return { what, bill }
+}
+
+/** "Bill #1234", or "Order #56" for a bill with no invoice number (a comp), or "A bill". */
+export function billLabel(o) {
+  if (!o) return 'A bill'
+  return o.invoice_no != null ? `Bill #${o.invoice_no}` : (o.order_no != null ? `Order #${o.order_no}` : 'A bill')
+}
+
+// ── S815 4g ──────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Points that can be spent now (CUSTOMERS-PARKING-9, owner decision Q19 c): the balance less the points
+ * held on unpaid Credit bills. A Credit bill earns at its close, and its points can be spent once it is
+ * settled. `held` comes from pos_loyalty_balances, the one place the server works it out, and
+ * redeem_loyalty_points refuses the held part. Never below 0.
+ */
+export function spendablePoints(balance, held) {
+  const b = Math.floor(Number(balance) || 0)
+  const h = Math.max(0, Math.floor(Number(held) || 0))
+  return Math.max(0, b - h)
+}
+
+/** Money with paisa only when there are some: a point worth NPR 2.5 shows as NPR 2.50, NPR 10 as NPR 10. */
+export function nprPoints(n) {
+  const v = Math.round((Number(n) || 0) * 100) / 100
+  return Number.isInteger(v) ? npr(v) : nprExact(v)
+}
+
+/**
+ * What a scheme gives back, in rupees per NPR 100 spent, at the outlet's point value
+ * (CUSTOMERS-PARKING-10). Per NPR 100, so the same number is the percentage of the bill. null when
+ * either number is unknown or not usable.
+ */
+export function schemeGivesBack(pointsPer100, pointValue) {
+  const r = Number(pointsPer100)
+  const v = Number(pointValue)
+  if (pointsPer100 == null || pointValue == null || !Number.isFinite(r) || !Number.isFinite(v) || r < 0 || v <= 0) return null
+  return Math.round(r * v * 100) / 100
+}
+
+/** A scheme giving back this percentage of a bill or more asks before it is saved (CUSTOMERS-PARKING-10). */
+export const GIVE_BACK_CONFIRM_PCT = 50
+
+/**
+ * What the bill on the payment screen will earn, in the cashier's words (CUSTOMERS-PARKING-11). The
+ * window used to tell every customer with no points that "this bill will earn some", including those in
+ * no scheme and those under the minimum, and then no points arrived.
+ *
+ * @param {{base: number, scheme: ({name?: string, points_per_100: number, min_spend_to_earn: number,
+ *          is_active?: boolean}|null), credit?: boolean}} input
+ *   `base` as loyaltyPoints() takes it; `scheme` the customer's scheme (null when in none); `credit`
+ *   when the bill is going on Credit, whose points wait for the bill to be settled (Q19 c).
+ * @returns {{points: number, text: string}}
+ */
+export function earnPreview({ base, scheme, credit = false }) {
+  if (!scheme) return { points: 0, text: 'Not in a points scheme, so this bill earns no points.' }
+  if (scheme.is_active === false) {
+    return { points: 0, text: `Their scheme${scheme.name ? ` (${scheme.name})` : ''} is switched off, so this bill earns no points.` }
+  }
+  const min = Number(scheme.min_spend_to_earn) || 0
+  if (min > 0 && (Number(base) || 0) < min) {
+    return { points: 0, text: `Below the ${nprPoints(min)} minimum for points, so this bill earns no points.` }
+  }
+  const points = loyaltyPoints(base, scheme)
+  if (points <= 0) return { points: 0, text: 'This bill earns no points.' }
+  const n = `${points.toLocaleString('en-IN')} point${points === 1 ? '' : 's'}`
+  return { points, text: credit ? `This bill earns ${n}, usable once it is settled.` : `This bill earns ${n}.` }
+}
+
+/**
+ * A bill's earn base from its stored lines, as award_loyalty_points works it out: lines not comped, at
+ * qty × unit_price, less the bill's discount.
+ */
+export function billEarnBase(items, discountAmount) {
+  const sub = (items || []).reduce((s, i) => (i?.comped ? s : s + (Number(i?.qty) || 0) * (Number(i?.unit_price) || 0)), 0)
+  return sub - (Number(discountAmount) || 0)
+}
+
+/**
+ * The customer's bills that should have earned and have no points recorded, for the one-tap "add the
+ * points this bill earned" (owner addition, S815 4g). Only bills closed since the customer joined their
+ * scheme (D13): one from before earned nothing on purpose, and award_loyalty_points refuses it. Only a
+ * paid bill with no credit note and no delivery partner, on which the scheme earns more than 0 today
+ * (the server works the points out from the same stored lines and the scheme as it is now).
+ *
+ * @param {{bills: Array<{id: string, closed_at: string, close_type: string, credit_note_id: ?string,
+ *          delivery_partner: ?string, discount_amount: ?number}>, earnedIds: Set<string>,
+ *          itemsByOrder: Map<string, Array>, scheme: ?object, joinedAt: ?string}} input
+ * @returns {Array<{bill: object, points: number}>} newest first, as `bills` is ordered.
+ */
+export function billsMissingPoints({ bills, earnedIds, itemsByOrder, scheme, joinedAt }) {
+  if (!scheme || scheme.is_active === false) return []
+  const since = joinedAt ? new Date(joinedAt).getTime() : null
+  const out = []
+  for (const b of bills || []) {
+    if (b.close_type !== 'paid' || b.credit_note_id || b.delivery_partner) continue
+    if (earnedIds?.has(b.id)) continue
+    if (since != null && new Date(b.closed_at).getTime() < since) continue
+    const points = loyaltyPoints(billEarnBase(itemsByOrder?.get(b.id), b.discount_amount), scheme)
+    if (points > 0) out.push({ bill: b, points })
+  }
+  return out
+}
+
+/**
+ * Checks a points move before it is sent, with the rules move_loyalty_points applies (owner addition,
+ * S815 4g), so the window can say what is wrong next to the field. The server still decides.
+ *
+ * @param {{toPhone: string, reason: string, fromPhone: string, partners?: Array}} input
+ * @returns {{toNumber: (string|null), errors: {phone?: string, reason?: string}}} `toNumber` is the new
+ *   number as the customer book will store it.
+ */
+export function pointsMove({ toPhone, reason, fromPhone, partners = [] }) {
+  const errors = {}
+  const toNumber = normalizePhone(toPhone)
+  if (!String(toPhone ?? '').trim()) errors.phone = 'Enter the new phone number.'
+  else if (!toNumber) errors.phone = 'Type the new number in full (7 digits or more).'
+  else if (toNumber === normalizePhone(fromPhone) || String(toPhone).trim() === String(fromPhone ?? '').trim()) errors.phone = 'That is this customer’s own number.'
+  else if (isDeliveryPartnerPhone(toPhone, partners)) errors.phone = 'That is a delivery partner’s number, which does not earn or spend points.'
+
+  const why = String(reason ?? '').trim()
+  if (!why) errors.reason = 'Say why — the reason is kept on both numbers.'
+  else if (why.length > MAX_ADJUST_REASON) errors.reason = `Keep the reason under ${MAX_ADJUST_REASON} characters.`
+  return { toNumber, errors }
 }

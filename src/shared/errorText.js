@@ -270,7 +270,7 @@ const rules = [
   {
     test: e => hasCode(e, 'award_window_closed'),
     staff: 'This bill closed too long ago for points to be added from the till. The bill itself is fine — the owner or a POS manager can add the points in Customers → Loyalty.',
-    operator: 'Loyalty points are added as a bill closes, and this one closed more than 10 minutes ago, so none were added. The bill is unaffected; add them by hand with Adjust in Customers → Loyalty.',
+    operator: 'Loyalty points are added as a bill closes, and this one closed more than 10 minutes ago, so none were added from the till. The bill is unaffected; add them from the customer’s History in Customers → Loyalty.',
   },
   {
     test: e => hasCode(e, 'redeem_exceeds_bill'),
@@ -317,6 +317,61 @@ const rules = [
     test: e => hasCode(e, 'pos_points_adjust_no_customer'),
     staff: 'That customer is no longer in the book. No points were changed.',
     operator: 'That customer is no longer in the customer book (deleted since this page loaded), so no points were changed. Reload the page.',
+  },
+  // S815 4g (migration 20261012100000). Q19 (c): a Credit bill earns at its close and its points can be
+  // spent once it is settled; redeem_loyalty_points refuses the held part before writing anything.
+  {
+    test: e => hasCode(e, 'pos_points_held'),
+    staff: 'Some of this customer’s points came from a Credit bill that is not paid yet, so they cannot be spent until it is settled. No points were used — redeem fewer.',
+    operator: 'Some of this customer’s points were earned on a Credit bill that has not been paid yet, and they can be spent once it is settled in Customers → Outstanding Credit. No points were used; redeem fewer.',
+  },
+  // The one-tap "add the points this bill earned" (award_loyalty_points after the till's window).
+  {
+    test: e => hasCode(e, 'pos_points_before_enrolment'),
+    staff: 'That bill closed before the customer joined their points scheme, so it earns no points.',
+    operator: 'That bill closed before the customer joined their points scheme, so it earns no points and none were added. Only bills since they joined can have their points added.',
+  },
+  // move_loyalty_points (owner addition). Every refusal is raised inside the one transaction that would
+  // write both rows, so each may say no points were moved.
+  {
+    test: e => hasCode(e, 'pos_points_move_rank'),
+    staff: 'Only the owner or a POS manager can move points to a new number. No points were moved.',
+    operator: 'Only the Owner or a POS manager can move loyalty points to a new number, so no points were moved.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_reason'),
+    staff: 'Say why the points are moving. No points were moved.',
+    operator: 'Say in a few words why the points are moving (300 characters at most) — the reason is kept on both numbers — so no points were moved.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_number'),
+    staff: 'Type the new number in full. No points were moved.',
+    operator: 'Type the new phone number in full (7 digits or more), so no points were moved. If it was typed in full, try again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_same'),
+    staff: 'That is this customer’s own number. No points were moved.',
+    operator: 'That is this customer’s own number, written another way, so no points were moved.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_partner'),
+    staff: 'A delivery partner’s number does not earn or spend points. No points were moved.',
+    operator: 'One of the two numbers is a delivery partner’s (Foodmandu, Pathao and the like). A partner does not earn or spend points, so points cannot move off its number or onto it, and none were moved.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_held'),
+    staff: 'All of this customer’s points are waiting on an unpaid Credit bill. No points were moved.',
+    operator: 'All of this customer’s points were earned on a Credit bill that is not paid yet, so they can be moved once it is settled in Customers → Outstanding Credit. No points were moved.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_nothing'),
+    staff: 'This customer has no points to move.',
+    operator: 'This customer holds no points to move (they may have been spent at a till since this page loaded), so nothing was moved. Reload to see the balance.',
+  },
+  {
+    test: e => hasCode(e, 'pos_points_move_no_customer'),
+    staff: 'That customer is no longer in the book. No points were moved.',
+    operator: 'That customer is no longer in the customer book (deleted since this page loaded), so no points were moved. Reload the page.',
   },
   // S809 2g: the CHECK settings_pos_loyalty_point_value_positive. Customers → Loyalty already refuses 0
   // before saving, so only a hand-made request reaches it. A 23514, so it sits above the generic rule.
@@ -615,7 +670,7 @@ const rules = [
   {
     test: e => hasCode(e, 'rank_required') && /person who closed it/i.test(e.message || ''),
     staff: 'Points for a bill are added by whoever closed it, as it closes. The bill itself is fine — the owner or a POS manager can add the points in Customers → Loyalty.',
-    operator: 'Loyalty points for a bill are added by the person who closed it, as it closes, so none were added from this login. The bill is unaffected; add them by hand with Adjust in Customers → Loyalty.',
+    operator: 'Loyalty points for a bill are added by the person who closed it as it closes, or later by the Owner or a POS manager, so none were added from this login. The bill is unaffected; the Owner or a POS manager adds them from the customer’s History in Customers → Loyalty.',
   },
   {
     test: e => hasCode(e, 'rank_required'),

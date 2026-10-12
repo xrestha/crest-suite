@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S814 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped; stages 5–7 outlined)
+Last updated: 2026-10-12 (S815 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`); stages 5–7 outlined)
 
 ---
 
@@ -65,13 +65,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (29 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8; GUEST-7 closed as accepted, Q21 (c))
+### P3 (26 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11; GUEST-7 closed as accepted, Q21 (c))
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| CUSTOMERS-PARKING-9 | An unpaid Credit bill earns spendable points at close, though the guide says points follow payment | 4 | Q19 | yes |
-| CUSTOMERS-PARKING-10 | Nothing shows what points are worth per bill, and changing the point value re-prices every balance unwarned (BLOOM CAFE's test schemes give back 100% and 400%) | 4 | — | no |
-| CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
 | CUSTOMIZATION-4 | The till's price for a size-scaled topping is a paisa off the server's on about 1 price in 25 | 4 | — | no |
 | CUSTOMIZATION-5 | A "No …" choice uses up a free pick and a place under the maximum | 4 | Q20 | yes |
 | CUSTOMIZATION-6 | Sizes are stored as a difference from the dish price, so a dish price rise silently raises every size | 4 | — | yes |
@@ -352,14 +349,14 @@ that file.
 | 4d ✅ | REPORTS-5, -6, -7, -9, -10, -11, SHIFTS-5 [B4 Covers Avg Turn Time; Manual Sales by Category counting `pos_credit`; Sales Report / Exceptions comp food cost] (shipped 2026-10-12, app only, crest-v430; Owner Report schema 16; owner D1–D3) | none | Q22 |
 | 4e ✅ | IMS-HANDOFF-5, -6, -7, -8, -9, -10 [`imsPostWarning` never decreases; `writeSalesEntries` links by screen `orderId`] (shipped 2026-10-12, app only, crest-v430; owner D4–D7) | none | — |
 | 4f ✅ | CUSTOMERS-PARKING-14, -15, GUEST-8; GUEST-7 closed as accepted [Guest Menu Preview wording] (shipped 2026-10-12, app only, crest-v430; owner D8–D10) | none | Q21 |
-| 4g | CUSTOMERS-PARKING-9, -10, -11; owner additions: one-tap "add the points this bill earned", "Move points" [full points history; "+977" bill-history search] | yes | Q19 |
+| 4g ✅ | CUSTOMERS-PARKING-9, -10, -11; owner additions: one-tap "add the points this bill earned", "Move points" [full points history; "+977" bill-history search] (shipped 2026-10-12, S815, migration `20261012100000` applied live, crest-v431; owner D11–D14) | yes | Q19 |
 | 4h | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note | yes | Q20 |
 | 4i | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] | yes | — |
 | 4j | RESERVATIONS-6, -7, -8, -9, -10, -11 | yes | Q23 |
 | 4k | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT] | yes | — |
 | 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
 
-Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last.
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815).
 
 **After stage 4 (owner approved 2026-10-12):**
 
@@ -572,10 +569,11 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - `pos_loyalty_ledger` carries the S782 grants trap: anon and authenticated hold REFERENCES, TRIGGER
     and TRUNCATE (not reachable through REST). `REVOKE TRUNCATE, REFERENCES, TRIGGER ON
     public.pos_loyalty_ledger FROM anon, authenticated;` (3k).
-  - Customers' own bill history matches `buyer_phone` exactly and its search misses "+977…" spellings;
-    only pre-3k bills typed differently (0 live) (3k). "00977 98…" is not read as the same number by
+  - ~~Customers' own bill history matches `buyer_phone` exactly and its search misses "+977…" spellings;
+    only pre-3k bills typed differently (0 live) (3k).~~ Fixed in 4g: the history matches the stored phone
+    and its number, and both Customers searches match by number (`phoneMatchesSearch`). "00977 98…" is not read as the same number by
     either twin (they agree, so nothing splits) (3k).
-  - No screen shows a customer's full points history (Adjust shows the latest 10); Loyalty's member list
+  - ~~No screen shows a customer's full points history (Adjust shows the latest 10)~~ (History, 4g); Loyalty's member list
     hides when no scheme exists, so balances left after every scheme is deleted cannot be adjusted;
     "+ Add scheme" is `disabled` with no reason when the name is empty (3k).
   - Between a release and every till reloading, an older till that creates a customer typed "+977…"
@@ -697,6 +695,18 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     hours are left out (4d): remove it in 4j.
   - `pos_parking_slips` has no index on `time_in`; the All tab's date range filters on it. Fine at
     today's volume (0 slips live) (4f).
+- **Found while building stage 4, slice 4g (2026-10-12, not fixed):**
+  - A late award (the one-tap) uses the customer's scheme as it is now, not as it was when the bill
+    closed; the History row shows the points before the tap, and the answer says when the server's
+    figure differs. Fine while schemes rarely change.
+  - A Credit Note on a bill closed before a Move takes its points back from the OLD number, which can go
+    below 0 while the new number keeps them (the ledger's true position, as for any spent points).
+  - `pos_customer_phone_locked`'s sentence still says "the points stay with the old number"; it should
+    name Move. Stage 5 (it is a guard body).
+  - A till on crest-v430 or older shows held points as spendable until it reloads; the server refuses
+    them with a sentence (`pos_points_held`).
+  - Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
+    with no reason when the name is empty (S809.4, 3k): 4l or stage 6.
 
 ---
 

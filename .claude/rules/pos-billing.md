@@ -987,16 +987,11 @@ is charged on the full bill, and **IMS revenue needs no change at all** — `wri
    a redemption is not picked — it is applied when the customer has a balance. S290→S291 already
    learned this by adding Foodmandu/Pathao there and reverting it.
 
-### A no-write-policy table still has to survive a restore
-
-`pos_loyalty_ledger` deliberately has no client INSERT/UPDATE/DELETE policy — the two
-`SECURITY DEFINER` RPCs are the only write path, the same shape as `apply_pos_item_comps` (S579)
-and `set_outlet_access` (S617). But **Export/Import restore inserts through the BROWSER as
-`authenticated`**, not through the service role (`restoreClientData.js`), so that lock would have
-silently restored every customer's balance as zero and reported success. An admin-only INSERT
-policy fixes it without touching the actual threat, which is a till JWT minting itself points.
-
 **Loyalty is earned and spent only at the close, by the closer (S754, `20260916100000`).**
+- **`pos_loyalty_ledger` takes no client write, except an admin-only INSERT the browser restore needs**
+  (it inserts as `authenticated`). Verify such a table with one row from two identities (Owner
+  42501, admin 201), never `has_table_privilege`.
+  History: docs/rules-archive/pos-billing.md#loyalty-ledger-restore
 - **`redeem_loyalty_points`** needs supervisor rank and an OPEN order.
 - **A Loyalty line belongs only on a Split charge (S809 2g, `20261009230000`).** `guard_pos_order_close`
   hands back a standing redemption on any other close via `redeem_loyalty_points(id, 0)`, in the
@@ -1008,9 +1003,19 @@ policy fixes it without touching the actual threat, which is a till JWT minting 
 - **`settings_pos_loyalty_point_value_positive`**: a point is worth more than 0; NULL reads as 1
   everywhere. The till never guesses an unread value and stops when the redeemed amount differs from
   its screen (`redeemedAmountDiffers`).
-- **`award_loyalty_points`** is callable only by the order's `closed_by`, within the window after
-  the server-stamped `closed_at`. A failed award cannot be retried later from the till; the Owner or
-  a POS manager adds the points by hand.
+- **`award_loyalty_points`** is callable by the order's `closed_by` within the window after the
+  server-stamped `closed_at`, and at any time by `pos_caller_has_rank('manager')` (S815 4g, the one-tap
+  "add the points this bill earned" in the customer's History, `PointsHistoryModal`). A late award for a
+  bill closed before `pos_customers.loyalty_enrolled_at` is refused (`pos_points_before_enrolment`, D13);
+  at the close it is an ordinary 0. The row is an ordinary `earn`, so a Credit Note takes it back.
+- **A Credit bill's points are held until it is settled (S815 4g, Q19 c, `20261012100000`).**
+  `pos_loyalty_balances(client, customer?)` (INVOKER) is the one place `balance` and `held` are worked
+  out; redeem spends only `balance − held` (`pos_points_held`), and the till and Loyalty read it (paged:
+  a set-returning RPC stops at 1,000 rows). Never sum the raw ledger for a spendable figure.
+- **`loyalty_enrolled_at` is stamped by the server (S815 4g)**: join `now()`, scheme change kept, leave
+  cleared, a client's value ignored, a restore INSERT keeps its own. A write that enrols reads it back.
+- **`move_loyalty_points` (S815 4g, D11–D14)**: manager; moves `balance − held` as two no-bill `adjust`
+  rows; adds/enrols the new number, unenrols the old; `pointsMove` is its JS twin.
 - **`adjust_loyalty_points(customer, points, reason)` (S809 3k, `20261010110000`, Q13 b):** Owner, POS
   manager or operator; reason required; never below 0; never adds to a partner's number; `order_id`
   NULL, because redeem hands back and a credit note reverses every adjust row on a bill;
@@ -1042,23 +1047,8 @@ policy fixes it without touching the actual threat, which is a till JWT minting 
   with ledger rows (`pos_customer_has_points_history`); deleting an enrolled one needs POS manager
   (`pos_customer_delete_rank`). `pos_loyalty_ledger_customer_id_fkey` is NO ACTION, not CASCADE:
   history goes only after its ledger rows (Danger Zone's order), and NO ACTION rather than RESTRICT
-  so a client delete's one-statement cascade still passes. Moving points to a new number is two hand
-  corrections today; a Move action is a stage-4 item (owner, 2026-10-09).
-
-**A lock that breaks the backup is not a security posture.** Ask of any new locked-down table:
-what writes it during a restore, and as which role? It only surfaced because `RESTORE_ORDER` is a
-step on the new-feature checklist.
-
-**Verifying such a table needs a PAIR of measurements, never one.** `authenticated` holds INSERT
-so the restore path works, which means `has_table_privilege` proves nothing about who is refused.
-The evidence is the same row sent to the same table by two identities: Owner → `403 / 42501`,
-admin → `201`. A guard that refuses everyone is indistinguishable from a correct one until the
-day a restore comes back empty.
-
-**Reading your own role needs the token's `sub`.** `profiles?select=role&limit=1` returns an
-arbitrary row for an admin, because an admin can read every profile — it reported the admin
-account as `role: client`. Key the query to the JWT's `sub`, and cross-check with a row count
-(admin sees all profiles, a client sees exactly one).
+  so a client delete's one-statement cascade still passes. Moving points to a new number is Move
+  (S815 4g, above), never two hand corrections.
 
 ## One colour vocabulary, and loudness tracks demand for action (S661)
 

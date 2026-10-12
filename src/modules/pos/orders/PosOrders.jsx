@@ -6,7 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature, mapSignature } from '../../../shared/setIfChanged'
-import { pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers } from '../customers/loyaltyPoints'
+import { pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers, spendablePoints, earnPreview } from '../customers/loyaltyPoints'
 import { phoneForRecord, customerPhoneKey } from '../../../utils/phone'
 import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
@@ -484,6 +484,10 @@ export default function PosOrders({ billingStation = false } = {}) {
   // buyer phone has been entered and looked up — null and 0 are different facts here (not
   // checked yet vs checked and empty), and the panel renders nothing for the first.
   const [loyaltyBalance, setLoyaltyBalance] = useState(null)
+  // S815 4g (Q19 c): the part of the balance earned on unpaid Credit bills, spendable once each is
+  // settled; and the customer's scheme (null when in none), so the window can say what this bill earns.
+  const [loyaltyHeld, setLoyaltyHeld] = useState(0)
+  const [loyaltyScheme, setLoyaltyScheme] = useState(null)
   const [loyaltyPointValue, setLoyaltyPointValue] = useState(1)
   const [redeemStr, setRedeemStr] = useState('')
   const [loyaltyLookupMsg, setLoyaltyLookupMsg] = useState('')
@@ -1074,9 +1078,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Look up the customer's points as soon as a phone is on the bill. Debounced because this
   // fires per keystroke on a field a cashier types ten digits into.
   //
-  // fetchAllRows, not a bare select: a regular's ledger is one row per visit plus one per
-  // redemption, and a truncated SUM would understate a balance the customer is about to spend —
-  // the silent-wrong-number shape, on the one figure a diner will argue about.
+  // S815 4g: the balance and its held part come from pos_loyalty_balances, the one place the server
+  // works them out (redeem_loyalty_points asks it too), in one round trip; until then the till summed
+  // the raw ledger itself. The customer's scheme comes with the customer, for the earn line.
   useEffect(() => {
     if (!billingOpen || !hasFeature('loyalty')) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
     const phone = buyerPhone.trim()
@@ -1086,7 +1090,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const key = customerPhoneKey(phone)
     const timer = setTimeout(async () => {
       const [custRes, setRes] = await Promise.all([
-        scopedFrom('pos_customers', 'id, name').eq(key.column, key.value).maybeSingle(),
+        scopedFrom('pos_customers', 'id, name, pos_loyalty_schemes(name, points_per_100, min_spend_to_earn, is_active)').eq(key.column, key.value).maybeSingle(),
         supabase.from('settings').select('pos_loyalty_point_value').eq('client_id', clientId).maybeSingle(),
       ])
       if (cancelled) return
@@ -1099,12 +1103,14 @@ export default function PosOrders({ billingStation = false } = {}) {
       // would have a cashier tell a regular to their face that they have nothing.
       if (custRes.error) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points. ${errorText(custRes.error, 'staff')}`); return }
       if (!custRes.data) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
-      const { data: rows, error: ledErr } = await fetchAllRows(() =>
-        scopedFrom('pos_loyalty_ledger', 'points').eq('customer_id', custRes.data.id).order('id'))
+      const { data: rows, error: ledErr } = await supabase.rpc('pos_loyalty_balances', { p_client_id: clientId, p_customer_id: custRes.data.id })
       if (cancelled) return
       if (ledErr) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points. ${errorText(ledErr, 'staff')}`); return }
       setLoyaltyLookupMsg('')
-      setLoyaltyBalance((rows || []).reduce((t, r) => t + (r.points || 0), 0))
+      // No row: no points history yet, a balance of 0.
+      setLoyaltyBalance(Number(rows?.[0]?.balance) || 0)
+      setLoyaltyHeld(Number(rows?.[0]?.held) || 0)
+      setLoyaltyScheme(custRes.data.pos_loyalty_schemes || null)
     }, 400)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [billingOpen, buyerPhone, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -3700,7 +3706,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // closeOrder calls redeem_loyalty_points at Charge time, so an abandoned bill debits nothing.
   function applyRedemption() {
     const pts = Math.floor(Number(redeemStr) || 0)
-    const cap = maxRedeemablePoints(loyaltyBalance, redeemableTotal, loyaltyPointValue)
+    const cap = maxRedeemablePoints(spendablePoints(loyaltyBalance, loyaltyHeld), redeemableTotal, loyaltyPointValue)
     if (pts <= 0 || pts > cap) return
     setSplitMode(true)
     setTenders(prev => [...prev.filter(t => t.method !== 'Loyalty'),
@@ -3735,7 +3741,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
-    setLoyaltyBalance(null); setRedeemStr(''); setLoyaltyLookupMsg('')
+    setLoyaltyBalance(null); setLoyaltyHeld(0); setLoyaltyScheme(null); setRedeemStr(''); setLoyaltyLookupMsg('')
     setBillPreviewOpen(false)
     // A try at this bill is still unsettled (S809 CHECKOUT-7): the window opens on what that try sent,
     // locked, rather than on a blank payment the cashier could change before it lands.
@@ -4788,15 +4794,20 @@ export default function PosOrders({ billingStation = false } = {}) {
       const who = updated.buyer_name || (attempt ? '' : buyerName.trim()) || phone
       const { data: earned, error: loyErr } = await bounded(supabase.rpc('award_loyalty_points', { p_order_id: updated.id }), 'Adding the points')
       // The award's own refusals (not the closer, past the 10-minute window) already say where points
-      // are added by hand (S809 3k: Customers → Loyalty, by the Owner or a POS manager).
+      // are added later (S815 4g: the customer's History in Customers → Loyalty, by the Owner or a POS
+      // manager, in one tap).
       if (loyErr && (loyErr.hint === HINT.rank || loyErr.hint === 'award_window_closed')) {
         setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${loyErr.message}` })
       } else if (loyErr && (isTimeout(loyErr) || isNetworkError(loyErr))) {
         // The award may have landed with its answer lost, so this must not invite adding them by hand.
-        setLoyaltyNote({ ok: false, text: `It is not known whether points were added for ${who} — the connection dropped. The Owner or a POS manager can check in Customers → Loyalty (Adjust shows the customer's recent points) before adding any by hand.` })
+        setLoyaltyNote({ ok: false, text: `It is not known whether points were added for ${who} — the connection dropped. The Owner or a POS manager can check the customer's History in Customers → Loyalty, and add this bill's points there if they are missing.` })
       } else if (loyErr) {
-        setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${errorText(loyErr, 'staff')} They can only be added from the till as the bill closes; the Owner or a POS manager can add them by hand in Customers → Loyalty.` })
-      } else if (earned > 0) setLoyaltyNote({ ok: true, text: `+${earned} point${earned === 1 ? '' : 's'} for ${who}` })
+        setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${errorText(loyErr, 'staff')} They can only be added from the till as the bill closes; the Owner or a POS manager can add them from the customer's History in Customers → Loyalty.` })
+      } else if (earned > 0) {
+        // S815 4g (Q19 c): a Credit bill's points wait for the bill to be paid.
+        const onTab = updated.payment_method === 'Credit'
+        setLoyaltyNote({ ok: true, text: `+${earned} point${earned === 1 ? '' : 's'} for ${who}${onTab ? ' — usable once this Credit bill is settled' : ''}` })
+      }
     }
 
     if (tableFree) await tableFree
@@ -6168,7 +6179,12 @@ The tables were left occupied rather than freed with their orders still open.`)
             {billingTab === 'pay' && hasFeature('loyalty') && (loyaltyBalance !== null || loyaltyLookupMsg) &&
               !deliveryPartner && !isDeliveryPartnerPhone(buyerPhone, billingSettings.delivery_partners) && (() => {
               const applied = tenders.find(t => t.method === 'Loyalty')
-              const cap = maxRedeemablePoints(loyaltyBalance, redeemableTotal, loyaltyPointValue)
+              // S815 4g (Q19 c): points earned on an unpaid Credit bill wait for it to be settled, and
+              // redeem_loyalty_points refuses them, so the window offers only what can be spent.
+              const spendable = spendablePoints(loyaltyBalance, loyaltyHeld)
+              const cap = maxRedeemablePoints(spendable, redeemableTotal, loyaltyPointValue)
+              // CUSTOMERS-PARKING-11: what this bill earns, never a promise to a guest who will earn none.
+              const earn = earnPreview({ base: paySubEx - discountAmt, scheme: loyaltyScheme, credit: !splitMode && payMethod === 'Credit' })
               return (
                 <div style={{
                   marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
@@ -6180,12 +6196,17 @@ The tables were left occupied rather than freed with their orders still open.`)
                   ) : (<>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                        <Tip text="Points this customer has earned on past bills. Redeeming settles part of this bill like a gift card — it is not a discount, so the VAT on the bill does not change." width={300}>Loyalty points</Tip>
+                        <Tip text="Points this customer can spend now, earned on past bills. Redeeming settles part of this bill like a gift card — it is not a discount, so the VAT on the bill does not change. Points from a Credit bill that is not paid yet can be spent once it is settled." width={300}>Loyalty points</Tip>
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-purple-text)' }}>
-                        {loyaltyBalance} pt{loyaltyBalance === 1 ? '' : 's'} · {fmtNpr(pointsValue(loyaltyBalance, loyaltyPointValue))}
+                        {spendable} pt{spendable === 1 ? '' : 's'} · {fmtNpr(pointsValue(spendable, loyaltyPointValue))}
                       </span>
                     </div>
+                    {loyaltyHeld > 0 && (
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+                        + {loyaltyHeld} pt{loyaltyHeld === 1 ? '' : 's'} from a Credit bill not paid yet — usable once it is settled.
+                      </p>
+                    )}
                     {applied ? (
                       <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-purple-text)' }}>
                         {applied.points} pt{applied.points === 1 ? '' : 's'} applied ({fmtNpr(applied.amount)}) — undo it in the tender list below to change it.
@@ -6207,9 +6228,12 @@ The tables were left occupied rather than freed with their orders still open.`)
                       </div>
                     ) : (
                       <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
-                        {loyaltyBalance > 0 ? 'Not enough to cover any of this bill yet.' : 'No points yet — this bill will earn some.'}
+                        {spendable > 0 ? 'Not enough to cover any of this bill yet.' : 'No points to spend yet.'}
                       </p>
                     )}
+                    <p style={{ margin: '8px 0 0', fontSize: 12, color: earn.points > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>
+                      {earn.text}
+                    </p>
                   </>)}
                 </div>
               )

@@ -10,7 +10,7 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
 import { IDENTITY_BADGE } from '../posSignals'
-import { normalizePhone } from '../../../utils/phone'
+import { normalizePhone, phoneMatchesSearch } from '../../../utils/phone'
 import { errorText } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
@@ -239,8 +239,11 @@ export default function PosCustomers() {
     // A cached failure is not a result — re-expanding retries it (S754).
     if (historyMap[cust.id] && !historyMap[cust.id].error) return
     setHistoryMap(m => ({ ...m, [cust.id]: 'loading' }))
+    // S815 4g: the stored phone and the number it is, so a bill an older till stored as typed
+    // ("+977 98…") is listed beside the ones stored as the number since S809 3k.
+    const phones = [...new Set([cust.phone, normalizePhone(cust.phone)].filter(Boolean))]
     const { data, error } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id, vat_registered')
-      .eq('status', 'billed').eq('buyer_phone', cust.phone)
+      .eq('status', 'billed').in('buyer_phone', phones)
       .order('closed_at', { ascending: false }).limit(50)
     // S754: a failed read said "No billed orders found for this phone number".
     setHistoryMap(m => ({ ...m, [cust.id]: error ? { error } : (data || []) }))
@@ -338,7 +341,8 @@ export default function PosCustomers() {
 
   const q = search.trim().toLowerCase()
   const filteredCustomers = q
-    ? customers.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q))
+    // S815 4g: a phone matches by its digits, so "+977 984…" finds the regular stored as 984….
+    ? customers.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q) || phoneMatchesSearch(c.phone, q))
     : customers
 
   return (

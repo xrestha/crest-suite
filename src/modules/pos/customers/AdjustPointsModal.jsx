@@ -13,8 +13,9 @@ import { pointsAdjustment, pointsValue, describeLedgerRow, MAX_ADJUST_REASON } f
 // Add points to a customer's balance, or take them off, by hand (S809 3k, CUSTOMERS-PARKING-5).
 //
 // Owner decision Q13 (b), 2026-10-09: the Owner and POS managers may add or correct a balance by hand.
-// Every till message about points that did not land ("not added", "not known whether they were added",
-// "can no longer be handed back") now sends the reader here. adjust_loyalty_points decides: it checks the
+// Since S815 4g a bill's missing points are added in one tap from the customer's History
+// (PointsHistoryModal) and a new number takes its points with Move (MovePointsModal); Adjust is for the
+// rest (a gift, a mistake, points no bill shows). adjust_loyalty_points decides: it checks the
 // rank, the outlet, the reason and the balance again, stamps the signed-in login, and writes one
 // 'adjust' row with no bill (a row on a bill would be handed back or reversed with it).
 //
@@ -24,7 +25,7 @@ import { pointsAdjustment, pointsValue, describeLedgerRow, MAX_ADJUST_REASON } f
 const HISTORY_ROWS = 10
 const CALL_MS = 20000
 
-export default function AdjustPointsModal({ customer, balance, pointValue, isPartner = false, onClose, onAdjusted }) {
+export default function AdjustPointsModal({ customer, balance, held = 0, pointValue, isPartner = false, onClose, onAdjusted }) {
   const { scopedFrom } = useScopedDb()
   const [direction, setDirection] = useState(isPartner ? 'take' : 'add')
   const [pointsStr, setPointsStr] = useState('')
@@ -94,6 +95,8 @@ export default function AdjustPointsModal({ customer, balance, pointValue, isPar
       dirty={pointsStr !== '' || reason !== ''}>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
         {customer.phone} · holds <strong style={{ color: 'var(--theme-text1)' }}>{balance == null ? '—' : `${fmt(balance)} points`}</strong>{balance == null ? '' : worth(balance)}
+        {/* S815 4g (Q19 c): part of it may wait on an unpaid Credit bill. */}
+        {held > 0 && <>, {fmt(held)} of them held until a Credit bill is paid</>}
       </p>
       {isPartner && (
         <p role="note" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
@@ -104,7 +107,7 @@ export default function AdjustPointsModal({ customer, balance, pointValue, isPar
 
       <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
         <legend style={{ padding: 0, fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginBottom: 6 }}>
-          <Tip text="Add: points that should have been earned and were not (a bill whose points did not reach the till), a goodwill gift, or points moved here from the guest's old number. Take off: points added by mistake, or points moving to the guest's new number (add them there next). A balance is never taken below 0 by hand." width={340}>
+          <Tip text="Add: a goodwill gift, or points owed for a reason no bill shows. A bill whose points did not reach the till is added in one tap from the customer's History instead, and a guest's new number takes their points with Move. Take off: points added by mistake. A balance is never taken below 0 by hand." width={340}>
             Add or take off
           </Tip>
         </legend>
@@ -134,12 +137,12 @@ export default function AdjustPointsModal({ customer, balance, pointValue, isPar
 
       <div className="form-field" style={{ marginBottom: 12 }}>
         <label htmlFor="adjust-reason">
-          <Tip text="Kept with the change in this customer's points history, with your name and the time, so anyone can see later why the balance moved. For example: Bill 1234's points did not reach the till." width={320}>
+          <Tip text="Kept with the change in this customer's points history, with your name and the time, so anyone can see later why the balance moved. For example: Birthday gift." width={320}>
             Reason
           </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
         </label>
         <textarea id="adjust-reason" className="form-input" rows={2} maxLength={MAX_ADJUST_REASON} value={reason}
-          onChange={e => setReason(e.target.value)} placeholder="e.g. Bill 1234's points did not reach the till" disabled={busy}
+          onChange={e => setReason(e.target.value)} placeholder="e.g. Birthday gift" disabled={busy}
           style={{ width: '100%', resize: 'vertical' }} {...fieldAria('adjust-reason', shown.reason)} />
         <FieldError id="adjust-reason" message={shown.reason} />
       </div>
@@ -162,7 +165,7 @@ export default function AdjustPointsModal({ customer, balance, pointValue, isPar
       </div>
 
       <h3 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
-        <Tip text="The latest changes to this customer's points, newest first: points earned and spent on bills, points handed back from an unfinished payment, credit-note reversals and hand corrections." width={320}>
+        <Tip text="The latest 10 changes to this customer's points, newest first: points earned and spent on bills, points handed back from an unfinished payment, credit-note reversals, hand corrections and moves. History on the customer's row shows them all." width={320}>
           Recent points
         </Tip>
       </h3>

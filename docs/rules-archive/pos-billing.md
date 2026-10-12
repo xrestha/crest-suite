@@ -208,3 +208,29 @@ while Inventory never saw its revenue or ingredient usage, so POS Sales Report a
 MonthlySummary disagreed by an unbounded amount with nothing on either page saying so. Found live
 on a test client — 15 bills, NPR 18,900 — caused by Ashadh 2083 being left open past its end while
 Shrawan was never created, so every bill rung after the BS rollover bailed.
+
+## Loyalty ledger restore
+
+Moved from `.claude/rules/pos-billing.md` (S815, to keep the POS rules load under its ceiling).
+
+`pos_loyalty_ledger` deliberately has no client INSERT/UPDATE/DELETE policy — the two
+`SECURITY DEFINER` RPCs are the only write path, the same shape as `apply_pos_item_comps` (S579)
+and `set_outlet_access` (S617). But **Export/Import restore inserts through the BROWSER as
+`authenticated`**, not through the service role (`restoreClientData.js`), so that lock would have
+silently restored every customer's balance as zero and reported success. An admin-only INSERT
+policy fixes it without touching the actual threat, which is a till JWT minting itself points.
+
+**A lock that breaks the backup is not a security posture.** Ask of any new locked-down table:
+what writes it during a restore, and as which role? It only surfaced because `RESTORE_ORDER` is a
+step on the new-feature checklist.
+
+**Verifying such a table needs a PAIR of measurements, never one.** `authenticated` holds INSERT
+so the restore path works, which means `has_table_privilege` proves nothing about who is refused.
+The evidence is the same row sent to the same table by two identities: Owner → `403 / 42501`,
+admin → `201`. A guard that refuses everyone is indistinguishable from a correct one until the
+day a restore comes back empty.
+
+**Reading your own role needs the token's `sub`.** `profiles?select=role&limit=1` returns an
+arbitrary row for an admin, because an admin can read every profile — it reported the admin
+account as `role: client`. Key the query to the JWT's `sub`, and cross-check with a row count
+(admin sees all profiles, a client sees exactly one).

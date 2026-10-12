@@ -1,6 +1,7 @@
 import {
   loyaltyPoints, pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers,
   pointsAdjustment, schemeNumberCommit, describeLedgerRow, MAX_POINTS_ADJUST,
+  spendablePoints, nprPoints, schemeGivesBack, earnPreview, billEarnBase, billsMissingPoints, pointsMove,
 } from './loyaltyPoints'
 
 // These encode the same boundaries award_loyalty_points() enforces in SQL. The till renders a
@@ -231,5 +232,116 @@ describe('describeLedgerRow', () => {
     expect(describeLedgerRow({ kind: 'adjust', note: 'Points handed back: this bill was not paid with them', pos_orders: { invoice_no: null, order_no: 7 } }))
       .toEqual({ what: 'Points handed back: this bill was not paid with them', bill: 'Order #7' })
     expect(describeLedgerRow({ kind: 'adjust', note: null })).toEqual({ what: 'Corrected', bill: null })
+  })
+})
+
+// ── S815 4g ──────────────────────────────────────────────────────────────────────────────────
+
+describe('spendablePoints (Q19 c)', () => {
+  test('points held on an unpaid Credit bill cannot be spent yet', () => {
+    expect(spendablePoints(600, 100)).toBe(500)
+    expect(spendablePoints(600, 0)).toBe(600)
+  })
+
+  test('never below 0, and unknown figures read as 0', () => {
+    expect(spendablePoints(100, 300)).toBe(0)
+    expect(spendablePoints(-20, 0)).toBe(0)
+    expect(spendablePoints(null, undefined)).toBe(0)
+  })
+})
+
+describe('schemeGivesBack (CUSTOMERS-PARKING-10)', () => {
+  test('rupees back per NPR 100, which is also the percentage', () => {
+    // BLOOM CAFE: a point is NPR 10, and its schemes earn 10 and 40 points per NPR 100.
+    expect(schemeGivesBack(10, 10)).toBe(100)
+    expect(schemeGivesBack(40, 10)).toBe(400)
+    expect(schemeGivesBack(1, 1)).toBe(1)
+    expect(schemeGivesBack(0.5, 2.5)).toBe(1.25)
+  })
+
+  test('unknown when the point value has not been read or a number is unusable', () => {
+    expect(schemeGivesBack(10, null)).toBeNull()
+    expect(schemeGivesBack(null, 10)).toBeNull()
+    expect(schemeGivesBack(10, 0)).toBeNull()
+    expect(schemeGivesBack(-1, 10)).toBeNull()
+  })
+
+  test('money shows paisa only when there are some', () => {
+    expect(nprPoints(100)).toBe('NPR 100')
+    expect(nprPoints(1.25)).toBe('NPR 1.25')
+  })
+})
+
+describe('earnPreview (CUSTOMERS-PARKING-11)', () => {
+  const s = { name: 'Regulars', points_per_100: 10, min_spend_to_earn: 500, is_active: true }
+
+  test('says what the bill earns', () => {
+    expect(earnPreview({ base: 1880, scheme: s })).toEqual({ points: 188, text: 'This bill earns 188 points.' })
+    expect(earnPreview({ base: 510, scheme: { ...s, points_per_100: 0.2 } }).text).toBe('This bill earns 1 point.')
+  })
+
+  test('a Credit bill earns now and the points are usable once it is settled', () => {
+    expect(earnPreview({ base: 1000, scheme: s, credit: true }).text).toBe('This bill earns 100 points, usable once it is settled.')
+  })
+
+  test('never promises points to someone in no scheme, a switched-off scheme or under the minimum', () => {
+    expect(earnPreview({ base: 1000, scheme: null })).toEqual({ points: 0, text: 'Not in a points scheme, so this bill earns no points.' })
+    expect(earnPreview({ base: 1000, scheme: { ...s, is_active: false } }).text).toBe('Their scheme (Regulars) is switched off, so this bill earns no points.')
+    expect(earnPreview({ base: 400, scheme: s })).toEqual({ points: 0, text: 'Below the NPR 500 minimum for points, so this bill earns no points.' })
+    expect(earnPreview({ base: 5, scheme: { ...s, min_spend_to_earn: 0 } }).points).toBe(0)
+  })
+})
+
+describe('billEarnBase', () => {
+  test('lines not comped, less the discount, as award_loyalty_points works it out', () => {
+    expect(billEarnBase([{ qty: 2, unit_price: 500 }, { qty: 1, unit_price: 300, comped: true }], 100)).toBe(900)
+    expect(billEarnBase([], null)).toBe(0)
+    expect(billEarnBase(undefined, 0)).toBe(0)
+  })
+})
+
+describe('billsMissingPoints (the one-tap add, D13)', () => {
+  const scheme = { points_per_100: 10, min_spend_to_earn: 0, is_active: true }
+  const bill = (id, closed_at, extra = {}) => ({ id, closed_at, close_type: 'paid', credit_note_id: null, delivery_partner: null, discount_amount: 0, ...extra })
+  const items = new Map([['a', [{ qty: 1, unit_price: 1000 }]], ['b', [{ qty: 1, unit_price: 1000 }]], ['c', [{ qty: 1, unit_price: 1000 }]],
+    ['d', [{ qty: 1, unit_price: 1000 }]], ['e', [{ qty: 1, unit_price: 1000 }]], ['f', [{ qty: 1, unit_price: 5 }]], ['g', [{ qty: 1, unit_price: 1000 }]]])
+
+  test('only bills since joining, with no points, that earn some', () => {
+    const bills = [
+      bill('a', '2026-10-10T10:00:00Z'),
+      bill('b', '2026-10-09T10:00:00Z'),                              // has its points
+      bill('c', '2026-10-09T09:00:00Z', { credit_note_id: 'n1' }),   // credit-noted
+      bill('d', '2026-10-09T08:00:00Z', { delivery_partner: 'Foodmandu' }),
+      bill('e', '2026-10-08T10:00:00Z', { close_type: 'complimentary' }),
+      bill('f', '2026-10-08T09:00:00Z'),                              // earns 0
+      bill('g', '2026-10-01T10:00:00Z'),                              // before joining
+    ]
+    const out = billsMissingPoints({ bills, earnedIds: new Set(['b']), itemsByOrder: items, scheme, joinedAt: '2026-10-05T00:00:00Z' })
+    expect(out.map(x => [x.bill.id, x.points])).toEqual([['a', 100]])
+  })
+
+  test('nothing to offer to a customer in no scheme or a switched-off one', () => {
+    const bills = [bill('a', '2026-10-10T10:00:00Z')]
+    expect(billsMissingPoints({ bills, earnedIds: new Set(), itemsByOrder: items, scheme: null, joinedAt: null })).toEqual([])
+    expect(billsMissingPoints({ bills, earnedIds: new Set(), itemsByOrder: items, scheme: { ...scheme, is_active: false }, joinedAt: null })).toEqual([])
+  })
+})
+
+describe('pointsMove (owner addition)', () => {
+  const partners = [{ name: 'Foodmandu', phone: '9800000009' }]
+
+  test('a new number typed any way is stored as the number', () => {
+    expect(pointsMove({ toPhone: '+977 984-1234567', reason: 'New SIM', fromPhone: '9801111111', partners }))
+      .toEqual({ toNumber: '9841234567', errors: {} })
+  })
+
+  test('refuses what move_loyalty_points refuses', () => {
+    expect(pointsMove({ toPhone: '', reason: 'x', fromPhone: '9801111111' }).errors.phone).toBe('Enter the new phone number.')
+    expect(pointsMove({ toPhone: '12345', reason: 'x', fromPhone: '9801111111' }).errors.phone).toBe('Type the new number in full (7 digits or more).')
+    expect(pointsMove({ toPhone: '+977 980-111-1111', reason: 'x', fromPhone: '9801111111' }).errors.phone).toBe('That is this customer’s own number.')
+    expect(pointsMove({ toPhone: '980-000-0009', reason: 'x', fromPhone: '9801111111', partners }).errors.phone)
+      .toBe('That is a delivery partner’s number, which does not earn or spend points.')
+    expect(pointsMove({ toPhone: '9841234567', reason: '   ', fromPhone: '9801111111' }).errors.reason).toBe('Say why — the reason is kept on both numbers.')
+    expect(pointsMove({ toPhone: '9841234567', reason: 'x'.repeat(301), fromPhone: '9801111111' }).errors.reason).toMatch(/under 300/)
   })
 })

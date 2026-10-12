@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
+import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import RowMenu from '../../../components/RowMenu'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { pointsValue, isDeliveryPartnerPhone, schemeNumberCommit } from './loyaltyPoints'
+import {
+  pointsValue, isDeliveryPartnerPhone, schemeNumberCommit, spendablePoints, schemeGivesBack, nprPoints,
+  GIVE_BACK_CONFIRM_PCT,
+} from './loyaltyPoints'
 import { errorLine } from '../../../shared/errorText'
+import { phoneMatchesSearch } from '../../../utils/phone'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import AdjustPointsModal from './AdjustPointsModal'
+import PointsHistoryModal from './PointsHistoryModal'
+import MovePointsModal from './MovePointsModal'
 
 // Loyalty & Rewards — schemes, who is enrolled, and each member's balance (S618).
 //
@@ -38,18 +46,27 @@ import AdjustPointsModal from './AdjustPointsModal'
 // did not land now names. `deliveryPartners` is settings.pos_delivery_partners: a partner's row is in
 // the book only because picking it puts its name and phone on a bill, so it is shown as a partner and
 // never offered for enrolment or for added points (2g: a partner neither earns nor spends).
+//
+// S815 4g: each member's balance comes from pos_loyalty_balances with the part held on unpaid Credit
+// bills (Q19 c: spendable once the bill is settled). History opens the whole points history and the
+// one-tap "add the points this bill earned"; Move takes a regular's points to their new number. Each
+// scheme says what it gives back in rupees, and a point value or rate that changes what customers get
+// asks first, naming the consequence (CUSTOMERS-PARKING-10).
 export default function LoyaltyTab({ pointValue, pointValueError = null, onPointValueSaved, canManage = false, deliveryPartners = [] }) {
-  const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { clientId, scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
 
   const [schemes, setSchemes] = useState([])
   const [members, setMembers] = useState([])
   const [balances, setBalances] = useState({})
+  const [held, setHeld] = useState({})          // S815 4g: points on unpaid Credit bills, by customer
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [msg, setMsg] = useState('')
   const [search, setSearch] = useState('')
   const [adjusting, setAdjusting] = useState(null) // the member whose points are being adjusted
+  const [viewing, setViewing] = useState(null)     // the member whose points history is open
+  const [moving, setMoving] = useState(null)       // the member whose points are moving to a new number
 
   const [newName, setNewName] = useState('')
   const [newRate, setNewRate] = useState('1')
@@ -57,6 +74,21 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   const [savingScheme, setSavingScheme] = useState(false)
   const [valueStr, setValueStr] = useState(pointValue == null ? '' : String(pointValue))
   const [savingValue, setSavingValue] = useState(false)
+
+  // S815 4g: summed by the server, one row per customer with points history, with the part held on
+  // unpaid Credit bills. Paged: a set-returning call stops at 1,000 rows like any read, and the id is
+  // unique per row. Returns the error, or null.
+  const loadBalances = useCallback(async () => {
+    const { data: rows, error } = await fetchAllRows(() =>
+      supabase.rpc('pos_loyalty_balances', { p_client_id: clientId }).order('customer_id'))
+    if (error) return error
+    const b = {}
+    const h = {}
+    for (const r of rows || []) { b[r.customer_id] = Number(r.balance) || 0; h[r.customer_id] = Number(r.held) || 0 }
+    setBalances(b)
+    setHeld(h)
+    return null
+  }, [clientId])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -66,7 +98,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
       // S809 3k (CUSTOMERS-PARKING-8): paged. A bare select stopped at 1,000 customers with no error, so
       // anyone past "R" could not be enrolled and every count read low. The id breaks ties between
       // customers of the same name, so no one is skipped or repeated across pages.
-      fetchAllRows(() => scopedFrom('pos_customers', 'id, name, phone, loyalty_scheme_id').order('name').order('id')),
+      fetchAllRows(() => scopedFrom('pos_customers', 'id, name, phone, loyalty_scheme_id, loyalty_enrolled_at').order('name').order('id')),
     ])
     // A failed read must not render as "no schemes yet" — that reads as a correct empty state and
     // would have someone re-create schemes that already exist (S594).
@@ -78,25 +110,45 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setSchemes(schemeRes.data || [])
     setMembers(custRes.data || [])
 
-    // One read for every ledger row, summed per customer here. Paged, because this is the whole
-    // client's ledger rather than one customer's and it grows with every bill ever rung.
-    const { data: rows, error: ledErr } = await fetchAllRows(() =>
-      scopedFrom('pos_loyalty_ledger', 'customer_id, points').order('id'))
-    if (ledErr) { setLoadError(ledErr); setLoading(false); return }
-    const byCustomer = {}
-    for (const r of rows || []) byCustomer[r.customer_id] = (byCustomer[r.customer_id] || 0) + (r.points || 0)
-    setBalances(byCustomer)
+    const balErr = await loadBalances()
+    if (balErr) { setLoadError(balErr); setLoading(false); return }
     setLoading(false)
-  }, [scopedFrom])
+  }, [scopedFrom, loadBalances])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { setValueStr(pointValue == null ? '' : String(pointValue)) }, [pointValue])
+
+  // CUSTOMERS-PARKING-10: a rate that gives back half a bill or more asks first, saying what it gives
+  // back. Returns false when it asked, so the caller leaves the stored value on screen meanwhile.
+  function askIfGenerous(rate, schemeName, save) {
+    const back = schemeGivesBack(rate, pointValue)
+    if (back == null || back < GIVE_BACK_CONFIRM_PCT) return true
+    askConfirm({
+      title: `Give back ${back}% of every bill?`,
+      confirmLabel: 'Save the rate', busyLabel: 'Saving…',
+      body: (
+        <p style={{ margin: 0 }}>
+          At {rate} points per NPR 100 and {nprPoints(pointValue)} a point, a member of “{schemeName}” gets{' '}
+          <strong>{nprPoints(back)} back for every NPR 100</strong> they spend: {back}% of each qualifying bill,
+          spendable on their next visit.
+        </p>
+      ),
+      run: save,
+    })
+    return false
+  }
 
   async function addScheme() {
     const name = newName.trim()
     if (!name || !canManage) return
     // S809 3k (CUSTOMERS-PARKING-12): a cleared rate box used to add a scheme that earns nothing.
     if (newRate.trim() === '' || !(Number(newRate) >= 0)) { setMsg('error:Enter how many points a member earns per NPR 100, for example 1.'); return }
+    if (!askIfGenerous(Number(newRate), name, insertScheme)) return
+    await insertScheme()
+  }
+
+  async function insertScheme() {
+    const name = newName.trim()
     setSavingScheme(true)
     setMsg('')
     const { error } = await scopedInsert('pos_loyalty_schemes', {
@@ -146,20 +198,76 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   async function tag(customerId, schemeId) {
     if (!canManage) return
     setMsg('')
-    const { error } = await scopedUpdate('pos_customers', { loyalty_scheme_id: schemeId || null }).eq('id', customerId)
+    // S815 4g: the stored row comes back, because the server dates a join (loyalty_enrolled_at) and the
+    // customer's History offers only bills since then.
+    const { data, error } = await scopedUpdate('pos_customers', { loyalty_scheme_id: schemeId || null }).eq('id', customerId)
+      .select('loyalty_scheme_id, loyalty_enrolled_at')
     if (error) { setMsg(`error:The enrolment was not changed. ${errorLine(error)}`); return }
-    setMembers(prev => prev.map(m => m.id === customerId ? { ...m, loyalty_scheme_id: schemeId || null } : m))
+    if (!data?.length) { setMsg('error:The enrolment was not changed — this customer is not in the book any more. Reload the page.'); return }
+    setMembers(prev => prev.map(m => m.id === customerId ? { ...m, ...data[0] } : m))
   }
 
-  async function savePointValue() {
-    setSavingValue(true)
+  // A scheme's rate box: a rate that gives back half a bill or more asks first (CUSTOMERS-PARKING-10).
+  function saveRate(s, v) {
+    if (!askIfGenerous(v, s.name, () => patchScheme(s.id, { points_per_100: v }))) return false
+    return patchScheme(s.id, { points_per_100: v })
+  }
+
+  // CUSTOMERS-PARKING-10: the point value re-prices every balance at once and changes what every scheme
+  // gives back, so a change asks first and says both. It used to save on the press.
+  function savePointValue() {
     setMsg('')
     const v = Number(valueStr)
-    if (!Number.isFinite(v) || v <= 0) { setSavingValue(false); setMsg('error:A point has to be worth more than zero.'); return }
+    if (!Number.isFinite(v) || v <= 0) { setMsg('error:A point has to be worth more than zero.'); return }
+    if (pointValue != null && v === Number(pointValue)) return
+    const total = Object.values(balances).reduce((s, n) => s + Math.max(0, n || 0), 0)
+    const active = schemes.filter(s => s.is_active)
+    askConfirm({
+      title: `Make one point worth ${nprPoints(v)}?`,
+      confirmLabel: 'Change the value', busyLabel: 'Saving…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            {total > 0
+              ? <>Customers hold <strong>{total.toLocaleString('en-IN')} points</strong>, worth {nprPoints(pointsValue(total, pointValue))} now and <strong>{nprPoints(pointsValue(total, v))}</strong> after this change. Every balance changes at once, and the next redemption at any till pays out at the new value.</>
+              : <>No customer holds points yet. The next redemption at any till pays out at the new value.</>}
+          </p>
+          {active.length > 0 && (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {active.map(s => {
+                const back = schemeGivesBack(s.points_per_100, v)
+                return (
+                  <li key={s.id} style={back != null && back >= GIVE_BACK_CONFIRM_PCT ? { color: 'var(--theme-amber-text)' } : undefined}>
+                    {s.name} gives back {back == null ? '—' : `${nprPoints(back)} per NPR 100 (${back}%)`}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
+      ),
+      run: () => storePointValue(v),
+    })
+  }
+
+  async function storePointValue(v) {
+    setSavingValue(true)
     const failure = await onPointValueSaved(v)
     setSavingValue(false)
     // A string is a sentence the page wrote; anything else is a Supabase error to word (S754).
     if (failure) setMsg(`error:The point value was not changed. ${typeof failure === 'string' ? failure : errorLine(failure)}`)
+  }
+
+  // A points move landed (S815 4g). Both numbers' rows changed (enrolment too), so the tab reads again.
+  async function onMoved(member, res) {
+    setMoving(null)
+    const n = Number(res?.moved) || 0
+    const left = Number(res?.held_left) || 0
+    setMsg(`ok:${n.toLocaleString('en-IN')} points moved from ${member.phone} to ${res?.to_phone}${res?.created ? ' (added to the customer book)' : ''}.`
+      + (res?.enrolled ? ' The new number joined the scheme.' : '')
+      + (res?.unenrolled ? ` ${member.phone} left its scheme.` : '')
+      + (left > 0 ? ` ${left.toLocaleString('en-IN')} points from an unpaid Credit bill stay on ${member.phone} until it is settled.` : ''))
+    await load()
   }
 
   // A hand correction landed: the balance is the one the server returned, never a sum worked out here.
@@ -172,10 +280,9 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
 
   const enrolled = members.filter(m => m.loyalty_scheme_id)
   const q = search.trim().toLowerCase()
-  const qDigits = q.replace(/\D/g, '')
+  // S815 4g: a phone matches by its digits, "+977" and a leading 0 taken off (phoneMatchesSearch).
   const shownMembers = !q ? members : members.filter(m =>
-    String(m.name || '').toLowerCase().includes(q)
-    || (qDigits.length >= 3 && String(m.phone || '').replace(/\D/g, '').includes(qDigits)))
+    String(m.name || '').toLowerCase().includes(q) || phoneMatchesSearch(m.phone, q))
 
   return (
     <div>
@@ -243,6 +350,9 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                         <Tip text="Points earned per NPR 100 of the bill, measured before VAT and after any discount — the same base the rest of POS uses.">Points / NPR 100</Tip>
                       </th>
                       <th style={{ textAlign: 'right' }}>
+                        <Tip text="What a member gets back for every NPR 100 they spend: points per NPR 100 × the value of one point. The same number is the share of the bill given back — 100% means the whole bill comes back as points. Amber from 50%." width={320}>Gives back</Tip>
+                      </th>
+                      <th style={{ textAlign: 'right' }}>
                         <Tip text="A bill below this earns nothing. Once a bill qualifies, the whole bill earns — the minimum is a qualifier, not an amount deducted first.">Min. spend</Tip>
                       </th>
                       <th style={{ textAlign: 'center' }}>Active</th>
@@ -258,9 +368,17 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                           <SchemeNumberInput
                             stored={s.points_per_100} step="0.1" width={80}
                             label={`Points per NPR 100 for ${s.name}`} canManage={canManage}
-                            onSave={v => patchScheme(s.id, { points_per_100: v })} onInvalid={t => setMsg(`error:${t}`)}
+                            onSave={v => saveRate(s, v)} onInvalid={t => setMsg(`error:${t}`)}
                           />
                         </td>
+                        {(() => {
+                          const back = schemeGivesBack(s.points_per_100, pointValue)
+                          return (
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: back != null && back >= GIVE_BACK_CONFIRM_PCT ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+                              {back == null ? '—' : `${nprPoints(back)} per NPR 100 · ${back}%`}
+                            </td>
+                          )
+                        })()}
                         <td style={{ textAlign: 'right' }}>
                           <SchemeNumberInput
                             stored={s.min_spend_to_earn} step="1" width={90}
@@ -341,21 +459,23 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                       <th>Customer</th>
                       <th>Phone</th>
                       <th>Scheme</th>
-                      <th style={{ textAlign: 'right' }}>Points</th>
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="The customer's points balance. Points earned on a Credit bill that is not paid yet show as held: they can be spent once the bill is settled in Outstanding Credit." width={320}>Points</Tip>
+                      </th>
                       <th style={{ textAlign: 'right' }}>Worth</th>
-                      {canManage && (
-                        <th style={{ textAlign: 'right' }}>
-                          <Tip text="Add points by hand (a bill whose points did not reach the till, a goodwill gift) or take them off (a mistake, or points moving to the guest's new number: take them off here, then add them on the new number). A reason is kept with every change. The Owner and POS managers only." width={340}>
-                            Adjust
-                          </Tip>
-                        </th>
-                      )}
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="History: every change to the customer's points, and their bills with no points — the Owner or a POS manager adds those in one tap. ⋯ (Owner and POS managers): Adjust adds or takes off points by hand with a reason; Move takes the points to the guest's new number." width={340}>
+                          History
+                        </Tip>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {shownMembers.map(m => {
                       const bal = balances[m.id] || 0
+                      const onTab = held[m.id] || 0
                       const partner = isDeliveryPartnerPhone(m.phone, deliveryPartners)
+                      const movable = spendablePoints(bal, onTab)
                       return (
                         <tr key={m.id}>
                           <td>{m.name}</td>
@@ -385,19 +505,34 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                               </select>
                             )}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: bal > 0 ? 700 : 400, color: bal > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>{bal}</td>
+                          <td style={{ textAlign: 'right', fontWeight: bal > 0 ? 700 : 400, color: bal > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>
+                            {bal.toLocaleString('en-IN')}
+                            {onTab > 0 && (
+                              <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
+                                {onTab.toLocaleString('en-IN')} held
+                              </span>
+                            )}
+                          </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                             {bal > 0 && pointValue != null ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
                           </td>
-                          {canManage && (
-                            <td style={{ textAlign: 'right' }}>
-                              {/* A partner can only lose points, so it is offered only while it holds some. */}
-                              {(!partner || bal > 0) && (
-                                <button className="btn btn-ghost btn-sm" onClick={() => { setMsg(''); setAdjusting(m) }}
-                                  aria-label={`Adjust points for ${m.name}`}>Adjust</button>
+                          <td style={{ textAlign: 'right' }}>
+                            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                              <button className="btn btn-ghost btn-sm" onClick={() => { setMsg(''); setViewing(m) }}
+                                aria-label={`Points history for ${m.name}`}>History</button>
+                              {canManage && (
+                                <RowMenu label={`More for ${m.name}`} items={[
+                                  // A partner can only lose points, so Adjust is offered only while it holds some.
+                                  (!partner || bal > 0) && { key: 'adjust', label: 'Adjust points…', onSelect: () => { setMsg(''); setAdjusting(m) } },
+                                  !partner && {
+                                    key: 'move', label: 'Move to a new number…', onSelect: () => { setMsg(''); setMoving(m) },
+                                    disabled: movable <= 0,
+                                    hint: movable <= 0 ? (onTab > 0 ? 'Its points are held on an unpaid Credit bill' : 'No points to move') : undefined,
+                                  },
+                                ]} />
                               )}
-                            </td>
-                          )}
+                            </span>
+                          </td>
                         </tr>
                       )
                     })}
@@ -410,10 +545,35 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
           </div>
         </>
       )}
+      {viewing && (
+        <PointsHistoryModal
+          customer={viewing}
+          scheme={schemes.find(s => s.id === viewing.loyalty_scheme_id) || null}
+          balance={balances[viewing.id] || 0}
+          held={held[viewing.id] || 0}
+          pointValue={pointValue}
+          canManage={canManage}
+          onClose={() => setViewing(null)}
+          onChanged={loadBalances}
+        />
+      )}
+      {moving && (
+        <MovePointsModal
+          customer={moving}
+          schemeName={schemes.find(s => s.id === moving.loyalty_scheme_id)?.name || null}
+          balance={balances[moving.id] || 0}
+          held={held[moving.id] || 0}
+          pointValue={pointValue}
+          partners={deliveryPartners}
+          onClose={() => setMoving(null)}
+          onMoved={res => onMoved(moving, res)}
+        />
+      )}
       {adjusting && (
         <AdjustPointsModal
           customer={adjusting}
           balance={balances[adjusting.id] || 0}
+          held={held[adjusting.id] || 0}
           pointValue={pointValue}
           isPartner={isDeliveryPartnerPhone(adjusting.phone, deliveryPartners)}
           onClose={() => setAdjusting(null)}

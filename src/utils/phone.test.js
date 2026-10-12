@@ -1,4 +1,4 @@
-import { normalizePhone, phoneForRecord, customerPhoneKey } from './phone'
+import { normalizePhone, phoneForRecord, customerPhoneKey, phoneMatchesSearch } from './phone'
 
 // The generated column pos_customers.phone_canonical and pos_phone_canonical() (migration
 // 20261010110000) write a number the same way; these pin the JS twin the till matches with.
@@ -68,5 +68,25 @@ describe('customerPhoneKey — how the till finds the customer the server will (
       const storedKey = customerPhoneKey(stored)
       expect([typed, storedKey]).toEqual([typed, key])
     }
+  })
+})
+
+describe('phoneMatchesSearch — a customer search finds the number however it is typed (S815 4g)', () => {
+  test('+977, spaces, dashes and a leading 0 do not hide a customer', () => {
+    for (const typed of ['+977 984-123', '9779841234567', '984 123', '0984123', '9841234567']) {
+      expect([typed, phoneMatchesSearch('9841234567', typed)]).toEqual([typed, true])
+    }
+  })
+
+  test('a customer stored another way is still found', () => {
+    expect(phoneMatchesSearch('+977 984-1234567', '9841234')).toBe(true)
+    expect(phoneMatchesSearch('01-4412345', '4412345')).toBe(true)
+  })
+
+  test('another number, or under 3 digits, is no match', () => {
+    expect(phoneMatchesSearch('9841234567', '9851')).toBe(false)
+    expect(phoneMatchesSearch('9841234567', '98')).toBe(false)
+    expect(phoneMatchesSearch('9841234567', 'Ram')).toBe(false)
+    expect(phoneMatchesSearch(null, '984')).toBe(false)
   })
 })

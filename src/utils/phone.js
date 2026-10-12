@@ -32,3 +32,17 @@ export function customerPhoneKey(raw) {
   const canon = normalizePhone(typed)
   return canon ? { column: 'phone_canonical', value: canon } : { column: 'phone', value: typed }
 }
+
+// Whether a phone matches what someone typed into a search box (S815 4g): by its digits, so
+// "+977 984-123" finds 9841234567 the way the till finds the regular by the number. A leading "977"
+// (the country code) and leading zeros come off the typed digits first, as normalizePhone takes them
+// off a whole number. Fewer than 3 digits typed is not a phone search: false, and the caller matches
+// names alone.
+export function phoneMatchesSearch(phone, typed) {
+  let q = String(typed ?? '').replace(/\D/g, '')
+  if (q.startsWith('977') && q.length > 5) q = q.slice(3)
+  q = q.replace(/^0+/, '')
+  if (q.length < 3) return false
+  const stored = normalizePhone(phone) || String(phone ?? '').replace(/\D/g, '')
+  return stored.includes(q)
+}

@@ -111,7 +111,7 @@ const TABLE_EXTRA_IGNORE = {
 }
 
 const FIELD_LABELS = {
-  uom: 'UOM', pan: 'PAN', vat_amount: 'VAT', loyalty_scheme_id: 'Loyalty Scheme',
+  uom: 'UOM', pan: 'PAN', vat_amount: 'VAT', loyalty_scheme_id: 'Loyalty Scheme', loyalty_enrolled_at: 'Joined Loyalty Scheme',
   ims_role: 'IMS Role', hr_role: 'HR Role', pos_role: 'POS Role',
   pos_team: 'POS Team', pos_discount_limit: 'Discount Limit %', pos_allow_void: 'Allow Void',
   pos_job_title: 'POS Job Title', ims_job_title: 'IMS Job Title', hr_job_title: 'HR Job Title',

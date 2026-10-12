@@ -180,6 +180,25 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4g: CUSTOMERS-PARKING-9, -10, -11 (P3); owner additions "add the points this
+  bill earned" and "Move points"; plus the S809.4 full points history and "+977" bill search~~ —
+  **shipped S815, 2026-10-12**, migration `20261012100000` applied live after a rolled-back probe as
+  BLOOM CAFE's supervisor, manager and the operator (crest-v431). **Q19 (c):** a Credit bill earns at its
+  close and its points are held until it is settled; `pos_loyalty_balances` is the one place balance and
+  held are worked out, `redeem_loyalty_points` spends only the rest (`pos_points_held`), and the till and
+  Customers → Loyalty show the held part. CUSTOMERS-PARKING-10: each scheme shows what it gives back in
+  rupees per NPR 100; a point-value change asks first, naming what customers' points are worth before and
+  after; a rate giving back 50% or more asks too. CUSTOMERS-PARKING-11: the payment window says what the
+  bill earns, or why it earns nothing (no scheme, switched off, under the minimum), via `earnPreview`.
+  **One-tap add:** the customer's History lists bills since they joined with no points, and the Owner or
+  a POS manager adds them (`award_loyalty_points` opened to `pos_caller_has_rank('manager')`); the row is
+  an ordinary earn, so a Credit Note takes it back. **Move:** `move_loyalty_points`, a pair of no-bill
+  adjust rows. **Decided (owner, 2026-10-12, as recommended):** D11 only spendable points move, held
+  points stay until their bill is settled; D12 the new number joins the old number's scheme if in none,
+  the old number leaves its scheme; D13 the one-tap offers only bills since the customer joined
+  (`pos_customers.loyalty_enrolled_at`, server-stamped; existing members dated by their first earned
+  points, else the migration), and a late award for an older bill is refused; D14 a new number not in
+  the book is added with the old row's name, PAN and address. Original rows: `CUSTOMERS-PARKING.md`.
 - [x] ~~S809 stage 4, slice 4f: CUSTOMERS-PARKING-14, -15, GUEST-8 (P3); GUEST-7 closed as accepted;
   plus the S809.4 Guest Menu Preview wording~~ — **shipped S814, 2026-10-12**, app only (crest-v430).
   CUSTOMERS-PARKING-14 (owner D8, D10): the token's print window opens on the tap, before any await; a
