@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S820 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stages 5–7 outlined)
+Last updated: 2026-10-12 (S820 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`); stages 6–7 outlined)
 
 ---
 
@@ -75,7 +75,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
 
-## S809.1 Owner decisions (Q1–Q27)
+## S809.1 Owner decisions (Q1–Q29)
 
 Each has a recommended answer. Answering "all as recommended" is enough to start; name any you want
 different.
@@ -112,6 +112,11 @@ from the recommendation:
   bill is settled. The guide is corrected to say so.
 - **Q21 (c):** no revocable table QR. Staff Accept stays the check on a guest order; GUEST-7 closes as
   accepted, with that reasoning moved to `POS_DECISIONS.md` in 4f (S814).
+
+**Answered 2026-10-12: both stage-5 questions** (asked in plain words). Q28 (a), as recommended. One
+differs from the recommendation:
+
+- **Q29 (b):** the server-side post to Inventory is built now, as slice 5f, not left for stage 7.
 
 **Stage 1**
 
@@ -197,6 +202,17 @@ from the recommendation:
 - **Q23 (RESERVATIONS-7) May a mistaken cancel be undone before the booking's day?** **(a) Recommended:**
   yes, until the end of the booking's day, as the dialog already promises. (b) Keep the own-day rule and
   reword the dialog.
+
+**Stage 5**
+
+- **Q28 (S782 grants) How far should the clean-up of unused database permissions go?** The browser logins
+  hold powers no screen uses (empty a table, lock it, hang a trigger on it); none is reachable through the
+  app today. **(a) Recommended:** every table, and new tables start without them. (b) Only the five POS
+  tables the outline named.
+- **Q29 (IMS-HANDOFF, 4e) Should the server send a paid bill to Inventory itself, as part of the close?**
+  Today the till sends it, and a bill whose send failed waits for a manager to send it from the floor.
+  **(a) Recommended:** later, with the stage-7 builds; it is a new feature, not a safety fix. (b) Now, as a
+  sixth stage-5 slice.
 
 **From the gap pass**
 
@@ -332,17 +348,7 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
 
 **After stage 4 (owner approved 2026-10-12):**
 
-- **Stage 5, database hardening (all migrations):** S782 grants cleanup on `pos_parking_slips`,
-  `pos_payment_confirmations`, `pos_guest_order_requests`, `pos_loyalty_ledger`; `credit_settled_at :=
-  now()` and the `credit_settlement` unique index; the close pins its priced lines, split legs inside the
-  shift lock, raise `pos_min_till_build()`; `guard_pos_credit_note` checks `original_invoice_no`,
-  `ims_sales_entries_guard` checks the note's bill; `pos_customers` audit trigger;
-  `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; drop
-  `pos-staff-login`'s pre-S791 fallback and the retired key columns (`get_pos_staff` went with
-  `20261010190500`); A2 rate-limit first hop and delete-open-order message; B3
-  `admin-user-ops` discount-limit default; `guard_pos_order_close` stamps a void's `shift_id` from the
-  open shift (4a's browser read is all that files it today); a server-side credit-note print counter
-  (`OLD.print_count + 1` in the guard, or an RPC), so two reprints at once cannot share a copy number.
+- **Stage 5, database hardening (all migrations):** sliced below (owner approved 2026-10-12).
 - **Stage 6, till reliability (app only):** B3 offline sync failure message; unknown-close marks lost on
   reload; a self-ended session drops the unsent cart; offline tickets with null `order_no`; 5xx read as a
   refusal; KDS error wording; "Discard unsaved" copy during a send; unbounded reads (PosCustomers,
@@ -352,6 +358,26 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
 - **Stage 7, new builds (owner ranking, section A):** table move/merge/split; Customization follow-ups;
   kitchen and bar printers.
 - **Later:** section C, section D, the ⚪ questions.
+
+**Stage 5 slices (owner approved 2026-10-12; Q28 (a), Q29 (b)).** Every slice is a migration, and no
+database object or app file is changed by two slices except `ims_sales_entries_guard` (5d, then 5f from
+5d's live body). This machine has no local Postgres, so each file checks the live bodies by md5 and runs its
+rolled-back probe inside the apply (S819's shape). 5a and 5b go first, because 5b's probe decides 5b's
+rate-limit key and whether 5c raises the till build floor. Then 5c, 5d, 5e and 5f, one at a time.
+
+| # | IDs | Migration | Decisions |
+| --- | --- | --- | --- |
+| 5a ✅ | S782 grants (shipped 2026-10-12, S821, `20261012150000` applied live, migration only): TRUNCATE/REFERENCES/TRIGGER live on 19 tables (`pos_cash_movements`, `pos_loyalty_ledger` among them), MAINTAIN on about 80 (`pos_parking_slips`, `pos_payment_confirmations`, `pos_guest_order_requests` among them) | revoked from anon, authenticated and PUBLIC on every public table; the schema's default privileges stop handing them to new tables | Q28 |
+| 5b | A2 rate-limit first hop; A2 delete-open-order message; 4g `pos_customer_phone_locked` names Move | a throwaway header probe first (created, called with a set `x-forwarded-for` and `x-crest-build`, dropped); `submit_reservation_request` keyed on the trusted hop (or left, with the reason recorded); `guard_pos_order_items_closed_del` tells a deleted parent from a closed one (S749 DEFINER lookup); the phone-lock sentence | — |
+| 5c | `credit_settled_at := now()`; the `credit_settlement` unique index; the close pins its priced lines (`items_version`, after checking what bumps it); a Split bill's legs inside the shift lock; a void's `shift_id` from the open shift (4a's browser read files it today); raise `pos_min_till_build()` | `guard_pos_order_close`, `pos_shifts_guard`, a partial unique index on `pos_cash_movements`; a second file raising the floor after the deploy, only if 5b's probe sees `x-crest-build` | — |
+| 5d | CREDIT-NOTES-5 server half (`original_invoice_*` from the bill); the server-side credit-note print counter (the parking slip's `OLD.print_count + 1`); `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows for a client without Inventory (4e); 2f: a comp-cost read IMS logins may use (`viewPosBill.js`, `loadDeltaExplosion`) | `guard_pos_credit_note`, `ims_sales_entries_guard`, a new DEFINER read | — |
+| 5e | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`) | those two functions; `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys | — |
+| 5f | 4e: the server posts a closed bill to Inventory from the stored bill in the close's transaction (replacing `postClosedBill`'s browser read); posting a POS-only outlet's past unmarked bills when Inventory is switched on | its own plan first: the depletion walk lives only in `recipeCost.js` ("never a SQL copy of it", `pos-billing.md`), so a server post needs a SQL copy of it or another shape; may take more than one migration | Q29 |
+
+Closed without work: S809.4's `pos_customers` audit trigger (1i) shipped in 3k. Not in stage 5 unless the
+owner pulls them in: an FK on `pos_orders.table_id` (4k, needs a decision on deleting a table with bill
+history), refusing an order on an inactive table (4i, "if it shows up"), and
+`pos_payment_confirmations.matched_order_id`'s NO ACTION key (latent until auto-confirm is live).
 
 **Added to stage 4 by the owner (2026-10-09, 2026-10-10):**
 
@@ -396,10 +422,11 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
 - `pos_payment_confirmations.matched_order_id` is NO ACTION: once auto-confirm is live, Clear Occupied of a
   bill holding an unused matched confirmation is refused by that key. `pos-payment-webhook` drops the error
   of both its reads (1k).
-- Grants hygiene (the S782 trap): `anon` MAINTAIN on `pos_parking_slips` / `pos_payment_confirmations`,
-  and TRUNCATE/REFERENCES/TRIGGER on `pos_cash_movements` (1k, 1l).
-- `pos_customers` has no audit trigger, so enrolment changes leave no record; `supabase-sql.md`'s
-  `updated_at` table is wrong about it (the till's upsert writes it from the tablet clock) (1i).
+- ~~Grants hygiene (the S782 trap): `anon` MAINTAIN on `pos_parking_slips` / `pos_payment_confirmations`,
+  and TRUNCATE/REFERENCES/TRIGGER on `pos_cash_movements` (1k, 1l).~~ Fixed in 5a (S821), on every table.
+- ~~`pos_customers` has no audit trigger, so enrolment changes leave no record; `supabase-sql.md`'s
+  `updated_at` table is wrong about it (the till's upsert writes it from the tablet clock) (1i).~~ Both
+  fixed in 3k: three enrolment audit triggers, and the table row now says the tablet's clock.
 - ~~Credit Note Book reprint labels from the list loaded at page open, so two managers reprinting one note
   print the same copy number (the stored count is right since 1c) (1c).~~ App half fixed in 4c: the
   reprint reads `print_count` just before printing (`nextCreditNoteCopy`). Two reprints at the same
@@ -539,9 +566,9 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     Log shows `pos_blocked_at` under its raw column name (`FIELD_LABELS` in AuditLog.js) (3i).
   - Recorded-rows counts are full table scans per Delete press; the Unblock leaver check reads
     `hr_employee_id` only, not the S798 3f-1 employee links (3i).
-  - `pos_loyalty_ledger` carries the S782 grants trap: anon and authenticated hold REFERENCES, TRIGGER
+  - ~~`pos_loyalty_ledger` carries the S782 grants trap: anon and authenticated hold REFERENCES, TRIGGER
     and TRUNCATE (not reachable through REST). `REVOKE TRUNCATE, REFERENCES, TRIGGER ON
-    public.pos_loyalty_ledger FROM anon, authenticated;` (3k).
+    public.pos_loyalty_ledger FROM anon, authenticated;` (3k).~~ Fixed in 5a (S821).
   - ~~Customers' own bill history matches `buyer_phone` exactly and its search misses "+977…" spellings;
     only pre-3k bills typed differently (0 live) (3k).~~ Fixed in 4g: the history matches the stored phone
     and its number, and both Customers searches match by number (`phoneMatchesSearch`). "00977 98…" is not read as the same number by
@@ -553,8 +580,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     stores that spelling, and a new till's later upsert for them is refused and logged (name/PAN
     updates do not land; points still work) (3k).
 - **Found while drafting stage 3, wave 2 (3b, 3d, 3j; 2026-10-10, not fixed):**
-  - Grants hygiene (the S782 trap): anon and authenticated hold MAINTAIN on `pos_guest_order_requests`
-    (3b).
+  - ~~Grants hygiene (the S782 trap): anon and authenticated hold MAINTAIN on `pos_guest_order_requests`
+    (3b).~~ Fixed in 5a (S821).
   - ~~The app-wide guest alert (`useGuestOrderAlerts`) keeps ringing on the very till that accepted a guest
     order until it saves, because the request still waits in the database (since S763) (3b).~~ Fixed in 3c:
     an accepted order is held out of that till's alert.

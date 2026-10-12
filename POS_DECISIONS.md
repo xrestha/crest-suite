@@ -180,6 +180,26 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5a: the S782 grants trap (S809.4 1k, 1l, 3b, 3k)~~ — **shipped S821,
+  2026-10-12**, migration `20261012150000` applied live, migration only (no app change, no till reload).
+  **Q28 (owner, as recommended): every table, and new tables start without them.** The four S809.4 lines
+  named five POS tables. The live read found the trap on 83 of the 103 public relations: TRUNCATE,
+  REFERENCES and TRIGGER on 19 tables (`client_secrets`, `staff_pin_vault`, `app_secrets`,
+  `pos_cash_movements` and `pos_loyalty_ledger` among them) and MAINTAIN on 83, because postgres's
+  default ACL in `public` still read `anon=Dxtm, authenticated=Dxtm`. Since S782, migrations had revoked
+  them one table at a time. The file revokes the four from anon, authenticated and PUBLIC on every public
+  table and the one view, and takes them out of postgres's default ACL, so a new table starts with nothing
+  for a browser role. None was reachable through PostgREST, and no function in `public` uses any of them
+  (0 of 287). Verified inside the apply (one DO block, so a failed check undoes both changes): 0
+  role-table pairs left holding a removed power; SELECT/INSERT/UPDATE/DELETE for both browser roles and
+  all eight for service_role hashed identical before and after (98 SELECT and 262 write pairs); a
+  scratch table made under the new default (rolled back) gave the browser roles nothing and service_role
+  all eight. Read back afterwards: TRUNCATE gone on `pos_loyalty_ledger` and `pos_cash_movements`,
+  MAINTAIN on `pos_guest_order_requests`, TRIGGER on `client_secrets`; UPDATE kept on
+  `pos_guest_order_requests`; anon's pre-login `settings` read kept; service_role's TRUNCATE kept. The
+  `apply-migration` skill's "REVOKE those in the same migration" line now says the default hands out
+  nothing. supabase_admin's own default ACL in `public` still grants everything; it owns no public
+  relation.
 - [x] ~~S809 stage 4, slice 4l: DOCS-3, DOCS-4, DOCS-5, DOCS-7, DOCS-10, DOCS-11, DOCS-12 (P3); plus the
   KOT button's Tip and the Owner Report's Avg Bill Value Tip (3m)~~ — **shipped S820, 2026-10-12**, app and
   docs only, crest-v436. Stage 4 is complete. Several sentences had already been put right by earlier
