@@ -76,7 +76,7 @@ import {
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
   storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
-  btnSm, billInput, PREVIEW_DEBOUNCE_MS,
+  btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
   keptLinesToRestore, mergeRecoveredLines,
 } from './posOrdersConstants'
 
@@ -1137,13 +1137,13 @@ export default function PosOrders({ billingStation = false } = {}) {
         qrAmount: splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal,
         outletName, billingSettings, hscMap,
         tableName: activeTable?.name || 'Takeaway',
-        cashierName: profile?.full_name || '',
+        cashierName: printedStaffName(profile, isAdmin),
       })
     : billingTab === 'writeoff' ? buildCompSlipHtml({
         order: previewDraftOrder, items: orderItems, costMap: compCostMap, copyLabel: 'PREVIEW',
         outletName,
         tableName: activeTable?.name || 'Takeaway',
-        authorizedBy: profile?.full_name || '',
+        authorizedBy: printedStaffName(profile, isAdmin),
       })
     : null
 
@@ -3703,7 +3703,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const html = buildKotBotHtml({
       station, items, ticketNo, outletName,
       tableName,
-      takenBy: profile?.full_name || '',
+      takenBy: printedStaffName(profile, isAdmin),
       covers: ticketCovers, reprint,
     })
     return printHtml(html)
@@ -4768,7 +4768,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         for (const r of stopped || []) (byStation[r.station] ||= []).push(...(r.items || []))
         const voidPrinted = ['KOT', 'BOT'].filter(st => byStation[st]?.length).map(st => printHtml(buildVoidSlipHtml({
           station: st, items: byStation[st], ticketNo: updated.order_no ?? orderNo, outletName,
-          tableName: updated.table_name || activeTable?.name || 'Takeaway', voidedBy: profile?.full_name || '', voidedAt: updated.closed_at,
+          tableName: updated.table_name || activeTable?.name || 'Takeaway', voidedBy: printedStaffName(profile, isAdmin), voidedAt: updated.closed_at,
         })))
         if (voidPrinted.some(p => p === false)) {
           warnWrite(`The bill for ${where} was voided, but the VOID slip did not print — allow pop-ups for this site, and tell the kitchen and bar to stop ${where}'s order.`)
@@ -4969,7 +4969,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       order, items, copyLabel: COPY_LABEL(newCount), qrUrl, payments,
       outletName, billingSettings, hscMap: reprint ? reprint.hscMap : hscMap,
       tableName: activeTable?.name || order.table_name || 'Takeaway',
-      cashierName: reprint ? reprint.staffName : (profile?.full_name || ''),
+      cashierName: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
     }))
   }
 
@@ -5006,7 +5006,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       outletName,
       tableName: activeTable?.name || order.table_name || 'Takeaway',
       // A reprint names who comped the bill, not who reprinted it (S809 CHECKOUT-11).
-      authorizedBy: reprint ? reprint.staffName : (profile?.full_name || ''),
+      authorizedBy: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
     }))
   }
 
@@ -5030,7 +5030,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       items: compedItems, costMap, copyLabel: COPY_LABEL(newCount),
       outletName,
       tableName: activeTable?.name || order.table_name || 'Takeaway',
-      authorizedBy: reprint ? reprint.staffName : (profile?.full_name || ''),
+      authorizedBy: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
     }))
   }
 

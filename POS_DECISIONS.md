@@ -180,6 +180,36 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4k: DATABASE-7, DATABASE-8, GAP-OPERATOR-2, GAP-OPERATOR-3 (P3); plus the
+  S809.4 follow-ups "the operator bypasses `guard_pos_kot_log` on UPDATE" (3d) and "`pos_parking_slips_guard`
+  lets any operator INSERT" (3i), and POS_TODO B's `pos_order_items.recipe_id` FK~~ — **shipped S819,
+  2026-10-12**, migration `20261012140000` applied live on the second attempt (the first stopped in its
+  own probe on a test ticket's station, `'kitchen'` for `'KOT'`, and rolled back whole; the read-back
+  confirmed nothing had landed). Its rolled-back probe ran inside the apply as BLOOM CAFE's operator and
+  Owner and passed; the catalog read back as written; the planner takes the new indexes for the floor
+  and Kitchen Display polls; crest-v435. DATABASE-7: `pos_orders.client_id` and
+  `pos_order_items.client_id` → `clients` ON DELETE CASCADE, and **D27 (owner, as recommended):**
+  `pos_order_items.recipe_id` → `recipes` NO ACTION, so a dish on any bill is hidden, never deleted (the
+  `sales_entries` answer); the review's orphan was already gone (0 of each), so the file refuses an
+  orphan rather than deleting a bill. DATABASE-8: `idx_pos_orders_open`, `idx_pos_orders_closed`,
+  `idx_pos_kot_log_live`, `idx_pos_kot_log_cancelled`, one per poll or report range; shifts left alone.
+  3d/3i (Q26 a): the operator passes `guard_pos_kot_log` and `pos_parking_slips_guard` only on its
+  restore (an INSERT dated before the transaction, the 1l shape) and otherwise meets the Owner's rules
+  with the rank exemption `pos_caller_has_rank` already grants: Kitchen Display taps take the server's
+  times and only move forward, a ticket is never deleted (so "Clear every occupied table" refuses an
+  order with tickets for support as for the Owner), a slip is numbered, timed and signed by the server.
+  The ticket guard lets a DELETE through once the client row is gone, because ClientDrawer deletes the
+  clients row from the operator's session and the new cascade reaches tickets. GAP-OPERATOR-3,
+  **D28 (owner, b):** `get_client_profile_names` returns every Crest operator login as "Crest support",
+  no personal name, to the operator as well; its caller check is COALESCE'd. **D29 (owner, a):** every
+  slip the operator's session prints (bill Cashier, comp and void slips, kitchen tickets) says the same
+  (`CREST_SUPPORT_LABEL` / `printedStaffName`, held to the SQL by a test). GAP-OPERATOR-2:
+  `customizationEnabled` follows the viewed client's own switch for the operator (the till and the menu
+  reports' "costed by build" rating; ModuleGate still admits the operator to Option Groups for setup).
+  **D30 (owner, a):** `TillOutletGate` stops Orders, Billing, Shifts and the Kitchen Display for the
+  operator on a client whose POS is off; the setup pages stay open. Original rows: `DATABASE.md`,
+  `GAPS.md`.
+
 - [x] ~~S809 stage 4, slice 4i: FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 (P3); plus the S809.4
   follow-ups "Ticket Routing hides dishless bar categories" (3m) and "a waiting guest QR order when its
   bill closes" (3g)~~ — **shipped S817, 2026-10-12**, migration `20261012120000` applied live (its

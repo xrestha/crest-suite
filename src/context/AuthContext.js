@@ -437,8 +437,9 @@ export function AuthProvider({ children }) {
   const hrEnabled  = isAdmin || (profile?.clients?.hr_enabled ?? false)
   // Crest Customization (S758) is an add-on ON POS: the database refuses the flag without
   // pos_enabled, and this mirrors it so a stale flag on a client whose POS was switched off can
-  // never light the module up here either.
-  const customizationEnabled = isAdmin || (posEnabled && (profile?.clients?.customization_enabled ?? false))
+  // never light the module up here either. The operator's value is the viewed client's own switch
+  // (S819 4k, GAP-OPERATOR-2), resolved below once clientModules exists.
+  const ownCustomizationEnabled = posEnabled && (profile?.clients?.customization_enabled ?? false)
   // Admin gets 'manager'; owner (client with no pos_role/ims_role/hr_role) gets 'manager' on the
   // corresponding module when it's enabled; staff use their explicit pos_role/ims_role/hr_role. An
   // HR self-service account also has role 'client' with none of the four set — without excluding
@@ -733,6 +734,16 @@ export function AuthProvider({ children }) {
     const pos = cPos ?? false
     return { ims: cIms ?? true, hr: cHr ?? false, pos, customization: pos && (cCust ?? false) }
   }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos, cCust])
+  // False only while an operator's view of a client is still reading that client's switches, when
+  // clientModules holds the placeholder above. A gate that acts on a switch being OFF waits for it.
+  const clientModulesKnown = !(isAdmin && adminViewClientId) || viewModules !== null
+
+  // S819 4k (GAP-OPERATOR-2): Crest support's till and menu reports follow the viewed client's own
+  // Customization switch. With the admin bypass, BLOOM CAFE's till demanded four choices on a dish
+  // the restaurant's own till sells plain, and Send was then refused ("not switched on for this
+  // outlet"). Route access is untouched: ModuleGate still lets the operator through to set up
+  // option groups before the module goes on.
+  const customizationEnabled = isAdmin ? !!clientModules.customization : ownCustomizationEnabled
 
   // `plan` is the IMS plan and nothing else. It used to be the MAXIMUM across clients.plan,
   // ims_plan, hr_plan, pos_plan and is_premium — which was a revenue leak, found live while
@@ -860,6 +871,7 @@ export function AuthProvider({ children }) {
       hasImsAccess,
       hasHrAccess,
       clientModules, // displayed client's actual subscription (nav + dashboard sections)
+      clientModulesKnown,
       // hrPlan/posPlan are deliberately NOT exposed. Crest HR and Crest POS are yes/no modules
       // with no tiers, so a "plan" for either is a concept the product does not sell. The
       // clients.hr_plan/pos_plan columns still exist but are vestigial; anything that needs to

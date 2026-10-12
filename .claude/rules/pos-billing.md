@@ -647,9 +647,9 @@ it rather than carrying its own copy, and since S809 1j so do `apply_pos_item_co
 `caller_can_set_menu_price` (`pos_caller_has_rank('manager') OR ims_caller_has_rank('manager')`) and
 `settings_guard_staff_roles`' POS lines: the last copies are gone. **The operator is exempt from rank,
 never from the record (S809 1l, Q26 a)**: outside a restore it meets the same integrity checks on
-credit notes, cash entries, shifts, payment lines and customers. The restore is recognised as an
-operator INSERT of a row dated before the transaction (`opened_at`/`created_at` < `now()`); no screen
-sends those columns, and a new screen must not.
+credit notes, cash entries, shifts, payment lines, customers, tickets and slips (S819). The restore is
+an operator INSERT of a row dated before the transaction (`opened_at`/`created_at`/`sent_at` <
+`now()`); no screen sends those columns, nor may a new one.
 
 | What | Rank the table now requires |
 | --- | --- |

@@ -1256,7 +1256,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
     //   demand_forecast_daily     CASCADE           forecast rows go too
     //   recipe_suggestions        CASCADE (both)    pairing rows go too
     //   pos_kot_removals          SET NULL          the audit row survives, orphaned
-    //   pos_order_items.recipe_id NO FK AT ALL      bill lines silently point at nothing
+    //   pos_order_items.recipe_id plain FK (S819)   REFUSES too; until S819 it had none at all
     //
     // So "the database will stop me" was true for sales_entries only — and being stopped THERE
     // was the problem, because deleteRecipeNow() used to clear recipe_ingredients first and then

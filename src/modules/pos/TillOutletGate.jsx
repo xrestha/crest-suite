@@ -23,7 +23,7 @@ const RECHECK_MS = 20000
 export default function TillOutletGate({ children }) {
   const {
     clientId, isAdmin, profile, outlets, outletHeld, returnToOutlet, switchAdminClient,
-    adminViewClientName, checkOutlet,
+    adminViewClientName, checkOutlet, clientModules, clientModulesKnown,
   } = useAuth()
   // The outlet this page opened in, for a browser that is no till (below).
   const [openedIn] = useState(clientId)
@@ -39,6 +39,27 @@ export default function TillOutletGate({ children }) {
     const t = setInterval(() => checkOutlet(), RECHECK_MS)
     return () => clearInterval(t)
   }, [stop, isAdmin, checkOutlet])
+
+  // S819 4k (GAP-OPERATOR-2, owner D30 a): ModuleGate lets Crest support onto every POS route, so
+  // support could ring numbered Tax Invoices, send tickets and open a shift on a client whose POS is
+  // switched off, in a till that client cannot see. The till pages stop here instead. The setup
+  // pages (tables, menu, Till Devices) are not under this gate and stay open, so POS can be prepared
+  // before it goes on. Waits for the client's switches to load rather than flashing the notice.
+  if (isAdmin && clientId && clientModulesKnown && !clientModules?.pos) {
+    return (
+      <div className="card" role="alert" style={{ maxWidth: 640, margin: '24px auto', padding: 24 }}>
+        <h2 style={{ margin: '0 0 10px', fontSize: 18, color: 'var(--theme-text1)' }}>
+          POS is switched off for {adminViewClientName || 'this client'}
+        </h2>
+        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: 'var(--theme-text2)' }}>
+          The till, Billing, Shifts and the Kitchen Display stay closed for Crest support too, so no
+          bill, kitchen ticket or shift is recorded in a till the restaurant cannot see. Switch POS on
+          under Admin → Clients → Manage first. Tables, the menu and Till Devices stay open for setting
+          POS up before it goes on.
+        </p>
+      </div>
+    )
+  }
 
   if (!stop) {
     // A browser that is no till follows its login (S798), and Layout takes it to the dashboard after

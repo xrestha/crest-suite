@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S818 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`) and 4j (migration `20261012130000`); stages 5–7 outlined)
+Last updated: 2026-10-12 (S819 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`) and 4k (migration `20261012140000`); stages 5–7 outlined)
 
 ---
 
@@ -65,12 +65,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (9 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8, FLOOR-KITCHEN-4, FLOOR-KITCHEN-7, FLOOR-KITCHEN-8, FLOOR-KITCHEN-9, ORDER-FLOW-17, ORDER-FLOW-19, RESERVATIONS-6, RESERVATIONS-7, RESERVATIONS-8, RESERVATIONS-9, RESERVATIONS-10, RESERVATIONS-11; GUEST-7 closed as accepted, Q21 (c))
+### P3 (7 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8, FLOOR-KITCHEN-4, FLOOR-KITCHEN-7, FLOOR-KITCHEN-8, FLOOR-KITCHEN-9, ORDER-FLOW-17, ORDER-FLOW-19, RESERVATIONS-6, RESERVATIONS-7, RESERVATIONS-8, RESERVATIONS-9, RESERVATIONS-10, RESERVATIONS-11, DATABASE-7, DATABASE-8; GUEST-7 closed as accepted, Q21 (c))
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| DATABASE-7 | Bills and lines have no FK to their client; a deleted client's open order is still in the live table (KNOWN) | 4 | — | yes |
-| DATABASE-8 | The floor, KDS and nav badges re-read the whole order and ticket history every poll; no index matches | 4 | — | yes |
 | DOCS-3 | Help gives six wrong answers about who may do what at the till | 4 | — | no |
 | DOCS-4 | Help still calls Guest QR ordering a Pro switch an admin turns on | 4 | — | no |
 | DOCS-5 | The POS guide still says S754's database rules and tablet keys are not live, plus three more stale sentences | 4 | — | no |
@@ -79,12 +77,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | DOCS-11 | Seven rule sentences and code comments describe mechanisms that no longer hold; two would steer a change wrong | 4 | — | no |
 | DOCS-12 | This file keeps a shipped S792 item open and the webhook secret's old home; POS_DECISIONS states two superseded rules | 4 | — | no |
 
-### Gaps (2 open, both P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l, GAP-OUTLETS-2 in 2h, GAP-OUTLETS-3 in 3n)
+### Gaps (0 open; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l, GAP-OUTLETS-2 in 2h, GAP-OUTLETS-3 in 3n, GAP-OPERATOR-2 and GAP-OPERATOR-3 in 4k)
 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
-| GAP-OPERATOR-2 | Inside a client's POS the operator gets every module on, whatever the client bought, so the operator's till behaves unlike the restaurant's | P3 | 4 | — | no |
-| GAP-OPERATOR-3 | What the operator does in a client's POS shows to the Owner as nobody: bills, voids, tickets, a shift and a credit note carry "—" | P3 | 4 | — | yes |
 
 ## S809.1 Owner decisions (Q1–Q27)
 
@@ -336,10 +332,10 @@ that file.
 | 4h ✅ | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note [`handleSaveRefusal` said "The menu has been reloaded" before the reload ran] (shipped 2026-10-12, S816, migration `20261012110000` applied live, crest-v432; owner D15–D17) | yes | Q20 |
 | 4i ✅ | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] (shipped 2026-10-12, S817, migration `20261012120000` applied live, crest-v433; owner D18–D21) | yes | — |
 | 4j ✅ | RESERVATIONS-6, -7, -8, -9, -10, -11 [Table Management's dead "skewed by bills left open" note removed; a refused Seat hand-off no longer stays armed] (shipped 2026-10-12, S818, migration `20261012130000` applied live, crest-v434; owner D22–D26) | yes | Q23 |
-| 4k | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT] | yes | — |
+| 4k ✅ | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT; B's `pos_order_items.recipe_id` FK] (shipped 2026-10-12, S819, migration `20261012140000` applied live, crest-v435; owner D27–D30) | yes | — |
 | 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
 
-Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816), 4i shipped 2026-10-12 (S817), 4j shipped 2026-10-12 (S818).
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816), 4i shipped 2026-10-12 (S817), 4j shipped 2026-10-12 (S818), 4k shipped 2026-10-12 (S819).
 
 **After stage 4 (owner approved 2026-10-12):**
 
@@ -350,7 +346,7 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   `ims_sales_entries_guard` checks the note's bill; `pos_customers` audit trigger;
   `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; drop
   `pos-staff-login`'s pre-S791 fallback and the retired key columns (`get_pos_staff` went with
-  `20261010190500`); A2 rate-limit first hop and delete-open-order message; B `recipe_id` FK; B3
+  `20261010190500`); A2 rate-limit first hop and delete-open-order message; B3
   `admin-user-ops` discount-limit default; `guard_pos_order_close` stamps a void's `shift_id` from the
   open shift (4a's browser read is all that files it today); a server-side credit-note print counter
   (`OLD.print_count + 1` in the guard, or an RPC), so two reprints at once cannot share a copy number.
@@ -539,8 +535,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     Fixed in 3h: its own 403 (`switched_off`, "This login is switched off"), not counted.
   - Deleting an IMS or HR staff login (`delete_ims_staff` / `delete_hr_staff`) also SET NULLs its name
     on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i).
-  - Live `pos_parking_slips_guard` still lets any operator INSERT through unchanged; its comment says 1l
-    narrowed it to a restore, the body does not (3i).
+  - ~~Live `pos_parking_slips_guard` still lets any operator INSERT through unchanged; its comment says 1l
+    narrowed it to a restore, the body does not (3i).~~ Fixed in 4k (S819): the restore only.
   - Clear IMS also deletes the Fixed Assets register and categories, which neither its confirm nor the
     "setup kept" heading mentions (3i).
   - After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
@@ -572,8 +568,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - `placeOrder`'s menu re-read after a refusal is unbounded (background only) (3b). ~~Help's Order Taking
     bullet still says "(Pro plan)" and "Enable it per client in Admin → Manage Clients → Features".~~
     Fixed in 3c.
-  - The operator still bypasses `guard_pos_kot_log` entirely on UPDATE, so an operator's KDS taps keep
-    tablet times and skip forward-only, against Q26 (a) (3d).
+  - ~~The operator still bypasses `guard_pos_kot_log` entirely on UPDATE, so an operator's KDS taps keep
+    tablet times and skip forward-only, against Q26 (a) (3d).~~ Fixed in 4k (S819): the restore only.
   - The KDS's non-timeout error still says "was not moved — it is back where it was" for a dropped
     connection, where the write may have landed; KOT Log shows "Cancelled" for both a kitchen Clear
     and a void (3d).
@@ -734,6 +730,23 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     migration's own section 2 asserted md5, SECURITY DEFINER and anon / authenticated / service_role
     EXECUTE inside the apply.
 
+- **Found while building stage 4, slice 4k (2026-10-12, not fixed):**
+  - `pos_orders.table_id` still has no FK (FLOOR-KITCHEN's offline-delete note): a table deleted while a
+    till holds an offline order for it leaves that order on neither the floor nor Billing. A FK has to
+    decide what deleting a table with bill history means (refuse, or SET NULL and keep `table_name`).
+  - The new client FKs make a client delete with POS rows left behind cascade only as far as the guards
+    allow: `guard_pos_order_delete` refuses a billed bill in that cascade from the operator's browser
+    session, so Delete Client stops at its last step and says to run it again. Safe (deleteClientDataFor
+    clears POS first), but the message names no table.
+  - `fetchViewModules` (AuthContext) still drops its read error; on a failed read `clientModulesKnown`
+    stays false and the D30 till notice never shows for support (it fails open, as every UI gate does).
+  - `get_client_profile_names` now returns every Crest operator login's id (as "Crest support") to any
+    client's caller. One login today; ids only, no name.
+  - Live today: 0 bills closed and 0 tickets sent by support (BLOOM CAFE was rebuilt in S810), so the
+    new label shows on nothing yet.
+  - `POS_DECISIONS.md` has no entry for slice 4j (S818 moved its rows out of this file and wrote none
+    there); the CHANGELOG entry is the only record of D22–D26.
+
 ---
 
 ## A. Next builds — ranked by the owner (S754, 2026-09-14)
@@ -818,20 +831,6 @@ when these were filed. Every item below assumes they are.
 
 - [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier). **`pos_orders` itself cannot be deleted or edited once billed, enforced by the database since S754** (`guard_pos_order_delete` plus the closed-bill lock in `guard_pos_order_close`, migration `20260916100000`, applied live 2026-09-14). Before that it was only true because no screen offered it: a till login could delete a billed order over REST. **Narrowed by S698 on the purchases side, not closed:** the replacement is now one transaction inside `save_purchase_bill` rather than two requests, so a bill can no longer end up holding both versions, and a bill with `payable_payments` against it is refused outright by a `BEFORE DELETE` trigger. The lines themselves are still replaced rather than superseded, so an audit trail beyond `audit_logs` would still need a version column. `sales_entries` is unchanged.
 - [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
-- [ ] 🟡 `pos_order_items.recipe_id` has **no foreign key at all** (found S711 while enumerating what
-  references `recipes`). Every other referencing column is constrained one way or another —
-  `sales_entries` refuses the delete, three tables cascade, `pos_kot_removals` sets null — and this
-  one lets a recipe be deleted out from under its bill lines, which then point at an id that no
-  longer exists. The bill itself still prints, because a line carries its own `name` and `price`
-  snapshot; what breaks is anything joining back to `recipes` for a COST, so a comp on the POS
-  exception report or a margin on the sales report silently values those lines at zero.
-  **The page-level guard added in S711 covers the delete path in the app** (Recipe Costing counts
-  POS lines before allowing a delete), which is why this is 🟡 and not 🔴 — but per S707's own
-  lesson, a guard that lives only in the page is a guard on the page: the REST API still accepts
-  the delete. The fix is a migration adding the FK, which has to decide between `ON DELETE SET NULL`
-  (matching `pos_kot_removals`, keeps the bill line and loses the link) and a plain FK (refuses,
-  matching `sales_entries` — probably right, since the two tables are the same fact recorded twice).
-  Check for pre-existing orphans before adding either, or the migration fails on live data.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 

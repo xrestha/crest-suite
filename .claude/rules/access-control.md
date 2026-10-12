@@ -249,6 +249,10 @@ in-page role checks are a separate audit** — the same reason a sub-route inher
 parent (S647) and a nav allowlist is not a guard (S683). Detail in
 `.claude/rules/accounts-and-logins.md`.
 
+**The operator's route bypass is not a behaviour bypass (S819, GAP-OPERATOR-2).** Where a flag
+changes what a page DOES, support follows the viewed client's `clientModules`: `customizationEnabled`,
+`outletHasIms` (S814), `TillOutletGate`'s POS-off stop (D30 a, after `clientModulesKnown`).
+
 ## Four gates, one grammar for "you cannot have this" (S683)
 
 The critique found four gates with four grammars. `ModuleGate` was three silent

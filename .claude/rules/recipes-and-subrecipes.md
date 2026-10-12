@@ -222,7 +222,7 @@ means, while the calling code cannot see the difference:
 | `demand_forecast_daily` | CASCADE | forecast rows go |
 | `recipe_suggestions` (both cols) | CASCADE | pairing rows go |
 | `pos_kot_removals.recipe_id` | SET NULL | audit row survives, orphaned |
-| `pos_order_items.recipe_id` | **no FK at all** | bill lines silently point at nothing |
+| `pos_order_items.recipe_id` | plain FK (S819, D27 a) | **refuses**; it had none until then, and bill lines pointed at nothing |
 
 **Order the delete so nothing irreversible runs before the step that can still be refused.**
 `deleteRecipeNow` used to clear `recipe_ingredients`, deactivate the mirror item, and only then

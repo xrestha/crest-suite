@@ -365,6 +365,15 @@ export const KOT_PULL_REASONS = [
 // different concept (sequential reprints over time) — the two don't actually map cleanly.
 export const COPY_LABEL = n => n <= 1 ? '' : `COPY OF ORIGINAL - (${n - 1})`
 
+// S819 4k (GAP-OPERATOR-3, owner D28 b / D29 a): Crest support is "Crest support" on every slip
+// its session prints (bill Cashier, comp and void slips, kitchen tickets), never its own name, so
+// the paper says what get_client_profile_names tells the Owner and a reprint matches the original.
+// The SQL twin is in migration 20261012140000; posOrdersConstants.crestSupport.test.js holds the two
+// to one spelling.
+export const CREST_SUPPORT_LABEL = 'Crest support'
+export const printedStaffName = (profile, isAdmin) =>
+  isAdmin ? CREST_SUPPORT_LABEL : (profile?.full_name || '')
+
 // 40x40 rather than the 44px touch-target ideal — the largest that comfortably fits the 320px
 // cart column and 52px top bar without reflowing either layout; still a large jump from the
 // 26x26 it replaced, on the single most-tapped control on the busiest screen in the app.
