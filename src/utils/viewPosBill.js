@@ -2,6 +2,8 @@ import { supabase } from '../supabaseClient'
 import { scopedFrom } from '../shared/scopedDb'
 import { buildBillHtml, buildCompSlipHtml } from '../modules/pos/orders/posOrderPrintHtml'
 import { computeRecipeCosts } from './recipeCost'
+import { withTimeout, settleWithin } from './withTimeout'
+import { readHscMap, staffNameFor, REPRINT_READ_MS } from '../modules/pos/orders/billReprintData'
 
 // Read-only, full-fidelity drill-down — opens the exact same Tax Invoice/Bill or Complimentary
 // Slip layout used for the real print (same buildBillHtml/buildCompSlipHtml builders from
@@ -24,6 +26,10 @@ function writeLoadFailure(w) {
   w.document.close()
 }
 
+// Every read is bounded (S809.4): a hung request left the tab on "Loading…" for ever, with nothing
+// saying the bill would not come. A timeout is a failed read like any other.
+const within = (call, label) => settleWithin(call, REPRINT_READ_MS, label)
+
 export async function viewPosBill(clientId, row) {
   const orderId = row.isItemComp ? row.parentOrderId : row.id
   if (!clientId || !orderId) return
@@ -36,9 +42,9 @@ export async function viewPosBill(clientId, row) {
   if (w) w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Loading…</p>')
 
   const [{ data: order, error: orderErr }, { data: settings, error: settingsErr }, { data: client, error: clientErr }] = await Promise.all([
-    scopedFrom('pos_orders', clientId).eq('id', orderId).single(),
-    supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
-    supabase.from('clients').select('name').eq('id', clientId).single(),
+    within(scopedFrom('pos_orders', clientId).eq('id', orderId).single(), 'Reading the bill'),
+    within(supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(), 'Reading the billing settings'),
+    within(supabase.from('clients').select('name').eq('id', clientId).single(), 'Reading the outlet'),
   ])
   // The settings decide the document itself — TAX INVOICE or BILL, the seller's VAT/PAN number, the
   // prefix, the address — so a failed read of them is a failed read of the bill (S809 2a, CHECKOUT-9).
@@ -58,7 +64,7 @@ export async function viewPosBill(clientId, row) {
   const outletName = client?.name || ''
   const tableName = order.table_name || 'Takeaway'
 
-  const { data: allItems, error: itemsErr } = await scopedFrom('pos_order_items', clientId).eq('order_id', orderId)
+  const { data: allItems, error: itemsErr } = await within(scopedFrom('pos_order_items', clientId).eq('order_id', orderId), 'Reading the bill lines')
   if (itemsErr) { writeLoadFailure(w); return }
   const items = allItems || []
 
@@ -69,26 +75,36 @@ export async function viewPosBill(clientId, row) {
   const staffId = row.isItemComp ? compedItemsForStaff[0]?.comped_by : order.closed_by
   // A raw `profiles` query only ever returns the CALLER's own row under RLS
   // (profiles_select: id = auth.uid() OR admin) — resolving another staff member's name
-  // needs get_client_profile_names(), a SECURITY DEFINER RPC.
-  let staffName = ''
-  if (staffId) {
-    const { data: staffList } = await supabase.rpc('get_client_profile_names', { p_client_id: clientId })
-    staffName = (staffList || []).find(s => s.id === staffId)?.full_name || ''
+  // needs get_client_profile_names(), a SECURITY DEFINER RPC. Its error used to be dropped, so a
+  // failed read showed the bill with a blank Cashier as though nobody had closed it (S809.4).
+  const { name: staffName, error: staffErr } = await staffNameFor(supabase, clientId, staffId)
+  if (staffErr) { writeLoadFailure(w); return }
+
+  // computeRecipeCosts THROWS on a failed read (recipeCost.js), which used to leave the tab on
+  // "Loading…" with an unhandled rejection. A slip valued at zero would be a wrong document.
+  const slipCosts = async recipeIds => {
+    if (recipeIds.length === 0) return {}
+    try {
+      return await withTimeout(computeRecipeCosts(supabase, recipeIds), REPRINT_READ_MS, 'Reading food costs')
+    } catch (e) {
+      console.error('viewPosBill: food costs could not be read:', e)
+      return null
+    }
   }
 
   let html
   if (row.isItemComp) {
     const compedItems = compedItemsForStaff
-    const recipeIds = compedItems.map(i => i.recipe_id).filter(Boolean)
-    const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
+    const costMap = await slipCosts(compedItems.map(i => i.recipe_id).filter(Boolean))
+    if (!costMap) { writeLoadFailure(w); return }
     html = buildCompSlipHtml({
       order: { ...order, invoice_no: row.compNo, close_reason: compedItems[0]?.comp_reason || '', bill_remarks: '' },
       items: compedItems, costMap, copyLabel: 'VIEW ONLY',
       outletName, tableName, authorizedBy: staffName,
     })
   } else if (order.close_type === 'writeoff') {
-    const recipeIds = items.map(i => i.recipe_id).filter(Boolean)
-    const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
+    const costMap = await slipCosts(items.map(i => i.recipe_id).filter(Boolean))
+    if (!costMap) { writeLoadFailure(w); return }
     html = buildCompSlipHtml({
       order, items, costMap, copyLabel: 'VIEW ONLY',
       outletName, tableName, authorizedBy: staffName,
@@ -99,16 +115,11 @@ export async function viewPosBill(clientId, row) {
     // placeholder for a null one), but the item composition is still the truest record of what
     // was rung up. Comped lines are excluded — they were never on this bill either (see closeOrder).
     const payableItems = items.filter(i => !i.comped)
-    const recipeIds = payableItems.map(i => i.recipe_id).filter(Boolean)
-    let hscMap = {}
-    if (recipeIds.length > 0) {
-      const { data: recipes, error: recErr } = await scopedFrom('recipes', clientId, 'id, hsc_code').in('id', recipeIds)
-      if (recErr) { writeLoadFailure(w); return }
-      hscMap = Object.fromEntries((recipes || []).map(r => [r.id, r.hsc_code]))
-    }
+    const { map: hscMap, error: recErr } = await readHscMap((t, sel) => scopedFrom(t, clientId, sel), payableItems.map(i => i.recipe_id))
+    if (recErr) { writeLoadFailure(w); return }
     let payments
     if (order.payment_method === 'Split') {
-      const { data, error: payErr } = await scopedFrom('pos_order_payments', clientId, 'payment_method, amount').eq('order_id', orderId).order('recorded_at')
+      const { data, error: payErr } = await within(scopedFrom('pos_order_payments', clientId, 'payment_method, amount').eq('order_id', orderId).order('recorded_at'), 'Reading the payments')
       if (payErr) { writeLoadFailure(w); return }
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
     }

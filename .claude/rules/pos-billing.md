@@ -177,6 +177,17 @@ bill or entry holding the lock and then counts it (1l refuses the stale report);
 Close locked the row is refused. A shift's `closed_at` and the report's `capturedAt` are `now()`. Not
 covered: a Split bill's legs, inserted in a later request (POS_TODO S809.4).
 
+**A Void reads the open shift before it writes but is never refused for it (S809 SHIFTS-6)**: none
+open stamps none, a failed read keeps the cached id. The guard stamps only Charge/Complimentary, so
+this read files a void until stage 5. A server `no_open_shift` clears the cached id.
+
+**PosShifts (S809 4a): every read and write is time-limited, and no answer reads "not known", never
+"not opened/closed" (`shiftText.js`).** A lost Open re-reads the server; a retry meets the
+one-open-shift index (23505). `loadOpenShift` runs under `useLatestRequest`; the page reloads on
+`visibilitychange`, never a timer (owner decision). The Close dialog is pinned to its shift
+(`closingShiftRef`): one closed elsewhere writes nothing and the page names Shift History. Messages
+that outlive the dialog go in `shiftReadError`/`pageMsg`, never its `msg`.
+
 **`salesTotal` is "Total Sales", not "Total Collection"** — it includes Credit bills, which are
 billed but not collected. The screen had this right and the signed paper slip had it wrong.
 
@@ -458,21 +469,18 @@ which renders `BillingStation.jsx`), then the **order screen** (`if (view === 'o
 and then falls through to the **floor view** (`return (<>...</>)`). They render completely different
 trees.
 
-The KOT-pull prompt was placed beside the credit-note modal at the tail of the file — i.e. in the
-floor view — while `setQty` only ever runs on the order screen. Pressing × on an already-fired item
-therefore did **nothing visible at all**: the state was set, the removal was correctly blocked, and
-no dialog appeared anywhere. It compiled, passed the label/colour/duplicate-id detectors, and read
-correctly in review. Only pressing the button in a browser found it.
-
-Before adding a modal here, check which return the handler that opens it lives in. Nothing about a
-misplaced one fails loudly, and the failure mode — a button that silently does nothing — is the one
-a cashier reports as "the till is broken" rather than as a bug you can search for.
+Before adding a modal here, check which return the handler that opens it lives in, and press it in
+a browser: a misplaced one is a button that silently does nothing.
+History: docs/rules-archive/pos-billing.md#three-returns-story
 
 **The `bills` return is the narrowest of the three and should stay that way.** It renders the list,
-the shared `floorMsg` banner and `confirmEl` — nothing else. Every refusal it can produce (a bill
-closed on another till, a table gone from the floor plan, offline, an unsynced order) goes through
-`floorMsg`, deliberately, rather than the floor view's `window.alert`s: this screen has a banner, so
-the reason those alerts exist does not apply here.
+`floorMsg`, the unsettled-close and write-warnings banners, `loyaltyNoteBanner`, `recentBillsModal`
+(Recent Bills plus the credit-note modal it opens, S809.4) and `confirmEl`. The loyalty note and
+`recentBillsModal` are elements built once and rendered by this return AND the floor's, because a
+modal in one return is a button that does nothing in the other (S578). Every refusal the list can
+produce (a bill closed on another till, a table gone from the floor plan, offline, an unsynced order)
+goes through `floorMsg` rather than the floor view's `window.alert`s; a Recent Bills reprint still
+alerts here, because `floorMsg` sits hidden behind that dialog.
 
 ## The Billing station is a third VIEW, never a second implementation (S762)
 
@@ -523,17 +531,8 @@ Stash the JWT in `sessionStorage` first — it stays valid independently of the 
 it, so one browser profile is enough. Restore the role afterwards and re-read the page to confirm it
 took, rather than trusting the change event.
 
-Results, all confirmed live on 2026-08-19:
-
-- **Close guard (S577)** — `{"close_type":"void"}` → 403; a 30% discount → 403 naming the cap; a 10%
-  discount → 200. An ordinary close still assigns an invoice, stamps `ims_posted_at`, and leaves
-  `pos_order_items` matching the `sales_entries` row.
-- **KOT-removal record (S577)** — the prompt names the item and quantity, Remove stays disabled
-  until a reason is chosen, and KOT Log → Pulled Items renders the row with the staff name resolved.
-- **Comp guard (S579)** — direct `PATCH {comped:true}` → 403, the same dressed with a forged
-  `comp_no`/`comped_by` → 403, an INSERT arriving already comped → 403, an ordinary `notes` edit →
-  200. The RPC called with `p_comped_by` set to a colleague's real uuid stored the **caller's** id
-  instead, and returned 403 once the account was demoted to Staff.
+All three passed live on 2026-08-19, each with its control.
+History: docs/rules-archive/pos-billing.md#smoke-test-results
 
 ## Item-level comp is enforced server-side too (S579)
 
@@ -829,6 +828,19 @@ reading the diff.
 Times on every POS slip and screen go through `src/shared/nepalTime.js`; see
 `.claude/rules/design-system.md` for why the obvious `toLocaleTimeString` form is wrong.
 
+### A reprint is a copy of the original, or nothing (S809 4b, 4c)
+
+- **Round Off prints on every bill and every credit note**, PAN included, 0.00 when nothing rounded
+  (owner decision). The note's comes from its own stored figures as printed (`creditNoteRoundOff`),
+  and it lists a dish's choices with the bill's own `billOptionRow`. A Credit bill prints "Amount on
+  credit", not Tender/Change.
+- **A reprint takes its HSC codes and Cashier / Authorized by from the bill** (`billReprintData.js`:
+  `readHscMap`, `staffNameFor`), never from the `hscMap` state or the reprinter's login. Either read
+  failing prints nothing; a document with blank codes or the wrong name is wrong, not partial.
+- **A credit-note reprint's label is `nextCreditNoteCopy` over a `print_count` read just before
+  printing** and the page's list. Two reprints at the same instant can still share a number until the
+  server keeps the counter (stage 5).
+
 ### The four POS report pages are reports, not till screens (S613)
 
 `SalesReport`, `CoversReport`, `KotLog` and `PosExceptionReport` now render the product's shell
@@ -840,19 +852,11 @@ keep the full-screen till idiom deliberately; see `.claude/rules/design-system.m
 
 Two POS-specific details from that convergence:
 
-- **A `<tr onClick>` is mouse-only.** The RowDisclosure sweep never reached POS, so every
-  drill-down here was unreachable by keyboard. An inline detail expansion takes `RowDisclosure` in
-  the first cell.
-
-  **Corrected 2026-08-30/S653: the second half of this bullet described a fix that was never
-  applied, and prescribed the wrong one.** It said an *opening* drill-down takes a button in a
-  trailing `no-print` action column. Nine rows across four POS files were still bare `<tr onClick>`
-  when S653 measured them, and a trailing action column contradicts `.btn-linklike`'s own reason for
-  existing ("the affordance has to sit on the name itself rather than in a trailing Actions
-  column"). What shipped: `.btn-linklike` on the cell carrying the row's **identity** — invoice no.,
-  order no., payment method — `stopPropagation()`ing so the row handler cannot double-fire, and
-  `aria-pressed` instead of link semantics where the row toggles a filter rather than opening
-  something. No column was added, so the tfoot alignment warning no longer applies.
+- **A `<tr onClick>` is mouse-only.** An inline detail expansion takes `RowDisclosure` in the first
+  cell; an opening drill-down takes `.btn-linklike` on the cell carrying the row's identity (invoice
+  no., order no., payment method), `stopPropagation()`ing, with `aria-pressed` where the row toggles
+  a filter. Never a trailing action column.
+  History: docs/rules-archive/pos-billing.md#report-rows-correction
 - **KOT vs BOT is a category, not a status.** The KOT chip used `badge-green`; success-green for a
   categorical distinction is the one thing the badge set is not for. KOT is `badge-purple`, BOT
   stays `badge-yellow` (the accent-tinted categorical tag).

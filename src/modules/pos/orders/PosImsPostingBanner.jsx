@@ -141,6 +141,8 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
           <div style={{ marginTop: 4 }}>
             {notes === 1 ? 'It is' : 'They are'} valid and printed, but Inventory still counts the sales
             {notes === 1 ? ' it cancels' : ' they cancel'} until {notes === 1 ? 'it is' : 'they are'} posted.
+            A note waits when its month was not started in Inventory, its month was closed, its bill
+            was not in Inventory yet, or the save failed.
           </div>
         </div>
       )}

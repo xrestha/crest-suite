@@ -199,9 +199,10 @@ export default function PosLogin() {
           setPin('')
         } else if (status === 401 && body?.error === ERR_DEVICE_NOT_ACTIVATED) {
           // The device key no longer works: this tablet was revoked in Till Devices, or it still
-          // holds the shared key a manager has since switched off (S754). No PIN will work until a
-          // manager activates it again from /pos.
-          setError('This till needs to be activated again by a manager')
+          // holds the old shared key, since switched off (S754). No PIN will work until it is activated
+          // again from /pos — by the Owner, since a POS manager has only a PIN, which a dead key
+          // refuses (S809 ACCESS-10). Only a POS manager still signed in on this tablet can do it too.
+          setError('This till needs to be activated again by the Owner')
         } else if (status === 401 && body?.error === ERR_INVALID_CREDENTIALS) {
           setError('Incorrect PIN. Try again.')
           setPin('')
@@ -263,7 +264,8 @@ const pinDots = Math.max(4, pin.length)
   const itemsWord = n => `${n} item${n === 1 ? '' : 's'}`
 
   // Device not yet activated for any client — explain why, instead of silently bouncing
-  // to /login. Activation itself happens from Till Devices (/pos) by an owner/manager.
+  // to /login. Activation itself happens from Till Devices (/pos), signed in on this tablet: in
+  // practice the Owner, by email, because a POS manager has no email login (S809 ACCESS-10).
   // Also catches a device activated before device-secret verification was introduced — its
   // stored client_id is still present but there's no secret to show staff with, so it needs a
   // one-time re-activation rather than silently showing "no staff found".
@@ -278,12 +280,13 @@ const pinDots = Math.max(4, pin.length)
       }}>
         <div className="card" role="alert" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
           <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
-            This till needs to be activated again by a manager
+            This till needs to be activated again by the Owner
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
-            Its device key no longer works, so staff can't sign in on it. An owner or POS manager can sign
-            in here, open <strong>POS → Admin → Till Devices</strong>, activate this tablet again, then
-            press <strong>Sign out and open the PIN screen</strong>.
+            Its device key no longer works, so staff can't sign in on it. The Owner signs in here with
+            email, opens <strong>POS → Admin → Till Devices</strong>, activates this tablet again, then
+            presses <strong>Sign out and open the PIN screen</strong>. A POS manager can do it only while
+            still signed in on this tablet: a PIN cannot sign in on it now.
           </p>
           <button className="btn btn-primary" onClick={() => navigate('/login')}>
             Owner Login
@@ -305,7 +308,7 @@ const pinDots = Math.max(4, pin.length)
             This device isn't set up yet
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
-            Staff PIN login only works on a device an owner or manager has activated first.
+            Staff PIN login only works on a device the Owner has activated first.
             Log in with your owner account, open <strong>POS → Admin → Till Devices</strong>, click
             <strong> Activate</strong>, then <strong>Sign out and open the PIN screen</strong> — this
             screen will then show your staff.

@@ -88,10 +88,14 @@ export function resetGuestAlertBridge() {
  * till does not hold (useGuestOrderAlerts has already dropped the held ones); `till` is the till
  * screen's published view, or null.
  *
- * `where` picks the banner's sentence and whether it carries Open Orders:
- *   'shell'        any other page, the Billing list, or a bill on the Billing station: Open Orders.
+ * `where` picks the banner's sentence and whether it carries Open Orders (only 'shell' does):
+ *   'shell'        any other page, or the Billing list: Open Orders.
  *   'order-screen' the order screen on /pos/orders, another table waiting: Open Orders would only
  *                  reopen the screen the waiter is on, so the banner says how to get there instead.
+ *   'billing-bill' a bill open on the Billing station (/pos/billing, order view), another table
+ *                  waiting: Open Orders would leave the bill mid-payment, dropping its unsaved lines
+ *                  and recorded payments without the questions ← asks (S809.4), so the banner says
+ *                  to close the bill first.
  *   'this-table'   every waiting order is the table on screen, whose own strip has Accept.
  */
 export function shellGuestAlertPlan({ pathname, till, requests }) {
@@ -104,11 +108,10 @@ export function shellGuestAlertPlan({ pathname, till, requests }) {
   const floor = onTill && pathname === '/pos/orders' && till.view === 'floor'
   const orderScreen = onTill && till.view === 'order'
   const allOnScreen = orderScreen && !!till.openTableId && requests.every(r => r.tableId === till.openTableId)
-  return {
-    sound: true,
-    banner: !floor,
-    where: allOnScreen ? 'this-table' : (orderScreen && pathname === '/pos/orders') ? 'order-screen' : 'shell',
-  }
+  const where = allOnScreen ? 'this-table'
+    : !orderScreen ? 'shell'
+      : pathname === '/pos/orders' ? 'order-screen' : 'billing-bill'
+  return { sound: true, banner: !floor, where }
 }
 
 /** "New guest order — Table 7", or "2 new guest orders — Table 7, Table 3". */
@@ -123,6 +126,7 @@ export function guestAlertTitle(requests) {
 const HOW = {
   shell: 'Nothing reaches the kitchen until a staff member accepts it.',
   'order-screen': 'Nothing reaches the kitchen until it is accepted: go back to the floor (← at the top left) and tap the table.',
+  'billing-bill': 'Nothing reaches the kitchen until it is accepted: close this bill first (← at the top left), then open Orders.',
   'this-table': 'It is for the table on this screen: Accept or Dismiss it just below the top bar.',
   pin: 'Nothing reaches the kitchen until a staff member signs in and accepts it.',
 }

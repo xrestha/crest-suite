@@ -16,7 +16,44 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 // apart, carried contradictory copy labels. One definition, one convention.
 import { COPY_LABEL } from '../orders/posOrdersConstants'
 import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
+import { npr2 } from '../../../shared/nepalMoney'
+// The bill's own choices row (S758), so a customized line reads on the note as it did on the bill.
+import { billOptionRow } from '../orders/posOrderPrintHtml'
 export { COPY_LABEL }
+
+// A line's choices as the bill printed them (S809 4c, CREDIT-NOTES-8): two "Chicken Momo" lines at
+// 400.00 and 550.00 were unexplained on the note. `options` is a cart-shaped line; both item reads
+// (the issuing modal's and the Book's reprint) carry the stored pos_order_item_options embed instead.
+function withChoices(i) {
+  const opts = i.options ?? i.pos_order_item_options
+  if (!opts?.length) return i
+  return { ...i, options: [...opts].sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0)) }
+}
+
+// Round Off from the note's own stored figures, as they print (S809 4c, CREDIT-NOTES-8). The note's
+// Net Credited is the bill's, rounded to the rupee, so on a VAT note Taxable 1,327.44 + VAT 172.57 =
+// 1,500.01 printed above a Net Credited of 1,500.00 with nothing explaining the 0.01. A VAT note
+// rounds from taxable + non-taxable + VAT, a PAN note from gross − discount. Each figure is taken as
+// it prints (two decimals), so the printed lines always add up. Printed on every note, 0.00 when
+// nothing was rounded (owner decision, the same as the bill).
+export function creditNoteRoundOff(creditNote, vatReg) {
+  const shown = n => Number((Number(n) || 0).toFixed(2))
+  const before = vatReg
+    ? shown(creditNote.taxable_amount) + shown(creditNote.non_taxable_amount) + shown(creditNote.vat_amount)
+    : shown(creditNote.gross_amount) - shown(creditNote.discount_amount)
+  // `|| 0` drops a float's -0, so nothing rounded prints 0.00, never "-0.00".
+  return Math.round((shown(creditNote.net_amount) - before) * 100) / 100 || 0
+}
+
+// The copy a print is about to make (S809 4c, the S809.4 reprint item). `counts` are every print
+// count known for the note: the Book's reprint passes the one it read from the database just before
+// printing as well as the one its list loaded at page open. Counts only go up, so the highest is the
+// truest. Before this the label came from the page-open list alone, so two managers reprinting one
+// note from pages opened earlier both printed the same copy number.
+export function nextCreditNoteCopy(...counts) {
+  const count = Math.max(0, ...counts.map(c => Number(c) || 0)) + 1
+  return { count, label: COPY_LABEL(count) }
+}
 
 // `billVat` (S809 2c, CREDIT-NOTES-5): the tax status of the BILL this note credits, from its own
 // stamp (pos_orders.vat_registered). A note corrects a Tax Invoice or a PAN bill because its bill was
@@ -35,6 +72,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   const adDateStr = nepalDateAd(now)
   const bsDateStr = nepalBsLong(now)
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
+  const roundOff  = creditNoteRoundOff(creditNote, vatReg)
 
   return `<!DOCTYPE html>
 <html><head><title>Credit Note</title>
@@ -78,7 +116,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${i.unit_price.toFixed(2)}</td><td>${(i.qty * i.unit_price).toFixed(2)}</td></tr>`).join('')}
+      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${i.unit_price.toFixed(2)}</td><td>${(i.qty * i.unit_price).toFixed(2)}</td></tr>${billOptionRow(withChoices(i))}`).join('')}
     </tbody>
   </table>
   <hr>
@@ -89,6 +127,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   <div class="row"><span>Nontaxable:</span><span>${creditNote.non_taxable_amount.toFixed(2)}</span></div>
   <div class="row"><span>VAT 13%:</span><span>${creditNote.vat_amount.toFixed(2)}</span></div>
   ` : ''}
+  <div class="row"><span>Round Off:</span><span>${roundOff > 0 ? '+' : ''}${npr2(roundOff)}</span></div>
   <div class="row tot"><span>Net Credited:</span><span>${creditNote.net_amount.toFixed(2)}</span></div>
   <hr>
   <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
@@ -120,11 +159,12 @@ export function printCreditNoteHtml(html, onPopupBlocked) {
 // Returns { printed, newCount, countError }. S754: the counter used to be bumped BEFORE the pop-up
 // was opened and whatever it returned, so a blocked pop-up still advanced print_count and the next
 // real print came out labelled as a later copy than any that had ever existed. The window is opened
-// first now, and the count only moves when it actually did.
-export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap, billVat = null) {
-  const newCount = (creditNote.print_count || 0) + 1
-  const printed = printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, COPY_LABEL(newCount), billVat))
-  if (!printed) return { printed: false, newCount: creditNote.print_count || 0, countError: null }
+// first now, and the count only moves when it actually did. `storedCount` (S809 4c) is the note's
+// print_count read from the database just before this print, where the caller has one.
+export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap, billVat = null, storedCount = null) {
+  const { count: newCount, label } = nextCreditNoteCopy(creditNote.print_count, storedCount)
+  const printed = printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, label, billVat))
+  if (!printed) return { printed: false, newCount: newCount - 1, countError: null }
   const { error } = await scopedUpdate('pos_credit_notes', clientId, { print_count: newCount }).eq('id', creditNote.id)
   return { printed: true, newCount, countError: error || null }
 }

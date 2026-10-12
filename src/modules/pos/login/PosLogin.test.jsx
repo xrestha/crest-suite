@@ -169,7 +169,7 @@ describe('a guest order waiting while the till is locked', () => {
   it('is not asked about on a tablet still on the restaurant\'s old shared key', async () => {
     localStorage.removeItem('pos_device_id')
     renderPin()
-    expect(await screen.findByText('This till needs to be activated again by a manager')).toBeTruthy()
+    expect(await screen.findByText('This till needs to be activated again by the Owner')).toBeTruthy()
     expect(guestCalls()).toEqual([])
   })
 })
@@ -197,7 +197,7 @@ describe('signing in', () => {
   it('a tablet holding only the old shared key asks nothing and says it needs activating again', async () => {
     localStorage.removeItem('pos_device_id')
     renderPin()
-    expect(await screen.findByText('This till needs to be activated again by a manager')).toBeTruthy()
+    expect(await screen.findByText('This till needs to be activated again by the Owner')).toBeTruthy()
     expect(mockRpcCalls.map(([name]) => name).filter(n => n !== 'get_pos_device_guest_alerts')).toEqual([])
   })
 

@@ -43,6 +43,9 @@ export default function BillingStation({
   isOnline,
   now,
   canVoid,
+  // Opens Recent Bills (S809.4): today's bills, reprints and the Credit Note entry. Null for a Staff-rank
+  // till, which the floor also does not offer it to (S754: Supervisor and above).
+  onRecentBills = null,
 }) {
   const grandTotal = rows.reduce((s, r) => s + r.total, 0)
   // "Table 12's bill, please" (S776). The list is sorted longest-open first, which is right for
@@ -62,19 +65,30 @@ export default function BillingStation({
             Complimentary window you get from the order screen.
           </p>
         </div>
-        {rows.length > 0 && (
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              {rows.length} open bill{rows.length !== 1 ? 's' : ''}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 2 }}>
-              {fmtNpr(grandTotal)}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
-              <Tip text="The sum of every bill still open on the floor right now — what is sitting on tables uncollected, not today's takings. It moves as orders are added to and bills are settled.">
-                on the floor
+        {(onRecentBills || rows.length > 0) && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            {onRecentBills && (
+              <Tip text="Today's closed bills — reprint a copy if a customer needs one again, check whether a bill already closed before taking a payment twice, and (POS manager) issue a Credit Note.">
+                <button type="button" className="btn btn-ghost" onClick={onRecentBills} style={{ fontSize: 13 }}>
+                  📄 Recent Bills
+                </button>
               </Tip>
-            </div>
+            )}
+            {rows.length > 0 && (
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  {rows.length} open bill{rows.length !== 1 ? 's' : ''}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 2 }}>
+                  {fmtNpr(grandTotal)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                  <Tip text="The sum of every bill still open on the floor right now — what is sitting on tables uncollected, not today's takings. It moves as orders are added to and bills are settled.">
+                    on the floor
+                  </Tip>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

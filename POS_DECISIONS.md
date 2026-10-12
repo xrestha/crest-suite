@@ -180,6 +180,44 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4c: CREDIT-NOTES-7, -8, -9, -10, DOCS-8 (P3); plus the S809.4 Credit Note
+  Book reprint-label item (app half)~~ — **shipped S809, 2026-10-12**, app only (crest-v429).
+  CREDIT-NOTES-7: the invoice-number search shows each match's BS year and "FY", this fiscal year's
+  first. CREDIT-NOTES-8: the printed note lists a customized dish's choices (the bill's `billOptionRow`)
+  and always prints Round Off, from its own stored figures (`creditNoteRoundOff`), so its lines add up.
+  CREDIT-NOTES-9: the pickers' today and day edges, the Date cells, the export and the note's Invoice
+  Date are Nepal's, not the viewer's clock zone. CREDIT-NOTES-10: a lost Issue answer names the shift
+  the cash refund went on and says not to record it by hand. DOCS-8: Help, the guide, the Recent Bills
+  Tip, the floor banner and the Book's badge say a note credits the whole bill (to fix one line, credit
+  it, answer No to "served?", ring it again) and give the four reasons a note is not in Inventory yet.
+  A reprint's label is `nextCreditNoteCopy` over a `print_count` read just before printing; the
+  server-side counter is stage 5. Original rows: `CREDIT-NOTES.md`, `DOCS.md`.
+- [x] ~~S809 stage 4, slice 4b: CHECKOUT-11, -13, -14, -15, ACCESS-10 (P3); plus three S809.4 items
+  (`viewPosBill.js`' dropped name-read error, the Billing station's loyalty note and Recent Bills, its
+  "Open Orders" unsaved-changes guard)~~ — **shipped S809, 2026-10-12**, app only (crest-v429).
+  CHECKOUT-11: a reprint reads its own bill's HSC codes and the login that closed or comped it
+  (`billReprintData.js`), and prints nothing if either read fails. CHECKOUT-13 (owner decision): Round
+  Off prints on every bill, PAN bills included, 0.00 when nothing rounded; a Credit bill prints "Amount
+  on credit", not Tender/Change. CHECKOUT-14: the Complimentary tab no longer says the slip shows no
+  outlet name. CHECKOUT-15: tenders recorded before a refused save come back on that order's next
+  Payment, Loyalty excepted. ACCESS-10 (owner: wording only): the dead-till screens say the Owner
+  re-activates it, a POS manager only while still signed in there; an enrolment code is filed in
+  `POS_TODO.md` A2. The Billing station renders the loyalty note and Recent Bills (with its credit-note
+  modal), elements shared with the floor; a guest-order bar over a bill opened there says to close the
+  bill first, and a reload asks first while unsaved lines or tenders are on screen. `viewPosBill.js`
+  bounds every read and refuses a failed name or cost read; `reprintItemCompSlip` says when its reads
+  fail. Original rows: `CHECKOUT.md`, `ACCESS.md`.
+- [x] ~~S809 stage 4, slice 4a: SHIFTS-6, -8, -9, -10, -11 (P3); plus the S809.4 cached-shift item~~ —
+  **shipped S809, 2026-10-12**, app only (crest-v429). SHIFTS-6: a Void reads the open shift before it
+  writes and is filed on it, never refused (a failed read keeps the cached id; the server stamp is
+  stage 5), and a server `no_open_shift` clears the cached id. SHIFTS-8: Shift History has a Date
+  column, the BS day opened plus the close day and time when it ran past midnight. SHIFTS-9: Open,
+  Close and cash entries are time-limited; no answer reads "not known", a lost Open re-reads the
+  server, and a blocked slip says so (reprint from Shift History). SHIFTS-10 (owner: no timer): Current
+  Shift shows "Totals as of", has Refresh and reloads on tab return; the Close dialog is pinned to its
+  shift, and one closed elsewhere says the count was not saved. SHIFTS-11: a failed first read shows
+  Retry, not "Loading…", and messages that outlive the dialog sit on the page. Original rows:
+  `SHIFTS.md`.
 - [x] ~~S809 stage 3, slice 3o: CUSTOMIZATION-2, REPORTS-4 (P2), REPORTS-12 (P3); plus the S809.4
   `option_count` message item~~ — **shipped S809, 2026-10-10**, app only (crest-v428). A choice hidden as
   sold out, or deleted, mid-service no longer blocks a table's order unseen: the choice window starts

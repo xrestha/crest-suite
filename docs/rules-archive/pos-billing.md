@@ -140,3 +140,61 @@ and no movements**, and a later guard that inferred "has this already posted?" f
 revenue on real data (S573). Whenever a best-effort second write follows a primary one, the second
 one's absence proves nothing — give each table its own link back to the source row and ask the
 table you actually mean.
+
+---
+
+## Three returns story
+
+Moved word for word out of `## PosOrders.jsx has THREE returns, and a modal put in the wrong one is
+invisible` in S809 stage 4 (2026-10-12), when slices 4a–4c took the POS rules load past its +15%
+warning. The rule stays in the rules file.
+
+The KOT-pull prompt was placed beside the credit-note modal at the tail of the file — i.e. in the
+floor view — while `setQty` only ever runs on the order screen. Pressing × on an already-fired item
+therefore did **nothing visible at all**: the state was set, the removal was correctly blocked, and
+no dialog appeared anywhere. It compiled, passed the label/colour/duplicate-id detectors, and read
+correctly in review. Only pressing the button in a browser found it.
+
+Before adding a modal here, check which return the handler that opens it lives in. Nothing about a
+misplaced one fails loudly, and the failure mode — a button that silently does nothing — is the one
+a cashier reports as "the till is broken" rather than as a bug you can search for.
+
+---
+
+## Report rows correction
+
+Moved word for word out of `### The four POS report pages are reports, not till screens (S613)` in
+S809 stage 4 (2026-10-12). The rule (`.btn-linklike` on the identity cell) stays in the rules file.
+
+- **A `<tr onClick>` is mouse-only.** The RowDisclosure sweep never reached POS, so every
+  drill-down here was unreachable by keyboard. An inline detail expansion takes `RowDisclosure` in
+  the first cell.
+
+  **Corrected 2026-08-30/S653: the second half of this bullet described a fix that was never
+  applied, and prescribed the wrong one.** It said an *opening* drill-down takes a button in a
+  trailing `no-print` action column. Nine rows across four POS files were still bare `<tr onClick>`
+  when S653 measured them, and a trailing action column contradicts `.btn-linklike`'s own reason for
+  existing ("the affordance has to sit on the name itself rather than in a trailing Actions
+  column"). What shipped: `.btn-linklike` on the cell carrying the row's **identity** — invoice no.,
+  order no., payment method — `stopPropagation()`ing so the row handler cannot double-fire, and
+  `aria-pressed` instead of link semantics where the row toggles a filter rather than opening
+  something. No column was added, so the tfoot alignment warning no longer applies.
+
+---
+
+## Smoke-test results
+
+Moved word for word out of `## How to smoke-test any of these guards` in S809 stage 4 (2026-10-12).
+The method stays in the rules file.
+
+Results, all confirmed live on 2026-08-19:
+
+- **Close guard (S577)** — `{"close_type":"void"}` → 403; a 30% discount → 403 naming the cap; a 10%
+  discount → 200. An ordinary close still assigns an invoice, stamps `ims_posted_at`, and leaves
+  `pos_order_items` matching the `sales_entries` row.
+- **KOT-removal record (S577)** — the prompt names the item and quantity, Remove stays disabled
+  until a reason is chosen, and KOT Log → Pulled Items renders the row with the staff name resolved.
+- **Comp guard (S579)** — direct `PATCH {comped:true}` → 403, the same dressed with a forged
+  `comp_no`/`comped_by` → 403, an INSERT arriving already comped → 403, an ordinary `notes` edit →
+  200. The RPC called with `p_comped_by` set to a colleague's real uuid stored the **caller's** id
+  instead, and returned 403 once the account was demoted to Staff.

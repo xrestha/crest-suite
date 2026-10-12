@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { getBsFiscalYear, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
-import { nepalBs } from '../../../shared/nepalTime'
+import { getBsFiscalYear, BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalBs, nepalBsLong, nepalTime } from '../../../shared/nepalTime'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
@@ -49,6 +49,26 @@ const fmtNpr = npr
 
 function invoiceLabel(order, vatReg, prefix) {
   return `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
+}
+
+// What to do when Issue's answer was lost (S809 4c, CREDIT-NOTES-10). Since S809 2e the note, the
+// bill's mark, the cash refund and the points land together or not at all, so a note found in the
+// Book has its refund already, on the shift that was open when it landed: the one read just before
+// Issue (`cashShift`, null when the money did not go back in cash). The old text said "any cash refund
+// is on the shift" — read after a handover as the CURRENT shift — so a manager finding no Refund line
+// there recorded a Cash Out on it, and the one refund counted twice.
+function lostReplyText(cashShift, cashOut) {
+  const opened = cashShift?.opened_at
+    ? `, opened ${[nepalBsLong(cashShift.opened_at), nepalTime(cashShift.opened_at)].filter(Boolean).join(' at ')}`
+    : ''
+  const shiftName = cashShift ? `the ${cashShift.label ? `${cashShift.label} ` : ''}shift${opened}` : ''
+  const done = cashShift
+    ? `the bill is marked credited, its cash refund of ${npr(cashOut)} is on ${shiftName} (in Shifts → Shift History if that shift has closed since), and any points are reversed`
+    : 'the bill is marked credited and any points are reversed'
+  return 'The connection dropped, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again. '
+    + `If it is there, it is complete — ${done} — and only its printing is left: press Print on it there.`
+    + (cashShift ? ' Do not record the refund by hand: a Cash Out would count it twice.' : '')
+    + ' A second note for this bill would be refused.'
 }
 
 // Shared by two entry points — the Recent Bills "Credit Note" quick action (same-day) and the
@@ -218,6 +238,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     // trusted from when Cash was picked — the shift can close while the reason is being typed.
     // Refused before anything is written, so "nothing was issued" is true on both branches. (Since
     // S809 2e the database refuses the note too when no shift is open: credit_note_refund_no_shift.)
+    // `cashShift` is kept for the lost-reply message below (S809 4c, CREDIT-NOTES-10): it names the
+    // shift the refund went on, which may have closed by the time the manager looks.
+    let cashShift = null
     if (refundMode === 'cash') {
       const r = await readOpenShift()
       setRefundShift({ loading: false, ...r })
@@ -229,10 +252,12 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
         setMsg('error:No shift is open, so a cash refund has nowhere to be recorded and no Credit Note was issued. Open a shift to record a cash refund, or choose Other or None.')
         setSubmitting(false); return
       }
+      cashShift = r.shift
     }
 
-    const bs = adToBsSafe(new Date(order.closed_at))
-    const original_invoice_date_bs = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(order.closed_at).slice(0, 10)} (AD)`
+    // The bill's own Miti, read in Nepal (S809 4c, CREDIT-NOTES-9): `adToBsSafe(new Date(…))` read the
+    // viewer's clock zone, so a note issued from abroad could print an Invoice Date a day off the bill's.
+    const original_invoice_date_bs = nepalBsLong(order.closed_at) || `${String(order.closed_at).slice(0, 10)} (AD)`
     const original_invoice_label = invoiceLabel(order, vatReg, settings.invoice_prefix)
     // The CN's own invoice_fy (which drives its sequential credit_note_no via
     // assign_pos_credit_note_no) is the fiscal year it's actually issued in — matching the
@@ -285,7 +310,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       const text = error.hint === 'credit_note_exists' || /credit_note_exists/.test(error.message || '')
         ? `error:${errorText(error, 'operator')} (${[error.code, error.message].filter(Boolean).join(' · ')})`
         : isNetworkError(error) || isTimeout(error)
-          ? 'error:The connection dropped, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again. If it is there, it is complete — the bill is marked credited, any cash refund is on the shift and any points are reversed — and only its printing is left: press Print on it there. A second note for this bill would be refused. ' + errorLine(error)
+          ? `error:${lostReplyText(cashShift, cashOut)} ` + errorLine(error)
           : 'error:The credit note was not issued — nothing has changed. ' + errorLine(error)
       setMsg(text); setSubmitting(false); return
     }

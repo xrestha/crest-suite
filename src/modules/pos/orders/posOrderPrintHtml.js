@@ -75,8 +75,8 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
 
 // One bill line per dish at its combined price, with the choices listed underneath (owner decision,
 // S758): a paid choice with what it added, a free one by name. The Rate column is still unit_price,
-// so nothing in the bill's arithmetic changes.
-function billOptionRow(i) {
+// so nothing in the bill's arithmetic changes. Exported for the credit note's copy of the lines.
+export function billOptionRow(i) {
   if (!i.options?.length && !i.option_summary) return ''
   const text = i.options?.length
     ? i.options.map(o => {
@@ -116,6 +116,13 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
     computeOrderAmounts(order, items, vatReg)
   const tendered = order.tendered_amount ?? net
   const change   = !isSplitBill && payLabel === 'Cash' ? Math.max(0, tendered - net) : 0
+  // Nothing was handed over on a Credit bill, so it says what is owed rather than printing a Tender
+  // and a Change as if the guest had paid (S809 CHECKOUT-13).
+  const onCredit = !isSplitBill && payLabel === 'Credit'
+  // Round Off prints on EVERY bill, PAN bills included (S809 CHECKOUT-13, owner decision): a PAN bill
+  // of 1,172.48 printed Net 1,172.00 with nothing explaining the 0.48. Rounded to the paisa it prints
+  // in, so nothing rounded reads 0.00, never "+0.00" or a float's "-0.00" (`|| 0` drops a -0).
+  const roundOffShown = Math.round(roundOff * 100) / 100 || 0
 
   return `<!DOCTYPE html>
 <html><head><title>Bill</title>
@@ -170,11 +177,13 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   <div class="row"><span>Taxable:</span><span>${npr2(taxableBase)}</span></div>
   <div class="row"><span>Nontaxable:</span><span>${npr2(nonTaxableBase)}</span></div>
   <div class="row"><span>VAT 13%:</span><span>${npr2(netVatAmt)}</span></div>
-  <div class="row"><span>Round Off:</span><span>${roundOff >= 0 ? '+' : ''}${npr2(roundOff)}</span></div>
   ` : ''}
+  <div class="row"><span>Round Off:</span><span>${roundOffShown > 0 ? '+' : ''}${npr2(roundOffShown)}</span></div>
   <div class="row tot"><span>Net Amount:</span><span>${npr2(net)}</span></div>
   <hr>
-  ${isSplitBill ? payments.map(p => `<div class="row"><span>${esc(p.method)}:</span><span>${npr2(p.amount)}</span></div>`).join('') : `
+  ${isSplitBill ? payments.map(p => `<div class="row"><span>${esc(p.method)}:</span><span>${npr2(p.amount)}</span></div>`).join('') : onCredit ? `
+  <div class="row b"><span>Amount on credit:</span><span>${npr2(net)}</span></div>
+  ` : `
   <div class="row"><span>Tender:</span><span>${npr2(tendered)}</span></div>
   <div class="row"><span>Change:</span><span>${npr2(change)}</span></div>
   `}

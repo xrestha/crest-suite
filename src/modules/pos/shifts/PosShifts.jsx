@@ -1,5 +1,5 @@
 import { npr, npr2 } from '../../../shared/nepalMoney'
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -8,7 +8,10 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
-import { errorLine, isNetworkError } from '../../../shared/errorText'
+import { errorLine } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -17,6 +20,10 @@ import { posFoodCosts } from '../orders/posRecipeBook'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
+import {
+  shiftDates, historyRowLabel, asOfLabel, isNoAnswer, openUnknownText, closeUnknownText,
+  cashUnknownText, detailSuffix, slipNotPrintedText, shiftReadFailLead, SHIFT_ALREADY_CLOSED_TEXT, SHIFT_ALREADY_OPEN_TEXT,
+} from './shiftText'
 
 const fmtNpr = npr
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
@@ -32,6 +39,12 @@ const fmtNpr = npr
 // redeemed bill would leave the method breakdown short of the bill total with nothing saying so.
 const PAY_METHODS = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
 const DENOMINATIONS = [1000, 500, 100, 50, 20, 10, 5, 2, 1]
+// Time limits (S809 SHIFTS-9). A supabase call can hang with no error (withTimeout.js), and Cancel is
+// inert while a dialog saves, so an unbounded wait was a page whose only way out was a reload that
+// threw the drawer count away. The report is two waves of reads plus a recipe-cost walk, hence longer.
+const SHIFT_READ_MS = 15000
+const SHIFT_WRITE_MS = 20000
+const SHIFT_REPORT_MS = 60000
 const EMPTY_COUNTS = Object.fromEntries(DENOMINATIONS.map(d => [d, '']))
 
 function sumDenoms(counts) {
@@ -444,6 +457,26 @@ export default function PosShifts() {
   const [label, setLabel] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  // S809 SHIFTS-10: when the totals on screen were read. They are read when the page opens, on
+  // Refresh and when this tab comes back into view, never on a timer (owner decision), so the page
+  // says how old they are.
+  const [reportAsOf, setReportAsOf] = useState(null)
+  // S809 SHIFTS-11: the page's own message slots, above the tabs. `msg` renders only inside the
+  // dialog, so a failed first read left "Loading…" on screen for good and "already closed" was set
+  // as the dialog vanished. shiftReadError is the open-shift read, cleared by the next good one;
+  // pageMsg is what an action came to ({ text, detail?, toHistory? }), cleared when a dialog opens.
+  const [shiftReadError, setShiftReadError] = useState(null)
+  const [pageMsg, setPageMsg] = useState(null)
+  // An older open-shift read must never land over a newer one: a read started before a close and
+  // answered after it would put the closed shift back on screen. Keyed per call, because every
+  // caller is a full reload of the same thing and the newest one is the truth.
+  const shiftReq = useLatestRequest()
+  const shiftReqSeq = useRef(0)
+  // The shift the totals on screen belong to, so one shift's figures never show under another's header.
+  const reportShiftRef = useRef(null)
+  // The shift the Close dialog was opened for. A reload while the drawer is counted (coming back to
+  // this tab) can find it closed elsewhere and ANOTHER shift open; that count is never put on the new one.
+  const closingShiftRef = useRef(null)
   // A material drawer discrepancy pending explicit confirmation: { freshReport, closing_cash,
   // expected, diff } — set by submitClose, committed by commitClose. Held as state (not a
   // window.confirm) so the ask renders in the product's own dialog, on top of the close modal.
@@ -495,7 +528,19 @@ export default function PosShifts() {
     setHistoryError(null)
     setExpandedId(null)
     setHistoryLoaded(false)
+    setShiftReadError(null)
+    setPageMsg(null)
     if (mainTab === 'history') loadHistory()
+  }, [clientId]) // eslint-disable-line
+
+  // S809 SHIFTS-10 (owner decision): read again when this tab comes back into view, not on a timer.
+  // The office PC left on Shifts at 8 pm shows 10 pm's figures the moment someone looks at it again,
+  // and "as of" beside the totals says when they were read.
+  useEffect(() => {
+    if (!clientId) return
+    const onVisible = () => { if (document.visibilityState === 'visible') loadOpenShift() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [clientId]) // eslint-disable-line
 
   // Same pattern as PosOrders.jsx's printHtml — a popup window that auto-prints and closes.
@@ -517,30 +562,62 @@ export default function PosShifts() {
 
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
 
+  // Resolves with the open shift's row, null when the server shows none open, or undefined when the
+  // read failed — the server's answer even when a newer read has taken the page, so a caller deciding
+  // something (submitOpen) can use it. The totals carry on loading after it resolves.
   async function loadOpenShift() {
-    const { data, error } = await scopedFrom('pos_shifts').eq('status', 'open').maybeSingle()
+    const reqId = shiftReq.begin(++shiftReqSeq.current)
+    const { data, error } = await settleWithin(scopedFrom('pos_shifts').eq('status', 'open').maybeSingle(),
+      SHIFT_READ_MS, 'Checking the shift')
+    const row = error ? undefined : (data || null)
+    if (!shiftReq.isCurrent(reqId)) return row
     // A failed read is not "no shift is open" — that offered Open Shift over a shift already
-    // running (S682). Keep the last-known state and say so.
-    if (error) { setMsg('error:Could not check whether a shift is open — the page shows the last known state. ' + errorLine(error)); return }
-    setOpenShift(data || null)
-    if (data) {
-      setReportLoading(true)
-      try {
-        const report = await loadShiftReport(clientId, data.id)
-        setCurrentReport(report)
-        setReportError(null)
-      } catch (err) {
-        // S754: a failed read is not a quiet shift. Null the report too, so the close modal cannot
-        // show an Expected Cash left over from an earlier read — submitClose re-reads regardless.
-        setCurrentReport(null)
-        setReportError(err)
-      } finally {
-        setReportLoading(false)
-      }
-    } else {
+    // running (S682). Keep the last-known state and say so, on the page (SHIFTS-11).
+    // reportLoading is cleared here too: an older read's totals still loading are now superseded and
+    // will not clear it themselves.
+    if (error) { setShiftReadError(error); setReportLoading(false); return row }
+    setShiftReadError(null)
+    setOpenShift(row)
+    const shiftId = row ? row.id : null
+    if (reportShiftRef.current !== shiftId) {
       setCurrentReport(null)
       setReportError(null)
+      setReportAsOf(null)
+      reportShiftRef.current = shiftId
     }
+    if (row) void loadCurrentReport(reqId, row.id)
+    else setReportLoading(false)
+    return row
+  }
+
+  // Current Shift's totals. Never rejects; superseded by any newer loadOpenShift.
+  async function loadCurrentReport(reqId, shiftId) {
+    setReportLoading(true)
+    let report = null
+    let failure = null
+    try {
+      report = await withTimeout(loadShiftReport(clientId, shiftId), SHIFT_REPORT_MS, 'Reading the shift totals')
+    } catch (err) {
+      failure = err
+    }
+    if (!shiftReq.isCurrent(reqId)) return
+    if (failure) {
+      // S754: a failed read is not a quiet shift. Null the report too, so the close modal cannot
+      // show an Expected Cash left over from an earlier read — submitClose re-reads regardless.
+      setCurrentReport(null)
+      setReportError(failure)
+    } else {
+      setCurrentReport(report)
+      setReportError(null)
+      setReportAsOf(new Date())
+    }
+    setReportLoading(false)
+  }
+
+  // The Retry on a page whose first read failed: back to "Loading…" while it reads again.
+  function retryFirstRead() {
+    setShiftReadError(null)
+    loadOpenShift()
   }
 
   async function loadHistory() {
@@ -573,7 +650,8 @@ export default function PosShifts() {
     // disagree with the signed one. Only shifts closed before S573 have no snapshot and fall
     // back to a live recompute.
     try {
-      const report = shift.closing_report || await loadShiftReport(clientId, shift.id)
+      const report = shift.closing_report
+        || await withTimeout(loadShiftReport(clientId, shift.id), SHIFT_REPORT_MS, 'Reading the closing report')
       setReportsMap(m => ({ ...m, [shift.id]: report }))
     } catch (err) {
       // S754: the row shows the failure, not a Z-report of zeros. Not cached, so re-expanding retries.
@@ -585,6 +663,8 @@ export default function PosShifts() {
     setDenomCounts(EMPTY_COUNTS)
     setLabel(type === 'open' ? suggestShiftLabel() : '')
     setMsg('')
+    setPageMsg(null)
+    closingShiftRef.current = type === 'close' ? (openShift?.id ?? null) : null
     setModal(type)
     // Re-read the money before showing Expected Cash. This page loads its report once, on mount,
     // so a shift opened at 8pm and closed at 11pm was being reconciled against 8pm's figures —
@@ -601,21 +681,21 @@ export default function PosShifts() {
     if (!amt || amt <= 0) { setCashMoveMsg('Enter an amount greater than zero.'); return }
     if (!cashMoveReason.trim()) { setCashMoveMsg('A reason is required — this is a cash record.'); return }
     setCashMoveSaving(true); setCashMoveMsg('')
-    const { error } = await scopedInsert('pos_cash_movements', {
+    const { error } = await settleWithin(scopedInsert('pos_cash_movements', {
       shift_id: openShift.id,
       direction: cashMoveDir,
       kind: cashMoveDir === 'in' ? 'pay_in' : 'pay_out',
       amount: amt,
       reason: cashMoveReason.trim(),
       created_by: profile?.id || null,
-    })
+    }), SHIFT_WRITE_MS, 'Recording the cash')
     setCashMoveSaving(false)
     if (error) {
       // S754: a guard refusal (rank, closed shift) is raised before the insert, and errorLine names
-      // it. A dropped connection proves nothing either way, so it sends them to the list instead
-      // of claiming the drawer is unchanged — a blind retry would record the cash twice.
-      if (isNetworkError(error)) {
-        setCashMoveMsg('The connection dropped, so it is not known whether this was recorded. Reopen Cash In / Out and check the list before recording it again. ' + errorLine(error))
+      // it. A dropped connection or a timeout proves nothing either way, so it sends them to the
+      // list instead of claiming the drawer is unchanged — a blind retry would record the cash twice.
+      if (isNoAnswer(error)) {
+        setCashMoveMsg(cashUnknownText(error) + detailSuffix(error))
         await loadOpenShift()
       } else {
         setCashMoveMsg(errorLine(error))
@@ -632,29 +712,55 @@ export default function PosShifts() {
     setSaving(true); setMsg('')
     const opening_cash = sumDenoms(denomCounts)
     const openedAt = new Date()
-    const { error } = await scopedInsert('pos_shifts', {
+    const { error } = await settleWithin(scopedInsert('pos_shifts', {
       status: 'open', label: label.trim() || null,
       opened_by: profile?.id || null, opening_cash,
       opening_denominations: Object.fromEntries(DENOMINATIONS.map(d => [d, parseInt(denomCounts[d]) || 0])),
-    })
-    setSaving(false)
-    if (error) {
-      setMsg(error.code === '23505' ? 'error:A shift is already open — refresh the page.' : 'error:The shift was not opened. ' + errorLine(error))
+    }), SHIFT_WRITE_MS, 'Opening the shift')
+    if (error && isNoAnswer(error)) {
+      // S809 SHIFTS-9: no answer is not "not opened" — the insert may have landed. Read what the
+      // server holds: a shift open now goes on the page; otherwise the count stays in the dialog for
+      // a retry, which the one-open-shift index answers (23505, below) if the first press did land.
+      const found = await loadOpenShift()
+      setSaving(false)
+      if (found) {
+        setModal(null)
+        setPageMsg({ text: openUnknownText(error, found), detail: asActionError(error).detail })
+      } else {
+        setMsg('error:' + openUnknownText(error, found) + detailSuffix(error))
+      }
       return
     }
-    printHtml(buildShiftSlipHtml({
+    setSaving(false)
+    if (error) {
+      if (error.code === '23505') {
+        // A definite answer: one shift per outlet. Show the open one rather than "refresh the page".
+        setModal(null)
+        setPageMsg({ text: SHIFT_ALREADY_OPEN_TEXT })
+        await loadOpenShift()
+        return
+      }
+      setMsg('error:The shift was not opened. ' + errorLine(error))
+      return
+    }
+    const printed = printHtml(buildShiftSlipHtml({
       mode: 'open', outletName, propertyAddress,
       label: label.trim() || 'Shift', openedByName: profile?.full_name, openedAt,
       denomCounts, opening: opening_cash,
     }))
     setModal(null)
+    // printHtml is false when the browser blocked the print window (SHIFTS-9).
+    if (!printed) setPageMsg({ text: slipNotPrintedText('open') })
     await loadOpenShift()
   }
 
   async function submitClose() {
     // No `!currentReport` bail (S754): the report is re-read below before anything is written, and
     // after a failed modal-open read that bail made Close Shift a button that silently did nothing.
-    if (!openShift) return
+    // S809 SHIFTS-10: nor a silent `!openShift` one. Opening this dialog (and coming back to this tab)
+    // re-reads the shift; none open, or another one, means the shift being counted was closed
+    // elsewhere: say so on the page, behind no scrim, and close the dialog.
+    if (!closingThisShift()) { showClosedElsewhere(); return }
     setSaving(true); setMsg('')
 
     // S754 (owner decision): WARN about orders still open, then let the close proceed. The check
@@ -664,8 +770,8 @@ export default function PosShifts() {
     // write: an order billed after this close is stamped with the shift open at that moment, so its
     // cash reconciles on the next shift. A failed read refuses the close — a check that could not
     // run has not passed.
-    const { data: openOrders, error: openErr } = await scopedFrom('pos_orders', 'id, order_no, table_id, table_name')
-      .eq('status', 'open').order('order_no')
+    const { data: openOrders, error: openErr } = await settleWithin(scopedFrom('pos_orders', 'id, order_no, table_id, table_name')
+      .eq('status', 'open').order('order_no'), SHIFT_READ_MS, 'Checking for open orders')
     if (openErr) {
       setSaving(false)
       setMsg('error:Could not check whether any orders are still open, so nothing was closed. Try Close Shift again. ' + errorLine(openErr))
@@ -679,8 +785,27 @@ export default function PosShifts() {
     await continueClose()
   }
 
+  // Still the shift the dialog was opened for, and still open as far as the page knows.
+  function closingThisShift() {
+    return !!openShift && openShift.id === closingShiftRef.current
+  }
+
+  // The shift this dialog is closing was closed somewhere else (SHIFTS-10/11): on the page, never in
+  // the dialog that is going away, naming where the signed count is. This count was not saved.
+  function showClosedElsewhere() {
+    setSaving(false)
+    setConfirmOpenOrders(null)
+    setConfirmShort(null)
+    setModal(null)
+    setPageMsg({ text: SHIFT_ALREADY_CLOSED_TEXT, toHistory: true })
+    setHistoryLoaded(false)
+  }
+
   // The rest of the close, after the open-orders warning has been answered (or was not needed).
   async function continueClose() {
+    // A reload while the open-orders question was up (coming back to this tab) can find the shift
+    // closed elsewhere; the confirm calls the newest render's continueClose, which sees it.
+    if (!closingThisShift()) { showClosedElsewhere(); return }
     setConfirmOpenOrders(null)
     setSaving(true); setMsg('')
 
@@ -689,7 +814,7 @@ export default function PosShifts() {
     // this shift's figures. This is the snapshot that gets frozen and signed.
     let freshReport
     try {
-      freshReport = await loadShiftReport(clientId, openShift.id)
+      freshReport = await withTimeout(loadShiftReport(clientId, openShift.id), SHIFT_REPORT_MS, "Reading this shift's sales")
     } catch (err) {
       // S754: this used to freeze a Z-report of zeros into closing_report and print it on the
       // signed slip. The close write has not been attempted, so "nothing was closed" is true.
@@ -714,6 +839,7 @@ export default function PosShifts() {
   }
 
   async function commitClose(freshReport, closing_cash, expected) {
+    if (!closingThisShift()) { showClosedElsewhere(); return }
     setSaving(true)
     setConfirmShort(null)
     // .eq('status', 'open') + .select() together detect a double-close: the DB's only relevant
@@ -724,7 +850,7 @@ export default function PosShifts() {
     // S809 2b (SHIFTS-7): no close time is sent. pos_shifts_guard stamps closed_at and the report's
     // capturedAt from the server clock, and the slip below prints the time the row came back with,
     // so a tablet whose clock reset cannot date the shift (or the paper) to another day.
-    const { data: closed, error } = await scopedUpdate('pos_shifts', {
+    const { data: closed, error } = await settleWithin(scopedUpdate('pos_shifts', {
       status: 'closed', closed_by: profile?.id || null,
       closing_cash,
       closing_denominations: Object.fromEntries(DENOMINATIONS.map(d => [d, parseInt(denomCounts[d]) || 0])),
@@ -738,25 +864,27 @@ export default function PosShifts() {
         expectedCash: expected,
         variance: closing_cash - expected,
       },
-    }).eq('id', openShift.id).eq('status', 'open').select()
+    }).eq('id', openShift.id).eq('status', 'open').select(), SHIFT_WRITE_MS, 'Closing the shift')
     setSaving(false)
     // S754: pos_shifts_guard refuses an UPDATE of a closed shift outright (it used to match zero
     // rows and fall to the branch below), so that refusal is the same double-close and is handled
     // the same way. Rank and other refusals are worded by errorLine.
     const closedUnderneath = error && (error.hint === 'pos_shift_closed' || /pos_shift_closed/.test(error.message || ''))
     if (error && !closedUnderneath) {
-      setMsg(isNetworkError(error)
-        ? "error:The connection dropped, so it is not known whether the shift closed. Reload the page before trying again — if it shows as closed, its slip is in Shift History. " + errorLine(error)
+      // S809 SHIFTS-9: a timeout is no answer too, so it gets the "not known" wording, never "not closed".
+      setMsg(isNoAnswer(error)
+        ? 'error:' + closeUnknownText(error) + detailSuffix(error)
         : 'error:The shift was not closed. ' + errorLine(error))
       return
     }
     if (closedUnderneath || !closed || closed.length === 0) {
-      setMsg('error:This shift was already closed — refresh to see the latest reconciliation.')
-      setModal(null)
+      // S809 SHIFTS-11: on the page, not in the dialog that is closing, and naming where the signed
+      // count is (another supervisor's close won; this count was not saved and no slip prints).
+      showClosedElsewhere()
       await loadOpenShift()
       return
     }
-    printHtml(buildShiftSlipHtml({
+    const printed = printHtml(buildShiftSlipHtml({
       mode: 'close', outletName, propertyAddress,
       label: openShift.label || 'Shift',
       openedByName: staffNames[openShift.opened_by], closedByName: profile?.full_name,
@@ -764,11 +892,19 @@ export default function PosShifts() {
       denomCounts, opening: openShift.opening_cash, closing: closing_cash, report: freshReport,
     }))
     setModal(null)
+    // printHtml is false when the browser blocked the print window (SHIFTS-9): the slip is in History.
+    if (!printed) setPageMsg({ text: slipNotPrintedText('close'), toHistory: true, slip: true })
     setHistoryLoaded(false) // force a refetch next time History is opened
     await loadOpenShift()
   }
 
   const expectedCash = expectedCashOf(openShift, currentReport)
+  // The open-shift read's failure, worded for the page (SHIFTS-11): converted here, where the reader
+  // is known to be a supervisor or above, never at render inside ActionError.
+  const shiftReadView = shiftReadError ? (() => {
+    const { text, detail } = asActionError(shiftReadError, 'operator')
+    return { text: `${shiftReadFailLead(openShift === undefined)} ${text}`, detail }
+  })() : null
 
   return (
     <div>
@@ -776,9 +912,23 @@ export default function PosShifts() {
       <div className="page-header">
         <h1 className="page-title">Shifts</h1>
         <p className="page-subtitle">
-          Open a shift with a starting cash count, watch live totals as the shift runs, and count the drawer against the takings when it ends — the closing report, often called a Z-report.
+          Open a shift with a starting cash count, check its totals as the shift runs (read again when you come back to this page or press Refresh), and count the drawer against the takings when it ends — the closing report, often called a Z-report.
         </p>
       </div>
+
+      {/* S809 SHIFTS-11: the page's own message slots. The dialog's line is unseen once the dialog
+          closes, and on a failed first read there is no dialog at all. */}
+      {shiftReadView && <ActionError className="action-error--top" error={shiftReadView} />}
+      {pageMsg && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+            <ActionError className="action-error--top" error={pageMsg} />
+          </div>
+          {pageMsg.toHistory && mainTab !== 'history' && (
+            <button className="btn btn-ghost btn-sm" onClick={openHistoryTab}>Open Shift History</button>
+          )}
+        </div>
+      )}
 
       <Tabs idBase="pos-shifts" label="Shift views" active={mainTab} style={{ marginBottom: 24 }}
         onChange={key => (key === 'history' ? openHistoryTab() : setMainTab('current'))}
@@ -790,7 +940,14 @@ export default function PosShifts() {
       {/* ══ CURRENT SHIFT TAB ══ */}
       {mainTab === 'current' && (
         <>
-          {openShift === undefined ? (
+          {openShift === undefined && shiftReadError ? (
+            // S809 SHIFTS-11: the first read failed, so there is no last state to show — not
+            // "Loading…" for good. The reason is in the message above.
+            <div className="card" style={{ padding: 32, textAlign: 'center' }}>
+              <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--theme-text3)' }}>Nothing is shown until the shift can be read.</p>
+              <button className="btn btn-primary" onClick={retryFirstRead}>Retry</button>
+            </div>
+          ) : openShift === undefined ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : openShift === null ? (
             <div className="card" style={{ padding: 32, textAlign: 'center' }}>
@@ -865,8 +1022,22 @@ export default function PosShifts() {
                 </div>
               )}
 
-              {reportLoading || (!currentReport && !reportError) ? (
-                <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading live totals…</p>
+              {/* S809 SHIFTS-10: how old the totals are, and a way to read them again. A refresh keeps
+                  the figures on screen until the new ones land. */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                {reportAsOf && (
+                  <Tip text="These totals were read at this time. They are read again when you come back to this page and when you press Refresh, not by themselves — refresh before deciding anything from them.">
+                    <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Totals {asOfLabel(reportAsOf)}</span>
+                  </Tip>
+                )}
+                <button className="btn btn-ghost btn-sm" onClick={() => loadOpenShift()} disabled={reportLoading}>
+                  {reportLoading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+              {!currentReport && !reportError ? (
+                <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>
+                  {reportLoading ? 'Loading totals…' : 'The totals have not been read yet — press Refresh.'}
+                </p>
               ) : reportError ? (
                 <ReportLoadError error={reportError} />
               ) : (
@@ -894,6 +1065,7 @@ export default function PosShifts() {
                 <thead>
                   <tr>
                     <th>Shift</th>
+                    <th><Tip text="The Nepali date the shift opened. A shift that closed on a later day shows that day and time underneath.">Date</Tip></th>
                     <th>Duration</th>
                     <th>Opened / Closed By</th>
                     <th style={{ textAlign: 'right' }}>Variance</th>
@@ -911,6 +1083,7 @@ export default function PosShifts() {
                     const variance = !shiftReport ? 0
                       : shiftReport.variance != null ? Number(shiftReport.variance)
                       : (Number(s.closing_cash) || 0) - expectedCashOf(s, shiftReport)
+                    const dates = shiftDates(s.opened_at, s.closed_at)
                     return (
                       <Fragment key={s.id}>
                         <tr onClick={() => toggleExpand(s)} style={{ cursor: 'pointer' }}>
@@ -921,8 +1094,17 @@ export default function PosShifts() {
                             <RowDisclosure
                               expanded={expandedId === s.id}
                               onToggle={() => toggleExpand(s)}
-                              label={`Closing report for ${s.label || 'shift'} on ${fmtSpan(s.opened_at, s.closed_at)}`}
+                              label={historyRowLabel(s)}
                             /> {s.label || 'Shift'}
+                          </td>
+                          {/* S809 SHIFTS-8: the day, so "last Tuesday's evening shift" is found by reading. */}
+                          <td>
+                            <span style={{ whiteSpace: 'nowrap' }}>{dates.opened || '—'}</span>
+                            {dates.closed && (
+                              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                                closed <span style={{ whiteSpace: 'nowrap' }}>{dates.closed}</span>
+                              </div>
+                            )}
                           </td>
                           <td>{fmtSpan(s.opened_at, s.closed_at)}</td>
                           <td style={{ fontSize: 12 }}>{staffNames[s.opened_by] || '—'} / {staffNames[s.closed_by] || '—'}</td>
@@ -938,7 +1120,7 @@ export default function PosShifts() {
                         </tr>
                         {expandedId === s.id && (
                           <tr>
-                            <td colSpan={5} style={{ background: 'var(--theme-bg)', padding: '16px 18px' }}>
+                            <td colSpan={6} style={{ background: 'var(--theme-bg)', padding: '16px 18px' }}>
                               {reportErrorsMap[s.id] ? (
                                 <ReportLoadError error={reportErrorsMap[s.id]} />
                               ) : !reportsMap[s.id] ? (
@@ -947,14 +1129,18 @@ export default function PosShifts() {
                                 <>
                                   <ReportBody report={reportsMap[s.id]} opening={s.opening_cash} closing={s.closing_cash} variance={variance} />
                                   <button className="btn btn-ghost" style={{ fontSize: 12, marginTop: 14 }}
-                                    onClick={() => printHtml(buildShiftSlipHtml({
-                                      mode: 'close', outletName, propertyAddress,
-                                      label: s.label || 'Shift',
-                                      openedByName: staffNames[s.opened_by], closedByName: staffNames[s.closed_by],
-                                      openedAt: s.opened_at, closedAt: s.closed_at,
-                                      denomCounts: s.closing_denominations || EMPTY_COUNTS,
-                                      opening: s.opening_cash, closing: s.closing_cash || 0, report: reportsMap[s.id],
-                                    }))}>
+                                    onClick={() => {
+                                      const printed = printHtml(buildShiftSlipHtml({
+                                        mode: 'close', outletName, propertyAddress,
+                                        label: s.label || 'Shift',
+                                        openedByName: staffNames[s.opened_by], closedByName: staffNames[s.closed_by],
+                                        openedAt: s.opened_at, closedAt: s.closed_at,
+                                        denomCounts: s.closing_denominations || EMPTY_COUNTS,
+                                        opening: s.opening_cash, closing: s.closing_cash || 0, report: reportsMap[s.id],
+                                      }))
+                                      // A slip that printed now answers any earlier "did not print".
+                                      setPageMsg(m => (printed ? (m?.slip ? null : m) : { text: slipNotPrintedText('reprint'), slip: true }))
+                                    }}>
                                     🖨 Reprint closing report
                                   </button>
                                 </>
@@ -998,6 +1184,13 @@ export default function PosShifts() {
             )}
             {/* S754: without this the modal simply had no Expected Cash line and no live variance,
                 with nothing saying why. */}
+            {/* The page's read-error line is behind this dialog's scrim, so the dialog says it too. */}
+            {modal === 'close' && shiftReadError && (
+              <p role="alert" style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-red-text)' }}>
+                The shift could not be read again, so the Expected Cash shown may be out of date. Close
+                Shift reads the sales again first, and closes nothing if that read fails.
+              </p>
+            )}
             {modal === 'close' && reportError && !reportLoading && (
               <p role="alert" style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-red-text)' }}>
                 This shift's sales could not be read, so Expected Cash is unknown. You can still count the

@@ -16,6 +16,7 @@ import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bs
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { posFoodCosts, posStockLines } from './posRecipeBook'
+import { readHscMap, staffNameFor } from './billReprintData'
 import { lineIngredientDeltas, deltaItems } from '../../../utils/orderLineIngredients'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
@@ -378,6 +379,13 @@ export default function PosOrders({ billingStation = false } = {}) {
   // still has to hand the points back before it closes without them.
   const liveRedemptionRef = useRef(null)
   const undoingTenderRef = useRef(false)
+  // { orderId, tenders }: the payments on screen when the save before a Charge was refused (S809
+  // CHECKOUT-15) — another tablet changed the order, or a dish went off the menu. The refusal closes the
+  // payment window and openBilling starts blank, so the cashier had to remember every amount already
+  // taken. The next openBilling of the SAME order brings them back (and uses them up); another order or
+  // a close forgets them. A Loyalty tender is never kept: the refusal hands its points back, and Charge
+  // redeems them again once the cashier re-adds them.
+  const refusedTendersRef = useRef(null)
 
   // The billing modal's two columns need a breakpoint, and an inline style cannot carry a media
   // query while PosOrders imports no stylesheet of its own (S754) — so the width is state. Below
@@ -1161,6 +1169,18 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     return out
   }, [optionCatalog, customizationEnabled])
+
+  // A reload or a closed tab ends this screen without a word (S809.4): ← asks before it drops unsaved
+  // lines, and Cancel before it drops recorded payments, but the browser asked nothing. While either is
+  // on screen the browser asks first. Tenders count only while the payment window is up, because they
+  // stay in state after it closes until the next bill is opened.
+  const unsavedOnLeave = (view === 'order' && unsavedChangeCount(orderItems) > 0) || (billingOpen && tenders.length > 0)
+  useEffect(() => {
+    if (!unsavedOnLeave) return
+    const onBeforeUnload = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [unsavedOnLeave])
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
   // The Floor → Billing nav item is Supervisor+; a nav item is not a guard and /pos/billing is a
@@ -3703,6 +3723,12 @@ export default function PosOrders({ billingStation = false } = {}) {
     // locked, rather than on a blank payment the cashier could change before it lands.
     const kept = closeAttemptFor(orderId)?.sent
     if (kept) restoreSentPayment(kept)
+    const refused = refusedTendersRef.current
+    refusedTendersRef.current = null
+    if (!kept && orderId && refused?.orderId === orderId) {
+      setSplitMode(true); setTenders(refused.tenders)
+      setCloseMsg('warn:Payments kept from the refused try — check the new total.')
+    }
     setBillingOpen(true)
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
     if (recipeIds.length > 0) {
@@ -4291,8 +4317,19 @@ export default function PosOrders({ billingStation = false } = {}) {
       // cached openShiftId: that cache is refreshed only after a close and deliberately survives a
       // failed read, so it can say "open" about a shift another device closed minutes ago. A failed
       // read refuses (fails closed). Runs before performSave, so a refusal here has written nothing.
+      // S809 SHIFTS-6: a Void reads it too, so the void lands on the shift open NOW and that shift's
+      // Z-report counts it (the cache could name a shift already closed and frozen without it). It is
+      // never refused for it: no shift open stamps none, and a failed read keeps the cached id.
       let billShiftId = openShiftId
-      if (closeType === 'paid' || closeType === 'writeoff') {
+      if (closeType === 'void') {
+        setCloseStep('Checking the shift…')
+        const { data: shiftRow, error: shiftErr } = await bounded(
+          scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle(), 'Checking the shift', 8000)
+        if (!shiftErr) {
+          billShiftId = shiftRow?.id ?? null
+          setOpenShiftId(billShiftId)
+        }
+      } else if (closeType === 'paid' || closeType === 'writeoff') {
         setCloseStep('Checking the shift…')
         const { data: shiftRow, error: shiftErr } = await bounded(
           scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle(), 'Checking the shift')
@@ -4345,7 +4382,12 @@ export default function PosOrders({ billingStation = false } = {}) {
           }
           // A stale order, a bill closed elsewhere, a dish off the menu: the order screen already says
           // which, so the payment modal gets out of its way (and hands back any standing redemption).
-          if (persisted.handled) { dismissBillingAfterRefusal(); return false }
+          if (persisted.handled) {
+            const keep = tenders.filter(t => t.method !== 'Loyalty')
+            refusedTendersRef.current = keep.length > 0 ? { orderId, tenders: keep } : null
+            dismissBillingAfterRefusal()
+            return false
+          }
           setCloseMsg(`error:Could not save the order before billing it, so nothing was charged — try again. ${errorText(persisted.error, 'staff')}`)
           return false
         }
@@ -4553,10 +4595,13 @@ export default function PosOrders({ billingStation = false } = {}) {
         // Complimentary) — the DB trigger partitions the counter by close_type so the two
         // sequences never share numbers. Void never gets one (order was never fulfilled).
         ...(closeType !== 'void' ? { invoice_fy: getBsFiscalYear(today.year, today.month) } : {}),
-        // The shift open at the moment of the bill. For Charge and Complimentary this is the fresh
-        // read above, which refused the close when there was none (S754) — so an order left open
+        // The shift open at the moment of the bill, from the fresh read above. For Charge and
+        // Complimentary that read refused the close when there was none (S754) — so an order left open
         // across a shift close is stamped with the NEXT shift when it is finally billed, which is
-        // what PosShifts' close warning tells the supervisor. A void stays on the cached id.
+        // what PosShifts' close warning tells the supervisor; guard_pos_order_close re-stamps those
+        // two from the shift it locks (S809 2b) anyway. A Void reads it too since S809 SHIFTS-6 but is
+        // never refused for it: no shift open sends none, and only a failed read sends the cached id.
+        // The server does not stamp a void yet (stage 5), so this read is what files it.
         shift_id: billShiftId,
       }
 
@@ -4581,6 +4626,10 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (error) {
         // A refusal is an answer. The mark stays only while an earlier press's write is still travelling.
         if (!attempt.writesInFlight) setCloseAttempt(orderId, null)
+        // S809.4 follow-up: guard_pos_order_close found no shift open (a Close Shift landed between the read
+        // above and this write). The cache must not go on saying one is; the server's sentence below
+        // tells the cashier to open one.
+        if (error.hint === 'no_open_shift') setOpenShiftId(null)
         // Closed on another device between the save above and this write: the close guard now refuses
         // any write to a closed bill (S754). After an earlier press that never heard back, it may be
         // that press's write instead (S776), so it is read before another till is blamed.
@@ -4642,6 +4691,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // The bill is closed and numbered. Nothing an earlier attempt redeemed is "standing" any more —
     // it is this bill's tender now. (A redemption standing on another bill stays tracked.)
     if (liveRedemptionRef.current?.orderId === updated.id) liveRedemptionRef.current = null
+    if (refusedTendersRef.current?.orderId === updated.id) refusedTendersRef.current = null
     const where = (background && attempt?.where) || activeTable?.name || (orderNo ? `Takeaway #${orderNo}` : 'this takeaway')
     const step = background ? () => {} : setCloseStep
 
@@ -4870,7 +4920,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     try { return await QRCode.toDataURL(payload, { margin: 1, width: 200 }) } catch { return '' }
   }
 
-  async function printBill(order, items) {
+  // `reprint` (S809 CHECKOUT-11) carries what a reprint read from the bill itself: the HSC codes of
+  // its own lines and the name of the login that closed it. Without it this is the live close, whose
+  // codes openBilling just read and whose cashier is the login pressing Confirm.
+  async function printBill(order, items, reprint = null) {
     // Split tenders are read BEFORE print_count is incremented. A dropped error here fell
     // through to `payments = []` and printed a Split bill with no payment breakdown at all —
     // a wrong document under a real invoice number — and aborting after the increment would
@@ -4898,9 +4951,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Returned so a caller can tell a blocked pop-up from a printed bill (S754).
     return printHtml(buildBillHtml({
       order, items, copyLabel: COPY_LABEL(newCount), qrUrl, payments,
-      outletName, billingSettings, hscMap,
+      outletName, billingSettings, hscMap: reprint ? reprint.hscMap : hscMap,
       tableName: activeTable?.name || order.table_name || 'Takeaway',
-      cashierName: profile?.full_name || '',
+      cashierName: reprint ? reprint.staffName : (profile?.full_name || ''),
     }))
   }
 
@@ -4919,7 +4972,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Invoice or PAN Bill: no VAT/PAN, own NC-prefixed sequence (separate from TI/PB), and line
   // amounts are valued at food cost (not menu price) so the P&L impact isn't distorted by
   // retail pricing. Standard practice per restaurant accounting for comps.
-  async function printCompSlip(order, items) {
+  async function printCompSlip(order, items, reprint = null) {
     const newCount = (order.print_count || 0) + 1
     // Not blocking: withholding a customer's bill because a counter did not move is worse than
     // the counter being stale. But the label printed on this copy comes from `newCount` while
@@ -4936,7 +4989,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       order, items, costMap, copyLabel: COPY_LABEL(newCount),
       outletName,
       tableName: activeTable?.name || order.table_name || 'Takeaway',
-      authorizedBy: profile?.full_name || '',
+      // A reprint names who comped the bill, not who reprinted it (S809 CHECKOUT-11).
+      authorizedBy: reprint ? reprint.staffName : (profile?.full_name || ''),
     }))
   }
 
@@ -4946,7 +5000,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Bill number) is swapped out for the comp-specific number the comped rows just got assigned.
   // Uses its own `comp_print_count` counter (not the main bill's `print_count`) so reprinting
   // one document never mislabels the other's copy number — see reprintItemCompSlip.
-  async function printItemCompSlip(order, compedItems) {
+  async function printItemCompSlip(order, compedItems, reprint = null) {
     const newCount = (order.comp_print_count || 0) + 1
     // Not awaited (S776): the paper does not wait on a counter.
     void bounded(scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id), 'Counting the print').then(({ error: pcErr }) => {
@@ -4960,7 +5014,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       items: compedItems, costMap, copyLabel: COPY_LABEL(newCount),
       outletName,
       tableName: activeTable?.name || order.table_name || 'Takeaway',
-      authorizedBy: profile?.full_name || '',
+      authorizedBy: reprint ? reprint.staffName : (profile?.full_name || ''),
     }))
   }
 
@@ -4971,17 +5025,29 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (!hasPosAccess('supervisor')) return // S754: Recent Bills is Supervisor+ — see loadRecentBills
     // Together, not one after the other — the second read filters on orderRow.id like the first,
     // not on anything the first returns, so serialising them just made the counter wait twice.
-    const [{ data: order }, { data: items }] = await Promise.all([
-      scopedFrom('pos_orders').eq('id', orderRow.id).single(),
-      scopedFrom('pos_order_items', '*').eq('order_id', orderRow.id).eq('comped', true),
+    const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
+      bounded(scopedFrom('pos_orders').eq('id', orderRow.id).single(), 'Reading the bill'),
+      bounded(scopedFrom('pos_order_items', '*').eq('order_id', orderRow.id).eq('comped', true), 'Reading the bill lines'),
     ])
-    if (!order || !items || items.length === 0) return
-    if ((await printItemCompSlip(order, items)) === false) alertPopupBlocked()
+    // Both errors used to be dropped, so a failed read printed nothing and said nothing (S809.4).
+    if (orderErr || itemsErr || !order || !items || items.length === 0) {
+      window.alert(`Couldn't load the Complimentary Slip of bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'No comped line was found on it.'}\n\nNothing was printed — try again.`)
+      return
+    }
+    // "Authorized by" is whoever comped these lines, not the reprinter (S809 CHECKOUT-11).
+    const { name: staffName, error: staffErr } = await staffNameFor(supabase, clientId, items[0]?.comped_by)
+    if (staffErr) {
+      window.alert(`Couldn't read who comped bill ${orderRow.invoice_no || orderRow.order_no || ''}. ${errorText(staffErr, 'staff')}\n\nNothing was printed — try again.`)
+      return
+    }
+    if ((await printItemCompSlip(order, items, { staffName })) === false) alertPopupBlocked()
   }
 
-  // Recent Bills is on the FLOOR, which has no message line — printHtml's own setMsg renders only
+  // Recent Bills opens over the FLOOR, which has no message line — printHtml's own setMsg renders only
   // on the order screen, so a blocked reprint did nothing visible (S754). window.alert for the
-  // same reason the floor's other refusals use it (see the import note at the top).
+  // same reason the floor's other refusals use it (see the import note at the top). The Billing
+  // station opens the same dialog since S809.4, whose floorMsg banner would sit hidden behind it, so
+  // its reprints say so the same way.
   function alertPopupBlocked() {
     window.alert('Nothing printed — this browser blocked the print window. Allow pop-ups for this site, then press Reprint again.')
   }
@@ -5043,8 +5109,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Same reason as reprintItemCompSlip above: independent reads, so one round trip rather than
     // two with a customer standing at the counter.
     const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
-      scopedFrom('pos_orders').eq('id', orderRow.id).single(),
-      scopedFrom('pos_order_items').eq('order_id', orderRow.id),
+      bounded(scopedFrom('pos_orders').eq('id', orderRow.id).single(), 'Reading the bill'),
+      bounded(scopedFrom('pos_order_items').eq('order_id', orderRow.id), 'Reading the bill lines'),
     ])
     // `if (!order) return` alone let a failed ITEMS read straight through: items came back null,
     // `|| []` turned it into an empty array, and the reprint went out as a Tax Invoice carrying
@@ -5053,14 +5119,25 @@ export default function PosOrders({ billingStation = false } = {}) {
       window.alert(`Couldn't load bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'The bill could not be found.'}\n\nNothing was printed — try again.`)
       return
     }
-    let printed
-    if (order.close_type === 'writeoff') {
-      printed = await printCompSlip(order, items || [])
-    } else {
-      // Exclude any individually-comped lines from the reprinted Tax Invoice/PAN Bill — they
-      // were never on the original bill either (see closeOrder's payableOrderItems).
-      printed = await printBill(order, (items || []).filter(i => !i.comped))
+    // A copy of the original (S809 CHECKOUT-11): the HSC codes of THIS bill's lines, and the login
+    // that closed it as Cashier / "Authorized by". Read together; either failing prints nothing, as a
+    // failed items read does above, since a copy with blank codes or the reprinter's name is wrong.
+    const writeoff = order.close_type === 'writeoff'
+    // Exclude any individually-comped lines from the reprinted Tax Invoice/PAN Bill — they
+    // were never on the original bill either (see closeOrder's payableOrderItems).
+    const lines = writeoff ? items : items.filter(i => !i.comped)
+    const [hsc, staff] = await Promise.all([
+      writeoff ? { map: {}, error: null } : readHscMap(scopedFrom, lines.map(i => i.recipe_id)),
+      staffNameFor(supabase, clientId, order.closed_by),
+    ])
+    if (hsc.error || staff.error) {
+      window.alert(`Couldn't read ${hsc.error ? 'the HSC codes of' : 'who closed'} bill ${orderRow.invoice_no || orderRow.order_no || ''}. ${errorText(hsc.error || staff.error, 'staff')}\n\nNothing was printed — try again.`)
+      return
     }
+    const reprint = { hscMap: hsc.map, staffName: staff.name }
+    const printed = writeoff
+      ? await printCompSlip(order, lines, reprint)
+      : await printBill(order, lines, reprint)
     // false = blocked window; null = printBill already alerted about its own failed read.
     if (printed === false) alertPopupBlocked()
     setRecentBills(prev => prev.map(o => o.id === orderRow.id ? { ...o, print_count: (o.print_count || 0) + 1 } : o))
@@ -5235,7 +5312,7 @@ The tables were left occupied rather than freed with their orders still open.`)
     }}>
       <strong style={{ color: 'var(--theme-amber-text)' }}>⚠ Payment not yet known</strong>
       {' '}for {unsettledCloses.map(a => a.where).join(', ')} — the first try may still go through. Check Recent Bills
-      on the Orders screen before taking the payment again; the till keeps checking and finishes the bill if it did.
+      (at the top of this screen) before taking the payment again; the till keeps checking and finishes the bill if it did.
     </div>
   )
   const unsettledCloseChip = (
@@ -5263,6 +5340,110 @@ The tables were left occupied rather than freed with their orders still open.`)
       <button className="btn btn-ghost" style={{ fontSize: 12, flexShrink: 0 }}
         onClick={() => setWriteWarnings([])}>Dismiss</button>
     </div>
+  )
+
+  // What the bill just closed earned. Dismissible and transient: it is feedback on one
+  // action, not a standing condition like the unposted-bills warning below it. A failure
+  // uses the same amber treatment rather than red — nothing is wrong with the BILL, which
+  // closed and printed correctly; only the points did not land.
+  // Drawn on the Billing station too (S809.4): most bills close there, so the note has to as well.
+  const loyaltyNoteBanner = loyaltyNote && (
+    <div
+      role="status"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        background: loyaltyNote.ok
+          ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)'
+          : 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+        border: `1px solid color-mix(in srgb, var(--theme-${loyaltyNote.ok ? 'green' : 'amber'}) 28%, transparent)`,
+        borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13,
+        color: loyaltyNote.ok ? 'var(--theme-green-text)' : 'var(--theme-amber-text)',
+      }}
+    >
+      <span style={{ fontWeight: 600 }}>{loyaltyNote.ok ? '★ ' : '⚠ '}{loyaltyNote.text}</span>
+      <button className="btn btn-ghost btn-sm" onClick={() => setLoyaltyNote(null)} aria-label="Dismiss">×</button>
+    </div>
+  )
+  // Recent Bills — today's bills, reprints and the Credit Note entry (S754: Supervisor and above) — and
+  // the credit note it opens. One element rendered by BOTH the floor and the Billing station (S809.4):
+  // many of the till's messages say "reprint it from Recent Bills", and the Billing station, where most
+  // bills close, had no way there. A modal in only one return is a button that does nothing in the
+  // other (S578).
+  const openRecentBills = () => { setRecentBillsOpen(true); setRecentBillsSearch(''); loadRecentBills() }
+  const recentBillsModal = (
+    <>
+      {recentBillsOpen && hasPosAccess('supervisor') && (
+        <Modal title="Recent Bills — Today" onClose={() => setRecentBillsOpen(false)} maxWidth={480}>
+            <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text3)' }}>Reprint a bill closed earlier today.</p>
+            {/* S754: the list is now the whole day, not the newest 30, so a customer's bill number needs a
+                way in. Matches the invoice number or the order number as printed on the slip. */}
+            <input
+              type="search"
+              className="form-input"
+              aria-label="Find a bill by invoice or order number"
+              placeholder="Find by bill or order no."
+              value={recentBillsSearch}
+              onChange={e => setRecentBillsSearch(e.target.value)}
+              style={{ marginBottom: 10 }}
+            />
+            <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+              {recentBillsLoad ? (
+                <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+              ) : recentBillsError ? (
+                <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>
+                  Couldn't load today's bills. {recentBillsError} This is a failed read, not an empty day: do not re-bill a table from this list.
+                </p>
+              ) : recentBills.length === 0 ? (
+                <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bills closed yet today.</p>
+              ) : visibleRecentBills.length === 0 ? (
+                <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bill today matches "{recentBillsSearch.trim()}" — {recentBills.length} bill{recentBills.length === 1 ? '' : 's'} closed so far.</p>
+              ) : visibleRecentBills.map(o => (
+                <div key={o.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--theme-border)' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>(Void)</span>}
+                      {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>(Complimentary)</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                      {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {nepalTime(o.closed_at)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {o.paid_amount != null && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(o.paid_amount)}</span>}
+                    {o.close_type !== 'void' && (
+                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintBill(o)}>Reprint</button>
+                    )}
+                    {o.close_type === 'paid' && ordersWithItemComp.has(o.id) && (
+                      <Tip text="Reprint the mini Complimentary Slip for the item(s) comped on this bill — separate from the Tax Invoice/Bill above, which only ever covers the non-comped items.">
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintItemCompSlip(o)}>Comp Slip</button>
+                      </Tip>
+                    )}
+                    {o.close_type === 'paid' && !o.credit_note_id && hasPosAccess('manager') && (
+                      <Tip text={'Issue a formal Credit Note that cancels this WHOLE bill, never one line — e.g. the wrong customer, a duplicate, or a tax correction. To fix one wrong line, credit the bill, answer No to "Was the food on this bill served?" (asked where Inventory is on, so its food goes back into Inventory), and ring the order again correctly.'}>
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => setCreditNoteOrder(o)}>Credit Note</button>
+                      </Tip>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 14, fontSize: 13 }}
+              onClick={() => setRecentBillsOpen(false)}>
+              Close
+            </button>
+        </Modal>
+      )}
+      {creditNoteOrder && (
+        <IssueCreditNoteModal
+          order={creditNoteOrder}
+          onClose={() => setCreditNoteOrder(null)}
+          onIssued={created => {
+            setRecentBills(prev => prev.map(o => o.id === creditNoteOrder.id ? { ...o, credit_note_id: created.id } : o))
+            setCreditNoteOrder(null)
+          }}
+        />
+      )}
+    </>
   )
 
   if (view === 'bills') {
@@ -5303,6 +5484,7 @@ The tables were left occupied rather than freed with their orders still open.`)
         )}
         {unsettledCloseBanner}
         {writeWarningsBanner}
+        {loyaltyNoteBanner}
         <BillingStation
           rows={billRows}
           loading={floorLoad}
@@ -5312,7 +5494,10 @@ The tables were left occupied rather than freed with their orders still open.`)
           isOnline={isOnline && !linkDown}
           now={kotNow}
           canVoid={isAdmin || isOwner || !!profile?.pos_allow_void}
+          // The floor's own rank check for the same button (S754): Supervisor and above.
+          onRecentBills={hasPosAccess('supervisor') ? openRecentBills : null}
         />
+        {recentBillsModal}
         {confirmEl}
       </>
     )
@@ -6424,7 +6609,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                 <input placeholder="Remarks (optional)" aria-label="Complimentary slip remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%', marginBottom: 12 }} />
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text3)' }}>
                   ₨0 is collected, but this still counts against food-cost/inventory reporting. Prints an internal
-                  Complimentary Slip valued at food cost — not a Tax Invoice or PAN Bill, no outlet name shown.
+                  Complimentary Slip valued at food cost — not a Tax Invoice or PAN Bill.
                 </p>
               </>
             )}
@@ -6433,7 +6618,8 @@ The tables were left occupied rather than freed with their orders still open.`)
           {/* Sticky footer — primary action + Cancel always reachable, independent of how tall the
               scrollable content above gets (e.g. a long list of split-payment tenders). */}
           <div style={{ flexShrink: 0, padding: narrowBilling ? '12px 16px 16px' : '14px 28px 20px', borderTop: '1px solid var(--theme-border)' }}>
-            {closeMsg && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
+            {/* warn: is a caution the cashier must act on (payments kept from a refused try, S809 CHECKOUT-15). */}
+            {closeMsg && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red-text)' : closeMsg.startsWith('warn:') ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{closeMsg.replace(/^(error|ok|warn):/, '')}</p>}
             {closeLocked && !closing && <p role="status" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-amber-text)' }}>{closeLockText}</p>}
             {/* aria-disabled, not disabled, for everything but an in-flight close (S776): see pressClose. */}
             {billingTab === 'pay' && (() => {
@@ -6709,7 +6895,7 @@ The tables were left occupied rather than freed with their orders still open.`)
             {hasPosAccess('supervisor') && (
               <Tip text="Today's closed bills — reprint a duplicate/triplicate copy if a customer needs one again.">
                 <button
-                  onClick={() => { setRecentBillsOpen(true); setRecentBillsSearch(''); loadRecentBills() }}
+                  onClick={openRecentBills}
                   className="btn btn-ghost"
                   style={{ fontSize: 13, flexShrink: 0 }}
                 >📄 Recent Bills</button>
@@ -6840,27 +7026,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           for their date. The sale itself is fine and the bill is valid — but IMS has no record of
           it, so MonthlySummary, Variance and stock levels are all short until it is backfilled.
           Silently correct-looking was the worst available option here. */}
-      {/* What the bill just closed earned. Dismissible and transient: it is feedback on one
-          action, not a standing condition like the unposted-bills warning below it. A failure
-          uses the same amber treatment rather than red — nothing is wrong with the BILL, which
-          closed and printed correctly; only the points did not land. */}
-      {loyaltyNote && (
-        <div
-          role="status"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-            background: loyaltyNote.ok
-              ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)'
-              : 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
-            border: `1px solid color-mix(in srgb, var(--theme-${loyaltyNote.ok ? 'green' : 'amber'}) 28%, transparent)`,
-            borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13,
-            color: loyaltyNote.ok ? 'var(--theme-green-text)' : 'var(--theme-amber-text)',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>{loyaltyNote.ok ? '★ ' : '⚠ '}{loyaltyNote.text}</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setLoyaltyNote(null)} aria-label="Dismiss">×</button>
-        </div>
-      )}
+      {loyaltyNoteBanner}
 
       {/* Waiting till bills and credit notes (S809 3j, owner decision Q12 c) are for whoever can post
           them: the Owner, the operator and a POS manager. The banner posts the open month's itself,
@@ -7126,80 +7292,7 @@ The tables were left occupied rather than freed with their orders still open.`)
       )}
     </div>
 
-    {/* ── Recent Bills / Reprint modal ── */}
-    {recentBillsOpen && hasPosAccess('supervisor') && (
-      <Modal title="Recent Bills — Today" onClose={() => setRecentBillsOpen(false)} maxWidth={480}>
-          <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text3)' }}>Reprint a bill closed earlier today.</p>
-          {/* S754: the list is now the whole day, not the newest 30, so a customer's bill number needs a
-              way in. Matches the invoice number or the order number as printed on the slip. */}
-          <input
-            type="search"
-            className="form-input"
-            aria-label="Find a bill by invoice or order number"
-            placeholder="Find by bill or order no."
-            value={recentBillsSearch}
-            onChange={e => setRecentBillsSearch(e.target.value)}
-            style={{ marginBottom: 10 }}
-          />
-          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-            {recentBillsLoad ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
-            ) : recentBillsError ? (
-              <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>
-                Couldn't load today's bills. {recentBillsError} This is a failed read, not an empty day: do not re-bill a table from this list.
-              </p>
-            ) : recentBills.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bills closed yet today.</p>
-            ) : visibleRecentBills.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bill today matches "{recentBillsSearch.trim()}" — {recentBills.length} bill{recentBills.length === 1 ? '' : 's'} closed so far.</p>
-            ) : visibleRecentBills.map(o => (
-              <div key={o.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--theme-border)' }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>
-                    {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>(Void)</span>}
-                    {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>(Complimentary)</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
-                    {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {nepalTime(o.closed_at)}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {o.paid_amount != null && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(o.paid_amount)}</span>}
-                  {o.close_type !== 'void' && (
-                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintBill(o)}>Reprint</button>
-                  )}
-                  {o.close_type === 'paid' && ordersWithItemComp.has(o.id) && (
-                    <Tip text="Reprint the mini Complimentary Slip for the item(s) comped on this bill — separate from the Tax Invoice/Bill above, which only ever covers the non-comped items.">
-                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintItemCompSlip(o)}>Comp Slip</button>
-                    </Tip>
-                  )}
-                  {o.close_type === 'paid' && !o.credit_note_id && hasPosAccess('manager') && (
-                    <Tip text="Issue a formal Credit Note that cancels this whole bill — e.g. the wrong customer, a duplicate, or a tax correction. It asks whether the food was served: if not (billed again, or a duplicate), the food goes back into Inventory.">
-                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => setCreditNoteOrder(o)}>Credit Note</button>
-                    </Tip>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-          <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 14, fontSize: 13 }}
-            onClick={() => setRecentBillsOpen(false)}>
-            Close
-          </button>
-      </Modal>
-    )}
-
-
-    {creditNoteOrder && (
-      <IssueCreditNoteModal
-        order={creditNoteOrder}
-        onClose={() => setCreditNoteOrder(null)}
-        onIssued={created => {
-          setRecentBills(prev => prev.map(o => o.id === creditNoteOrder.id ? { ...o, credit_note_id: created.id } : o))
-          setCreditNoteOrder(null)
-        }}
-      />
-    )}
+    {recentBillsModal}
     {/* The floor return's copy, for the admin clear-all tool above it. The order screen renders
         the same element for its own asks — only one tree is ever mounted (S578). */}
     {confirmEl}

@@ -7,7 +7,11 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
+import { nepalBs, nepalBsLong } from '../../../shared/nepalTime'
+import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, todayNepalBs } from '../reports/reportRange'
+import { settleWithin } from '../../../utils/withTimeout'
+import { readHscMap, REPRINT_READ_MS } from '../orders/billReprintData'
 import { printCreditNote } from './creditNoteHtml'
 import IssueCreditNoteModal from './IssueCreditNoteModal'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -23,13 +27,30 @@ const REFUND_LABEL = { cash: 'Cash', other: 'Card / QR / bank', none: 'None' }
 // for those the food did stay used, so "Used" is what happened to their stock.
 const stockLabel = n => (n.restock === true ? 'Put back' : 'Used')
 
+// A date as Nepal reads it (S809 4c, CREDIT-NOTES-9): `adToBsSafe(new Date(ts))` read the viewer's
+// clock zone, so an Owner abroad saw a note issued after 18:45 Nepal time dated the next day.
+const bsDayMonth = ts => {
+  const bs = nepalBs(ts)
+  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(ts).slice(0, 10)} (AD)`
+}
+const bsDayMonthYear = ts => nepalBsLong(ts) || `${String(ts).slice(0, 10)} (AD)`
+
+// The invoice-number search lists that number from every fiscal year, because numbers restart each
+// Shrawan (S809 4c, CREDIT-NOTES-7): typing 45 found this year's #45 and last year's, told apart only
+// by the amount. Each row names its year, and this year's comes first (a stable sort, so each year
+// keeps its newest-first order).
+function currentYearFirst(rows, currentFy) {
+  return [...rows].sort((a, b) => (b.invoice_fy === currentFy) - (a.invoice_fy === currentFy))
+}
+
 export default function CreditNotes() {
   const { clientId, hasPosAccess, imsEnabled } = useAuth()
   const { scopedFrom } = useScopedDb()
 
   const [tab, setTab] = useState('issue') // 'issue' | 'book'
-  const [fromIso, setFromIso] = useState(formatAd(new Date()))
-  const [toIso,   setToIso]   = useState(formatAd(new Date()))
+  // Nepal's today, not the viewer's (S809 4c, CREDIT-NOTES-9).
+  const [fromIso, setFromIso] = useState(todayNepalAdIso)
+  const [toIso,   setToIso]   = useState(todayNepalAdIso)
   const [invoiceSearch, setInvoiceSearch] = useState('')
 
   // S754: the search box drove a full reload on every keystroke ("2", "22", "223", "2238" — four
@@ -62,8 +83,9 @@ export default function CreditNotes() {
     const key = candReq.begin(`${clientId}|${fromIso}|${toIso}|${debouncedSearch.trim()}`)
     setCandLoading(true)
     setCandError(null)
-    const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
-    const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
+    // The picked days' first and last instants in Nepal, not in the viewer's clock zone (S809 4c).
+    const fromTs = nepalDayStartTs(fromIso)
+    const toTs   = nepalDayEndTs(toIso)
     // An invoice number is a direct lookup, so it deliberately ignores the date range: both
     // pickers default to today, and the single most common real trigger — "a customer came back
     // with a bill from last week" — used to return "No un-credited bills in this range" with
@@ -90,7 +112,8 @@ export default function CreditNotes() {
     // S754: a failed read rendered "No un-credited bills in this range" — i.e. told a manager the
     // bill in the customer's hand had already been credited.
     if (error) { setCandError(error); setCandidates([]); return }
-    setCandidates(data || [])
+    const today = todayNepalBs()
+    setCandidates(byInvoiceNo && today ? currentYearFirst(data || [], getBsFiscalYear(today.year, today.month)) : (data || []))
   }, [clientId, fromIso, toIso, debouncedSearch, scopedFrom, candReq])
 
   const loadNotes = useCallback(async () => {
@@ -98,8 +121,8 @@ export default function CreditNotes() {
     const key = notesReq.begin(`${clientId}|${fromIso}|${toIso}`)
     setNotesLoading(true)
     setNotesError(null)
-    const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
-    const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
+    const fromTs = nepalDayStartTs(fromIso)
+    const toTs   = nepalDayEndTs(toIso)
     const results = await Promise.all([
       scopedFrom('pos_credit_notes')
         .gte('created_at', fromTs).lte('created_at', toTs).order('created_at', { ascending: false }),
@@ -138,26 +161,27 @@ export default function CreditNotes() {
 
   async function reprintNote(note) {
     setBookMsg(null)
-    // With the lines, the credited bill's own tax status (S809 2c, CREDIT-NOTES-5): the note reprints
-    // as a Tax Invoice or a PAN bill correction because its bill was one, not by today's setting.
-    const [{ data: items, error: itemsErr }, { data: bill, error: billErr }] = await Promise.all([
-      scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary').eq('order_id', note.order_id),
-      scopedFrom('pos_orders', 'vat_registered').eq('id', note.order_id).maybeSingle(),
+    // With the lines (and their choices, S809 4c, CREDIT-NOTES-8), the credited bill's own tax status
+    // (S809 2c, CREDIT-NOTES-5): the note reprints as a Tax Invoice or a PAN bill correction because
+    // its bill was one, not by today's setting. And the note's print count as it stands now (S809 4c):
+    // the copy label came from the list loaded at page open, so two managers reprinting one note
+    // printed the same copy number. Read in the same batch, so the print window waits no longer.
+    // Bounded: the pop-up opens only after these, and a hung read left the press doing nothing.
+    const [{ data: items, error: itemsErr }, { data: bill, error: billErr }, { data: stored, error: countReadErr }] = await Promise.all([
+      settleWithin(scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary, pos_order_item_options(option_name, price_delta, sort)').eq('order_id', note.order_id), REPRINT_READ_MS, 'Reading the note lines'),
+      settleWithin(scopedFrom('pos_orders', 'vat_registered').eq('id', note.order_id).maybeSingle(), REPRINT_READ_MS, 'Reading the bill'),
+      settleWithin(scopedFrom('pos_credit_notes', 'print_count').eq('id', note.id).maybeSingle(), REPRINT_READ_MS, 'Reading the print count'),
     ])
     // S754: a failed read here printed a numbered Credit Note with no lines on it, and still
     // advanced its copy counter. Refuse instead — nothing has printed, so a retry is safe.
-    if (itemsErr || billErr) { setBookMsg(asActionError(itemsErr || billErr, 'operator')); return }
+    const readErr = itemsErr || billErr || countReadErr
+    if (readErr) { setBookMsg(asActionError(readErr, 'operator')); return }
     // Same exclusion as the original issuance (IssueCreditNoteModal.jsx) — item-level comps were
     // never billed, so they were never on this Credit Note in the first place.
     const payableItems = (items || []).filter(i => !i.comped)
-    const recipeIds = [...new Set(payableItems.map(i => i.recipe_id).filter(Boolean))]
-    let hscMap = {}
-    if (recipeIds.length > 0) {
-      const { data, error: hscErr } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
-      if (hscErr) { setBookMsg(asActionError(hscErr, 'operator')); return }
-      hscMap = Object.fromEntries((data || []).map(r => [r.id, r.hsc_code]))
-    }
-    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap, bill?.vat_registered ?? null)
+    const { map: hscMap, error: hscErr } = await readHscMap(scopedFrom, payableItems.map(i => i.recipe_id))
+    if (hscErr) { setBookMsg(asActionError(hscErr, 'operator')); return }
+    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap, bill?.vat_registered ?? null, stored?.print_count)
     if (!printed) {
       setBookMsg(`The print window for CN${note.credit_note_no} was blocked by the browser, so nothing printed. Allow pop-ups for this site and press Reprint again.`)
       return
@@ -173,11 +197,10 @@ export default function CreditNotes() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(notes.map(n => {
-      const bs = adToBsSafe(new Date(n.created_at))
       return {
         'CN No': `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`,
         'Ref Invoice No': n.original_invoice_label,
-        'Date (BS)': bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(n.created_at).slice(0, 10)} (AD)`,
+        'Date (BS)': bsDayMonthYear(n.created_at),
         'Buyer': n.buyer_name || 'CASH SALES',
         'Reason': n.reason,
         'Money Back': REFUND_LABEL[n.refund_method] || 'Not recorded',
@@ -245,11 +268,14 @@ export default function CreditNotes() {
                 </thead>
                 <tbody>
                   {candidates.map(o => {
-                    const bs = adToBsSafe(new Date(o.closed_at))
                     return (
                       <tr key={o.id}>
-                        <td>{bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(o.closed_at).slice(0, 10)} (AD)`}</td>
-                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{o.invoice_no}</td>
+                        {/* With its year and its fiscal year (S809 4c, CREDIT-NOTES-7): an invoice
+                            number restarts every Shrawan, so the bare "45" named two bills. */}
+                        <td style={{ whiteSpace: 'nowrap' }}>{bsDayMonthYear(o.closed_at)}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+                          {o.invoice_no}{o.invoice_fy ? <span style={{ fontWeight: 400, color: 'var(--theme-text2)' }}> · FY {o.invoice_fy}</span> : null}
+                        </td>
                         <td>{o.table_name || 'Takeaway'}</td>
                         <td>{o.buyer_name || 'CASH SALES'}</td>
                         <td style={{ textAlign: 'right' }}>{fmtNpr(o.paid_amount)}</td>
@@ -317,7 +343,6 @@ export default function CreditNotes() {
                 </thead>
                 <tbody>
                   {notes.map(n => {
-                    const bs = adToBsSafe(new Date(n.created_at))
                     const cnNo = `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`
                     return (
                       <tr key={n.id}>
@@ -326,14 +351,14 @@ export default function CreditNotes() {
                           {/* `in n` so a bundle deployed ahead of migration 20260914140200 (no such
                               column, select('*')) marks nothing rather than every note (S747). */}
                           {'ims_posted_at' in n && n.ims_posted_at == null && (
-                            <Tip width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
-                              text="This note has not yet taken its bill's revenue back out of Inventory — usually because its month was not open in Inventory when it was issued, or because its bill had not reached Inventory yet. Press Post to Inventory on the Orders floor while its month is open; a closed month is posted by the Owner, from Periods.">
+                            <Tip width={320} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
+                              text="This note has not yet taken its bill's revenue back out of Inventory, for one of four reasons: its month had not been started in Inventory, its month was already closed, its bill was not in Inventory yet (the note waits for it), or the save failed. While its month is open, a POS manager or the Owner presses Post to Inventory on the Orders floor (it posts the bill first, then the note). A closed month only the Owner (or Crest support) can post into, from Periods → Post POS bills to Inventory.">
                               <span className="badge-amber">Not in Inventory</span>
                             </Tip>
                           )}
                         </td>
                         <td>{n.original_invoice_label}</td>
-                        <td>{bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(n.created_at).slice(0, 10)} (AD)`}</td>
+                        <td>{bsDayMonth(n.created_at)}</td>
                         <td>{n.buyer_name || 'CASH SALES'}</td>
                         <td>{n.reason}</td>
                         <td>

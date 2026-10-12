@@ -44,9 +44,14 @@ describe('shellGuestAlertPlan', () => {
     expect(shellGuestAlertPlan({ pathname: '/pos/billing', till: view('order', 't7'), requests: [T7] }).where).toBe('this-table')
   })
 
-  it('keeps Open Orders on the Billing station, list and bill alike', () => {
+  it('keeps Open Orders on the Billing list', () => {
     expect(shellGuestAlertPlan({ pathname: '/pos/billing', till: view('bills'), requests: [T7] })).toEqual({ sound: true, banner: true, where: 'shell' })
-    expect(shellGuestAlertPlan({ pathname: '/pos/billing', till: view('order', 't2'), requests: [T7] }).where).toBe('shell')
+  })
+
+  it('on a bill open at the Billing station says to close it first, with no Open Orders that would drop it', () => {
+    expect(shellGuestAlertPlan({ pathname: '/pos/billing', till: view('order', 't2'), requests: [T7] })).toEqual({ sound: true, banner: true, where: 'billing-bill' })
+    // A takeaway bill there too.
+    expect(shellGuestAlertPlan({ pathname: '/pos/billing', till: view('order', null), requests: [T7] }).where).toBe('billing-bill')
   })
 
   it('treats a takeaway on the order screen as "another table"', () => {
@@ -70,6 +75,7 @@ describe('the banner words', () => {
     expect(guestAlertDetail({ waitedMs: 150000 })).toBe('Waiting 2 min. Nothing reaches the kitchen until a staff member accepts it.')
     expect(guestAlertDetail({ waitedMs: 0, where: 'order-screen' })).toMatch(/go back to the floor \(← at the top left\) and tap the table\.$/)
     expect(guestAlertDetail({ waitedMs: 0, where: 'this-table' })).toMatch(/Accept or Dismiss it just below the top bar\.$/)
+    expect(guestAlertDetail({ waitedMs: 0, where: 'billing-bill' })).toMatch(/close this bill first \(← at the top left\), then open Orders\.$/)
     expect(guestAlertDetail({ waitedMs: 0, where: 'pin' })).toBe('Just in. Nothing reaches the kitchen until a staff member signs in and accepts it.')
   })
 

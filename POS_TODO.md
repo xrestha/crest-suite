@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-09 (S809 — stages 1 and 2 complete; stage 3 split into slices 3a–3o, wave 1 (3a, 3i, 3k) shipped)
+Last updated: 2026-10-12 (S809 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, wave 1 (4a, 4b, 4c) shipped; stages 5–7 outlined)
 
 ---
 
@@ -65,19 +65,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (61 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12)
+### P3 (46 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8)
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-10 | A dead till says a POS manager can re-activate it, but a POS manager can't sign in on a dead tablet | 4 | — | no |
-| CHECKOUT-11 | A reprint from Recent Bills takes HSC codes and "Cashier" from the wrong bill | 4 | — | no |
-| CHECKOUT-13 | A PAN bill's Net Amount doesn't add up on paper (no Round Off line), and a Credit bill prints a "Tender" | 4 | — | no |
-| CHECKOUT-14 | The Complimentary tab says the slip shows no outlet name; it does | 4 | — | no |
-| CHECKOUT-15 | A save refused while split payments are recorded closes the payment window and silently drops them | 4 | — | no |
-| CREDIT-NOTES-7 | Searching notes by invoice number lists every fiscal year's match with no year shown | 4 | — | no |
-| CREDIT-NOTES-8 | The printed note loses a customized line's choices | 4 | — | no |
-| CREDIT-NOTES-9 | The Credit Notes page and the note's "Invoice Date" use the viewer's clock zone | 4 | — | no |
-| CREDIT-NOTES-10 | An unconfirmed cash refund's warning sends the manager to record it on the wrong shift. Since 2e the refund is written with the note, so only a page older than crest-v420 can still show that warning | 4 | — | no |
 | CUSTOMERS-PARKING-9 | An unpaid Credit bill earns spendable points at close, though the guide says points follow payment | 4 | Q19 | yes |
 | CUSTOMERS-PARKING-10 | Nothing shows what points are worth per bill, and changing the point value re-prices every balance unwarned (BLOOM CAFE's test schemes give back 100% and 400%) | 4 | — | no |
 | CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
@@ -94,7 +85,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | DOCS-4 | Help still calls Guest QR ordering a Pro switch an admin turns on | 4 | — | no |
 | DOCS-5 | The POS guide still says S754's database rules and tablet keys are not live, plus three more stale sentences | 4 | — | no |
 | DOCS-7 | Sales Report's help promises each day reconciles to that day's shift; a shift is not a day | 4 | — | no |
-| DOCS-8 | Credit-note copy points managers the wrong way twice ("price correction" credits the whole bill) | 4 | — | no |
 | DOCS-10 | pos-billing.md still says the till calls `get_next_pos_comp_slip_no` per Charge (untrue since S286) | 4 | — | no |
 | DOCS-11 | Seven rule sentences and code comments describe mechanisms that no longer hold; two would steer a change wrong | 4 | — | no |
 | DOCS-12 | This file keeps a shipped S792 item open and the webhook secret's old home; POS_DECISIONS states two superseded rules | 4 | — | no |
@@ -125,11 +115,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | RESERVATIONS-10 | Seating from Reservations onto a table another device just opened puts the host on that bill | 4 | — | no |
 | RESERVATIONS-11 | A booking whose table is deleted or made inactive is flagged nowhere | 4 | — | no |
 | SHIFTS-5 | The Z-report's Voided Value includes VAT; Exceptions excludes it | 4 | — | no |
-| SHIFTS-6 | A void is stamped with the till's cached shift, which may be closed | 4 | — | no |
-| SHIFTS-8 | Shift History shows no dates | 4 | — | no |
-| SHIFTS-9 | Shift open/close and cash entries have no time limit, and a lost Open reply reads "not opened" | 4 | — | no |
-| SHIFTS-10 | Current Shift's totals never refresh, and Close does nothing once another device closed the shift | 4 | — | no |
-| SHIFTS-11 | A failed first read leaves the Shifts page on "Loading…" for good | 4 | — | no |
 
 ### Gaps (2 open, both P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l, GAP-OUTLETS-2 in 2h, GAP-OUTLETS-3 in 3n)
 
@@ -161,12 +146,20 @@ Q17 (a), Q18 (a), as recommended. Two differ from the recommendation:
 owner assigns, and a one-station café puts everything on it): an empty bar list means nothing goes to the
 bar, and only NULL means the `['Beverage']` default, so a new outlet still starts with drinks at the bar.
 With an empty list the till hides its BOT button, Ticket Routing says "No bar: every dish prints on the
-kitchen ticket", and a category rename in Settings never adds a bar category. Q19–Q23 are still open.
+kitchen ticket", and a category rename in Settings never adds a bar category. Q19–Q23 were answered on 2026-10-12 (below).
 
 **Answered 2026-10-10 (S809, wave 3), both as recommended:** the monthly Owner Report counts only
 guests seated at tables from the next report on, done in slice 3m (reports already made stay as they
 were, with a note that the counting changed); and a dish taken off and saved, then added back, prints
 "+1" so the kitchen makes it again (3e, ORDER-FLOW-13).
+
+**Answered 2026-10-12: every stage-4 question.** Q20 (a), Q22 (a), Q23 (a), as recommended. Two differ
+from the recommendation:
+
+- **Q19 (c):** a Credit (tab) bill still earns its points at the close, but they cannot be spent until the
+  bill is settled. The guide is corrected to say so.
+- **Q21 (c):** no revocable table QR. Staff Accept stays the check on a guest order; GUEST-7 closes as
+  accepted, with that reasoning moved to `POS_DECISIONS.md` when stage 4 ships.
 
 **Stage 1**
 
@@ -349,7 +342,7 @@ needs a migration since 1d made cancelling a ticket Supervisor-only.
 | 3e ✅ | ORDER-FLOW-3, -4, -5 [ORDER-FLOW-13, -14] (shipped 2026-10-10, app only, crest-v427; ORDER-FLOW-4 took the app-only form) | none | — |
 | 3f ✅ | ORDER-FLOW-6, -7, -8 [ORDER-FLOW-15, -16; owner decision Q2 of 2026-10-10] (shipped 2026-10-10, app only, crest-v428) | none (ORDER-FLOW-8's pulled-item record can't be written from the browser since 1d) | Q16 |
 | 3g ✅ | ORDER-FLOW-10, RESERVATIONS-2, RESERVATIONS-5 [ORDER-FLOW-12] (shipped 2026-10-10, app only, crest-v428) | none | — |
-| 3h ✅ | ACCESS-6, ACCESS-7 [ACCESS-11, ACCESS-12; the legacy shared-key code, its DROPs in a later migration] (shipped 2026-10-10, `20261010180000` live, pos-staff-login v10, admin-user-ops v66, crest-v428; the DROP file `20261010190500` waits a day after the release) | sessions recorded per tablet, `revoke_pos_device` ends them; `pos-staff-login` deploy | Q18 |
+| 3h ✅ | ACCESS-6, ACCESS-7 [ACCESS-11, ACCESS-12; the legacy shared-key code, its DROPs in a later migration] (shipped 2026-10-10, `20261010180000` live, pos-staff-login v10, admin-user-ops v66, crest-v428; the DROP file `20261010190500` applied live 2026-10-12, S812) | sessions recorded per tablet, `revoke_pos_device` ends them; `pos-staff-login` deploy | Q18 |
 | 3i ✅ | ACCESS-5, DATABASE-2, DATABASE-3 [DATABASE-6] (shipped 2026-10-09, `20261010100000` live, admin-user-ops v65, crest-v424) | a POS block marker read by `pos_caller_has_rank`; `admin-user-ops` deploy | Q17 |
 | 3j ✅ | CREDIT-NOTES-3, IMS-HANDOFF-1 [DOCS-9] (shipped 2026-10-10, `20261010140000` live, crest-v426) | maybe: whatever a POS manager needs to post from the POS side | Q12 |
 | 3k ✅ | CUSTOMERS-PARKING-4, -5, -8 [CUSTOMERS-PARKING-12] (shipped 2026-10-09, `20261010110000` live, crest-v424) | `award_`/`redeem_loyalty_points` match `phone_canonical`, a unique key on it (the raw-phone key kept for older tills), new `adjust_loyalty_points` | Q13 |
@@ -360,8 +353,53 @@ needs a migration since 1d made cancelling a ticket Supervisor-only.
 
 Wave 1 (drafted together, no shared database object or code region): 3a, 3i, 3k — all shipped 2026-10-09.
 Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shipped 2026-10-10. Wave 4: 3f,
-3g, 3h, 3l, 3m, 3o — all shipped 2026-10-10 (crest-v428). **STAGE 3 COMPLETE**, except applying
-`20261010190500` (the shared key's four functions) a day after the release, and committing it.
+3g, 3h, 3l, 3m, 3o — all shipped 2026-10-10 (crest-v428). **STAGE 3 COMPLETE.** ✅ `20261010190500`
+(the shared key's four functions) applied live and committed on 2026-10-12 (S812, 04ebdb0e).
+
+**Stage 4 slices (owner approved 2026-10-12; Q19 (c), Q20 (a), Q21 (c), Q22 (a), Q23 (a)).** App-only
+slices first, then migrations (each planned first), Help and docs last because every other slice changes
+what they should say. Bracketed items are S809.4 follow-ups pulled in because the slice already edits
+that file.
+
+| # | IDs | Migration | Decisions |
+| --- | --- | --- | --- |
+| 4a ✅ | SHIFTS-6, -8, -9, -10, -11 [a server `no_open_shift` keeps the cached shift id] (shipped 2026-10-12, app only, crest-v429) | none | — |
+| 4b ✅ | CHECKOUT-11, -13, -14, -15, ACCESS-10 [`viewPosBill.js`' dropped name-read error; Billing station's loyalty note and Recent Bills way; Billing "Open Orders" unsaved-changes guard] (shipped 2026-10-12, app only, crest-v429; ACCESS-10 as wording only, owner) | none | — |
+| 4c ✅ | CREDIT-NOTES-7, -8, -9, -10, DOCS-8 [Credit Note Book reprint labels from page-open list, app half] (shipped 2026-10-12, app only, crest-v429) | none | — |
+| 4d | REPORTS-5, -6, -7, -9, -10, -11, SHIFTS-5 [B4 Covers Avg Turn Time; Manual Sales by Category counting `pos_credit`; Sales Report / Exceptions comp food cost] | none | Q22 |
+| 4e | IMS-HANDOFF-5, -6, -7, -8, -9, -10 [`imsPostWarning` never decreases; `writeSalesEntries` links by screen `orderId`] | none | — |
+| 4f | CUSTOMERS-PARKING-14, -15, GUEST-8; GUEST-7 closed as accepted [Guest Menu Preview wording] | none | Q21 |
+| 4g | CUSTOMERS-PARKING-9, -10, -11; owner additions: one-tap "add the points this bill earned", "Move points" [full points history; "+977" bill-history search] | yes | Q19 |
+| 4h | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note | yes | Q20 |
+| 4i | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] | yes | — |
+| 4j | RESERVATIONS-6, -7, -8, -9, -10, -11 | yes | Q23 |
+| 4k | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT] | yes | — |
+| 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
+
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f. Then 4g–4k one at a time, 4l last.
+
+**After stage 4 (owner approved 2026-10-12):**
+
+- **Stage 5, database hardening (all migrations):** S782 grants cleanup on `pos_parking_slips`,
+  `pos_payment_confirmations`, `pos_guest_order_requests`, `pos_loyalty_ledger`; `credit_settled_at :=
+  now()` and the `credit_settlement` unique index; the close pins its priced lines, split legs inside the
+  shift lock, raise `pos_min_till_build()`; `guard_pos_credit_note` checks `original_invoice_no`,
+  `ims_sales_entries_guard` checks the note's bill; `pos_customers` audit trigger;
+  `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; drop
+  `pos-staff-login`'s pre-S791 fallback and the retired key columns (`get_pos_staff` went with
+  `20261010190500`); A2 rate-limit first hop and delete-open-order message; B `recipe_id` FK; B3
+  `admin-user-ops` discount-limit default; `guard_pos_order_close` stamps a void's `shift_id` from the
+  open shift (4a's browser read is all that files it today); a server-side credit-note print counter
+  (`OLD.print_count + 1` in the guard, or an RPC), so two reprints at once cannot share a copy number.
+- **Stage 6, till reliability (app only):** B3 offline sync failure message; unknown-close marks lost on
+  reload; a self-ended session drops the unsent cart; offline tickets with null `order_no`; 5xx read as a
+  refusal; KDS error wording; "Discard unsaved" copy during a send; unbounded reads (PosCustomers,
+  `placeOrder` re-read); 30 s queue after one no-answer; note change on a partly sent line; B3 live clicks.
+  Polish found in 4c: the credit note prints its figures with `toFixed` (no comma grouping) where the
+  bill uses `npr2`; the Credit Note Book's Date cell shows day and month only, with no year.
+- **Stage 7, new builds (owner ranking, section A):** table move/merge/split; Customization follow-ups;
+  kitchen and bar printers.
+- **Later:** section C, section D, the ⚪ questions.
 
 **Added to stage 4 by the owner (2026-10-09, 2026-10-10):**
 
@@ -394,9 +432,9 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
 
 - **Legacy shared-key code** (1j): ~~every client's shared key is now off, so delete `pos-staff-login`'s
   legacy branch and PGRST202 fallback, PosLogin's `get_pos_staff` path, the Pos.js legacy notice and the
-  Till Devices shared-key panel,~~ fixed in 3h; then drop `get_pos_staff`, `verify_pos_legacy_device`,
+  Till Devices shared-key panel,~~ fixed in 3h; ~~then drop `get_pos_staff`, `verify_pos_legacy_device`,
   `retire_pos_legacy_device_key`, `pos_legacy_device_key_status` (written in 3h as `20261010190500`,
-  applied a day after the release; `auth-and-pins.md`).
+  applied a day after the release; `auth-and-pins.md`).~~ Dropped 2026-10-12 (S812, 04ebdb0e).
 - `settings_guard_staff_roles`' HR, IMS, travel-claim and weather-city lines still test raw ranks, so a
   settlement-blocked login passes them for the hour its token lives (1j did the POS lines).
 - ~~`apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
@@ -409,8 +447,10 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
   and TRUNCATE/REFERENCES/TRIGGER on `pos_cash_movements` (1k, 1l).
 - `pos_customers` has no audit trigger, so enrolment changes leave no record; `supabase-sql.md`'s
   `updated_at` table is wrong about it (the till's upsert writes it from the tablet clock) (1i).
-- Credit Note Book reprint labels from the list loaded at page open, so two managers reprinting one note
-  print the same copy number (the stored count is right since 1c) (1c).
+- ~~Credit Note Book reprint labels from the list loaded at page open, so two managers reprinting one note
+  print the same copy number (the stored count is right since 1c) (1c).~~ App half fixed in 4c: the
+  reprint reads `print_count` just before printing (`nextCreditNoteCopy`). Two reprints at the same
+  instant can still share a number until the server keeps the counter (stage 5).
 - ~~Kitchen stage times (`started_at`/`ready_at`/`served_at`) are still tablet-supplied, so prep times
   can be shaded (1d).~~ Fixed in 3d: the server stamps each on entering its stage.
 - Admin → Guest Menu Preview quotes "This menu isn't available right now"; the guest page says "This menu
@@ -442,8 +482,8 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     that bill is unsettled, and the close itself returns forgotten points.
   - A 5xx from the gateway on the close write is reported to the cashier as a refusal, though the
     database may still commit it (2d).
-  - The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
-    "reprint it from Recent Bills" (2d).
+  - ~~The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
+    "reprint it from Recent Bills" (2d).~~ Fixed in 4b: both render there, one element shared with the floor.
   - A Split bill's payment legs are inserted in a request after the close, so 2b's shift lock does not
     cover them: a Close Shift between the two can freeze a report without that bill's cash leg. Fix:
     `pos_shifts_guard` refuses a close while a Split bill closed in the last 10 minutes on that shift has
@@ -456,9 +496,11 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
   - Raise `pos_min_till_build()` to crest-v417 so a till older than 2a cannot charge an emptied cart, but
     only after checking that `x-crest-build` reaches `request.headers` through PostgREST in production
     (1b's open check); every till would be refused otherwise (2b).
-  - On a server `no_open_shift` the till keeps its cached shift id until the next press (cosmetic, 2b).
-  - `viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
-    no time limit; `reprintItemCompSlip` drops both read errors and prints nothing silently (2a).
+  - ~~On a server `no_open_shift` the till keeps its cached shift id until the next press (cosmetic, 2b).~~
+    Fixed in 4a: the refusal clears it.
+  - ~~`viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
+    no time limit; `reprintItemCompSlip` drops both read errors and prints nothing silently (2a).~~ Fixed
+    in 4b: every read is bounded and a failed one prints nothing and says so (`billReprintData.js`).
 - **Found while drafting stage 2, wave 2 (2c, 2e, 2f; 2026-10-09, not fixed):**
   - ~~The Owner Report's POS section (`computeMonthlyReport.js`) still works out past bills with the VAT
     flag read when the report is generated, so a month generated after a VAT change loses its VAT. Fix:
@@ -537,8 +579,8 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     "setup kept" heading mentions (3i).
   - After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
     stays un-depleted until that day is re-saved (3i).
-  - The retired shared-key picker `get_pos_staff` still lists blocked logins (nothing calls it since 3h;
-    `20261010190500` drops it), and the Audit
+  - ~~The retired shared-key picker `get_pos_staff` still lists blocked logins (nothing calls it since 3h;
+    `20261010190500` drops it)~~ (dropped, S812), and the Audit
     Log shows `pos_blocked_at` under its raw column name (`FIELD_LABELS` in AuditLog.js) (3i).
   - Recorded-rows counts are full table scans per Delete press; the Unblock leaver check reads
     `hr_employee_id` only, not the S798 3f-1 employee links (3i).
@@ -585,8 +627,10 @@ Wave 2: 3b, 3d, 3j — all shipped 2026-10-10. Wave 3: 3c, 3e, 3n — all shippe
     the cart returns with those dishes and the table's banner offers Accept again: pressing it doubles
     the dishes (since S776 plus guest Accept). Belongs in 3g (3c).~~ Fixed in 3g: the accepted request
     ids ride with the kept cart (`guestReqs`).
-  - On the Billing station, "Open Orders" from an open bill leaves it with no unsaved-changes guard (no
-    `useBlocker` or `beforeunload` in `PosOrders.jsx`, since S762/S763) (3c).
+  - ~~On the Billing station, "Open Orders" from an open bill leaves it with no unsaved-changes guard (no
+    `useBlocker` or `beforeunload` in `PosOrders.jsx`, since S762/S763) (3c).~~ Fixed in 4b: the alert bar
+    over a bill opened there has no Open Orders and says to close the bill first (`billing-bill`), and a
+    reload or closed tab with unsaved lines or recorded payments asks first (`beforeunload`).
   - ~~A save that answered but whose `pos_kot_log` insert failed is only logged to the console, so the food
     has no ticket. Suggested for 3f with ORDER-FLOW-7: a client-minted ticket id, the failed insert kept
     and retried with the same id, a duplicate-key answer read as "it landed" (3e).~~ Fixed in 3f, as
@@ -719,6 +763,11 @@ when these were filed. Every item below assumes they are.
 - [x] **A credit note's reason line printed "(no money returned)"** — closed S755: the answer is
   `pos_credit_notes.refund_method`, shown in the Credit Note Book, never printed. Notes issued before
   S755 keep their reason text as printed.
+- [ ] 🔵 **A POS manager cannot re-activate a dead tablet** (ACCESS-10; the owner chose wording only on
+  2026-10-12, so the till now says "activated again by the Owner"). A POS manager has only a PIN, which a
+  revoked or never-activated tablet refuses, so only the Owner's email sign-in on that tablet can
+  activate it (or a POS manager still signed in there). The build, if wanted: an enrolment code the
+  Owner issues in Till Devices that a POS manager types on the tablet.
 - [ ] 🟡 **Deleting an open order that still has lines is refused as "this bill is closed and
   printed"** (found S755, measured rolled back on live). `guard_pos_order_items_closed_del` is an
   AFTER STATEMENT trigger, so inside the `pos_orders` cascade it fires as `authenticated` and its
