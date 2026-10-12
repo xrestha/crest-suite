@@ -2,6 +2,7 @@ import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../sha
 import { daysInBsMonth, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { lineIngredientDeltas } from '../../../utils/orderLineIngredients'
 import { nepalDayInPeriod } from '../../../shared/nepalPeriodDay'
+import { storedDiscountRatio } from '../orders/closeAttempt'
 
 // A credit note's revenue reversal in Inventory (S747).
 //
@@ -30,18 +31,17 @@ export const RESTOCK_SOURCE = 'pos_credit_restock'
 /**
  * The reversal rows for one credited bill: exactly the revenue its close POSTED, negated.
  *
- * Mirrors backfillPosToIms.js / writeSalesEntries clause for clause. Comped lines are skipped (they
+ * Mirrors backfillPosToIms.js' billSalesRows clause for clause. Comped lines are skipped (they
  * were posted as 'pos_comp' at zero revenue, so there is nothing to take back), and the bill-level
- * discount is spread over the payable lines the same way — `unit_price × discRatio`. The reversal
+ * discount is spread with the same storedDiscountRatio, over every non-comped line (S809 4e), so a
+ * note takes back exactly the price each line posted at. The reversal
  * used the raw `unit_price`, so a discounted bill's credit note took back MORE revenue than the
  * bill had ever put in, and a whole-bill comp (`writeoff`) was reversed as if it had been paid.
  */
 export function creditNoteReversalRows({ order, items, periodId, bsDay, creditNoteId, restock = false }) {
   if (!order || order.close_type === 'writeoff') return []
   const payable = (items || []).filter(i => i.recipe_id && !i.comped)
-  const payableGross = payable.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.unit_price) || 0), 0)
-  const discount = Number(order.discount_amount) || 0
-  const discRatio = payableGross > 0 ? Math.max(0, 1 - discount / payableGross) : 1
+  const discRatio = 1 - storedDiscountRatio(items, order.discount_amount)
   return payable.map(i => ({
     period_id: periodId,
     recipe_id: i.recipe_id,

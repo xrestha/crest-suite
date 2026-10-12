@@ -3,24 +3,153 @@ import { lineIngredientDeltas, loadDeltaExplosion, deltaItems } from '../../../u
 import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../shared/fetchAllRows'
 import { daysInBsMonth, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { nepalDayInPeriod } from '../../../shared/nepalPeriodDay'
+import { settleWithin, withTimeout } from '../../../utils/withTimeout'
+import { storedDiscountRatio } from './closeAttempt'
 
-// Posts POS bills into IMS that were closed while no matching BS period was open.
+// A closed POS bill's sales and stock use, posted into Inventory (IMS) from what is STORED on it.
 //
-// PosOrders' writeSalesEntries() bails when it can't find an open period for today, so the bill
-// closes, prints and takes an invoice number while Inventory never sees its revenue or ingredient
-// usage (S573). Those bills carry `ims_posted_at IS NULL`. Once the period is created, this
-// reposts them and stamps the flag.
+// Two callers, one preparation (S809 4e, IMS-HANDOFF-8/10). The till posts the bill it just closed
+// (postClosedBill, below); Periods and the floor's "Post to Inventory" post every bill a month is still
+// waiting for (backfillPosOrdersToIms: a bill closed while its month was not open in Inventory carries
+// `ims_posted_at IS NULL` until then, S573). Both build their rows with billSalesRows and
+// billMovementRows, so a bill reaches Inventory the same way whichever path got there first.
 //
-// Deliberately derives everything from STORED rows rather than reusing writeSalesEntries: that
-// function closes over live component state (the current cart, the Pay tab's comp picker, the
-// bill-level discount ratio), none of which exists after the fact. `pos_order_items.comped` is the
-// durable record of the same split, and the discount is re-derived from the order's own
-// discount_amount — so this reaches the same answer from the data instead of from the screen.
+// Both read the bill as the SERVER holds it, never the screen: its stored lines (a comped row is comped
+// whole: `pos_order_items.comped` is the durable record of the Pay tab's comp picker), its stored
+// discount spread over the non-comped lines, and the day it closed in Nepal (`closed_at` is the
+// server's). The till used to post from the cart, under the tablet's date at the moment of posting and
+// the screen's order id, so a bill closed at 23:59 and posted after midnight landed on the next day,
+// or in the next month.
 //
-// Sources match the live path exactly and that matters: revenue-facing IMS reports exclude
-// 'pos_comp' because a comped dish was never paid for, while consumption-facing reports sum every
-// source because the food was still prepared. Getting this wrong would silently misstate either
-// revenue or variance.
+// Sources matter: revenue-facing IMS reports exclude 'pos_comp' because a comped dish was never paid
+// for, while consumption-facing reports sum every source because the food was still prepared. Getting
+// this wrong would silently misstate either revenue or variance.
+
+/**
+ * The stored line columns a bill posts from: the select of one bill's lines (postClosedBill), and the
+ * backfill's `pos_order_items(...)` embed. `selection_key` and the options snapshot carry a customized
+ * line's choice stock lines (S758), exactly as the server froze them onto the bill.
+ */
+export const BILL_POST_LINES = 'recipe_id, qty, unit_price, vat_rate, comped, selection_key, pos_order_item_options(ingredient_deltas)'
+
+const lineDeltas = i => (i.selection_key ? lineIngredientDeltas(i.pos_order_item_options) : null)
+const recipeLines = order => (order?.pos_order_items || []).filter(i => i.recipe_id)
+
+/**
+ * A closed bill's `sales_entries` rows. Pure.
+ *
+ * `order` is `{ id, close_type, discount_amount, pos_order_items }` with BILL_POST_LINES lines. Only a
+ * line with a recipe posts. A comped line, and every line of a Complimentary (`writeoff`) bill, posts
+ * as 'pos_comp' at full price (zero revenue by source; consumption reports read only its qty). Every
+ * other line posts as 'pos' at its price less the bill discount spread over the bill's non-comped lines
+ * (storedDiscountRatio: the share the till's bill and the server's discount cap use), or every
+ * revenue-based IMS report would overstate revenue by the discount granted. VAT is the line's rate as
+ * billed, 0 when none was stored. Each row carries the bill's own id and its line's choices.
+ */
+export function billSalesRows(order, period, bsDay) {
+  const wholeComp = order.close_type === 'writeoff'
+  const disc = wholeComp ? 0 : storedDiscountRatio(order.pos_order_items, order.discount_amount)
+  return recipeLines(order).map(i => {
+    const isComp = wholeComp || !!i.comped
+    const deltas = lineDeltas(i)
+    return {
+      period_id: period.id,
+      recipe_id: i.recipe_id,
+      bs_day: bsDay,
+      qty_sold: i.qty,
+      source: isComp ? 'pos_comp' : 'pos',
+      unit_price: isComp ? i.unit_price : i.unit_price * (1 - disc),
+      vat_rate: i.vat_rate ?? 0,
+      pos_order_id: order.id,
+      ...(deltas ? { ingredient_deltas: deltas } : {}),
+    }
+  })
+}
+
+/**
+ * A closed bill's `stock_movements` rows: each recipe line's raw items per plate (`breakdown`, as
+ * explodeRecipeIngredients returns it) plus its choices' stock lines (`explosion`, for deltaItems),
+ * times its quantity, summed per item into 'pos_sale' and 'pos_comp' (the sales rows' split). An item
+ * whose quantity sums to zero is dropped. Pure.
+ */
+export function billMovementRows(order, period, bsDay, { breakdown = {}, explosion = null } = {}) {
+  const wholeComp = order.close_type === 'writeoff'
+  const agg = { pos_sale: {}, pos_comp: {} }
+  for (const i of recipeLines(order)) {
+    const bucket = (wholeComp || i.comped) ? 'pos_comp' : 'pos_sale'
+    const deltas = lineDeltas(i)
+    const extra = deltas ? deltaItems(deltas, explosion) : []
+    for (const { item_id, qty } of [...(breakdown[i.recipe_id] || []), ...extra]) {
+      agg[bucket][item_id] = (agg[bucket][item_id] || 0) + qty * i.qty
+    }
+  }
+  return Object.entries(agg).flatMap(([source, m]) =>
+    Object.entries(m)
+      .filter(([, qty]) => Math.abs(qty) > 1e-9)
+      .map(([item_id, qty]) => ({ item_id, period_id: period.id, bs_day: bsDay, qty: -qty, source, ref_id: order.id }))
+  )
+}
+
+const recipeIdsOf = orders => [...new Set(orders.flatMap(o => recipeLines(o).map(i => i.recipe_id)))]
+const deltaListsOf = orders => orders.flatMap(o => recipeLines(o).map(lineDeltas).filter(Boolean))
+const isAlreadyPosted = err => err?.hint === 'pos_bill_already_posted' || /pos_bill_already_posted/.test(err?.message || '')
+
+/**
+ * Posts ONE bill the till has closed. `bill` is the STORED `pos_orders` row (the close's
+ * `.select('*')`, or the read-back of a close settled after its answer was lost), never the screen's.
+ *
+ * - The month is the one OPEN in Inventory, and the day is the day the bill closed there, in Nepal
+ *   (nepalDayInPeriod over the server's `closed_at`). A bill closed in any other month is left
+ *   unposted (`other_month`): Periods → Post POS bills, or the floor's Post to Inventory, posts it into
+ *   its own month, dated the same way.
+ * - The lines are read back from the bill, bounded; a failed read posts nothing.
+ * - The sales rows go in ONE statement. The database marks the bill posted in the same transaction and
+ *   refuses a second statement for it (pos_bill_already_posted), which counts as posted here: another
+ *   device got there first, with its own movements.
+ * - The stock movements follow, best-effort and bounded: a depletion problem never un-posts revenue.
+ *
+ * Never throws (a caller may still bound the whole). `empty` is a bill with no recipe line: nothing to
+ * post, so the caller marks it.
+ * @returns {Promise<{ posted: boolean, reason?: 'period_read'|'no_open'|'other_month'|'lines_read'|'write', error?, empty?: boolean, already?: boolean }>}
+ */
+export async function postClosedBill({ supabase, scopedFrom, scopedInsert, bill, loadStockLines, stepMs = 15000 }) {
+  const { data: open, error: pErr } = await settleWithin(
+    scopedFrom('monthly_periods', 'id, bs_year, bs_month, status').eq('status', 'open').maybeSingle(),
+    stepMs, 'Checking which month is open in Inventory')
+  if (pErr) return { posted: false, reason: 'period_read', error: pErr }
+  if (!open) return { posted: false, reason: 'no_open' }
+  const bsDay = nepalDayInPeriod(bill?.closed_at, open)
+  if (bsDay == null) return { posted: false, reason: 'other_month' }
+
+  const { data: lines, error: lErr } = await settleWithin(
+    scopedFrom('pos_order_items', BILL_POST_LINES).eq('order_id', bill.id),
+    stepMs, 'Reading the bill')
+  if (lErr) return { posted: false, reason: 'lines_read', error: lErr }
+  const order = { ...bill, pos_order_items: lines || [] }
+
+  const salesRows = billSalesRows(order, open, bsDay)
+  if (salesRows.length === 0) return { posted: true, empty: true }
+  // Plain supabase.from: sales_entries is scoped by period, not client, so scopedDb throws for it; the
+  // period it names came through the scoped read above.
+  const { error: sErr } = await supabase.from('sales_entries').insert(salesRows)
+  if (sErr) {
+    if (isAlreadyPosted(sErr)) return { posted: true, already: true }
+    return { posted: false, reason: 'write', error: sErr }
+  }
+
+  try {
+    const { breakdown, explosion } = await withTimeout(
+      loadStockLines(recipeIdsOf([order]), deltaListsOf([order])), stepMs, 'Reading the recipe book')
+    const moves = billMovementRows(order, open, bsDay, { breakdown, explosion })
+    if (moves.length > 0) {
+      const { error: mErr } = await withTimeout(scopedInsert('stock_movements', moves), stepMs, 'Recording the stock used')
+      if (mErr) console.error('stock_movements write failed (the sales are in Inventory):', mErr)
+    }
+  } catch (err) {
+    console.error('stock_movements write did not finish (the sales are in Inventory):', err)
+  }
+  return { posted: true }
+}
 
 // AD instants bounding a BS month, for matching pos_orders.closed_at (a real timestamptz).
 // Uses bsDayBoundaryIso rather than .toISOString() on a bsToAd Date — that returns local midnight,
@@ -60,9 +189,8 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   // is not unique (two bills close in the same second).
   const { data: orders, error: oErr } = await fetchAllRows(() => scopedFrom(
     'pos_orders',
-    // selection_key + the options snapshot (S758): a customized line posts its choices' stock lines
-    // exactly as the live close does.
-    'id, close_type, closed_at, discount_amount, pos_order_items(recipe_id, qty, unit_price, vat_rate, comped, selection_key, pos_order_item_options(ingredient_deltas))'
+    // The lines the till's own post reads (BILL_POST_LINES), so both paths prepare the same rows.
+    `id, close_type, closed_at, discount_amount, pos_order_items(${BILL_POST_LINES})`
   )
     .eq('status', 'billed')
     .is('ims_posted_at', null)
@@ -79,8 +207,8 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   //
   // The guard asks the only question that matters — does revenue already exist for this bill —
   // against sales_entries.pos_order_id. An earlier version inferred it from stock_movements
-  // instead and was WRONG for exactly the case that bit us: writeSalesEntries writes revenue
-  // first and depletion second inside a try/catch that swallows failures, so a bill can have
+  // instead and was WRONG for exactly the case that bit us: the till's post (postClosedBill, once
+  // writeSalesEntries) writes revenue first and depletion second, best-effort, so a bill can have
   // revenue and no movements. Two of the three double-posted bills were that shape.
   //
   // Chunked AND paged, because this guard fails in the one direction that matters: it returns one
@@ -112,9 +240,8 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   if (list.length === 0) return { posted: 0, skipped: preStamped }
 
   // One explosion for every recipe across every order, rather than per order.
-  const recipeIds = [...new Set(list.flatMap(o => (o.pos_order_items || []).map(i => i.recipe_id).filter(Boolean)))]
-  const lineDeltas = i => (i.selection_key ? lineIngredientDeltas(i.pos_order_item_options) : null)
-  const allDeltas = list.flatMap(o => (o.pos_order_items || []).map(lineDeltas).filter(Boolean))
+  const recipeIds = recipeIdsOf(list)
+  const allDeltas = deltaListsOf(list)
   let breakdown, explosion
   if (loadStockLines) {
     ;({ breakdown, explosion } = await loadStockLines(recipeIds, allDeltas))
@@ -130,8 +257,7 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   const nothingToPost = []
   let undated = 0
   for (const o of list) {
-    const items = (o.pos_order_items || []).filter(i => i.recipe_id)
-    if (items.length === 0) { nothingToPost.push(o.id); continue }
+    if (recipeLines(o).length === 0) { nothingToPost.push(o.id); continue }
 
     // The day the bill closed IN NEPAL (S792, SALES-6). `adToBs(new Date(closed_at))` read the
     // viewer's clock zone while the window above is Nepal's, so a backfill run from abroad dated a
@@ -145,50 +271,13 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
       continue
     }
 
-    // A bill-level discount reduces the taxable base proportionally across payable (non-comped)
-    // lines — the same treatment the live path applies, or every revenue-based IMS report would
-    // overstate revenue by the discount actually granted. Comped lines stay at full price: they
-    // are already zero-revenue by source, and consumption reports never read unit_price from them.
-    const payableGross = items
-      .filter(i => !i.comped)
-      .reduce((s, i) => s + (i.qty * i.unit_price), 0)
-    const discount = Number(o.discount_amount) || 0
-    const discRatio = payableGross > 0 ? Math.max(0, 1 - discount / payableGross) : 1
-
-    // A whole-order Complimentary close comps everything regardless of the per-line flag.
-    const wholeComp = o.close_type === 'writeoff'
-
-    const salesRows = items.map(i => {
-      const isComp = wholeComp || i.comped
-      return {
-        period_id: period.id,
-        recipe_id: i.recipe_id,
-        bs_day: bsDay,
-        qty_sold: i.qty,
-        source: isComp ? 'pos_comp' : 'pos',
-        unit_price: isComp ? i.unit_price : i.unit_price * discRatio,
-        vat_rate: i.vat_rate ?? 0,
-        pos_order_id: o.id,
-        ...(lineDeltas(i) ? { ingredient_deltas: lineDeltas(i) } : {}),
-      }
+    // The rows the till's own post would write for this bill (the discount, the comps, the
+    // Complimentary close and the choices are all decided there, once).
+    prepared.push({
+      id: o.id,
+      salesRows: billSalesRows(o, period, bsDay),
+      movementRows: billMovementRows(o, period, bsDay, { breakdown, explosion }),
     })
-
-    // Ingredient depletion, split by the same sale/comp buckets.
-    const agg = { pos_sale: {}, pos_comp: {} }
-    items.forEach(i => {
-      const bucket = (wholeComp || i.comped) ? 'pos_comp' : 'pos_sale'
-      const extra = lineDeltas(i) ? deltaItems(lineDeltas(i), explosion) : []
-      ;[...(breakdown[i.recipe_id] || []), ...extra].forEach(({ item_id, qty }) => {
-        agg[bucket][item_id] = (agg[bucket][item_id] || 0) + qty * i.qty
-      })
-    })
-    const movementRows = Object.entries(agg).flatMap(([source, m]) =>
-      Object.entries(m).map(([item_id, qty]) => ({
-        item_id, period_id: period.id, bs_day: bsDay, qty: -qty, source, ref_id: o.id,
-      }))
-    )
-
-    prepared.push({ id: o.id, salesRows, movementRows })
   }
 
   let posted = 0, skipped = preStamped + undated

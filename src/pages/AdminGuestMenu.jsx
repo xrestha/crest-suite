@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import ReportLoadError from '../components/ReportLoadError'
-import { tidyName } from '../modules/pos/guestmenu/guestMenuHelpers'
+import { tidyName, MENU_UNAVAILABLE, ORDERING_OFF_TEXT } from '../modules/pos/guestmenu/guestMenuHelpers'
 import { getAccessState, GRACE_DAYS } from '../utils/subscription'
 
 // Crest Admin utility: preview the currently-viewed client's guest QR menu (GuestMenu.jsx,
@@ -164,8 +164,8 @@ export default function AdminGuestMenu() {
         <div role="alert" className="card" style={amberBanner}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>{clientName} is locked out of Crest, so guests can't order or book.</strong>{' '}
           Every login there is locked because {LOCK_REASON[access.reason] || 'its access has lapsed'}, so no till could see a
-          guest order or a booking request. Every table QR code shows "This menu isn't available" and the online booking
-          link shows "Online booking isn't available here right now", the same as with POS switched off. Both come back
+          guest order or a booking request. Every table QR code shows “{MENU_UNAVAILABLE.title}” and the online booking
+          link shows “Online booking isn't available here right now”, the same as with POS switched off. Both come back
           the moment the client's access is restored.{' '}
           <Link to="/admin/clients" style={linkStyle}>Manage this client in Admin → Clients →</Link>
         </div>
@@ -173,8 +173,9 @@ export default function AdminGuestMenu() {
     )
   }
 
-  // get_guest_menu returns nothing at all while POS is off, so every QR shows "This menu isn't
-  // available right now". Said before anything else, because the frame below would otherwise be
+  // get_guest_menu returns nothing at all while POS is off, so every QR shows MENU_UNAVAILABLE — the
+  // guest page's own words, quoted from guestMenuHelpers (S814; this page used to add a "right now"
+  // the guest never sees). Said before anything else, because the frame below would otherwise be
   // the only statement of it — and it reads as a broken page, not a switched-off module.
   if (posOff) {
     return (
@@ -182,7 +183,7 @@ export default function AdminGuestMenu() {
         <Header clientName={clientName} />
         <div role="alert" className="card" style={amberBanner}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Crest POS is switched off for {clientName}.</strong>{' '}
-          Every guest QR code shows "This menu isn't available right now" until POS is switched on in
+          Every guest QR code shows “{MENU_UNAVAILABLE.title}” until POS is switched on in
           Admin → Clients. The guest menu and guest ordering both come with the POS module.
         </div>
       </div>
@@ -240,8 +241,8 @@ export default function AdminGuestMenu() {
         <div role="alert" className="card" style={amberBanner}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Guests see no menu at all.</strong>{' '}
           {coverage.unpriced > 0
-            ? `${coverage.unpriced} ${coverage.unpriced === 1 ? 'dish is' : 'dishes are'} switched on for POS but ${coverage.unpriced === 1 ? 'has' : 'have'} no selling price, and a dish with no price is left off the guest menu — so every QR code shows "This menu isn't available right now".`
-            : 'No active dish is switched on for POS, so every QR code shows "This menu isn\'t available right now".'}{' '}
+            ? `${coverage.unpriced} ${coverage.unpriced === 1 ? 'dish is' : 'dishes are'} switched on for POS but ${coverage.unpriced === 1 ? 'has' : 'have'} no selling price, and a dish with no price is left off the guest menu — so every QR code shows “${MENU_UNAVAILABLE.title}”.`
+            : `No active dish is switched on for POS, so every QR code shows “${MENU_UNAVAILABLE.title}”.`}{' '}
           <Link to="/menu-pricing" style={linkStyle}>Set prices and POS dishes in Menu Pricing →</Link>
         </div>
       )}
@@ -260,8 +261,8 @@ export default function AdminGuestMenu() {
       {selectedInactive && (
         <div role="alert" className="card" style={amberBanner}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>{selected.name} is marked inactive.</strong>{' '}
-          Its QR code still shows the menu, but guests cannot order from it — the POS floor cannot open an
-          inactive table, so an order sent from it would have nowhere to go.{' '}
+          Its QR code still shows the menu with “{ORDERING_OFF_TEXT}” Guests cannot order from it, because the
+          POS floor cannot open an inactive table, so an order sent from it would have nowhere to go.{' '}
           <Link to="/pos/tables" style={linkStyle}>Change table status in POS Setup →</Link>
         </div>
       )}

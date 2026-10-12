@@ -2,7 +2,7 @@ import {
   NOT_RECORDED, SPLIT_NO_BREAKDOWN, AMOUNT_KEYS,
   billAmounts, creditNoteAmounts, buildSalesEntries, paymentSharesOf, allocateAmounts,
   buildPaymentRows, sortByMethodOrder, buildGroupedRows, partyNameKey, mergeNameOnlyParties, zeroAmounts, addAmounts,
-  fiscalYearsSince,
+  fiscalYearsSince, deliveryOutstanding, forgoneMenuValue, buildCategoryDayRows,
 } from './salesReportMath'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 
@@ -278,5 +278,85 @@ describe('fiscalYearsSince', () => {
   })
   test("a first bill numbered ahead of this device's date starts the list, never a century back", () => {
     expect(fiscalYearsSince('83/84', ASHADH_2083)).toEqual(['83/84', '82/83'])
+  })
+})
+
+// S814 4d (REPORTS-6): a bill with a credit note against it is no longer owed, whichever range the
+// note falls in — the Customers page's rule (PosCustomers.jsx).
+describe('deliveryOutstanding', () => {
+  const owed = amount => ({ isReturn: false, settled: false, credited: false, amount })
+  const total = rows => rows.reduce((s, r) => s + deliveryOutstanding(r), 0)
+
+  test('NPR 15,000 owed plus a note against a Bhadra bill: still 15,000', () => {
+    const note = { isReturn: true, settled: false, originalSettled: false, amount: -1130 }
+    expect(total([owed(10000), owed(5000), note])).toBe(15000)
+  })
+  test('a range holding only the note: 0, not −1,130', () => {
+    expect(total([{ isReturn: true, settled: false, originalSettled: false, amount: -1130 }])).toBe(0)
+  })
+  test('a credited Bhadra bill viewed in Bhadra: 0', () => {
+    expect(total([{ ...owed(1130), credited: true }])).toBe(0)
+  })
+  test('a settled bill was paid: 0; an unsettled, uncredited one is owed in full', () => {
+    expect(deliveryOutstanding({ ...owed(900), settled: true })).toBe(0)
+    expect(deliveryOutstanding(owed(900))).toBe(900)
+  })
+})
+
+// S814 4d (REPORTS-7, SHIFTS-5): one basis for a void's and a comp's lost sale, before VAT.
+describe('forgoneMenuValue', () => {
+  test('2 × 500 at 13% is NPR 1,000, never 1,130', () => {
+    expect(forgoneMenuValue([{ qty: 2, unit_price: 500, vat_rate: 0.13 }])).toBe(1000)
+  })
+  test('sums every line it is handed, and nothing for none', () => {
+    expect(forgoneMenuValue([{ qty: 1, unit_price: '250.50' }, { qty: '3', unit_price: 100 }])).toBeCloseTo(550.5)
+    expect(forgoneMenuValue([])).toBe(0)
+    expect(forgoneMenuValue(null)).toBe(0)
+  })
+})
+
+// S814 4d (REPORTS-9): the POS sales pivot's Category × Day rows, on the Sales Report's rule.
+describe('buildCategoryDayRows', () => {
+  const dayOf = ts => (ts ? Number(ts.slice(8, 10)) : null) // the fixtures' AD day stands in for the BS day
+  const base = { orderById, itemsByOrder, vatReg: true, dayOf }
+  const byKey = rows => Object.fromEntries(rows.map(r => [`${r.category}|${r.day}`, r]))
+
+  test('a bill on its own day: billed is after discount with VAT, exVat before VAT, and they tie to the bill', () => {
+    const rows = buildCategoryDayRows({ ...base, orders: [BILL_A], creditNotes: [] })
+    const a = billAmounts(BILL_A, ITEMS_A, true)
+    expect(sum(rows, 'exVat')).toBeCloseTo(a.taxable + a.nonTaxable, 9)
+    expect(sum(rows, 'billed')).toBeCloseTo(a.taxable + a.nonTaxable + a.vat, 9)
+    expect(rows.every(r => r.day === 10)).toBe(true)
+  })
+
+  test('a note is a minus on the day it was issued; its bill stays on the day it was sold', () => {
+    const note = noteFor(BILL_A, ITEMS_A) // issued on the 12th
+    const rows = byKey(buildCategoryDayRows({ ...base, orders: [BILL_A, BILL_B], creditNotes: [note] }))
+    expect(rows['Food|10'].billed).toBeGreaterThan(0)
+    expect(rows['Food|12'].billed).toBeLessThan(0)
+    expect(rows['Beverage|12'].billed).toBeLessThan(0)
+    // The two days of bill A cancel out; bill B is what is left.
+    const net = Object.values(rows).reduce((s, r) => s + r.billed, 0)
+    const b = billAmounts(BILL_B, ITEMS_B, true)
+    expect(net).toBeCloseTo(b.taxable + b.nonTaxable + b.vat, 9)
+  })
+
+  test('a note this period against an earlier period\'s bill is a minus on the note\'s day, and its bill adds nothing', () => {
+    const lastMonthBill = { ...BILL_B, id: 'OLD', closed_at: '2026-08-28T08:00:00Z' }
+    const note = { id: 'n-old', order_id: 'OLD', created_at: '2026-09-03T06:00:00Z' }
+    const rows = buildCategoryDayRows({
+      ...base, orders: [], creditNotes: [note],
+      orderById: { OLD: lastMonthBill }, itemsByOrder: { OLD: ITEMS_B },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ category: 'Food', day: 3 })
+    expect(rows[0].billed).toBeCloseTo(-452, 9)
+    expect(rows[0].exVat).toBeCloseTo(-400, 9)
+  })
+
+  test('a timestamp dayOf rejects is left out, and a note whose bill was not read adds nothing', () => {
+    const rows = buildCategoryDayRows({ ...base, dayOf: () => null, orders: [BILL_A], creditNotes: [] })
+    expect(rows).toEqual([])
+    expect(buildCategoryDayRows({ ...base, orders: [], creditNotes: [{ id: 'x', order_id: 'missing', created_at: '2026-09-12T06:00:00Z' }] })).toEqual([])
   })
 })

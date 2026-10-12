@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { withTimeout } from '../../utils/withTimeout'
-import { nepalDayStartTs, todayNepalAdIso } from '../../modules/pos/reports/reportRange'
+import { serviceDayStartIso } from '../../shared/nepalTime'
 import { KDS_LATE_MS } from '../../modules/pos/posSignals'
 import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 import { ticketSummary } from '../../modules/pos/dashboard/posDashboardMath'
@@ -71,13 +71,15 @@ export default function HomeAttention({
   const load = useCallback(async () => {
     if (!clientId || (!posFront && !wantPosting && !wantCount)) { setCounts({}); return }
     const id = latest.begin(Symbol('home-attention'))
-    const todayStart = nepalDayStartTs(todayNepalAdIso())
+    // The Kitchen Display's own window (S814 4d, REPORTS-11): this service, from midnight and
+    // rolling over at 6 AM, so a ticket sent at 11:50 PM and still waiting at 12:30 AM is late here.
+    const serviceStart = serviceDayStartIso()
     const none = Promise.resolve({ data: null, count: null, error: null })
     try {
       const [guest, kot, unposted, count] = await withTimeout(Promise.all([
         posFront ? scopedFrom('pos_guest_order_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending') : none,
         // Same read as the POS Dashboard's, a CHANGE ticket (S809 3a) left out the same way.
-        posFront ? scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart).not('items', 'cs', KOT_CHANGE_ITEMS) : none,
+        posFront ? scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', serviceStart).not('items', 'cs', KOT_CHANGE_ITEMS) : none,
         // Bills and credit notes waiting for Inventory, all months (never throws: { rows, error }).
         wantPosting ? loadImsWaiting(supabase, clientId) : none,
         // null when it could not check — the close dialog says the same.

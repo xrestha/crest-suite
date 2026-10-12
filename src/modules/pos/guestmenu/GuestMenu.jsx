@@ -16,7 +16,7 @@ import { playChime } from '../posChime'
 import {
   tidyName, orderCategories, matchesSearch, SEARCH_THRESHOLD,
   STAGES, STAGE_SHORT, stageFromProgress, laterStage,
-  newRequestKey, orderSignature, cartWithout,
+  newRequestKey, orderSignature, cartWithout, MENU_UNAVAILABLE, ORDERING_OFF_TEXT,
 } from './guestMenuHelpers'
 // The page's structure, the order tracker, the choice sheet and the touch tier. Colour comes from the
 // app theme, which ThemeContext pins to the default preset on this route (S767) — see the header
@@ -597,8 +597,8 @@ export default function GuestMenu() {
     return (
       <GuestShell>
         <div className="gm-page gm-state">
-          <h1 className="gm-state-title">This menu isn’t available</h1>
-          <p className="gm-state-text">Please ask a member of staff for a menu.</p>
+          <h1 className="gm-state-title">{MENU_UNAVAILABLE.title}</h1>
+          <p className="gm-state-text">{MENU_UNAVAILABLE.text}</p>
         </div>
       </GuestShell>
     )
@@ -851,7 +851,7 @@ export default function GuestMenu() {
           {/* get_guest_menu turns ordering off for a table marked inactive (S746). Without a line
               saying so, the only difference is the missing Add buttons, which reads as a broken page. */}
           {!orderingEnabled && (
-            <p className="gm-note">Ordering from this table is off right now. Please order with a member of staff.</p>
+            <p className="gm-note">{ORDERING_OFF_TEXT}</p>
           )}
           {orderingEnabled && optionsFailed && (
             <p role="status" className="gm-note gm-note--warn">

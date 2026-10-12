@@ -1,6 +1,6 @@
 // closePeriod.js imports supabaseClient (createClient at module load) and scopedDb; both are
 // mocked so the suite runs in a plain checkout, the same way persistSalesDay.test.js does it.
-jest.mock('../../supabaseClient', () => ({ supabase: { from: jest.fn() } }))
+jest.mock('../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
 jest.mock('../../shared/scopedDb', () => ({
   scopedFrom: jest.fn(), scopedInsert: jest.fn(), scopedUpdate: jest.fn(),
 }))
@@ -24,7 +24,7 @@ import {
   closingCountPreflight,
   performPeriodClose, closeFailureText, closeFailuresText, payrollNote, nextBsMonth,
   nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
-  closerMakesReport, deferredReportNote,
+  closerMakesReport, deferredReportNote, tillWaitingNote, tillWaitingPreflight,
 } from './closePeriod'
 /* eslint-enable import/first */
 
@@ -521,5 +521,80 @@ describe('payrollNote', () => {
       expect(n.text).toMatch(/HR pages stay open/)
       expect(n.text).toMatch(/ESTIMATED labour cost/)
     }
+  })
+})
+
+// S809 4e (IMS-HANDOFF-5, owner decision D4): ending a month says how many of its till bills still wait
+// for Inventory. It warns and never blocks, and names who can post them.
+describe('tillWaitingNote', () => {
+  test('a failed check admits it, quietly', () => {
+    expect(tillWaitingNote(null, 'Bhadra 2083', { closerPosts: true })).toEqual({
+      danger: false, warn: false,
+      text: "Couldn't check whether any of Bhadra 2083's till bills are still waiting for Inventory.",
+    })
+  })
+
+  test('nothing waiting is the quiet all-clear', () => {
+    expect(tillWaitingNote({ bills: 0, notes: 0 }, 'Bhadra 2083')).toEqual({
+      danger: false, warn: false, text: 'Every till bill and credit note from Bhadra 2083 is in Inventory.',
+    })
+  })
+
+  test('the Owner or admin is told to post them first, and what posting after the close costs', () => {
+    const n = tillWaitingNote({ bills: 3, notes: 1 }, 'Bhadra 2083', { closerPosts: true })
+    expect(n.danger).toBe(false)
+    expect(n.warn).toBe(true)
+    expect(n.text).toBe("3 bills and 1 credit note from Bhadra 2083 are not in Inventory yet, so the month's sales and stock use are short, and so is the Monthly Report this close freezes. Post them first: Periods → Post POS bills to Inventory, or Post to Inventory on the till's floor. Posted after the close, the frozen report needs Regenerate Snapshot.")
+  })
+
+  test('an IMS supervisor is told who posts them, and that after the close only the Owner can', () => {
+    const n = tillWaitingNote({ bills: 2, notes: 0 }, 'Bhadra 2083', { closerPosts: false })
+    expect(n.danger).toBe(false)
+    expect(n.warn).toBe(true)
+    expect(n.text).toBe("2 bills from Bhadra 2083 are not in Inventory yet. Ask the Owner, or a POS manager (Post to Inventory on the till's floor), to post them before you close: once Bhadra 2083 is closed, only the Owner can.")
+  })
+
+  test('one waiting is singular in both wordings', () => {
+    expect(tillWaitingNote({ bills: 1, notes: 0 }, 'Bhadra 2083', { closerPosts: true }).text)
+      .toMatch(/^1 bill from Bhadra 2083 is not in Inventory yet, .* Post it first: /)
+    expect(tillWaitingNote({ bills: 0, notes: 1 }, 'Bhadra 2083').text)
+      .toMatch(/^1 credit note from Bhadra 2083 is not in Inventory yet\. .* to post it before you close/)
+  })
+
+  test('never red, whatever the count', () => {
+    for (const closerPosts of [true, false]) {
+      expect(tillWaitingNote({ bills: 900, notes: 40 }, 'Bhadra 2083', { closerPosts }).danger).toBe(false)
+    }
+  })
+})
+
+describe('tillWaitingPreflight', () => {
+  afterEach(() => { jest.useRealTimers() })
+
+  test('reads the server counts for this outlet and hands back that period\'s', async () => {
+    supabase.rpc.mockResolvedValue({ data: [
+      { bs_year: 2083, bs_month: 5, period_id: 'p-bhadra', period_status: 'open', bills: 3, notes: 1 },
+      { bs_year: 2083, bs_month: 4, period_id: 'p-shrawan', period_status: 'closed', bills: 7, notes: 0 },
+    ], error: null })
+    await expect(tillWaitingPreflight('p-bhadra', 'c1')).resolves.toEqual({ bills: 3, notes: 1 })
+    expect(supabase.rpc).toHaveBeenCalledWith('pos_ims_waiting_counts', { p_client_id: 'c1' })
+  })
+
+  test('a period with nothing waiting is 0 and 0', async () => {
+    supabase.rpc.mockResolvedValue({ data: [], error: null })
+    await expect(tillWaitingPreflight('p-bhadra', 'c1')).resolves.toEqual({ bills: 0, notes: 0 })
+  })
+
+  test('a refused read is null — "couldn\'t check", never 0', async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: 'boom', hint: 'rank_required' } })
+    await expect(tillWaitingPreflight('p-bhadra', 'c1')).resolves.toBeNull()
+  })
+
+  test('a read that does not answer in 10s is null', async () => {
+    jest.useFakeTimers()
+    supabase.rpc.mockReturnValue(new Promise(() => {}))
+    const p = tillWaitingPreflight('p-bhadra', 'c1')
+    jest.advanceTimersByTime(10000)
+    await expect(p).resolves.toBeNull()
   })
 })

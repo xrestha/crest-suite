@@ -197,6 +197,68 @@ export function buildGroupedRows({ orders, creditNotes, orderById, itemsByOrder,
   return Object.values(grouped).sort((a, b) => (b.gross - b.discount + b.vat) - (a.gross - a.discount + a.vat))
 }
 
+/**
+ * What a Delivery Partners row adds to Outstanding (S814 4d, REPORTS-6): an unsettled, uncredited
+ * bill its amount, and nothing else. A bill with a credit note against it is no longer owed,
+ * whichever range the note falls in — the Customers page's rule (PosCustomers.jsx) — so a credited
+ * bill adds 0 in its own range, and the note's minus row adds 0 in the note's range. Before this the
+ * note subtracted its amount while its bill was unsettled: a range holding only the note read
+ * −NPR 1,130 owed, and a range holding both read 0 only by cancellation.
+ */
+export function deliveryOutstanding(r) {
+  return !r.isReturn && !r.settled && !r.credited ? r.amount : 0
+}
+
+/**
+ * What a set of lines would have sold for at menu price, before discount and VAT: Σ qty × unit_price
+ * (S814 4d, REPORTS-7 / SHIFTS-5). The one basis for a void's forgone value and a comp's potential
+ * value, on Sales Exceptions, the Sales Report's Comped Bills, the shift Z-report and the Owner
+ * Report since schema 16 (S754's owner decision: VAT on a sale that never happened was never
+ * revenue). Callers pass only the lines they mean — the comped ones, a void's whole bill.
+ */
+export function forgoneMenuValue(lines) {
+  return (lines || []).reduce((s, i) => s + num(i.qty) * num(i.unit_price), 0)
+}
+
+/**
+ * The POS sales pivot's Category × Day rows (S814 4d, REPORTS-9), on the Sales Report's rule: every
+ * paid bill closed in the period at full value on its own Nepal day, a credited one included, and
+ * every credit note issued in the period a MINUS on the note's Nepal day, whichever month its bill
+ * closed in. Both sides go through computeGroupAmounts with the bill's charged lines, the way the
+ * Category Wise tab does (buildGroupedRows), each bill under its own VAT stamp.
+ *
+ *   itemsByOrder  each bill's charged lines (comped lines already left out), with category,
+ *                 qty, unit_price and vat_rate.
+ *   orderById     every bill a note credits, the earlier months' ones included.
+ *   dayOf(ts)     the BS day a timestamp belongs to in the period, or null to leave it out.
+ *
+ * Returns [{ category, day, billed, exVat }]: `billed` is after discount, VAT included (what the
+ * guest paid, unrounded); `exVat` is after discount, before VAT.
+ */
+export function buildCategoryDayRows({ orders, creditNotes, orderById, itemsByOrder, vatReg, dayOf }) {
+  const agg = new Map()
+  const add = (order, ts, sign) => {
+    const day = dayOf(ts)
+    if (day == null) return
+    const byCat = computeGroupAmounts(order, itemsByOrder[order.id] || [], billVatRegistered(order, vatReg),
+      i => i.category || 'Uncategorized')
+    for (const [category, v] of Object.entries(byCat)) {
+      const key = `${category}|${day}`
+      const row = agg.get(key) || { category, day, billed: 0, exVat: 0 }
+      const exVat = v.taxable + v.nonTaxable
+      row.exVat += sign * exVat
+      row.billed += sign * (exVat + v.vat)
+      agg.set(key, row)
+    }
+  }
+  for (const o of orders || []) add(o, o.closed_at, 1)
+  for (const n of creditNotes || []) {
+    const o = orderById[n.order_id]
+    if (o) add(o, n.created_at, -1)
+  }
+  return [...agg.values()]
+}
+
 /** A party name as the 1L+ merge compares it: trimmed, internal whitespace collapsed, case-folded. */
 export function partyNameKey(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()

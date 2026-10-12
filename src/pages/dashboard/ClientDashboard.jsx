@@ -32,12 +32,12 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
-import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText, closerMakesReport, deferredReportNote, nextBsMonth } from '../periods/closePeriod'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText, closerMakesReport, deferredReportNote, nextBsMonth, tillWaitingPreflight, tillWaitingNote } from '../periods/closePeriod'
 import { backfillLeaveText } from '../../modules/hr/leave/backfillApprovedLeave'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd } from '../../utils/bsCalendar'
-import { nepalBs, nepalCivilDate } from '../../shared/nepalTime'
+import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
@@ -60,7 +60,7 @@ import { dashboardModules, IMS_DASHBOARD_PATH } from '../../shared/dashboardHome
 import { npr } from '../../shared/nepalMoney'
 import { KDS_LATE_MS } from '../../modules/pos/posSignals'
 import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
-import { dineInOnly, seatedCovers } from '../../modules/pos/reports/coversMath'
+import { summariseBills, returnsOf } from '../../modules/pos/dashboard/posDashboardMath'
 import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUnavailable } from './homePosStats'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
@@ -1007,7 +1007,8 @@ export default function ClientDashboard({ scope = 'home' }) {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single()
 
-    let orders = [], ordersErr = null, coversTotal = 0, dineInBills = 0
+    let ordersErr = null, notesErr = null
+    let summary = summariseBills([])
     if (period) {
       const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
       const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
@@ -1020,24 +1021,35 @@ export default function ClientDashboard({ scope = 'home' }) {
       // already page the same table; the dashboard was the one surface that did not, so it would
       // have disagreed with them without either screen saying why. `.order('id')` is the unique
       // tiebreaker fetchAllRows requires.
-      const { data, error } = await fetchAllRows(() =>
-        scopedFrom('pos_orders', 'id, table_id, covers, paid_amount, credit_note_id, close_type, closed_at')
-          .eq('close_type', 'paid')
-          .gte('closed_at', fromTs).lte('closed_at', toTs)
-          .order('id'))
-      ordersErr = error
-      // Revenue, Bills and Avg Check leave a since-credit-noted bill out (whether they should follow
-      // the Sales Report's rule instead, the bill on its day and the note a minus on its own, is
-      // REPORTS-5). Covers Served is the Covers Report's count, which it links to (S809 3n,
-      // REPORTS-3): guests seated at tables only, and a credit-noted bill keeps its guests.
-      orders = (data || []).filter(o => !o.credit_note_id)
-      coversTotal = seatedCovers(data || [])
-      dineInBills = dineInOnly(data).length
+      //
+      // S814 4d (REPORTS-5, owner Q22 a): the Sales Report's rule. Every paid bill closed in the
+      // month counts in full, a since-credit-noted one included, and every credit note ISSUED in the
+      // month comes off (the notes are paged too: their window is the same month). The note brings
+      // the bill it credits, which may have closed last month, for the dine-in side of Avg per cover.
+      const [bills, notes] = await Promise.all([
+        fetchAllRows(() =>
+          scopedFrom('pos_orders', 'id, table_id, covers, paid_amount, discount_amount, close_type, closed_at')
+            .eq('close_type', 'paid')
+            .gte('closed_at', fromTs).lte('closed_at', toTs)
+            .order('id')),
+        fetchAllRows(() =>
+          scopedFrom('pos_credit_notes', 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, covers)')
+            .gte('created_at', fromTs).lte('created_at', toTs)
+            .order('id')),
+      ])
+      ordersErr = bills.error
+      notesErr = notes.error
+      // Covers Served is the Covers Report's count, which it links to (S809 3n, REPORTS-3): guests
+      // seated at tables only, and a credit-noted bill keeps its guests (summariseBills, through
+      // coversMath). One arithmetic with the POS Dashboard's tiles.
+      if (!ordersErr && !notesErr) summary = summariseBills(bills.data, returnsOf(notes.data))
     }
 
-    const revenueTotal = orders.reduce((s, o) => s + (parseFloat(o.paid_amount) || 0), 0)
-    const billCount     = orders.length
-    const avgCheck      = billCount > 0 ? revenueTotal / billCount : 0
+    const revenueTotal = summary.sales
+    const billCount     = summary.bills
+    const coversTotal   = summary.covers
+    const dineInBills   = summary.dineInBills
+    const avgCheck      = summary.avgBill ?? 0
 
     // Tonight's bookings (S677): the same window the Orders floor uses — today's BS day plus six
     // hours past midnight, so a 12:15 AM booking belongs to tonight's service. "Still to come" is
@@ -1065,13 +1077,15 @@ export default function ClientDashboard({ scope = 'home' }) {
     const bookingsTonight = bookings.length
     const coversToCome    = bookings.filter(b => b.status !== 'seated').reduce((s, b) => s + (b.party_size || 0), 0)
 
-    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || tablesErr || bookingsErr || requestsErr
+    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || notesErr || tablesErr || bookingsErr || requestsErr
     setLoadErrors(prev => ({ ...prev, pos: hadRealError ? 'POS data failed to load — figures below may be incomplete or stale.' : '' }))
 
     // S809 3n (REPORTS-8): a failed read is not an empty period. Its tiles keep the last good figures
     // (or show "—" when there are none), and nothing from a failed load is cached.
     const fresh = { revenueTotal, coversTotal, dineInBills, billCount, avgCheck, tablesOccupied, tablesTotal, bookingsTonight, coversToCome, requestsPending }
-    const failed = { sales: !!((periodErr && periodErr.code !== 'PGRST116') || ordersErr), tables: !!tablesErr, bookings: !!(bookingsErr || requestsErr) }
+    // A failed credit-note read fails the sales tiles too: without the notes, Revenue would read as
+    // the bills alone, a figure the page did not compute.
+    const failed = { sales: !!((periodErr && periodErr.code !== 'PGRST116') || ordersErr || notesErr), tables: !!tablesErr, bookings: !!(bookingsErr || requestsErr) }
     if (anyReadFailed(failed)) setPosStats(prev => keepLastGood(prev, fresh, failed, HOME_POS_READS))
     else setAndCache(setPosStats, 'posStats', fresh)
   }
@@ -1080,16 +1094,18 @@ export default function ClientDashboard({ scope = 'home' }) {
   // queue (KOT for kitchen, BOT for bar), never the other station's. Thresholds/formulas match
   // KitchenDisplay.jsx exactly (LATE_MS=15min) so a card here and the live board never disagree.
   async function loadKitchenPosStats(myId) {
-    const today = nepalBsToday()
-    const fromTs = bsDayBoundaryIso(today.year, today.month, today.day, false)
-    const toTs   = bsDayBoundaryIso(today.year, today.month, today.day, true)
     const kdsStation = posTeam === 'bar' ? 'BOT' : 'KOT'
 
-    const { data, error } = await scopedFrom('pos_kot_log', 'status, sent_at, started_at, ready_at')
+    // The Kitchen Display's own window (S814 4d, REPORTS-11): this service, from midnight and rolling
+    // over at 6 AM (serviceDayStartIso), with no upper bound — a ticket sent at 11:50 PM is still on
+    // the board at 12:30 AM, so it is still on this card. Paged: one row per send per station, and a
+    // long service at a busy outlet can pass 1,000 (the KDS pages the same read).
+    const { data, error } = await fetchAllRows(() => scopedFrom('pos_kot_log', 'id, status, sent_at, started_at, ready_at')
       .eq('station', kdsStation)
       .neq('status', 'cancelled')
       .not('items', 'cs', KOT_CHANGE_ITEMS) // a CHANGE ticket (S809 3a) is not a dish made or waiting
-      .gte('sent_at', fromTs).lte('sent_at', toTs)
+      .gte('sent_at', serviceDayStartIso())
+      .order('id'))
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
     const rows = data || []
@@ -1139,13 +1155,18 @@ export default function ClientDashboard({ scope = 'home' }) {
     // sentence saying when the report WILL be made instead.
     const makesReport = closerMakesReport({ isAdmin, isOwner })
     const askPayroll = hrOn && makesReport
-    const [count, payroll] = await Promise.all([
+    // With POS on, how many of the month's till bills still wait for Inventory (S809 4e, D4: warns,
+    // never blocks), worded for who is closing. Not without Inventory (D6: its bills stay unposted).
+    const askTill = !!clientModules?.pos && !!clientModules?.ims
+    const [count, payroll, waiting] = await Promise.all([
       closingCountPreflight(activePeriod.id, effectiveClientId),
       askPayroll ? payrollPreflight(activePeriod.id, effectiveClientId) : Promise.resolve(undefined),
+      askTill ? tillWaitingPreflight(activePeriod.id, effectiveClientId) : Promise.resolve(undefined),
     ])
     setCloseNotes([
       closingCountNote(count),
       askPayroll ? payrollNote(payroll, monthLabel) : null,
+      askTill ? tillWaitingNote(waiting, monthLabel, { closerPosts: makesReport }) : null,
       makesReport ? null : deferredReportNote(monthLabel),
     ])
     setCheckingClose(false)
@@ -1771,8 +1792,13 @@ export default function ClientDashboard({ scope = 'home' }) {
   // independent of loadStats' load cycle — unchanged from when FoodBeverageSplit.jsx owned this.
   const salesMixIncludeManual = showIms && canSales
   const salesMixIncludePos = showPos && !posIsStationTeam
+  // The card renders only on a page with one module (the Inventory Dashboard, or a single-module
+  // /dashboard: imsChartsAndTables sits in the `!showModuleHeaders` branch), so the read is asked for
+  // only then (S814 4d). Home of 2+ modules used to read a month of sales for a card it never drew.
   const { buckets: salesMixBuckets, loading: salesMixLoading } = useFoodBeverageSplit({
-    activePeriod, includeManual: salesMixIncludeManual, includePos: salesMixIncludePos,
+    activePeriod,
+    includeManual: !showModuleHeaders && salesMixIncludeManual,
+    includePos: !showModuleHeaders && salesMixIncludePos,
   })
   const salesMixCategories = Object.keys(salesMixBuckets).filter(c => salesMixBuckets[c] > 0).sort((a, b) => salesMixBuckets[b] - salesMixBuckets[a])
   const salesMixTotal = salesMixCategories.reduce((s, c) => s + salesMixBuckets[c], 0)
@@ -2073,7 +2099,9 @@ export default function ClientDashboard({ scope = 'home' }) {
         <div style={kpiSubtextStyle}>{posGone('tickets') ? <>Couldn&apos;t load →</> : <>Last 20 min →</>}</div>
       </div>
       <div {...kpiCard(null)}>
-        <div style={kpiLabelStyle}>Avg Prep Time</div>
+        <div style={kpiLabelStyle}>
+          <Tip text="Average minutes from Start to Ready for this station's tickets, and how many reached Ready, this service (from midnight, rolling over at 6 AM) — the Kitchen Display's own window, so a ticket sent just before midnight still counts after it." width={240}>Avg Prep Time</Tip>
+        </div>
         <div style={kpiValueStyle(18)}>
           {!posStats
             ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
@@ -2083,7 +2111,7 @@ export default function ClientDashboard({ scope = 'home' }) {
           {!posStats
             ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
             : posGone('tickets') ? <>Couldn&apos;t load</>
-            : <>{posStats.completedToday} completed today</>}
+            : <>{posStats.completedToday} completed this service</>}
         </div>
       </div>
     </>
@@ -2094,7 +2122,7 @@ export default function ClientDashboard({ scope = 'home' }) {
   const posFrontHeadlineCard = (
     <div {...kpiCard(() => navigate('/pos/sales-report'))}>
       <div style={kpiLabelStyle}>
-        <Tip text="Total billed on paid POS orders closed in this period, as tendered — VAT included, credit notes excluded. The Inventory section's Revenue tile counts the same sales before VAT, so the two will not match." width={280}>Revenue</Tip>
+        <Tip text="Billed incl. VAT on this period's paid bills, less credit notes issued this period — the Sales Report's rule: a credited bill stays on the day it was sold; its note comes off the day it is issued. The Inventory section's Revenue tile counts the same sales before VAT, so the two will not match." width={280}>Revenue</Tip>
       </div>
       <div style={{ ...kpiValueStyle(22, 800), color: posGone('sales') ? 'var(--theme-text2)' : 'var(--theme-green-text)' }}>
         {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
@@ -2121,7 +2149,9 @@ export default function ClientDashboard({ scope = 'home' }) {
         </div>
       </div>
       <div {...kpiCard(null)}>
-        <div style={kpiLabelStyle}>Avg Check</div>
+        <div style={kpiLabelStyle}>
+          <Tip text="Revenue (after this period's credit notes) ÷ every paid bill closed this period, a credited one included." width={240}>Avg Check</Tip>
+        </div>
         <div style={{ ...kpiValueStyle(18), ...(posGone('sales') ? { color: 'var(--theme-text2)' } : null) }}>
           {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-IN')}`}
         </div>

@@ -1,5 +1,6 @@
 import { creditNoteReversalRows, creditNoteRestockMovements, backfillCreditNotesToIms, postCreditNoteToIms } from './creditNotePosting'
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
+import { billSalesRows } from '../orders/backfillPosToIms'
 
 jest.mock('../../../shared/fetchAllRows', () => ({
   fetchAllRows: async make => make(),
@@ -23,11 +24,19 @@ describe('creditNoteReversalRows — the revenue the bill POSTED, negated', () =
   })
 
   it('spreads the bill discount over the payable lines, exactly as the close posted it', () => {
-    // payable gross 2,000; a 400 discount leaves 80% of each line's price
-    const rows = creditNoteReversalRows({ order: { close_type: 'paid', discount_amount: 400 }, items: ITEMS, periodId: 'p', bsDay: 1, creditNoteId: 'cn' })
+    // payable gross 2,050 (the non-recipe line is paid for too); a 410 discount leaves 80% of each price
+    const rows = creditNoteReversalRows({ order: { close_type: 'paid', discount_amount: 410 }, items: ITEMS, periodId: 'p', bsDay: 1, creditNoteId: 'cn' })
     expect(rows.map(r => r.unit_price)).toEqual([400, 800])
     const reversed = rows.reduce((s, r) => s + -r.qty_sold * r.unit_price, 0)
     expect(reversed).toBe(1600)
+  })
+
+  it('takes back exactly what billSalesRows posted for the same bill', () => {
+    const order = { id: 'o1', close_type: 'paid', discount_amount: 333, pos_order_items: ITEMS }
+    const posted = billSalesRows(order, { id: 'p' }, 1).filter(r => r.source === 'pos')
+    const reversal = creditNoteReversalRows({ order, items: ITEMS, periodId: 'p', bsDay: 2, creditNoteId: 'cn' })
+    expect(reversal.map(r => [r.recipe_id, -r.qty_sold, r.unit_price]))
+      .toEqual(posted.map(r => [r.recipe_id, r.qty_sold, r.unit_price]))
   })
 
   it('reverses nothing for a whole-bill comp, which posted no revenue', () => {

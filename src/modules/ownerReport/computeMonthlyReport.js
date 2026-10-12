@@ -15,7 +15,7 @@ import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportC
 import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
 import { periodRevenue, periodStockMaps, valuePeriodItems, periodWastageValue, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
 import { findUncountedItems, UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
-import { zeroAmounts, addAmounts, billAmounts, buildSalesEntries, buildGroupedRows, buildPaymentRows } from '../pos/reports/salesReportMath'
+import { zeroAmounts, addAmounts, billAmounts, buildSalesEntries, buildGroupedRows, buildPaymentRows, forgoneMenuValue } from '../pos/reports/salesReportMath'
 import { coversTotals } from '../pos/reports/coversMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
@@ -553,7 +553,9 @@ async function computePosSection(clientId, period) {
     compedItems.forEach(i => {
       compGroups.add(`${i.order_id}:${i.comp_no}`)
       compedFoodCost += i.qty * (costMap[i.recipe_id] || 0)
-      compedPotentialValue += i.qty * i.unit_price * (1 + (i.vat_rate ?? 0))
+      // Menu price before VAT since schema 16 (S814 4d, owner decision D1): the Sales Exceptions
+      // basis, and the voids beside it were already ex-VAT.
+      compedPotentialValue += forgoneMenuValue([i])
     })
     compedCount = compGroups.size
   }
@@ -566,12 +568,14 @@ async function computePosSection(clientId, period) {
   if (voidOrderIds.length > 0) {
     const voidItemsRes = await fetchAllRowsChunked(voidOrderIds, ids => scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', ids).order('id'))
     throwFirstError([voidItemsRes])
-    voidsAmount = (voidItemsRes.data || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
+    voidsAmount = forgoneMenuValue(voidItemsRes.data)
   }
 
   return {
     ...figures,
-    compedBillsTotal: { count: compedCount, foodCost: compedFoodCost, potentialValue: compedPotentialValue },
+    // `basis: 'ex_vat'` (schema 16) marks a potential value before VAT; an older report's has none
+    // and was frozen with VAT, which the page and the workbook say.
+    compedBillsTotal: { count: compedCount, foodCost: compedFoodCost, potentialValue: compedPotentialValue, basis: 'ex_vat' },
     voidsWriteoffsTotal: { count: voidOrderIds.length, amount: voidsAmount },
   }
 }
@@ -859,7 +863,14 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   - The month runs on Nepal's day edges (bsDayBoundaryIso), not the generating device's clock zone.
 //   No Trend marker: POS Net Sales differs across the line only by a note that credits another
 //   month's bill.
-export const CURRENT_SCHEMA_VERSION = 15
+// 16 (S814 4d, REPORTS-7, owner decision D1): the Crest POS section's Comped Bills potential value is
+//   menu price BEFORE VAT (salesReportMath.forgoneMenuValue), one basis with Sales Exceptions, the
+//   Sales Report's Comped Bills tab and the shift Z-report's Voided Value. v15 added each comped
+//   line's VAT, so a VAT-registered outlet's v16 figure is lower by 13% of its taxable comped lines.
+//   `pos.compedBillsTotal.basis: 'ex_vat'` marks it; the page and the workbook label an older
+//   report's figure "incl. VAT". Food cost and the voids figure are unchanged (voids were already
+//   ex-VAT). No Trend marker: Trend does not compare comps.
+export const CURRENT_SCHEMA_VERSION = 16
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

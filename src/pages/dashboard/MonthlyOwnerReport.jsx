@@ -279,6 +279,9 @@ export default function MonthlyOwnerReport() {
   // v15 (S809 3m): the till section counts seated guests and nets credit notes by issue month. Read
   // from the section's own marker, the way foodCostBasisOf reads the combined one.
   const posSeated = snapshot?.pos?.covers?.basis === 'seated'
+  // v16 (S814 4d, owner decision D1): Comped Bills' potential value is before VAT, marked on the
+  // figure itself (`compedBillsTotal.basis`); an older report's carries VAT.
+  const compExVat = snapshot?.pos?.compedBillsTotal?.basis === 'ex_vat'
 
   // Color bands match Owner Dashboard's live KPI cards exactly, so the same rough magnitude
   // never reads as a different "health" color depending on which page you're looking at.
@@ -672,8 +675,13 @@ export default function MonthlyOwnerReport() {
                         tip="Credit notes issued this month, taken off Net Sales in the month they were issued. The bill each one cancels still counts in the month it was sold, as on the Sales Report." />
                     )}
                     <Row label="Discount Given" value={fmt(snapshot.pos.totalDiscount)} />
-                    <Row label="Comped Bills" value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value`}
-                      tip="Bills given away free (staff meals, goodwill, promo) — 'potential value' is what they would have cost the guest at full price." />
+                    {/* v16 (S814 4d, owner decision D1): the potential value is menu price before VAT.
+                        An older report keeps the figure it was frozen with, VAT included, and says so. */}
+                    <Row label="Comped Bills"
+                      value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value${compExVat ? ', before VAT' : ', incl. VAT'}`}
+                      tip={compExVat
+                        ? "Bills and dishes given away free (staff meals, goodwill, promo) — 'potential value' is what they would have sold for at menu price, before VAT: the Sales Exceptions basis, since VAT on a sale that never happened was never revenue."
+                        : "Bills and dishes given away free (staff meals, goodwill, promo) — 'potential value' is what they would have cost the guest at full price, VAT included. This report was made before Crest valued comps before VAT; reports made since show the figure before VAT, as Sales Exceptions does."} />
                     <Row label="Voids / Write-offs" value={`${num(snapshot.pos.voidsWriteoffsTotal?.count)} — ${fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}`}
                       color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red-text)' : undefined}
                       tip="Void = cancelled before payment (e.g. a wrong order). Write-off = billed but never collected. Both are lost potential revenue." />

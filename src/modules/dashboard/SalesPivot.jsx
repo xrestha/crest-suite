@@ -2,6 +2,8 @@ import { npr } from '../../shared/nepalMoney'
 import { useNavigate } from 'react-router-dom'
 import PivotTable from '../../components/PivotTable'
 import { useSalesPivotData } from './useSalesPivotData'
+import { BS_MONTHS, formatBsDay } from '../../utils/bsCalendar'
+import { nepalBs, nepalTime } from '../../shared/nepalTime'
 
 const fmtNpr = npr
 
@@ -18,14 +20,42 @@ const fmtNpr = npr
 // bulk-excluding subtotal. On a client entering sales in bulk, or with sales earlier in the month
 // than the last 7 active days, it read far below the period's actual revenue and did not tie to
 // Sales Entry's Period Summary. Totals are now computed from ALL rows and passed in explicitly.
-export default function SalesPivot({ activePeriod, posEnabled, title = 'Sales by Category' }) {
+//
+// S814 4d (REPORTS-9): the two cards say what they count. The POS card is the till's bills after
+// discount with VAT, a credit note a minus on the day it was issued (the Sales Report's rule), and
+// how fresh it is; the manual card is hand-entered sales only, before VAT. Day columns name the
+// month ("11th Ashwin"), as every period-scoped day column does.
+const cardTitleStyle = { fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }
+const subStyle = { color: 'var(--theme-text3)', fontSize: 11, margin: '2px 0 0', lineHeight: 1.4 }
+
+export default function SalesPivot({ activePeriod, posEnabled, title, refreshKey = 0 }) {
   const navigate = useNavigate()
-  const { rows, loading, error } = useSalesPivotData({ activePeriod, posEnabled })
+  const { rows, loading, error, asOf, refreshError } = useSalesPivotData({ activePeriod, posEnabled, refreshKey })
+
+  const monthLabel = activePeriod ? `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}` : ''
+  const heading = title || (posEnabled ? `POS sales by category${monthLabel ? ` — ${monthLabel}` : ''}` : 'Sales by Category')
+  const basis = posEnabled
+    ? `after discount, VAT included · credit notes on their issue day${asOf ? ` · as of ${nepalTime(asOf)}` : ''}`
+    : 'hand-entered (Sales Entry), after discount, before VAT'
+  // The open month can run past its own end (nobody has closed it yet); the till's bills from today
+  // then belong to a month this card is not showing, and the card must say so rather than look short.
+  const today = nepalBs(Date.now())
+  const notThisMonth = posEnabled && activePeriod && today
+    && (today.year !== activePeriod.bs_year || today.month !== activePeriod.bs_month)
+  const header = (
+    <div style={{ marginBottom: 10 }}>
+      <h3 style={cardTitleStyle}>{heading}</h3>
+      <p style={subStyle}>{basis}</p>
+      {notThisMonth && (
+        <p style={subStyle}>{BS_MONTHS[activePeriod.bs_month - 1]} is still the open month; today&apos;s bills are not in it.</p>
+      )}
+    </div>
+  )
 
   if (loading) {
     return (
       <div className="card" style={{ padding: '14px 16px' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>{title}</div>
+        {header}
         <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
       </div>
     )
@@ -36,7 +66,7 @@ export default function SalesPivot({ activePeriod, posEnabled, title = 'Sales by
   if (error) {
     return (
       <div className="card" style={{ padding: '14px 16px' }} role="alert">
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{title}</div>
+        {header}
         <p style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: 0 }}>
           Couldn't load this breakdown — nothing here is a real figure. Reload the page.
         </p>
@@ -50,8 +80,10 @@ export default function SalesPivot({ activePeriod, posEnabled, title = 'Sales by
   if (rows.length === 0) {
     return (
       <div className="card" style={{ padding: '14px 16px' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{title}</div>
-        <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: 0 }}>No sales recorded yet this period.</p>
+        {header}
+        <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: 0 }}>
+          {posEnabled ? 'No till sales yet this period.' : 'No hand-entered sales this period.'}
+        </p>
       </div>
     )
   }
@@ -80,26 +112,31 @@ export default function SalesPivot({ activePeriod, posEnabled, title = 'Sales by
   })
 
   const pivotRows = topCategories.map(c => ({ key: c, label: c }))
-  const pivotCols = recentDays.map(d => ({ key: d, label: String(d) }))
+  const pivotCols = recentDays.map(d => ({ key: d, label: formatBsDay(d, activePeriod?.bs_month) || String(d) }))
 
   // Spelled out whenever the Period column genuinely covers more than the visible cells, so the
   // rows not adding up across is read as scope rather than as a broken total.
   const scopeNotes = []
   if (olderDaysShown) scopeNotes.push(`day columns show the latest ${recentDays.length} days with sales`)
   if (hasBulk) scopeNotes.push('bulk entries have no day column')
-  if (hiddenTotal > 0) scopeNotes.push(`${hiddenCategories.length} smaller categor${hiddenCategories.length === 1 ? 'y' : 'ies'} (${fmtNpr(hiddenTotal)}) not listed`)
+  if (hiddenTotal !== 0) scopeNotes.push(`${hiddenCategories.length} smaller categor${hiddenCategories.length === 1 ? 'y' : 'ies'} (${fmtNpr(hiddenTotal)}) not listed`)
 
   return (
     <div className="card" style={{ padding: '14px 16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{title}</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        {header}
         <button
-          className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }}
+          className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px', flexShrink: 0 }}
           onClick={() => navigate(posEnabled ? '/pos/sales-report' : '/sales')}
         >
           View Full Report →
         </button>
       </div>
+      {refreshError && (
+        <p role="status" style={{ color: 'var(--theme-amber-text)', fontSize: 11, margin: '0 0 8px' }}>
+          Couldn&apos;t refresh — these are the figures from {nepalTime(asOf)}.
+        </p>
+      )}
       <PivotTable
         rows={pivotRows} cols={pivotCols} values={values}
         rowHeader="Category" formatValue={fmtNpr}

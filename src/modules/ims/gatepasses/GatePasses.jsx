@@ -134,7 +134,7 @@ export default function GatePasses() {
     let p = results[0].data || []
 
     // Sweep-close any pass still "open" from a previous gate-pass day — same reasoning/pattern as
-    // PosParkingSlips.jsx's loadSlips(): no server cron in this project, so this runs the moment
+    // PosParkingSlips.jsx's loadOpen(): no server cron in this project, so this runs the moment
     // the page is next opened. Never deletes data, just flags auto_closed so it stays
     // distinguishable from a real staff-confirmed Mark Exited. A voided pass is not 'open', so it
     // is never swept.

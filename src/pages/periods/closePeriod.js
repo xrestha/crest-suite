@@ -4,6 +4,7 @@ import { withTimeout } from '../../utils/withTimeout'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
+import { loadImsWaiting, waitingForPeriod, countPhrase } from '../../modules/pos/orders/posImsWaiting'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 
 /**
@@ -17,7 +18,8 @@ import { BS_MONTHS } from '../../utils/bsCalendar'
  * guide had noticed, and taught the workaround ("always close from Periods") instead of the fix.
  *
  * Every close now goes through `performPeriodClose()`, and every close dialog gets its notes from
- * the two preflights here, so the sentence and the write cannot disagree again. The Dashboard's
+ * the preflights here (closing count, payroll with HR on, and since S809 4e waiting till bills with
+ * POS on), so the sentence and the write cannot disagree again. The Dashboard's
  * ConfirmModal, the client's Close on Periods and the admin's two closes are four ASKS with four
  * different framings; they share one COMMIT.
  *
@@ -164,6 +166,48 @@ export function deferredReportNote(monthLabel) {
   return {
     danger: false, warn: false,
     text: `${monthLabel}'s Owner Report will be made when the Owner first opens it, not now — it holds figures only the Owner's login can see. It will show ${monthLabel}'s figures as they stand on the day the Owner opens it.`,
+  }
+}
+
+/**
+ * How many of this month's till bills and credit notes still wait for Inventory (S809 4e,
+ * IMS-HANDOFF-5), for a client with POS on — the caller decides that. Read through
+ * pos_ims_waiting_counts (DEFINER, numbers only), because an IMS login cannot read till bills and a
+ * count it made itself would read 0 (posImsWaiting.js). Bounded at 10s like the other preflights.
+ *
+ * @returns {Promise<{bills: number, notes: number}|null>} null when the check itself failed.
+ */
+export async function tillWaitingPreflight(periodId, clientId) {
+  const { rows, error } = await loadImsWaiting(supabase, clientId, { timeoutMs: 10000 })
+  if (error || !rows) return null
+  return waitingForPeriod(rows, periodId)
+}
+
+/**
+ * The close dialog's sentence about waiting till bills (S809 4e, owner decision D4: warn, never
+ * block). Amber when any wait, because the month's sales and stock use are short until they are
+ * posted; never `danger`, because posting them later is possible. Who is told to post depends on who
+ * is closing (`closerPosts`, i.e. closerMakesReport): the Owner and admin post from Periods or the
+ * till's floor; an IMS supervisor cannot post them at all, and once the month is closed only the
+ * Owner can (ims_closed_period_guard).
+ *
+ * @param {{bills: number, notes: number}|null} pre - null when the preflight failed.
+ * @param {string} monthLabel - e.g. "Bhadra 2083".
+ * @returns {{danger: boolean, warn: boolean, text: string}}
+ */
+export function tillWaitingNote(pre, monthLabel, { closerPosts = false } = {}) {
+  if (!pre) return { danger: false, warn: false, text: `Couldn't check whether any of ${monthLabel}'s till bills are still waiting for Inventory.` }
+  const bills = Number(pre.bills) || 0
+  const notes = Number(pre.notes) || 0
+  if (bills + notes === 0) return { danger: false, warn: false, text: `Every till bill and credit note from ${monthLabel} is in Inventory.` }
+  const one = bills + notes === 1
+  const what = `${countPhrase(bills, notes)} from ${monthLabel} ${one ? 'is' : 'are'} not in Inventory yet`
+  const them = one ? 'it' : 'them'
+  return {
+    danger: false, warn: true,
+    text: closerPosts
+      ? `${what}, so the month's sales and stock use are short, and so is the Monthly Report this close freezes. Post ${them} first: Periods → Post POS bills to Inventory, or Post to Inventory on the till's floor. Posted after the close, the frozen report needs Regenerate Snapshot.`
+      : `${what}. Ask the Owner, or a POS manager (Post to Inventory on the till's floor), to post ${them} before you close: once ${monthLabel} is closed, only the Owner can.`,
   }
 }
 

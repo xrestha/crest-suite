@@ -15,7 +15,8 @@ import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
-import { computeRecipeCosts } from '../../../utils/recipeCost'
+import { posFoodCosts } from '../orders/posRecipeBook'
+import { forgoneMenuValue } from './salesReportMath'
 import { billVatRegistered } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { CLOSE_TYPE_BADGE } from '../posSignals'
@@ -128,11 +129,13 @@ export default function PosExceptionReport() {
       const compRecipeIds = [...new Set((items || [])
         .filter(i => needItems.find(o => o.id === i.order_id)?.close_type === 'writeoff')
         .map(i => i.recipe_id).filter(Boolean))]
-      // computeRecipeCosts THROWS on a failed read (S695). Unwrapped, the rejection escaped load()
-      // and `loading` never went false — the page sat on "Loading…" for good (S754).
+      // Food cost through the till's recipe book (S814 4d, `pos_recipe_book`), the read the Z-report
+      // and the comp slips use, so a comp is costed the same here as on the slip it printed. It
+      // THROWS on a failed or refused read (S695). Unwrapped, the rejection escaped load() and
+      // `loading` never went false — the page sat on "Loading…" for good (S754).
       if (compRecipeIds.length > 0) {
         try {
-          costMap = await computeRecipeCosts(supabase, compRecipeIds)
+          costMap = await posFoodCosts(supabase, clientId, compRecipeIds)
         } catch (err) {
           if (!loadReq.isCurrent(reqKey)) return
           setLoadError(err); setRows([]); setLoading(false); return
@@ -146,12 +149,12 @@ export default function PosExceptionReport() {
       let amount = 0
       let potentialValue = 0
       if (type === 'discount') amount = o.discount_amount || 0
-      if (type === 'void')     amount = (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
+      if (type === 'void')     amount = forgoneMenuValue(itemsByOrder[o.id])
       if (type === 'writeoff') {
         amount = (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)
         // What this would have sold for at menu price, ex-VAT, had it been a normal sale — same
         // formula as Void's forgone value, just for the Comp bucket instead.
-        potentialValue = (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
+        potentialValue = forgoneMenuValue(itemsByOrder[o.id])
       }
       return {
         ...o, type, amount, potentialValue,
@@ -177,7 +180,7 @@ export default function PosExceptionReport() {
       let itemCostMap = {}
       if (recipeIds.length > 0) {
         try {
-          itemCostMap = await computeRecipeCosts(supabase, recipeIds)
+          itemCostMap = await posFoodCosts(supabase, clientId, recipeIds)
         } catch (err) {
           if (!loadReq.isCurrent(reqKey)) return
           setLoadError(err); setRows([]); setLoading(false); return
@@ -204,7 +207,7 @@ export default function PosExceptionReport() {
           parentVatRegistered: parentById[i.order_id]?.vat_registered, // S809 2c: TI or PB as issued
         }
         g.amount += i.qty * (itemCostMap[i.recipe_id] || 0)
-        g.potentialValue += i.qty * i.unit_price
+        g.potentialValue += forgoneMenuValue([i])
       }
       itemCompRows = Object.values(groups)
     }

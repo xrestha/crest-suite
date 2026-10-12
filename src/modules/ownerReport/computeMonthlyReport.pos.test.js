@@ -122,4 +122,12 @@ describe('the reads behind it', () => {
   test('the schema version moved with the meaning', () => {
     expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(15)
   })
+  // S814 4d (REPORTS-7, owner decision D1): one basis for a comp's lost sale, before VAT, as on
+  // Sales Exceptions; 2 × 500 at 13% is 1,000 (salesReportMath.test.js pins the helper).
+  test('Comped Bills potential value is menu price before VAT, and v16 marks it', () => {
+    expect(pos).toMatch(/compedPotentialValue \+= forgoneMenuValue\(\[i\]\)/)
+    expect(pos).not.toMatch(/1 \+ \(i\.vat_rate/)
+    expect(pos).toMatch(/compedBillsTotal: \{[^}]*basis: 'ex_vat'/)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(16)
+  })
 })

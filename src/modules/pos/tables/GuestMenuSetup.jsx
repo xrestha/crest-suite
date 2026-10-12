@@ -7,13 +7,15 @@ import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
+import { isNetworkError } from '../../../shared/errorText'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import {
   DISH_PHOTO_BUCKET, PHOTO_ACCEPT, PHOTO_EXT,
   photoRefusal, versionedUrl, objectPathFromUrl, downscalePhoto, storageRefusal,
 } from '../../ims/recipes/dishPhoto'
 import { tidyName, orderCategories, reorderCategoryList } from '../guestmenu/guestMenuHelpers'
+import { logoSaveOutcome } from './guestLogoSave'
 
 // POS Setup → Guest Menu (S767). What a guest sees at the top of every table's QR menu, and the
 // order of its sections.
@@ -29,6 +31,8 @@ import { tidyName, orderCategories, reorderCategoryList } from '../guestmenu/gue
 // Content-Security-Policy already loads from it — a separate bucket would have needed both again. As
 // with a dish photo: never upsert (a new path per upload), write the row before deleting the old
 // file, and remove the new file if the row write is refused, so the row can never point at nothing.
+// S814 (GUEST-8): only if it is REFUSED. A save that got no answer may still land, so the page reads
+// the stored logo back (guestLogoSave.js) and deletes nothing it cannot prove is unused.
 //
 // SECTION ORDER is the Recipe Categories list (owner decision) — the same `settings.recipe_categories`
 // Settings → Recipe Categories edits. It is offered here too because that tab needs Recipe Costing,
@@ -38,6 +42,10 @@ import { tidyName, orderCategories, reorderCategoryList } from '../guestmenu/gue
 const LOGO_MAX_SIDE = 512
 const UPLOAD_TIMEOUT_MS = 60000
 const WRITE_TIMEOUT_MS = 20000
+const READBACK_MS = 10000
+
+// A write that got no answer: timed out, or the connection dropped. It may have landed.
+const noAnswer = err => isTimeout(err) || isNetworkError(err)
 
 function describe(err, lead = '') {
   const own = storageRefusal(err)
@@ -71,6 +79,7 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
   const [nameMsg, setNameMsg] = useState('')
   const [nameError, setNameError] = useState('')
   const [logoBusy, setLogoBusy] = useState('')
+  const [logoMsg, setLogoMsg] = useState('')
   const [logoError, setLogoError] = useState('')
   const [orderBusy, setOrderBusy] = useState(false)
   const [orderMsg, setOrderMsg] = useState('')
@@ -80,7 +89,7 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
     if (!clientId) return undefined
     let cancelled = false
     setLoading(true); setLoadError(null)
-    setNameMsg(''); setNameError(''); setLogoError(''); setOrderMsg(''); setOrderError('')
+    setNameMsg(''); setNameError(''); setLogoMsg(''); setLogoError(''); setOrderMsg(''); setOrderError('')
     Promise.all([
       supabase.from('settings').select('id, guest_menu_name, guest_menu_logo_url, recipe_categories').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).maybeSingle(),
@@ -114,23 +123,41 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
   // A settings write as a PATCH of exactly the columns this card owns (settings-row.md). A failed
   // existing-row read never falls through into INSERT (S613), and a refused RLS update — 0 rows and
   // no error — is reported as a refusal rather than a save.
+  //
+  // S814 (GUEST-8): every step is bounded by settleWithin, so a slow connection answers
+  // `{ error }` instead of rejecting past the callers (withTimeout's rejection reached neither
+  // handleFile's nor the Remove dialog's code, and the page said nothing). Returns `{ error, sent }`:
+  // `sent` is false only when the write itself never went out (the existing-row read failed), which
+  // is the one case where "not saved" needs no read-back.
   async function writeSettings(patch) {
     let id = settingsId
     if (!id) {
-      const { data: existing, error: readErr } = await supabase.from('settings').select('id').eq('client_id', clientId).maybeSingle()
-      if (readErr) return readErr
+      const { data: existing, error: readErr } = await settleWithin(
+        supabase.from('settings').select('id').eq('client_id', clientId).maybeSingle(), WRITE_TIMEOUT_MS, 'Reading the settings')
+      if (readErr) return { error: readErr, sent: false }
       id = existing?.id || null
     }
     if (id) {
-      const { data, error } = await withTimeout(supabase.from('settings').update(patch).eq('id', id).select('id'), WRITE_TIMEOUT_MS, 'Saving')
-      if (error) return error
-      if (!data?.length) return { message: 'settings: update matched no row (refused)' }
-      return null
+      const { data, error } = await settleWithin(supabase.from('settings').update(patch).eq('id', id).select('id'), WRITE_TIMEOUT_MS, 'Saving')
+      if (error) return { error, sent: true }
+      if (!data?.length) return { error: { message: 'settings: update matched no row (refused)' }, sent: true }
+      return { error: null, sent: true }
     }
-    const { data, error } = await withTimeout(supabase.from('settings').insert({ client_id: clientId, ...patch }).select('id'), WRITE_TIMEOUT_MS, 'Saving')
-    if (error) return error
+    const { data, error } = await settleWithin(supabase.from('settings').insert({ client_id: clientId, ...patch }).select('id'), WRITE_TIMEOUT_MS, 'Saving')
+    if (error) return { error, sent: true }
     if (data?.[0]?.id) setSettingsId(data[0].id)
-    return null
+    return { error: null, sent: true }
+  }
+  const lostAnswer = res => !!res.error && res.sent && noAnswer(res.error)
+
+  // The logo guests see right now, read after a save whose answer was lost. `undefined` when this read
+  // failed too — not the same as null, which is "no logo".
+  async function readStoredLogo() {
+    const { data, error } = await settleWithin(
+      supabase.from('settings').select('id, guest_menu_logo_url').eq('client_id', clientId).maybeSingle(), READBACK_MS, 'Checking the logo')
+    if (error) return undefined
+    if (data?.id && !settingsId) setSettingsId(data.id)
+    return data?.guest_menu_logo_url ?? null
   }
 
   const fallbackName = tidyName(accountName) || 'your account name'
@@ -141,8 +168,12 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
     if (!canBrand || nameBusy) return
     setNameBusy(true); setNameMsg(''); setNameError('')
     try {
-      const err = await writeSettings({ guest_menu_name: trimmed || null })
-      if (err) { setNameError(describe(err, 'The name was not saved, so guests still see the previous one. ')); return }
+      const res = await writeSettings({ guest_menu_name: trimmed || null })
+      if (lostAnswer(res)) {
+        setNameError({ text: 'The name may not have saved: the answer did not arrive. Reload this page in a minute to see which name guests see.', detail: describe(res.error).detail })
+        return
+      }
+      if (res.error) { setNameError(describe(res.error, 'The name was not saved, so guests still see the previous one. ')); return }
       setStoredName(trimmed)
       setName(trimmed)
       setNameMsg(trimmed ? 'Saved. Guests now see this name.' : `Saved. Guests now see “${fallbackName}”.`)
@@ -169,7 +200,7 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
   async function handleFile(file) {
     if (fileRef.current) fileRef.current.value = ''
     if (!file || !canBrand) return
-    setLogoError('')
+    setLogoMsg(''); setLogoError('')
     if (!PHOTO_EXT[file.type]) { setLogoError('That file is not a JPG, PNG or WebP image. Save the logo as one of those and try again.'); return }
     setLogoBusy('upload')
     try {
@@ -190,35 +221,83 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
       if (upErr) { setLogoError(describe(upErr, 'The logo was not uploaded. ')); return }
       const { data: { publicUrl } } = bucket().getPublicUrl(path)
       const url = versionedUrl(publicUrl)
+      const before = logoUrl || null
       const previous = ownPath
-      const rowErr = await writeSettings({ guest_menu_logo_url: url })
-      if (rowErr) {
+      const res = await writeSettings({ guest_menu_logo_url: url })
+      const showSaved = async text => {
+        setLogoUrl(url)
+        setLogoFailed(false)
+        setLogoMsg(text)
+        if (previous && previous !== path) await removeObjectQuietly(previous)
+      }
+      if (!res.error) { await showSaved('Saved. Guests now see this logo.'); return }
+      if (!lostAnswer(res)) {
+        // The server's own refusal: the row still names the old file, so the new one can go.
         await removeObjectQuietly(path)
-        setLogoError(describe(rowErr, 'The logo uploaded, but the menu could not be updated, so guests still see the previous one. '))
+        setLogoError(describe(res.error, 'The logo uploaded, but the menu could not be updated, so guests still see the previous one. '))
         return
       }
-      setLogoUrl(url)
-      setLogoFailed(false)
-      if (previous && previous !== path) await removeObjectQuietly(previous)
+      // No answer. Read the row back; until it is known to name the new file, keep both files.
+      const detail = describe(res.error).detail
+      const stored = await readStoredLogo()
+      const outcome = logoSaveOutcome({ wanted: url, before, stored })
+      if (outcome === 'landed') { await showSaved('Saved. The connection was slow, but guests now see this logo.'); return }
+      if (outcome === 'pending') {
+        setLogoError({ text: `The logo uploaded, but saving it to the menu did not answer in time. When this page checked, guests still saw ${before ? 'the previous logo' : 'no logo'} — the save may still go through. Reload this page in a minute before uploading it again.`, detail })
+        return
+      }
+      if (outcome === 'elsewhere') {
+        setLogoUrl(stored || '')
+        setLogoFailed(false)
+        setLogoError({ text: 'The logo uploaded, but saving it to the menu did not answer in time, and when this page checked, the menu had a logo saved from another device — that is the one shown here now. Reload this page in a minute before uploading again.', detail })
+        return
+      }
+      setLogoError({ text: 'The logo uploaded, but saving it to the menu did not answer in time, and neither did the check after it, so it is not known which logo guests see. Reload this page in a minute to find out.', detail })
+    } catch (e) {
+      setLogoError(describe(e, 'It is not known whether the logo saved. Reload this page in a minute to see which logo guests see. '))
     } finally {
       setLogoBusy('')
     }
   }
 
   function removeLogo() {
-    setLogoError('')
+    setLogoMsg(''); setLogoError('')
     ask({
       title: 'Remove the logo from the guest menu?',
       confirmLabel: 'Remove logo', danger: true, busyLabel: 'Removing…',
       body: <p style={{ margin: 0 }}>Guests will see the restaurant name without a logo. This takes effect straight away.</p>,
+      // Never rejects: useConfirm has no catch of its own, so a rejection here was a dialog that
+      // closed and a page that said nothing (S814, GUEST-8).
       run: async () => {
         setLogoBusy('remove')
-        try {
-          const err = await writeSettings({ guest_menu_logo_url: null })
-          if (err) { setLogoError(describe(err, 'The logo is still on the menu — the change did not save. ')); return }
-          const path = ownPath
+        const path = ownPath
+        const before = logoUrl || null
+        const showRemoved = async text => {
           setLogoUrl('')
+          setLogoMsg(text)
           await removeObjectQuietly(path)
+        }
+        try {
+          const res = await writeSettings({ guest_menu_logo_url: null })
+          if (!res.error) { await showRemoved('Removed. Guests now see the menu without a logo.'); return }
+          if (!lostAnswer(res)) { setLogoError(describe(res.error, 'The logo is still on the menu — the change did not save. ')); return }
+          const detail = describe(res.error).detail
+          const stored = await readStoredLogo()
+          const outcome = logoSaveOutcome({ wanted: null, before, stored })
+          if (outcome === 'landed') { await showRemoved('Removed. The connection was slow, but guests no longer see a logo.'); return }
+          if (outcome === 'pending') {
+            setLogoError({ text: 'Removing the logo did not answer in time. When this page checked, guests still saw the logo — the removal may still go through. Reload this page in a minute before removing it again.', detail })
+            return
+          }
+          if (outcome === 'elsewhere') {
+            setLogoUrl(stored || '')
+            setLogoFailed(false)
+            setLogoError({ text: 'Removing the logo did not answer in time, and when this page checked, the menu had a logo saved from another device — that is the one shown here now. Reload this page in a minute before changing it again.', detail })
+            return
+          }
+          setLogoError({ text: 'Removing the logo did not answer in time, and neither did the check after it, so it is not known which logo guests see. Reload this page in a minute to find out.', detail })
+        } catch (e) {
+          setLogoError(describe(e, 'It is not known whether the logo was removed. Reload this page in a minute to see which logo guests see. '))
         } finally {
           setLogoBusy('')
         }
@@ -244,8 +323,12 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
     try {
       const base = Array.isArray(storedCategories) && storedCategories.length > 0 ? storedCategories : DEFAULT_RECIPE_CATS
       const next = reorderCategoryList(base, menuCategories)
-      const err = await writeSettings({ recipe_categories: next })
-      if (err) { setOrderError(describe(err, 'The section order was not saved, so the menu keeps its previous order. ')); return }
+      const res = await writeSettings({ recipe_categories: next })
+      if (lostAnswer(res)) {
+        setOrderError({ text: 'The section order may not have saved: the answer did not arrive. Reload this page in a minute to see the order guests see.', detail: describe(res.error).detail })
+        return
+      }
+      if (res.error) { setOrderError(describe(res.error, 'The section order was not saved, so the menu keeps its previous order. ')); return }
       setStoredCategories(next)
       setSavedOrder(menuCategories)
       setOrderMsg('Saved. The guest menu shows its sections in this order.')
@@ -367,6 +450,7 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
               Uploading or removing the logo changes the menu straight away.
             </div>
           )}
+          {logoMsg && <p role="status" style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-green-text)' }}>{logoMsg}</p>}
           <ActionError error={logoError} />
         </div>
       </section>

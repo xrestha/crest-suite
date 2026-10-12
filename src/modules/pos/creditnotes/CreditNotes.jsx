@@ -349,8 +349,9 @@ export default function CreditNotes() {
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                           <span style={{ whiteSpace: 'nowrap' }}>{cnNo}</span>
                           {/* `in n` so a bundle deployed ahead of migration 20260914140200 (no such
-                              column, select('*')) marks nothing rather than every note (S747). */}
-                          {'ims_posted_at' in n && n.ims_posted_at == null && (
+                              column, select('*')) marks nothing rather than every note (S747). An
+                              outlet without Inventory owes it nothing, so nothing waits (S809 4e, D7). */}
+                          {imsEnabled && 'ims_posted_at' in n && n.ims_posted_at == null && (
                             <Tip width={320} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
                               text="This note has not yet taken its bill's revenue back out of Inventory, for one of four reasons: its month had not been started in Inventory, its month was already closed, its bill was not in Inventory yet (the note waits for it), or the save failed. While its month is open, a POS manager or the Owner presses Post to Inventory on the Orders floor (it posts the bill first, then the note). A closed month only the Owner (or Crest support) can post into, from Periods → Post POS bills to Inventory.">
                               <span className="badge-amber">Not in Inventory</span>

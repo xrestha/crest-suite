@@ -751,7 +751,8 @@ under-counts (36 against a true 46 on its fixture).
 
 **A `pos_credit_restock` row (S809 2e) DOES deplete, negatively**, where `pos_credit` never does: a
 Credit Note that said its bill's food was not served takes those plates back out of theoretical usage
-(`isRestockSource`), and Stock Movements subtracts its positive put-back rows from Value Depleted.
+(`isRestockSource`), and Stock Movements nets every row by its sign (`movementFigures`, S814, owner D5): a put-back row,
+and a sale whose choices added stock (flagged "Added stock"), come off Value Depleted.
 
 **Generally: when a helper's correctness depends on the SHAPE of what it is handed — one period, one
 day, one bill — say so in its own doc comment, because the next caller will widen the window and

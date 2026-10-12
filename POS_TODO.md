@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S809 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, wave 1 (4a, 4b, 4c) shipped; stages 5–7 outlined)
+Last updated: 2026-10-12 (S814 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped; stages 5–7 outlined)
 
 ---
 
@@ -65,15 +65,13 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (46 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8)
+### P3 (29 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8; GUEST-7 closed as accepted, Q21 (c))
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 | CUSTOMERS-PARKING-9 | An unpaid Credit bill earns spendable points at close, though the guide says points follow payment | 4 | Q19 | yes |
 | CUSTOMERS-PARKING-10 | Nothing shows what points are worth per bill, and changing the point value re-prices every balance unwarned (BLOOM CAFE's test schemes give back 100% and 400%) | 4 | — | no |
 | CUSTOMERS-PARKING-11 | The payment window promises points to customers who will earn none | 4 | — | no |
-| CUSTOMERS-PARKING-14 | A blocked pop-up loses the parking token silently; the guest's only token reads "REPRINT #2" | 4 | — | no |
-| CUSTOMERS-PARKING-15 | Parking re-reads every slip ever issued on each open and Mark Exited | 4 | — | no |
 | CUSTOMIZATION-4 | The till's price for a size-scaled topping is a paisa off the server's on about 1 price in 25 | 4 | — | no |
 | CUSTOMIZATION-5 | A "No …" choice uses up a free pick and a place under the maximum | 4 | Q20 | yes |
 | CUSTOMIZATION-6 | Sizes are stored as a difference from the dish price, so a dish price rise silently raises every size | 4 | — | yes |
@@ -92,29 +90,14 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | FLOOR-KITCHEN-7 | A table can be marked Inactive with an open bill; the floor then refuses it silently | 4 | — | yes |
 | FLOOR-KITCHEN-8 | Two tables can share a name, and a mid-meal rename splits one order's tickets | 4 | — | yes |
 | FLOOR-KITCHEN-9 | A KDS reloaded by the browser makes no sound until touched, and says nothing | 4 | — | no |
-| GUEST-7 | Anyone who ever scanned a table's QR can order to it from anywhere, for as long as the table exists | 4 | Q21 | yes |
-| GUEST-8 | Saving the guest-menu logo on a slow connection can end with no message | 4 | — | no |
-| IMS-HANDOFF-5 | Ending a month never asks whether its till bills reached Inventory | 4 | — | no |
-| IMS-HANDOFF-6 | Stock Movements shows a till sale that added stock as one that took it away (live at BLOOM CAFE) | 4 | — | no |
-| IMS-HANDOFF-7 | The Inventory Dashboard's manual Sales by Category and Sales Mix count a credit note's reversal; Sales Mix subtracts it twice | 4 | — | no |
-| IMS-HANDOFF-8 | A till bill is filed in Inventory under the tablet's date at post time, not its close time (KNOWN, IMS_TODO) | 4 | — | no |
-| IMS-HANDOFF-9 | A till on a client without IMS writes Inventory rows in month one, then says every bill "was not posted" | 4 | — | no |
-| IMS-HANDOFF-10 | Inventory takes a closing bill's lines from the till's screen, not the stored bill | 4 | — | no |
 | ORDER-FLOW-17 | A cart line's kitchen timer is matched by dish, not line | 4 | — | no |
 | ORDER-FLOW-19 | The order-delete pulled-item record groups by dish, not line | 4 | — | yes |
-| REPORTS-5 | The POS Dashboard and Home drop a credited bill from its own day and never subtract the note | 4 | Q22 | no |
-| REPORTS-6 | Delivery Partners' Outstanding goes negative, or counts a cancelled bill, across date ranges | 4 | — | no |
-| REPORTS-7 | Comped Bills values a comp with VAT, Exceptions without: 13% apart | 4 | — | no |
-| REPORTS-9 | POS Sales by Category names no month or basis, follows the open Inventory month and never refreshes. Its arithmetic (credited bills dropped, bill discount ignored, days by the viewer's clock, `useSalesPivotData.js:67-111`) also belongs here: REPORTS and IMS-HANDOFF each handed it to the other | 4 | — | no |
-| REPORTS-10 | Covers' RevPASH divides by inactive tables' seats | 4 | — | no |
-| REPORTS-11 | Between midnight and 6 AM the dashboards drop tickets the KDS still shows late | 4 | — | no |
 | RESERVATIONS-6 | "Clear every occupied table" with a booking-seated table deletes lines, then fails | 4 | — | no |
 | RESERVATIONS-7 | A booking cancelled by mistake can't be restored before its day, though the dialog says it can | 4 | Q23 | no |
 | RESERVATIONS-8 | At midnight a late booking still in play vanishes from the floor and the default views | 4 | — | no |
 | RESERVATIONS-9 | An unanswered online request never expires, and that phone stays blocked | 4 | — | yes |
 | RESERVATIONS-10 | Seating from Reservations onto a table another device just opened puts the host on that bill | 4 | — | no |
 | RESERVATIONS-11 | A booking whose table is deleted or made inactive is flagged nowhere | 4 | — | no |
-| SHIFTS-5 | The Z-report's Voided Value includes VAT; Exceptions excludes it | 4 | — | no |
 
 ### Gaps (2 open, both P3; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l, GAP-OUTLETS-2 in 2h, GAP-OUTLETS-3 in 3n)
 
@@ -159,7 +142,7 @@ from the recommendation:
 - **Q19 (c):** a Credit (tab) bill still earns its points at the close, but they cannot be spent until the
   bill is settled. The guide is corrected to say so.
 - **Q21 (c):** no revocable table QR. Staff Accept stays the check on a guest order; GUEST-7 closes as
-  accepted, with that reasoning moved to `POS_DECISIONS.md` when stage 4 ships.
+  accepted, with that reasoning moved to `POS_DECISIONS.md` in 4f (S814).
 
 **Stage 1**
 
@@ -366,9 +349,9 @@ that file.
 | 4a ✅ | SHIFTS-6, -8, -9, -10, -11 [a server `no_open_shift` keeps the cached shift id] (shipped 2026-10-12, app only, crest-v429) | none | — |
 | 4b ✅ | CHECKOUT-11, -13, -14, -15, ACCESS-10 [`viewPosBill.js`' dropped name-read error; Billing station's loyalty note and Recent Bills way; Billing "Open Orders" unsaved-changes guard] (shipped 2026-10-12, app only, crest-v429; ACCESS-10 as wording only, owner) | none | — |
 | 4c ✅ | CREDIT-NOTES-7, -8, -9, -10, DOCS-8 [Credit Note Book reprint labels from page-open list, app half] (shipped 2026-10-12, app only, crest-v429) | none | — |
-| 4d | REPORTS-5, -6, -7, -9, -10, -11, SHIFTS-5 [B4 Covers Avg Turn Time; Manual Sales by Category counting `pos_credit`; Sales Report / Exceptions comp food cost] | none | Q22 |
-| 4e | IMS-HANDOFF-5, -6, -7, -8, -9, -10 [`imsPostWarning` never decreases; `writeSalesEntries` links by screen `orderId`] | none | — |
-| 4f | CUSTOMERS-PARKING-14, -15, GUEST-8; GUEST-7 closed as accepted [Guest Menu Preview wording] | none | Q21 |
+| 4d ✅ | REPORTS-5, -6, -7, -9, -10, -11, SHIFTS-5 [B4 Covers Avg Turn Time; Manual Sales by Category counting `pos_credit`; Sales Report / Exceptions comp food cost] (shipped 2026-10-12, app only, crest-v430; Owner Report schema 16; owner D1–D3) | none | Q22 |
+| 4e ✅ | IMS-HANDOFF-5, -6, -7, -8, -9, -10 [`imsPostWarning` never decreases; `writeSalesEntries` links by screen `orderId`] (shipped 2026-10-12, app only, crest-v430; owner D4–D7) | none | — |
+| 4f ✅ | CUSTOMERS-PARKING-14, -15, GUEST-8; GUEST-7 closed as accepted [Guest Menu Preview wording] (shipped 2026-10-12, app only, crest-v430; owner D8–D10) | none | Q21 |
 | 4g | CUSTOMERS-PARKING-9, -10, -11; owner additions: one-tap "add the points this bill earned", "Move points" [full points history; "+977" bill-history search] | yes | Q19 |
 | 4h | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note | yes | Q20 |
 | 4i | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] | yes | — |
@@ -376,7 +359,7 @@ that file.
 | 4k | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT] | yes | — |
 | 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
 
-Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f. Then 4g–4k one at a time, 4l last.
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last.
 
 **After stage 4 (owner approved 2026-10-12):**
 
@@ -453,8 +436,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   instant can still share a number until the server keeps the counter (stage 5).
 - ~~Kitchen stage times (`started_at`/`ready_at`/`served_at`) are still tablet-supplied, so prep times
   can be shaded (1d).~~ Fixed in 3d: the server stamps each on entering its stage.
-- Admin → Guest Menu Preview quotes "This menu isn't available right now"; the guest page says "This menu
-  isn't available" (1h).
+- ~~Admin → Guest Menu Preview quotes "This menu isn't available right now"; the guest page says "This menu
+  isn't available" (1h).~~ Fixed in 4f: both read `MENU_UNAVAILABLE` / `ORDERING_OFF_TEXT`.
 - ~~One-line pulls-forward, now that their functions were rebuilt: SHIFTS-7 (`NEW.closed_at := now()` in
   `pos_shifts_guard`) and SHIFTS-1's database half (`FOR SHARE` on the shift read in
   `pos_cash_movements_guard`) (1l).~~ Both shipped in 2b.
@@ -515,19 +498,21 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     prints under its old setting while the bill is stamped with the new one (2c).
   - `openBilling` and `openCompTab` never catch a failed cost read, so the comp cost silently shows
     NPR 0 (S695 says callers must) (2f).
-  - `imsPostWarning` is a local counter that never goes down: a timed-out post that later lands (now
-    marked by the database) still shows "1 not posted" until the page reloads (2f).
-  - `writeSalesEntries` links rows by the screen's `orderId`, not `updated.id`; equal on every path that
-    posts today, but fragile (2f).
-  - Same cause as IMS-HANDOFF-3, not switched: Sales Report's and Sales Exceptions' comp food cost (one
-    line each, `posFoodCosts`), `viewPosBill.js` (also opened by IMS logins with no POS rank, which
-    `pos_recipe_book` refuses, so it needs a fallback) and the Customization report (`loadDeltaExplosion`)
-    (2f).
+  - ~~`imsPostWarning` is a local counter that never goes down: a timed-out post that later lands (now
+    marked by the database) still shows "1 not posted" until the page reloads (2f).~~ Fixed in 4e
+    (`noteImsMiss` / `pruneImsMisses`).
+  - ~~`writeSalesEntries` links rows by the screen's `orderId`, not `updated.id`; equal on every path that
+    posts today, but fragile (2f).~~ Fixed in 4e: `postClosedBill` posts the stored bill under its own id.
+  - Same cause as IMS-HANDOFF-3, not switched: ~~Sales Report's and Sales Exceptions' comp food cost (one
+    line each, `posFoodCosts`),~~ (switched in 4d) `viewPosBill.js` (also opened by IMS logins with no POS
+    rank, which `pos_recipe_book` refuses, so it needs a fallback) and the Customization report
+    (`loadDeltaExplosion`) (2f). Stage 5: a server read IMS logins may use.
   - ~~A note's takeback has the race bills had (a late post after a Periods post); no refusal for notes
     yet. `creditNotePosting.js`' comment at its mark write and `posted: true` when only the mark failed
     are moot now (2f).~~ Fixed in 3j (`pos_credit_note_already_posted`).
-  - "Manual Sales by Category" (`useSalesPivotData.js`) excludes only `pos`/`pos_comp`, so it counts
-    `pos_credit` and `pos_credit_restock` rows as hand-entered sales (2e, predates it).
+  - ~~"Manual Sales by Category" (`useSalesPivotData.js`) excludes only `pos`/`pos_comp`, so it counts
+    `pos_credit` and `pos_credit_restock` rows as hand-entered sales (2e, predates it).~~ Fixed in 4d
+    (`isManualSource`).
   - `buildUsageMap` clamps a recipe's net sold at 0 for the base recipe but not for choice extras
     (`ingredient_deltas`); matters only for a negative month (2e).
   - A "not served" note on a bill from an earlier Inventory month puts the food back in the note's
@@ -613,12 +598,14 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - With two live tickets for one dish and one pulled, a direct API call could Clear either ticket
     (never both); a send whose ticket insert failed leaves food no ticket carries, so the board offers
     Clear and the server refuses it (a supervisor clears it) (3d).
-  - IMS-HANDOFF-9 is unchanged: neither the floor banner nor its post checks whether the client has
-    Inventory at all; errorText's `pos_sale_unlinked` operator sentence names only Periods (3j).
+  - ~~IMS-HANDOFF-9 is unchanged: neither the floor banner nor its post checks whether the client has
+    Inventory at all; errorText's `pos_sale_unlinked` operator sentence names only Periods (3j).~~ Fixed
+    in 4e (`tillPostsToIms`).
   - `ims_sales_entries_guard` lets a `pos_credit` row name any note, with no check that the note belongs
     to the row's outlet (the new lock simply skips a note of another outlet) (3j).
-  - IMS-HANDOFF-5 (no "till bills still waiting" note when ending a month) could now use
-    `pos_ims_waiting_counts` for any closer, IMS supervisors included (3j).
+  - ~~IMS-HANDOFF-5 (no "till bills still waiting" note when ending a month) could now use
+    `pos_ims_waiting_counts` for any closer, IMS supervisors included (3j).~~ Done in 4e
+    (`tillWaitingPreflight`).
   - `pos-billing.md`'s "Periods backfill … re-stamps what it finds" sentence (IMS-HANDOFF-2) is still out
     of date (3j).
 - **Found while drafting stage 3, wave 3 (3c, 3e, 3n; 2026-10-10, not fixed):**
@@ -696,6 +683,19 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     `option_not_on_menu` fires first) (3o).
   - On a POS manager's PIN the Customization Report's Margin `items` read is fenced, so costs read NPR 0:
     the 2f item above ("the Customization report (`loadDeltaExplosion`)"), not a new one (3o).
+- **Found while building stage 4, wave 2 (4d, 4e, 4f; 2026-10-12, not fixed):**
+  - The operator's `imsEnabled` is always true, so a bill the operator closes on an outlet without Crest
+    IMS still posts to Inventory (4e). `clientModules.ims` would close it; rare, left as is.
+  - Stage 5: a server-side post from the stored bill, stamping it in one transaction (would replace
+    `postClosedBill`'s browser read); `ims_sales_entries_guard` refusing till rows for a client without
+    Inventory; and, when Inventory is switched on for a POS-only outlet, a way to settle (or post) its
+    past unmarked bills, which D6 kept recoverable (4e).
+  - The POS-only Home's own POS sales pivot still shows money to Staff rank; D2 covered only the POS
+    Dashboard, and that Home already shows staff its POS Revenue tile (4d). Owner's call.
+  - Table Management's "skewed by bills left open" note can no longer show, now that sittings over 12
+    hours are left out (4d): remove it in 4j.
+  - `pos_parking_slips` has no index on `time_in`; the All tab's date range filters on it. Fine at
+    today's volume (0 slips live) (4f).
 
 ---
 
@@ -853,7 +853,8 @@ the same family were deliberately not taken, because each changes a figure rathe
 Both items that stood here — the Sales Report's runtime-local range bounds and `closed_at` written
 by the till — were closed by S754 and moved to `POS_DECISIONS.md`.
 
-- [ ] 🟡 **Covers Report's Avg Turn Time silently shrinks its sample.** `if (mins < 0) continue`
+- [x] ~~🟡 **Covers Report's Avg Turn Time silently shrinks its sample.**~~ Fixed in 4d (S814): a 12-hour
+  cap (`MAX_SITTING_MINUTES`, owner D3) and a note under the table counting each excluded kind. `if (mins < 0) continue`
   drops skewed pairs with nothing on screen saying how many, and drops nothing for an absurdly large
   positive (a bill left open for days). A footnote naming the excluded count would make it honest.
 

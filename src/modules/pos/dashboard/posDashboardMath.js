@@ -6,34 +6,65 @@
 // their home screens; comparing a part-day against a whole prior day would read every lunchtime as
 // a collapse, so the earlier day is cut off at this moment's time of day before it is summed.
 import { paymentSharesOf } from '../reports/salesReportMath'
-import { dineInOnly, seatedCovers } from '../reports/coversMath'
+import { coversTotals } from '../reports/coversMath'
 import { nepalHour } from '../../../shared/nepalTime'
 import { compareFigures } from '../../../shared/compareFigures'
 
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0 }
 
-/** A paid bill that still counts: the same exclusion Home's POS card and Sales Report make — a
- *  since-Credit-Noted bill's correction posts on the day the note was issued, not here. */
-export const countsAsSale = o => o?.close_type === 'paid' && !o.credit_note_id
+/** A paid bill is a sale on the day it closed, a since-credit-noted one included (S814 4d, REPORTS-5,
+ *  owner Q22 (a)). Its credit note is a minus on the day the NOTE was issued (`returnsOf`): the Sales
+ *  Report's rule (salesReportMath.buildSalesEntries), which the Owner Report has followed since
+ *  schema 15. So a bill sold on Saturday and credited on Monday leaves Saturday's figure as it was and
+ *  takes its value off Monday. */
+export const countsAsSale = o => o?.close_type === 'paid'
 
-/** Bills, sales (billed, incl. VAT), covers, discounts and the two averages for a set of bills. */
-export function summariseBills(orders) {
-  const paid = (orders || []).filter(countsAsSale)
-  const sales = paid.reduce((s, o) => s + num(o.paid_amount), 0)
-  // S809 3n (REPORTS-3): covers are guests SEATED, the Covers Report's own count (seatedCovers):
-  // dine-in bills only, and a since-credit-noted bill keeps its guests. A takeaway or delivery bill
-  // is in Sales and Bills, never a guest, so Avg per cover divides only what the dine-in bills charged.
-  const covers = seatedCovers((orders || []).filter(o => o?.close_type === 'paid'))
-  const dineInSales = dineInOnly(paid).reduce((s, o) => s + num(o.paid_amount), 0)
+/**
+ * Credit notes as returns: [{ order, net, at }], `net` NEGATIVE (−net_amount, the note's stored
+ * figure as printed) and `at` the moment it was issued. `order` is the bill it credits, from `byId`
+ * (a Map or an object of the bills the page read) or else from the bill embedded on the note row,
+ * which is how a note against an earlier day's bill brings its table, method and partner.
+ */
+export function returnsOf(notes, byId) {
+  const lookup = id => (byId?.get ? byId.get(id) : byId?.[id]) || null
+  return (notes || []).map(n => ({
+    order: lookup(n.order_id) || n.pos_orders || null,
+    net: -num(n.net_amount),
+    at: n.created_at,
+  }))
+}
+
+/**
+ * Bills, sales (billed, incl. VAT), covers, discounts and the two averages for a set of bills and the
+ * credit notes issued over the same window.
+ *
+ *   Sales          Σ paid_amount of the paid bills + Σ the returns' (negative) nets.
+ *   Bills          every paid bill, a credited one included: it was sold.
+ *   Covers         guests seated (coversMath.seatedCovers): dine-in bills only, a credited one
+ *                  keeps its guests (S809 3n, REPORTS-3).
+ *   Avg per cover  the Covers Report's arithmetic (coversTotals): dine-in sales, less the notes on
+ *                  dine-in bills, ÷ seated guests. Takeaway and delivery are in neither side.
+ *   Avg bill       Sales ÷ Bills.
+ *   Discounts      as given on the bills; a note does not give a discount back.
+ */
+export function summariseBills(orders, returns = []) {
+  const all = orders || []
+  const rets = returns || []
+  const paid = all.filter(countsAsSale)
+  const returnNet = rets.reduce((s, r) => s + num(r.net), 0)
+  const sales = paid.reduce((s, o) => s + num(o.paid_amount), 0) + returnNet
+  const ct = coversTotals(paid, o => num(o.paid_amount), rets)
   const discount = paid.reduce((s, o) => s + num(o.discount_amount), 0)
   const bills = paid.length
   return {
-    sales, bills, covers, discount,
+    sales, bills, covers: ct.covers, discount,
+    dineInBills: ct.bills,
+    returns: rets.length, returnNet,
     avgBill: bills > 0 ? sales / bills : null,
     // Covers are entered at the table; a takeaway-only day has none, which is not an average of 0.
-    avgCover: covers > 0 ? dineInSales / covers : null,
-    voids: (orders || []).filter(o => o?.close_type === 'void').length,
-    comps: (orders || []).filter(o => o?.close_type === 'writeoff').length,
+    avgCover: ct.covers > 0 ? ct.revPerCover : null,
+    voids: all.filter(o => o?.close_type === 'void').length,
+    comps: all.filter(o => o?.close_type === 'writeoff').length,
   }
 }
 
@@ -41,14 +72,21 @@ export function summariseBills(orders) {
 export const compareToLastWeek = compareFigures
 
 /** Sales per Nepal hour for both days, trimmed to the hours either day traded in (plus the current
- *  hour, so "nothing since 3 PM" shows as an empty bar rather than a chart that stops). */
-export function hourlySales(todayOrders, lastWeekOrders, { currentHour = null } = {}) {
+ *  hour, so "nothing since 3 PM" shows as an empty bar rather than a chart that stops). A credit note
+ *  sits in the hour it was issued, as a minus (REPORTS-5), so an hour can come out below zero. */
+export function hourlySales(todayOrders, lastWeekOrders, { currentHour = null, todayReturns = [], lastWeekReturns = [] } = {}) {
   const today = new Array(24).fill(0)
   const lastWeek = new Array(24).fill(0)
-  for (const o of todayOrders || []) if (countsAsSale(o)) { const h = nepalHour(o.closed_at); if (h != null) today[h] += num(o.paid_amount) }
-  for (const o of lastWeekOrders || []) if (countsAsSale(o)) { const h = nepalHour(o.closed_at); if (h != null) lastWeek[h] += num(o.paid_amount) }
+  const addBills = (into, orders) => {
+    for (const o of orders || []) if (countsAsSale(o)) { const h = nepalHour(o.closed_at); if (h != null) into[h] += num(o.paid_amount) }
+  }
+  const addReturns = (into, returns) => {
+    for (const r of returns || []) { const h = nepalHour(r.at); if (h != null) into[h] += num(r.net) }
+  }
+  addBills(today, todayOrders); addReturns(today, todayReturns)
+  addBills(lastWeek, lastWeekOrders); addReturns(lastWeek, lastWeekReturns)
   const active = []
-  for (let h = 0; h < 24; h++) if (today[h] > 0 || lastWeek[h] > 0) active.push(h)
+  for (let h = 0; h < 24; h++) if (today[h] !== 0 || lastWeek[h] !== 0) active.push(h)
   if (currentHour != null) active.push(currentHour)
   if (active.length === 0) return []
   const first = Math.min(...active), last = Math.max(...active)
@@ -66,16 +104,19 @@ const METHOD_GROUP = {
 }
 const GROUP_ORDER = ['Cash', 'Wallet / QR', 'Card', 'Credit (unpaid)', 'Loyalty points', 'Other']
 
-export function paymentMix(orders, legsByOrder) {
+/** A credit note comes off the methods its bill was paid with, in the same shares (a Split bill's
+ *  legs), the way the Sales Report's Payment Summary attributes it. `legsByOrder` must hold the legs
+ *  of every credited Split bill too, today's or not. */
+export function paymentMix(orders, legsByOrder, returns = []) {
   const by = new Map()
-  for (const o of orders || []) {
-    if (!countsAsSale(o)) continue
-    const amount = num(o.paid_amount)
-    for (const { method, share } of paymentSharesOf(o, legsByOrder?.get?.(o.id) || [])) {
+  const add = (order, amount) => {
+    for (const { method, share } of paymentSharesOf(order, (order && legsByOrder?.get?.(order.id)) || [])) {
       const group = METHOD_GROUP[method] || 'Other'
       by.set(group, (by.get(group) || 0) + amount * share)
     }
   }
+  for (const o of orders || []) if (countsAsSale(o)) add(o, num(o.paid_amount))
+  for (const r of returns || []) add(r.order, num(r.net))
   const total = [...by.values()].reduce((s, a) => s + a, 0)
   return GROUP_ORDER.filter(g => by.has(g)).map(g => ({ method: g, amount: by.get(g), share: total > 0 ? by.get(g) / total : 0 }))
 }
@@ -88,20 +129,30 @@ export function channelOf(order) {
   return 'Dine-in'
 }
 
-export function channelMix(orders) {
+/** Sales by channel. A credit note comes off its bill's channel and is counted apart from the bills
+ *  (`returns`): it is not a bill. */
+export function channelMix(orders, returns = []) {
   const by = new Map()
+  const rowOf = c => by.get(c) || { channel: c, bills: 0, returns: 0, amount: 0 }
   for (const o of orders || []) {
     if (!countsAsSale(o)) continue
-    const c = channelOf(o)
-    const row = by.get(c) || { channel: c, bills: 0, amount: 0 }
+    const row = rowOf(channelOf(o))
     row.bills += 1
     row.amount += num(o.paid_amount)
-    by.set(c, row)
+    by.set(row.channel, row)
+  }
+  for (const r of returns || []) {
+    const row = rowOf(channelOf(r.order))
+    row.returns += 1
+    row.amount += num(r.net)
+    by.set(row.channel, row)
   }
   return ['Dine-in', 'Takeaway', 'Delivery'].filter(c => by.has(c)).map(c => by.get(c))
 }
 
-/** The most-sold dishes by quantity. Comped lines are left out: they were given away, not sold. */
+/** The most-sold dishes by quantity. Comped lines are left out: they were given away, not sold. A
+ *  dish on a bill credited since is still counted: the plate went out (the caller reads the lines of
+ *  every paid bill, a credited one included). */
 export function topItems(items, n = 5) {
   const by = new Map()
   for (const i of items || []) {

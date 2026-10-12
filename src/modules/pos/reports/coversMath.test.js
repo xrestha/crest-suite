@@ -1,4 +1,7 @@
-import { PARTY_BANDS, bandFor, turnoverByBand, isDineIn, dineInOnly, seatedCovers, coversTotals, addReturnsByBand } from './coversMath'
+import {
+  PARTY_BANDS, bandFor, turnoverByBand, isDineIn, dineInOnly, seatedCovers, coversTotals, addReturnsByBand,
+  MAX_SITTING_MINUTES, turnoverExclusions, turnoverExclusionNote,
+} from './coversMath'
 
 // Verbatim copy of the loop CoversReport.jsx carried before S677 lifted it out. The helper must
 // produce the same rows for the same input — this is the guard that the extraction changed
@@ -126,5 +129,36 @@ describe('dine-in only (S754)', () => {
     expect(by['3-4'].orders).toBe(1)
     expect(by['1-2'].net).toBe(1500)  // the takeaway return is not a dine-in band's
     expect(rows.find(r => r.key === '3-4').net).toBe(4000) // input not mutated
+  })
+})
+
+// S814 4d (B4, owner decision D3): a sitting is at most 12 hours, POS Setup → Reservations' own
+// ceiling for a party's table time. A bill open longer was left open past closing.
+describe('the 12-hour sitting cap', () => {
+  const thirteenHours = { id: 'h', covers: 2, opened_at: at(1, 0), closed_at: at(14, 0), net: 700 }
+  const twelveExactly = { id: 'x', covers: 2, opened_at: at(1, 0), closed_at: at(13, 0), net: 700 }
+
+  test('the cap is the reservation settings\' 720 minutes', () => {
+    expect(MAX_SITTING_MINUTES).toBe(720)
+  })
+
+  test('a 13-hour bill is not a sitting; 12 hours exactly still is', () => {
+    const rows = turnoverByBand([...ORDERS, thirteenHours, twelveExactly], o => o.net)
+    const by = Object.fromEntries(rows.map(r => [r.key, r]))
+    expect(by['1-2'].orders).toBe(4)                     // a, b, g and the 12-hour bill
+    expect(by['1-2'].avgMinutes).toBeCloseTo((50 + 70 + 20 + 720) / 4)
+  })
+
+  test('the excluded bills are counted by reason, from the same classifier', () => {
+    expect(turnoverExclusions([...ORDERS, thirteenHours, twelveExactly])).toEqual({ untimed: 1, negative: 1, overCap: 1 })
+    expect(turnoverExclusions(ORDERS.slice(0, 4))).toEqual({ untimed: 0, negative: 0, overCap: 0 })
+  })
+
+  test('the note names only the reasons that happened, and nothing when none did', () => {
+    expect(turnoverExclusionNote({ untimed: 0, negative: 0, overCap: 0 })).toBeNull()
+    expect(turnoverExclusionNote({ untimed: 0, negative: 2, overCap: 1 })).toBe(
+      '3 dine-in bills are not in this table: 2 closed before they were opened (a till clock behind), 1 open over 12 hours (left open past closing). Their sales are still in the Overview.')
+    expect(turnoverExclusionNote({ untimed: 0, negative: 0, overCap: 1 })).toBe(
+      '1 dine-in bill is not in this table: 1 open over 12 hours (left open past closing). Their sales are still in the Overview.')
   })
 })

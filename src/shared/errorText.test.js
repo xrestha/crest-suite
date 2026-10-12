@@ -681,3 +681,21 @@ describe('a guest QR order is answered once (S809 3b)', () => {
       .not.toBe(errorText({ code: '23503', message: 'violates foreign key constraint "pos_guest_order_requests_table_id_fkey" on table "pos_guest_order_requests"' }, 'operator'))
   })
 })
+
+// S809 4e: a till sale that named no closed bill points at BOTH ways to post it, not only Periods —
+// Periods' button is the Owner's alone, and a POS manager reading this has the floor's.
+describe('an unlinked till sale names both ways to post it (S809 4e)', () => {
+  const unlinked = { code: '23514', hint: 'pos_sale_unlinked', message: 'sales_entries: a till sale is recorded under the bill it came from, and this one named no bill, so it was not recorded' }
+
+  it('the operator is sent to the floor first, and to the Owner\'s Periods button for the rest', () => {
+    const text = errorText(unlinked, 'operator')
+    expect(text).toMatch(/nothing was added/)
+    expect(text).toMatch(/Post to Inventory on the POS Orders floor while its month is open in Inventory/)
+    expect(text).toMatch(/\(the Owner\) Periods → Post POS bills to Inventory/)
+    expect(text).toMatch(/both post each closed bill from what is stored on it/)
+  })
+
+  it('the staff sentence is unchanged: tell the manager', () => {
+    expect(errorText(unlinked, 'staff')).toMatch(/Tell your manager/)
+  })
+})

@@ -198,3 +198,13 @@ Results, all confirmed live on 2026-08-19:
   `comp_no`/`comped_by` → 403, an INSERT arriving already comped → 403, an ordinary `notes` edit →
   200. The RPC called with `p_comped_by` set to a colleague's real uuid stored the **caller's** id
   instead, and returned 403 once the account was demoted to Staff.
+
+## Silent IMS post
+
+Moved from `.claude/rules/pos-billing.md` ("A closed POS bill must reach IMS", S814), word for word:
+
+It used to return silently: the bill still closed, printed and consumed an invoice number
+while Inventory never saw its revenue or ingredient usage, so POS Sales Report and IMS
+MonthlySummary disagreed by an unbounded amount with nothing on either page saying so. Found live
+on a test client — 15 bills, NPR 18,900 — caused by Ashadh 2083 being left open past its end while
+Shrawan was never created, so every bill rung after the BS rollover bailed.

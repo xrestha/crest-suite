@@ -92,7 +92,9 @@ What was wrong was the sentence. Both close dialogs said *"entry pages become re
 qualifier, so the frozen Monthly Report's labour figure could move after a month the Owner had
 been told was locked. Every close dialog now names what locks — *IMS entry pages (Purchases,
 Sales, Stock Count, Overheads)* — and, when HR is on, says HR stays open. A **payroll preflight**
-(`payrollPreflight()` / `payrollNote()`) sits beside the closing-count one: amber when payroll is
+(`payrollPreflight()` / `payrollNote()`) sits beside the closing-count one, and with POS and IMS on a
+**till-waiting preflight** (`tillWaitingPreflight()` / `tillWaitingNote()`, S814, owner D4) says how
+many of the month's till bills and credit notes are not in Inventory yet, amber, never blocking. The payroll one is amber when payroll is
 not finalized, because the frozen report then carries an ESTIMATED labour cost
 (`computeMonthlyReport.js` prefers a finalized run and falls back to an estimate, labelled
 `payrollSource: 'estimated'`) until an admin runs Regenerate Snapshot. It informs and never blocks,
@@ -112,7 +114,7 @@ instead of the fix — **a guide that documents a defect as advice is the tell t
 old.** Every month closed from the Dashboard before S683 opened with no opening stock and no
 snapshot until someone visited the report; "Resync Opening Stock" is the repair.
 
-`src/pages/periods/closePeriod.js` now holds the whole thing: both preflights, the carry-forward,
+`src/pages/periods/closePeriod.js` now holds the whole thing: all three preflights, the carry-forward,
 `performPeriodClose({ clientId, period, openNext, actorId })`, and `closeFailureText()`.
 `CloseConfirmBody` renders every close dialog's notes. Four ASKS with four framings (Owner on the
 Dashboard, client on Periods, admin close-and-advance, admin End Period), one COMMIT. Three

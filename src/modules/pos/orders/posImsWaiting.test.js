@@ -1,7 +1,7 @@
 // S809 3j: the till floor's Post to Inventory and the waiting counts every screen words. The sorting
 // of months decides which ones a POS manager is offered and who is named for the rest, so it is
 // pinned here; postWaitingFromTill is exercised with its two posting functions mocked.
-import { summarizeWaiting, waitingForPeriod, countPhrase, loadImsWaiting, postWaitingFromTill } from './posImsWaiting'
+import { summarizeWaiting, waitingForPeriod, countPhrase, loadImsWaiting, postWaitingFromTill, noteImsMiss, pruneImsMisses } from './posImsWaiting'
 import { backfillPosOrdersToIms } from './backfillPosToIms'
 import { backfillCreditNotesToIms } from '../creditnotes/creditNotePosting'
 import { posStockLines } from './posRecipeBook'
@@ -143,5 +143,52 @@ describe('postWaitingFromTill', () => {
     backfillCreditNotesToIms.mockResolvedValue({ posted: 0, skipped: 0, error: 'boom' })
     const r = await postWaitingFromTill(deps(scopedFromWith({ data: OPEN, error: null })))
     expect(r).toEqual({ period: OPEN, bills: { posted: 2, skipped: 0 }, step: 'notes', error: 'boom' })
+  })
+})
+
+// S809 4e: the floor banner's count of this till's own misses used to be a counter only Post to
+// Inventory reset, so a bill posted by Periods, another tablet or its own late write stayed counted.
+describe('noteImsMiss and pruneImsMisses', () => {
+  test('a miss is noted once per bill, at its latest time', () => {
+    let list = noteImsMiss([], 'o1', 100)
+    list = noteImsMiss(list, 'o2', 200)
+    list = noteImsMiss(list, 'o1', 300)
+    expect(list).toEqual([{ orderId: 'o2', at: 200 }, { orderId: 'o1', at: 300 }])
+    expect(noteImsMiss(null, 'o1', 5)).toEqual([{ orderId: 'o1', at: 5 }])
+  })
+
+  test('a count read that started after a miss answers for it, so the miss goes', () => {
+    const list = [{ orderId: 'o1', at: 100 }, { orderId: 'o2', at: 200 }]
+    // The read started at 150: o1 is in its answer (still waiting, or posted since); o2 came after.
+    expect(pruneImsMisses(list, 150)).toEqual([{ orderId: 'o2', at: 200 }])
+    expect(pruneImsMisses(list, 250)).toEqual([])
+  })
+
+  test('a miss noted while the count was in flight stays', () => {
+    const list = [{ orderId: 'o1', at: 150 }]
+    expect(pruneImsMisses(list, 150)).toBe(list)
+    expect(pruneImsMisses(list, 100)).toBe(list)
+  })
+
+  test('nothing to prune hands back the same list, so a setter can bail out', () => {
+    const list = []
+    expect(pruneImsMisses(list, 999)).toBe(list)
+    expect(pruneImsMisses(null, 999)).toEqual([])
+  })
+})
+
+describe('loadImsWaiting — a caller can bound it shorter', () => {
+  test('times out at timeoutMs with an error, never an empty list', async () => {
+    jest.useFakeTimers()
+    try {
+      const supabase = { rpc: () => new Promise(() => {}) }
+      const p = loadImsWaiting(supabase, 'c1', { timeoutMs: 10000 })
+      jest.advanceTimersByTime(10000)
+      const r = await p
+      expect(r.rows).toBeNull()
+      expect(r.error.name).toBe('TimeoutError')
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

@@ -18,7 +18,7 @@ export const POS_GUIDE_GROUPS = [
         route: null,
         plan: null,
         summary:
-          'Crest POS is a till system built to feed the rest of Crest: every closed bill posts its revenue into IMS Sales Entry and its ingredient depletion into the Stock Movements ledger, so the food-cost figures the suite is sold on come from real service, not re-typed totals. It is sold flat — pos_enabled on or off, no tiers, and no feature flag of its own: everything in this guide, Guest QR Ordering and Loyalty included, comes WITH the module (S632). pos_enabled is the only thing standing between a client and a public guest menu.',
+          'Crest POS is a till system built to feed the rest of Crest: where the outlet has Crest IMS, every closed bill posts its revenue into IMS Sales Entry and its ingredient depletion into the Stock Movements ledger, so the food-cost figures the suite is sold on come from real service, not re-typed totals. It is sold flat — pos_enabled on or off, no tiers, and no feature flag of its own: everything in this guide, Guest QR Ordering and Loyalty included, comes WITH the module (S632). pos_enabled is the only thing standing between a client and a public guest menu.',
         workflow: [
           'Setup once: activate each till tablet on Till Devices (every tablet gets its own key), build tables and ticket routing in POS Setup, create PIN staff on POS Staff.',
           'Service: front-of-house staff PIN in and take orders on the floor grid; Send Order fires the KOT/BOT tickets (printed and on the Kitchen Display); a Supervisor or above presses Payment to close the bill. Kitchen and bar team logins only ever see the Kitchen Display.',
@@ -27,7 +27,7 @@ export const POS_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'One rank axis + three per-staff switches', desc: 'pos_role (staff < supervisor < manager) gates pages and actions. Orthogonal to it: pos_team (FOH / Kitchen / Bar — a kitchen or bar account sees ONLY the Kitchen Display, whatever its rank), a per-staff Discount Limit %, and a per-staff Allow Void checkbox. Void is deliberately NOT a rank power — promoting someone to Supervisor does not grant it.' },
-          { label: 'The IMS handoff', desc: 'Closing a bill needs an OPEN IMS period covering today\'s BS month to post into. If there isn\'t one, the bill still closes and prints — refusing a sale mid-service is never acceptable — but it is stamped unposted, counted in a standing banner on the Orders floor, and recoverable once the period exists: "Post to Inventory" on the Orders floor banner (POS manager, Owner, operator; the open month only, S809 3j), or Periods → "Post POS bills to Inventory" (Owner, operator; any month, a closed one included). Since S809 the database writes the bill\'s "posted" mark together with its sales (sales_entries_stamp_pos_source), so a bill whose sales are in Inventory never shows as not posted, and a second post of the same bill is refused. Since S809 3j a credit note\'s reversal is refused a second time too (pos_credit_note_already_posted).' },
+          { label: 'The IMS handoff', desc: 'Where the outlet has Crest IMS, closing a bill posts it into the IMS period of the BS month the bill closed in (server time, Nepal date), from the lines stored on the bill — so a bill closed at 11:59 PM and posted after midnight stays on its own day (S809 4e). That month must be the one OPEN in IMS. If it isn\'t, the bill still closes and prints — refusing a sale mid-service is never acceptable — but it is stamped unposted, counted in a standing banner on the Orders floor, and recoverable once the period exists: "Post to Inventory" on the Orders floor banner (POS manager, Owner, operator; the open month only, S809 3j), or Periods → "Post POS bills to Inventory" (Owner, operator; any month, a closed one included). Since S809 the database writes the bill\'s "posted" mark together with its sales (sales_entries_stamp_pos_source), so a bill whose sales are in Inventory never shows as not posted, and a second post of the same bill is refused. Since S809 3j a credit note\'s reversal is refused a second time too (pos_credit_note_already_posted). An outlet without Crest IMS posts nothing, counts nothing and shows no banner, and its bills and credit notes are deliberately left unmarked, so switching IMS on later still finds them waiting to post (S809 4e, owner decisions D6, D7).' },
           { label: 'Attribution', desc: 'Every close, discount, comp and ticket send records whoever last PIN\'d in — which is why the 3-minute idle lock exists (below), and why the Exceptions report can rank staff at all.' },
         ],
         formulas: [
@@ -94,10 +94,10 @@ export const POS_GUIDE_GROUPS = [
         fields: [
           { label: 'Open bills', desc: 'pos_orders with status open. The oldest one\'s age, and (Supervisor+) the value on them: Σ qty × unit price over non-comped lines, before discount and VAT.' },
           { label: 'QR orders waiting', desc: 'pos_guest_order_requests still pending — guest orders nobody has accepted, which the kitchen has not seen.' },
-          { label: 'Kitchen tickets', desc: 'Today\'s pos_kot_log tickets still new or in progress; late = past KDS_LATE_MS (15 min) since sent, the Kitchen Display\'s own line from posSignals.js.' },
-          { label: 'Sales', desc: 'Σ paid_amount of today\'s paid bills (VAT included, as Home\'s POS Revenue card), a since-credit-noted bill left out — the same basis as Home.' },
+          { label: 'Kitchen tickets', desc: 'pos_kot_log tickets of this service (from midnight, rolling over at 6 AM: serviceDayStartIso, the Kitchen Display\'s own window) still new or in progress; late = past KDS_LATE_MS (15 min) since sent, the Kitchen Display\'s own line from posSignals.js. Home\'s "running late" row and the kitchen team\'s Home card read the same window.' },
+          { label: 'Sales', desc: 'Σ paid_amount of today\'s paid bills (VAT included), a since-credit-noted bill included, less Σ net_amount of the credit notes issued today (pos_credit_notes) — the Sales Report\'s rule: a credited bill stays on the day it was sold, its note comes off the day it is issued. Home\'s POS Revenue card is the same rule over the month. Bills counts every paid bill; Avg bill = Sales ÷ Bills.' },
           { label: 'Covers', desc: 'Σ covers of today\'s paid bills served at a table (coversMath.seatedCovers, the Covers Report\'s count, S809 3n). Takeaway and delivery bills are never guests; a since-credit-noted bill keeps its guests.' },
-          { label: 'Avg per cover', desc: 'Σ paid_amount of today\'s dine-in bills (a since-credit-noted bill left out, as in Sales) ÷ Covers. No guests = no average, never 0.' },
+          { label: 'Avg per cover', desc: 'The Covers Report\'s arithmetic (coversTotals): Σ paid_amount of today\'s dine-in bills, less the credit notes issued today against dine-in bills, ÷ Covers. A credited bill keeps its guests. No guests = no average, never 0.' },
           { label: 'Discounts', desc: 'Σ discount_amount on today\'s paid bills. Its verdict colour is inverted: a rise reads red.' },
           { label: 'Voids · complimentary', desc: 'Bills closed today as void / as complimentary (close_type writeoff).' },
           { label: 'Payments today', desc: 'Cash, Wallet / QR (eSewa, Khalti, FonePay together), Card, Credit (billed, unpaid), Loyalty points. A Split bill is shared across its payment legs by amount (paymentSharesOf, the Sales Report\'s rule).' },
@@ -112,7 +112,7 @@ export const POS_GUIDE_GROUPS = [
           'A POS-only client\'s main Dashboard is now called "POS Overview", so the two pages do not share a name.',
           'The arithmetic is posDashboardMath.js, pinned by posDashboardMath.test.js; change it there, not in the page.',
         ],
-        connections: 'Reads pos_orders, pos_order_items, pos_order_payments, pos_tables, pos_guest_order_requests, pos_kot_log, pos_shifts and the open monthly period (for the sales-by-category table). Links to Orders, Billing, Kitchen Display, Shifts, Sales Report, Covers Report and Exceptions.',
+        connections: 'Reads pos_orders, pos_order_items, pos_order_payments, pos_credit_notes, pos_tables, pos_guest_order_requests, pos_kot_log, pos_shifts and the open monthly period (for the sales-by-category table, Supervisor and above, which reloads on Refresh and on the minute tick once its last read is five minutes old). Links to Orders, Billing, Kitchen Display, Shifts, Sales Report, Covers Report and Exceptions.',
       },
       {
         id: 'orders',
@@ -156,14 +156,14 @@ export const POS_GUIDE_GROUPS = [
         gotchas: [
           'A bill where EVERY line is comped cannot be Confirmed on the Pay tab — use the Complimentary tab instead, otherwise a sequential tax-invoice number burns on a ₨0 document.',
           'Cash: an empty tendered box means "exact cash"; an entered amount below the total blocks Confirm with the shortfall named. Change is computed, not trusted.',
-          'The floor shows a standing count of closed bills not yet posted to Inventory, and a separate amber banner counting credit notes not yet taken off Inventory sales — a POS manager, the Owner or the operator posts the open month\'s with the banner\'s own "Post to Inventory" button (S809 3j); the banner says which are from a closed month (the Owner posts those from Periods → "Post POS bills to Inventory") or from a month not yet started in Inventory. Never by re-ringing or re-issuing anything.',
+          'Where the outlet has Crest IMS, the floor shows a standing count of closed bills not yet posted to Inventory, and a separate amber banner counting credit notes not yet taken off Inventory sales — a POS manager, the Owner or the operator posts the open month\'s with the banner\'s own "Post to Inventory" button (S809 3j); the banner says which are from a closed month (the Owner posts those from Periods → "Post POS bills to Inventory") or from a month not yet started in Inventory. Never by re-ringing or re-issuing anything.',
           'Reprints increment a visible print counter on the bill — an audit trail, not a malfunction. A reprint is a copy of the original (S809 CHECKOUT-11): it reads that bill\'s own HSC codes and the login that closed (or comped) it, for Cashier / Authorized by, and prints nothing if either read fails (billReprintData.js). The Bill Register\'s VIEW ONLY bill refuses a failed name read the same way.',
           'The printed bill (S809 CHECKOUT-13, owner decision): Round Off prints on every bill, PAN bills included, 0.00 when nothing was rounded; a Credit bill prints "Amount on credit" in place of Tender and Change.',
           'Recent Bills (today\'s bills, reprints and the Credit Note entry) is Supervisor+ since S754 — a Staff login does not see the button. Since S809 it is on the Billing station too, the same window.',
           '"Open a shift first" on Confirm Payment is the S754 shift rule, not a fault: open one on Shifts and charge again. Clients used to billing with no shift open (BHATTI CHOILA billed all 18 of its recent bills that way) will hit this on day one.',
           'Who closed a bill, and when, is recorded by the server — not by the tablet\'s clock. Bills closed before migration 20260916100000 carry the till\'s clock time, which is why the Sales Report still flags a close recorded before its own open.',
         ],
-        connections: 'Closing posts revenue to IMS Sales Entry and depletion to Stock Movements. Tickets land in the KOT Log and on the Kitchen Display. Buyer identities build Customers; credit bills appear there for settlement. Exceptions, Sales Report and Covers all read what this screen writes.',
+        connections: 'Closing posts revenue to IMS Sales Entry and depletion to Stock Movements, where the outlet has Crest IMS. Tickets land in the KOT Log and on the Kitchen Display. Buyer identities build Customers; credit bills appear there for settlement. Exceptions, Sales Report and Covers all read what this screen writes.',
       },
       {
         id: 'billing-station',
@@ -231,7 +231,7 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/parking',
         plan: 'Staff+ to view, reprint and mark exited · Supervisor+ to issue',
         summary:
-          'Vehicle token slips for guest parking: issue and print a numbered slip, optionally linked to one of today\'s bills, then mark it exited when the vehicle leaves. Open/All filters and reprint (with a visible reprint count).',
+          'Vehicle token slips for guest parking: issue and print a numbered slip, optionally linked to one of today\'s bills, then mark it exited when the vehicle leaves. Open/All filters (All reads a date range, this Nepali month by default) and reprint (marked COPY OF ORIGINAL - (N), like a bill).',
         workflow: [
           'Issue: vehicle number/type, optional link to one of TODAY\'s billed orders, print the slip. Mark Exited on departure.',
         ],
@@ -357,6 +357,7 @@ export const POS_GUIDE_GROUPS = [
         formulas: [
           'Expected cash = opening float + cash sales + cash in − cash out. Variance = counted − expected; balanced under one rupee, otherwise over/short.',
           'Total Sales on the report is SALES, not collection — it includes Credit bills billed but not yet collected. The drawer expectation uses cash sales only.',
+          'Voided Value = Σ qty × menu price over the shift\'s voided bills, BEFORE VAT (S814, the Sales Exceptions basis: forgoneMenuValue). A report frozen before that change keeps its figure, VAT included, and History labels it "incl. VAT (closed before this change)" (closing_report.voidBasis is absent on it).',
         ],
         gotchas: [
           'Closing is no longer blocked by open orders (S754) — it warns and lets you close. An open table paid later lands on the NEXT open shift, never on the one already signed.',
@@ -393,7 +394,7 @@ export const POS_GUIDE_GROUPS = [
         ],
         formulas: [],
         gotchas: [
-          'The page authorizes itself server-side from the table id (table → client → POS enabled) since a guest has no login — an invalid or stale QR gets nothing.',
+          'The page authorizes itself server-side from the table id (table → client → POS enabled) since a guest has no login — a QR for a table that no longer exists gets nothing; a table\'s QR never expires — staff Accept is the check on every guest order.',
           'A table marked inactive in POS Setup still shows the menu from its QR, but ordering is off and the server refuses a guest order for it — the floor cannot open an inactive table, so the order would have nowhere to land (S746).',
           'A dish switched on for POS with no selling price is left off the guest menu and refused in a guest order until it is priced — it used to appear, and be orderable, at NPR 0 (S746). Admin → Guest Menu counts how many were left off.',
           'Admin → Guest Menu embeds this page with Place Order switched off, so previewing can never send a real order; guests\' phones are unaffected.',
@@ -429,7 +430,7 @@ export const POS_GUIDE_GROUPS = [
           { label: 'Comp food cost', desc: 'What a comp actually cost in ingredients (matching the printed Complimentary Slip). Kept in its own column and NEVER added into a revenue total — cost and forgone revenue are different units. On the till it is costed the same whoever is signed in: a supervisor\'s PIN reads ingredient costs and trim loss through the till\'s own read, pos_recipe_book (S809). This report still reads them directly, so a PIN manager here can see NPR 0 (POS_TODO S809.4).' },
         ],
         formulas: [
-          'Void value = the voided bill\'s menu value EXCLUDING VAT (it included VAT before S754). Comp potential sales value is ex-VAT too; a discount is already pre-VAT, because it comes off the bill before VAT is worked out. Example: a NPR 1,000 (before VAT) dish voided counts NPR 1,000, not NPR 1,130.',
+          'Void value = the voided bill\'s menu value EXCLUDING VAT (it included VAT before S754). Comp potential sales value is ex-VAT too; a discount is already pre-VAT, because it comes off the bill before VAT is worked out. Example: a NPR 1,000 (before VAT) dish voided counts NPR 1,000, not NPR 1,130. Since S814 the Sales Report\'s Comped Bills, the shift Z-report\'s Voided Value and the Owner Report\'s comp potential value (schema 16) use the same basis, and comp food cost on this report and on Comped Bills is read through the till\'s recipe book (pos_recipe_book), as on the Complimentary Slip.',
           'Item-comp events group one billing action into one row (one NC number), however many lines it comped.',
         ],
         gotchas: [
@@ -490,7 +491,7 @@ export const POS_GUIDE_GROUPS = [
           'The 1L+ tab works on a whole FISCAL YEAR, chosen from its own Fiscal Year dropdown — the date range does not apply to it. It lists buyers whose paid bills in that year cross NPR 1,00,000 — the IRD Annexure 13 disclosure threshold — and flags a buyer over the line with no PAN recorded. That threshold is one reason buyer names are mandatory on credit and discounted bills. Since S754: every bill counts in the year it was sold and returns issued in the year are netted off; a party billed once WITH a PAN and once by name only is treated as one party (owner decision); and the walk-in row (all the unnamed customers added together) is never flagged "Missing PAN". Since S809 3m (REPORTS-2) the year list runs from the first bill\'s fiscal year to this one (one row, read when the tab opens, with its own error), and a year reads up to 2,00,000 bills.',
         ],
         fields: [
-          { label: 'By Partner rollup (Delivery Partners tab)', desc: 'One row per delivery platform — outstanding balance, commission taken, net received — plus the effective commission rate measured against the agreed one. The rate is the point: without it the tab can say how much a platform withheld but never whether that was the agreed amount. Clicking a row filters the bills, the KPIs and the export to that platform.' },
+          { label: 'By Partner rollup (Delivery Partners tab)', desc: 'One row per delivery platform — outstanding balance, commission taken, net received — plus the effective commission rate measured against the agreed one. A bill with a Credit Note against it is no longer owed, whichever range the note falls in (S814; deliveryOutstanding, the Customers page\'s rule): its row reads "Credited, not owed", and the note\'s minus row comes off Billed only, never off Outstanding. The rate is the point: without it the tab can say how much a platform withheld but never whether that was the agreed amount. Clicking a row filters the bills, the KPIs and the export to that platform.' },
           { label: 'Date / Time (BS) column', desc: 'On the three bill-level tabs (Bill Register, Comped Bills, Delivery Partners) each row carries the order-opened and bill-paid clock times under its date. The row date is the PAID date, since that is what the report ranges and totals on, so an order opened on an earlier day shows a date on both times rather than leaving the reader to infer one. Opened comes from the server (pos_orders.opened_at, a DEFAULT now()). Paid (closed_at) came from the till device until S754; since migration 20260916100000 the server stamps it too. On older bills they are two different clocks, so a till set wrong can have recorded a close before its own open — that is flagged with a warning glyph past a minute of tolerance and both values are still shown exactly as recorded, never reordered. Every time is rendered in Nepal time regardless of the viewing device\'s timezone.' },
           { label: 'Product Type tab', desc: 'Three axes the data already carries: Kitchen vs Bar (the same ticket-routing categories that drive the printers, so the report and the tickets cannot disagree), VAT vs non-VAT as billed, and Veg vs Non-veg from the recipe flag.' },
         ],
@@ -544,7 +545,7 @@ export const POS_GUIDE_GROUPS = [
           'Reservations: bookings whose BOOKED time falls in the range. Kept = seated or completed; no-show rate = no-shows ÷ (kept + no-shows), so cancelled and still-open bookings neither help nor hurt it.',
         ],
         fields: [
-          { label: 'RevPASH', desc: 'Revenue ÷ (total seats × open hours). Needs the opening and closing time set (editable inline on the report); left unset, that one card hides rather than blocking the rest. Total seats = the capacity sum from POS Setup.' },
+          { label: 'RevPASH', desc: 'Revenue ÷ (total seats × open hours). Needs the opening and closing time set (editable inline on the report); left unset, that one card hides rather than blocking the rest. Total seats = the seats at tables in service today: the capacity sum of POS Setup\'s tables, a table marked inactive left out.' },
         ],
         formulas: [
           'Spend per cover = dine-in bill revenue, net of dine-in returns issued in the range ÷ dine-in covers, over the same discount-aware bill math as the Sales Report.',
@@ -552,6 +553,7 @@ export const POS_GUIDE_GROUPS = [
         gotchas: [
           'Credit-noted bills are KEPT (S754): a Credit Note corrects the bill, not the fact that the guests sat down, so their covers, party size and turnover still count. The return nets off revenue (and revenue per cover / RevPASH) on the day the note was issued — the Sales Report\'s rule, so the two never disagree about a reversed evening. Before S754 the whole bill was dropped, taking real guests out of the covers.',
           'Why dine-in only: a takeaway bag has no covers and no table time, so it only dragged the per-cover and turn-time figures around. A tab left empty because the range held only takeaway says so.',
+          'Turnover leaves out a bill closed before it was opened (a till clock behind) and one open over 12 hours (S814, owner decision: MAX_SITTING_MINUTES = 720, the Reservations duration ceiling — a bill left open past closing, not a meal). A line under the table and on its sheet counts them by reason; their sales stay in the Overview. The Reservations settings\' "Measured" uses the same rule.',
           'Reads are paged; truncation here would not just shrink totals, it would skew the averages the report exists for.',
         ],
         connections: 'Covers come from Orders\' cover counts; capacity from POS Setup; revenue math shared with the Sales Report. The Turnover tab\'s per-band averages are the same arithmetic (coversMath.js) the Reservations settings show as "Measured", so the two can never disagree. Booked-vs-walk-in reads the order link a seated booking carries.',

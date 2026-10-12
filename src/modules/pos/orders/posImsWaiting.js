@@ -18,14 +18,15 @@ import { posStockLines } from './posRecipeBook'
  * How many bills and notes wait, per Nepali month: [{ bs_year, bs_month, period_id, period_status,
  * bills, notes }], period_id/period_status NULL when the month has no Inventory period yet. Never
  * throws: a failed or timed-out read is `{ rows: null, error }`, which a caller shows as "couldn't
- * check" and never as 0 (S734: on a queue, zero is the answer the reader wants).
+ * check" and never as 0 (S734: on a queue, zero is the answer the reader wants). `timeoutMs` is
+ * shorter where a dialog waits on it (the period close's preflight, S809 4e).
  */
-export async function loadImsWaiting(supabase, clientId) {
+export async function loadImsWaiting(supabase, clientId, { timeoutMs = 20000 } = {}) {
   if (!clientId) return { rows: [], error: null }
   try {
     const { data, error } = await withTimeout(
       supabase.rpc('pos_ims_waiting_counts', { p_client_id: clientId }),
-      20000, 'Checking which till bills wait for Inventory')
+      timeoutMs, 'Checking which till bills wait for Inventory')
     if (error) return { rows: null, error }
     return { rows: data || [], error: null }
   } catch (err) {
@@ -60,6 +61,29 @@ export function summarizeWaiting(rows) {
 export function waitingForPeriod(rows, periodId) {
   const r = (rows || []).find(x => x.period_id === periodId)
   return { bills: Number(r?.bills) || 0, notes: Number(r?.notes) || 0 }
+}
+
+// Bills this till closed that did not reach Inventory, noted the moment it happens (S809 4e). The floor's
+// count of waiting bills is the database's (a head count on `ims_posted_at IS NULL`), but it is read only
+// when the floor loads, so a miss is noted here to show on the banner at once. It used to be a counter
+// that only Post to Inventory reset: a bill posted by Periods, by another tablet, or by its own write
+// landing late stayed counted on this tablet for the rest of the session.
+
+/** The list with this bill's miss noted at `at` (ms), once per bill. Pure. */
+export function noteImsMiss(list, orderId, at) {
+  const rest = (list || []).filter(m => m.orderId !== orderId)
+  return [...rest, { orderId, at }]
+}
+
+/**
+ * The misses a count read that STARTED at `countStartedAt` (ms) and answered does not already include,
+ * i.e. those noted after it started. Every earlier one is either still waiting, and so in that count,
+ * or posted since: the database count is the truth for it. Returns `list` itself when nothing goes. Pure.
+ */
+export function pruneImsMisses(list, countStartedAt) {
+  if (!list) return []
+  const kept = list.filter(m => m.at >= countStartedAt)
+  return kept.length === list.length ? list : kept
 }
 
 /** "3 bills and 1 credit note", "1 bill", "2 credit notes"; '' for none. Pure. */

@@ -1,113 +1,395 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { settleWithin } from '../../../utils/withTimeout'
 import Fab from '../../../components/Fab'
 import Tip from '../../../components/Tip'
-import { printParkingSlip } from './parkingSlipHtml'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import RangePresets from '../reports/RangePresets'
+import { bsMonthRangeIso } from '../reports/reportRange'
+import { openSlipWindow, printParkingSlip } from './parkingSlipHtml'
 import NewParkingSlipModal from './NewParkingSlipModal'
 import { viewPosBill } from '../../../utils/viewPosBill'
-import { nepalTime, serviceDayStartIso, SERVICE_DAY_ROLLOVER_MS } from '../../../shared/nepalTime'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import {
+  sweepCutoffIso, staleOpenSlips, slipRangeBounds, patchSlips, noAnswer, printNoticeKind,
+  parkingSlipNotice, slipTimeIn, LIST_STALE_TEXT,
+} from './parkingSlipList'
+import './parking.css'
 
+// Every read and write on this page waits at most this long (S814). A hung request used to leave
+// "Loading…" up for ever, and a hung Mark Exited left the vehicle looking parked with no word.
+const LIST_READ_MS = 20000
+const WRITE_MS = 20000
+// The columns a close answers with: what Mark Exited and the sweep change, as the server stored them.
+const CLOSE_COLUMNS = 'id, status, time_out, exited_by, auto_closed'
+
+// S814 (CUSTOMERS-PARKING-15, owner decision D9): the page no longer reads every slip ever issued.
+// The Open tab reads the open slips; the All tab reads a From/To range of Time In (this BS month by
+// default), only while it is open. What the page itself changes — an issue, a Mark Exited, a print,
+// the day's sweep — is applied to both lists from the row the server answered with (patchSlip), and
+// kept in `local` so a read that was already in flight cannot put the old state back.
 export default function PosParkingSlips() {
   const { clientId, profile, hasPosAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
 
-  const [slips, setSlips]     = useState([])
-  const [loading, setLoading] = useState(true)
   const [filter, setFilter]   = useState('open') // 'open' | 'all'
   const [staffNames, setStaffNames] = useState({})
-  const [showNew, setShowNew] = useState(false)
   const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
-  const [loadError, setLoadError]     = useState(null)  // a read the page depends on failed (S754)
+  const [metaLoaded, setMetaLoaded] = useState(false)
+  const [metaError, setMetaError]   = useState(null)   // the first read of names/outlet failed
+  const [open, setOpen] = useState({ rows: null, error: null, stale: false })
+  const [openBusy, setOpenBusy] = useState(false)
+  const [range, setRange] = useState(() => bsMonthRangeIso(0))
+  const [all, setAll] = useState({ key: null, range: null, rows: null, error: null, stale: false })
+  const [allBusy, setAllBusy] = useState(false)
+  const [showNew, setShowNew] = useState(false)
   const [sweepFailed, setSweepFailed] = useState(false) // some stale slips could not be auto-closed
-  const [actionError, setActionError] = useState(null)  // the last Mark Exited that did not land
+  const [actionError, setActionError] = useState(null)  // the last action's notice
+  const [busy, setBusy] = useState({})                  // slip id → 'exit' | 'print'
 
-  const loadSlips = useCallback(async () => {
+  const metaLoadedRef = useRef(false)
+  const openReq = useLatestRequest()
+  const openSeq = useRef(0)
+  const allReq = useLatestRequest()
+  const allSeq = useRef(0)
+
+  // Rows this page wrote, in order. A load applies the ones written after it started, because the
+  // database may have answered it from before them.
+  const localSeq = useRef(0)
+  const local = useRef([])
+  const remember = useCallback(rows => {
+    for (const row of rows) local.current.push({ seq: ++localSeq.current, row })
+    if (local.current.length > 200) local.current.splice(0, local.current.length - 200)
+  }, [])
+  const changesSince = useCallback(seq => local.current.filter(c => c.seq > seq).map(c => c.row), [])
+
+  const loadMeta = useCallback(async () => {
     if (!clientId) return
-    setLoading(true)
     const results = await Promise.all([
-      // Paged: nothing bounds this by date, so it is every slip the outlet has ever written and
-      // it only gets longer. A bare select stops at 1000 with no error, which here would also
-      // silently shrink the stale-slip sweep below to whatever happened to fit.
-      fetchAllRows(() => scopedFrom('pos_parking_slips').order('created_at', { ascending: false }).order('id')),
       // Raw `profiles` reads are RLS-limited to the caller's own row — resolving OTHER staff
       // members' names needs get_client_profile_names(), a SECURITY DEFINER RPC.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
-      supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle(),
+      settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), LIST_READ_MS, 'Reading staff names'),
+      settleWithin(supabase.from('clients').select('name').eq('id', clientId).single(), LIST_READ_MS, 'Reading the outlet'),
+      settleWithin(supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle(), LIST_READ_MS, 'Reading the outlet address'),
     ])
-    // S754: a failed read is not an empty car park. Every one of these used to drop its error, so a
-    // dead connection rendered "No vehicles currently parked" over vehicles still in the lot — and
-    // the names and the outlet header are what a printed token carries, so they gate the page too.
+    // S754: the names and the outlet header are what a printed token carries, so the first read
+    // gates the page. A later one that fails keeps what was loaded.
     const readErr = results.find(r => r.error)?.error
-    if (readErr) { setSlips([]); setLoadError(readErr); setLoading(false); return }
-    setLoadError(null)
-    const [{ data: rows }, { data: profs }, { data: client }, { data: settings }] = results
-
-    // Sweep-close any slip still "open" from a previous day — the Open tab should start fresh
-    // each day, not accumulate vehicles staff forgot to Mark Exited. No server cron in this
-    // project (see Periods.js's own client-side expired-period check), so this runs the moment
-    // the page is next opened, whatever day that is. Data is never deleted, just flagged
-    // auto_closed so it stays distinguishable from a real confirmed exit.
-    // S754 (owner decision): a slip rolls over at 6 AM Nepal time, not at the device's midnight — a
-    // car parked at 11:30 PM during a late service must still be on the Open tab at 12:30 AM.
-    // S756 (owner decision): the cut-off is the actual 6 AM that starts today's service day, the same
-    // boundary gate passes use. serviceDayStartIso() is that day's MIDNIGHT, so a car parked at 3 AM
-    // (still yesterday's service) stayed open until the NEXT morning's sweep.
-    const startOfDay = new Date(Date.parse(serviceDayStartIso()) + SERVICE_DAY_ROLLOVER_MS)
-    const stale = (rows || []).filter(s => s.status === 'open' && new Date(s.time_in) < startOfDay)
-    setSweepFailed(false)
-    if (stale.length > 0) {
-      const nowIso = new Date().toISOString()
-      // S754: only rows the update actually closed are shown closed. The error used to be dropped
-      // while every stale row was flipped on screen, so a refused sweep showed vehicles as
-      // Auto-Closed that the database still held open. `.select('id')` also catches the zero-row
-      // RLS refusal, which returns no error at all.
-      const { data: closed, error: sweepErr } = await scopedUpdate('pos_parking_slips', { status: 'closed', time_out: nowIso, auto_closed: true })
-        .in('id', stale.map(s => s.id)).select('id')
-      const closedIds = new Set((sweepErr ? [] : closed || []).map(s => s.id))
-      if (closedIds.size < stale.length) setSweepFailed(true)
-      ;(rows || []).forEach(s => { if (closedIds.has(s.id)) { s.status = 'closed'; s.time_out = nowIso; s.auto_closed = true } })
+    if (readErr) {
+      if (!metaLoadedRef.current) setMetaError(readErr)
+      else console.error('Parking slips: staff names / outlet not refreshed:', readErr)
+      return
     }
-
-    setSlips(rows || [])
+    const [{ data: profs }, { data: client }, { data: settings }] = results
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
-    setLoading(false)
-  }, [clientId, scopedFrom, scopedUpdate])
+    metaLoadedRef.current = true
+    setMetaLoaded(true)
+    setMetaError(null)
+  }, [clientId])
 
-  useEffect(() => { loadSlips() }, [loadSlips])
+  const loadOpen = useCallback(async () => {
+    if (!clientId) return
+    const key = openReq.begin(++openSeq.current)
+    const startedAt = localSeq.current
+    setOpenBusy(true)
+    const { data, error } = await settleWithin(
+      fetchAllRows(() => scopedFrom('pos_parking_slips').eq('status', 'open').order('slip_no', { ascending: false }).order('id')),
+      LIST_READ_MS, 'Reading the parked vehicles',
+    )
+    if (!openReq.isCurrent(key)) return
+    // S754: a failed read is not an empty car park. Before anything has loaded it is the page's error;
+    // after, the last good list stays up and says it may be out of date.
+    if (error) {
+      setOpenBusy(false)
+      setOpen(prev => (prev.rows ? { ...prev, stale: true } : { rows: null, error, stale: false }))
+      return
+    }
+    let rows = patchSlips(data, changesSince(startedAt), { openOnly: true })
+
+    // Sweep-close any slip still open from an earlier parking day, so the Open tab starts fresh each
+    // day. No server cron in this project, so this runs the moment the page next loads its Open list.
+    // The record is kept and flagged auto_closed, visibly distinct from a confirmed exit. A day ends
+    // at 6 AM Nepal (S754/S756, owner decisions), and pos_parking_slips_guard refuses anything newer.
+    // S754: only rows the update actually closed are shown closed; `.select()` also catches the
+    // zero-row RLS refusal, which returns no error at all. S814: the write names the rule, not the
+    // ids, so it no longer carries a URL that grows with the backlog.
+    const cutoffIso = sweepCutoffIso()
+    const stale = staleOpenSlips(rows, cutoffIso)
+    let sweepShort = false
+    if (stale.length > 0) {
+      const { data: closed, error: sweepErr } = await settleWithin(
+        scopedUpdate('pos_parking_slips', { status: 'closed', time_out: new Date().toISOString(), auto_closed: true })
+          .eq('status', 'open').lt('time_in', cutoffIso).select(CLOSE_COLUMNS),
+        WRITE_MS, 'Closing earlier days’ slips',
+      )
+      if (sweepErr) console.error('Parking slips: earlier days’ slips not auto-closed:', sweepErr)
+      const closedRows = sweepErr ? [] : (closed || [])
+      remember(closedRows)
+      rows = patchSlips(rows, closedRows, { openOnly: true })
+      if (closedRows.length) setAll(prev => (prev.rows ? { ...prev, rows: patchSlips(prev.rows, closedRows, { range: prev.range }) } : prev))
+      const closedIds = new Set(closedRows.map(r => r.id))
+      sweepShort = stale.some(s => !closedIds.has(s.id))
+      if (!openReq.isCurrent(key)) return
+    }
+    setSweepFailed(sweepShort)
+    setOpen({ rows, error: null, stale: false })
+    setOpenBusy(false)
+  }, [clientId, scopedFrom, scopedUpdate, openReq, remember, changesSince])
+
+  const loadAll = useCallback(async r => {
+    if (!clientId || !r?.from || !r?.to) return
+    const rangeKey = `${clientId}:${r.from}:${r.to}`
+    // Keyed on the range plus a counter, so a refresh of the same range also retires an older load.
+    const key = allReq.begin(`${rangeKey}#${++allSeq.current}`)
+    const startedAt = localSeq.current
+    setAllBusy(true)
+    const { startIso, endIso } = slipRangeBounds(r.from, r.to)
+    const { data, error } = await settleWithin(
+      fetchAllRows(() => scopedFrom('pos_parking_slips').gte('time_in', startIso).lt('time_in', endIso)
+        .order('slip_no', { ascending: false }).order('id')),
+      LIST_READ_MS, 'Reading the parking slips',
+    )
+    if (!allReq.isCurrent(key)) return
+    setAllBusy(false)
+    if (error) {
+      setAll(prev => (prev.key === rangeKey && prev.rows
+        ? { ...prev, stale: true }
+        : { key: rangeKey, range: r, rows: null, error, stale: false }))
+      return
+    }
+    setAll({ key: rangeKey, range: r, rows: patchSlips(data, changesSince(startedAt), { range: r }), error: null, stale: false })
+  }, [clientId, scopedFrom, allReq, changesSince])
+
+  const rangeFrom = range.from
+  const rangeTo = range.to
+  const reloadLists = useCallback(({ withMeta = false } = {}) => {
+    if (withMeta || !metaLoadedRef.current) loadMeta()
+    loadOpen()
+    if (filter === 'all') loadAll({ from: rangeFrom, to: rangeTo })
+  }, [filter, rangeFrom, rangeTo, loadMeta, loadOpen, loadAll])
+
+  useEffect(() => { loadMeta(); loadOpen() }, [loadMeta, loadOpen])
+  // The All tab reads only while it is open, and again whenever its range moves.
+  useEffect(() => {
+    if (filter === 'all') loadAll({ from: rangeFrom, to: rangeTo })
+  }, [filter, rangeFrom, rangeTo, loadAll])
+  // Back on the page after another app or tab: re-read, never on a timer (the PosShifts pattern).
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') reloadLists() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [reloadLists])
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
+  const markBusy = (id, what) => setBusy(b => ({ ...b, [id]: what }))
+  const clearBusy = id => setBusy(b => { const next = { ...b }; delete next[id]; return next })
+
+  // Apply rows the server answered with to both lists, and keep them for any load in flight.
+  function applyLocal(rows) {
+    remember(rows)
+    setOpen(prev => (prev.rows ? { ...prev, rows: patchSlips(prev.rows, rows, { openOnly: true }) } : prev))
+    setAll(prev => (prev.rows ? { ...prev, rows: patchSlips(prev.rows, rows, { range: prev.range }) } : prev))
+  }
+
+  function showPrintNotice(slip, print, issuing) {
+    const kind = printNoticeKind(print, { issuing })
+    if (!kind) return
+    setActionError({
+      text: parkingSlipNotice(kind, { slip, count: print.count }),
+      detail: print.countError ? asActionError(print.countError, 'staff').detail : '',
+    })
+  }
+
   async function markExited(slip) {
+    if (busy[slip.id]) return
     setActionError(null)
-    // S754: the write error was ignored and the list reloaded unchanged, which reads as "that did
-    // nothing" rather than as a refusal. Say which vehicle is still marked parked.
-    const { data, error } = await scopedUpdate('pos_parking_slips', { status: 'closed', time_out: new Date().toISOString(), exited_by: profile?.id || null })
-      .eq('id', slip.id).select('id')
+    markBusy(slip.id, 'exit')
+    const { data, error } = await settleWithin(
+      scopedUpdate('pos_parking_slips', { status: 'closed', time_out: new Date().toISOString(), exited_by: profile?.id || null })
+        .eq('id', slip.id).select(CLOSE_COLUMNS),
+      WRITE_MS, 'Marking the vehicle exited',
+    )
+    clearBusy(slip.id)
     if (error) {
       const { text, detail } = asActionError(error, 'staff')
+      if (noAnswer(error)) {
+        // It may have landed. Pressing again is safe: the guard keeps a slip's first close.
+        setActionError({ text: parkingSlipNotice('exit-unknown', { slip }), detail })
+        reloadLists()
+        return
+      }
+      // S754: a refusal is said, naming which vehicle is still marked parked.
       setActionError({ text: `${slip.vehicle_number} (P-${slip.slip_no}) could not be confirmed as exited — it still shows as parked here. ${text}`, detail })
       return
     }
-    if (!data?.length) {
+    const row = data?.[0]
+    if (!row) {
       setActionError({ text: `${slip.vehicle_number} (P-${slip.slip_no}) was not marked exited — this account may not change it, or it was removed on another device. The list has been refreshed.` })
+      reloadLists()
+      return
     }
-    loadSlips()
+    applyLocal([row])
+    loadOpen()
   }
 
   async function reprint(slip) {
-    await printParkingSlip(clientId, slip, bizInfo.name, bizInfo.address, staffNames[slip.issued_by])
-    setSlips(prev => prev.map(s => s.id === slip.id ? { ...s, print_count: (s.print_count || 0) + 1 } : s))
+    if (busy[slip.id]) return
+    setActionError(null)
+    // On the tap, before any await (owner decision D10) — see openSlipWindow.
+    const w = openSlipWindow()
+    markBusy(slip.id, 'print')
+    const print = await printParkingSlip({
+      w, clientId, slip, outletName: bizInfo.name, propertyAddress: bizInfo.address, issuedByName: staffNames[slip.issued_by],
+    })
+    clearBusy(slip.id)
+    // The count is the server's answer, never this page's guess: a print that did not happen, or whose
+    // count did not save, leaves the stored count where it is.
+    if (print.count != null && !print.countError) applyLocal([{ id: slip.id, print_count: print.count }])
+    showPrintNotice(slip, print, false)
   }
 
-  const visible = filter === 'open' ? slips.filter(s => s.status === 'open') : slips
+  function handleIssued(slip, print) {
+    setShowNew(false)
+    setActionError(null)
+    applyLocal([print.count != null && !print.countError ? { ...slip, print_count: print.count } : slip])
+    showPrintNotice(slip, print, true)
+  }
+
+  const loadError = metaError || (open.rows === null ? open.error : null)
+  const loading = !loadError && (!metaLoaded || open.rows === null)
+  const refreshing = openBusy || (filter === 'all' && allBusy)
+  const rangeKey = `${clientId}:${rangeFrom}:${rangeTo}`
+  const allShown = all.key === rangeKey ? all : null
+
+  const staleNote = (
+    <p role="status" className="parking-note parking-note--warn">{LIST_STALE_TEXT}</p>
+  )
+
+  const renderTable = rows => (
+    <div className="table-wrap table-wrap--fab-clear">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Slip No</th>
+            <th>Vehicle No</th>
+            <th>Type</th>
+            <th>Customer</th>
+            <th>Time In</th>
+            <th><Tip text="If this slip was linked to a bill at issue time (e.g. to honor a 'free parking with purchase' policy) — click to view that bill." width={280}>Bill No</Tip></th>
+            <th>Notes</th>
+            <th><Tip text="Open means the vehicle is still parked; Closed means staff marked it exited/retrieved; Auto-Closed means it rolled over from a previous day unattended and was closed automatically — the vehicle's actual exit was never confirmed." width={300}>Status</Tip></th>
+            <th>Issued By</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(s => (
+            <tr key={s.id}>
+              <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>P-{s.slip_no}</td>
+              <td style={{ fontWeight: 600 }}>{s.vehicle_number}</td>
+              <td>{s.vehicle_type || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+              <td>{s.customer_name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+              <td style={{ whiteSpace: 'nowrap' }}>{slipTimeIn(s.time_in)}</td>
+              <td>
+                {s.bill_invoice_no ? (
+                  <button
+                    onClick={() => viewPosBill(clientId, { id: s.order_id })}
+                    style={{ background: 'none', border: 'none', color: 'var(--theme-accent-ink)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}
+                  >
+                    #{s.bill_invoice_no}
+                  </button>
+                ) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+              </td>
+              <td style={{ maxWidth: 160, whiteSpace: 'normal', color: 'var(--theme-text2)', fontSize: 12 }}>
+                {s.notes || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+              </td>
+              <td>
+                {s.status === 'open' ? (
+                  <span className="badge badge-amber">Open</span>
+                ) : s.auto_closed ? (
+                  <Tip text="Automatically closed when the page was next opened after this slip's day ended — staff never confirmed the vehicle actually exited." width={280}>
+                    <span className="badge badge-gray">Auto-Closed</span>
+                  </Tip>
+                ) : (
+                  <span className="badge badge-green">Closed</span>
+                )}
+              </td>
+              <td>{staffNames[s.issued_by] || '—'}</td>
+              <td style={{ textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                {s.status === 'open' && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => markExited(s)} disabled={!!busy[s.id]}
+                    aria-busy={busy[s.id] === 'exit' ? 'true' : undefined}>
+                    {busy[s.id] === 'exit' ? 'Marking…' : 'Mark Exited'}
+                  </button>
+                )}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => reprint(s)} disabled={!!busy[s.id]}
+                  aria-busy={busy[s.id] === 'print' ? 'true' : undefined}>
+                  {busy[s.id] === 'print' ? 'Printing…' : 'Reprint'}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+
+  let body
+  if (loading) {
+    body = <p className="parking-note">Loading…</p>
+  } else if (loadError) {
+    body = <ReportLoadError error={loadError} />
+  } else if (filter === 'open') {
+    body = (
+      <>
+        {sweepFailed && (
+          <p role="status" className="parking-note parking-note--warn">
+            Some slips from an earlier day could not be closed automatically, so they still show as parked. Mark them Exited, or press Refresh to try again.
+          </p>
+        )}
+        {open.stale && staleNote}
+        {open.rows.length === 0
+          ? <div className="card empty-state">No vehicles currently parked.</div>
+          : renderTable(open.rows)}
+      </>
+    )
+  } else {
+    body = (
+      <>
+        <div className="parking-range">
+          <RangePresets fromIso={rangeFrom} toIso={rangeTo} onPick={r => setRange({ from: r.from, to: r.to })} />
+          <div>
+            <label className="parking-range-label" htmlFor="parking-from-bs">From (BS)</label>
+            <BsCalendarPicker id="parking-from-bs" value={rangeFrom} onChange={v => setRange(r => ({ ...r, from: v }))} />
+          </div>
+          <div>
+            <label className="parking-range-label" htmlFor="parking-to-bs">To (BS)</label>
+            <BsCalendarPicker id="parking-to-bs" value={rangeTo} onChange={v => setRange(r => ({ ...r, to: v }))} />
+          </div>
+        </div>
+        {!allShown ? (
+          <p className="parking-note">Loading…</p>
+        ) : allShown.rows === null ? (
+          <ReportLoadError error={allShown.error} />
+        ) : (
+          <>
+            {allShown.stale && staleNote}
+            {allShown.rows.length === 0
+              ? <div className="card empty-state">No parking slips were issued in these dates.</div>
+              : renderTable(allShown.rows)}
+          </>
+        )}
+      </>
+    )
+  }
 
   return (
     <div>
@@ -118,100 +400,31 @@ export default function PosParkingSlips() {
             Issue a parking token for a customer's vehicle — no order required. Printing a new slip needs Supervisor access.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <Fab onClick={() => setShowNew(true)} label="+ New Parking Slip" show={hasPosAccess('supervisor') && !showNew && !loading && !loadError} />
+        <div className="parking-actions">
+          <button type="button" className="btn btn-ghost" onClick={() => reloadLists({ withMeta: true })} disabled={refreshing}
+            aria-busy={refreshing ? 'true' : undefined}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+          {/* Not gated on the dialog's own open state: the Fab is the trigger the dialog hands focus back to. */}
+          <Fab onClick={() => setShowNew(true)} label="+ New Parking Slip" show={hasPosAccess('supervisor') && !loading && !loadError} />
         </div>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 20 }}>
-        <button className={`tab-btn${filter === 'open' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('open')}>Open</button>
-        <button className={`tab-btn${filter === 'all' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('all')}>All</button>
+        <button type="button" className={`tab-btn${filter === 'open' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'open'} onClick={() => setFilter('open')}>Open</button>
+        <button type="button" className={`tab-btn${filter === 'all' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>All</button>
       </div>
 
       <ActionError error={actionError} className="action-error--top" />
-      {!loading && !loadError && sweepFailed && (
-        <p role="status" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-          Some slips from an earlier day could not be closed automatically, so they still show as parked. Mark them Exited, or reload the page to try again.
-        </p>
-      )}
-
-      {loading ? (
-        <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
-      ) : loadError ? (
-        <ReportLoadError error={loadError} />
-      ) : visible.length === 0 ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {filter === 'open' ? 'No vehicles currently parked.' : 'No parking slips issued yet.'}
-        </div>
-      ) : (
-        <div className="table-wrap table-wrap--fab-clear">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Slip No</th>
-                <th>Vehicle No</th>
-                <th>Type</th>
-                <th>Customer</th>
-                <th>Time In</th>
-                <th><Tip text="If this slip was linked to a bill at issue time (e.g. to honor a 'free parking with purchase' policy) — click to view that bill." width={280}>Bill No</Tip></th>
-                <th>Notes</th>
-                <th><Tip text="Open means the vehicle is still parked; Closed means staff marked it exited/retrieved; Auto-Closed means it rolled over from a previous day unattended and was closed automatically — the vehicle's actual exit was never confirmed." width={300}>Status</Tip></th>
-                <th>Issued By</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map(s => (
-                <tr key={s.id}>
-                  <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>P-{s.slip_no}</td>
-                  <td style={{ fontWeight: 600 }}>{s.vehicle_number}</td>
-                  <td>{s.vehicle_type || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                  <td>{s.customer_name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                  <td>{nepalTime(s.time_in)}</td>
-                  <td>
-                    {s.bill_invoice_no ? (
-                      <button
-                        onClick={() => viewPosBill(clientId, { id: s.order_id })}
-                        style={{ background: 'none', border: 'none', color: 'var(--theme-accent-ink)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}
-                      >
-                        #{s.bill_invoice_no}
-                      </button>
-                    ) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
-                  </td>
-                  <td style={{ maxWidth: 160, whiteSpace: 'normal', color: 'var(--theme-text2)', fontSize: 12 }}>
-                    {s.notes || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
-                  </td>
-                  <td>
-                    {s.status === 'open' ? (
-                      <span className="badge badge-amber">Open</span>
-                    ) : s.auto_closed ? (
-                      <Tip text="Automatically closed when the page was next opened after this slip's day ended — staff never confirmed the vehicle actually exited." width={280}>
-                        <span className="badge badge-gray">Auto-Closed</span>
-                      </Tip>
-                    ) : (
-                      <span className="badge badge-green">Closed</span>
-                    )}
-                  </td>
-                  <td>{staffNames[s.issued_by] || '—'}</td>
-                  <td style={{ textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                    {s.status === 'open' && (
-                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => markExited(s)}>Mark Exited</button>
-                    )}
-                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprint(s)}>Reprint</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {body}
 
       {showNew && (
         <NewParkingSlipModal
           outletName={bizInfo.name}
           propertyAddress={bizInfo.address}
           onClose={() => setShowNew(false)}
-          onIssued={() => { setShowNew(false); loadSlips() }}
+          onIssued={handleIssued}
+          onUnknown={() => reloadLists()}
         />
       )}
     </div>

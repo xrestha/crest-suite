@@ -180,6 +180,52 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4f: CUSTOMERS-PARKING-14, -15, GUEST-8 (P3); GUEST-7 closed as accepted;
+  plus the S809.4 Guest Menu Preview wording~~ — **shipped S814, 2026-10-12**, app only (crest-v430).
+  CUSTOMERS-PARKING-14 (owner D8, D10): the token's print window opens on the tap, before any await; a
+  blocked window prints and counts nothing and says which slip to reprint; the count is the server's
+  (`print_count: -1`, which `pos_parking_slips_guard` turns into `OLD + 1`), and the token reads "COPY
+  OF ORIGINAL - (N)" like a bill, never "REPRINT #N". CUSTOMERS-PARKING-15 (owner D9): Parking reads
+  open slips only; All loads on demand over a BS date range (this month by default); the sweep closes
+  by rule; Mark Exited is bounded and patches its row; Refresh and a re-read on tab return; a failed
+  reload keeps the last list. GUEST-8: every guest-menu settings write is bounded, a lost logo answer
+  is read back (`logoSaveOutcome`) and the new file is deleted only on a real refusal. Admin Guest Menu
+  quotes the guest page's own `MENU_UNAVAILABLE` / `ORDERING_OFF_TEXT`. Original rows:
+  `CUSTOMERS-PARKING.md`, `GUEST.md`.
+  **GUEST-7, Q21 (c), as decided:** a table's QR stays its id and cannot be revoked. A guest order is
+  only a request: nothing is cooked until a signed-in staff member Accepts it (3b), a table holds one
+  waiting request (`pos_guest_order_requests_one_pending_per_table`), and a locked or POS-off outlet's
+  QR shows no menu (1h). A revocable token meant a migration, a new column and reprinting every sticker
+  for a risk nobody has seen (0 guest requests live, 2026-10-12). Staff accept only an order the table
+  confirms and dismiss a stranger's; marking a table Inactive turns its ordering off. Revisit with a
+  per-table token and "New QR code" if an outlet reports remote or repeated orders.
+- [x] ~~S809 stage 4, slice 4e: IMS-HANDOFF-5, -6, -7, -8, -9, -10 (P3); plus two S809.4 items
+  (`imsPostWarning` never decreasing, `writeSalesEntries` linking by the screen's id)~~ — **shipped
+  S814, 2026-10-12**, app only (crest-v430). IMS-HANDOFF-8/10: the till posts the STORED bill under its
+  own id, on the Nepal day of the server's `closed_at`, through the `billSalesRows` /
+  `billMovementRows` Periods' backfill uses (`postClosedBill`); a bill closed in a month that is not the
+  open one waits for Periods, and a credit note's reversal spreads the discount the same way.
+  IMS-HANDOFF-9 (owner D6, D7): an outlet without Crest IMS posts nothing, reads no counts, shows no
+  banner, and leaves its bills and credit notes unmarked so switching Inventory on later still finds
+  them. IMS-HANDOFF-5 (D4): ending a month says how many of its till bills and notes are not in
+  Inventory yet, worded for the Owner or an IMS supervisor; it never blocks. IMS-HANDOFF-6 (D5): Stock
+  Movements nets every row by its sign, so a sale that added stock comes off Value Depleted, marked
+  "Added stock". IMS-HANDOFF-7: see 4d. The floor's miss count is a list pruned by every count that
+  answers. Original rows: `IMS-HANDOFF.md`.
+- [x] ~~S809 stage 4, slice 4d: REPORTS-5, -6, -7, -9, -10, -11, SHIFTS-5 (P3), IMS-HANDOFF-7; plus B4's
+  Avg Turn Time, the manual pivot counting `pos_credit`, and Sales Report / Exceptions comp food
+  cost~~ — **shipped S814, 2026-10-12**, app only (crest-v430; Owner Report schema 16). REPORTS-5 (Q22
+  (a)): the POS Dashboard and Home keep a credited bill on its sale day and take its note off its issue
+  day, across hours, payments, channels and Avg per cover. REPORTS-6: a delivery bill with a credit
+  note is "Credited, not owed" in any range. REPORTS-7, SHIFTS-5 (owner D1): Comped Bills, the Z-report
+  and the Owner Report value at menu price before VAT (`forgoneMenuValue`), as Sales Exceptions does;
+  older shift and owner reports are labelled incl. VAT. REPORTS-9, IMS-HANDOFF-7: the manual pivot is
+  hand-entered rows only, Sales Mix splits the Inventory Revenue tile (a note comes off once; a POS-only
+  Home splits its till bills), and the POS pivot names its month and basis, dates by Nepal time, takes
+  notes off and refreshes; Staff rank no longer sees it on the POS Dashboard (D2). REPORTS-10: RevPASH
+  counts active tables' seats. REPORTS-11: every kitchen count reads the Kitchen Display's service day.
+  B4 (D3): sittings over 12 hours are left out of Turnover, and a note counts each excluded kind.
+  Original rows: `REPORTS.md`, `SHIFTS.md`, `IMS-HANDOFF.md`.
 - [x] ~~S809 stage 4, slice 4c: CREDIT-NOTES-7, -8, -9, -10, DOCS-8 (P3); plus the S809.4 Credit Note
   Book reprint-label item (app half)~~ — **shipped S809, 2026-10-12**, app only (crest-v429).
   CREDIT-NOTES-7: the invoice-number search shows each match's BS year and "FY", this fiscal year's

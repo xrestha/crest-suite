@@ -1,0 +1,37 @@
+/* POS → Parking Slips (S814). The page's few layout rules, as classes rather than inline styles so the
+   range bar wraps on a phone and the notes take their colour from the theme. Scoped by name. */
+
+.parking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+/* The All tab's From/To bar: the report presets beside two BS pickers, as on the POS reports. */
+.parking-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+
+.parking-range-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--theme-text3);
+}
+
+/* A one-line status above a list: loading, or a list that may be out of date. */
+.parking-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--theme-text3);
+}
+
+.parking-note--warn {
+  font-size: 12px;
+  color: var(--theme-amber-text);
+}

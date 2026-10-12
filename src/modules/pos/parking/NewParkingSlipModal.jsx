@@ -8,9 +8,13 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBs, nepalDateAd, serviceDayStartIso } from '../../../shared/nepalTime'
-import { printParkingSlip } from './parkingSlipHtml'
+import { settleWithin } from '../../../utils/withTimeout'
+import { openSlipWindow, printParkingSlip } from './parkingSlipHtml'
+import { noAnswer, parkingSlipNotice } from './parkingSlipList'
 
 const VEHICLE_TYPES = ['Two Wheeler', 'Four Wheeler']
+// The issue waits this long for the server before saying its answer did not arrive (S814).
+const ISSUE_WRITE_MS = 20000
 
 // S754 (owner decision): parking's "day" is the SERVICE day — it rolls over at 6 AM Nepal time, not
 // at the device's midnight. The helper lives in shared/nepalTime.js since S756 (it was defined here
@@ -29,7 +33,12 @@ export { serviceDayStartIso }
 // issuer, Time In and the linked bill's own number itself, so for a till login the issued_by and
 // bill_invoice_no sent below are ignored. They are still sent for the operator, whose insert the
 // trigger keeps as sent (the restore path).
-export default function NewParkingSlipModal({ outletName, propertyAddress, onClose, onIssued }) {
+//
+// S814 (CUSTOMERS-PARKING-14, owner decision D10): the print window opens on the Issue tap, before
+// the insert is awaited, so a slow answer can no longer cost the guest their token to the pop-up
+// blocker. `onIssued(slip, print)` hands the page the saved row and what the print did; the page says
+// what follows. `onUnknown()` asks the page to re-read its Open list when the insert's answer was lost.
+export default function NewParkingSlipModal({ outletName, propertyAddress, onClose, onIssued, onUnknown }) {
   const { clientId, profile, hasPosAccess } = useAuth()
   const { scopedFrom, scopedInsert } = useScopedDb()
 
@@ -82,28 +91,43 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   }))
 
   async function handleSave() {
+    if (saving) return
     if (!vehicleNumber.trim()) { setVehicleErr('Vehicle number is required.'); return }
     setVehicleErr('')
     setSaving(true); setError('')
+    // Synchronous, before the first await: the tap is the only moment the browser allows it.
+    const w = openSlipWindow()
+    const vehicle = vehicleNumber.trim().toUpperCase()
     const linkedBill = todaysBills.find(o => o.id === billOrderId)
-    const { data: slip, error: insErr } = await scopedInsert('pos_parking_slips', {
-      vehicle_number: vehicleNumber.trim().toUpperCase(),
+    const { data: slip, error: insErr } = await settleWithin(scopedInsert('pos_parking_slips', {
+      vehicle_number: vehicle,
       vehicle_type:   vehicleType || null,
       customer_name:  customerName.trim() || null,
       notes:          notes.trim() || null,
       order_id:       billOrderId || null,
       bill_invoice_no: linkedBill?.invoice_no || null,
       issued_by:      profile?.id || null,
-    }, { single: true })
-    // S754: the sentence, not Postgres' raw message; the detail rides along as fine print.
+    }, { single: true }), ISSUE_WRITE_MS, 'Issuing the slip')
     if (insErr) {
+      if (w && !w.closed) w.close()
       const { text, detail } = asActionError(insErr, 'staff')
-      setError({ text: `No slip was printed. ${text}`, detail })
-      setSaving(false); return
+      if (noAnswer(insErr)) {
+        // The insert may have landed after the clock ran out, so this never says "not saved": a
+        // second Issue would put a second numbered slip on the same car. The page re-reads its Open
+        // list so the answer to "is it there?" is on screen.
+        setError({ text: parkingSlipNotice('issue-unknown', { vehicle }), detail })
+        onUnknown?.()
+      } else {
+        // S754: the sentence, not Postgres' raw message; the detail rides along as fine print. A
+        // refusal is the server's answer, so here "nothing printed" is earned.
+        setError({ text: `No slip was printed. ${text}`, detail })
+      }
+      setSaving(false)
+      return
     }
+    const print = await printParkingSlip({ w, clientId, slip, outletName, propertyAddress, issuedByName: profile?.full_name })
     setSaving(false)
-    printParkingSlip(clientId, slip, outletName, propertyAddress, profile?.full_name)
-    onIssued()
+    onIssued(slip, print)
   }
 
   return (
@@ -183,7 +207,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
       </div>
       <ActionError error={error} />
       <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving…' : 'Issue & Print'}
         </button>

@@ -16,6 +16,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tabs from '../../../components/Tabs'
+import { movementFigures } from './stockMovementRows'
 
 // Module scope so the memoized derivation below can reference them without them becoming
 // unstable dependencies (they're pure column definitions).
@@ -23,16 +24,18 @@ const ITEM_SORTS = {
   day:      { label: 'Day',          get: r => r.bsDay },
   item:     { label: 'Item',         get: r => r.item.name || '' },
   category: { label: 'Category',     get: r => r.category || '' },
-  qty:      { label: 'Qty Depleted', get: r => r.qtyAbs },
+  qty:      { label: 'Qty Depleted', get: r => r.qtyOut },
   source:   { label: 'Source',       get: r => r.source || '' },
   value:    { label: 'Value',        get: r => r.value },
 }
 // One label per ledger source, for the badge, the filter and the Excel column. 'pos_credit_restock'
 // (S809 2e) is stock a Credit Note put back because the bill's food was not served on it: it ADDS
-// stock, so its value is subtracted from Value Depleted rather than added to it.
+// stock. Every row is signed by its own qty since S809 4e (movementFigures), so a put-back, and a sale
+// whose choices added stock, both come off Value Depleted rather than onto it.
 const SOURCE_LABEL = { pos_sale: 'POS Sale', pos_comp: 'POS Comp', manual: 'Manual Entry', pos_credit_restock: 'Credit Note — put back' }
 const sourceLabel = s => SOURCE_LABEL[s] || 'POS Sale'
 const isPutBack = s => s === 'pos_credit_restock'
+const ADDED_STOCK_TIP = 'This sale ADDED stock: a choice removes an ingredient the dish\'s recipe does not use (e.g. "No onion" with no onion in the recipe). Fix the recipe or the choice.'
 
 const SUB_SORTS = {
   name:      { label: 'Sub-Recipe',    get: r => r.name || '' },
@@ -200,11 +203,11 @@ export default function StockMovements() {
     const built = (movements || []).map(m => {
       const item = m.items || {}
       const order = m.pos_orders || null
-      const qtyAbs = Math.abs(parseFloat(m.qty) || 0)
-      // Stock put back by a Credit Note counts against the period's depletion (S809 2e).
-      const value = (isPutBack(m.source) ? -1 : 1) * qtyAbs * (parseFloat(item.per_uom_rate) || 0)
+      // Signed by the row's own qty (S809 4e, D5): stock put back by a Credit Note, or added by a sale
+      // whose choices outweigh its recipe, counts against the period's depletion, as Book Stock nets it.
+      const { qtyOut, value, unexpectedAdd } = movementFigures(m, item.per_uom_rate)
       return {
-        id: m.id, item_id: m.item_id, ref_id: m.ref_id, item, order, qtyAbs, value,
+        id: m.id, item_id: m.item_id, ref_id: m.ref_id, item, order, qtyOut, value, unexpectedAdd,
         source: m.source, bsDay: m.bs_day,
         category: item.categories?.name || 'Uncategorised',
       }
@@ -247,6 +250,7 @@ export default function StockMovements() {
       return matchSource && matchSearch && matchDay
     }).sort((a, b) => cmp(ITEM_SORTS[itemSort].get(a), ITEM_SORTS[itemSort].get(b)))
 
+    // Net figures (S809 4e, D5): a row that added stock carries a negative value and comes off.
     const totalValue = filtered.reduce((s, r) => s + r.value, 0)
     const compValue = filtered.filter(r => r.source === 'pos_comp').reduce((s, r) => s + r.value, 0)
     const itemsAffected = new Set(filtered.map(r => r.item?.name)).size
@@ -281,6 +285,11 @@ export default function StockMovements() {
   // rather than leaving two numbers on one page disagreeing in silence.
   // Compared against the UNFILTERED ledger total, since the derivation ignores the day filter.
   const ledgerTotalValue = useMemo(() => rows.reduce((s, r) => s + r.value, 0), [rows])
+  // Items a SALE added stock to this period (S809 4e): named in a banner, like the no-BOM one, because
+  // the fix is in Recipes or the dish's choices, not here.
+  const addedStockItems = useMemo(
+    () => [...new Set(rows.filter(r => r.unexpectedAdd).map(r => r.item?.name || 'An unnamed item'))].sort(),
+    [rows])
   const reconGap = usage.derivedItemValue - ledgerTotalValue
   // `!loading` matters: the usage derivation resolves independently of the ledger fetch, so
   // without it there's a window where usage has landed but `rows` is still empty and the gap
@@ -301,7 +310,8 @@ export default function StockMovements() {
       'Item': r.item.name || '',
       'Category': r.category,
       'UOM': r.item.uom || '',
-      'Qty Depleted': (isPutBack(r.source) ? -1 : 1) * parseFloat(r.qtyAbs.toFixed(3)),
+      // Signed as the screen shows it: stock added (a put-back, or a sale that added stock) is negative.
+      'Qty Depleted': parseFloat(r.qtyOut.toFixed(3)),
       'Source': sourceLabel(r.source),
       'Order #': r.order?.order_no || '',
       'Staff': (r.order && staffNames[r.order.closed_by]) || '',
@@ -406,12 +416,12 @@ export default function StockMovements() {
           <div className="stat-sub">depletion entries this period</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value this period's sales consumed. Covers POS sales and comps AND manual Sales Entry, which has written depletion movements since 2026-07-30, less any stock a Credit Note put back because a bill's food was not served on it." width={300}>Value Depleted</Tip></div>
+          <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value this period's sales consumed. Covers POS sales and comps AND manual Sales Entry, which has written depletion movements since 2026-07-30. Net, as Book Stock is: less any stock a Credit Note put back because a bill's food was not served on it, and less any a sale ADDED (marked Added stock)." width={300}>Value Depleted</Tip></div>
           <div className="stat-value" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">POS + manual entry, at cost</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Same calc, restricted to POS Comp rows — the food-cost value of dishes given away complimentary, with zero revenue collected." width={260}>Comp Value</Tip></div>
+          <div className="stat-label"><Tip text="Same calc, restricted to POS Comp rows — the food-cost value of dishes given away complimentary, with zero revenue collected. Net too: a comp that added stock comes off." width={260}>Comp Value</Tip></div>
           <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-text1)' }}>NPR {compValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">value given away</div>
         </div>
@@ -441,6 +451,18 @@ export default function StockMovements() {
           <span>⚠</span>
           <span>
             {noBomRecipes.length} item{noBomRecipes.length !== 1 ? 's' : ''} sold this period {noBomRecipes.length !== 1 ? 'have' : 'has'} no ingredients linked, so no stock was depleted for {noBomRecipes.length !== 1 ? 'them' : 'it'}: <strong>{noBomRecipes.join(', ')}</strong>. Add ingredients under Recipes to fix this going forward.
+          </span>
+        </div>
+      )}
+
+      {/* S809 4e (IMS-HANDOFF-6, D5): a sale whose choices take off more of an ingredient than its
+          recipe uses ADDS that stock. Named here, as the no-BOM banner names its dishes, and netted
+          off Value Depleted rather than counted as a depletion. */}
+      {addedStockItems.length > 0 && (
+        <div role="status" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          <span>⚠</span>
+          <span>
+            A sale this period ADDED stock to {addedStockItems.length} item{addedStockItems.length !== 1 ? 's' : ''}: <strong>{addedStockItems.join(', ')}</strong>. A choice on the dish takes off an ingredient its recipe does not use (e.g. "No onion" with no onion in the recipe). Those rows show with a minus and are taken off Value Depleted. Fix the recipe or the choice.
           </span>
         </div>
       )}
@@ -664,7 +686,14 @@ export default function StockMovements() {
                     </td>
                     <td><span className="badge badge-gray">{r.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{isPutBack(r.source) ? '−' : ''}{r.qtyAbs.toFixed(3)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      <span style={{ whiteSpace: 'nowrap' }}>{r.qtyOut < 0 ? '−' : ''}{Math.abs(r.qtyOut).toFixed(3)}</span>
+                      {r.unexpectedAdd && (
+                        <Tip text={ADDED_STOCK_TIP} width={300} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}>
+                          <span className="badge badge-amber" style={{ whiteSpace: 'nowrap' }}>Added stock</span>
+                        </Tip>
+                      )}
+                    </td>
                     <td>
                       <span className={`badge ${r.source === 'pos_comp' ? 'badge-amber' : r.source === 'manual' || isPutBack(r.source) ? 'badge-gray' : 'badge-green'}`}>
                         {sourceLabel(r.source)}

@@ -12,7 +12,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import {
   closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText,
   carryForwardOpeningStock, createPeriodWithCarryForward, nextExistingPeriod, periodLabel, nextBsMonth,
-  closerMakesReport, deferredReportNote,
+  closerMakesReport, deferredReportNote, tillWaitingPreflight, tillWaitingNote,
 } from './periods/closePeriod'
 import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
@@ -176,7 +176,7 @@ export default function Periods() {
       // supabase-js call unsettled forever — "Loading…" with no error and no way out (CLAUDE.md:
       // guard any user-gating await with withTimeout).
       results = await withTimeout(Promise.all([
-        supabase.from('clients').select('id, name, is_active, ims_enabled, hr_enabled').order('name'),
+        supabase.from('clients').select('id, name, is_active, ims_enabled, hr_enabled, pos_enabled').order('name'),
         // Every period of every client: rows are clients × months, so 30 clients over three years
         // is already past PostgREST's 1000-row cap — and the sort drops the OLDEST rows first,
         // which means the client this read silently erases is the dormant one whose open period is
@@ -221,14 +221,25 @@ export default function Periods() {
   // for the deferred-report one. The payroll note is about the labour figure frozen AT the close,
   // which such a close does not freeze — and an IMS login cannot read hr_payroll_runs at all
   // (no_ims_staff returns []), so it would say "not finalized" whatever the truth was.
-  async function closeNotes(period, cid, hrOn, makesReport = true) {
-    const payrollOn = hrOn && makesReport
-    const [count, payroll] = await Promise.all([
+  //
+  // With POS on, the dialog also says how many of the month's till bills still wait for Inventory
+  // (S809 4e, IMS-HANDOFF-5, owner decision D4): a warning, never a block. Not without Inventory: such
+  // an outlet's bills are deliberately left unposted (D6), so "not in Inventory yet" would be noise.
+  async function closeNotes(period, cid, { hr = false, pos = false, ims = true } = {}, makesReport = true) {
+    const payrollOn = hr && makesReport
+    const tillOn = pos && ims
+    const [count, payroll, waiting] = await Promise.all([
       closingCountPreflight(period.id, cid),
       payrollOn ? payrollPreflight(period.id, cid) : Promise.resolve(undefined),
+      tillOn ? tillWaitingPreflight(period.id, cid) : Promise.resolve(undefined),
     ])
     const label = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
-    return [closingCountNote(count), payrollOn ? payrollNote(payroll, label) : null, makesReport ? null : deferredReportNote(label)]
+    return [
+      closingCountNote(count),
+      payrollOn ? payrollNote(payroll, label) : null,
+      tillOn ? tillWaitingNote(waiting, label, { closerPosts: makesReport }) : null,
+      makesReport ? null : deferredReportNote(label),
+    ]
   }
 
   // HR pages are deliberately NOT locked by the close — payroll is finalized after the stock
@@ -262,7 +273,7 @@ export default function Periods() {
 
   const adminMods = cid => {
     const c = allClients.find(x => x.id === cid)
-    return { ims: c?.ims_enabled !== false, hr: !!c?.hr_enabled }
+    return { ims: c?.ims_enabled !== false, hr: !!c?.hr_enabled, pos: !!c?.pos_enabled }
   }
 
   async function adminCloseAndAdvance(period, cid) {
@@ -271,7 +282,7 @@ export default function Periods() {
     const mods = adminMods(cid)
     setNotice(null)
     setActionClientId(cid)
-    const notes = await closeNotes(period, cid, mods.hr)
+    const notes = await closeNotes(period, cid, mods)
     setActionClientId(null)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
@@ -294,7 +305,7 @@ export default function Periods() {
     const mods = adminMods(cid)
     setNotice(null)
     setActionClientId(cid)
-    const notes = await closeNotes(period, cid, mods.hr)
+    const notes = await closeNotes(period, cid, mods)
     setActionClientId(null)
     setPendingConfirm({
       title: `End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
@@ -489,18 +500,18 @@ export default function Periods() {
   async function closeAndAdvance(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    const mods = { ims: !!clientModules?.ims, hr: !!clientModules?.hr }
+    const mods = { ims: !!clientModules?.ims, hr: !!clientModules?.hr, pos: !!clientModules?.pos }
     // The Owner and admin make the frozen report at the close. An IMS supervisor or manager may
     // end the month but cannot write the report (its RLS refuses every staff login), so the
     // Owner's first view makes it — and this dialog must not promise it "now" (S792, D42).
     const makesReport = closerMakesReport({ isAdmin, isOwner })
-    // The two preflights are each bounded at 10s by withTimeout, so on a bad connection this
+    // The preflights are each bounded at 10s by withTimeout, so on a bad connection this
     // await is ten seconds long — and it runs BEFORE the dialog appears. The admin paths show
     // "Working…" through it (setActionClientId); this one, the Owner's month-end button, showed
     // nothing at all, so pressing it looked like nothing happening.
     setNotice(null)
     setCloseBusy(true)
-    const notes = await closeNotes(period, clientId || profile?.client_id, mods.hr, makesReport)
+    const notes = await closeNotes(period, clientId || profile?.client_id, mods, makesReport)
     setCloseBusy(false)
     const reportClause = makesReport
       ? `, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`

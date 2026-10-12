@@ -212,6 +212,8 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   // drawer cannot disagree. 0 for a card, QR or points bill, and for a Credit bill nobody has paid yet.
   const cashOut = amounts ? Math.min(Number(cashTaken) || 0, amounts.net) : 0
   const askFood = imsEnabled !== false
+  // Whether this note's reversal goes to Inventory at all (S809 4e, D7): the outlet has Crest IMS.
+  const postsToIms = imsEnabled !== false
   // The food goes back in the month the note is issued in, beside its revenue reversal. For a bill
   // billed again now that is right (the new bill uses the food again this month). For a duplicate
   // charged in an earlier month it is not: that month's stock count has already settled its food.
@@ -329,27 +331,37 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     // Q10 a); otherwise the food was used and this corrects money and tax only. It used to skip
     // silently with no open period and never read its insert's error (S747); now a note that could
     // not post is stamped "waiting", said so here, counted on the POS floor and posted from Periods.
+    //
+    // An outlet without Inventory posts nothing (S809 4e, owner decision D7, as its bills, D6): there is
+    // no Inventory revenue to take back, and the note is left unmarked, so switching Inventory on later
+    // posts it after its bill.
     let ims
-    try {
-      ims = await withTimeout(postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note: created, order, items, today }), 30000, 'Posting to Inventory')
-    } catch (err) {
-      ims = { posted: false, reason: 'write', error: err }
+    if (!postsToIms) {
+      ims = { posted: false, reason: 'no_ims' }
+    } else {
+      try {
+        ims = await withTimeout(postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note: created, order, items, today }), 30000, 'Posting to Inventory')
+      } catch (err) {
+        ims = { posted: false, reason: 'write', error: err }
+      }
     }
+    // Nothing more is owed to Inventory: the note is in it, or the outlet has none.
+    const imsSettled = ims.posted || ims.reason === 'no_ims'
 
     setSubmitting(false)
-    if (ims.posted && print.printed) { onIssued?.(created); return }
+    if (imsSettled && print.printed) { onIssued?.(created); return }
     // The note is issued, numbered and printed whatever happens here, so this is a notice with one
     // button, not an error with a retry: Periods' backfill is the retry.
     const month = `${BS_MONTHS[today.month - 1]} ${today.year}`
     setImsNotice({
       created,
       printed: print.printed,
-      imsPosted: ims.posted,
+      imsPosted: imsSettled,
       printText,
       // S809 3j (CREDIT-NOTES-3, Q12 c): who posts a waiting note. A POS manager (who issues notes),
       // the Owner and the operator post from the Orders floor's "Post to Inventory"; a closed month
       // only the Owner (or the operator), from Periods. Periods does not open for a POS manager.
-      text: ims.posted ? '' : ims.reason === 'no_period'
+      text: imsSettled ? '' : ims.reason === 'no_period'
         ? `${month} has not been started in Inventory yet, so this credit note has not been taken off Inventory sales. Once ${month} is started there, press "Post to Inventory" on the Orders floor and the note is posted then.`
         : ims.reason === 'closed'
           ? `${month} is closed in Inventory, so this credit note has not been taken off Inventory sales. Only the Owner can post into a closed month: Periods → "Post POS bills to Inventory" on ${month}.`

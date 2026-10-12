@@ -21,13 +21,13 @@ rows' own `unit_price`. Since `20260918100000` the database refuses a non-manual
 delete from anyone but the Owner or admin, and a `pos_sale`/`pos_comp` insert below POS or IMS
 supervisor.
 
-**A closed POS bill must reach IMS, and if it can't, that must be visible.** `writeSalesEntries()`
-returns early when there is no open `monthly_periods` row, or when today's BS month isn't the open
-one. It used to return silently: the bill still closed, printed and consumed an invoice number
-while Inventory never saw its revenue or ingredient usage, so POS Sales Report and IMS
-MonthlySummary disagreed by an unbounded amount with nothing on either page saying so. Found live
-on a test client — 15 bills, NPR 18,900 — caused by Ashadh 2083 being left open past its end while
-Shrawan was never created, so every bill rung after the BS rollover bailed.
+**A closed POS bill must reach IMS, and if it can't, that must be visible.** The till's post
+(`postClosedBill`, behind `writeSalesEntries`) leaves a bill unposted when no `monthly_periods` row is
+open or the bill's close month (Nepal date of the server's `closed_at`) is not it; it posts the STORED
+bill under its own id with the backfill's `billSalesRows`/`billMovementRows` (S814). An outlet without
+Crest IMS posts nothing and leaves bills and notes unmarked (`tillPostsToIms`, D6, D7). A silent
+return once left 15 bills out of Inventory unnoticed.
+History: docs/rules-archive/pos-billing.md#silent-ims-post
 
 It now returns a boolean, the close path stamps `pos_orders.ims_posted_at` **only on a confirmed
 post**, the POS floor shows a standing count of unposted bills, and Periods carries **Post POS
@@ -70,8 +70,7 @@ than being read as "none of these has posted". `backfillPosToIms.test.js` assert
 counts as exact numbers, because a regression to per-order writes is invisible otherwise.
 
 **`sales_entries` and `stock_movements` can diverge, so neither is evidence of the other.**
-`writeSalesEntries` writes revenue first and depletion second, inside a try/catch that swallows
-failures — by design, so a depletion problem never blocks a bill. The consequence is that a bill
+The till's post (`postClosedBill`) writes revenue first and depletion second, best-effort — by design, so a depletion problem never blocks a bill. The consequence is that a bill
 can have revenue and no movements. A backfill guard that inferred "already posted?" from
 `stock_movements` was therefore **wrong**, not merely incomplete, and double-posted two bills'
 revenue on real data. Both tables now carry a link to the order (`stock_movements.ref_id`,
@@ -93,12 +92,13 @@ PIN every yield read 100% and every comp its typed Cost Price. The till's comp c
 bill's stock lines now read through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
 the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`,
 `posStockLines`), which feed `recipeCost.js`' `{ book }` walk, never a SQL copy of it. A till or shift
-screen that costs or depletes uses those two. Not switched yet: Sales Report's and Sales Exceptions'
-comp cost, `viewPosBill`, the Customization report (POS_TODO S809.4).
+screen that costs or depletes uses those two. Sales Report's and Sales Exceptions'
+comp cost switched in S814 (`posFoodCosts`). Not switched yet: `viewPosBill` and the Customization
+report, which IMS logins with no POS rank open and `pos_recipe_book` refuses (stage 5).
 
 **`sales_entries` is period-scoped, not client-scoped**, so it is deliberately absent from
 `CLIENT_SCOPED_TABLES` and `scopedDb` throws for it — use plain `supabase.from()`, as
-`writeSalesEntries` does. `stock_movements` and `pos_orders` *are* client-scoped and stay on
+`postClosedBill` does. `stock_movements` and `pos_orders` *are* client-scoped and stay on
 `scopedDb`. Getting this wrong fails loudly, which is the point.
 
 **Every period-scoped read here needs `fetchAllRows`.** Six `pos_orders` reads had none and capped
@@ -111,7 +111,7 @@ unbounded outstanding-credit read.
 **That sweep stopped at the report pages, and S629 found the rest.** The reports were clean; the
 *operational* screens were not, and several of them read tables with nothing at all to bound them:
 `pos_customers` (a row per phone that has ever been on a bill, so past 1000 a regular cannot be
-found by the search box), `pos_parking_slips` (every slip ever), `pos_shifts` history (two or three
+found by the search box), `pos_parking_slips` (every slip ever; since S814 open slips plus a date range on All), `pos_shifts` history (two or three
 a day crosses 1000 inside the first year), Credit Notes' candidate list (its range is whatever the
 two pickers are set to), the Z-report's own `pos_orders` read, and `pos_kot_log` on the **Kitchen
 Display** — that one sorted oldest-first, so truncation drops the *newest* tickets, the ones the
@@ -282,8 +282,9 @@ table's food.
   sentence parses `option_not_on_menu`/`option_count` (`choiceRefusal.js`): change the RAISE text and
   its regexes together.
 - **Stock at close reads the SERVER snapshot, never the cart.** The cart's choices are built by the
-  till and carry no stock lines; `writeSalesEntries` reads `pos_order_item_options.ingredient_deltas`
-  per line key and stops (unposted, chased by the backfill) on a failed read.
+  till and carry no stock lines; `postClosedBill` reads the bill's own lines with their
+  `pos_order_item_options.ingredient_deltas` (`BILL_POST_LINES`) and posts nothing (unposted, chased
+  by the backfill) on a failed read.
   `src/utils/orderLineIngredients.js` is the only place those lines become raw items.
 - **The guest menu calls `get_guest_menu_options` beside `get_guest_menu`**, and a `PGRST202` (the
   function not deployed yet) reads as "no choices", not a warning to every guest.
@@ -354,7 +355,8 @@ table's food.
   accepted guest request ids (`guestReqs`); what is not consumed is kept again. The PIN screen names
   them. The countdown toast is `zIndex: 1100`, above the till's 1000 layer — at 400 it was invisible.
 - **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
-  sales value*) — one coherent unit, **all ex-VAT since S754**. Comp food cost stays in its own
+  sales value*) — one coherent unit, **all ex-VAT since S754**; Comped Bills, the Z-report (`voidBasis: 'ex_vat'`) and
+  the Owner Report share `forgoneMenuValue` since S814. Comp food cost stays in its own
   column. Never reintroduce a total that adds comp COST to revenue figures, or VAT to a sale that
   never happened.
 - **The printed settlement slip's Variance now derives from `expectedCashOf`** — the same figure
@@ -406,8 +408,9 @@ Three things to know before touching it:
 - **`closeOrder` now persists the cart through `save_pos_order_items` before billing a paid
   order**, because the trigger can only measure the cap against STORED lines and the Payment
   button never gated on a dirty cart. That also closed a quieter divergence that predates the
-  trigger: `writeSalesEntries` posts revenue from the in-memory cart, so an unsaved line was
-  already reaching IMS revenue and the printed bill while never existing in `pos_order_items`.
+  trigger: `writeSalesEntries` posted revenue from the in-memory cart (until S814; it now reads the
+  stored bill), so an unsaved line was already reaching IMS revenue and the printed bill while never
+  existing in `pos_order_items`.
 
 History: docs/rules-archive/pos-billing.md#pos-write-guards-copy
 
@@ -840,6 +843,10 @@ Times on every POS slip and screen go through `src/shared/nepalTime.js`; see
 - **A credit-note reprint's label is `nextCreditNoteCopy` over a `print_count` read just before
   printing** and the page's list. Two reprints at the same instant can still share a number until the
   server keeps the counter (stage 5).
+- **A parking token's count is the server's (S814).** The window opens on the tap; a blocked one counts
+  nothing. The print sends `print_count: -1` (the guard writes `OLD + 1` for any differing value) and
+  labels from the count returned. Never send the page's own: a stale page sending the stored value
+  changes nothing.
 
 ### The four POS report pages are reports, not till screens (S613)
 
@@ -909,7 +916,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 - **The till's settings come from a read that answered, or billing waits (S809 2a).** `loadTillSettings` bounds the `settings` and `clients` reads, applies and caches only an answer, keeps the offline copy for routing on a failure, and never caches a failure. `billingSettingsLoaded` gates `payBlocker`, `closeBlocker`, `billOrder` and `reprintBill`; a cached copy never opens Payment. Never fall back to defaults in silence: `is_vat_registered ?? true` made every PAN outlet a VAT one on a dropped read.
 - **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar. Measured S776: 0 of 32 controls under 44px at 820px touch (was 24 of 36).
 - **Till text is `errorText(err, 'staff')`, never `err.message`** — the floor alerts, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
-- **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till (the 9px chips were raised). Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
+- **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager; outlet has Crest IMS, S814); its misses are pruned by every count that answers (`pruneImsMisses`). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till (the 9px chips were raised). Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
 - **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. A KDS estimate preset starts the ticket in one tap.
 
 ## A send whose answer is lost is read back too (S809 3e)
@@ -1114,7 +1121,7 @@ way to post it afterwards.
   carries **`sales_entries.pos_credit_note_id`**. The backfill asks the link, never the stamp alone —
   the same reason bills carry `pos_order_id` (above).
 - **The reversal takes back what the bill POSTED**: comped lines skipped, the bill discount spread by
-  the same `discRatio` `backfillPosToIms` uses, a `writeoff` bill reverses nothing. It used raw
+  the same `storedDiscountRatio` `billSalesRows` uses (over every non-comped line, S814), a `writeoff` bill reverses nothing. It used raw
   `unit_price`, so a discounted bill's note removed more revenue than the bill ever added.
 - **The note issues whatever happens**, so failure is a notice with one button, not an error with a
   retry. Recovery is the floor banner's Post to Inventory (open month) or Periods → Post POS bills to

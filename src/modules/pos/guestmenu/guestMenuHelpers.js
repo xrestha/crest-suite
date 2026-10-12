@@ -69,6 +69,18 @@ export function reorderCategoryList(stored, menuOrder) {
   })
 }
 
+// ── What a guest is told when there is no menu, or no ordering ───────────────────────────────────
+// One screen covers four cases a guest cannot tell apart and should not be told apart: POS off, the
+// account locked (get_guest_menu answers both the same way, S809 1h), a table that no longer exists,
+// and no priced dish on the menu. Admin → Guest Menu quotes these to the operator, so the sentence on
+// that page is the one the guest actually sees (S814).
+export const MENU_UNAVAILABLE = {
+  title: 'This menu isn’t available',
+  text: 'Please ask a member of staff for a menu.',
+}
+// A table marked inactive still shows its menu, with ordering off (S746).
+export const ORDERING_OFF_TEXT = 'Ordering from this table is off right now. Please order with a member of staff.'
+
 // ── Search ───────────────────────────────────────────────────────────────────────────────────────
 // A search box appears once a menu is long enough that scrolling stops being a way to find a dish.
 export const SEARCH_THRESHOLD = 30

@@ -804,7 +804,7 @@ const rules = [
   {
     test: e => hasCode(e, 'pos_sale_unlinked'),
     staff: 'This sale did not name the closed bill it came from, so it was not added to Inventory. Tell your manager.',
-    operator: "A till sale is added to Inventory under the closed bill it came from, at this outlet, and this one was not, so nothing was added. Use Periods → Post POS bills to Inventory, which posts each closed bill from what is stored on it.",
+    operator: "A till sale is added to Inventory under the closed bill it came from, at this outlet, and this one was not, so nothing was added. Post it with Post to Inventory on the POS Orders floor while its month is open in Inventory, or (the Owner) Periods → Post POS bills to Inventory; both post each closed bill from what is stored on it.",
   },
   // S809 2e (migration 20261009210000): a Credit Note's Inventory posting must follow the note's own
   // answer to "was the food served?". Both raised by a BEFORE trigger (42501), so above the generic

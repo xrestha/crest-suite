@@ -2,7 +2,9 @@
 // reading. The function takes supabase/scopedFrom/scopedInsert/scopedUpdate as parameters, so the
 // whole thing is exercisable by injection with no real client — which is also why the module-level
 // mock below is only needed for the recipeCost import's transitive supabaseClient.
-import { backfillPosOrdersToIms, countUnpostedForPeriod } from './backfillPosToIms'
+import {
+  backfillPosOrdersToIms, countUnpostedForPeriod, billSalesRows, billMovementRows, postClosedBill, BILL_POST_LINES,
+} from './backfillPosToIms'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 
 // babel-jest hoists jest.mock above the imports, so the mocks still apply first; placed after them
@@ -275,5 +277,191 @@ describe('backfillPosOrdersToIms — a recipe book handed in (S809 3j)', () => {
     await expect(backfillPosOrdersToIms({ ...h, period: PERIOD, loadStockLines })).rejects.toThrow('refused')
     expect(h.count('insert', 'sales_entries')).toBe(0)
     expect(h.count('update', 'pos_orders')).toBe(0)
+  })
+})
+
+// S809 4e (IMS-HANDOFF-8/10): the till and the backfill prepare a bill's rows with the same two pure
+// functions, from the bill's STORED lines.
+describe('billSalesRows / billMovementRows — what one stored bill posts', () => {
+  const line = (recipe_id, qty, unit_price, extra = {}) => ({ recipe_id, qty, unit_price, vat_rate: 0.13, comped: false, selection_key: '', ...extra })
+
+  test('the bill discount is spread over the non-comped lines; a comped line posts as pos_comp at full price', () => {
+    // Payable: 2 × 100 + 1 × 200 = 400; discount 100 → 25% off each payable line. The comped dessert
+    // is not in that base and keeps its price.
+    const bill = { id: 'b1', close_type: 'paid', discount_amount: 100, pos_order_items: [
+      line('r-momo', 2, 100), line('r-tea', 1, 200), line('r-cake', 1, 300, { comped: true }),
+    ] }
+    const rows = billSalesRows(bill, { id: 'p6' }, 5)
+    expect(rows).toEqual([
+      expect.objectContaining({ recipe_id: 'r-momo', source: 'pos', qty_sold: 2, unit_price: 75, bs_day: 5, period_id: 'p6', pos_order_id: 'b1' }),
+      expect.objectContaining({ recipe_id: 'r-tea', source: 'pos', qty_sold: 1, unit_price: 150 }),
+      expect.objectContaining({ recipe_id: 'r-cake', source: 'pos_comp', qty_sold: 1, unit_price: 300 }),
+    ])
+  })
+
+  test('a Complimentary (writeoff) bill posts every line as pos_comp at full price, whatever its discount', () => {
+    const bill = { id: 'b2', close_type: 'writeoff', discount_amount: 50, pos_order_items: [line('r-momo', 2, 100), line('r-tea', 1, 200)] }
+    const rows = billSalesRows(bill, { id: 'p6' }, 7)
+    expect(rows.map(r => [r.source, r.unit_price])).toEqual([['pos_comp', 100], ['pos_comp', 200]])
+  })
+
+  test('no stored VAT rate posts 0; a line with no recipe posts nothing; choices ride along', () => {
+    const bill = { id: 'b3', close_type: 'paid', discount_amount: 0, pos_order_items: [
+      line('r-momo', 1, 100, { vat_rate: null }),
+      { ...line(null, 1, 50) },
+      line('r-bowl', 1, 300, { selection_key: 'o1', pos_order_item_options: [{ ingredient_deltas: [{ item_id: 'i-cheese', qty: 30 }] }] }),
+    ] }
+    const rows = billSalesRows(bill, { id: 'p6' }, 1)
+    expect(rows).toHaveLength(2)
+    expect(rows[0].vat_rate).toBe(0)
+    expect(rows[0]).not.toHaveProperty('ingredient_deltas')
+    expect(rows[1].ingredient_deltas).toEqual([{ item_id: 'i-cheese', qty: 30 }])
+  })
+
+  test('movements: recipe lines and choices per plate, split sale/comp, zero sums dropped, linked to the bill', () => {
+    const bill = { id: 'b4', close_type: 'paid', discount_amount: 0, pos_order_items: [
+      line('r-momo', 2, 100),
+      line('r-cake', 1, 300, { comped: true }),
+      // "No onion" on a dish whose recipe has 5 onion per plate: it nets to zero and is dropped.
+      line('r-soup', 1, 150, { selection_key: 'o9', pos_order_item_options: [{ ingredient_deltas: [{ item_id: 'i-onion', qty: -5 }] }] }),
+    ] }
+    const breakdown = { 'r-momo': [{ item_id: 'i-flour', qty: 3 }], 'r-cake': [{ item_id: 'i-flour', qty: 1 }], 'r-soup': [{ item_id: 'i-onion', qty: 5 }] }
+    const moves = billMovementRows(bill, { id: 'p6' }, 5, { breakdown, explosion: { itemYield: {}, subPerUnit: {} } })
+    expect(moves).toEqual([
+      { item_id: 'i-flour', period_id: 'p6', bs_day: 5, qty: -6, source: 'pos_sale', ref_id: 'b4' },
+      { item_id: 'i-flour', period_id: 'p6', bs_day: 5, qty: -1, source: 'pos_comp', ref_id: 'b4' },
+    ])
+  })
+
+  test('the backfill reads the same stored line columns', () => {
+    expect(BILL_POST_LINES).toMatch(/comped/)
+    expect(BILL_POST_LINES).toMatch(/pos_order_item_options\(ingredient_deltas\)/)
+  })
+})
+
+describe('postClosedBill — the till posts the bill it closed, by its own day (S809 4e)', () => {
+  const ASHWIN = { id: 'p-ashwin', bs_year: 2083, bs_month: 6, status: 'open' }
+  const at = (month, day, hhmmss) => `${formatAd(bsToAd(2083, month, day))}T${hhmmss}+05:45`
+  const LINES = [
+    { recipe_id: 'r0', qty: 2, unit_price: 100, vat_rate: 0.13, comped: false, selection_key: '' },
+    { recipe_id: 'r1', qty: 1, unit_price: 200, vat_rate: 0.13, comped: true, selection_key: '' },
+  ]
+
+  function closeHarness({ open = ASHWIN, periodErr = null, lines = LINES, linesErr = null, insertErr = null } = {}) {
+    const calls = []
+    const scopedFrom = (table, cols) => {
+      const rec = { kind: 'select', table, cols, filters: [] }
+      calls.push(rec)
+      const b = {
+        eq: (c, v) => { rec.filters.push([c, v]); return b },
+        maybeSingle: () => Promise.resolve({ data: periodErr ? null : open, error: periodErr }),
+        then: (res, rej) => Promise.resolve(table === 'pos_order_items'
+          ? { data: linesErr ? null : lines, error: linesErr }
+          : { data: null, error: null }).then(res, rej),
+      }
+      return b
+    }
+    const supabase = {
+      from: table => ({
+        insert: rows => { calls.push({ kind: 'insert', table, rows }); return Promise.resolve({ error: insertErr }) },
+      }),
+    }
+    const scopedInsert = async (table, rows) => { calls.push({ kind: 'insert', table, rows }); return { error: null } }
+    const asked = []
+    const loadStockLines = async (recipeIds, deltaLists) => {
+      asked.push({ recipeIds, deltaLists })
+      return { breakdown: Object.fromEntries(recipeIds.map(id => [id, [{ item_id: `i-${id}`, qty: 2 }]])), explosion: null }
+    }
+    return { calls, asked, supabase, scopedFrom, scopedInsert, loadStockLines,
+      inserts: table => calls.filter(c => c.kind === 'insert' && c.table === table) }
+  }
+  const bill = closedAt => ({ id: 'bill-1', status: 'billed', close_type: 'paid', discount_amount: 0, closed_at: closedAt })
+
+  afterEach(() => { jest.useRealTimers() })
+
+  test('a bill closed 23:59:50 on Ashwin 5 and posted after midnight lands on day 5, under its own id', async () => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date(at(6, 6, '00:00:10')))
+    const h = closeHarness()
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '23:59:50')) })
+
+    expect(r).toEqual({ posted: true })
+    const [sales] = h.inserts('sales_entries')
+    expect(sales.rows.map(x => x.bs_day)).toEqual([5, 5])
+    expect(sales.rows.every(x => x.period_id === 'p-ashwin' && x.pos_order_id === 'bill-1')).toBe(true)
+    expect(sales.rows.map(x => x.source)).toEqual(['pos', 'pos_comp'])
+    // The lines are the bill's, read by its id.
+    expect(h.calls.find(c => c.table === 'pos_order_items').filters).toEqual([['order_id', 'bill-1']])
+    const [moves] = h.inserts('stock_movements')
+    expect(moves.rows.every(m => m.bs_day === 5 && m.ref_id === 'bill-1')).toBe(true)
+    expect(moves.rows.map(m => [m.source, m.qty])).toEqual([['pos_sale', -4], ['pos_comp', -2]])
+  })
+
+  test('the sales go in ONE statement', async () => {
+    const h = closeHarness()
+    await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(h.inserts('sales_entries')).toHaveLength(1)
+    expect(h.inserts('sales_entries')[0].rows).toHaveLength(2)
+  })
+
+  test('a Kartik close while Ashwin is open is left for its own month: no line read, no insert', async () => {
+    const h = closeHarness()
+    const r = await postClosedBill({ ...h, bill: bill(at(7, 1, '00:05:00')) })
+    expect(r).toEqual({ posted: false, reason: 'other_month' })
+    expect(h.calls.some(c => c.table === 'pos_order_items')).toBe(false)
+    expect(h.inserts('sales_entries')).toHaveLength(0)
+  })
+
+  test('no month open in Inventory posts nothing', async () => {
+    const h = closeHarness({ open: null })
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(r).toEqual({ posted: false, reason: 'no_open' })
+    expect(h.inserts('sales_entries')).toHaveLength(0)
+  })
+
+  test('a failed period read is said, and posts nothing', async () => {
+    const h = closeHarness({ periodErr: { message: 'boom' } })
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(r).toMatchObject({ posted: false, reason: 'period_read', error: { message: 'boom' } })
+    expect(h.inserts('sales_entries')).toHaveLength(0)
+  })
+
+  test('a failed line read posts nothing — never an empty bill, never the cart', async () => {
+    const h = closeHarness({ linesErr: { message: 'Failed to fetch' } })
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(r).toMatchObject({ posted: false, reason: 'lines_read' })
+    expect(h.inserts('sales_entries')).toHaveLength(0)
+    expect(h.inserts('stock_movements')).toHaveLength(0)
+  })
+
+  test('pos_bill_already_posted counts as posted, and writes no movements of its own', async () => {
+    const h = closeHarness({ insertErr: { code: '23505', hint: 'pos_bill_already_posted', message: "sales_entries: this bill's sales are already in Inventory" } })
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(r).toEqual({ posted: true, already: true })
+    expect(h.inserts('stock_movements')).toHaveLength(0)
+    expect(h.asked).toHaveLength(0)
+  })
+
+  test('any other refused insert is not posted, and writes no movements', async () => {
+    const h = closeHarness({ insertErr: { code: '42501', message: 'permission denied' } })
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(r).toMatchObject({ posted: false, reason: 'write' })
+    expect(h.inserts('stock_movements')).toHaveLength(0)
+  })
+
+  test('a bill with no recipe line has nothing to post', async () => {
+    const h = closeHarness({ lines: [] })
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')) })
+    expect(r).toEqual({ posted: true, empty: true })
+    expect(h.inserts('sales_entries')).toHaveLength(0)
+  })
+
+  test('a failed book read after the sales landed is still posted (the movements are best-effort)', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const h = closeHarness()
+    const r = await postClosedBill({ ...h, bill: bill(at(6, 5, '12:00:00')), loadStockLines: async () => { throw new Error('refused') } })
+    expect(r).toEqual({ posted: true })
+    expect(h.inserts('sales_entries')).toHaveLength(1)
+    expect(h.inserts('stock_movements')).toHaveLength(0)
   })
 })

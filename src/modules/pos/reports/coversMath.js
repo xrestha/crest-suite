@@ -18,28 +18,76 @@ export function bandFor(covers) {
 }
 
 /**
+ * The longest a dine-in sitting can be and still be one: 12 hours (S814 4d, B4, owner decision D3),
+ * the ceiling POS Setup → Reservations allows for a party's table time (reservationSettings.js
+ * clamps each band's duration to 15–720 minutes). A bill open longer was left open past closing —
+ * a table nobody closed at night — not a meal, and one such bill moved a band's average by hours.
+ */
+export const MAX_SITTING_MINUTES = 720
+
+/**
+ * One bill's sitting: `{ mins }`, or `{ reason }` when it cannot be one —
+ *   'untimed'   no opened_at or closed_at;
+ *   'negative'  closed before it was opened (a till clock behind the server's);
+ *   'overCap'   open longer than MAX_SITTING_MINUTES.
+ * The one classifier behind turnoverByBand and turnoverExclusions, so the table and the line that
+ * names what it left out cannot disagree.
+ */
+function classifySitting(o) {
+  if (!o.opened_at || !o.closed_at) return { reason: 'untimed' }
+  const mins = (new Date(o.closed_at) - new Date(o.opened_at)) / 60000
+  if (mins < 0) return { reason: 'negative' }
+  if (mins > MAX_SITTING_MINUTES) return { reason: 'overCap' }
+  return { mins }
+}
+
+/**
  * Average dwell (closed_at − opened_at) per party band.
  *
  * `netOf(order)` supplies the order's net sales; CoversReport passes computeOrderAmounts and the
- * settings tab passes nothing (it only wants minutes). The loop body is byte-for-byte what
- * CoversReport carried inline — coversMath.test.js holds a verbatim copy and asserts equality,
+ * settings tab passes nothing (it only wants minutes). The loop body is what CoversReport carried
+ * inline — coversMath.test.js holds a verbatim copy and asserts equality on sittings under the cap,
  * so any drift here fails the build rather than the report.
  *
- * Skipped rows: no opened_at/closed_at, or a negative dwell (a till clock behind the server's —
- * POS_TODO B4 wants the excluded count surfaced; that is a separate change).
+ * Skipped rows (classifySitting): no opened_at/closed_at, a negative dwell, or one over
+ * MAX_SITTING_MINUTES. turnoverExclusions counts them, and the report says how many (POS_TODO B4).
  */
 export function turnoverByBand(orders, netOf = () => 0) {
   const buckets = PARTY_BANDS.map(b => ({ ...b, orders: 0, totalMinutes: 0, covers: 0, net: 0 }))
   for (const o of orders) {
-    if (!o.opened_at || !o.closed_at) continue
-    const mins = (new Date(o.closed_at) - new Date(o.opened_at)) / 60000
-    if (mins < 0) continue
+    const sitting = classifySitting(o)
+    if (sitting.reason) continue
+    const mins = sitting.mins
     const band = buckets.find(b => b.test(o.covers || 0))
     if (!band) continue
     band.orders += 1; band.totalMinutes += mins; band.covers += (o.covers || 0)
     band.net += netOf(o)
   }
   return buckets.map(b => ({ ...b, avgMinutes: b.orders > 0 ? b.totalMinutes / b.orders : 0 }))
+}
+
+/** The bills turnoverByBand leaves out, by reason: { untimed, negative, overCap }. */
+export function turnoverExclusions(orders) {
+  const out = { untimed: 0, negative: 0, overCap: 0 }
+  for (const o of orders || []) {
+    const sitting = classifySitting(o)
+    if (sitting.reason) out[sitting.reason] += 1
+  }
+  return out
+}
+
+/**
+ * The sentence under the Turnover table and on its export, or null when nothing was left out. Only
+ * the reasons that happened are named.
+ */
+export function turnoverExclusionNote(ex) {
+  const total = (ex?.untimed || 0) + (ex?.negative || 0) + (ex?.overCap || 0)
+  if (total === 0) return null
+  const parts = []
+  if (ex.negative > 0) parts.push(`${ex.negative} closed before ${ex.negative === 1 ? 'it was' : 'they were'} opened (a till clock behind)`)
+  if (ex.overCap > 0) parts.push(`${ex.overCap} open over 12 hours (left open past closing)`)
+  if (ex.untimed > 0) parts.push(`${ex.untimed} with no opening or closing time`)
+  return `${total} dine-in bill${total === 1 ? ' is' : 's are'} not in this table: ${parts.join(', ')}. Their sales are still in the Overview.`
 }
 
 /**

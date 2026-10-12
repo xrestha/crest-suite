@@ -104,7 +104,11 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       Bills: pos.billCount, 'Qty Sold': pos.totalQty,
       // v15 (S809 3m): the credit notes issued in the month, which Net Sales is after.
       ...(pos.creditNotes ? { 'Credit Notes': pos.creditNotes.count, 'Credit Notes Value (NPR)': round2(pos.creditNotes.net) } : {}),
-      'Comped Bills': pos.compedBillsTotal?.count ?? 0, 'Comped Potential Value (NPR)': round2(pos.compedBillsTotal?.potentialValue),
+      // v16 (S814 4d): the potential value is before VAT; an older report's was frozen with VAT.
+      'Comped Bills': pos.compedBillsTotal?.count ?? 0,
+      ...(pos.compedBillsTotal?.basis === 'ex_vat'
+        ? { 'Comped Potential Value, ex-VAT (NPR)': round2(pos.compedBillsTotal?.potentialValue) }
+        : { 'Comped Potential Value, incl. VAT (NPR)': round2(pos.compedBillsTotal?.potentialValue) }),
       'Voids/Writeoffs': pos.voidsWriteoffsTotal?.count ?? 0, 'Voids/Writeoffs Value (NPR)': round2(pos.voidsWriteoffsTotal?.amount),
       'Total Covers': pos.covers?.totalCovers ?? 0,
       // What "covers" counted in this report (owner decision 2026-10-10), so the sheet says it too.

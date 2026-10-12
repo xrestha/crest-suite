@@ -17,6 +17,7 @@ import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { posFoodCosts } from '../orders/posRecipeBook'
+import { forgoneMenuValue } from '../reports/salesReportMath'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
@@ -204,8 +205,6 @@ function throwIfFailed(results) {
   if (bad) throw bad.error
 }
 
-// Shared X/Z-report totals from a shift's closed orders — used for the live Current Shift view
-// and for expanding a past shift in History. Void/Comp valuation mirrors PosExceptionReport.jsx.
 // "Table 3, Table 7 and 2 takeaways (#41, #42)" — what a supervisor needs to find the open orders
 // on the floor before deciding to close over them (S754).
 function openOrdersLabel(orders) {
@@ -219,6 +218,10 @@ function openOrdersLabel(orders) {
   return parts.length <= 1 ? (parts[0] || '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
 
+// Shared X/Z-report totals from a shift's closed orders — used for the live Current Shift view
+// and for expanding a past shift in History. Voided Value is the voided bills' menu value before VAT
+// (forgoneMenuValue, S814 4d), the Sales Exceptions basis; Comp Food Cost is the till's own recipe
+// book (posFoodCosts), as on the Complimentary Slip.
 async function loadShiftReport(clientId, shiftId) {
   // Both reads are filtered on the shift alone — neither needs the other's result — so they go
   // together. This is the report the drawer is counted against and it is rebuilt every time a
@@ -320,7 +323,7 @@ async function loadShiftReport(clientId, shiftId) {
       }
     } else if (o.close_type === 'void') {
       orderCount++; voidCount++
-      voidTotal += (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * i.unit_price * (1 + (i.vat_rate ?? 0)), 0)
+      voidTotal += forgoneMenuValue(itemsByOrder[o.id])
     } else if (o.close_type === 'writeoff') {
       orderCount++; compCount++
       compTotal += (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)
@@ -332,6 +335,10 @@ async function loadShiftReport(clientId, shiftId) {
     orderCount, paidCount, voidCount, compCount, byMethod,
     discountTotal, voidTotal, compTotal, salesTotal, cashSales,
     movements: moveList, cashIn, cashOut, creditSettlementsCash, refundsCash,
+    // What Voided Value is measured in, frozen with the report (S814 4d, SHIFTS-5). A closing_report
+    // without it was frozen when voids were valued with VAT; the History row says so. Not one of the
+    // eight cash figures pos_shifts_guard checks, so it can never refuse a close.
+    voidBasis: 'ex_vat',
   }
 }
 
@@ -367,8 +374,17 @@ function ReportBody({ report, opening, closing, variance }) {
           <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNpr(report.discountTotal)}</div>
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
-          <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Voided Value</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <Tip text={report.voidBasis === 'ex_vat'
+              ? 'Menu value of this shift\'s voided bills, before VAT — the Sales Exceptions basis'
+              : 'Menu value of this shift\'s voided bills, VAT included: this shift was closed before Crest valued voids before VAT, and its signed report keeps the figure it was closed with.'} width={260}>
+              Voided Value
+            </Tip>
+          </div>
           <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>{fmtNpr(report.voidTotal)}</div>
+          {report.voidBasis !== 'ex_vat' && (
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>incl. VAT (closed before this change)</div>
+          )}
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Comp Food Cost</div>

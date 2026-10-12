@@ -17,7 +17,8 @@ import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnT
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { posFoodCosts, posStockLines } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
-import { lineIngredientDeltas, deltaItems } from '../../../utils/orderLineIngredients'
+import { postClosedBill } from './backfillPosToIms'
+import { noteImsMiss, pruneImsMisses } from './posImsWaiting'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
@@ -134,7 +135,13 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Who the floor's Inventory-posting banner is for (S776): since S809 3j it posts the open month itself
   // (Post to Inventory); a closed month stays the Owner's, in Periods. hasPosAccess resolves admin and
   // Owner to manager already.
-  const canSeeImsPosting = isAdmin || isOwner || hasPosAccess('manager')
+  // Whether this outlet's bills go to Inventory at all (S809 4e, IMS-HANDOFF-9; owner decisions D6, D7).
+  // An outlet without Crest IMS posts nothing, counts nothing and shows no banner — and its bills are
+  // NOT marked settled, so switching Inventory on later still finds them waiting (Periods, or the
+  // floor's Post to Inventory). `imsEnabled` is the route-access flag (CLAUDE.md); the operator's is
+  // always true, so an admin close on such an outlet still posts, as switching IMS on later would.
+  const tillPostsToIms = !!imsEnabled
+  const canSeeImsPosting = tillPostsToIms && (isAdmin || isOwner || hasPosAccess('manager'))
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   // Rendered in BOTH returns (this file has two — S578). One pending ask at a time, drawn by
   // whichever tree is live: the admin clear-all tool asks from the floor, and the discard-payments
@@ -456,10 +463,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   // { units, lines, where } while the ask is open.
   const [sendPrompt, setSendPrompt] = useState(null)
   const [floorMsg,        setFloorMsg]        = useState('') // transient floor-view banner (e.g. blocked-table message)
-  // Bills closed this session whose revenue/stock could not reach IMS (no matching open period).
-  // Bumped so the floor banner appears immediately after the close that caused it, rather than
-  // only after the next full refresh of unpostedCount below.
-  const [imsPostWarning,  setImsPostWarning]  = useState(0)
+  // Bills closed on this till whose sales did not reach Inventory, as [{ orderId, at }] (noteImsMiss), so
+  // the floor banner shows them at once rather than after the next floor load. A floor load whose count
+  // answers prunes every miss noted before that count started (pruneImsMisses, S809 4e): the database's
+  // count is the truth for those. It used to be a counter only Post to Inventory reset.
+  const [imsMisses,       setImsMisses]       = useState([])
   // Secondary writes that failed AFTER the thing they belong to was already committed —
   // a split-tender breakdown, a table release, a posted-stamp. None of these can be undone
   // by refusing the action (the bill is closed and has an invoice number), and none of them
@@ -1264,6 +1272,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
 
     if (!quiet) loadOpenShift()
+    // An outlet without Inventory (S809 4e, D6) asks for neither count: nothing of its waits for a post.
+    const noCount = Promise.resolve({ count: 0, error: null })
+    // Taken before the count is asked, so a miss noted while it is in flight is not pruned by it.
+    const countStartedAt = Date.now()
     const [tblRes, ordRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
@@ -1271,16 +1283,22 @@ export default function PosOrders({ billingStation = false } = {}) {
         .eq('status', 'open'),
       // head:true — a count, not rows, so the 1000-row cap cannot apply. Backed by the partial
       // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
-      scopedFrom('pos_orders', 'id', { count: 'exact', head: true })
-        .eq('status', 'billed').is('ims_posted_at', null),
+      tillPostsToIms
+        ? scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').is('ims_posted_at', null)
+        : noCount,
       // Same shape, backed by idx_pos_credit_notes_unposted.
-      scopedFrom('pos_credit_notes', 'id', { count: 'exact', head: true })
-        .is('ims_posted_at', null),
+      tillPostsToIms
+        ? scopedFrom('pos_credit_notes', 'id', { count: 'exact', head: true }).is('ims_posted_at', null)
+        : noCount,
     ])
     if (seq !== floorReqSeq.current) return
     // A failed count keeps the last value (a failed poll must not blank live state, S654) — and a
-    // bundle deployed ahead of the migration reads 42703 here, which must not paint a banner.
-    if (!unpostedErr) setUnpostedCount(unposted || 0)
+    // bundle deployed ahead of the migration reads 42703 here, which must not paint a banner. A count
+    // that answered is the truth for every miss this till noted before it was asked (S809 4e).
+    if (!unpostedErr) {
+      setUnpostedCount(unposted || 0)
+      setImsMisses(list => pruneImsMisses(list, countStartedAt))
+    }
     if (!notesErr) setUnpostedNotes(notesWaiting || 0)
 
     // S754: both reads used to drop their error, so a failed read painted "No tables set up yet",
@@ -3892,130 +3910,36 @@ export default function PosOrders({ billingStation = false } = {}) {
     })
   }
 
-  // Returns true when the bill's revenue and stock depletion actually reached IMS. The two early
-  // returns below used to be silent: the bill closed, printed and took an invoice number while
-  // Inventory never saw it, so POS Sales Report and IMS MonthlySummary disagreed by an unbounded
-  // amount with nothing on either page saying so. The bill must still close — refusing a sale
-  // mid-service is not acceptable — but the caller now stamps ims_posted_at only on success, and
-  // the floor view surfaces whatever didn't post so it can be backfilled from Periods.
+  // Posts the bill this till just closed into Inventory, and returns true when its sales reached it
+  // (S809 4e, IMS-HANDOFF-8/10). `bill` is the STORED row the close wrote (`updated`, or the read-back of
+  // a close settled after its answer was lost), never the screen: postClosedBill reads the bill's own
+  // lines and dates it by the day it closed in Nepal (`closed_at` is the server's), through the same two
+  // functions Periods' backfill uses. It used to post the cart under the tablet's date at the moment of
+  // posting and the screen's order id, so a bill closed at 23:59 and posted after midnight landed on the
+  // next day, or in the next month.
   //
-  // `stored` (S809 CHECKOUT-7) is a close settled after its answer was lost: { items, discRatio } of
-  // the bill as the server holds it. That bill posts from its own lines, comps and discount — never
-  // from the cart, which the cashier may have changed after the try that closed it went out.
-  async function writeSalesEntries(closeType, compQtyMap = compQtyByLine, stored = null) {
-    const { data: periods, error: perErr } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    // Returning false is correct either way — the bill still closes and gets chased by the
-    // unposted banner. But the banner's sentence blames a missing open period, so say when the
-    // real cause was a failed read instead: the period may be open and fine.
-    if (perErr) {
-      warnWrite('Could not check which Inventory period is open, so the bill just closed was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', perErr)
-      return false
-    }
-    const open = (periods || []).find(p => p.status === 'open')
-    if (!open) return false
-    const today = getBsToday()
-    if (today.year !== open.bs_year || today.month !== open.bs_month) return false
-
-    const soldItems = (stored ? stored.items : orderItems).filter(i => i.recipe_id)
-    // Split each line's qty into its sold and comped portions — a whole-order Complimentary
-    // close (closeType==='writeoff') comps the entire qty; an otherwise-paid order only comps
-    // whatever the Pay tab's item-level comp picker recorded (compQtyMap, keyed by lineKeyOf).
-    // A stored bill already holds that split as rows: a comped row is comped whole.
-    const qtySplit = soldItems.map(i => {
-      const compQty = closeType === 'writeoff' ? i.qty : stored ? (i.comped ? i.qty : 0) : Math.min(compQtyMap[lineKeyOf(i)] || 0, i.qty)
-      return { ...i, compQty, saleQty: i.qty - compQty }
+  // The bill still closes whatever happens here — refusing a sale mid-service is not acceptable. A bill
+  // that did not post is left unmarked and counted on the floor banner, which posts the open month's
+  // (Post to Inventory); a bill from a month that is not the one open in Inventory waits for that month.
+  async function writeSalesEntries(bill) {
+    const res = await postClosedBill({
+      supabase, scopedFrom, scopedInsert, bill,
+      // One read the till is allowed to make (S809 IMS-HANDOFF-3): a PIN login cannot read `items`, so
+      // every yield came back 100% and the ledger took too little of any trimmed ingredient.
+      loadStockLines: (recipeIds, deltaLists) => posStockLines(supabase, clientId, recipeIds, deltaLists),
+      stepMs: CLOSE_STEP_MS,
     })
-    // Recorded under separate sources (not both as 'pos') so revenue-facing IMS reports
-    // (MonthlySummary, PeriodComparison, AnnualSummary, MenuRepricing, MenuEngineering,
-    // Overheads, BestSellers, Sales.js) can exclude 'pos_comp' — a comped dish was never paid
-    // for — while consumption-facing reports (Variance, TheoreticalVariance, ShrinkageReport,
-    // ReorderReport, StockReport, Recipes.js's per-cover overhead) keep summing every source
-    // unfiltered, since that food was still prepared and consumed regardless of who paid for it.
-    // unit_price/vat_rate snapshot the actual price charged on THIS bill (not just the recipe's
-    // current default, which could differ later — or already did, via a per-order override) —
-    // every IMS revenue report used to join the recipe's CURRENT selling_price instead, so a past
-    // period's revenue/Food Cost % silently shifted whenever a menu price changed after the fact.
-    // A bill-level discount (Pay tab only) reduces the taxable base proportionally across every
-    // payable line (discRatio, computed above alongside payVatAmt) — 'pos' rows must snapshot
-    // that discounted price too, or every revenue-based IMS report (incl. Owner Dashboard's Food
-    // Cost %/Net Margin %) overstates revenue by the discount actually granted at the till.
-    // 'pos_comp' rows stay at full price: comps are already zero-revenue (excluded by source),
-    // and Variance/consumption reports only ever read qty_sold, never unit_price, from them.
-    const saleDiscRatio = closeType === 'paid' ? (stored ? stored.discRatio : discRatio) : 0
-
-    // Crest Customization (S758): a customized line's stock lines come from the snapshot the SERVER
-    // saved (pos_order_item_options), never from the cart — the cart's choices were built by the
-    // till and carry no stock lines, and the server's are the ones frozen onto the bill. Keyed by
-    // line; a comped split carries the same snapshot, so the first row of a line is enough.
-    const deltasByLine = {}
-    if (soldItems.some(i => i.selection_key)) {
-      const { data: snapRows, error: snapErr } = await scopedFrom('pos_order_items', 'recipe_id, selection_key, pos_order_item_options(ingredient_deltas)')
-        .eq('order_id', orderId).neq('selection_key', '')
-      if (snapErr) {
-        warnWrite('Could not read the choices on this bill, so it was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', snapErr)
-        return false
-      }
-      for (const r of snapRows || []) {
-        const k = lineKeyOf(r)
-        if (!(k in deltasByLine)) deltasByLine[k] = lineIngredientDeltas(r.pos_order_item_options)
-      }
+    // The floor banner's sentence blames a missing open month, so say when the real cause was a failed
+    // read instead: the month may be open and fine.
+    if (res.reason === 'period_read') {
+      warnWrite('Could not check which Inventory period is open, so the bill just closed was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', res.error)
+    } else if (res.reason === 'lines_read') {
+      warnWrite('Could not read the items on this bill back, so it was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', res.error)
+    } else if (res.reason === 'write') {
+      // The banner chases it; the database marks it posted if the rows did land.
+      console.error('sales_entries insert failed — bill left unposted for Post to Inventory:', res.error)
     }
-
-    const rows = []
-    qtySplit.forEach(line => {
-      const { recipe_id, saleQty, compQty, unit_price, vat_rate } = line
-      const ingredient_deltas = line.selection_key ? (deltasByLine[lineKeyOf(line)] ?? null) : null
-      // pos_order_id mirrors stock_movements.ref_id: without it, "has this bill's revenue already
-      // posted?" is unanswerable, and a bad post can't be undone by order (S573).
-      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos', unit_price: unit_price * (1 - saleDiscRatio), vat_rate, pos_order_id: orderId, ...(ingredient_deltas ? { ingredient_deltas } : {}) })
-      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp', unit_price, vat_rate, pos_order_id: orderId, ...(ingredient_deltas ? { ingredient_deltas } : {}) })
-    })
-    if (rows.length > 0) {
-      // S754: this dropped its error and fell through to `return true`, so closeOrder stamped
-      // ims_posted_at on a bill whose revenue never landed — the one stamp that tells the unposted
-      // banner and the Periods backfill to leave it alone. Returning false leaves it unstamped, so
-      // both still chase it. Returning BEFORE the depletion is deliberate: the backfill posts
-      // revenue and stock together, and movements written here would then be written twice.
-      const { error: salesErr } = await supabase.from('sales_entries').insert(rows)
-      if (salesErr) { console.error('sales_entries insert failed — bill left unposted for backfill:', salesErr); return false }
-    }
-
-    // Best-effort stock depletion — never blocks or fails the close. An item
-    // individually comped within an otherwise-paid order posts as 'pos_comp' just like a
-    // whole-order Complimentary close does — food cost was still lost even though this specific
-    // line collected no revenue. A partially-comped line (e.g. 1 of 3) splits its ingredient
-    // usage proportionally between the two buckets, since only part of that line was comped.
-    try {
-      const recipeIds = [...new Set(soldItems.map(i => i.recipe_id))]
-      if (recipeIds.length > 0) {
-        // One read the till is allowed to make (S809 IMS-HANDOFF-3): a PIN login cannot read `items`,
-        // so every yield came back 100% and the ledger took too little of any trimmed ingredient.
-        const { breakdown, explosion } = await posStockLines(supabase, clientId, recipeIds, Object.values(deltasByLine))
-        const aggBySource = { pos_sale: {}, pos_comp: {} }
-        qtySplit.forEach(line => {
-          const { recipe_id, saleQty, compQty } = line
-          // Base recipe ± the chosen options' stock lines, per plate (owner decision, S758).
-          const extra = line.selection_key ? deltaItems(deltasByLine[lineKeyOf(line)], explosion) : []
-          ;[...(breakdown[recipe_id] || []), ...extra].forEach(({ item_id, qty }) => {
-            if (saleQty > 0) aggBySource.pos_sale[item_id] = (aggBySource.pos_sale[item_id] || 0) + qty * saleQty
-            if (compQty > 0) aggBySource.pos_comp[item_id] = (aggBySource.pos_comp[item_id] || 0) + qty * compQty
-          })
-        })
-        const movementRows = Object.entries(aggBySource).flatMap(([source, agg]) =>
-          Object.entries(agg).filter(([, qty]) => Math.abs(qty) > 1e-9).map(([item_id, qty]) => ({
-            item_id, period_id: open.id, bs_day: today.day, qty: -qty, source, ref_id: orderId,
-          }))
-        )
-        if (movementRows.length > 0) {
-          const { error: moveErr } = await scopedInsert('stock_movements', movementRows)
-          if (moveErr) console.error('stock_movements write failed:', moveErr)
-        }
-      }
-    } catch (err) {
-      console.error('stock_movements write failed:', err)
-    }
-    return true
+    return res.posted
   }
 
   // What stops a close before anything is written — or null when nothing does (S776). One list, read by
@@ -4353,18 +4277,19 @@ export default function PosOrders({ billingStation = false } = {}) {
       //      legitimately be charged straight after an edit — the Payment button gates on
       //      saving/orderId/isOnline, never on a dirty cart — so without this an at-the-cap
       //      discount could be rejected for a subtotal the server cannot see.
-      //   2. writeSalesEntries posts revenue from the in-memory cart. An unsaved line was already
-      //      reaching IMS revenue and the printed bill while never existing in pos_order_items —
-      //      the bill and its own lines disagreeing, quietly, with nothing on either side saying so.
+      //   2. The printed bill is built from the in-memory cart, and until S809 4e so was the post to
+      //      IMS. An unsaved line was reaching IMS revenue and the paper while never existing in
+      //      pos_order_items — the bill and its own lines disagreeing, quietly, with nothing on either
+      //      side saying so. (The post now reads the stored lines itself: writeSalesEntries.)
       //
       // Runs before apply_pos_item_comps, not after: save_pos_order_items replaces the lines
       // wholesale, so persisting afterwards would erase the comp rows it had just written.
       //
       // Every close type, not just 'paid' (S754): a Complimentary slip and a void read their lines
       // back from the same stored rows (Recent Bills reprints, KOT Reconciliation, the credit-note
-      // and exception reports), and writeSalesEntries posts a write-off's consumption from this
-      // in-memory cart — so an unsaved line on a comp slip reached IMS and the paper while never
-      // existing on the order. performSave only persists lines, covers and guest-request accepts;
+      // and exception reports), and the comp slip prints from this in-memory cart — so an unsaved
+      // line on a comp slip reached the paper (and, until S809 4e, IMS) while never existing on the
+      // order. performSave only persists lines, covers and guest-request accepts;
       // it never fires a ticket (that is saveOrder/sendTicket), so it is safe for all three.
       //
       // Bounded like every step here (S776). A save that timed out may still land, and a retry is safe:
@@ -4681,11 +4606,12 @@ export default function PosOrders({ billingStation = false } = {}) {
   //
   // A close settled after its answer was lost (finishSettledClose, S809 CHECKOUT-7) passes `stored` (the
   // bill's lines and legs as the server holds them), `attempt` (what that try sent) and `note` (what the
-  // floor must be told). It prints, posts and records legs from those, never from the screen. With
+  // floor must be told). It prints and records legs from those, never from the screen; every close posts
+  // to Inventory from the stored bill itself (`updated`, through postClosedBill, S809 4e). With
   // `background` the till has moved on to other work: the bill is not printed (nobody may be at the
-  // printer, and the guest may have gone — the floor says to reprint it), Inventory is left to Periods →
-  // Post POS bills (which posts by the bill's own date and checks first that nothing posted already),
-  // and nothing on screen is touched. What is time-bound still runs: the Split legs and the points, each
+  // printer, and the guest may have gone — the floor says to reprint it), Inventory is left to Post to
+  // Inventory or Periods → Post POS bills (which post by the bill's own date and check first that nothing
+  // posted already), and nothing on screen is touched. What is time-bound still runs: the Split legs and the points, each
   // admitted by the server only within 10 minutes of the close, then the customer, booking and table.
   async function finishClosedBill(closeType, updated, { compNo = null, compedItemRows = [], custRow = null, custUpsertDone = false, stored = null, attempt = null, background = false, note = null } = {}) {
     // The bill is closed and numbered. Nothing an earlier attempt redeemed is "standing" any more —
@@ -4810,12 +4736,15 @@ export default function PosOrders({ billingStation = false } = {}) {
     // than left looking like a failure the floor banner should chase. A post that timed out counts as
     // not posted here; if its rows land later, the database marks the bill then, and it refuses a
     // second post of the same bill (S809 2f), so the chase cannot double-post.
-    if (closeType !== 'void') {
-      // A settled close posts its STORED lines (S809); one in the background, or one whose lines could
-      // not be read, is left unposted for Periods → Post POS bills, which the floor banner points to.
-      const posted = background || (stored && !stored.items) ? false
-        : await withTimeout(writeSalesEntries(closeType, compQtyByLine, stored), CLOSE_STEP_MS + 10000, 'Posting to Inventory')
-          .catch(e => { console.error('IMS post did not finish — bill left for backfill:', e); return false })
+    if (closeType !== 'void' && !tillPostsToIms) {
+      // An outlet without Inventory (S809 4e, owner decision D6): nothing is posted and nothing counted,
+      // and the bill is deliberately NOT marked, so switching Inventory on later still finds it waiting.
+    } else if (closeType !== 'void') {
+      // Every close posts the bill as STORED (`updated`: postClosedBill reads its own lines, S809 4e).
+      // One in the background is left unposted for Post to Inventory, which the floor banner offers.
+      const posted = background ? false
+        : await withTimeout(writeSalesEntries(updated), CLOSE_STEP_MS + 10000, 'Posting to Inventory')
+          .catch(e => { console.error('IMS post did not finish — bill left for Post to Inventory:', e); return false })
       if (posted) {
         // S809 2f (IMS-HANDOFF-2): the database marks a bill posted in the same transaction as its
         // Inventory rows, so a bill whose rows landed is marked whatever happens here. This write
@@ -4823,7 +4752,10 @@ export default function PosOrders({ billingStation = false } = {}) {
         // the first mark. A failure is logged, not shown: the cashier has nothing to do about it.
         const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', updated.id), 'Marking the bill posted')
         if (stampErr) console.error('ims_posted_at mark failed (a bill with Inventory rows is already marked by the database):', stampErr)
-      } else setImsPostWarning(w => w + 1)
+      } else {
+        const missedId = updated.id
+        setImsMisses(list => noteImsMiss(list, missedId, Date.now()))
+      }
     } else {
       const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', updated.id), 'Marking the bill settled')
       // No screen counts a voided bill as not posted (each counts billed bills only), so this is logged.
@@ -4879,7 +4811,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (background) {
       warnWrite(closeType === 'void'
         ? `The first try to void ${where} went through after all — no bill was issued.`
-        : `The first payment try for ${where} went through after all: ${closedStatement(closeType, updated, where).replace(/\.$/, '')}. It was not printed, because the till had moved on — reprint it from Recent Bills. It is not in Inventory yet: a POS manager posts it with Post to Inventory on the floor.${note ? ` ${note}` : ''}`)
+        : `The first payment try for ${where} went through after all: ${closedStatement(closeType, updated, where).replace(/\.$/, '')}. It was not printed, because the till had moved on — reprint it from Recent Bills.${tillPostsToIms ? ' It is not in Inventory yet: a POS manager posts it with Post to Inventory on the floor.' : ''}${note ? ` ${note}` : ''}`)
       void withTimeout(loadFloor({ quiet: true }), CLOSE_STEP_MS, 'Reloading the floor')
         .catch(e => console.error('floor reload after a late close did not finish (non-fatal):', e))
       return true
@@ -7030,12 +6962,14 @@ The tables were left occupied rather than freed with their orders still open.`)
 
       {/* Waiting till bills and credit notes (S809 3j, owner decision Q12 c) are for whoever can post
           them: the Owner, the operator and a POS manager. The banner posts the open month's itself,
-          because Periods does not open for a POS manager, and says who posts the rest. */}
+          because Periods does not open for a POS manager, and says who posts the rest. An outlet
+          without Inventory has none (S809 4e, D6). This till's own misses show at once; the floor
+          load that follows a post prunes them against the database's count. */}
       {canSeeImsPosting && (
         <PosImsPostingBanner
-          bills={Math.max(unpostedCount, imsPostWarning)}
+          bills={Math.max(unpostedCount, imsMisses.length)}
           notes={unpostedNotes}
-          onPosted={() => { setImsPostWarning(0); loadFloor({ quiet: true }) }}
+          onPosted={() => { loadFloor({ quiet: true }) }}
         />
       )}
       {conflictOrders.map(c => (

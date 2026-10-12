@@ -37,6 +37,22 @@ test('POS switched off says so instead of previewing an unavailable menu', async
   renderPage()
   expect(await screen.findByText(/Crest POS is switched off for Casa Acai/)).toBeInTheDocument()
   expect(screen.queryByTitle(/Guest menu preview/)).toBeNull()
+  // S814: the banner quotes what the guest really sees, word for word — and the guest page never
+  // said "right now".
+  const banner = screen.getByRole('alert')
+  expect(banner.textContent).toContain('Every guest QR code shows “This menu isn’t available” until POS is switched on')
+  expect(banner.textContent).not.toMatch(/right now/)
+})
+
+test('an inactive table quotes the line its guests see in place of ordering', async () => {
+  mockData = {
+    clients: { name: 'Casa Acai', pos_enabled: true },
+    pos_tables: [{ id: 't1', name: 'Patio 1', status: 'inactive' }],
+    recipes: [{ id: 'r1', selling_price: 300, image_url: 'x', description: 'y', is_veg: true }],
+  }
+  renderPage()
+  expect(await screen.findByText(/Patio 1 is marked inactive/)).toBeInTheDocument()
+  expect(screen.getByText(/“Ordering from this table is off right now\. Please order with a member of staff\.”/)).toBeInTheDocument()
 })
 
 test('inactive tables stay listed, and selecting one explains that ordering is off', async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { RefreshCw } from 'lucide-react'
@@ -9,7 +9,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { withTimeout } from '../../../utils/withTimeout'
 import { npr, nprOrDash } from '../../../shared/nepalMoney'
-import { nepalTime } from '../../../shared/nepalTime'
+import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
 import { chartMotion } from '../../../shared/chartMotion'
 import { TOOLTIP_CHROME } from '../../../shared/tooltipChrome'
 import { CHART_COLORS } from '../../../shared/chartColors'
@@ -23,7 +23,7 @@ import Tip from '../../../components/Tip'
 import SalesPivot from '../../dashboard/SalesPivot'
 import {
   summariseBills, compareToLastWeek, hourlySales, paymentMix, channelMix, topItems,
-  openBillsSummary, ticketSummary, sameWeekdayLastWeek,
+  openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf,
 } from './posDashboardMath'
 
 // The POS Dashboard (S800 stage B) — the page the POS tab opens.
@@ -39,12 +39,18 @@ import {
 // minutes stale is a floor band nobody trusts.
 
 const REFRESH_MS = 60 * 1000
+// The sales-by-category table reads a whole month of bills and lines, so the minute tick refreshes it
+// only once its last read is this old; the Refresh button always does.
+const PIVOT_STALE_MS = 5 * 60 * 1000
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const TODAY_HEX = CHART_COLORS[0]
 const LAST_WEEK_HEX = CHART_COLORS[2]
 const MUTED = '#6b7280' // chart-tick, for Recharts SVG props only; the page's text takes the tokens
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
 const ORDER_SELECT = 'id, covers, paid_amount, discount_amount, payment_method, table_id, delivery_partner, credit_note_id, close_type, closed_at'
+// A credit note with the bill it credits, which may have closed on an earlier day: the bill's table,
+// method and partner decide which channel, payment line and cover figure the note comes off.
+const NOTE_SELECT = 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, payment_method, delivery_partner)'
 
 function weekdayOf(adIso) {
   const [y, m, d] = adIso.split('-').map(Number)
@@ -93,9 +99,10 @@ function ShareRows({ rows, labelOf, valueOf, emptyText }) {
             <span style={{ color: 'var(--theme-text1)' }}>{labelOf(r)}</span>
             <span style={{ color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{npr(valueOf(r))}</span>
           </div>
-          {/* A length, not a colour, carries the share: a neutral fill from the text token. */}
+          {/* A length, not a colour, carries the share: a neutral fill from the text token. A line a
+              credit note took below zero (S814 4d) draws no bar; its figure says so. */}
           <div aria-hidden="true" style={{ height: 6, marginTop: 4, background: 'color-mix(in srgb, var(--theme-text2) 12%, transparent)' }}>
-            <div style={{ height: '100%', width: `${(valueOf(r) / max) * 100}%`, background: 'color-mix(in srgb, var(--theme-text2) 55%, transparent)' }} />
+            <div style={{ height: '100%', width: `${Math.max(0, valueOf(r) / max) * 100}%`, background: 'color-mix(in srgb, var(--theme-text2) 55%, transparent)' }} />
           </div>
         </div>
       ))}
@@ -116,6 +123,10 @@ export default function PosDashboard() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [updatedAt, setUpdatedAt] = useState(null)
+  // The sales-by-category table's own reload, separate from the floor and sales bands (S814 4d).
+  const [pivotKey, setPivotKey] = useState(0)
+  const pivotAskedAt = useRef(0)
+  const refreshPivot = useCallback(() => { pivotAskedAt.current = Date.now(); setPivotKey(k => k + 1) }, [])
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -125,34 +136,53 @@ export default function PosDashboard() {
     const today = todayNepalAdIso()
     const lastWeek = sameWeekdayLastWeek(today)
     const todayStart = nepalDayStartTs(today)
+    const lastWeekStart = nepalDayStartTs(lastWeek)
+    const nowIso = new Date(nowMs).toISOString()
+    const lastWeekNowIso = new Date(nowMs - 7 * 86400000).toISOString()
     try {
       const floorReads = Promise.all([
         // Open bills are a handful at most, so no paging; the items ride along for the value.
         scopedFrom('pos_orders', 'id, table_id, opened_at, pos_order_items(qty, unit_price, comped)').eq('status', 'open'),
         scopedFrom('pos_tables', 'status').neq('status', 'inactive'),
         scopedFrom('pos_guest_order_requests', 'id, created_at').eq('status', 'pending'),
-        // A CHANGE ticket (S809 3a) is an instruction for the kitchen to read, not food being made.
-        scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', todayStart).not('items', 'cs', KOT_CHANGE_ITEMS),
+        // The Kitchen Display's own window (S814 4d, REPORTS-11): this service, from midnight and
+        // rolling over at 6 AM, so a ticket sent at 11:50 PM is still here at 12:30 AM. A CHANGE
+        // ticket (S809 3a) is an instruction for the kitchen to read, not food being made.
+        scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', serviceDayStartIso(nowMs)).not('items', 'cs', KOT_CHANGE_ITEMS),
         canMoney ? scopedFrom('pos_shifts', 'opened_at').eq('status', 'open').maybeSingle() : Promise.resolve({ data: null, error: null }),
         scopedFrom('monthly_periods', 'id, bs_year, bs_month').eq('status', 'open').maybeSingle(),
       ])
       // The two days are cut at the same clock time: today up to now, last week up to now − 7 days.
+      // Each day's credit notes are read on the same cut (S814 4d, REPORTS-5): a note is a minus on
+      // the day it was issued, its bill staying on the day it was sold (the Sales Report's rule).
       const salesReads = canMoney ? Promise.all([
         fetchAllRows(() => scopedFrom('pos_orders', ORDER_SELECT).in('close_type', ['paid', 'void', 'writeoff'])
-          .gte('closed_at', todayStart).lte('closed_at', new Date(nowMs).toISOString()).order('id')),
+          .gte('closed_at', todayStart).lte('closed_at', nowIso).order('id')),
         fetchAllRows(() => scopedFrom('pos_orders', ORDER_SELECT).in('close_type', ['paid', 'void', 'writeoff'])
-          .gte('closed_at', nepalDayStartTs(lastWeek)).lte('closed_at', new Date(nowMs - 7 * 86400000).toISOString()).order('id')),
+          .gte('closed_at', lastWeekStart).lte('closed_at', lastWeekNowIso).order('id')),
+        fetchAllRows(() => scopedFrom('pos_credit_notes', NOTE_SELECT)
+          .gte('created_at', todayStart).lte('created_at', nowIso).order('id')),
+        fetchAllRows(() => scopedFrom('pos_credit_notes', NOTE_SELECT)
+          .gte('created_at', lastWeekStart).lte('created_at', lastWeekNowIso).order('id')),
       ]) : Promise.resolve(null)
       const [floorRes, salesRes] = await withTimeout(Promise.all([floorReads, salesReads]), 25000, 'POS Dashboard')
       const err = firstError(floorRes) || (salesRes && firstError(salesRes))
       if (err) throw err
 
-      let todayOrders = [], lastWeekOrders = [], legs = new Map(), items = []
+      let todayOrders = [], lastWeekOrders = [], todayReturns = [], lastWeekReturns = [], legs = new Map(), items = []
       if (salesRes) {
         todayOrders = salesRes[0].data || []
         lastWeekOrders = salesRes[1].data || []
+        todayReturns = returnsOf(salesRes[2].data, new Map(todayOrders.map(o => [o.id, o])))
+        lastWeekReturns = returnsOf(salesRes[3].data, new Map(lastWeekOrders.map(o => [o.id, o])))
+        // Every paid bill's lines, a since-credited one included: Top 5 counts plates that went out.
         const paidIds = todayOrders.filter(o => o.close_type === 'paid').map(o => o.id)
-        const splitIds = todayOrders.filter(o => o.payment_method === 'Split').map(o => o.id)
+        // Today's Split bills, and the Split bills today's notes credit (an earlier day's included):
+        // a note comes off the methods its bill was paid with, in the legs' shares.
+        const splitIds = [...new Set([
+          ...todayOrders.filter(o => o.payment_method === 'Split').map(o => o.id),
+          ...todayReturns.filter(r => r.order?.payment_method === 'Split').map(r => r.order.id),
+        ])]
         const [legRes, itemRes] = await withTimeout(Promise.all([
           fetchAllRowsChunked(splitIds, ids => scopedFrom('pos_order_payments', 'id, order_id, payment_method, amount').in('order_id', ids).order('id')),
           fetchAllRowsChunked(paidIds, ids => scopedFrom('pos_order_items', 'id, order_id, recipe_id, name, qty, comped').in('order_id', ids).order('id')),
@@ -178,11 +208,13 @@ export default function PosDashboard() {
       })
       setPeriod(periodRes.data || null)
       setSales(salesRes ? {
-        today: summariseBills(todayOrders),
-        lastWeek: summariseBills(lastWeekOrders),
-        hourly: hourlySales(todayOrders, lastWeekOrders, { currentHour: new Date(nowMs + 345 * 60000).getUTCHours() }),
-        payments: paymentMix(todayOrders, legs),
-        channels: channelMix(todayOrders),
+        today: summariseBills(todayOrders, todayReturns),
+        lastWeek: summariseBills(lastWeekOrders, lastWeekReturns),
+        hourly: hourlySales(todayOrders, lastWeekOrders, {
+          currentHour: new Date(nowMs + 345 * 60000).getUTCHours(), todayReturns, lastWeekReturns,
+        }),
+        payments: paymentMix(todayOrders, legs, todayReturns),
+        channels: channelMix(todayOrders, todayReturns),
         top: topItems(items),
       } : null)
       setError(null)
@@ -198,9 +230,14 @@ export default function PosDashboard() {
 
   useEffect(() => {
     load()
-    const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, REFRESH_MS)
+    if (!pivotAskedAt.current) pivotAskedAt.current = Date.now() // the table's own first read is now
+    const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      load()
+      if (Date.now() - pivotAskedAt.current >= PIVOT_STALE_MS) refreshPivot()
+    }, REFRESH_MS)
     return () => clearInterval(t)
-  }, [load])
+  }, [load, refreshPivot])
 
   // After every hook. ModuleGate has already sent a kitchen or bar station team to its KDS.
   if (!hasPosAccess('staff')) return <Navigate to="/dashboard" replace />
@@ -222,7 +259,7 @@ export default function PosDashboard() {
             {updatedAt && <> · updated {nepalTime(updatedAt)}</>}
           </p>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={load} aria-busy={loading || undefined}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { load(); refreshPivot() }} aria-busy={loading || undefined}>
           <RefreshCw size={13} aria-hidden="true" /> Refresh
         </button>
       </div>
@@ -268,7 +305,7 @@ export default function PosDashboard() {
             />
             <Tile
               label="Kitchen tickets"
-              tip={`Tickets sent to the kitchen or bar today that are not ready yet. Late means more than ${KDS_LATE_MS / 60000} minutes since it was sent — the same line the Kitchen Display uses.`}
+              tip={`Tickets sent to the kitchen or bar this service (from midnight, rolling over at 6 AM) that are not ready yet — the Kitchen Display's own window, so a ticket sent just before midnight is still here after it. Late means more than ${KDS_LATE_MS / 60000} minutes since it was sent, the same line the Kitchen Display uses.`}
               value={floor.tickets.working}
               tone={floor.tickets.late > 0 ? 'bad' : null}
               sub={<div className="stat-sub">{floor.tickets.late > 0 ? `▲ ${floor.tickets.late} late` : 'None late'}</div>}
@@ -290,18 +327,21 @@ export default function PosDashboard() {
           {canMoney && sales && (
             <>
               <h2 className="dash-heading">
-                <Tip text={`Today so far, against last ${weekday} up to the same time of day — so a lunchtime figure is compared with last week's lunchtime, not with last week's whole day. Sales are what the bills charged, VAT included, as on Home's POS card; a bill later credit-noted is left out.`} width={300}>
+                <Tip text={`Today so far, against last ${weekday} up to the same time of day — so a lunchtime figure is compared with last week's lunchtime, not with last week's whole day. Sales are what the bills charged, VAT included, less credit notes issued in the same window — the Sales Report's rule, as on Home's POS card: a credited bill stays on the day it was sold, and its note comes off the day it is issued.`} width={300}>
                   Today so far vs last {weekday}
                 </Tip>
               </h2>
               <div className="stat-grid stat-grid--compact dash-section">
-                <Tile label="Sales" value={npr(t.sales)} sub={<CompareLine cmp={compareToLastWeek(t.sales, lw.sales, { floor: 100 })} then={lw.sales} money />}
+                <Tile label="Sales"
+                  tip="What today's paid bills charged, VAT included, less the credit notes issued today. A bill credited later still counts on the day it was sold; its note comes off the day it is issued."
+                  value={npr(t.sales)} sub={<CompareLine cmp={compareToLastWeek(t.sales, lw.sales, { floor: 100 })} then={lw.sales} money />}
                   to={canReports ? '/pos/sales-report' : null} />
-                <Tile label="Bills" value={t.bills} sub={<CompareLine cmp={compareToLastWeek(t.bills, lw.bills, { floor: 1 })} then={lw.bills} />} />
+                <Tile label="Bills" tip="Paid bills closed today, a bill later credit-noted included: it was sold. Avg bill is Sales ÷ these bills."
+                  value={t.bills} sub={<CompareLine cmp={compareToLastWeek(t.bills, lw.bills, { floor: 1 })} then={lw.bills} />} />
                 <Tile label="Covers" tip="Guests seated at tables on today's paid bills, as entered when the table was opened: the Covers Report's count. Takeaway and delivery bills seat no guests, so they are not counted here; a bill later credit-noted still counts its guests."
                   value={t.covers} sub={<CompareLine cmp={compareToLastWeek(t.covers, lw.covers, { floor: 1 })} then={lw.covers} />}
                   to={canReports ? '/pos/covers-report' : null} />
-                <Tile label="Avg per cover" tip="What today's dine-in bills charged, VAT included, divided by the guests seated at them. A bill later credit-noted gives its money back but keeps its guests, as on the Covers Report. Takeaway and delivery sales are left out: they have no guests to divide by."
+                <Tile label="Avg per cover" tip="What today's dine-in bills charged, VAT included, less credit notes issued today against dine-in bills, divided by the guests seated today — the Covers Report's Revenue per cover. A credited bill keeps its guests; its note lowers the figure on the day it is issued. Takeaway and delivery sales are left out: they have no guests to divide by."
                   value={nprOrDash(t.avgCover)}
                   sub={<CompareLine cmp={compareToLastWeek(t.avgCover, lw.avgCover, { floor: 20 })} then={lw.avgCover} money />} />
                 <Tile label="Discounts" tip="Bill discounts given today. Here less is the better direction, so a rise shows red."
@@ -344,19 +384,21 @@ export default function PosDashboard() {
               <div className="dash-section dash-card-grid">
                 <div className="card card--compact">
                   <h3 className="dash-card-title">
-                    <Tip text="How today's bills were paid. eSewa, Khalti and FonePay are one line; a split bill is shared across its payments. Credit is billed but not yet paid." width={280}>Payments today</Tip>
+                    <Tip text="How today's bills were paid. eSewa, Khalti and FonePay are one line; a split bill is shared across its payments. Credit is billed but not yet paid. A credit note issued today comes off the way its bill was paid, so a line can read below zero." width={280}>Payments today</Tip>
                   </h3>
                   <ShareRows rows={sales.payments} labelOf={r => r.method} valueOf={r => r.amount} emptyText="No bills paid yet today." />
                 </div>
                 <div className="card card--compact">
                   <h3 className="dash-card-title">
-                    <Tip text="Dine-in is a bill opened at a table, takeaway one with no table, delivery one billed to a delivery partner." width={260}>Where today's sales came from</Tip>
+                    <Tip text="Dine-in is a bill opened at a table, takeaway one with no table, delivery one billed to a delivery partner. A credit note issued today comes off its bill's line." width={260}>Where today's sales came from</Tip>
                   </h3>
-                  <ShareRows rows={sales.channels} labelOf={r => `${r.channel} · ${r.bills} bill${r.bills === 1 ? '' : 's'}`} valueOf={r => r.amount} emptyText="No bills paid yet today." />
+                  <ShareRows rows={sales.channels}
+                    labelOf={r => `${r.channel} · ${r.bills} bill${r.bills === 1 ? '' : 's'}${r.returns > 0 ? ` · ${r.returns} credit note${r.returns === 1 ? '' : 's'}` : ''}`}
+                    valueOf={r => r.amount} emptyText="No bills paid yet today." />
                 </div>
                 <div className="card card--compact">
                   <h3 className="dash-card-title">
-                    <Tip text="The dishes sold most today, by quantity. Complimentary items are not counted." width={240}>Top 5 today</Tip>
+                    <Tip text="The dishes sold most today, by quantity. Complimentary items are not counted. A dish on a bill credited since is still counted: it went out to the table." width={240}>Top 5 today</Tip>
                   </h3>
                   {sales.top.length === 0
                     ? <p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Nothing sold yet today.</p>
@@ -377,10 +419,14 @@ export default function PosDashboard() {
             </>
           )}
 
-          {/* The month's POS sales by category — moved here from Home with the rest of POS (S800). */}
-          <div className="dash-section">
-            <SalesPivot activePeriod={period} posEnabled={true} title="POS Sales by Category" />
-          </div>
+          {/* The month's POS sales by category — moved here from Home with the rest of POS (S800).
+              Money, so Supervisor and above, like the sales band (owner decision D2, S814 4d): a
+              staff-rank login sees the floor band only. */}
+          {canMoney && (
+            <div className="dash-section">
+              <SalesPivot activePeriod={period} posEnabled={true} refreshKey={pivotKey} />
+            </div>
+          )}
         </>
       )}
     </div>

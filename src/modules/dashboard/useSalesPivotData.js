@@ -10,47 +10,52 @@ import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { supabase } from '../../supabaseClient'
-import { firstError } from '../../shared/queryError'
 import { errorLine } from '../../shared/errorText'
-import { bsToAd, adToBs, daysInBsMonth } from '../../utils/bsCalendar'
+import { daysInBsMonth, bsDayBoundaryIso } from '../../utils/bsCalendar'
+import { nepalBs } from '../../shared/nepalTime'
+import { isManualSource } from '../ims/sales/salesDepletion'
+import { buildCategoryDayRows } from '../pos/reports/salesReportMath'
 
-// Same Nepal-offset boundary construction as ClientDashboard.jsx's own bsDayBoundaryIso — bsToAd
-// gives local Y/M/D components with no timezone conversion, but .toISOString() would convert
-// using the RUNTIME's offset, not Nepal's fixed +05:45, silently shifting the day boundary for a
-// viewer outside Nepal. Duplicated here (not imported) since the original is a small unexported
-// local function inside a page component, not a shared util.
-function bsDayBoundaryIso(bsYear, bsMonth, bsDay, endOfDay) {
-  const d = bsToAd(bsYear, bsMonth, bsDay)
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0')
-  return endOfDay ? `${y}-${m}-${dd}T23:59:59.999+05:45` : `${y}-${m}-${dd}T00:00:00.000+05:45`
+// A failed read must not render as "No sales recorded yet this period" — that is the silent-zero
+// shape on the dashboard card an owner glances at between services (S682). Throw so the hook can
+// say the figure could not be built.
+function throwIfFailed(results) {
+  const bad = (results || []).find(r => r && r.error)
+  if (bad) throw new Error(errorLine(bad.error))
 }
 
-export async function loadFromSalesEntries(period, scopedFrom) {
+/**
+ * Category × Day from `sales_entries`, the IMS revenue rows, at the price each row was charged
+ * (`unit_price`, after discount, before VAT) less its own discount.
+ *
+ * `sources` decides which rows (S814 4d, REPORTS-9 / IMS-HANDOFF-7):
+ *   'manual'   (the default, the Manual pivot) only hand-entered rows: `source` NULL or 'manual'
+ *              (salesDepletion.isManualSource). Everything the till wrote is left out, the credit
+ *              notes' `pos_credit` / `pos_credit_restock` reversals included — they reverse a till
+ *              bill this pivot never showed, so subtracting them here took a till return off
+ *              hand-entered sales (BLOOM CAFE's −450 / −160 on Ashwin 18).
+ *   'revenue'  every row except `pos_comp`, the periodRevenue rule (periodCost.js): the Inventory
+ *              Revenue tile's population, so Sales Mix built from it splits that same figure by
+ *              category and a credit note comes off once.
+ *
+ * FILTERED IN JS, never as `.neq('source', …)` (S734): `sales_entries.source` is nullable and
+ * `NULL <> 'pos'` is NULL in SQL, which dropped exactly the legacy hand-entered rows.
+ */
+export async function loadFromSalesEntries(period, scopedFrom, { sources = 'manual' } = {}) {
+  const keep = sources === 'revenue' ? s => s.source !== 'pos_comp' : s => isManualSource(s.source)
   const results = await Promise.all([
-    // Excludes both pos_comp (never billed) and pos (already counted by the POS-sourced pivot —
-    // PosOrders.jsx stamps a source:'pos' row per bill at close) so this "manual" pivot and the
-    // POS pivot can render side by side without double-counting the same revenue.
-    //
-    // FILTERED IN JS, never as `.neq('source', …)` (S734). `sales_entries.source` is nullable
-    // (DEFAULT 'manual', no NOT NULL) and in SQL `NULL <> 'pos_comp'` is NULL rather than true,
-    // so the two chained `.neq`s dropped every legacy row written before that column had a
-    // default — i.e. exactly the hand-entered rows this pivot is titled "Manual Sales by
-    // Category" to show. An older client's manual pivot could come back empty under a card that
-    // reads as fact. Third instance of this defect on the dashboards; see the rule in
-    // `.claude/rules/dashboards.md`.
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount, source').eq('period_id', period.id).order('id')),
-    scopedFrom('recipes', 'id, category, selling_price'),
+    // Paged like every master-data map on the dashboards (S734): a recipe past the cut would price
+    // its sales at 0 and file them under Uncategorized.
+    fetchAllRows(() => scopedFrom('recipes', 'id, category, selling_price').order('id')),
   ])
-  // Same rule as loadFromPos below: a failed read here would render as "No sales recorded yet
-  // this period" on a card an owner reads as fact (S682).
-  const failed = firstError(results)
-  if (failed) throw new Error(failed)
+  throwIfFailed(results)
   const [{ data: sales }, { data: recipes }] = results
   const priceMap = {}, catMap = {}
   ;(recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0; catMap[r.id] = r.category || 'Uncategorized' })
   const agg = {}
   ;(sales || []).forEach(s => {
-    if (s.source === 'pos_comp' || s.source === 'pos') return // see the read above
+    if (!keep(s)) return
     const day = parseInt(s.bs_day) || 0
     const price = s.unit_price != null ? parseFloat(s.unit_price) : (priceMap[s.recipe_id] || 0)
     const amount = (parseFloat(s.qty_sold) || 0) * price - (parseFloat(s.discount) || 0)
@@ -64,81 +69,111 @@ export async function loadFromSalesEntries(period, scopedFrom) {
   })
 }
 
-export async function loadFromPos(period, scopedFrom) {
+// `vat_registered` (S809 2c): each bill is valued under the tax status it was issued with.
+const PIVOT_ORDER_COLUMNS = 'id, closed_at, discount_amount, vat_registered'
+
+/**
+ * Category × Day from the till, on the Sales Report's rule (S814 4d, REPORTS-9): every paid bill
+ * closed in the period at full value on its own day, a since-credited one included, and every credit
+ * note issued in the period a minus on the day it was issued, whichever month its bill closed in
+ * (salesReportMath.buildCategoryDayRows). The day is Nepal's (nepalBs), never the viewer's clock: a
+ * bill closed at 23:59 in Kathmandu is that day's for an admin abroad too.
+ *
+ * Rows carry `billed` (after discount, VAT included, what the pivot shows, as `amount`) and `exVat`.
+ */
+export async function loadFromPos(period, scopedFrom, clientId) {
   const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
-  const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
-  const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)
-  // Same exclusions as SalesReport.jsx/computePosSection — credit-noted bills' revenue
-  // correction posts on the day the Credit Note is issued, not retroactively here.
-  // Paged (S734), for the same reason the line list below it already is: this is one row per
-  // BILL for a whole month, so a till closing 40 a day crosses PostgREST's 1000-row cap inside
-  // one period — and a truncated ORDER list silently shortens the very `orderIds` the paged
-  // item read filters on, so paging the child while leaving the parent bare buys nothing. The
-  // producer-and-consumer rule (S706/S708) pointing at a read that had the consumer half right.
-  const { data: orders, error: ordersErr } = await fetchAllRows(() =>
-    scopedFrom('pos_orders', 'id, closed_at, credit_note_id')
-      .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs)
-      .order('id'))
-  // A failed read must not render as "No sales recorded yet this period" — that is the silent-zero
-  // shape on the dashboard card an owner glances at between services (S682). Throw so the hook can
-  // say the figure could not be built.
-  if (ordersErr) throw new Error(errorLine(ordersErr))
-  const validOrders = (orders || []).filter(o => !o.credit_note_id)
-  if (validOrders.length === 0) return []
-  const orderDayMap = {}
-  validOrders.forEach(o => { orderDayMap[o.id] = adToBs(new Date(o.closed_at)).day })
-  const orderIds = validOrders.map(o => o.id)
-  // Paged AND chunked: a month of bill lines runs to thousands, past PostgREST's silent 1000-row
-  // cap, which would quietly shrink the dashboard's POS Sales by Category pivot to a fraction of
-  // the month while still reading as a complete one (S529) — and the `.in()` list is spelled out
-  // in the request URL at ~37 characters per uuid, so a month's worth of order ids is a 414
-  // before the row cap is even reached (S629, applied here S734).
-  const { data: items, error: itemsErr } = await fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', ids).order('id'))
-  if (itemsErr) throw new Error(errorLine(itemsErr))
-  const agg = {}
-  ;(items || []).forEach(i => {
-    if (i.comped) return // never billed at menu price — excluded from revenue, same as every POS report
-    const day = orderDayMap[i.order_id]
-    if (!day) return
-    const cat = i.category || 'Uncategorized'
-    const amount = (parseFloat(i.qty) || 0) * (parseFloat(i.unit_price) || 0)
-    const key = `${cat}|${day}`
-    agg[key] = (agg[key] || 0) + amount
-  })
-  return Object.entries(agg).map(([key, amount]) => {
-    const [category, day] = key.split('|')
-    return { category, day: parseInt(day), amount }
-  })
+  const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month), true)
+  // Paged (S734): one row per BILL (and per note) for a whole month, past PostgREST's silent 1000-row
+  // cap at a busy till, and a truncated bill list silently shortens the id list the line read uses.
+  const results = await Promise.all([
+    fetchAllRows(() => scopedFrom('pos_orders', PIVOT_ORDER_COLUMNS)
+      .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs).order('id')),
+    fetchAllRows(() => scopedFrom('pos_credit_notes', 'id, order_id, created_at')
+      .gte('created_at', fromTs).lte('created_at', toTs).order('id')),
+    // Today's flag decides only a bill with no stamp (billVatRegistered); `?? true` as the Sales Report.
+    supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
+  ])
+  throwIfFailed(results)
+  const [{ data: orderData }, { data: noteData }, { data: settings }] = results
+  const orders = orderData || []
+  const creditNotes = noteData || []
+  if (orders.length === 0 && creditNotes.length === 0) return []
+
+  // The bills this period's notes credit that closed in an earlier month: their lines are what the
+  // note returns. Chunked, since the ids ride in the URL.
+  const inPeriod = new Set(orders.map(o => o.id))
+  const earlierIds = [...new Set(creditNotes.map(n => n.order_id).filter(id => id && !inPeriod.has(id)))]
+  const earlier = await fetchAllRowsChunked(earlierIds, ids => scopedFrom('pos_orders', PIVOT_ORDER_COLUMNS).in('id', ids).order('id'))
+  throwIfFailed([earlier])
+  const allOrders = [...orders, ...(earlier.data || [])]
+  const orderById = Object.fromEntries(allOrders.map(o => [o.id, o]))
+
+  // Paged AND chunked: a month of bill lines runs to thousands, past the 1000-row cap (S529), and a
+  // month of order ids in one `.in()` is a 414 before the row cap is reached (S629, S734).
+  const items = await fetchAllRowsChunked(allOrders.map(o => o.id),
+    ids => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id'))
+  throwIfFailed([items])
+  const itemsByOrder = {}
+  for (const i of items.data || []) {
+    if (i.comped) continue // never billed at menu price — excluded from revenue, as on every POS report
+    ;(itemsByOrder[i.order_id] = itemsByOrder[i.order_id] || []).push(i)
+  }
+
+  const dayOf = ts => {
+    const bs = nepalBs(ts)
+    return bs && bs.year === period.bs_year && bs.month === period.bs_month ? bs.day : null
+  }
+  return buildCategoryDayRows({
+    orders, creditNotes, orderById, itemsByOrder, vatReg: settings?.is_vat_registered ?? true, dayOf,
+  }).map(r => ({ ...r, amount: r.billed }))
 }
 
-// Returns { rows, loading, error } where rows is a flat [{ category, day, amount }] — the caller pivots
-// this into whatever top-N/last-N-days shape it wants to display (SalesPivot.jsx).
-export function useSalesPivotData({ activePeriod, posEnabled }) {
+/**
+ * Returns { rows, loading, error, asOf, refreshError } where rows is a flat [{ category, day, amount }]
+ * — the caller pivots it into whatever top-N/last-N-days shape it wants (SalesPivot.jsx).
+ *
+ * `refreshKey`: bump it to re-read the same period (the POS Dashboard's Refresh, and its tick once
+ * the last read is five minutes old). A failed REFRESH keeps the last good rows on screen and says
+ * so (`refreshError`), the POS Dashboard's own rule; only a failed first read of a period is `error`.
+ */
+export function useSalesPivotData({ activePeriod, posEnabled, refreshKey = 0 }) {
   const { clientId } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [refreshError, setRefreshError] = useState(null)
+  const [asOf, setAsOf] = useState(null)
   const loadIdRef = useRef(0)
+  const shownKeyRef = useRef(null) // whose rows are on screen: client, period and source
 
   useEffect(() => {
-    if (!clientId || !activePeriod) { setRows([]); setLoading(false); return }
+    if (!clientId || !activePeriod) { shownKeyRef.current = null; setRows([]); setLoading(false); return }
     const myId = ++loadIdRef.current
-    setLoading(true)
-    setError(null)
-    const loader = posEnabled ? loadFromPos(activePeriod, scopedFrom) : loadFromSalesEntries(activePeriod, scopedFrom)
+    const key = `${clientId}:${activePeriod.id}:${posEnabled ? 'pos' : 'manual'}`
+    const refreshing = shownKeyRef.current === key
+    if (!refreshing) { setLoading(true); setError(null) }
+    const loader = posEnabled ? loadFromPos(activePeriod, scopedFrom, clientId) : loadFromSalesEntries(activePeriod, scopedFrom)
     loader.then(flatRows => {
       if (loadIdRef.current !== myId) return // superseded by a newer client switch
+      shownKeyRef.current = key
       setRows(flatRows)
+      setError(null)
+      setRefreshError(null)
+      setAsOf(Date.now())
       setLoading(false)
     }).catch(e => {
       if (loadIdRef.current !== myId) return
-      setError(e?.message || 'Could not load the sales breakdown.')
+      const message = e?.message || 'Could not load the sales breakdown.'
+      if (refreshing) { setRefreshError(message); return } // the last good rows stay
+      shownKeyRef.current = null
+      setError(message)
       setRows([])
       setLoading(false)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, activePeriod?.id, posEnabled])
+  }, [clientId, activePeriod?.id, posEnabled, refreshKey])
 
-  return { rows, loading, error }
+  return { rows, loading, error, asOf, refreshError }
 }

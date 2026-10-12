@@ -21,7 +21,7 @@ import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { nepalHour, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
-import { turnoverByBand, isDineIn, dineInOnly, coversTotals, addReturnsByBand } from './coversMath'
+import { turnoverByBand, turnoverExclusions, turnoverExclusionNote, isDineIn, dineInOnly, coversTotals, addReturnsByBand } from './coversMath'
 import { SOURCE_LABEL } from '../reservations/reservationStatus'
 
 const fmtNpr = npr
@@ -128,7 +128,9 @@ export default function CoversReport() {
         .order('id')),
       supabase.from('settings').select('id, is_vat_registered, pos_open_time, pos_close_time').eq('client_id', clientId).maybeSingle(),
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
-      scopedFrom('pos_tables', 'id, capacity'),
+      // Seats at tables in service today (S814 4d, REPORTS-10): a table marked inactive in POS
+      // Setup has no seats to sell, so it is not RevPASH's denominator — the floor's own rule.
+      scopedFrom('pos_tables', 'id, capacity').neq('status', 'inactive'),
       // Bookings by their BOOKED time, on the same range bounds as the bills so the tabs agree
       // with each other. Paged for the same reason the orders are: every rate below divides by
       // a count taken from this read.
@@ -311,6 +313,9 @@ export default function CoversReport() {
     () => addReturnsByBand(turnoverByBand(dineInOrders, netOf), dineInReturns),
     [dineInOrders, netOf, dineInReturns]
   )
+  // What the table left out and why (S814 4d, B4): a till clock behind, or a bill left open past
+  // closing (over the 12-hour cap). The same classifier as the table, said under it and on its sheet.
+  const turnoverNote = useMemo(() => turnoverExclusionNote(turnoverExclusions(dineInOrders)), [dineInOrders])
 
   // Bookings vs walk-ins. A booking is KEPT when it reached a table (seated or completed) and a
   // NO-SHOW when staff said so; the rate is no-shows over the bookings that were decided either
@@ -393,6 +398,7 @@ export default function CoversReport() {
         'Party Size': r.label, 'Orders': r.orders, 'Covers': r.covers,
         'Avg Turnover (min)': Math.round(r.avgMinutes * 10) / 10, 'Net Sales (NPR)': Math.round(r.net * 100) / 100,
       })))
+      if (turnoverNote) XLSX.utils.sheet_add_aoa(ws, [[], [turnoverNote]], { origin: -1 })
       XLSX.utils.book_append_sheet(wb, ws, 'Turnover Time')
       XLSX.writeFile(wb, `covers-turnover-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'peak') {
@@ -512,7 +518,7 @@ export default function CoversReport() {
             </div>
             <div className="stat-card">
               <div className="stat-label">
-                <Tip text="Revenue Per Available Seat-Hour — dine-in net sales (after credit notes) ÷ (total seats × operating hours in this range). Takeaway and delivery do not use a seat, so they are left out. Set your operating hours below to see this." width={300}>RevPASH</Tip>
+                <Tip text="Revenue Per Available Seat-Hour — dine-in net sales (after credit notes) ÷ (total seats × operating hours in this range). Total seats are the seats at tables in service today: a table marked inactive in POS Setup is not counted. Takeaway and delivery do not use a seat, so they are left out. Set your operating hours below to see this." width={300}>RevPASH</Tip>
               </div>
               {revPash !== null ? (
                 <div className="stat-value">{fmtNpr(revPash)}</div>
@@ -607,6 +613,7 @@ export default function CoversReport() {
           </div>
         </>
       ) : tab === 'turnover' ? (
+        <>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -630,6 +637,8 @@ export default function CoversReport() {
             </tbody>
           </table>
         </div>
+        {turnoverNote && <p className="page-footnote">{turnoverNote}</p>}
+        </>
       ) : tab === 'reservations' ? (
         reservations.length === 0 ? (
           <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
