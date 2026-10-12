@@ -163,7 +163,7 @@ export default function PosExceptionReport() {
     })
 
     // Group item-level comps by (order_id, comp_no) — every item comped in one Charge action
-    // shares one slip/one number (see get_next_pos_comp_slip_no), so it's one exception row here
+    // shares one slip/one number (`apply_pos_item_comps`), so it's one exception row here
     // too, not one per line, matching how a whole-order Comp is already one row per order.
     let itemCompRows = []
     if ((itemComps || []).length > 0) {

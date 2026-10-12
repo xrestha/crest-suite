@@ -173,14 +173,14 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         id: 'guest-choices',
         title: 'On the QR guest menu',
         route: '/pos/menu/:tableId',
-        plan: 'Public, while pos_enabled and guest ordering are on',
+        plan: 'Public, while pos_enabled is on and the table is not Inactive',
         summary:
           'A dish with sizes shows "From NPR x" on its card. Tapping a dish with choices opens a phone sheet: the dish name pinned at the top, one group per section with a Required pill and a plain rule ("Pick 1", "Pick up to 3"), 48px chips with the same veg / non-veg square the menu card uses and any allergens, and the running price on the Add button pinned at the bottom.',
         workflow: [
           'Guest taps the dish, picks, presses "Add to order · NPR 260". A short group is named beside the button, scrolled to and focused; the button stays pressable so the tap can explain itself.',
           'A build-your-own dish (S760) is a stepper instead: "Step 1 of 5 · Size" with a progress bar, one group per step with the size first, Next (which names what is short) or Skip on an optional step with nothing picked, then Review — every group with its picks and a Change button — and Add to order. Changing the size re-prices every pick already made.',
           'Edit choices on a line in the order before sending it reopens the sheet with the line\'s picks.',
-          'Send → the request lands on the floor tile as a guest order; Accept → Send on the till re-prices it on the server (pos_price_selection) and writes the snapshot, so a guest\'s phone can never set what they pay.',
+          'Send → the server prices the request as it is submitted (submit_guest_order) and it lands on the floor tile as a guest order; Accept → Send on the till prices each line again as it is saved (save_pos_order_items) and writes the snapshot, so a guest\'s phone can never set what they pay.',
         ],
         fields: [
           { label: 'Included / free picks', desc: 'Same as the till: a free pick reads Included with the list price struck through, and the group line counts "1 of 2 free picks used · then +NPR 50 each".' },
@@ -191,9 +191,9 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           '"From NPR x" = the dish price plus the cheapest valid pick of each REQUIRED group (a Half at −NPR 100 lowers it; optional extras never do). Free picks follow the till\'s rule, the earliest-listed ones free, not the cheapest (S792 stage 3, RECIPES-4): "pick 3, first 2 free" listed Banana +30, Granola +20, Honey +10, Nutella +50 is From +10, not +30. Recipe Costing\'s "Cheapest build" comes from the same search, so the two always agree.',
         ],
         gotchas: [
-          'The guest RPC (get_guest_menu_options) is public to anon; the pricer (pos_price_selection) is callable by NO client role — it runs only inside the accept path.',
+          'The guest RPC (get_guest_menu_options) is public to anon; the pricer (pos_price_selection) is callable by NO client role — it runs only inside submit_guest_order, which prices the guest\'s request; the till\'s save prices the line itself (save_pos_order_items).',
           'Prices on the sheet apply VAT only when the outlet is VAT-registered, the same rule the menu card uses.',
-          'The sheet has its own scoped palette and shape language (rounded chips, the guest bone/pine tokens) on purpose — it is the one surface in the product a stranger sees.',
+          'Since S767 the sheet wears the app\'s default theme (Modernist Night) with square corners, like the rest of the guest menu (the bone-and-pine palette ran from S604 to S767) — it is the one surface in the product a stranger sees.',
         ],
         connections: 'get_guest_menu_options beside get_guest_menu; submit_guest_order carries option ids; the accept path on the till prices and snapshots. The Customization Report counts guest-picked choices exactly like waiter-picked ones.',
       },

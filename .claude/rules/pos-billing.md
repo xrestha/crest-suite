@@ -321,11 +321,12 @@ table's food.
   product code prefix and the category splits. The mark makes the till always open the choice window
   (the S759 one-tap default is skipped), makes the guest sheet a stepper (size first, then Review), and
   swaps the dish's cost for a range (`src/shared/buildCost.js`, `useBuildCostRanges`).
-- **No page's own recipe query names the new columns.** The mark reaches the till, Menu Pricing and the
-  range through `loadOptionCatalog`'s `buildYourOwn`, which reads `[]` on a missing column, and the
+- **The till never names the new columns in a recipe query.** The mark reaches the till, Menu Pricing and
+  the range through `loadOptionCatalog`'s `buildYourOwn`, which reads `[]` on a missing column, and the
   catalog reads fall back to the S758 column lists. The admin edit dialogs write the new columns only
-  when they change. So the migration can land after the frontend without breaking service, but setting
-  a portion or a mark needs it.
+  when they change. **The IMS rating pages do name `is_build_your_own` since S792** (Menu Engineering,
+  Recipe Margin, Best Sellers select it; Menu Repricing filters on it), so on a database without the
+  column those pages fail their read, and the till does not.
 
 ## Closed in S575 (phase 8), for the record
 
@@ -677,8 +678,10 @@ Three shapes are worth copying:
   Pricing. An UPDATE that re-sends the stored price passes; `vat_rate` NULL and 0.13 count as the
   same price.
 - **Only a `status` change is cheap.** The till flips `pos_tables.status` on every seat and bill,
-  so the guard returns before any identity lookup when `to_jsonb(NEW) - 'status'` equals `OLD` and
-  neither side is `inactive`.
+  so the guard returns after ONE `is_admin()` call (its first line, SECURITY DEFINER, so not
+  inlined) when `to_jsonb(NEW) - 'status'` equals `OLD` and neither side is `inactive`; the rank
+  lookup is skipped. A new guard on a hot table that wants a truly free path puts its cheap test
+  above `is_admin()`, not after it.
 - **The invoice columns are resolved at PRINT time** (`settings-row.md`), so a waiter changing the
   payment QR would redirect every guest's payment into their own wallet, and a prefix change
   renumbers bills already issued. Those are the Owner's, not a POS manager's.
@@ -939,22 +942,14 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 - It is this page's own press only if `credit_settled_by` is this login with the pressed method while the page holds an unanswered press (memory, 15 min); its Cash In follows once the bill has none. Anyone else's settlement is named, never posted.
 - The Cash In has a minted id (no answer: sent once more, 23505 = landed); a refusal reads OVER. No shift: keep the cash out of the next float and record it, or count it and record nothing. The commission base is `{ orderId, base }` under `useLatestRequest`.
 
-## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
+## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682, S809 4l)
 
-`PosOrders.jsx` has two returns, and `setMsg` renders only inside the `view === 'order'` tree — so
-the **floor view has no message banner at all**. Its six refusals therefore use `window.alert`:
-could not check whether this table already has an open order, could not load a bill to reprint,
-could not read the split payment lines, and the three clear-all-tables failures. Each is a refusal
-a waiter must not be able to walk past mid-service.
-
-A product-wide audit flagged them as P2 — unstyled, and modal to the whole tab on a tablet. Both
-true. **Being un-missable is the property that was chosen** (S616), and it still wins: the
-alternative is a non-blocking banner on the one screen where the cost of a missed refusal is a dish
-cooked twice or a bill reprinted with no lines. Left as found, with the reasoning now at the import
-that would otherwise look like a missing conversion.
-
-If the floor ever grows a real banner of its own, revisit this — that is the thing that changes the
-answer, not the styling.
+The floor's refusals a waiter must not walk past mid-service use `window.alert`: could not check a
+table for an open order, could not load a bill to reprint, a blocked print window, the clear-all
+failures. An audit called them unstyled and tab-modal (P2); **un-missable is the property chosen**
+(S616), because a missed refusal there is a dish cooked twice or a bill reprinted with no lines.
+The floor HAS a banner (`floorMsg`, three returns: `bills`, `order`, floor), so this is chosen over
+it, not for want of one (re-read S809 4l): a message a waiter may glance past goes in `floorMsg`.
 
 ## Anything that takes money off a bill is a TENDER or a DISCOUNT, and the choice is not cosmetic (S618)
 

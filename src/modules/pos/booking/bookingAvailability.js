@@ -17,7 +17,9 @@ export function loadMapFrom(rows) {
  * The hours of the day a sitting starting at 'HH:MM' touches, for `durationMinutes`. Arithmetic
  * on the clock, not on timestamps: the slot is already in the outlet's own clock and Nepal has
  * no DST. A sitting that runs past midnight is counted to 23 and stops — those hours belong to
- * another date, and the server's check does the same.
+ * another date. The server's check is stricter: `reservation_hour_load` carries the hours past
+ * midnight into the next date, so a late booking this page shows as free can still be refused
+ * `full` there.
  */
 export function hoursTouched(hm, durationMinutes) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(hm || '')

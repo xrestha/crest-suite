@@ -85,7 +85,7 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 - [x] ~~Category Wise Sales Report~~ — shipped S235, consolidated into `/pos/sales-report` (Category Wise tab). New `computeCategoryAmounts()` helper in `posBillingMath.js` (per-category discount allocation, reconciles to order totals). "Return" = whole-bill Credit Notes (no partial/line-level return exists).
 - [x] ~~Customer Wise Sales Report~~ — shipped S235, consolidated into `/pos/sales-report` (Customer Wise tab).
 - [x] ~~Hourly Sales Report~~ — shipped S235, consolidated into `/pos/sales-report` (Hourly tab). Buckets `pos_orders.closed_at` by local hour-of-day, Recharts bar chart + table.
-- [x] ~~Daily Sales Report~~ — shipped S235 (added mid-consolidation, not originally on this list). `/pos/sales-report` (Daily tab). Groups by BS calendar day; excludes Credit-Noted bills entirely (the revenue correction posts on the day the note is issued, not retroactively).
+- [x] ~~Daily Sales Report~~ — shipped S235 (added mid-consolidation, not originally on this list). `/pos/sales-report` (Daily tab). Groups by BS calendar day; excludes Credit-Noted bills entirely (the revenue correction posts on the day the note is issued, not retroactively). **(Superseded S754, owner decision: the credited bill now stays at full value on the day it was sold, and the note is a minus row on the day it was issued, on every tab — `pos-billing.md`, `salesReportMath.js`.)**
 - [x] ~~Item Wise Sales Report~~ — shipped S236, 2026-07-04. 6th tab in `/pos/sales-report`. New `computeItemAmounts()` helper in `posBillingMath.js`, same Sales/Return-on-credit-note pattern as Category Wise.
 - [x] ~~KOT Register Report~~ — shipped S236, 2026-07-04. `/pos/kot-log` (Register tab). Required a new `pos_kot_log` table — no historical send log existed before this (`sent_to_kot` was a live boolean, overwritten in place, no timestamp/sender).
 - [x] ~~KOT vs Prebill vs Sales reconciliation~~ — shipped S236, 2026-07-04. `/pos/kot-log` (Reconciliation tab). Flags items whose total sent-to-kitchen qty exceeds their current order qty, and any KOT/BOT send on an order that ends up Voided. Only shows flagged rows.
@@ -180,6 +180,28 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4l: DOCS-3, DOCS-4, DOCS-5, DOCS-7, DOCS-10, DOCS-11, DOCS-12 (P3); plus the
+  KOT button's Tip and the Owner Report's Avg Bill Value Tip (3m)~~ — **shipped S820, 2026-10-12**, app and
+  docs only, crest-v436. Stage 4 is complete. Several sentences had already been put right by earlier
+  slices and were only closed here: Help's "Guest QR is a Pro switch" line and its FAQ (DOCS-4), the "VAT
+  toggle an admin sets" line (DOCS-3), the guide's "Needs migration 20260916120000" line (DOCS-5, gone
+  with the shared key in 3h), `pos-billing.md`'s comp-slip rule (DOCS-10, rewritten with DATABASE-9 in
+  1j), `posChime.js`' and Layout's outlet comments (DOCS-11), and the periods-backfill sentence (rewritten
+  in 2f). Fixed in 4l: Help's rank answers (Credit is Supervisor+, a Staff login also opens the Kitchen
+  Display, Parking Slips and Reservations, a new login starts at 0%, the Owner's own login takes no role,
+  the floor shows no ETA); the guide's two "not yet live" sentences and Update Order; the Customization
+  guide's pricing path and theme; the Sales Report's "each day matches that day's shift report" (a shift
+  is not a day: Cash ties over a range of whole shifts); the pos_tables cheap path, worded as "after one
+  `is_admin()` call" rather than moved by a migration; the floor's `window.alert` decision, kept with its
+  real premise (the floor has had `floorMsg` since; un-missable is chosen over it); the build-your-own
+  readers; the only-`updated_at`-trigger claim and the doubled S686 bullet; the booking page's
+  past-midnight comment (the server is stricter); and the DOCS-12 entries below and in POS_TODO D. Left
+  for stage 6: Loyalty's hidden member list and "+ Add scheme" disabled with no reason.
+- [x] ~~Crest Customization follow-up: `computeInventoryVariance` / `computeInventoryShrinkageTrend`
+  (owner report) sum sales without the POS-supersedes-manual rule~~ — **closed in S792** (d088b4ac):
+  both apply it, `computeInventoryVariance` through `selectDepletingSales` and the shrinkage trend through
+  `shrinkageCalc.js` (`selectDepletingSalesAcrossPeriods`). The POS_TODO line kept it open until S820
+  (DOCS-12).
 - [x] ~~S809 stage 4, slice 4k: DATABASE-7, DATABASE-8, GAP-OPERATOR-2, GAP-OPERATOR-3 (P3); plus the
   S809.4 follow-ups "the operator bypasses `guard_pos_kot_log` on UPDATE" (3d) and "`pos_parking_slips_guard`
   lets any operator INSERT" (3i), and POS_TODO B's `pos_order_items.recipe_id` FK~~ — **shipped S819,
@@ -794,7 +816,9 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   mid-service both have something in their hands) plus `playGuestAlert`, three rising notes twice at
   double gain, escalating past three minutes. **The Kitchen Display got the same treatment for its
   own event**, on the 8- and 15-minute marks its card strip already uses — deliberately not on
-  "any unstarted ticket", which in a working kitchen is most of them. One real bug fell out, in all
+  "any unstarted ticket", which in a working kitchen is most of them **(revised the same day, as the
+  "third" decision above says: it fires on any ticket in New and the two marks escalate it;
+  `KitchenDisplay.jsx`'s `alertOn = newTickets.length > 0`)**. One real bug fell out, in all
   four places POS makes a sound: every chime built a new `AudioContext` per call and never closed
   one, and Chrome caps a document at ~6 — so the kitchen board, the floor, Reservations and a
   guest's own phone each went **silent from the seventh event**, with nothing on screen to say so.

@@ -24,10 +24,11 @@ import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
 import ActionError from '../../../components/ActionError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
-// The floor view's six window.alert()s are deliberately NOT converted (S616, re-affirmed S682):
-// setMsg renders only inside the `view === 'order'` tree, so the floor has no banner of its own,
-// and each of these is a refusal a waiter must not be able to walk past mid-service. The audit
-// called them unstyled; being un-missable is the property that was chosen, and it still wins.
+// The floor view's window.alert()s are deliberately NOT converted (S616, re-affirmed S682, S809 4l):
+// each is a refusal a waiter must not be able to walk past mid-service (a table that may already
+// have an order, a bill reprinted without its lines, a clear-all that half ran). The floor DOES
+// have a banner (`floorMsg`, role="alert" for an error), so the choice is un-missable over the
+// banner, not alert-for-lack-of-one; a new floor message that a waiter may glance past goes there.
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import OptionPickerModal from '../../customization/OptionPickerModal'
@@ -2468,9 +2469,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A dropped error here is the worst swallow in this file: `existing` comes back null, the
     // table reads as EMPTY, and staff start a SECOND order on a table whose items are already
     // with the kitchen — re-firing every KOT and opening a second bill on one guest. Refuse to
-    // guess. window.alert because the floor view has no message banner (setMsg renders only
-    // inside the `view === 'order'` tree — CLAUDE.md's two-returns trap) and this cannot be
-    // missable mid-service (S616). S809 3f (Q16): no answer at all is the internet, not the table — it opens
+    // guess. window.alert rather than the floor's `floorMsg` banner because this cannot be
+    // missable mid-service (S616; see the note at the imports). S809 3f (Q16): no answer at all is the internet, not the table — it opens
     // as offline, by the offline rules (this till's copy, and never a table it has not loaded).
     if (existingErr && isNetworkError(existingErr)) {
       noteLinkDown()
@@ -5011,8 +5011,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   }
 
   // One item-level Complimentary Slip per Charge action, covering every item comped in that
-  // action (not one per line) — shares the whole-order Complimentary Slip's NC-series (see the
-  // get_next_pos_comp_slip_no migration), so `order.invoice_no` (this order's Tax Invoice/PAN
+  // action (not one per line) — shares the whole-order Complimentary Slip's NC-series
+  // (`apply_pos_item_comps` takes the number under that series' lock), so `order.invoice_no` (this order's Tax Invoice/PAN
   // Bill number) is swapped out for the comp-specific number the comped rows just got assigned.
   // Uses its own `comp_print_count` counter (not the main bill's `print_count`) so reprinting
   // one document never mislabels the other's copy number — see reprintItemCompSlip.
@@ -6115,7 +6115,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
 
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Tip text="Kitchen Order Ticket — sends unsent food items to the kitchen printer. Bold + badge show how many items are waiting."
+                <Tip text="Kitchen Order Ticket — sends every unsent item that is not routed to the bar (POS Setup → Ticket Routing) to the kitchen printer. Bold + badge show how many items are waiting."
                   style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
                   <button
                     className={`ticket-btn${kotCount > 0 ? ' ticket-btn--pending' : ''}`}
@@ -6276,7 +6276,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             )}
 
             {/* Loyalty redemption. Rendered inside the ORDER-screen return, beside the item-comp
-                panel — PosOrders has two returns and a control placed in the floor tree sets state
+                panel — PosOrders has three returns and a control placed in the floor tree sets state
                 that nothing renders (S578).
 
                 Deliberately NOT gated on Supervisor rank, unlike comp above it: comping is

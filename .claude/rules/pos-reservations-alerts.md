@@ -109,8 +109,9 @@ are load-bearing, each with the reason it exists:
 - **Closed wins over walk-in-only** (`normalizeReservationSettings` strips the overlap; the
   settings tab clears the other list when one is ticked). Closures are the outlet's own list —
   never derived from the HR holiday calendar, since most outlets are open on a public holiday.
-- **`pos_reservations` is the schema's only table with a real `updated_at` trigger.** A new table
-  wanting one attaches `touch_updated_at()`; do not write a second function.
+- **`touch_updated_at()` is the one `updated_at` trigger function**, on `pos_reservations` and, since
+  S790, `onboarding_progress` (`onboarding_progress_touch`). A new table wanting one attaches it; do
+  not write a second function. Every other table's `updated_at` is only as true as its writers.
 - **Generated columns must be in `restoreClientData.js`'s `GENERATED_COLUMNS`.** Registering
   `pos_reservations.phone_canonical` there is how S677 found that `pos_customers.phone_canonical`
   never was, i.e. every restore of the customer book had been rejected since S545 while the backup
@@ -134,17 +135,15 @@ are load-bearing, each with the reason it exists:
   `Layout.js`) and raises `ArrivalAlert`: a fixed banner with an Open Orders button, plus
   `playGuestAlert` re-sounding every 20 s until someone acts, escalating past three minutes.
   **Ask of any new waiting-for-a-human state which of the two it is** — a number someone will see
-  when they next look, or a person who is waiting now.
-- **Anything that waits for a human Accept must feed `useNavBadgeCounts` (S686).** The rail's
-  amber dot on the HR/POS icon and the per-route `navCounts` chip in `Layout.js` are the shell's
-  only alert visible from every page; a count shown on the page the item lands on, or on a
-  dashboard tile's second line, was reported as "no notification" by an owner on the IMS
-  dashboard. `posRequests` (reservations `status = 'requested'`) is the first POS entry; keep a
-  failed count at its last value rather than zero.
+  when they next look, or a person who is waiting now. The rail's amber dot on the HR/POS icon and
+  the per-route `navCounts` chip in `Layout.js` are the badge half; a count shown only on the page
+  the item lands on, or on a dashboard tile's second line, was reported as "no notification" by an
+  owner on the IMS dashboard. `posRequests` (reservations `status = 'requested'`) is the first POS
+  entry; keep a failed count at its last value rather than zero.
 - **The Reservations page opens on the whole future book, and Activity is the only view that
   says what changed (S687).** Upcoming = `reserved_for >= today`, unpaged, under day headers;
   Day is the service view. Activity orders by `updated_at DESC LIMIT 100` — `updated_at` is
-  trigger-maintained on this table and on no other, which is why it can be trusted here. Only
+  trigger-maintained on this table (`touch_updated_at()`), which is why it can be trusted here. Only
   `created_by` is stored, stamped from `auth.uid()` by `pos_reservations_stamp_created_by` and
   kept on update (S809, operator exempt for the restore); `activityBy` names it on Booked alone.
   A future `updated_by` must be set the same way, never from a parameter.

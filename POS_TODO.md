@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S819 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`) and 4k (migration `20261012140000`); stages 5–7 outlined)
+Last updated: 2026-10-12 (S820 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stages 5–7 outlined)
 
 ---
 
@@ -65,17 +65,10 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (7 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8, FLOOR-KITCHEN-4, FLOOR-KITCHEN-7, FLOOR-KITCHEN-8, FLOOR-KITCHEN-9, ORDER-FLOW-17, ORDER-FLOW-19, RESERVATIONS-6, RESERVATIONS-7, RESERVATIONS-8, RESERVATIONS-9, RESERVATIONS-10, RESERVATIONS-11, DATABASE-7, DATABASE-8; GUEST-7 closed as accepted, Q21 (c))
+### P3 (0 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8, FLOOR-KITCHEN-4, FLOOR-KITCHEN-7, FLOOR-KITCHEN-8, FLOOR-KITCHEN-9, ORDER-FLOW-17, ORDER-FLOW-19, RESERVATIONS-6, RESERVATIONS-7, RESERVATIONS-8, RESERVATIONS-9, RESERVATIONS-10, RESERVATIONS-11, DATABASE-7, DATABASE-8, DOCS-3, DOCS-4, DOCS-5, DOCS-7, DOCS-10, DOCS-11, DOCS-12; GUEST-7 closed as accepted, Q21 (c))
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| DOCS-3 | Help gives six wrong answers about who may do what at the till | 4 | — | no |
-| DOCS-4 | Help still calls Guest QR ordering a Pro switch an admin turns on | 4 | — | no |
-| DOCS-5 | The POS guide still says S754's database rules and tablet keys are not live, plus three more stale sentences | 4 | — | no |
-| DOCS-7 | Sales Report's help promises each day reconciles to that day's shift; a shift is not a day | 4 | — | no |
-| DOCS-10 | pos-billing.md still says the till calls `get_next_pos_comp_slip_no` per Charge (untrue since S286) | 4 | — | no |
-| DOCS-11 | Seven rule sentences and code comments describe mechanisms that no longer hold; two would steer a change wrong | 4 | — | no |
-| DOCS-12 | This file keeps a shipped S792 item open and the webhook secret's old home; POS_DECISIONS states two superseded rules | 4 | — | no |
 
 ### Gaps (0 open; GAP-RELEASE-1 shipped in slice 1b, GAP-OUTLETS-1 in 1g, GAP-OPERATOR-1 in 1l, GAP-OUTLETS-2 in 2h, GAP-OUTLETS-3 in 3n, GAP-OPERATOR-2 and GAP-OPERATOR-3 in 4k)
 
@@ -333,9 +326,9 @@ that file.
 | 4i ✅ | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] (shipped 2026-10-12, S817, migration `20261012120000` applied live, crest-v433; owner D18–D21) | yes | — |
 | 4j ✅ | RESERVATIONS-6, -7, -8, -9, -10, -11 [Table Management's dead "skewed by bills left open" note removed; a refused Seat hand-off no longer stays armed] (shipped 2026-10-12, S818, migration `20261012130000` applied live, crest-v434; owner D22–D26) | yes | Q23 |
 | 4k ✅ | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT; B's `pos_order_items.recipe_id` FK] (shipped 2026-10-12, S819, migration `20261012140000` applied live, crest-v435; owner D27–D30) | yes | — |
-| 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
+| 4l ✅ | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence, already rewritten in 2f] (shipped 2026-10-12, S820, app and docs only, crest-v436) | none | — |
 
-Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816), 4i shipped 2026-10-12 (S817), 4j shipped 2026-10-12 (S818), 4k shipped 2026-10-12 (S819).
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816), 4i shipped 2026-10-12 (S817), 4j shipped 2026-10-12 (S818), 4k shipped 2026-10-12 (S819), 4l shipped 2026-10-12 (S820). **Stage 4 is complete.**
 
 **After stage 4 (owner approved 2026-10-12):**
 
@@ -584,8 +577,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - ~~IMS-HANDOFF-5 (no "till bills still waiting" note when ending a month) could now use
     `pos_ims_waiting_counts` for any closer, IMS supervisors included (3j).~~ Done in 4e
     (`tillWaitingPreflight`).
-  - `pos-billing.md`'s "Periods backfill … re-stamps what it finds" sentence (IMS-HANDOFF-2) is still out
-    of date (3j).
+  - ~~`pos-billing.md`'s "Periods backfill … re-stamps what it finds" sentence (IMS-HANDOFF-2) is still out
+    of date (3j).~~ Found already rewritten in 2f ("`ims_posted_at` is the database's"); closed in 4l.
 - **Found while drafting stage 3, wave 3 (3c, 3e, 3n; 2026-10-10, not fixed):**
   - ~~A till lock keeps the cart, a guest's accepted dishes included, but not the accepted request ids, so
     the request still waits (the PIN screen now announces it, correctly). When the waiter signs back in,
@@ -626,8 +619,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     greyed BOT (3m).~~ Fixed in 4i: listed, marked "no dishes on the till".
   - The 1L+ year's line read fires every 150-bill chunk at once (about 730 requests for a 1,09,500-bill
     year) (3m).
-  - The KOT button's Tip still says "food items"; Avg Bill Value on the Owner Report has no Tip; a no-bar
-    till shows BOT for a moment on load (3m).
+  - ~~The KOT button's Tip still says "food items"; Avg Bill Value on the Owner Report has no Tip~~ (both
+    fixed in 4l); a no-bar till shows BOT for a moment on load (3m).
   - The stock-count tablet's lock still signs out on every device (`scope: 'local'` would be safe there:
     `ims_revoke_count_sessions` covers a lost counting tablet) (3h).
   - `pos-staff-login` still carries the dead pre-S791 fallback for a missing `reserve_pos_pin_attempt`
@@ -686,7 +679,7 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - A till on crest-v430 or older shows held points as spendable until it reloads; the server refuses
     them with a sentence (`pos_points_held`).
   - Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
-    with no reason when the name is empty (S809.4, 3k): 4l or stage 6.
+    with no reason when the name is empty (S809.4, 3k): stage 6 (left out of 4l, which changed copy only).
 - **Found while building stage 4, slice 4h (2026-10-12, not fixed):**
   - The below-zero checks in the editors look at one option at a time. Two negative choices that only
     go below zero together, or a hidden option shown again with Show again, are refused only by the
@@ -764,9 +757,6 @@ In this order. Service charge was offered and **not** chosen.
     stock lines are not added to that figure yet.
   - Stock Movements' Sub-Recipes tab does not walk a choice's sub-recipe stock line (release 1);
     the tab says so.
-  - `computeInventoryVariance` / `computeInventoryShrinkageTrend` (owner report) still sum sales
-    without the POS-supersedes-manual rule the live pages apply (pre-existing), so a dish entered
-    both ways counts its choices twice there, as it already did its recipe.
   - Not yet pressed on a real till after S759: the cart's choices line and the choice window's
     scroll-to-short-group on a refused Add. (The guest sheet's sticky header WAS pressed in S767 —
     it clipped the content under it, and was fixed.)
@@ -912,7 +902,7 @@ by the till — were closed by S754 and moved to `POS_DECISIONS.md`.
 
 ## D. Known roadmap items
 
-- [ ] 🟡 QR payment auto-confirmation — receiver scaffold + admin UI shipped S271/S272, 2026-07-06 (`pos_payment_webhook` Edge Function, `settings.pos_webhook_secret` config in Manage Clients → QR tab). Still needs real FonePay/eSewa merchant onboarding + their actual signature scheme before anything goes live — low priority, blocked on merchant credentials, not engineering.
+- [ ] 🟡 QR payment auto-confirmation — receiver scaffold + admin UI shipped S271/S272, 2026-07-06 (`pos-payment-webhook` Edge Function; its secret is `client_secrets.pos_webhook_secret`, admin-only, set in Manage Clients → a client's QR tab — never on `settings`, which every login of the outlet can read). Still needs real FonePay/eSewa merchant onboarding + their actual signature scheme before anything goes live — low priority, blocked on merchant credentials, not engineering.
 - [ ] 🔴 Barcode support (structural, no current need identified)
 
 ## Not on this list (deliberately out of scope)

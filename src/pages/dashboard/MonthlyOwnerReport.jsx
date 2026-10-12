@@ -695,7 +695,8 @@ export default function MonthlyOwnerReport() {
                       tip={posSeated
                         ? 'Average spend per seated guest: dine-in Net Sales (after any credit notes on dine-in bills) ÷ guests seated. Takeaway and delivery are left out of both, as on the Covers Report.'
                         : "Average spend per guest ('cover' = one seated diner), not per bill — a table of 4 sharing one bill counts as 4 covers."} />
-                    <Row label="Avg Bill Value" value={fmt(snapshot.pos.covers?.avgBillValue)} />
+                    <Row label="Avg Bill Value" value={fmt(snapshot.pos.covers?.avgBillValue)}
+                      tip="Net Sales ÷ Bills, the two figures above: the average paid bill this month, takeaway and delivery included. It is per bill, not per guest, so a table of 4 on one bill counts once; Avg Check / Cover is the per-guest figure." />
                   </tbody></table>
                 </div>
                 {!posSeated && (
