@@ -641,8 +641,8 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'pos_customer_phone_locked'),
-    staff: 'A customer’s phone number cannot be changed, because their points belong to that number. Nothing was changed. A new number becomes a new customer the first time a bill is closed with it, and the points stay with the old number.',
-    operator: 'A customer’s phone number is what their loyalty points and bill history belong to, so it cannot be changed, and nothing was changed. A customer on a new number becomes a new record the first time a bill is closed with it. Their points stay with the old number, which still finds them at the till; to move them, take them off the old number and add them to the new one with Adjust in Customers → Loyalty.',
+    staff: 'A customer’s phone number cannot be changed, because their points belong to that number. Nothing was changed. A new number becomes a new customer the first time a bill is closed with it; the owner or a POS manager can move the points to it with Move to a new number.',
+    operator: 'A customer’s phone number is what their loyalty points and bill history belong to, so it cannot be changed, and nothing was changed. A customer on a new number becomes a new record the first time a bill is closed with it. To take their points there, use Move to a new number (the ⋯ on their row in Customers → Loyalty): the points move in one step, with the reason kept on both numbers.',
   },
   // S809 1k (migration 20261009170000). Raised by BEFORE triggers on pos_parking_slips and
   // pos_payment_confirmations, so the statement rolled back and each may say nothing was changed.

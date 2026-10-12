@@ -568,10 +568,11 @@ describe('POS payment-line and customer-book refusals (S809 1i)', () => {
     expect(errorText(err, 'operator')).not.toBe(errorText(hinted('loyalty_enrol_rank', 'loyalty_enrol_rank: …'), 'operator'))
   })
 
-  it('a phone change says the points stay with the old number, and does not send the reader to support', () => {
+  it('a phone change names Move, and does not send the reader to support', () => {
     const err = hinted('pos_customer_phone_locked', "pos_customer_phone_locked: a customer's phone number and outlet …")
     expect(errorText(err, 'staff')).toMatch(/new customer/i)
-    expect(errorText(err, 'operator')).toMatch(/stay with the old number/)
+    expect(errorText(err, 'staff')).toMatch(/Move to a new number/)
+    expect(errorText(err, 'operator')).toMatch(/Move to a new number/)
     // GAP-OPERATOR-1 / Q26 (a): the operator is held to this rule too, so support cannot do it either
     expect(errorText(err, 'operator')).not.toMatch(/support/i)
   })
@@ -624,10 +625,10 @@ describe('hand corrections of a points balance (S809 3k)', () => {
     }
   })
 
-  it('a phone change still says the points stay with the old number, and now how to move them', () => {
+  it('a phone change sends the reader to Move, not to Adjust (S822 5b)', () => {
     const err = { code: '42501', hint: 'pos_customer_phone_locked', message: "pos_customer_phone_locked: a customer's phone number and outlet …" }
-    expect(errorText(err, 'operator')).toMatch(/stay with the old number/)
-    expect(errorText(err, 'operator')).toMatch(/Adjust in Customers → Loyalty/)
+    expect(errorText(err, 'operator')).toMatch(/Move to a new number \(the ⋯ on their row in Customers → Loyalty\)/)
+    expect(errorText(err, 'operator')).not.toMatch(/Adjust/)
   })
 })
 

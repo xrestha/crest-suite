@@ -630,10 +630,9 @@ and `closed_at := now()`, because a tablet's clock could backdate a bill into a 
 cascade runs as the table owner and passes the `current_user` seam, which was measured live: deleting a profile or
 shift that a billed order names is Postgres's write, not the browser's, and is not refused.
 **That was measured on a BEFORE row trigger (`guard_pos_order_close`); an AFTER STATEMENT trigger on
-the child does not see it (measured S755).** It fires once the outer statement ends, as the caller. So a
-browser's DELETE of an open order that still has lines is refused by `guard_pos_order_items_closed`
-as "closed and printed": its LEFT JOIN reads the just-deleted parent as not open. It is fail-closed
-and no app path reaches it (`POS_TODO.md` A2). A guard that must tell who asked through a cascade
+the child does not see it (measured S755).** It fires once the outer statement ends, as the caller, and
+finds the parent gone; the two child guards ask `pos_orders_still_exist(uuid[])` (DEFINER, S822), so a
+gone parent passes and an unseen one is refused. A guard that must tell who asked through a cascade
 keys on `auth.jwt() ->> 'role'`, not `current_user`.
 
 ## A rank the screen requires must be enforced by the table (S754)

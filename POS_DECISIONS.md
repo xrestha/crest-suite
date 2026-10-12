@@ -180,6 +180,29 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5b: A2 booking rate-limit key, A2 delete-open-order message, 4g phone-lock
+  sentence~~ — **shipped S822, 2026-10-12**: migrations `20261012160000` + `20261012160100` (a header
+  probe, created, called and dropped, live about two minutes) and `20261012170000`, all applied live;
+  app wording crest-v437. No owner decision needed. **The probe** (anon, over `/rest/v1/rpc/`, curl):
+  an honest call's `x-forwarded-for` is one address, equal to `cf-connecting-ip`; a caller's own
+  `x-forwarded-for` is kept and Cloudflare appends the address it saw at the END; a caller-sent
+  `cf-connecting-ip` is refused at Cloudflare's edge (403, error 1000); `x-real-ip` is dropped;
+  `Forwarded` and `True-Client-IP` pass through as sent; `x-crest-build` arrives, and the preflight
+  allows it, so 5c's floor raise stands. **The limit** now keys on `cf-connecting-ip`, else the last
+  `x-forwarded-for` hop, an IPv6 address as its /64, else `unknown`; an honest guest's key is unchanged.
+  **The delete message:** `guard_pos_order_items_closed` and (same fault) `guard_pos_order_payments_closed`
+  pass a parent that no longer exists, asked of the new DEFINER `pos_orders_still_exist(uuid[])`
+  (answers only inside a trigger; authenticated and service_role only). **The sentence** names Move to a
+  new number; `errorText.js` (staff and operator) and Help, which still sent the reader to Adjust, say
+  the same. Verified inside the apply (rolled back, as an outlet's Owner and as a booking-page guest):
+  an open order with an unsent line deletes with its line; one with a points line is refused
+  `pos_payment_line_locked`; a closed bill's lines, payment lines and the bill stay `bill_locked`; a
+  phone change names Move; six requests behind one Cloudflare address with six made-up first hops: the
+  sixth is `rate`; no `cf-connecting-ip` keys on the last hop, IPv6 on its /64, no headers on
+  `unknown`. Read back: the four bodies' md5s as written, SECURITY unchanged, the lookup's ACL
+  authenticated/service_role, six bill-guard triggers enabled, no probe row left. Found, not changed:
+  `admin-user-ops` keys the trial-signup limit and the legal-acceptance address on the same first hop
+  through the Edge Function gateway (filed under A2 for 5e).
 - [x] ~~S809 stage 5, slice 5a: the S782 grants trap (S809.4 1k, 1l, 3b, 3k)~~ — **shipped S821,
   2026-10-12**, migration `20261012150000` applied live, migration only (no app change, no till reload).
   **Q28 (owner, as recommended): every table, and new tables start without them.** The four S809.4 lines

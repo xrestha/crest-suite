@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S820 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`); stages 6–7 outlined)
+Last updated: 2026-10-12 (S822 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437); stages 6–7 outlined)
 
 ---
 
@@ -368,7 +368,7 @@ rate-limit key and whether 5c raises the till build floor. Then 5c, 5d, 5e and 5
 | # | IDs | Migration | Decisions |
 | --- | --- | --- | --- |
 | 5a ✅ | S782 grants (shipped 2026-10-12, S821, `20261012150000` applied live, migration only): TRUNCATE/REFERENCES/TRIGGER live on 19 tables (`pos_cash_movements`, `pos_loyalty_ledger` among them), MAINTAIN on about 80 (`pos_parking_slips`, `pos_payment_confirmations`, `pos_guest_order_requests` among them) | revoked from anon, authenticated and PUBLIC on every public table; the schema's default privileges stop handing them to new tables | Q28 |
-| 5b | A2 rate-limit first hop; A2 delete-open-order message; 4g `pos_customer_phone_locked` names Move | a throwaway header probe first (created, called with a set `x-forwarded-for` and `x-crest-build`, dropped); `submit_reservation_request` keyed on the trusted hop (or left, with the reason recorded); `guard_pos_order_items_closed_del` tells a deleted parent from a closed one (S749 DEFINER lookup); the phone-lock sentence | — |
+| 5b ✅ | A2 rate-limit first hop; A2 delete-open-order message; 4g `pos_customer_phone_locked` names Move (shipped 2026-10-12, S822: probe `20261012160000` created, called and dropped by `20261012160100`; `20261012170000` applied live; app wording crest-v437. The probe saw `x-crest-build` arrive, so 5c's floor raise stands; the limit now keys on `cf-connecting-ip`, which Cloudflare refuses from a caller) | a throwaway header probe first (created, called with a set `x-forwarded-for` and `x-crest-build`, dropped); `submit_reservation_request` keyed on the trusted hop (or left, with the reason recorded); `guard_pos_order_items_closed_del` tells a deleted parent from a closed one (S749 DEFINER lookup); the phone-lock sentence | — |
 | 5c | `credit_settled_at := now()`; the `credit_settlement` unique index; the close pins its priced lines (`items_version`, after checking what bumps it); a Split bill's legs inside the shift lock; a void's `shift_id` from the open shift (4a's browser read files it today); raise `pos_min_till_build()` | `guard_pos_order_close`, `pos_shifts_guard`, a partial unique index on `pos_cash_movements`; a second file raising the floor after the deploy, only if 5b's probe sees `x-crest-build` | — |
 | 5d | CREDIT-NOTES-5 server half (`original_invoice_*` from the bill); the server-side credit-note print counter (the parking slip's `OLD.print_count + 1`); `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows for a client without Inventory (4e); 2f: a comp-cost read IMS logins may use (`viewPosBill.js`, `loadDeltaExplosion`) | `guard_pos_credit_note`, `ims_sales_entries_guard`, a new DEFINER read | — |
 | 5e | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`) | those two functions; `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys | — |
@@ -701,8 +701,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     figure differs. Fine while schemes rarely change.
   - A Credit Note on a bill closed before a Move takes its points back from the OLD number, which can go
     below 0 while the new number keeps them (the ledger's true position, as for any spent points).
-  - `pos_customer_phone_locked`'s sentence still says "the points stay with the old number"; it should
-    name Move. Stage 5 (it is a guard body).
+  - ~~`pos_customer_phone_locked`'s sentence still says "the points stay with the old number"; it should
+    name Move. Stage 5 (it is a guard body).~~ Fixed in 5b (S822), with `errorText.js` and Help, which
+    still sent the reader to Adjust.
   - A till on crest-v430 or older shows held points as spendable until it reloads; the server refuses
     them with a sentence (`pos_points_held`).
   - Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
@@ -817,10 +818,15 @@ when these were filed. Every item below assumes they are.
 - [x] **Credit-note amounts were trusted as sent** — closed S755: `guard_pos_credit_note` checks gross
   against the charged lines, discount and net against the bill, and the VAT split, with no second
   copy of the VAT formula (`credit_note_amounts`).
-- [ ] 🟡 **The public booking rate limit trusts the first hop of `x-forwarded-for`**
-  (`submit_reservation_request`), which a caller can set. S754 deliberately left it alone, because
-  nobody has confirmed which hop Supabase's proxy chain appends as trusted. Confirm that first, then
-  key the limit on that hop.
+- [x] **The public booking rate limit trusted the first hop of `x-forwarded-for`** — closed S822 (5b,
+  `20261012170000`). A live probe showed Cloudflare keeps a caller's own `x-forwarded-for` and appends
+  the address it saw LAST, and sets `cf-connecting-ip` itself (a request that sends one is refused at
+  the edge, 403 error 1000). `submit_reservation_request` keys on `cf-connecting-ip`, then the last
+  hop, an IPv6 address as its /64.
+- [ ] 🟡 **`admin-user-ops` reads the same first hop** (found S822): the trial-signup limit and the
+  address stored with a legal acceptance (`index.ts` ~575, ~831, ~895). That path is the Edge Function
+  gateway, which the S822 probe (PostgREST) did not test, so confirm its headers before changing the
+  key. Fits 5e, which redeploys `admin-user-ops`.
 - [ ] 🔵 **Remove the legacy shared device key once every client has switched it off.** Code to
   remove: the `verify_pos_legacy_device` branch in `pos-staff-login`, its `PGRST202` fallback, and
   `get_pos_staff`'s secret comparison. Till Devices shows when each client's shared key was last used.
@@ -835,14 +841,13 @@ when these were filed. Every item below assumes they are.
   revoked or never-activated tablet refuses, so only the Owner's email sign-in on that tablet can
   activate it (or a POS manager still signed in there). The build, if wanted: an enrolment code the
   Owner issues in Till Devices that a POS manager types on the tablet.
-- [ ] 🟡 **Deleting an open order that still has lines is refused as "this bill is closed and
-  printed"** (found S755, measured rolled back on live). `guard_pos_order_items_closed_del` is an
-  AFTER STATEMENT trigger, so inside the `pos_orders` cascade it fires as `authenticated` and its
-  LEFT JOIN reads the just-deleted parent as not open. Fail-closed and reached by no app path (Clear
-  Occupied deletes the lines first), but the message is wrong and a direct REST delete of an open
-  order cannot succeed. Fix: tell a deleted parent from a closed one inside a SECURITY DEFINER lookup
-  (the S749 pattern). `record_pos_kot_removals_on_order_delete` records that path once it can, by line
-  with its choices since S817 4i (ORDER-FLOW-19).
+- [x] **Deleting an open order that still had lines was refused as "this bill is closed and
+  printed"** (found S755) — closed S822 (5b, `20261012170000`). `guard_pos_order_items_closed` and
+  `guard_pos_order_payments_closed` (same fault: an open order with a points line said the bill was
+  closed) pass a parent that no longer exists, asked of the DEFINER `pos_orders_still_exist(uuid[])`;
+  an existing parent the caller cannot see is still refused. Now an open order with unsent lines
+  deletes; a sent line's ticket refuses it (`pos_kot_ticket_locked`); a points line refuses it with
+  `pos_payment_line_locked`. `record_pos_kot_removals_on_order_delete` records the path as before.
 
 ## B. Reports — compliance-adjacent
 

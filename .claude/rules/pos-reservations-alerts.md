@@ -54,7 +54,7 @@ are load-bearing, each with the reason it exists:
   attempts insert on purpose. **The page words every refusal itself by `code`** and uses the
   server's `message` only as a fallback: the server says "the restaurant", and a client may be a
   cafe, a bar or a banquet hall. Two limits sit after the attempts row: per connection (5 an hour,
-  refused attempts counted, code `rate`) and per outlet (40 requests that BECAME bookings an hour,
+  refused attempts counted, code `rate`, keyed on `cf-connecting-ip`, S822) and per outlet (40 requests that BECAME bookings an hour,
   code `busy`, S809 1h). The outlet one used to count attempts, so one connection's refusals shut
   the page for everyone (RESERVATIONS-4). **Never count refused attempts toward a limit every guest
   shares.**
