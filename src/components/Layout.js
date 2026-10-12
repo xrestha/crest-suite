@@ -23,7 +23,7 @@ import { useTillGuestView, shellGuestAlertPlan, guestAlertTitle, guestAlertDetai
 import ArrivalAlert from './ArrivalAlert'
 import SetupStepStrip from './SetupStepStrip'
 import { viewerOf as setupGuideViewerOf } from '../shared/onboarding/setupViewer'
-import { playGuestAlert } from '../modules/pos/posChime'
+import { playGuestAlert, soundBlocked, unlockAudio } from '../modules/pos/posChime'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
@@ -1005,6 +1005,18 @@ export default function Layout() {
     const id = setInterval(() => playGuestAlert({ urgent: guestAlerts.urgent }), REPEAT_MS)
     return () => clearInterval(id)
   }, [guestAlertSound, guestAlerts.muted, guestAlerts.urgent])
+  // S817 4i (FLOOR-KITCHEN-9): a page the browser reloaded or restored by itself plays nothing until
+  // someone touches it. While the alert is sounding, any tap or key lets it, and until then the
+  // banner says the sound is off (the PIN screen's S809 3c wording, guestAlertDetail).
+  useEffect(() => {
+    if (!guestAlertSound) return
+    window.addEventListener('pointerdown', unlockAudio)
+    window.addEventListener('keydown', unlockAudio)
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('keydown', unlockAudio)
+    }
+  }, [guestAlertSound])
   // Per-route counts rendered on the nav row itself, so a number waiting on one page is visible
   // from every other page in the module. Keyed by route because NAV is a module-level constant.
   // Amber while something needs a decision (a request); grey when it is only news (S687).
@@ -1389,7 +1401,7 @@ export default function Layout() {
           muted={guestAlerts.muted}
           onMute={guestAlerts.mute}
           title={guestAlertTitle(guestAlerts.requests)}
-          detail={guestAlertDetail({ waitedMs: guestAlerts.waitedMs, where: guestPlan.where })}
+          detail={guestAlertDetail({ waitedMs: guestAlerts.waitedMs, where: guestPlan.where, soundOff: guestAlertSound && soundBlocked() })}
           actionLabel={guestPlan.where === 'shell' ? 'Open Orders' : undefined}
           onAction={guestPlan.where === 'shell' ? () => navigate('/pos/orders') : undefined}
         />

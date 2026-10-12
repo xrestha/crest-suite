@@ -470,6 +470,24 @@ const rules = [
     staff: 'That table still has an open bill, so it cannot be deleted. Nothing was removed.',
     operator: 'That table still has an open bill (its order number is in the detail below), so it was not deleted — the bill would vanish from the floor with nobody able to reach it. Bill or void that order first.',
   },
+  // S817 4i (migration 20261012120000): pos_tables_guard_open_bill, a BEFORE trigger, so nothing changed.
+  {
+    test: e => hasCode(e, 'pos_table_inactive_open_bill'),
+    staff: 'That table still has an open bill, so it was not taken out of service. Nothing was changed.',
+    operator: 'That table still has an open bill (its order number is in the detail below), so it was not taken out of service — the floor would refuse every tap on it while the bill is still open. Bill or void that order first.',
+  },
+  {
+    test: e => hasCode(e, 'pos_table_rename_open_bill'),
+    staff: 'That table still has an open bill, so it was not renamed. Nothing was changed.',
+    operator: 'That table still has an open bill (its order number is in the detail below), so it was not renamed — the bill and the tickets already sent would keep the old name while new ones took the new one. Rename it once the bill is closed.',
+  },
+  // S817 4i: two tables in service never share a name (a retired table's name may be used again).
+  // Ahead of the generic 23505 rule, which could only say "already exists".
+  {
+    test: e => /pos_tables_client_name_live_key/i.test(e.message || ''),
+    staff: 'Another table already has that name. Nothing was saved.',
+    operator: 'Another table in service already has that name (capitals and spaces aside), so nothing was saved — two tables with one name cannot be told apart on a kitchen ticket or a bill. Give this one another name, or take the other out of service first.',
+  },
   // S755 (migration 20260917100000). Both are raised by a trigger in the statement that wrote, so
   // the statement rolled back and each may say this write did not land.
   {
@@ -532,8 +550,8 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'pos_tables_rank'),
-    staff: 'Only the owner or a POS manager can add, rename, move or delete tables. Nothing was changed.',
-    operator: 'Only the Owner or a POS manager can add, rename, move or delete tables, so nothing was changed. Marking a table occupied or free from the floor is unaffected.',
+    staff: 'Only the owner or a POS manager can add, rename, move or delete tables, or take one out of service or back. Nothing was changed.',
+    operator: 'Only the Owner or a POS manager can add, rename, move or delete tables, or take one out of service or bring it back, so nothing was changed. Marking a table occupied or free from the floor is unaffected.',
   },
   // S809 3b (migration 20261010120000): guard_pos_guest_order_request, a BEFORE UPDATE trigger, so the
   // statement rolled back and each may say nothing was changed. The till writes an answer only while a

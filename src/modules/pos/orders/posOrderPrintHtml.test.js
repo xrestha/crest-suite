@@ -1,6 +1,6 @@
 // S809 CHECKOUT-13: a PAN bill's own figures add up to its Net Amount (Round Off prints on every
 // bill), and a Credit bill says what is owed instead of printing a Tender as if the guest had paid.
-import { buildBillHtml, billOptionRow } from './posOrderPrintHtml'
+import { buildBillHtml, billOptionRow, buildVoidSlipHtml } from './posOrderPrintHtml'
 
 const SETTINGS = { is_vat_registered: false, invoice_prefix: '', vat_number: '123456789', property_address: '', property_phone: '' }
 
@@ -87,5 +87,45 @@ describe('billOptionRow', () => {
 
   test('is empty for a line with no choices', () => {
     expect(billOptionRow({ options: [] })).toBe('')
+  })
+})
+
+// S817 4i FLOOR-KITCHEN-4: the void prints a stop for each station still making the order's food.
+describe('buildVoidSlipHtml', () => {
+  const slip = buildVoidSlipHtml({
+    station: 'KOT',
+    ticketNo: 57,
+    outletName: 'Bloom Cafe',
+    tableName: 'Table 9',
+    voidedBy: 'Ram <Supervisor>',
+    voidedAt: '2026-10-12T14:20:00Z',
+    items: [
+      { name: 'Mixed Grill', qty: 1, options: [{ kitchen: 'No onion', is_removal: true }, { kitchen: 'Extra sauce' }] },
+      { name: 'Veg Momo', qty: 0, change: true },
+    ],
+  })
+
+  test('says VOID and STOP for the right station, table and order', () => {
+    expect(slip).toContain('*** VOID — KITCHEN ***')
+    expect(slip).toContain('STOP — DO NOT MAKE')
+    expect(slip).toContain('Table 9')
+    expect(slip).toContain('#57')
+    expect(buildVoidSlipHtml({ station: 'BOT', items: [] })).toContain('*** VOID — BAR ***')
+  })
+
+  test('strikes each dish with its quantity and choices, and a change line as CHANGE', () => {
+    expect(slip).toContain('<s>Mixed Grill</s></span><span class="qty">×1</span>')
+    expect(slip).toContain('NO onion')
+    expect(slip).toContain('+ Extra sauce')
+    expect(slip).toContain('<s>Veg Momo</s></span><span class="qty">CHANGE</span>')
+  })
+
+  test('escapes what a person typed', () => {
+    expect(slip).toContain('Voided by: Ram &lt;Supervisor&gt;')
+    expect(slip).not.toContain('<Supervisor>')
+  })
+
+  test('dates the slip from the void, in Nepal', () => {
+    expect(slip).toContain('08:05 PM')
   })
 })

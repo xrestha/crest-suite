@@ -40,7 +40,7 @@ import {
   clearCachedPosOrderForTable, enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
   settlePosOrderUpload, markQueuedSendsLogged, queuedSendKey, enqueuePosTickets,
 } from '../../../utils/offlineQueue'
-import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
+import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildVoidSlipHtml } from './posOrderPrintHtml'
 import BillingStation from './BillingStation'
 import PosImsPostingBanner from './PosImsPostingBanner'
 import {
@@ -74,7 +74,7 @@ import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange,
+  storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
   keptLinesToRestore, mergeRecoveredLines,
@@ -1635,9 +1635,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     setIfChanged(setKotStatusByTable, map, m => mapSignature(m, s => `${s.stage}:${s.ready}:${s.open}`))
   }
 
-  // Ticket rows for the order currently open on screen — matched to a cart line by recipe_id (see
-  // ticketForRecipe below) so each item can show its own Sent/Started/Ready timer, not just the
-  // table-wide summary loadKotStatus computes for the floor view.
+  // Ticket rows for the order currently open on screen — matched to a cart line by its line key
+  // (ticketForLine, S817 4i) and to a menu tile by recipe (ticketForRecipe below), so each item can
+  // show its own Sent/Started/Ready timer, not just the table-wide summary loadKotStatus computes.
   async function loadOrderKotTickets(oid) {
     if (!oid || !navigator.onLine) { setOrderKotTickets([]); return }
     // Served tickets stay in this read (S754): a line whose ticket was served reads "Served" on the
@@ -1661,7 +1661,8 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   // Most-recently-sent ticket containing this recipe — if the same item was sent in two separate
   // KOT/BOT sends (e.g. reordered after the first batch was already Ready), the newer send is the
-  // one still relevant to a waiter checking on it.
+  // one still relevant to a waiter checking on it. For the MENU TILE only, which is a dish; a cart
+  // line follows its own line (ticketForLine, ORDER-FLOW-17).
   function ticketForRecipe(recipeId) {
     if (!recipeId) return null
     return orderKotTickets.find(t => (t.items || []).some(i => i.recipe_id === recipeId)) || null
@@ -1796,7 +1797,8 @@ export default function PosOrders({ billingStation = false } = {}) {
           return toConflict('refused', errorText(up.error, 'staff'), false)
         }
         if (q.table_id) {
-          const { error: tErr } = await bounded(scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', q.table_id), 'Marking the table occupied', SEND_READ_MS)
+          // S817 4i (D19): never over a table taken out of service; only a POS manager brings one back.
+          const { error: tErr } = await bounded(scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', q.table_id).neq('status', 'inactive'), 'Marking the table occupied', SEND_READ_MS)
           if (tErr) console.error('offline sync: table occupy failed', tErr)
         }
       } else {
@@ -2328,7 +2330,16 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (kept.tableId) {
         const { data: table, error } = await bounded(scopedFrom('pos_tables', '*').eq('id', kept.tableId).maybeSingle(), 'Reading the table')
         if (error) { keepAgain(); return }
-        if (!table || table.status === 'inactive') {
+        // S817 4i (FLOOR-KITCHEN-7): a table taken out of service while its bill is still open takes the
+        // lines back onto that bill; only one with no open bill (or gone from the floor plan) cannot.
+        let retired = !table
+        if (table?.status === 'inactive') {
+          const { data: openBill, error: openErr } = await bounded(scopedFrom('pos_orders', 'id')
+            .eq('status', 'open').eq('table_id', table.id).limit(1), 'Reading the table')
+          if (openErr) { keepAgain(); return }
+          retired = !openBill?.length
+        }
+        if (retired) {
           lockedCartRef.current = null
           const what = keptLinesText(kept)
           setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before ${keptBefore(kept)} could not be put back — that table is no longer in use. Ring ${units === 1 ? 'it' : 'them'} on another table or a takeaway${what ? `: ${what}` : ''}.`)
@@ -2426,6 +2437,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         setFloorMsg(`error:${table.name}'s bill has not been loaded on this device — reconnect to bill it.`)
         return
       }
+      if (table.status === 'inactive') { setFloorMsg(`error:${inactiveTableText(table.name)}`); return } // S817 4i
       // No known order on this table — safe to start fresh, same as the online empty-table path.
       setPendingTable(table)
       setPendingCoversStr('')
@@ -2480,6 +2492,10 @@ export default function PosOrders({ billingStation = false } = {}) {
       setFloorMsg('error:That bill was already closed on another device.')
       loadFloor({ quiet: true })
     } else {
+      // S817 4i (FLOOR-KITCHEN-7, D19): a table out of service takes no new order, whether it was
+      // tapped, opened from a guest-order banner or a booking. Its bill, while one is still open, opens
+      // above as it always did; only a POS manager brings the table back.
+      if (table.status === 'inactive') { setFloorMsg(`error:${inactiveTableText(table.name)}`); return }
       // Lines a till lock kept for this login go straight onto a new order (S776), before a booking
       // prompt can ask about a party that is not the one these items were rung for.
       if (lockedCartRef.current) { startFreshOrder(table); return }
@@ -2931,9 +2947,13 @@ export default function PosOrders({ billingStation = false } = {}) {
         // floor keeps showing the tile as free. The optimistic repaint is deliberately inside
         // the success branch — loadFloor() re-reads from the server moments later, so painting
         // it occupied on a failed write would only lie until the next refresh.
-        const { error: occErr } = await bounded(scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', activeTable.id), 'Marking the table occupied', SEND_READ_MS)
+        // S817 4i (FLOOR-KITCHEN-7, D19): never over a table taken out of service — only a POS manager
+        // brings one back, and the floor opens an inactive table's bill as it is. `.select` so the floor
+        // repaints only a table this write actually seated.
+        const { data: occRows, error: occErr } = await bounded(scopedUpdate('pos_tables', { status: 'occupied' })
+          .eq('id', activeTable.id).neq('status', 'inactive').select('id'), 'Marking the table occupied', SEND_READ_MS)
         if (occErr) warnWrite(`${activeTable.name} still shows as free on the floor, though its order was saved — set its status by hand so it is not seated twice.`, occErr)
-        else setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
+        else if (occRows?.length) setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
       }
     }
 
@@ -4709,16 +4729,32 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
 
     step('Finishing up…')
-    if (closeType === 'void') {
-      // Best-effort — a KDS ticket for a voided order should disappear from the board rather
-      // than sit accumulating "late" alerts forever with no signal the order no longer exists.
-      // Comps (writeoff) don't cancel here: the food was actually prepared/served, so its
-      // ticket keeps its normal lifecycle.
-      // Best-effort by design; the try/catch this replaces caught nothing, since the call
-      // resolves with { error } rather than throwing. Failure leaves a cancelled order's
-      // ticket on the kitchen board accruing "late" alerts, which is worth a console line.
-      const { error: kotCancelErr } = await bounded(scopedUpdate('pos_kot_log', { status: 'cancelled' }).eq('order_id', updated.id), 'Clearing the kitchen tickets')
-      if (kotCancelErr) console.error('KDS ticket cancel failed (non-fatal):', kotCancelErr)
+    if (closeType === 'void' && !background) {
+      // S817 4i (FLOOR-KITCHEN-4, D18): the database cancels this order's tickets still being made in
+      // the void's own transaction (pos_orders_void_cancels_tickets), whichever way the bill was
+      // voided, so nothing is written here any more; the Kitchen Display shows them as "VOIDED — stop"
+      // for a few minutes. What the till adds is the paper: a VOID slip for each station whose ticket
+      // the void stopped, read back from the tickets themselves (stamped at the void's own instant, so
+      // a ticket the kitchen cleared earlier is not printed again). A Served ticket is left alone, and
+      // a comp (writeoff) cancels nothing: that food was made. In the background (S809) nothing prints.
+      step('Telling the kitchen…')
+      let stopRead = scopedFrom('pos_kot_log', 'station, items')
+        .eq('order_id', updated.id).eq('status', 'cancelled').not('cancelled_at', 'is', null)
+      if (updated.closed_at) stopRead = stopRead.gte('cancelled_at', updated.closed_at)
+      const { data: stopped, error: stopErr } = await bounded(stopRead.order('sent_at').order('id'), 'Checking the kitchen tickets')
+      if (stopErr) {
+        warnWrite(`The bill for ${where} was voided, but its kitchen tickets could not be read back, so no VOID slip printed. Tell the kitchen and bar to stop ${where}'s order.`, stopErr)
+      } else {
+        const byStation = {}
+        for (const r of stopped || []) (byStation[r.station] ||= []).push(...(r.items || []))
+        const voidPrinted = ['KOT', 'BOT'].filter(st => byStation[st]?.length).map(st => printHtml(buildVoidSlipHtml({
+          station: st, items: byStation[st], ticketNo: updated.order_no ?? orderNo, outletName,
+          tableName: updated.table_name || activeTable?.name || 'Takeaway', voidedBy: profile?.full_name || '', voidedAt: updated.closed_at,
+        })))
+        if (voidPrinted.some(p => p === false)) {
+          warnWrite(`The bill for ${where} was voided, but the VOID slip did not print — allow pop-ups for this site, and tell the kitchen and bar to stop ${where}'s order.`)
+        }
+      }
     }
 
     // The three writes below are STARTED here and awaited further down, rather than each taking
@@ -4734,7 +4770,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     const tableFree = tableId
       ? (background ? bounded(scopedFrom('pos_orders', 'id').eq('status', 'open').eq('table_id', tableId).limit(1), 'Checking the table') : Promise.resolve({ data: [] }))
           .then(({ data, error }) => ((error || data?.length) ? { error: null }
-            : bounded(scopedUpdate('pos_tables', { status: 'available' }).eq('id', tableId), 'Freeing the table')))
+            // S817 4i (FLOOR-KITCHEN-7): only a table the till marked Occupied goes back to Available, so a
+            // table a manager took out of service, or held as Reserved by hand, keeps that status.
+            : bounded(scopedUpdate('pos_tables', { status: 'available' }).eq('id', tableId).eq('status', 'occupied'), 'Freeing the table')))
           .then(({ error }) => { if (error) console.error('pos_tables release failed (non-fatal):', error) })
       : null
 
@@ -5744,7 +5782,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               </p>
             ) : orderItems.map((item, idx) => {
               const lineTotal = item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
-              const kotTimer = item.sent_to_kot ? kotTimerLabel(ticketForRecipe(item.recipe_id), kotNow) : null
+              const kotTimer = item.sent_to_kot ? kotTimerLabel(ticketForLine(orderKotTickets, item), kotNow) : null
               return (
                 <div key={idx} data-cart-line style={{
                   display: 'flex', flexDirection: 'column', gap: 4,
@@ -6130,6 +6168,15 @@ The tables were left occupied rather than freed with their orders still open.`)
             {(kotCount + botCount) > 0 && (
               <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                 ⚠ {kotCount + botCount} item{kotCount + botCount !== 1 ? 's' : ''} not yet sent to the kitchen/bar.
+              </p>
+            )}
+            {/* S817 4i (S809.4 follow-up, D21): closing or voiding this bill turns away a guest QR order
+                still waiting for the table (pos_orders_close_turns_away_guest_orders), so it can never
+                ring on into the next party's sitting. Said here, before the press. The list already
+                leaves out an order accepted into this cart: the save marks it before the close. */}
+            {activeTable && pendingGuestOrders[activeTable.id]?.length > 0 && (
+              <p role="status" style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
+                ⚠ A guest QR order for this table is still waiting. Closing the bill turns it away — if they still want it, close this window and Accept it onto the bill first.
               </p>
             )}
 
@@ -7152,14 +7199,17 @@ The tables were left occupied rather than freed with their orders still open.`)
             const ord      = tableOrders[t.id]
             const inactive = t.status === 'inactive'
             const hasPendingGuest = pendingGuestOrders[t.id]?.length > 0
+            // S817 4i (FLOOR-KITCHEN-7): a table taken out of service with its bill still open opens that
+            // bill; one with no bill says why it takes no order, instead of ignoring the tap.
+            const openTile = () => (inactive && !ord ? setFloorMsg(`error:${inactiveTableText(t.name)}`) : openTable(t))
             return (
               <div
                 key={t.id}
                 className={`card${hasPendingGuest ? ' guest-order-glow' : ''}`}
-                onClick={() => !inactive && openTable(t)}
+                onClick={openTile}
                 style={{
                   padding: '16px 18px',
-                  cursor: inactive ? 'default' : 'pointer',
+                  cursor: inactive && !ord ? 'default' : 'pointer',
                   // Muted by a dashed edge and the badge, not opacity (S776): 0.4 took the name and
                   // seat count below AA, so an inactive table was also an unreadable one.
                   ...(inactive ? { borderStyle: 'dashed', background: 'transparent' } : {}),
@@ -7167,11 +7217,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                   overflow: 'hidden',
                   ...(ord ? { borderColor: 'var(--theme-accent)' } : {}),
                 }}
-                {...(!inactive ? {
-                  role: 'button',
-                  tabIndex: 0,
-                  onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTable(t) } },
-                } : {})}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTile() } }}
               >
                 {/* Glanceable ATTENTION strip — readable across the room, and deliberately not a
                     status strip: a waiter crossing the floor can already see which tables are

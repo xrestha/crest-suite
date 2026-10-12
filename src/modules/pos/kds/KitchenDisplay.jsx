@@ -10,7 +10,8 @@ import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor, ticketAllPulled, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
 import { isChangeLine, isChangeTicket, changeNoteText } from '../kitchenNotes'
 import { POS_IDLE_LOCK_MS, posIdleLockApplies } from '../usePosIdleLock'
-import { playGuestAlert } from '../posChime'
+import { playGuestAlert, soundBlocked, unlockAudio, primeAudio } from '../posChime'
+import { voidColumn, visibleVoids, VOID_READ_WINDOW_MS } from './voidedTickets'
 import ArrivalAlert from '../../../components/ArrivalAlert'
 import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { errorText, errorLine } from '../../../shared/errorText'
@@ -220,20 +221,30 @@ export default function KitchenDisplay() {
   // saw each Ready ticket (id → Date.now()), which is what the 10 minutes are counted from.
   const autoServing = useRef(new Set())
   const readySince = useRef(new Map())
+  // S817 4i (FLOOR-KITCHEN-4, D18): a voided order's tickets this station had live, read for the last
+  // few minutes (voidedTickets.js). firstSeen counts the ten minutes by this screen's clock; dismissed
+  // holds the ones a cook tapped OK on here. The first read after opening or a station switch does not
+  // ring, like the new-ticket chime.
+  const [voids, setVoids] = useState([])
+  const [voidDismissed, setVoidDismissed] = useState(() => new Set())
+  const voidFirstSeen = useRef(new Map())
+  const voidsLoadedOnce = useRef(false)
+  // S817 4i (FLOOR-KITCHEN-9): the browser is holding this screen's sound until someone touches it.
+  const [soundOff, setSoundOff] = useState(false)
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current
     const gen = boardGen.current
     loadsInFlight.current += 1
     const serviceDayStart = serviceDayStartIso()
-    // 'cancelled' (set by PosOrders.jsx's closeOrder when the parent order is voided) and 'served'
-    // (S754) are excluded entirely rather than shown as a 4th column — there's nothing left for
-    // kitchen/bar to do with a ticket whose order no longer exists or whose food is at the table.
+    // 'cancelled' and 'served' (S754) are left out of this read rather than shown as a 4th column —
+    // there's nothing left for kitchen/bar to do with them. A voided order's cancelled tickets come
+    // back for a few minutes through the third read below, as "VOIDED — stop" (S817 4i).
     // Paged. pos_kot_log is one row per send per station, so a long service at a busy outlet can
     // cross the 1000-row cap inside a single day — and this query is sorted OLDEST first, so a
     // truncated read drops the newest tickets: precisely the ones the kitchen is waiting on, with
     // no error to say anything was dropped. `.order('id')` is the unique tiebreaker paging needs.
-    const [{ data, error }, removalsRes] = await Promise.all([
+    const [{ data, error }, removalsRes, voidsRes] = await Promise.all([
       settleWithin(fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
         .eq('station', station)
         .in('status', BOARD_STATUSES)
@@ -245,6 +256,17 @@ export default function KitchenDisplay() {
       settleWithin(fetchAllRows(() => scopedFrom('pos_kot_removals', 'id, order_id, recipe_id, item_name, qty_removed, reason, removed_at, selection_key')
         .gte('removed_at', serviceDayStart)
         .order('removed_at', { ascending: true }).order('id')), KDS_READ_MS, 'Checking for cancelled dishes'),
+      // S817 4i (FLOOR-KITCHEN-4): this station's tickets of a VOIDED order cancelled in the last few
+      // minutes (the server cancels them in the void and stamps cancelled_at). A ticket the kitchen
+      // cleared itself, or one cancelled for any other reason, belongs to an order that is not voided
+      // and is left out. A handful of rows at most, so no paging.
+      settleWithin(scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, started_at, ready_at, cancelled_at, pos_orders!inner(status)')
+        .eq('station', station)
+        .eq('status', 'cancelled')
+        .eq('pos_orders.status', 'voided')
+        .gte('cancelled_at', new Date(Date.now() - VOID_READ_WINDOW_MS).toISOString())
+        .order('cancelled_at', { ascending: true }).order('id')
+        .limit(200), KDS_READ_MS, 'Checking for voided orders'),
     ]).finally(() => { loadsInFlight.current -= 1 })
     // FLOOR-KITCHEN-6 (S809 3d): an answer for the station this board has left, or older than one
     // already on screen, is dropped before it touches anything; the next poll is at most 4 s away.
@@ -255,6 +277,23 @@ export default function KitchenDisplay() {
       setRemovalsError('')
       lastRemovals.current = removalsRes.data || []
     }
+    // S817 4i: a failed read keeps the voided cards already up (a cook told to stop must not see the
+    // card quietly vanish); it says nothing more, since the board's own poll error covers a dead link.
+    let chimed = false
+    if (voidsRes.error) {
+      console.error('KDS could not read voided orders, keeping the cards already shown:', voidsRes.error)
+    } else {
+      const vrows = voidsRes.data || []
+      const seenAt = Date.now()
+      let arrived = false
+      for (const t of vrows) {
+        if (!voidFirstSeen.current.has(t.id)) { voidFirstSeen.current.set(t.id, seenAt); arrived = true }
+      }
+      if (arrived && voidsLoadedOnce.current) { playNewTicketChime(); chimed = true }
+      voidsLoadedOnce.current = true
+      setIfChanged(setVoids, vrows, rs => rowsSignature(rs, ['id', 'cancelled_at']))
+    }
+    setSoundOff(soundBlocked())
     if (error) {
       // One failed poll must not write its empty result (the S654 rule, found here in S682): it
       // erased every New/Cooking/Ready ticket from the wall — the kitchen reads "nothing to cook"
@@ -279,7 +318,7 @@ export default function KitchenDisplay() {
     }).filter(t => BOARD_STATUSES.includes(t.status))
     const rows = attachRemovals(read, lastRemovals.current)
     const newTickets = rows.filter(t => t.status === 'new')
-    if (loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
+    if (!chimed && loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
       playNewTicketChime()
     }
     seenTicketIds.current = new Set(newTickets.map(t => t.id))
@@ -338,7 +377,31 @@ export default function KitchenDisplay() {
   // Switching stations is a real context switch, not a fresh arrival on the station just left —
   // without this, the first load after toggling KOT→BOT would chime for every ticket already
   // sitting in BOT's New column, not just a genuinely new one.
-  useEffect(() => { loadedOnce.current = false; seenTicketIds.current = new Set() }, [station])
+  useEffect(() => {
+    loadedOnce.current = false; seenTicketIds.current = new Set()
+    // S817 4i: the other station's voided cards are not this one's.
+    voidsLoadedOnce.current = false; setVoids([])
+  }, [station])
+  // S817 4i (FLOOR-KITCHEN-9): a board the browser reopened by itself (a crash, a power cut, a restored
+  // tab) plays nothing until someone touches it. Make the sound context now, so the board can say so
+  // before the first ticket rings into nothing, and let any tap or key start it.
+  useEffect(() => {
+    primeAudio()
+    const check = setTimeout(() => setSoundOff(soundBlocked()), 1000)
+    let recheck = null
+    const onInput = () => {
+      unlockAudio()
+      clearTimeout(recheck)
+      recheck = setTimeout(() => setSoundOff(soundBlocked()), 300)
+    }
+    window.addEventListener('pointerdown', onInput)
+    window.addEventListener('keydown', onInput)
+    return () => {
+      clearTimeout(check); clearTimeout(recheck)
+      window.removeEventListener('pointerdown', onInput)
+      window.removeEventListener('keydown', onInput)
+    }
+  }, [])
   useEffect(() => { setLoading(true); load() }, [load])
   useEffect(() => {
     // S809 3d (FLOOR-KITCHEN-6): a tick waits while a read is still out, so a slow link never piles
@@ -379,7 +442,7 @@ export default function KitchenDisplay() {
     if (nextStatus === 'ready') patch.ready_at = new Date().toISOString()
     if (nextStatus === 'served') patch.served_at = new Date().toISOString()
     // S754: conditional on the status this screen last saw. Unconditional, a Ready tap resurrected
-    // a ticket whose order had been voided (closeOrder sets 'cancelled') and two screens advancing
+    // a ticket whose order had been voided (the void cancels it) and two screens advancing
     // the same ticket silently overwrote each other. `.select('id')` because a write whose filter
     // matches nothing returns no error — only the empty result says it did not land.
     // S809 3d: time-limited, so a stalled request frees the button instead of freezing it ("…") until
@@ -470,6 +533,10 @@ export default function KitchenDisplay() {
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
+  // S817 4i (D18): the voided cards still up on this screen.
+  const shownVoids = visibleVoids(voids, { firstSeen: voidFirstSeen.current, dismissed: voidDismissed, now })
+  const dismissVoid = id => setVoidDismissed(prev => new Set(prev).add(id))
+
   const visible = tickets.filter(t => {
     // S809 3d: a Ready ticket whose dishes were all taken off stays up until it is cleared.
     if (t.status !== 'ready' || t.allPulled) return true
@@ -506,9 +573,10 @@ export default function KitchenDisplay() {
           title={newTickets.length === 1
             ? `${newChanges ? 'Changed instruction' : newPulled ? 'Dishes taken off' : 'New ticket'} — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
             : `${newTickets.length} tickets waiting${newChanges ? ` — ${newChanges} with a changed instruction` : newPulled ? ` — ${newPulled} with every dish taken off` : ' to start'}`}
-          detail={oldestNewMs < 30000
+          detail={(oldestNewMs < 30000
             ? `Just in. ${takeHint}`
-            : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. ${takeHint}`}
+            : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. ${takeHint}`)
+            + (soundOff ? ' The sound is off on this screen until someone taps it.' : '')}
         />
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 'var(--arrival-alert-h, 76px)' : 0 }}>
@@ -552,6 +620,24 @@ export default function KitchenDisplay() {
         )}
       </div>
 
+      {/* S817 4i (FLOOR-KITCHEN-9): the browser is holding the sound. The amber banner's shape
+          (PayrollRun's stale-draft card): the board still works, but nothing will ring. */}
+      {soundOff && (
+        <div role="alert" style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 14, color: 'var(--theme-text2)',
+        }}>
+          <span style={{ flex: 1, minWidth: 220 }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>🔇 Sound is off on this screen.</strong>{' '}
+            The browser holds it until someone touches the screen, so new tickets will not ring. Tap anywhere to turn it on.
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { unlockAudio(); setTimeout(() => setSoundOff(soundBlocked()), 300) }}>
+            Turn sound on
+          </button>
+        </div>
+      )}
+
       {/* A real Dismiss button, not a "(tap to dismiss)" div: role="alert" is not an interactive
           role, and the div had no tabIndex or key handler — mouse and touch only. */}
       {[pollError && ['poll', pollError, () => setPollError('')], removalsError && ['removals', removalsError, () => setRemovalsError('')], kdsError && ['kds', kdsError, () => setKdsError('')]]
@@ -573,7 +659,7 @@ export default function KitchenDisplay() {
         <>
         {/* An empty board had no state of its own — three columns each holding a bare "—", which
             on a wall screen reads as "is this thing on?". Say what an empty board means (S683). */}
-        {visible.length === 0 && (
+        {visible.length === 0 && shownVoids.length === 0 && (
           <div className="card" style={{ padding: '20px 24px', textAlign: 'center', color: 'var(--theme-text2)', fontSize: 14, marginBottom: 16 }}>
             Nothing on the board right now. Tickets appear here the moment a waiter sends an order — no refresh needed.
           </div>
@@ -581,6 +667,7 @@ export default function KitchenDisplay() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           {COLUMNS.map(col => {
             const colTickets = visible.filter(t => t.status === col.status)
+            const colVoids = shownVoids.filter(t => voidColumn(t) === col.status)
             return (
               <div key={col.status}>
                 <h3 style={{
@@ -593,9 +680,12 @@ export default function KitchenDisplay() {
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {/* A single quiet column keeps its dash; a wholly empty board says so once, above. */}
-                  {colTickets.length === 0 && visible.length > 0 && (
+                  {colTickets.length === 0 && colVoids.length === 0 && (visible.length > 0 || shownVoids.length > 0) && (
                     <div className="card" style={{ padding: 20, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>—</div>
                   )}
+                  {colVoids.map(t => (
+                    <VoidedCard key={`void-${t.id}`} ticket={t} onDismiss={dismissVoid} />
+                  ))}
                   {colTickets.map(t => (
                     <TicketCard
                       key={t.id} ticket={t} now={now} onAdvance={advance} onRequestEstimate={requestEstimate}
@@ -613,6 +703,40 @@ export default function KitchenDisplay() {
       {estimateTicket && (
         <EstimateTimeModal ticket={estimateTicket} onClose={() => setEstimateTicket(null)} onConfirm={confirmStart} />
       )}
+    </div>
+  )
+}
+
+// S817 4i (FLOOR-KITCHEN-4, D18): a ticket whose order was voided, kept up in the column it was in so
+// a cook mid-cook sees the stop rather than an empty column. Dressed like a ticket whose dishes were all
+// taken off (red-text label, struck lines, quiet strip): the same instruction, "do not make this".
+// OK takes it off this screen only; every other screen keeps it for its own ten minutes.
+function VoidedCard({ ticket, onDismiss }) {
+  return (
+    <div className="card" style={{ padding: 16, overflow: 'hidden' }}>
+      <div style={{ margin: '-16px -16px 12px', height: 7, background: ticketStripColor({ status: null, isLate: false, isWarn: false }) }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+        <span style={{ fontWeight: 700, fontSize: 22, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
+        <span style={{ fontSize: 14, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-red-text)', marginBottom: 6 }}>
+        <Tip text="This order's bill was voided on the till, so nothing on this ticket is wanted any more. A VOID slip printed with the dishes to stop. OK takes the card off this screen; it also leaves by itself after ten minutes.">
+          <span>Voided{ticket.cancelled_at ? ` ${nepalTime(ticket.cancelled_at)}` : ''} — stop, do not make</span>
+        </Tip>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
+        {(ticket.items || []).map((i, idx) => (
+          <div key={idx} style={{ fontSize: 20, color: 'var(--theme-text3)' }}>
+            <s>{isChangeLine(i) ? i.name : `${i.qty} × ${i.name}`}</s>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="button" className="btn btn-ghost" style={{ fontSize: 16, padding: '10px 20px' }} onClick={() => onDismiss(ticket.id)}
+          aria-label={`OK, take the voided ticket for ${ticket.table_name || 'Takeaway'} #${ticket.order_no} off this screen`}>
+          OK
+        </button>
+      </div>
     </div>
   )
 }

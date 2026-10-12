@@ -191,6 +191,33 @@ describe('errorText', () => {
     })
   })
 
+  // S817 4i (migration 20261012120000): a table's open bill, and two tables in service with one name.
+  describe('the table refusals', () => {
+    it('an open bill and a name clash each have their own sentence in both audiences', () => {
+      const generic = {
+        staff: [errorText({ code: 'P0001', message: 'x' }, 'staff'), errorText({ code: '23505' }, 'staff')],
+        operator: [errorText({ code: 'P0001', message: 'x' }, 'operator'), errorText({ code: '23505' }, 'operator')],
+      }
+      const errs = [
+        { code: 'P0001', hint: 'pos_table_inactive_open_bill', message: 'pos_table_inactive_open_bill: Table 4 has an open bill (order #57) — …' },
+        { code: 'P0001', hint: 'pos_table_rename_open_bill', message: 'pos_table_rename_open_bill: Table 4 has an open bill (order #57) — …' },
+        { code: '23505', message: 'duplicate key value violates unique constraint "pos_tables_client_name_live_key"' },
+      ]
+      for (const e of errs) {
+        for (const aud of ['staff', 'operator']) {
+          expect(generic[aud]).not.toContain(errorText(e, aud))
+        }
+      }
+      expect(errorText(errs[0], 'operator')).toMatch(/out of service/)
+      expect(errorText(errs[1], 'operator')).toMatch(/renamed/)
+      expect(errorText(errs[2], 'operator')).toMatch(/already has that name/)
+    })
+
+    it('the rank refusal names taking a table out of service', () => {
+      expect(errorText({ code: '42501', hint: 'pos_tables_rank', message: 'pos_tables_rank: …' }, 'staff')).toMatch(/out of service/)
+    })
+  })
+
   // S809 1k. The parking-slip and payment-confirmation guards (migration 20261009170000).
   describe('the parking slip and payment confirmation refusals', () => {
     const codes = ['pos_parking_slip_rank', 'pos_parking_slip_bill', 'pos_parking_slip_locked',

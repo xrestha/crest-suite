@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S816 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`) and 4h (migration `20261012110000`); stages 5–7 outlined)
+Last updated: 2026-10-12 (S817 — stages 1–3 complete; Q19–Q23 answered; stage 4 split into slices 4a–4l, waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f) shipped, then 4g (migration `20261012100000`), 4h (migration `20261012110000`) and 4i (migration `20261012120000`); stages 5–7 outlined)
 
 ---
 
@@ -65,7 +65,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
 
-### P3 (21 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8; GUEST-7 closed as accepted, Q21 (c))
+### P3 (15 open; shipped in stage 1: RESERVATIONS-12, CREDIT-NOTES-6, ACCESS-8, ACCESS-9, CHECKOUT-16, DATABASE-9, CHECKOUT-12, CUSTOMERS-PARKING-13; in stage 2: SHIFTS-7, CREDIT-NOTES-5; in stage 3: DATABASE-6, CUSTOMERS-PARKING-12, ORDER-FLOW-18, GUEST-5, GUEST-6, FLOOR-KITCHEN-5, FLOOR-KITCHEN-6, DOCS-9, DOCS-6, FLOOR-KITCHEN-10, ORDER-FLOW-13, ORDER-FLOW-14, REPORTS-8, ORDER-FLOW-12, ORDER-FLOW-15, ORDER-FLOW-16, ACCESS-11, ACCESS-12, CUSTOMERS-PARKING-16, REPORTS-12; in stage 4: SHIFTS-6, SHIFTS-8, SHIFTS-9, SHIFTS-10, SHIFTS-11, CHECKOUT-11, CHECKOUT-13, CHECKOUT-14, CHECKOUT-15, ACCESS-10, CREDIT-NOTES-7, CREDIT-NOTES-8, CREDIT-NOTES-9, CREDIT-NOTES-10, DOCS-8, REPORTS-5, REPORTS-6, REPORTS-7, REPORTS-9, REPORTS-10, REPORTS-11, SHIFTS-5, IMS-HANDOFF-5, IMS-HANDOFF-6, IMS-HANDOFF-7, IMS-HANDOFF-8, IMS-HANDOFF-9, IMS-HANDOFF-10, CUSTOMERS-PARKING-14, CUSTOMERS-PARKING-15, GUEST-8, CUSTOMERS-PARKING-9, CUSTOMERS-PARKING-10, CUSTOMERS-PARKING-11, CUSTOMIZATION-4, CUSTOMIZATION-5, CUSTOMIZATION-6, CUSTOMIZATION-7, CUSTOMIZATION-8, FLOOR-KITCHEN-4, FLOOR-KITCHEN-7, FLOOR-KITCHEN-8, FLOOR-KITCHEN-9, ORDER-FLOW-17, ORDER-FLOW-19; GUEST-7 closed as accepted, Q21 (c))
 
 | ID | Finding | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- |
@@ -78,12 +78,6 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | DOCS-10 | pos-billing.md still says the till calls `get_next_pos_comp_slip_no` per Charge (untrue since S286) | 4 | — | no |
 | DOCS-11 | Seven rule sentences and code comments describe mechanisms that no longer hold; two would steer a change wrong | 4 | — | no |
 | DOCS-12 | This file keeps a shipped S792 item open and the webhook secret's old home; POS_DECISIONS states two superseded rules | 4 | — | no |
-| FLOOR-KITCHEN-4 | A voided order's tickets vanish from the KDS mid-cook with no word to the kitchen | 4 | — | yes |
-| FLOOR-KITCHEN-7 | A table can be marked Inactive with an open bill; the floor then refuses it silently | 4 | — | yes |
-| FLOOR-KITCHEN-8 | Two tables can share a name, and a mid-meal rename splits one order's tickets | 4 | — | yes |
-| FLOOR-KITCHEN-9 | A KDS reloaded by the browser makes no sound until touched, and says nothing | 4 | — | no |
-| ORDER-FLOW-17 | A cart line's kitchen timer is matched by dish, not line | 4 | — | no |
-| ORDER-FLOW-19 | The order-delete pulled-item record groups by dish, not line | 4 | — | yes |
 | RESERVATIONS-6 | "Clear every occupied table" with a booking-seated table deletes lines, then fails | 4 | — | no |
 | RESERVATIONS-7 | A booking cancelled by mistake can't be restored before its day, though the dialog says it can | 4 | Q23 | no |
 | RESERVATIONS-8 | At midnight a late booking still in play vanishes from the floor and the default views | 4 | — | no |
@@ -346,12 +340,12 @@ that file.
 | 4f ✅ | CUSTOMERS-PARKING-14, -15, GUEST-8; GUEST-7 closed as accepted [Guest Menu Preview wording] (shipped 2026-10-12, app only, crest-v430; owner D8–D10) | none | Q21 |
 | 4g ✅ | CUSTOMERS-PARKING-9, -10, -11; owner additions: one-tap "add the points this bill earned", "Move points" [full points history; "+977" bill-history search] (shipped 2026-10-12, S815, migration `20261012100000` applied live, crest-v431; owner D11–D14) | yes | Q19 |
 | 4h ✅ | CUSTOMIZATION-4, -5, -6, -7, -8; owner addition: grey "no longer offered" note [`handleSaveRefusal` said "The menu has been reloaded" before the reload ran] (shipped 2026-10-12, S816, migration `20261012110000` applied live, crest-v432; owner D15–D17) | yes | Q20 |
-| 4i | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] | yes | — |
+| 4i ✅ | FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 [Ticket Routing hides dishless bar categories; a waiting guest QR order when its bill closes] (shipped 2026-10-12, S817, migration `20261012120000` applied live, crest-v433; owner D18–D21) | yes | — |
 | 4j | RESERVATIONS-6, -7, -8, -9, -10, -11 | yes | Q23 |
 | 4k | DATABASE-7, -8, GAP-OPERATOR-2, -3 [operator bypasses `guard_pos_kot_log` on UPDATE; `pos_parking_slips_guard` operator INSERT] | yes | — |
 | 4l | DOCS-3, -4, -5, -7, -10, -11, -12 [KOT button Tip; Owner Report Avg Bill Value Tip; `pos-billing.md` periods-backfill sentence] | none | — |
 
-Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816).
+Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12. Wave 2: 4d, 4e, 4f — all shipped 2026-10-12 (S814). Then 4g–4k one at a time, 4l last: 4g shipped 2026-10-12 (S815), 4h shipped 2026-10-12 (S816), 4i shipped 2026-10-12 (S817).
 
 **After stage 4 (owner approved 2026-10-12):**
 
@@ -637,9 +631,9 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     calls the figure "covers". `ClientDashboard.jsx` keeps its own copy of `bsDayBoundaryIso` (correct
     today) (3n).
 - **Found while drafting stage 3, wave 4 (3f, 3g, 3h, 3l, 3m, 3o; 2026-10-10, not fixed):**
-  - Ticket Routing lists only categories with a dish on the till, so a bar category with no dish (the
+  - ~~Ticket Routing lists only categories with a dish on the till, so a bar category with no dish (the
     default Beverage where the drinks are "Drinks") cannot be moved to KOT there, and that till keeps a
-    greyed BOT (3m).
+    greyed BOT (3m).~~ Fixed in 4i: listed, marked "no dishes on the till".
   - The 1L+ year's line read fires every 150-bill chunk at once (about 730 requests for a 1,09,500-bill
     year) (3m).
   - The KOT button's Tip still says "food items"; Avg Bill Value on the Owner Report has no Tip; a no-bar
@@ -654,9 +648,9 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - A session that ends by itself does not keep the till's unsent cart (`runBeforePosLock` is not run);
     `ProtectedRoute`'s `!profile` branch still sends a profile-less session on an activated tablet to
     `/login` (3h).
-  - A guest QR order still waiting when its table's bill closes is never answered by anything
+  - ~~A guest QR order still waiting when its table's bill closes is never answered by anything
     (`get_pos_device_guest_alerts` has no age limit), so it rings on and the next party's screen offers
-    its Accept (3g).
+    its Accept (3g).~~ Fixed in 4i (D21): the close turns it away (`pos_orders_close_turns_away_guest_orders`).
   - A table tapped while the sign-in restore's reads are running takes the kept lines (since S776);
     offline between the restore's two reads on a free table, the covers numpad hides the floor message;
     a takeaway closed between the two reads is kept under "could not be read" wording (3g).
@@ -716,6 +710,18 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
     other picks under its "Max"; the server prices the new rule (0 removals live).
   - The server's `option_count` still counts picks of hidden options (harmless while
     `option_not_on_menu` fires first), as filed in 3o.
+
+- **Found while building stage 4, slice 4i (2026-10-12, not fixed):**
+  - `guard_pos_order_insert` does not refuse an order on an inactive table. A till whose floor read is up
+    to 15 s old can still open one on a table retired a moment ago; its seat write then leaves the table
+    Inactive, and the floor opens that bill from the tile. Stage 5 if it shows up.
+  - A guest QR order on a table that never gets a bill is still answered by nothing and rings on
+    (`get_pos_device_guest_alerts` has no age limit); 4i answers it only when a bill on that table closes.
+  - A guest order accepted into the cart whose "accepted" mark failed to save before the close is turned
+    away by the close although its dishes were billed (the save marks it first; a failed mark is rare).
+  - A bill voided outside a till (REST) prints no VOID slip: only the Kitchen Display card tells the
+    kitchen. A till on crest-v432 or older still cancels a voided order's Served tickets itself.
+  - The 12 live tickets of voided orders (all from before S817) stay cancelled, Served ones included.
 
 ---
 
@@ -794,7 +800,8 @@ when these were filed. Every item below assumes they are.
   LEFT JOIN reads the just-deleted parent as not open. Fail-closed and reached by no app path (Clear
   Occupied deletes the lines first), but the message is wrong and a direct REST delete of an open
   order cannot succeed. Fix: tell a deleted parent from a closed one inside a SECURITY DEFINER lookup
-  (the S749 pattern). `record_pos_kot_removals_on_order_delete` already records that path once it can.
+  (the S749 pattern). `record_pos_kot_removals_on_order_delete` records that path once it can, by line
+  with its choices since S817 4i (ORDER-FLOW-19).
 
 ## B. Reports — compliance-adjacent
 

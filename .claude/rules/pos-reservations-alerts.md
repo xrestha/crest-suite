@@ -195,13 +195,15 @@ sound repeats); the order screen shows the bar, padded below it. `PosOrders` pub
 open table and HELD request ids to the bridge after every render, and the shell leaves held ids
 out. The PIN screen announces too (Q14) through `get_pos_device_guest_alerts` with the tablet key,
 table names and times only, silent with POS off or the account locked; while `soundBlocked()` it
-says the sound is off and unlocks on the first tap. Anything fixed over the whole screen pads by
+says the sound is off and unlocks on the first tap; so do the shell banner and the KDS (S817, which
+primes on opening). Anything fixed over the whole screen pads by
 `--arrival-alert-h` (`.layout-root`, the KDS header, the order screen's top bar, the PIN screen,
 `Modal`'s overlay).
 
 **The KDS's own standing alert fires on ANY ticket in New, and clears on Start** (owner decision), or
 on Seen for a CHANGE card (S809 3a, owner 2026-10-09: an allergy change rings until it is read), or
 on Clear for a ticket whose every dish was taken off (S809 3d; it rings but never hardens: not late food).
+A voided order's tickets ring once and never hold it (S817, `voidedTickets.js`).
 It hardens on `WARN_MS` and again on `LATE_MS` — **the same two thresholds the card strip and the
 ▲/△ marks already use** — so the banner cannot disagree with the board underneath it, and its
 elapsed figure rounds the way the card's own label rounds for the same reason. A new alert on this

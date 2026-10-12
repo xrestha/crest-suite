@@ -73,6 +73,48 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
 </body></html>`
 }
 
+// A VOID slip for a station (S817 4i, FLOOR-KITCHEN-4): printed by the void for each station whose
+// ticket for this order was still being made, so the paper rail gets the stop the Kitchen Display
+// shows. `items` are the cancelled tickets' own lines, exactly as sent, so the cook can match them to
+// the KOT on the rail. Same 80mm shape and header as buildKotBotHtml, with the VOID line where a
+// reprint says REPRINT.
+export function buildVoidSlipHtml({ station, items, ticketNo, outletName, tableName, voidedBy, voidedAt }) {
+  const stamp        = voidedAt ? new Date(voidedAt) : new Date()
+  const bs           = nepalBs(stamp)
+  const date         = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
+  const stationLabel = station === 'BOT' ? 'BAR' : 'KITCHEN'
+
+  return `<!DOCTYPE html>
+<html><head><title>VOID ${station}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
+  .c   { text-align:center; }
+  .b   { font-weight:bold; }
+  .lg  { font-size:20px; letter-spacing:2px; }
+  hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
+  .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
+  .opt { font-size:13px; color:#000; padding:0 0 1px 10px; }
+  s    { text-decoration:line-through; }
+</style>
+</head><body>
+  ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
+  <div class="c b lg">*** VOID — ${stationLabel} ***</div>
+  <div class="c b" style="font-size:15px;margin-top:3px">STOP — DO NOT MAKE</div>
+  <hr>
+  <div class="row"><span class="b" style="font-size:15px">${esc(tableName || 'Takeaway')}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
+  <div class="row"><span>${voidedBy ? `Voided by: ${esc(voidedBy)}` : ''}</span><span></span></div>
+  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${nepalTime(stamp)}</span></div>
+  <hr>
+  ${(items || []).map(i => (i.change
+      ? `<div class="row"><span class="b"><s>${esc(i.name)}</s></span><span class="qty">CHANGE</span></div>`
+      : `<div class="row"><span class="b"><s>${esc(i.name)}</s></span><span class="qty">×${esc(String(i.qty ?? ''))}</span></div>${kotOptionLines(i.options)}`)).join('')}
+  <hr>
+  <div class="c" style="font-size:11px">This order was voided. Nothing above is wanted.</div>
+</body></html>`
+}
+
 // One bill line per dish at its combined price, with the choices listed underneath (owner decision,
 // S758): a paid choice with what it added, a free one by name. The Rate column is still unit_price,
 // so nothing in the bill's arithmetic changes. Exported for the credit note's copy of the lines.

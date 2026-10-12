@@ -297,7 +297,8 @@ table's food.
   `guard_pos_guest_order_request` allows only status/order_id/decided_*, a decided status is final,
   `decided_by`/`decided_at` are the server's and the bill must be the request's outlet's. The till
   answers with `.eq('status','pending').select('id')` and never puts a saved-but-unmarked request back
-  on the banner. Guest stage reads leave CHANGE and cancelled tickets out.
+  on the banner. Guest stage reads leave CHANGE and cancelled tickets out. Closing a table's bill turns
+  its waiting ones away (S817, D21).
 
 ### A size scales the picks after it (S760, build-your-own dishes)
 
@@ -661,12 +662,12 @@ sends those columns, and a new screen must not.
 | Menu price, VAT rate, `pos_enabled` (`guard_recipe_menu_price`) | POS manager, IMS manager or Owner |
 | Till setup `settings` columns (discount reasons, note presets, ticket routing, delivery partners, reservation settings, opening hours, loyalty point value) | POS manager |
 | Invoice prefix, VAT number and flag, property address and phone, payment QR | Owner (admin exempt) |
-| `pos_tables` anything but `status` | POS manager. **No delete under an open bill**, for everyone |
+| `pos_tables` but `status` (and `inactive`, S817) | POS manager. **No delete, retire or rename under an open bill**, for everyone; names unique in service |
 | Loyalty schemes and enrolment (deleting an enrolled customer too) | POS manager |
 | Add or take off loyalty points by hand (`adjust_loyalty_points`, S809 3k) | POS manager; reason required, never below 0 |
 | Block / Unblock / Delete a till login (admin-user-ops, S809 3i) | POS manager, as a PIN reset (never a peer manager, own login, or a stronger login). Delete only a login with no rows in `pos_login_recorded_rows` |
 | Parking slips (`pos_parking_slips_guard`, S809 1k) | Issue: Supervisor. Reprint, Mark Exited, the day's auto-close: any POS rank. Number (UNIQUE per outlet), issuer, Time In, the linked bill's number, close time and closer are the server's. Never edited; a closed slip stays closed; auto-close only before today's 6 AM Nepal |
-| Cancel a kitchen ticket | Supervisor, or its order voided, or any POS login once every dish on it was taken off the order (Clear, S809 3d); final |
+| Cancel a kitchen ticket | Supervisor, or its order voided, or any POS login once every dish on it was taken off the order (Clear, S809 3d); final. A void cancels its live ones (S817) |
 
 Three shapes are worth copying:
 
@@ -676,7 +677,8 @@ Three shapes are worth copying:
   Pricing. An UPDATE that re-sends the stored price passes; `vat_rate` NULL and 0.13 count as the
   same price.
 - **Only a `status` change is cheap.** The till flips `pos_tables.status` on every seat and bill,
-  so the guard returns before any identity lookup when `to_jsonb(NEW) - 'status'` equals `OLD`.
+  so the guard returns before any identity lookup when `to_jsonb(NEW) - 'status'` equals `OLD` and
+  neither side is `inactive`.
 - **The invoice columns are resolved at PRINT time** (`settings-row.md`), so a waiter changing the
   payment QR would redirect every guest's payment into their own wallet, and a prefix change
   renumbers bills already issued. Those are the Owner's, not a POS manager's.

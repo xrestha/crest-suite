@@ -8,8 +8,10 @@
 // once and left running — the kitchen board, the floor, the reservations page — the seventh event
 // of a service made **no sound at all**, silently. `getCtx()` below keeps one and reuses it.
 //
-// Browsers block audio before any user gesture on the page; staff reach these screens through a
-// PIN login or a tap, so in practice the gesture has already happened.
+// Browsers block audio until someone touches the page. A screen reached by a tap is fine; one the
+// browser reloaded or restored by itself (a crash, a power cut, a release reload) is not, and plays
+// nothing until a tap. `soundBlocked` / `unlockAudio` / `primeAudio` at the end of this file let a
+// screen say so and let that tap start it (S809 3c, S817 4i FLOOR-KITCHEN-9).
 export function playChime(tones = [880, 660], step = 0.18) {
   try {
     const ctx = getCtx()
@@ -32,11 +34,9 @@ export function playChime(tones = [880, 660], step = 0.18) {
 
 // ── The app-wide guest-order alert (S763) ────────────────────────────────────────────────────
 //
-// `playChime` above builds a NEW AudioContext on every call and never closes it. That is fine for
-// a chime that fires once when something arrives; it is not fine for an alert that REPEATS until
-// someone deals with it — Chrome caps a document at ~6 concurrent AudioContexts, so the seventh
-// repeat throws and the alert goes silent exactly when it has been ignored longest. This one
-// keeps a single module-level context and reuses it.
+// Every sound here shares ONE module-level context. Until S763 each call built a new AudioContext
+// and never closed it, and Chrome caps a document at ~6, so a repeating alert went silent exactly
+// when it had been ignored longest (see the header). `playChime` above goes through it too.
 let sharedCtx = null
 function getCtx() {
   const Ctx = window.AudioContext || window.webkitAudioContext
@@ -99,4 +99,12 @@ export function unlockAudio() {
   if (sharedCtx && sharedCtx.state !== 'running' && sharedCtx.state !== 'closed') {
     sharedCtx.resume().catch(() => {})
   }
+}
+
+// S817 4i (FLOOR-KITCHEN-9): make the context now, before any sound, so `soundBlocked` can answer
+// while the screen is still quiet. The Kitchen Display calls it on opening: a board restored by the
+// browser overnight then says the sound is off before the first ticket lands, not after it rang into
+// nothing. Making a context plays nothing; a held one simply starts 'suspended'.
+export function primeAudio() {
+  try { getCtx() } catch (_) { /* no Web Audio: soundBlocked stays false and nothing is said */ }
 }

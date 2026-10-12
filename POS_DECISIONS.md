@@ -180,6 +180,40 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 4, slice 4i: FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 (P3); plus the S809.4
+  follow-ups "Ticket Routing hides dishless bar categories" (3m) and "a waiting guest QR order when its
+  bill closes" (3g)~~ — **shipped S817, 2026-10-12**, migration `20261012120000` applied live (its
+  rolled-back probe ran inside the apply, as a BLOOM CAFE POS PIN login at manager then Staff rank and as
+  the migration role, and passed; the catalog read back as written; crest-v433). FLOOR-KITCHEN-4: new `pos_kot_log.cancelled_at`, stamped
+  by `guard_pos_kot_log` on any cancel; `pos_orders_void_cancels_tickets` (AFTER UPDATE OF status,
+  INVOKER) cancels a voided bill's tickets still on the board in the void's own transaction, whichever
+  way it was voided, and the till's best-effort cancel write is gone. **D18 (owner, as recommended):** the
+  Kitchen Display keeps a voided order's tickets up, struck through in the column they were in, as
+  "Voided 8:05 PM — stop, do not make", rings once, and drops each on OK (that screen) or ten minutes
+  after that screen first saw it (`voidedTickets.js`); a Served ticket stays Served (the till used to
+  cancel those too). The till prints a VOID slip per station the void stopped (`buildVoidSlipHtml`), read
+  back from the tickets stamped at the void's instant. FLOOR-KITCHEN-7: `pos_tables_guard_open_bill`
+  (BEFORE UPDATE, DEFINER, every login) refuses Inactive under an open bill
+  (`pos_table_inactive_open_bill`); **D19 (owner):** `pos_tables_guard_rank`'s cheap status path no
+  longer covers Inactive, so only a POS manager retires or restores a table; the floor tile of an
+  inactive table opens its open bill or says why it takes no order (`inactiveTableText`), `openTable`
+  refuses a new order on one from any path, the lock restore puts kept lines back onto an inactive
+  table's open bill, the close frees a table only from Occupied, the till's seat writes never overwrite
+  Inactive, and POS Setup refuses Inactive or Available under an open bill. FLOOR-KITCHEN-8: unique index
+  `pos_tables_client_name_live_key` on `(client_id, lower(btrim(name)))` over tables not Inactive
+  (GUEST-7's closure keeps retire-and-re-add as the way to a new QR code); **D20 (owner):** a rename under
+  an open bill is refused (`pos_table_rename_open_bill`); POS Setup names a clash before saving
+  (`tableNames.js`), Quick Setup starts one past the prefix's highest number, and its failure line no
+  longer says "quick-service setting". FLOOR-KITCHEN-9: the Kitchen Display makes its sound context on
+  opening (`primeAudio`) and shows an amber "Sound is off on this screen" strip until a tap starts it;
+  the shell's guest-order banner says the same (`guestAlertDetail`'s `soundOff`) and unlocks on a tap.
+  ORDER-FLOW-17: a cart line's timer follows its own line (`ticketForLine`). ORDER-FLOW-19:
+  `record_pos_kot_removals_on_order_delete` groups by the line key and records `selection_key` /
+  `option_summary`. 3m: Ticket Routing lists a bar category with no dish, marked "no dishes on the
+  till". 3g, **D21 (owner):** `pos_orders_close_turns_away_guest_orders` (AFTER UPDATE OF status,
+  INVOKER) turns away a table's waiting guest orders when its bill is billed or voided, and the bill
+  window says so first. `posChime.js`' two stale comments (DOCS seam) corrected.
+
 - [x] ~~S809 stage 4, slice 4h: CUSTOMIZATION-4, -5, -6, -7, -8 (P3); owner addition: the grey "no longer
   offered" note; plus the S809.4 "The menu has been reloaded" wording~~ — **shipped S816, 2026-10-12**,
   migration `20261012110000` applied live after a rolled-back probe as BLOOM CAFE's POS manager and the

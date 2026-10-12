@@ -112,6 +112,22 @@ export const lineKeyOf = i => {
   return `name:${i.name}`
 }
 
+// What the till says when a table taken out of service is asked for a new order (S817 4i,
+// FLOOR-KITCHEN-7, D19). Its bill, while one is still open, opens as usual.
+export const inactiveTableText = name =>
+  `${name} is out of service, so it takes no new order. A POS manager can bring it back in POS Setup.`
+
+// The kitchen ticket a CART LINE's timer follows (S817 4i, ORDER-FLOW-17): the newest ticket (the
+// list is newest first) carrying that same line, by lineKeyOf, so "Momo, extra cheese" sent at 7:25
+// no longer shows plain Momo's 7:10 ticket stage, nor the other way round. A logged ticket line carries
+// recipe_id and selection_key, which is all lineKeyOf reads. The menu tile is a dish, not a line, and
+// keeps matching by recipe (ticketForRecipe in PosOrders.jsx).
+export function ticketForLine(tickets, line) {
+  if (!line?.recipe_id) return null
+  const key = lineKeyOf({ recipe_id: line.recipe_id, selection_key: line.selection_key, option_ids: line.option_ids })
+  return (tickets || []).find(t => (t.items || []).some(i => i.recipe_id && lineKeyOf({ recipe_id: i.recipe_id, selection_key: i.selection_key }) === key)) || null
+}
+
 // The client twin of the server's selection key: sorted option uuids joined with '+', '' for none.
 // Order-independent on purpose — the same options ticked in a different order are the same line.
 export const selectionKeyOf = optionIds =>

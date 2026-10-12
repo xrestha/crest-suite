@@ -14,6 +14,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBsSafe, formatBsDay, formatAd } from '../../../utils/bsCalendar'
 import { turnoverByBand, dineInOnly, PARTY_BANDS } from '../reports/coversMath'
 import { barCategoriesOf, NO_BAR_TEXT } from '../ticketRouting'
+import { tableNameClash, quickSetupNames, quickSetupClashes, nextQuickSetupStart } from './tableNames'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -68,6 +69,9 @@ export default function PosTableManagement() {
 
   // Ticket Routing
   const [categories,      setCategories]      = useState([])
+  // S817 4i: bar categories with no dish on the till (the default Beverage where the drinks are
+  // "Drinks"). Listed so they can be moved to Kitchen; before, a till kept a greyed BOT for them.
+  const [dishlessCats,    setDishlessCats]    = useState(new Set())
   const [botCats,         setBotCats]         = useState(new Set(['Beverage']))
   const [routingLoading,  setRoutingLoading]  = useState(false)
   const [routingSaving,   setRoutingSaving]   = useState(false)
@@ -190,22 +194,37 @@ export default function PosTableManagement() {
     if (n <= 5) return Array.from({ length: n }, (_, i) => `${p} ${s + i}`).join(', ')
     return `${p} ${s}, ${p} ${s + 1}, ${p} ${s + 2} … ${p} ${s + n - 1}`
   }
+  // S817 4i (FLOOR-KITCHEN-8): the names this batch would give a second table in service. Shown under
+  // the preview as the numbers change, and Generate refuses them (so does the database).
+  const qsClashes = qs.prefix.trim() ? quickSetupClashes(quickSetupNames(qs), tables) : []
+  const qsClashText = qsClashes.length === 0 ? ''
+    : `Already on the floor: ${qsClashes.slice(0, 5).join(', ')}${qsClashes.length > 5 ? ` and ${qsClashes.length - 5} more` : ''} — change Start # or the prefix.`
+
+  // Quick Setup opens on the next free number for its prefix (S817 4i): its defaults used to recreate
+  // "Table 1–10" on a floor that already had them. The Start box follows the prefix until it is typed in.
+  function openQuickSetup() {
+    setQs({ ...QS_EMPTY, start: nextQuickSetupStart(QS_EMPTY.prefix, tables) })
+    setQsMsg('')
+    setQsOpen(true)
+  }
 
   async function handleGenerate() {
     const count = parseInt(qs.count, 10) || 0
-    const start = parseInt(qs.start, 10) || 1
     if (!qs.prefix.trim()) { setQsMsg('error:Prefix is required.'); return }
     if (count < 1 || count > 50) { setQsMsg('error:Count must be 1–50.'); return }
+    if (qsClashes.length > 0) { setQsMsg('error:' + qsClashText); return }
     if (!clientId) return
     setQsSaving(true); setQsMsg('')
-    const rows = Array.from({ length: count }, (_, i) => ({
-      name:       `${qs.prefix.trim()} ${start + i}`,
+    const start = parseInt(qs.start, 10) || 1
+    const rows = quickSetupNames(qs).map((name, i) => ({
+      name,
       section:    qs.section.trim() || null,
       capacity:   parseInt(qs.capacity, 10) || 4,
       sort_order: start + i,
     }))
     const { error } = await scopedInsert('pos_tables', rows)
-    if (error) { setQsMsg('error:The quick-service setting was not saved. ' + errorLine(error)); setQsSaving(false); return }
+    // S817 4i: it said "The quick-service setting was not saved" for a failed table insert.
+    if (error) { setQsMsg('error:No tables were created. ' + errorLine(error)); setQsSaving(false); return }
     await load()
     setQsMsg(`ok:Created ${count} table${count !== 1 ? 's' : ''}.`)
     setQsSaving(false)
@@ -229,7 +248,18 @@ export default function PosTableManagement() {
   async function handleSave() {
     if (!form.name.trim()) { setMsg('error:Table name is required.'); return }
     if (!clientId) return
+    // S817 4i (FLOOR-KITCHEN-8): no second table in service with this name (a retired table's name may
+    // be used again), and no rename while the table has an open bill (D20) — the bill and its earlier
+    // kitchen tickets would keep the old name. The database refuses both too.
+    const name = form.name.trim()
+    const clash = (!target || target.status !== 'inactive') ? tableNameClash(name, tables, target?.id) : null
+    if (clash) { setMsg(`error:${clash.name} already has that name on the floor — two tables with one name cannot be told apart on a ticket. Give this one another name.`); return }
     setSaving(true); setMsg('')
+    if (target && name !== target.name) {
+      const { bill, error: billErr } = await openBillOn(target.id)
+      if (billErr) { setMsg('error:The table was not renamed — could not check whether it has an open bill. ' + errorLine(billErr)); setSaving(false); return }
+      if (bill) { setMsg(`error:${target.name} has an open bill (order #${bill.order_no ?? '?'}). Rename it once that bill is closed, so the bill and its kitchen tickets keep one name.`); setSaving(false); return }
+    }
     const payload = {
       name:       form.name.trim(),
       section:    form.section.trim() || null,
@@ -321,15 +351,44 @@ export default function PosTableManagement() {
     setTimeout(() => { w.print(); w.close() }, 300)
   }
 
+  // S817 4i (FLOOR-KITCHEN-7). A table's open bill, read before a status change or a rename the
+  // database refuses under one (pos_tables_guard_open_bill). A check that could not run has not passed.
+  async function openBillOn(tableId) {
+    const { data, error } = await scopedFrom('pos_orders', 'id, order_no').eq('table_id', tableId).eq('status', 'open').limit(1)
+    return { bill: data?.[0] || null, error }
+  }
+
+  // Why a status change must not happen, or null. Inactive under an open bill left the floor refusing
+  // every tap on the table, and Available under one offered it to the next walk-in; a table brought
+  // back into service must not take a name another table in service already has.
+  async function statusRefusal(t, next) {
+    if (next === 'inactive' || next === 'available') {
+      const { bill, error } = await openBillOn(t.id)
+      if (error) return `${t.name} was not changed — could not check whether it has an open bill. ${errorLine(error)}`
+      if (bill) return `${t.name} has an open bill (order #${bill.order_no ?? '?'}), so it stays ${STATUS_LABEL[t.status] || t.status} — bill or void it first.`
+    }
+    if (t.status === 'inactive' && next !== 'inactive') {
+      const clash = tableNameClash(t.name, tables, t.id)
+      if (clash) return `${t.name} was not brought back — another table in service is already called ${clash.name}. Rename one of them first.`
+    }
+    return null
+  }
+
   async function setTableStatus(t, next) {
     if (next === t.status) return
     setFloorMsg('')
+    const refusal = await statusRefusal(t, next)
+    if (refusal) { setFloorMsg('error:' + refusal); return }
     const { error } = await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
     if (error) { setFloorMsg('error:' + t.name + ' was not updated — the floor still shows its previous state. ' + errorLine(error)); return }
     setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: next } : r))
   }
 
   async function handleStatusChange(val) {
+    if (val === target.status) return
+    setMsg('')
+    const refusal = await statusRefusal(target, val)
+    if (refusal) { setMsg('error:' + refusal); return }
     const { error } = await scopedUpdate('pos_tables', { status: val }).eq('id', target.id)
     if (error) { setMsg('error:The table status was not changed — the floor still shows its previous state. ' + errorLine(error)); return }
     setTables(prev => prev.map(r => r.id === target.id ? { ...r, status: val } : r))
@@ -351,11 +410,14 @@ export default function PosTableManagement() {
     // WHOLE on-screen set — so a failed read followed by Save re-routed every real bar category
     // to the kitchen. Stay not-loaded; Save stays disabled; re-opening the tab retries.
     if (rErr || sErr) { setRoutingLoadError(loadFailedError('the ticket routing', rErr || sErr)); setRoutingLoading(false); return }
-    const cats = Array.from(new Set((recipeData || []).map(r => r.category).filter(Boolean))).sort()
-    setCategories(cats)
+    const dishCats = new Set((recipeData || []).map(r => r.category).filter(Boolean))
     // Never set means the Beverage default; an empty list is a saved "no bar" (S809 3m, Q15), and
     // every till reads it the same way now (ticketRouting.js).
-    setBotCats(new Set(barCategoriesOf(settingsData?.pos_bot_categories)))
+    const bar = barCategoriesOf(settingsData?.pos_bot_categories)
+    // S817 4i: a bar category with no dish on the till is listed too, so it can be moved to Kitchen.
+    setCategories(Array.from(new Set([...dishCats, ...bar])).sort())
+    setDishlessCats(new Set(bar.filter(c => !dishCats.has(c))))
+    setBotCats(new Set(bar))
     setRoutingLoading(false)
     setRoutingLoaded(true)
   }
@@ -868,7 +930,14 @@ export default function PosTableManagement() {
                       alignItems: 'center', padding: '12px 18px',
                       borderBottom: i < categories.length - 1 ? '1px solid var(--theme-border-lt, var(--theme-border))' : 'none',
                     }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{cat}</span>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>
+                        {cat}
+                        {dishlessCats.has(cat) && (
+                          <Tip text="No dish on the till is in this category, but the bar list still names it, so the tills keep a Bar (BOT) button for it. Move it to KOT and save if the outlet has no bar dishes under this name.">
+                            <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 400, color: 'var(--theme-text3)' }}>no dishes on the till</span>
+                          </Tip>
+                        )}
+                      </span>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {['KOT', 'BOT'].map(station => {
                           const active = station === 'BOT' ? isBot : !isBot
@@ -1180,7 +1249,7 @@ export default function PosTableManagement() {
               batch against a floor we cannot see is how Table 1–10 got created twice. */}
           {!tablesError && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-              <button className="tab-btn" onClick={() => { setQsOpen(true); setQsMsg('') }}>⚡ Quick Setup</button>
+              <button className="tab-btn" onClick={openQuickSetup}>⚡ Quick Setup</button>
             </div>
           )}
 
@@ -1195,14 +1264,14 @@ export default function PosTableManagement() {
                     Prefix <Tip text="The name prefix — each table will be Prefix + number, e.g. 'Table 1', 'Bar 1'" />
                   </label>
                   <input id="pos-table-management-prefix" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
-                    value={qs.prefix} onChange={e => setQs(q => ({ ...q, prefix: e.target.value }))} placeholder="e.g. Table" />
+                    value={qs.prefix} onChange={e => { const v = e.target.value; setQs(q => ({ ...q, prefix: v, ...(q.startTouched ? {} : { start: nextQuickSetupStart(v, tables) }) })) }} placeholder="e.g. Table" />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-start">
-                    Start # <Tip text="First table number" />
+                    Start # <Tip text="First table number. It starts one past the highest number already used with this prefix, so a new batch never repeats a table on the floor." />
                   </label>
                   <input id="pos-table-management-start" type="number" min="1" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
-                    value={qs.start} onChange={e => setQs(q => ({ ...q, start: e.target.value }))} />
+                    value={qs.start} onChange={e => { const v = e.target.value; setQs(q => ({ ...q, start: v, startTouched: true })) }} />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-count">
@@ -1231,12 +1300,15 @@ export default function PosTableManagement() {
                 </div>
               </div>
 
-              <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 14px', fontStyle: 'italic' }}>
+              <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: qsClashText ? '0 0 6px' : '0 0 14px', fontStyle: 'italic' }}>
                 Will create: <span style={{ color: 'var(--theme-text2)', fontStyle: 'normal' }}>{qsPreview()}</span>
                 {parseInt(qs.count, 10) > 0 && (
                   <span style={{ color: 'var(--theme-accent-ink)', marginLeft: 6 }}>({parseInt(qs.count, 10)} tables)</span>
                 )}
               </p>
+              {qsClashText && (
+                <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', margin: '0 0 14px' }}>{qsClashText}</p>
+              )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <button className="btn btn-primary" onClick={handleGenerate} disabled={qsSaving || !!tablesError}>
@@ -1603,7 +1675,7 @@ export default function PosTableManagement() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="pos-table-management-status">
-                    Status <Tip text="Available = ready to seat. Occupied = active order. Reserved = booking. Inactive = out of service." />
+                    Status <Tip text="Available = ready to seat. Occupied = active order. Reserved = booking. Inactive = out of service: it takes no new order or QR order. A table with an open bill cannot be made Inactive or Available until that bill is closed." />
                   </label>
                   <select id="pos-table-management-status" className="form-select" style={{ width: '100%' }}
                     value={target.status} onChange={e => handleStatusChange(e.target.value)}>
