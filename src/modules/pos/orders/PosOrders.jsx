@@ -13,7 +13,7 @@ import SupportContactLine from '../../../components/SupportContactLine'
 import { contrastRatio } from '../../../utils/avatarColor'
 import QRCode from 'qrcode'
 import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bsCalendar'
-import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap } from '../reservations/reservationStatus'
+import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap, carryOverFrom, stillInPlay } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { posFoodCosts, posStockLines } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
@@ -74,7 +74,7 @@ import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText,
+  storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
   keptLinesToRestore, mergeRecoveredLines,
@@ -1377,17 +1377,21 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Six hours past the BS day's end: a 12:15 AM booking belongs to tomorrow's date but to
     // tonight's service, so it is on the board during the preceding evening.
     const end = new Date(new Date(endOfDay).getTime() + 6 * 3600000).toISOString()
+    // And back into the evening before (S818, RESERVATIONS-8, D24): an 11:30 PM party still waiting
+    // for its table at 12:10 AM stays on the board until its booked window ends. It used to vanish
+    // at midnight, and a tap on its table gave the covers numpad.
     const [{ data, error }, { count, error: countErr }] = await Promise.all([
       scopedFrom('pos_reservations', 'id, customer_name, phone, party_size, reserved_for, duration_minutes, status, arrived_at, pos_reservation_tables(table_id)')
         .in('status', FLOOR_STATUSES)
-        .gte('reserved_for', start).lte('reserved_for', end)
+        .gte('reserved_for', carryOverFrom(start)).lte('reserved_for', end)
         .order('reserved_for'),
       scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
     ])
     // A failed poll keeps last-good — an emptied strip reads as "no bookings tonight".
     if (error) console.error('loadFloorReservations failed, keeping last known:', error)
     else {
-      const rows = (data || []).map(r => ({ ...r, tables: tableIdsOf(r).sort().join(',') }))
+      const dayStartMs = new Date(start).getTime()
+      const rows = (data || []).filter(r => stillInPlay(r, dayStartMs, Date.now())).map(r => ({ ...r, tables: tableIdsOf(r).sort().join(',') }))
       setIfChanged(setFloorReservations, rows, list => rowsSignature(list, ['id', 'status', 'reserved_for', 'party_size', 'customer_name', 'arrived_at', 'tables']))
     }
     if (countErr) console.error('reservation request count failed, keeping last known:', countErr)
@@ -2409,8 +2413,18 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   async function openTable(table, { existingOnly = false } = {}) {
     setFloorMsg('')
+    // S818 RESERVATIONS-10 (D25): a seat handed over from Reservations. Every path below that does not
+    // seat it drops it and says so. Left armed after a refusal, the next free table anyone tapped
+    // silently became that booking; opened onto another party's bill, the host rang on their bill.
+    const handoff = seatReservationRef.current
+    const refuseSeat = why => {
+      seatReservationRef.current = null
+      setFloorMsg(`error:${seatRefusedText(table.name, handoff, why)}`)
+    }
 
     if (tillOffline()) {
+      // The booking's link to its order is written on the server, so a seat needs a connection.
+      if (handoff?.id) { refuseSeat('cannot take a booking while this till is offline'); return }
       // A table this device already touched offline is the source of truth — use the queue.
       const queue = liveQueue(await getPosOrderQueue())
       const queued = queue.find(q => q.table_id === table.id)
@@ -2474,6 +2488,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       .find(q => q.table_id === table.id && (existing ? q.order_id === existing.id : q.created_offline))
     if (held) {
       if (existingOnly) { setFloorMsg(QUEUED_BILL_TEXT); return }
+      if (handoff?.id) { refuseSeat('has an order on this till waiting to upload'); return }
       seatReservationRef.current = null
       showLoadedOrder(table, { ...queuedOnScreen(held), orderNo: existing?.order_no ?? null })
       return
@@ -2481,7 +2496,9 @@ export default function PosOrders({ billingStation = false } = {}) {
 
     if (existing) {
       // A booking handed off onto a table that already has an order must not attach to that
-      // bill — it belongs to whoever is already sitting there.
+      // bill — it belongs to whoever is already sitting there. Nor is that bill opened (S818): the
+      // Seat dialog showed the table free, so the host would ring the booked party onto it.
+      if (handoff?.id) { refuseSeat('already has an open order'); loadFloor({ quiet: true }); return }
       seatReservationRef.current = null
       const items = showLoadedOrder(table, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
       cachePosOrderForTable(table.id, { orderId: existing.id, orderNo: existing.order_no || null, covers: existing.covers || 1, items, itemsVersion: Number.isInteger(existing.items_version) ? existing.items_version : null })
@@ -2495,13 +2512,15 @@ export default function PosOrders({ billingStation = false } = {}) {
       // S817 4i (FLOOR-KITCHEN-7, D19): a table out of service takes no new order, whether it was
       // tapped, opened from a guest-order banner or a booking. Its bill, while one is still open, opens
       // above as it always did; only a POS manager brings the table back.
-      if (table.status === 'inactive') { setFloorMsg(`error:${inactiveTableText(table.name)}`); return }
+      if (table.status === 'inactive') {
+        if (handoff?.id) { refuseSeat('is out of service'); return }
+        setFloorMsg(`error:${inactiveTableText(table.name)}`); return
+      }
       // Lines a till lock kept for this login go straight onto a new order (S776), before a booking
       // prompt can ask about a party that is not the one these items were rung for.
       if (lockedCartRef.current) { startFreshOrder(table); return }
       // An explicit handoff from the Reservations page seats straight away; a table whose
       // booking is due offers the party by name before falling back to the numpad.
-      const handoff = seatReservationRef.current
       if (handoff?.id) { seatReservation(table, handoff); return }
       const due = dueReservationFor(table.id)
       if (due) { setSeatPrompt({ table, reservation: due }); loadMenu(); return }
@@ -5178,7 +5197,8 @@ export default function PosOrders({ billingStation = false } = {}) {
             {occupied > 0 ? ` ${occupied} table${occupied === 1 ? '' : 's'} currently occupied` : ' no tables are occupied right now'}.
             Nothing is billed, so no revenue or stock movement is recorded for what those orders held, and their
             tickets leave the Kitchen Display. Food already sent to the kitchen or bar is recorded under
-            KOT Log → Pulled Items as “Table cleared”.
+            KOT Log → Pulled Items as “Table cleared”. A party seated from a booking goes back to Arrived on the
+            Reservations page, waiting for a table.
           </p>
           <p style={{ margin: 0 }}>This is a testing tool. If a single table is stuck, open it and void the order instead.</p>
         </>
@@ -5199,6 +5219,18 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     const ids = (openOrders || []).map(o => o.id)
     if (ids.length > 0) {
+      // S818 RESERVATIONS-6 (D22): a booking seated on one of these orders goes back to Arrived,
+      // unlinked, BEFORE anything is deleted. The link is ON DELETE SET NULL and a Seated booking must
+      // have an order (pos_reservations_seated_has_order), so the order delete was refused for the
+      // whole floor after every order's lines had already gone. This write is the one that can fail
+      // cleanly: nothing has been deleted yet.
+      const { error: unseatErr } = await scopedUpdate('pos_reservations', { status: 'arrived', order_id: null, seated_at: null })
+        .in('order_id', ids).eq('status', 'seated')
+      if (unseatErr) {
+        window.alert(`Couldn't take the booked parties off these orders. ${errorText(unseatErr, 'staff')}\n\nNothing was cleared — every order and table is as it was.`)
+        setFloorLoad(false)
+        return
+      }
       // The guard above protects the READ; these are the writes it was protecting, and they had
       // the identical hole one layer down — a failed delete followed by a successful table
       // release frees the whole floor with every open order still sitting underneath it.
@@ -5206,9 +5238,15 @@ export default function PosOrders({ billingStation = false } = {}) {
       const { error: delOrdersErr } = delItemsErr ? { error: null }
         : await scopedDelete('pos_orders').in('id', ids)
       if (delItemsErr || delOrdersErr) {
-        window.alert(`Couldn't delete the open orders. ${errorText(delItemsErr || delOrdersErr, 'staff')}
+        // Two statements, not one: when the second fails the first has landed, and the orders
+        // are still open with nothing on them.
+        window.alert(delItemsErr
+          ? `Couldn't delete the open orders. ${errorText(delItemsErr, 'staff')}
 
-The tables were left occupied rather than freed with their orders still open.`)
+Nothing was deleted, and the tables were left occupied rather than freed with their orders still open. Any party seated from a booking is already back to Arrived on the Reservations page.`
+          : `The dishes were taken off every open order, but the orders themselves could not be deleted. ${errorText(delOrdersErr, 'staff')}
+
+Every occupied table now holds an EMPTY open order. Press Clear again, or open each table and void it.`)
         setFloorLoad(false)
         await loadFloor()
         return

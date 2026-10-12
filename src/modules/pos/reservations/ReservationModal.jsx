@@ -242,6 +242,10 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
 
   const usableTables = (tables || []).filter(t => t.status !== 'inactive')
   const sections = Array.from(new Set(usableTables.map(t => t.section || '')))
+  // S818 RESERVATIONS-11: a table this booking holds that has since been taken out of service. It
+  // cannot be picked again, so it used to render nowhere while staying in the set: invisible on the
+  // form and impossible to take off. It shows as a chip whose press takes it off; Save releases it.
+  const heldInactive = (tables || []).filter(t => t.status === 'inactive' && tableIds.has(t.id))
   const idFor = k => `resv-${k}`
 
   return (
@@ -319,6 +323,17 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
         <span className="field-label" id={idFor('tables-label')}>
           Tables <Tip text="Optional. Holding a table shows the booking on that tile on the Orders floor and preselects it at seating. A party can hold several." width={260}>ⓘ</Tip>
         </span>
+        {heldInactive.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--theme-amber-text)' }}>△ Out of service — take off and pick another:</span>
+            {heldInactive.map(t => (
+              <button key={t.id} type="button" className="tab-btn tab-btn--active" onClick={() => toggleTable(t.id)}
+                aria-label={`Take ${t.name} off this booking — it is out of service`}>
+                {t.name} <span style={{ fontSize: 11, fontWeight: 400 }}>· out of service ✕</span>
+              </button>
+            ))}
+          </div>
+        )}
         {usableTables.length === 0 ? (
           <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No tables set up yet.</span>
         ) : (

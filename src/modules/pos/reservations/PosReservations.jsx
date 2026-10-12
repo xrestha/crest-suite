@@ -22,8 +22,8 @@ import { nepalTime, nepalCivilDate, nepalBs, nepalDateLong } from '../../../shar
 import { RESERVATION_STATUS_BADGE, IDENTITY_BADGE } from '../posSignals'
 import { playChime } from '../posChime'
 import {
-  STATUS_LABEL, LIVE_STATUSES, canTransition, canRevive, stampFor, isLate, waitingMinutes, tableIdsOf,
-  RESERVATION_SELECT, SOURCE_LABEL, CANCEL_REASONS, DECLINE_REASONS,
+  STATUS_LABEL, LIVE_STATUSES, canTransition, canRevive, canMarkNoShow, stampFor, isLate, waitingMinutes, tableIdsOf,
+  RESERVATION_SELECT, SOURCE_LABEL, CANCEL_REASONS, DECLINE_REASONS, carryOverFrom, stillInPlay,
 } from './reservationStatus'
 import { describeHoldRefusal } from './reservationConflicts'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from './reservationSettings'
@@ -58,6 +58,8 @@ const rowDayIso = r => { const d = nepalCivilDate(r.reserved_for); return d ? fo
 // One shape for every phone in the column — the book stores what was typed ("9841-234567",
 // "+977 98…"), and three shapes for one thing read as three things.
 const displayPhone = p => normalizePhone(p) || p || ''
+// A booking's time, with its day when that is not today: "7:30 PM", or "20 Bhadra 2083, 7:30 PM".
+const whenOf = r => (rowDayIso(r) === todayIso() ? nepalTime(r.reserved_for) : `${bsLabelOf(nepalBs(r.reserved_for))}, ${nepalTime(r.reserved_for)}`)
 
 // The signature the two polls compare against. Every field the row DRAWS is here (frontend-
 // performance.md: one omitted field is a stale render that never repaints). Table assignment is
@@ -143,7 +145,10 @@ export default function PosReservations() {
     let listQuery = scopedFrom('pos_reservations', RESERVATION_SELECT).neq('status', 'requested')
     if (filter === 'activity')  listQuery = listQuery.order('updated_at', { ascending: false }).order('id').limit(ACTIVITY_LIMIT)
     else if (filter === 'day')  listQuery = listQuery.gte('reserved_for', from.start).lte('reserved_for', from.end).order('reserved_for').order('id')
-    else                        listQuery = listQuery.gte('reserved_for', from.start).order('reserved_for').order('id')
+    // S818 RESERVATIONS-8: Upcoming and Unconfirmed also read the evening before today, and keep a
+    // booking from it only while it is still in play (stillInPlay, below). At midnight an 11:30 PM
+    // party waiting for its table used to drop off both. Day stays one strict day.
+    else                        listQuery = listQuery.gte('reserved_for', carryOverFrom(from.start)).order('reserved_for').order('id')
     const results = await Promise.all([
       listQuery,
       scopedFrom('pos_reservations', RESERVATION_SELECT).eq('status', 'requested').order('reserved_for').order('id'),
@@ -168,9 +173,13 @@ export default function PosReservations() {
       setLoadError(failed); setLoading(false); return
     }
     const [{ data: dayRows }, { data: reqRows }, { data: tbls }, { data: open }, { data: s }, { count: changed }, { data: names }] = results
+    const dayStartMs = new Date(from.start).getTime()
+    const listRows = filter === 'upcoming' || filter === 'unconfirmed'
+      ? (dayRows || []).filter(r => stillInPlay(r, dayStartMs, Date.now()))
+      : dayRows || []
     // setIfChanged throughout: this runs on a 30 s timer for as long as the book is open, and the
     // usual answer is "nothing moved" — a bare setter would re-render the whole table each tick.
-    setIfChanged(setRows, dayRows || [], rowsSig)
+    setIfChanged(setRows, listRows, rowsSig)
     commitRequests(reqRows || [])
     setIfChanged(setTables, tbls || [], l => rowsSignature(l, ['id', 'name', 'section', 'capacity', 'status']))
     setIfChanged(setOpenTableIds, new Set((open || []).map(o => o.table_id).filter(Boolean)), idsSig)
@@ -233,7 +242,7 @@ export default function PosReservations() {
   const visibleRows = useMemo(() => (filter === 'unconfirmed' ? rows.filter(r => r.status === 'booked') : rows), [rows, filter])
   // Upcoming and Unconfirmed read under day headers; Day is one day and needs none.
   const dayGroups = useMemo(() => (filter === 'upcoming' || filter === 'unconfirmed' ? groupByDay(visibleRows, rowDayIso) : null), [visibleRows, filter])
-  const tableName = useMemo(() => Object.fromEntries(tables.map(t => [t.id, t.name])), [tables])
+  const tableById = useMemo(() => Object.fromEntries(tables.map(t => [t.id, t])), [tables])
   const totalSeats = useMemo(() => tables.filter(t => t.status !== 'inactive').reduce((s, t) => s + (Number(t.capacity) || 0), 0), [tables])
 
   const stats = useMemo(() => ({
@@ -402,10 +411,12 @@ export default function PosReservations() {
           r.status !== 'arrived' && canTransition(r.status, 'seated') && { key: 'seat', label: 'Seat…', onSelect: () => setSeatTarget(r) },
           canTransition(r.status, 'completed') && { key: 'done', label: 'Mark done…', onSelect: () => setDoneTarget(r) },
           '-',
-          canTransition(r.status, 'no_show') && { key: 'noshow', label: 'No-show…', danger: true, onSelect: () => setNoShowTarget(r) },
+          // S818 (D23): from the booked time only. Before it a party is not late, and a guest who
+          // calls to say they will not come is a Cancel.
+          canTransition(r.status, 'no_show') && { key: 'noshow', label: 'No-show…', danger: true, disabled: !canMarkNoShow(r, now), hint: `From ${whenOf(r)}`, onSelect: () => setNoShowTarget(r) },
           canTransition(r.status, 'cancelled') && { key: 'cancel', label: 'Cancel booking…', danger: true, onSelect: () => { setCancelTarget(r); setCancelReason('') } },
-          r.status === 'no_show' && { key: 'revive', label: 'They turned up…', disabled: !revivable, hint: 'Only on the booking\'s own day', onSelect: () => setReviveTarget(r) },
-          r.status === 'cancelled' && { key: 'revive', label: 'Reinstate booking…', disabled: !revivable, hint: 'Only on the booking\'s own day', onSelect: () => setReviveTarget(r) },
+          r.status === 'no_show' && { key: 'revive', label: 'They turned up…', disabled: !revivable, hint: 'Only until the end of the booking\'s day', onSelect: () => setReviveTarget(r) },
+          r.status === 'cancelled' && { key: 'revive', label: 'Reinstate booking…', disabled: !revivable, hint: 'Only until the end of the booking\'s day', onSelect: () => setReviveTarget(r) },
         ]} />
     )
     return [contact, step, menu]
@@ -415,9 +426,20 @@ export default function PosReservations() {
     <span className={`badge ${RESERVATION_STATUS_BADGE[r.status] || 'badge-gray'}`}>{STATUS_LABEL[r.status] || r.status}</span>
   )
 
+  // S818 RESERVATIONS-11: a held table taken out of service is named as such. On a booking still to
+  // come it needs a new table, so it is marked to act on; a party cannot be seated at it.
   const tablesOf = r => {
-    const names = tableIdsOf(r).map(id => tableName[id]).filter(Boolean)
-    return names.length ? names.join(', ') : <span style={{ color: 'var(--theme-text3)' }}>—</span>
+    const held = tableIdsOf(r).map(id => tableById[id]).filter(Boolean)
+    if (held.length === 0) return <span style={{ color: 'var(--theme-text3)' }}>—</span>
+    const live = LIVE_STATUSES.includes(r.status)
+    return held.map((t, i) => (
+      <Fragment key={t.id}>
+        {i > 0 && ', '}{t.name}
+        {t.status === 'inactive' && (live
+          ? <> <Tip text="This table is out of service, so the party cannot be seated at it. Tap the guest's name and give them another table." width={240}><span className="badge badge-amber">△ out of service</span></Tip></>
+          : <span style={{ color: 'var(--theme-text3)' }}> (out of service)</span>)}
+      </Fragment>
+    ))
   }
 
   const notePreview = notes => {
@@ -477,9 +499,14 @@ export default function PosReservations() {
               <tbody>
                 {requests.map(r => {
                   const bs = nepalBs(r.reserved_for)
+                  // S818 RESERVATIONS-9: a request whose time has gone can only be declined now.
+                  const passed = new Date(r.reserved_for).getTime() < now
                   return (
                     <tr key={r.id}>
-                      <td style={{ whiteSpace: 'nowrap' }}>{bsLabelOf(bs)} · {nepalTime(r.reserved_for)}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {bsLabelOf(bs)} · {nepalTime(r.reserved_for)}
+                        {passed && <> <Tip text="The time asked for has passed. Decline it (Not answered in time) so the guest's phone stops saying it will be confirmed." width={260}><span className="badge badge-amber">△ time passed</span></Tip></>}
+                      </td>
                       <td>
                         <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.customer_name}</span>
                         <span className="cell-sub">{displayPhone(r.phone)}</span>
@@ -656,7 +683,7 @@ export default function PosReservations() {
                     <th>Guest</th>
                     <th style={{ textAlign: 'right' }}>Party</th>
                     <th>Tables <Tip text="Tables held for this party. Empty means the host will pick one at seating." width={220}>ⓘ</Tip></th>
-                    <th>Status <Tip text="Booked → Confirmed → Arrived → Seated → Completed. No-show and Cancelled end it, and can be undone from the ⋯ menu on the booking's own day. Seated means the order is open; Completed means the bill closed." width={280}>ⓘ</Tip></th>
+                    <th>Status <Tip text="Booked → Confirmed → Arrived → Seated → Completed. No-show (from the booked time) and Cancelled end it, and can be undone from the ⋯ menu until the end of the booking's day. Seated means the order is open; Completed means the bill closed." width={280}>ⓘ</Tip></th>
                     <th>Booked by</th>
                     <th><span className="visually-hidden">Actions</span></th>
                   </tr>

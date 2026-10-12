@@ -1,4 +1,4 @@
-import { LIVE_STATUSES, windowOf, tableIdsOf } from './reservationStatus'
+import { LIVE_STATUSES, windowOf, tableIdsOf, MAX_DURATION_MINUTES } from './reservationStatus'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
@@ -45,12 +45,11 @@ export function findTableConflicts(candidate, tableIds, bookings) {
 }
 
 /**
- * The widest window a stored booking can have — the duration field's own ceiling (720 min, the
- * validation in ReservationModal and normalizeReservationSettings). A fresh read for conflicts
- * must reach back this far before the candidate's start, or a long booking that began earlier and
- * is still running would be missed.
+ * A fresh read for conflicts must reach back the widest window a stored booking can have before the
+ * candidate's start, or a long booking that began earlier and is still running would be missed.
+ * Defined in reservationStatus.js since S818 (the floor's midnight carry-over reads it too).
  */
-export const MAX_DURATION_MINUTES = 720
+export { MAX_DURATION_MINUTES }
 
 /**
  * The database half of the rule (S755, migration 20260917100000): guard_pos_reservation_table_hold
@@ -79,4 +78,20 @@ export function describeHoldRefusal(err) {
     text: `${d.table_name || 'A selected table'} is already held for ${who} at ${nepalTime(d.reserved_for)}${day} — booked on another device a moment ago. Pick another table or change the time.`,
     detail,
   }
+}
+
+/**
+ * The bookings still to come that hold one table, worded for a confirm (S818, RESERVATIONS-11):
+ * "Gurung ×8 on 20 Bhadra at 7:00 PM", earliest first. `rows` are bookings read through the table's
+ * link; anything not live, or whose booked window has ended, is left out. Deleting a table drops its
+ * links (ON DELETE CASCADE), so this list, shown before the delete, is the only place they are named.
+ */
+export function holdingBookingLabels(rows, nowMs = Date.now()) {
+  return (rows || [])
+    .filter(b => LIVE_STATUSES.includes(b.status) && windowOf(b).end > nowMs)
+    .sort((a, b) => new Date(a.reserved_for) - new Date(b.reserved_for))
+    .map(b => {
+      const bs = nepalBs(b.reserved_for)
+      return `${b.customer_name} ×${b.party_size}${bs ? ` on ${bs.day} ${BS_MONTHS[bs.month - 1]}` : ''} at ${nepalTime(b.reserved_for)}`
+    })
 }

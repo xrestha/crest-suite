@@ -9,6 +9,9 @@ import { tableIdsOf } from './reservationStatus'
 export default function SeatTableModal({ reservation, tables, openTableIds, onClose, onPick }) {
   const held = new Set(tableIdsOf(reservation))
   const usable = (tables || []).filter(t => t.status !== 'inactive')
+  // S818 RESERVATIONS-11: a held table taken out of service cannot be picked, so it is named here
+  // rather than simply missing from the grid.
+  const heldInactive = (tables || []).filter(t => t.status === 'inactive' && held.has(t.id))
   const sorted = [...usable].sort((a, b) => (held.has(b.id) ? 1 : 0) - (held.has(a.id) ? 1 : 0))
   const sections = Array.from(new Set(sorted.map(t => t.section || '')))
 
@@ -20,6 +23,11 @@ export default function SeatTableModal({ reservation, tables, openTableIds, onCl
         Tap the table they are sitting at. The order opens with {reservation.party_size} cover{reservation.party_size === 1 ? '' : 's'} filled in
         and this booking is marked Seated. A table with a running order cannot be picked — it belongs to another party.
       </p>
+      {heldInactive.length > 0 && (
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
+          △ {heldInactive.map(t => t.name).join(', ')} {heldInactive.length === 1 ? 'was held for them but is' : 'were held for them but are'} out of service — pick another table.
+        </p>
+      )}
       {usable.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No tables set up yet.</p>
       ) : sections.map(sec => (

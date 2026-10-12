@@ -37,9 +37,10 @@ export const STATUS_LABEL = {
 // Two REVERSALS exist since S681, and only two. A no-show is recorded against a phone number and
 // shown on every future booking form from it; a guest marked at 8:20 who walks in at 8:25 needs a
 // way back, and "create a second booking and leave the mark" is not one. Likewise a booking
-// cancelled by mistake. Both are gated to the booking's own Nepal day by `canRevive()` on the page
-// (this table is about what is ever legal, not when). Completed stays terminal: it means the visit
-// happened, and the bill that closed it is its own record.
+// cancelled by mistake. Both are allowed until the end of the booking's Nepal day by `canRevive()`
+// on the page, the days before it included (S818, Q23 a); this table is about what is ever legal,
+// not when. Completed stays terminal: it means the visit happened, and the bill that closed it is
+// its own record.
 export const TRANSITIONS = {
   requested: ['confirmed', 'cancelled'],
   booked:    ['confirmed', 'arrived', 'seated', 'completed', 'no_show', 'cancelled'],
@@ -83,15 +84,58 @@ export function stampFor(status, nowIso = new Date().toISOString(), from = null)
 }
 
 /**
- * May this terminal booking be revived right now? Only on its own Nepal civil day: a no-show
- * undone a week later is a record being edited, not a guest turning up. False for anything that
- * is not no_show or cancelled.
+ * May this terminal booking be revived right now? Until the end of its Nepal civil day: a no-show
+ * undone a week later is a record being edited, not a guest turning up. Before the day it always
+ * may (S818, RESERVATIONS-7, Q23 a): a booking cancelled by mistake on Monday for Saturday used to
+ * wait for Saturday, its tables free for anyone in between, although the cancel dialog promised
+ * "until the end of its day". False for anything that is not no_show or cancelled.
  */
 export function canRevive(res, nowMs = Date.now()) {
   if (!REVERSAL_CLEARS[res?.status]) return false
   const a = nepalCivilDate(res.reserved_for)
   const b = nepalCivilDate(new Date(nowMs))
-  return !!(a && b) && formatAd(a) === formatAd(b)
+  // 'YYYY-MM-DD' strings order as the days do.
+  return !!(a && b) && formatAd(b) <= formatAd(a)
+}
+
+/**
+ * May this booking be marked a no-show right now? Only from its booked time (S818, D23): before it
+ * the party is not late yet, and a guest who calls ahead to say they will not come is a Cancel. A
+ * no-show pressed on next Saturday's booking showed on the guest's next booking form at once.
+ */
+export function canMarkNoShow(res, nowMs = Date.now()) {
+  if (!canTransition(res?.status, 'no_show')) return false
+  const at = new Date(res.reserved_for).getTime()
+  return Number.isFinite(at) && nowMs >= at
+}
+
+/**
+ * The widest window a stored booking can have: the duration field's ceiling (720 min, the
+ * validation in ReservationModal and normalizeReservationSettings, and the table's CHECK). A read
+ * that must see a booking still running must reach back this far before its own start.
+ */
+export const MAX_DURATION_MINUTES = 720
+
+/**
+ * The instant a "today" read starts from once it also carries the evening before (S818,
+ * RESERVATIONS-8): today's start less the longest booking, so an 11:30 PM party still being seated
+ * at 12:10 AM is read. `stillInPlay` then keeps only the ones not over yet.
+ */
+export function carryOverFrom(dayStartIso) {
+  const t = new Date(dayStartIso).getTime()
+  return Number.isFinite(t) ? new Date(t - MAX_DURATION_MINUTES * 60000).toISOString() : dayStartIso
+}
+
+/**
+ * Does this booking belong on today's floor, tile or Upcoming list? Anything booked from today's
+ * start does; one booked before it only while it is still live and its booked window has not
+ * ended (D24). At midnight a late-evening booking still in play used to vanish from all three.
+ */
+export function stillInPlay(res, dayStartMs, nowMs = Date.now()) {
+  const start = new Date(res.reserved_for).getTime()
+  if (!Number.isFinite(start)) return false
+  if (start >= dayStartMs) return true
+  return LIVE_STATUSES.includes(res.status) && windowOf(res).end > nowMs
 }
 
 export const SOURCES = [
@@ -117,10 +161,16 @@ export const CANCEL_REASONS = [
 // A REQUEST is declined, not cancelled, and the reason is shown on the guest's phone — so it has
 // to be true from where they stand. "Guest cancelled" shown to a guest who asked and was refused
 // is not. Stored in the same cancel_reason column; the page picks the list by status.
+// S818 (RESERVATIONS-9): the reason submit_reservation_request writes when it clears a phone's own
+// request whose time passed unanswered. The same words are a decline reason staff can pick, and the
+// guest's page shows them; `reservationStatus.test.js` holds the migration to this string.
+export const EXPIRED_REQUEST_REASON = 'Not answered in time'
+
 export const DECLINE_REASONS = [
   'No table at that time',
   'Closed that day',
   'Party too large for us',
+  EXPIRED_REQUEST_REASON,
   'Other',
 ]
 

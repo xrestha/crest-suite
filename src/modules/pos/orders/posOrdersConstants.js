@@ -117,6 +117,12 @@ export const lineKeyOf = i => {
 export const inactiveTableText = name =>
   `${name} is out of service, so it takes no new order. A POS manager can bring it back in POS Setup.`
 
+// What the floor says when a booking handed over from Reservations' Seat cannot be seated at the table
+// picked (S818, RESERVATIONS-10, D25). The hand-off is dropped rather than kept for the next table
+// tapped, which would make a walk-in the booking, so the sentence names the party and the way back.
+export const seatRefusedText = (tableName, res, why) =>
+  `${tableName} ${why}, so ${res?.customer_name || 'the booking'}${res?.party_size ? ` ×${res.party_size}` : ''} was not seated. Seat them again from Reservations.`
+
 // The kitchen ticket a CART LINE's timer follows (S817 4i, ORDER-FLOW-17): the newest ticket (the
 // list is newest first) carrying that same line, by lineKeyOf, so "Momo, extra cheese" sent at 7:25
 // no longer shows plain Momo's 7:10 ticket stage, nor the other way round. A logged ticket line carries

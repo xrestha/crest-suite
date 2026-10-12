@@ -311,8 +311,13 @@ export default function GuestBooking() {
   // A submitted request shows its status card even if the outlet has since switched the page off.
   if (request) {
     const s = status?.status
+    // S818 RESERVATIONS-9: a request still unanswered once its time has passed is not "will confirm
+    // shortly". The poll re-renders this every few seconds, so the clock read here stays current.
+    const forIso = status?.reserved_for || request.reservedFor
+    const passed = forIso && new Date(forIso).getTime() < Date.now()
     const stage = s === 'confirmed' || s === 'arrived' || s === 'seated' || s === 'completed' ? 'confirmed'
-      : s === 'cancelled' || s === 'no_show' ? 'declined' : 'requested'
+      : s === 'cancelled' || s === 'no_show' ? 'declined'
+      : passed ? 'expired' : 'requested'
     const outlet = (page?.menu_name && page.menu_name.trim()) || tidyName(status?.outlet_name || page?.outlet_name || '')
     return (
       <div className="guest-booking"><div className="gb-wrap">
@@ -321,10 +326,16 @@ export default function GuestBooking() {
           <h1 className="gb-outlet">{outlet}</h1>
           <p className="gb-tagline">Table booking</p>
         </header>
-        <div className={`gb-card gb-status gb-status--${stage}`} role="status" aria-live="polite">
+        <div className={`gb-card gb-status gb-status--${stage === 'expired' ? 'declined' : stage}`} role="status" aria-live="polite">
           {stage === 'requested' && (<>
             <p className="gb-status-stage">Request sent</p>
             <p className="gb-status-detail">{outlet || 'They'} will confirm shortly. Keep this page open, or come back to it — it updates by itself.</p>
+          </>)}
+          {stage === 'expired' && (<>
+            <p className="gb-status-stage">Not answered in time</p>
+            <p className="gb-status-detail">
+              {outlet || 'They'} did not confirm this request before the time you asked for. Please call or message {outlet || 'them'}, or tap Make another booking below.
+            </p>
           </>)}
           {stage === 'confirmed' && (<>
             <p className="gb-status-stage">Confirmed ✓</p>

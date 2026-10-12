@@ -1,8 +1,11 @@
+import fs from 'fs'
+import path from 'path'
 import {
   STATUSES, LIVE_STATUSES, FLOOR_STATUSES, TRANSITIONS, canTransition, stampFor, canRevive,
   isDue, isLate, waitingMinutes, windowOf, tableIdsOf, CANCEL_REASONS, DECLINE_REASONS,
-  bookingToSeatOnTap,
+  bookingToSeatOnTap, canMarkNoShow, stillInPlay, carryOverFrom, MAX_DURATION_MINUTES, EXPIRED_REQUEST_REASON,
 } from './reservationStatus'
+import { MAX_DURATION_MINUTES as CONFLICTS_MAX } from './reservationConflicts'
 
 test('every status has a transition entry; completed is terminal, no-show and cancelled reverse one step', () => {
   for (const s of STATUSES) expect(Array.isArray(TRANSITIONS[s])).toBe(true)
@@ -52,12 +55,15 @@ test('stampFor clears the mark a reversal leaves, and only for the two reversals
   expect(stampFor('seated', now)).toEqual({ status: 'seated', seated_at: now })
 })
 
-test('canRevive is true only for a terminal row on its own Nepal civil day', () => {
+test('canRevive is true for a terminal row until the end of its Nepal civil day', () => {
   // 13:45Z is 19:30 in Kathmandu on 4 Sep; 18:30Z is 00:15 on 5 Sep.
   const r = { status: 'no_show', reserved_for: '2026-09-04T13:45:00.000Z' }
   expect(canRevive(r, new Date('2026-09-04T17:00:00.000Z').getTime())).toBe(true)   // 22:45 same day
+  expect(canRevive(r, new Date('2026-09-04T18:14:00.000Z').getTime())).toBe(true)   // 23:59 same day
   expect(canRevive(r, new Date('2026-09-04T18:30:00.000Z').getTime())).toBe(false)  // past Nepal midnight
-  expect(canRevive(r, new Date('2026-09-03T10:00:00.000Z').getTime())).toBe(false)  // the day before
+  // S818 RESERVATIONS-7 (Q23 a): before the day it may, as the cancel dialog promises.
+  expect(canRevive(r, new Date('2026-09-03T10:00:00.000Z').getTime())).toBe(true)   // the day before
+  expect(canRevive({ ...r, status: 'cancelled' }, new Date('2026-08-31T04:00:00.000Z').getTime())).toBe(true) // the Monday before
   expect(canRevive({ ...r, status: 'cancelled' }, new Date('2026-09-04T17:00:00.000Z').getTime())).toBe(true)
   expect(canRevive({ ...r, status: 'completed' }, new Date('2026-09-04T17:00:00.000Z').getTime())).toBe(false)
   expect(canRevive({ ...r, status: 'confirmed' }, new Date('2026-09-04T17:00:00.000Z').getTime())).toBe(false)
@@ -132,4 +138,48 @@ test('bookingToSeatOnTap offers an arrived party whatever the clock says, after 
   expect(bookingToSeatOnTap([sharma], 't6', T('2026-09-04T14:55:00.000Z'), 45)).toBeNull()
   expect(bookingToSeatOnTap([{ ...sharma, status: 'confirmed' }], 't5', T('2026-09-04T14:55:00.000Z'), 45)).toBeNull()
   expect(bookingToSeatOnTap(undefined, 't5')).toBeNull()
+})
+
+// S818 RESERVATIONS-7 (D23): a no-show is offered from the booked time, never before it.
+test('canMarkNoShow opens at the booked time, for a row that may become a no-show', () => {
+  const r = { status: 'confirmed', reserved_for: '2026-09-04T13:45:00.000Z' } // 7:30 PM
+  expect(canMarkNoShow(r, T('2026-09-04T13:44:00.000Z'))).toBe(false) // 7:29 PM
+  expect(canMarkNoShow(r, T('2026-09-04T13:45:00.000Z'))).toBe(true)  // 7:30 PM
+  expect(canMarkNoShow(r, T('2026-09-01T13:45:00.000Z'))).toBe(false) // three days early
+  expect(canMarkNoShow({ ...r, status: 'arrived' }, T('2026-09-04T14:00:00.000Z'))).toBe(true)
+  expect(canMarkNoShow({ ...r, status: 'seated' }, T('2026-09-04T14:00:00.000Z'))).toBe(false)
+  expect(canMarkNoShow({ ...r, status: 'requested' }, T('2026-09-04T14:00:00.000Z'))).toBe(false)
+  expect(canMarkNoShow({ ...r, reserved_for: 'nonsense' }, T('2026-09-04T14:00:00.000Z'))).toBe(false)
+})
+
+// S818 RESERVATIONS-8 (D24): Thapa ×4 at 11:30 PM (17:45 UTC) on 4 Sep, 90 minutes, arrive at 11:25 PM
+// and wait for Table 2. Nepal midnight is 18:15 UTC.
+test('stillInPlay carries a booking from before midnight only while its window is open', () => {
+  const dayStart = T('2026-09-04T18:15:00.000Z')
+  const thapa = res({ id: 'thapa', status: 'arrived', reserved_for: '2026-09-04T17:45:00.000Z', duration_minutes: 90 })
+  expect(stillInPlay(thapa, dayStart, T('2026-09-04T18:25:00.000Z'))).toBe(true)   // 12:10 AM
+  expect(stillInPlay(thapa, dayStart, T('2026-09-04T19:15:00.000Z'))).toBe(false)  // 1:00 AM, the window ended
+  expect(stillInPlay({ ...thapa, status: 'seated' }, dayStart, T('2026-09-04T18:25:00.000Z'))).toBe(true)
+  expect(stillInPlay({ ...thapa, status: 'completed' }, dayStart, T('2026-09-04T18:25:00.000Z'))).toBe(false)
+  expect(stillInPlay({ ...thapa, status: 'cancelled' }, dayStart, T('2026-09-04T18:25:00.000Z'))).toBe(false)
+  // Anything from today's start is today's, whatever its status or the clock.
+  const tonight = res({ id: 'later', status: 'cancelled', reserved_for: '2026-09-05T13:15:00.000Z' })
+  expect(stillInPlay(tonight, dayStart, T('2026-09-05T17:00:00.000Z'))).toBe(true)
+  expect(stillInPlay({ ...thapa, reserved_for: 'nonsense' }, dayStart, T('2026-09-04T18:25:00.000Z'))).toBe(false)
+})
+
+test('carryOverFrom reaches back the longest booking, and one constant serves both files', () => {
+  expect(MAX_DURATION_MINUTES).toBe(720)
+  expect(CONFLICTS_MAX).toBe(MAX_DURATION_MINUTES)
+  expect(carryOverFrom('2026-09-05T00:00:00.000+05:45')).toBe('2026-09-04T06:15:00.000Z')
+  expect(carryOverFrom('not a date')).toBe('not a date')
+})
+
+// S818 RESERVATIONS-9: submit_reservation_request writes this reason when it answers a phone's own
+// passed request; staff pick the same words, and the guest's page shows them. One string, two homes.
+test('the expired-request reason is a decline reason and the one the migration writes', () => {
+  expect(EXPIRED_REQUEST_REASON).toBe('Not answered in time')
+  expect(DECLINE_REASONS).toContain(EXPIRED_REQUEST_REASON)
+  const sql = fs.readFileSync(path.join(__dirname, '../../../../supabase/migrations/20261012130000_pos_reservations_s818.sql'), 'utf8')
+  expect(sql).toContain(`cancel_reason = '${EXPIRED_REQUEST_REASON}'`)
 })

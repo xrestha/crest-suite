@@ -38,6 +38,7 @@ import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd } from '../../utils/bsCalendar'
 import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalTime'
+import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reservationStatus'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
@@ -1052,21 +1053,23 @@ export default function ClientDashboard({ scope = 'home' }) {
     const avgCheck      = summary.avgBill ?? 0
 
     // Tonight's bookings (S677): the same window the Orders floor uses — today's BS day plus six
-    // hours past midnight, so a 12:15 AM booking belongs to tonight's service. "Still to come" is
-    // the covers not yet seated; a seated party is already inside Tables Occupied. Requests are
-    // public-page bookings waiting for a staff Accept, whatever day they are for.
+    // hours past midnight, so a 12:15 AM booking belongs to tonight's service, and since S818
+    // (RESERVATIONS-8) a booking from the evening before while its booked window is still open. "Still
+    // to come" is the covers not yet seated; a seated party is already inside Tables Occupied.
+    // Requests are public-page bookings waiting for a staff Accept, whatever day they are for.
     const todayBs = nepalBs(new Date())
     let bookings = [], bookingsErr = null, requestsPending = 0, requestsErr = null
     if (todayBs) {
       const dayStart = bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, false)
       const dayEnd = new Date(new Date(bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, true)).getTime() + 6 * 3600000).toISOString()
       const [b, r] = await Promise.all([
-        scopedFrom('pos_reservations', 'status, party_size')
+        scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
           .in('status', ['booked', 'confirmed', 'arrived', 'seated'])
-          .gte('reserved_for', dayStart).lte('reserved_for', dayEnd),
+          .gte('reserved_for', carryOverFrom(dayStart)).lte('reserved_for', dayEnd),
         scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
       ])
-      bookings = b.data || []; bookingsErr = b.error
+      const dayStartMs = new Date(dayStart).getTime()
+      bookings = (b.data || []).filter(x => stillInPlay(x, dayStartMs, Date.now())); bookingsErr = b.error
       requestsPending = r.count || 0; requestsErr = r.error
     }
 

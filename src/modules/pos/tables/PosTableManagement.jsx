@@ -16,6 +16,8 @@ import { turnoverByBand, dineInOnly, PARTY_BANDS } from '../reports/coversMath'
 import { barCategoriesOf, NO_BAR_TEXT } from '../ticketRouting'
 import { tableNameClash, quickSetupNames, quickSetupClashes, nextQuickSetupStart } from './tableNames'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
+import { LIVE_STATUSES, carryOverFrom } from '../reservations/reservationStatus'
+import { holdingBookingLabels } from '../reservations/reservationConflicts'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { errorText, errorLine } from '../../../shared/errorText'
@@ -273,22 +275,33 @@ export default function PosTableManagement() {
     await load(); closeModal(); setSaving(false)
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!target) return
     // Three references, three behaviours, none visible from the button (S682, corrected S754):
     // pos_reservation_tables cascades only the LINK, so a booking survives with this table taken
     // off it; pos_guest_order_requests is a plain FK and refuses the delete (worded in errorText);
     // pos_orders.table_id has no FK at all, so an open bill would outlive its table and vanish from
     // the floor — which is why run() reads for one first.
+    // S818 RESERVATIONS-11: once the link is gone nothing records which bookings lost the table, so
+    // they are named here, before the delete. A check that could not run has not passed.
+    setMsg('')
+    const { labels, error: holdErr } = await bookingsHolding(target.id)
+    if (holdErr) { setMsg('error:"' + target.name + '" was not deleted — could not check which bookings hold it. ' + errorLine(holdErr)); return }
     askConfirm({
       title: `Delete "${target.name}"?`,
       confirmLabel: 'Delete Table', danger: true, busyLabel: 'Deleting…',
       body: (
         <>
-          <p style={{ margin: '0 0 8px' }}>
-            The table leaves the floor plan and its QR code stops working. <strong>Bookings holding it are kept, but lose
-            this table</strong> — give them another table on the Reservations page if they are still coming.
-          </p>
+          <p style={{ margin: '0 0 8px' }}>The table leaves the floor plan and its QR code stops working.</p>
+          {labels.length > 0 ? (<>
+            <p style={{ margin: '0 0 4px' }}>
+              <strong>{labels.length === 1 ? 'One booking still to come holds it and will lose it' : `${labels.length} bookings still to come hold it and will lose it`}</strong> — give
+              {labels.length === 1 ? ' it' : ' each'} another table on the Reservations page:
+            </p>
+            <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>{labels.map((l, i) => <li key={i}>{l}</li>)}</ul>
+          </>) : (
+            <p style={{ margin: '0 0 8px' }}>No booking still to come holds it.</p>
+          )}
           <p style={{ margin: '0 0 8px' }}>
             A table with an open bill cannot be deleted, and nor can one that has ever taken a QR guest order — mark that
             one Inactive instead.
@@ -358,6 +371,46 @@ export default function PosTableManagement() {
     return { bill: data?.[0] || null, error }
   }
 
+  // S818 RESERVATIONS-11. The bookings still to come that hold this table, worded for a confirm. A
+  // deleted table's links cascade away and an inactive table cannot be picked at seating, so both are
+  // asked about first. Reaches back the longest booking so one already running is seen.
+  async function bookingsHolding(tableId) {
+    const { data, error } = await scopedFrom('pos_reservations',
+      'id, customer_name, party_size, reserved_for, duration_minutes, status, pos_reservation_tables!inner(table_id)')
+      .eq('pos_reservation_tables.table_id', tableId)
+      .in('status', LIVE_STATUSES)
+      .gte('reserved_for', carryOverFrom(new Date().toISOString()))
+      .order('reserved_for').order('id')
+    return error ? { labels: [], error } : { labels: holdingBookingLabels(data), error: null }
+  }
+
+  // S818 (D26): Inactive while bookings still to come hold the table asks first, naming them, then
+  // goes ahead. They keep the table, marked out of service on the Reservations page, until re-tabled.
+  // Returns a refusal sentence, or null once the change has been handed to `apply` (now or on confirm).
+  async function retireOrAsk(t, apply) {
+    const { labels, error } = await bookingsHolding(t.id)
+    if (error) return `${t.name} was not changed — could not check which bookings hold it. ${errorLine(error)}`
+    if (labels.length === 0) { await apply(); return null }
+    askConfirm({
+      title: `Take ${t.name} out of service?`,
+      confirmLabel: 'Mark Inactive', busyLabel: 'Saving…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 4px' }}>
+            {labels.length === 1 ? 'One booking still to come holds' : `${labels.length} bookings still to come hold`} {t.name}:
+          </p>
+          <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>{labels.map((l, i) => <li key={i}>{l}</li>)}</ul>
+          <p style={{ margin: 0 }}>
+            They keep it, marked out of service on the Reservations page, and cannot be seated at it. Give
+            {labels.length === 1 ? ' it' : ' each'} another table there.
+          </p>
+        </>
+      ),
+      run: apply,
+    })
+    return null
+  }
+
   // Why a status change must not happen, or null. Inactive under an open bill left the floor refusing
   // every tap on the table, and Available under one offered it to the next walk-in; a table brought
   // back into service must not take a name another table in service already has.
@@ -379,20 +432,31 @@ export default function PosTableManagement() {
     setFloorMsg('')
     const refusal = await statusRefusal(t, next)
     if (refusal) { setFloorMsg('error:' + refusal); return }
-    const { error } = await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
-    if (error) { setFloorMsg('error:' + t.name + ' was not updated — the floor still shows its previous state. ' + errorLine(error)); return }
-    setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: next } : r))
+    const apply = async () => {
+      const { error } = await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
+      if (error) { setFloorMsg('error:' + t.name + ' was not updated — the floor still shows its previous state. ' + errorLine(error)); return }
+      setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: next } : r))
+    }
+    if (next !== 'inactive') { await apply(); return }
+    const retireRefusal = await retireOrAsk(t, apply)
+    if (retireRefusal) setFloorMsg('error:' + retireRefusal)
   }
 
   async function handleStatusChange(val) {
     if (val === target.status) return
     setMsg('')
-    const refusal = await statusRefusal(target, val)
+    const t = target
+    const refusal = await statusRefusal(t, val)
     if (refusal) { setMsg('error:' + refusal); return }
-    const { error } = await scopedUpdate('pos_tables', { status: val }).eq('id', target.id)
-    if (error) { setMsg('error:The table status was not changed — the floor still shows its previous state. ' + errorLine(error)); return }
-    setTables(prev => prev.map(r => r.id === target.id ? { ...r, status: val } : r))
-    setTarget(t => ({ ...t, status: val }))
+    const apply = async () => {
+      const { error } = await scopedUpdate('pos_tables', { status: val }).eq('id', t.id)
+      if (error) { setMsg('error:The table status was not changed — the floor still shows its previous state. ' + errorLine(error)); return }
+      setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: val } : r))
+      setTarget(cur => (cur?.id === t.id ? { ...cur, status: val } : cur))
+    }
+    if (val !== 'inactive') { await apply(); return }
+    const retireRefusal = await retireOrAsk(t, apply)
+    if (retireRefusal) setMsg('error:' + retireRefusal)
   }
 
   // ── Ticket Routing ───────────────────────────────────────────────────────────
@@ -1481,13 +1545,12 @@ export default function PosTableManagement() {
                               value={resv.duration_by_band[b.key]} onChange={e => setResvBand(b.key, e.target.value)} />
                           </td>
                           <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                            {/* S818: sittings over 12 hours are left out of the measure (S814 4d), so it can no
+                                longer read above the field's 720-minute ceiling; the "skewed by bills left
+                                open" note that stood here could not show. */}
                             {resvMeasured === null ? <span style={{ color: 'var(--theme-text3)' }}>—</span>
                               : measured == null ? <span style={{ color: 'var(--theme-text3)' }}>no sittings yet</span>
-                              : measured > 720
-                                // A bill left open for days skews the average past anything a sitting can be
-                                // (POS_TODO B4). Say so rather than offer a number the field would refuse.
-                                ? <span style={{ color: 'var(--theme-text3)' }}>{m.orders} sitting{m.orders === 1 ? '' : 's'} · average skewed by bills left open</span>
-                                : `${measured} min · ${m.orders} sitting${m.orders === 1 ? '' : 's'}`}
+                              : `${measured} min · ${m.orders} sitting${m.orders === 1 ? '' : 's'}`}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {measured != null && measured >= 15 && measured <= 720 && (

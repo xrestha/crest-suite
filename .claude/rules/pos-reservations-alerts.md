@@ -34,12 +34,18 @@ are load-bearing, each with the reason it exists:
   `booked/confirmed/arrived` too (a party seated offline or by hand): kept, but no covers. Mark done
   is offered on a Seated row too (S809 3g), for a booking its bill close did not complete; `order_id`
   stays, so its covers stay booked. The floor tap picks in the tile's own order
-  (`bookingToSeatOnTap`): due now, then arrived whatever the clock.
+  (`bookingToSeatOnTap`): due now, then arrived whatever the clock. **A Seat hand-off the picked
+  table cannot take (an open order, this till's queued one, out of service, offline) is dropped and
+  named on the floor (`seatRefusedText`, S818 D25)**, never left armed for the next table tapped.
+  Clear Occupied un-seats a seated booking to Arrived before deleting its order (D22): the link is
+  SET NULL and `seated ⇒ order_id` refuses the delete otherwise, so admin-user-ops deletes
+  reservations before orders.
 - **The handoff from the page to the floor carries the FULL `pos_tables` row**, because
   `table_name` is snapshotted onto the order at first save and printed on every KOT and bill.
 - **Today's floor window is the BS day plus six hours**, so a 12:15 AM booking is on tonight's
-  board. The Reservations page's day view is strict. The dashboard's Bookings Tonight tile uses
-  the floor's window, never the page's.
+  board, **and back 12 hours (`carryOverFrom`) keeping a booking from before midnight only while
+  `stillInPlay`** (live and its window not ended; S818 D24). The dashboard's Bookings Tonight tile and
+  the page's Upcoming/Unconfirmed use the same pair; Day stays strict.
 - **The public RPC `submit_reservation_request` RETURNS jsonb rather than raising** for every
   refusal that should cost quota. An exception rolls back the attempts row with everything else,
   so a refused request would burn nothing and the cheapest attack is to keep getting refused —
@@ -56,14 +62,15 @@ are load-bearing, each with the reason it exists:
   three booking functions and five guest-menu functions call `client_access_open()` beside
   `pos_enabled` and return the identical POS-off answer. `get_reservation_request_status` and
   `get_guest_order_request_status` stay ungated, so a guest's own card behaves as with POS off.
-- **The ladder reverses in exactly two places, and only on the booking's own day (S681).**
+- **The ladder reverses in exactly two places, until the end of the booking's day (S681; the days
+  before it too since S818, Q23 a).**
   `no_show → arrived` ("They turned up") and `cancelled → booked` ("Reinstate"). A no-show is shown
   on every future booking form from that phone number, so a guest marked at 8:20 who walks in at
   8:25 needs a path back that is not "make a second booking and leave the mark". `stampFor(to, now,
   from)` clears the mark being left (`no_show_at`; `cancelled_at` + `cancel_reason`) in the same
   write, so the Covers Report and the Customers no-show column forget it too. `canRevive()` gates
-  it to the Nepal civil day of `reserved_for` — the table says what is ever legal, the page says
-  when. `completed` stays terminal: the bill that closed it is its own record. **Mark done, the
+  it to the end of the Nepal civil day of `reserved_for`, and `canMarkNoShow()` offers No-show only
+  from the booked time (D23) — the table says what is ever legal, the page says when. `completed` stays terminal: the bill that closed it is its own record. **Mark done, the
   reversals and No-show all confirm through `ConfirmModal`** with consequence copy; nothing that
   ends or revives a booking is a bare button.
 - **A request is DECLINED, a booking is CANCELLED, and the two reason lists differ** because the
@@ -90,6 +97,12 @@ are load-bearing, each with the reason it exists:
   asserts it equals `LIVE_STATUSES`. The operator's restore insert is exempt. **An edit that moves
   the time releases dropped tables BEFORE the update**, or the move is refused over a table being
   removed (`ReservationModal.save`).
+- **An unanswered request expires only when its own phone asks again (S818, `20261012130000`).**
+  `submit_reservation_request` cancels that number's passed requests ('Not answered in time',
+  `EXPIRED_REQUEST_REASON`) before its insert, so the one-request-per-phone index no longer blocks it
+  for good. Other stale requests wait for staff (marked "time passed"); the guest card words a passed
+  one itself. A table held by a live booking is named before a delete or Inactive (D26), and the
+  booking form shows a held inactive table as a removable chip.
 - **Nothing self-confirms.** A public request lands as `requested` and waits for a staff Accept;
   there is no phone verification because there is no SMS rail (POS_TODO C). The staff WhatsApp or
   call is the verification.

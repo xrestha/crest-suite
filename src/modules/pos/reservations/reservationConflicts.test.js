@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { windowsOverlap, findTableConflicts, describeHoldRefusal } from './reservationConflicts'
+import { windowsOverlap, findTableConflicts, describeHoldRefusal, holdingBookingLabels } from './reservationConflicts'
 import { LIVE_STATUSES } from './reservationStatus'
 
 const at = hm => `2026-09-14T${hm}:00+05:45`
@@ -134,5 +134,31 @@ describe('describeHoldRefusal', () => {
     expect(describeHoldRefusal(null)).toBeNull()
     expect(describeHoldRefusal({ code: '42501', message: 'permission denied' })).toBeNull()
     expect(describeHoldRefusal({ message: 'no_table_hold_overlap_here' })).toBeNull()
+  })
+})
+
+// S818 RESERVATIONS-11: the delete and Inactive confirms name the bookings that still need the table.
+describe('holdingBookingLabels', () => {
+  const now = new Date('2026-09-14T19:00:00+05:45').getTime()
+
+  test('names live bookings not over yet, earliest first, in Nepal time with the BS day', () => {
+    const rows = [
+      booking('late', '20:00', 90, ['t1'], 'confirmed', { customer_name: 'Gurung', party_size: 8 }),
+      booking('now', '18:00', 90, ['t1'], 'arrived', { customer_name: 'Sharma' }),
+    ]
+    const out = holdingBookingLabels(rows, now)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatch(/^Sharma ×4 on \d+ \w+ at 0?6:00 PM$/)
+    expect(out[1]).toMatch(/^Gurung ×8 on \d+ \w+ at 0?8:00 PM$/)
+  })
+
+  test('leaves out bookings that are over, ended or not live', () => {
+    const rows = [
+      booking('done', '20:00', 90, ['t1'], 'completed'),
+      booking('gone', '20:00', 90, ['t1'], 'cancelled'),
+      booking('ended', '16:00', 90, ['t1'], 'booked'),
+    ]
+    expect(holdingBookingLabels(rows, now)).toEqual([])
+    expect(holdingBookingLabels(undefined, now)).toEqual([])
   })
 })
