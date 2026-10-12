@@ -684,14 +684,15 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   - On a POS manager's PIN the Customization Report's Margin `items` read is fenced, so costs read NPR 0:
     the 2f item above ("the Customization report (`loadDeltaExplosion`)"), not a new one (3o).
 - **Found while building stage 4, wave 2 (4d, 4e, 4f; 2026-10-12, not fixed):**
-  - The operator's `imsEnabled` is always true, so a bill the operator closes on an outlet without Crest
-    IMS still posts to Inventory (4e). `clientModules.ims` would close it; rare, left as is.
+  - ~~The operator's `imsEnabled` is always true, so a bill the operator closes on an outlet without Crest
+    IMS still posts to Inventory (4e).~~ Fixed the same day (owner): `outletHasIms` reads the viewed
+    outlet's own module for the operator, on the till and both credit-note screens.
   - Stage 5: a server-side post from the stored bill, stamping it in one transaction (would replace
     `postClosedBill`'s browser read); `ims_sales_entries_guard` refusing till rows for a client without
     Inventory; and, when Inventory is switched on for a POS-only outlet, a way to settle (or post) its
     past unmarked bills, which D6 kept recoverable (4e).
-  - The POS-only Home's own POS sales pivot still shows money to Staff rank; D2 covered only the POS
-    Dashboard, and that Home already shows staff its POS Revenue tile (4d). Owner's call.
+  - ~~The POS-only Home's own POS sales pivot still shows money to Staff rank; D2 covered only the POS
+    Dashboard (4d).~~ Fixed the same day (owner): Supervisor and above, as D2.
   - Table Management's "skewed by bills left open" note can no longer show, now that sittings over 12
     hours are left out (4d): remove it in 4j.
   - `pos_parking_slips` has no index on `time_in`; the All tab's date range filters on it. Fine at

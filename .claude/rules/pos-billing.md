@@ -25,7 +25,8 @@ supervisor.
 (`postClosedBill`, behind `writeSalesEntries`) leaves a bill unposted when no `monthly_periods` row is
 open or the bill's close month (Nepal date of the server's `closed_at`) is not it; it posts the STORED
 bill under its own id with the backfill's `billSalesRows`/`billMovementRows` (S814). An outlet without
-Crest IMS posts nothing and leaves bills and notes unmarked (`tillPostsToIms`, D6, D7). A silent
+Crest IMS posts nothing and leaves bills and notes unmarked (`outletHasIms`: the operator follows
+the outlet's own module, never the always-true route flag; D6, D7). A silent
 return once left 15 bills out of Inventory unnoticed.
 History: docs/rules-archive/pos-billing.md#silent-ims-post
 

@@ -15,6 +15,16 @@ import { posStockLines } from './posRecipeBook'
 // migration 20261010140000), which returns numbers per Nepali month and nothing else.
 
 /**
+ * Whether this outlet's bills and credit notes go to Inventory at all (S809 4e, owner D6, D7): the
+ * outlet has Crest IMS. `imsEnabled` is the route-access flag and the operator's is always true, so for
+ * the operator it is the viewed client's own module (`clientModules.ims`): a bill Crest support closes
+ * on a POS-only outlet follows the outlet's rule (S814, owner). Unknown counts as having it.
+ */
+export function outletHasIms({ isAdmin, imsEnabled, clientModules }) {
+  return isAdmin ? clientModules?.ims !== false : imsEnabled !== false
+}
+
+/**
  * How many bills and notes wait, per Nepali month: [{ bs_year, bs_month, period_id, period_status,
  * bills, notes }], period_id/period_status NULL when the month has no Inventory period yet. Never
  * throws: a failed or timed-out read is `{ rows: null, error }`, which a caller shows as "couldn't

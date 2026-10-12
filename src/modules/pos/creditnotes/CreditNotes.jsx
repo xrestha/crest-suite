@@ -1,4 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
+import { outletHasIms } from '../orders/posImsWaiting'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -44,7 +45,9 @@ function currentYearFirst(rows, currentFy) {
 }
 
 export default function CreditNotes() {
-  const { clientId, hasPosAccess, imsEnabled } = useAuth()
+  const { clientId, hasPosAccess, isAdmin, imsEnabled: imsRoute, clientModules } = useAuth()
+  // The outlet's own Inventory module, the operator included (outletHasIms, S814).
+  const imsEnabled = outletHasIms({ isAdmin, imsEnabled: imsRoute, clientModules })
   const { scopedFrom } = useScopedDb()
 
   const [tab, setTab] = useState('issue') // 'issue' | 'book'

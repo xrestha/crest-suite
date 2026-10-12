@@ -1,7 +1,7 @@
 // S809 3j: the till floor's Post to Inventory and the waiting counts every screen words. The sorting
 // of months decides which ones a POS manager is offered and who is named for the rest, so it is
 // pinned here; postWaitingFromTill is exercised with its two posting functions mocked.
-import { summarizeWaiting, waitingForPeriod, countPhrase, loadImsWaiting, postWaitingFromTill, noteImsMiss, pruneImsMisses } from './posImsWaiting'
+import { summarizeWaiting, waitingForPeriod, countPhrase, loadImsWaiting, postWaitingFromTill, noteImsMiss, pruneImsMisses, outletHasIms } from './posImsWaiting'
 import { backfillPosOrdersToIms } from './backfillPosToIms'
 import { backfillCreditNotesToIms } from '../creditnotes/creditNotePosting'
 import { posStockLines } from './posRecipeBook'
@@ -190,5 +190,20 @@ describe('loadImsWaiting — a caller can bound it shorter', () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe('outletHasIms — does this outlet send bills to Inventory at all (S814)', () => {
+  test("a signed-in outlet login follows the client's own flag", () => {
+    expect(outletHasIms({ isAdmin: false, imsEnabled: true, clientModules: { ims: true } })).toBe(true)
+    expect(outletHasIms({ isAdmin: false, imsEnabled: false, clientModules: { ims: false } })).toBe(false)
+  })
+  test("Crest support follows the viewed outlet's module, not its always-true route flag", () => {
+    expect(outletHasIms({ isAdmin: true, imsEnabled: true, clientModules: { ims: false, pos: true } })).toBe(false)
+    expect(outletHasIms({ isAdmin: true, imsEnabled: true, clientModules: { ims: true, pos: true } })).toBe(true)
+  })
+  test('an unknown flag counts as having Inventory, as before', () => {
+    expect(outletHasIms({ isAdmin: false, imsEnabled: undefined, clientModules: undefined })).toBe(true)
+    expect(outletHasIms({ isAdmin: true, imsEnabled: true, clientModules: undefined })).toBe(true)
   })
 })

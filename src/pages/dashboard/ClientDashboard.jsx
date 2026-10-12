@@ -3300,9 +3300,10 @@ export default function ClientDashboard({ scope = 'home' }) {
 
           {/* POS-sourced sales pivot — kitchen/bar station accounts have no use for a revenue
               breakdown (they get kitchen-ops KPIs above instead), so this is front-of-house only.
-              Single-module (POS-only) clients keep it right here, unchanged; once 2+ modules
+              Its figures are money, so Supervisor and above only, as on the POS Dashboard (owner D2,
+              S814). Single-module (POS-only) clients keep it right here; once 2+ modules
               share the page it lives on the POS Dashboard instead (S800), with the rest of POS. */}
-          {!showModuleHeaders && !posIsStationTeam && <div><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
+          {!showModuleHeaders && !posIsStationTeam && hasPosAccess('supervisor') && <div><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
         </div>
       )}
       </div>

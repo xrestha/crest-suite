@@ -1,4 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
+import { outletHasIms } from '../orders/posImsWaiting'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -76,7 +77,8 @@ function lostReplyText(cashShift, cashOut) {
 // settings/outlet/HSC data rather than depending on the caller's cached state, so it works
 // identically from either page.
 export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
-  const { clientId, profile, hasPosAccess, imsEnabled } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, imsEnabled, clientModules } = useAuth()
+  const hasIms = outletHasIms({ isAdmin, imsEnabled, clientModules })
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
 
   const [items, setItems] = useState([])
@@ -211,9 +213,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   // than the note. The database records exactly this (pos_credit_note_settle), so the sentence and the
   // drawer cannot disagree. 0 for a card, QR or points bill, and for a Credit bill nobody has paid yet.
   const cashOut = amounts ? Math.min(Number(cashTaken) || 0, amounts.net) : 0
-  const askFood = imsEnabled !== false
+  const askFood = hasIms
   // Whether this note's reversal goes to Inventory at all (S809 4e, D7): the outlet has Crest IMS.
-  const postsToIms = imsEnabled !== false
+  const postsToIms = hasIms
   // The food goes back in the month the note is issued in, beside its revenue reversal. For a bill
   // billed again now that is right (the new bill uses the food again this month). For a duplicate
   // charged in an earlier month it is not: that month's stock count has already settled its food.

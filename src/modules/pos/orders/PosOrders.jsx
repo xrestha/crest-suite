@@ -18,7 +18,7 @@ import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../r
 import { posFoodCosts, posStockLines } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
 import { postClosedBill } from './backfillPosToIms'
-import { noteImsMiss, pruneImsMisses } from './posImsWaiting'
+import { noteImsMiss, pruneImsMisses, outletHasIms } from './posImsWaiting'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
@@ -131,16 +131,16 @@ const keptLinesText = kept => keptLinesToRestore(kept?.items, []).map(l => `${l.
 // ~1,500 lines of interlocked state in this file (tenders, splits, comps, discount caps, loyalty,
 // the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
 export default function PosOrders({ billingStation = false } = {}) {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled, outlets } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, clientModules, hasFeature, customizationEnabled, outlets } = useAuth()
   // Who the floor's Inventory-posting banner is for (S776): since S809 3j it posts the open month itself
   // (Post to Inventory); a closed month stays the Owner's, in Periods. hasPosAccess resolves admin and
   // Owner to manager already.
   // Whether this outlet's bills go to Inventory at all (S809 4e, IMS-HANDOFF-9; owner decisions D6, D7).
   // An outlet without Crest IMS posts nothing, counts nothing and shows no banner — and its bills are
   // NOT marked settled, so switching Inventory on later still finds them waiting (Periods, or the
-  // floor's Post to Inventory). `imsEnabled` is the route-access flag (CLAUDE.md); the operator's is
-  // always true, so an admin close on such an outlet still posts, as switching IMS on later would.
-  const tillPostsToIms = !!imsEnabled
+  // floor's Post to Inventory). The operator follows the outlet's own module, not its always-true
+  // route flag (outletHasIms, S814).
+  const tillPostsToIms = outletHasIms({ isAdmin, imsEnabled, clientModules })
   const canSeeImsPosting = tillPostsToIms && (isAdmin || isOwner || hasPosAccess('manager'))
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   // Rendered in BOTH returns (this file has two — S578). One pending ask at a time, drawn by
