@@ -310,6 +310,35 @@ describe('errorText', () => {
     })
   })
 
+  // S823 5c (migration 20261013100000). Two new refusals: a close whose lines moved after they were
+  // priced, and a Close Shift while a Split bill's payments are still on their way.
+  describe('the S823 5c refusals', () => {
+    const lines = { code: 'P0001', hint: 'pos_bill_lines_changed', message: 'pos_orders: the items on this bill changed after this till worked out its total (another till saved the order in between), so it was not closed and nothing was charged — open the order again to see the latest, check the total, then close it' }
+    const split = { code: 'P0001', hint: 'pos_shift_split_pending', message: 'pos_shift_split_pending: a Split bill closed on this shift at 7:42 PM is still recording how it was paid, so the shift was not closed — press Close Shift again in a minute. Payments that never arrive stop holding the shift at 7:53 PM' }
+    const fallback = errorText({ message: 'x' }, 'operator')
+
+    it('a close refused for changed items says nothing was charged and to open the order again', () => {
+      for (const aud of ['staff', 'operator']) {
+        expect(errorText(lines, aud)).toMatch(/nothing was charged/i)
+        expect(errorText(lines, aud)).toMatch(/open the order again/i)
+        expect(errorText(lines, aud)).not.toBe(errorText({ message: 'x' }, aud))
+      }
+    })
+
+    it('a Close Shift held for a Split bill says the shift is still open, the count is kept, and to press again', () => {
+      for (const aud of ['staff', 'operator']) {
+        expect(errorText(split, aud)).toMatch(/press Close Shift again in a minute/i)
+        expect(errorText(split, aud)).toMatch(/still on screen/i)
+      }
+      expect(errorText(split, 'operator')).toMatch(/11 minutes/)
+      expect(errorText(split, 'operator')).not.toBe(fallback)
+      // the hint lost, the code still leads the message
+      expect(errorText({ message: split.message }, 'operator')).toBe(errorText(split, 'operator'))
+      // and the bill's time survives in the fine print
+      expect(errorInfo(split, 'operator').detail).toMatch(/7:42 PM/)
+    })
+  })
+
   // S809 1c. A close whose status and close type disagree is refused by guard_pos_order_close
   // with ERRCODE 22023, which no generic rule words.
   describe('the S809 mismatched-close refusal', () => {

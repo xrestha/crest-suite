@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-12 (S822 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437); stages 6–7 outlined)
+Last updated: 2026-10-12 (S822 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c step 1 shipped (S823, `20261013100000`, crest-v438; step 2, the till floor `20261013100100`, waits for that deploy); stages 6–7 outlined)
 
 ---
 
@@ -369,7 +369,7 @@ rate-limit key and whether 5c raises the till build floor. Then 5c, 5d, 5e and 5
 | --- | --- | --- | --- |
 | 5a ✅ | S782 grants (shipped 2026-10-12, S821, `20261012150000` applied live, migration only): TRUNCATE/REFERENCES/TRIGGER live on 19 tables (`pos_cash_movements`, `pos_loyalty_ledger` among them), MAINTAIN on about 80 (`pos_parking_slips`, `pos_payment_confirmations`, `pos_guest_order_requests` among them) | revoked from anon, authenticated and PUBLIC on every public table; the schema's default privileges stop handing them to new tables | Q28 |
 | 5b ✅ | A2 rate-limit first hop; A2 delete-open-order message; 4g `pos_customer_phone_locked` names Move (shipped 2026-10-12, S822: probe `20261012160000` created, called and dropped by `20261012160100`; `20261012170000` applied live; app wording crest-v437. The probe saw `x-crest-build` arrive, so 5c's floor raise stands; the limit now keys on `cf-connecting-ip`, which Cloudflare refuses from a caller) | a throwaway header probe first (created, called with a set `x-forwarded-for` and `x-crest-build`, dropped); `submit_reservation_request` keyed on the trusted hop (or left, with the reason recorded); `guard_pos_order_items_closed_del` tells a deleted parent from a closed one (S749 DEFINER lookup); the phone-lock sentence | — |
-| 5c | `credit_settled_at := now()`; the `credit_settlement` unique index; the close pins its priced lines (`items_version`, after checking what bumps it); a Split bill's legs inside the shift lock; a void's `shift_id` from the open shift (4a's browser read files it today); raise `pos_min_till_build()` | `guard_pos_order_close`, `pos_shifts_guard`, a partial unique index on `pos_cash_movements`; a second file raising the floor after the deploy, only if 5b's probe sees `x-crest-build` | — |
+| 5c ✅ (step 2 pending) | `credit_settled_at := now()`; the `credit_settlement` unique index; the close pins its priced lines (`items_version`, after checking what bumps it); a Split bill's legs inside the shift lock; a void's `shift_id` from the open shift (4a's browser read files it today); raise `pos_min_till_build()` (step 1 shipped 2026-10-13, S823, `20261013100000` applied live, crest-v438: only `save_pos_order_items` moves `items_version`; Close Shift waits 11 minutes for short Split legs; the till's void read removed. Step 2 `20261013100100` raises the floor to 438 once crest-v438 is live) | `guard_pos_order_close`, `pos_shifts_guard`, a partial unique index on `pos_cash_movements`; a second file raising the floor after the deploy, only if 5b's probe sees `x-crest-build` | — |
 | 5d | CREDIT-NOTES-5 server half (`original_invoice_*` from the bill); the server-side credit-note print counter (the parking slip's `OLD.print_count + 1`); `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows for a client without Inventory (4e); 2f: a comp-cost read IMS logins may use (`viewPosBill.js`, `loadDeltaExplosion`) | `guard_pos_credit_note`, `ims_sales_entries_guard`, a new DEFINER read | — |
 | 5e | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`) | those two functions; `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys | — |
 | 5f | 4e: the server posts a closed bill to Inventory from the stored bill in the close's transaction (replacing `postClosedBill`'s browser read); posting a POS-only outlet's past unmarked bills when Inventory is switched on | its own plan first: the depletion walk lives only in `recipeCost.js` ("never a SQL copy of it", `pos-billing.md`), so a server post needs a SQL copy of it or another shape; may take more than one migration | Q29 |
@@ -452,11 +452,12 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   allowlisted staff (latent, 0 rows). The till's new buttons send NULL. Fix: `outletSwitchArg` inside
   `switchOutlet`, or home-by-id as the reset in SQL (1g).
 - **Found while drafting stage 2 (2026-10-09, not fixed):**
-  - The close write does not pin the lines it priced: `guard_pos_order_close` accepts a close whose
+  - ~~The close write does not pin the lines it priced: `guard_pos_order_close` accepts a close whose
     `items_version` moved since `paid_amount` was worked out (a second press's save landing before a
     late first try). Fix: send `items_version` with the close and refuse a mismatch; first check what
     bumps it (`apply_pos_item_comps`?) so a normal close is never refused. Since 2d the till says so on
-    the floor when the stored lines don't add up to the money (2d).
+    the floor when the stored lines don't add up to the money (2d).~~ Fixed in 5c (S823): only
+    `save_pos_order_items` bumps it; `pos_bill_lines_changed`.
   - Unknown-close marks live in memory only: a PIN lock, leaving Orders or a reload forgets them (2d).
     ~~The lock still hands back a standing redemption.~~ Fixed in 2g: the lock skips it while a try at
     that bill is unsettled, and the close itself returns forgotten points.
@@ -464,10 +465,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     database may still commit it (2d).
   - ~~The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
     "reprint it from Recent Bills" (2d).~~ Fixed in 4b: both render there, one element shared with the floor.
-  - A Split bill's payment legs are inserted in a request after the close, so 2b's shift lock does not
+  - ~~A Split bill's payment legs are inserted in a request after the close, so 2b's shift lock does not
     cover them: a Close Shift between the two can freeze a report without that bill's cash leg. Fix:
     `pos_shifts_guard` refuses a close while a Split bill closed in the last 10 minutes on that shift has
-    legs short of `paid_amount` ("press Close Shift again in a moment") (2b).
+    legs short of `paid_amount` ("press Close Shift again in a moment") (2b).~~ Fixed in 5c (S823), with
+    an 11-minute window (`pos_shift_split_pending`).
   - ~~A Credit Note inserted by a client session keeps a sent `created_at`, which backdates its printed
     date: set `NEW.created_at := now()` on the non-restore path, with slice 2e (2b).~~ Fixed in 2e.
   - ~~`save_pos_order_items` leaves comped rows out of `before_sent` and `stored_sent`, so after a cancelled
@@ -475,7 +477,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     session, 2b review).~~ Fixed in 2h: comped rows count in both.
   - Raise `pos_min_till_build()` to crest-v417 so a till older than 2a cannot charge an emptied cart, but
     only after checking that `x-crest-build` reaches `request.headers` through PostgREST in production
-    (1b's open check); every till would be refused otherwise (2b).
+    (1b's open check); every till would be refused otherwise (2b). **5c step 2 (S823):** the header was
+    proven in 5b (S822); `20261013100100` raises it to 438 (the first build whose close carries
+    `items_version`), applied once crest-v438 is live.
   - ~~On a server `no_open_shift` the till keeps its cached shift id until the next press (cosmetic, 2b).~~
     Fixed in 4a: the refusal clears it.
   - ~~`viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
@@ -671,10 +675,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     "NOT applied" conflict though the lines landed (3f).
   - After one no-answer, sends queue for 30 s even if the link recovered sooner; an older (v427) tab
     draws a `kot:` entry as a 0-item takeaway (3f).
-  - `credit_settled_at` is still the settling tablet's clock: one line, `NEW.credit_settled_at := now()`
-    in `guard_pos_order_close`'s settlement branch, needs a migration (3l).
-  - A unique partial index on `pos_cash_movements(order_id) WHERE kind = 'credit_settlement'` would make
-    a settle's Cash In once-only across devices (live duplicates: 0) (3l).
+  - ~~`credit_settled_at` is still the settling tablet's clock: one line, `NEW.credit_settled_at := now()`
+    in `guard_pos_order_close`'s settlement branch, needs a migration (3l).~~ Fixed in 5c (S823).
+  - ~~A unique partial index on `pos_cash_movements(order_id) WHERE kind = 'credit_settlement'` would make
+    a settle's Cash In once-only across devices (live duplicates: 0) (3l).~~ Fixed in 5c (S823),
+    `pos_cash_movements_one_credit_settlement`.
   - PosCustomers' settings read, `loadCustomers` and `toggleHistory` have no time limit (3l).
   - `handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
     fails; the server's `option_count` counts picks of hidden options (harmless while

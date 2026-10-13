@@ -180,6 +180,29 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5c: `credit_settled_at := now()`; the `credit_settlement` unique index; the
+  close pins its priced lines; a Split bill's legs inside the shift lock; a void's shift from the open
+  shift; raise `pos_min_till_build()`~~ — **step 1 shipped S823, 2026-10-13**: migration `20261013100000`
+  applied live; app crest-v438. **Step 2** (`20261013100100`, the floor to 438) is written and is applied
+  only once crest-v438 is live. No owner decision needed. Checked first, live: only
+  `save_pos_order_items` writes `items_version`, so a normal close is never refused; 0 settlement
+  entries, so 0 duplicates. **The settle** stamps `credit_settled_at := now()` beside `credit_settled_by`.
+  **The index** `pos_cash_movements_one_credit_settlement` (order_id, kind = 'credit_settlement'); the
+  settle page reads a first-try 23505 as "already on the drawer record". **The pin**: the till sends the
+  version its own save returned, and a Charge or Complimentary whose stored version moved is refused
+  `pos_bill_lines_changed` (P0001); the till reloads the order ("nothing was charged"). An older till sends
+  none and closes as before until step 2. **A void** is filed by the guard on the shift open now (FOR
+  SHARE), or none, never refused; the till's own read is gone. **Close Shift** is refused
+  `pos_shift_split_pending` while a Split bill on the shift closed in the last 11 minutes has legs short
+  of `paid_amount` (one minute past the legs' 10-minute window). Verified inside the apply (rolled back,
+  as Bloom Cafe's Owner, its open shift set aside): a void with no shift open is filed on none and keeps
+  its version; a void naming another shift is filed on the open one; a Charge at an older version is
+  refused and stays open; at the stored version it closes on the open shift with a number; with no version
+  it closes; a settlement sent as 2020 is stored at the server's time, by the Owner; a second settlement
+  entry for the bill is refused by the new index; Close Shift with a just-closed Split bill short of its
+  legs is refused while one 12 minutes old is not, and closes once the legs land. Read back separately:
+  both md5s, both INVOKER, both triggers enabled, the index unique and valid on `order_id`, the floor
+  still NULL.
 - [x] ~~S809 stage 5, slice 5b: A2 booking rate-limit key, A2 delete-open-order message, 4g phone-lock
   sentence~~ — **shipped S822, 2026-10-12**: migrations `20261012160000` + `20261012160100` (a header
   probe, created, called and dropped, live about two minutes) and `20261012170000`, all applied live;

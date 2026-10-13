@@ -194,6 +194,15 @@ const rules = [
     staff: 'The restaurant\'s VAT setting was changed since this till loaded it, so the bill was not charged. The till is loading the new setting — check the new total with the guest, then charge again.',
     operator: 'This outlet\'s VAT registration was switched in Settings after this till loaded it, so the total on screen was worked out the other way and the bill was not charged. Nothing was charged or numbered. Wait for the till to reload its settings (or reload the page), check the new total, then charge again.',
   },
+  // S823 5c (migration 20261013100000). The close carries the version of the lines its total was
+  // worked out from, and guard_pos_order_close refuses it when another save landed in between.
+  // Raised by the BEFORE trigger on the still-open order, so nothing was charged or numbered. The
+  // till loads the latest order itself; this is the wording anywhere else it surfaces.
+  {
+    test: e => hasCode(e, 'pos_bill_lines_changed'),
+    staff: 'The items on this bill were changed on another device while it was being charged, so nothing was charged. Open the order again to see the latest items, check the total, then charge it again.',
+    operator: 'Another device saved this order after this till worked out its total, so the items stored on the bill are not the ones the total was worked out from. The bill was not closed and nothing was charged or numbered. Open the order again to see the latest items, check the total, then charge it again.',
+  },
   // Raised by guard_pos_order_close, guard_pos_credit_note and apply_pos_item_comps before they write,
   // when Nepal's date is past the end of the bs_months table (2031-04-13 as of 2026), so no year can
   // be given to number a bill, an NC slip or a Credit Note. Retrying cannot help.
@@ -456,6 +465,15 @@ const rules = [
     test: e => hasCode(e, 'pos_shift_figures_changed'),
     staff: 'A bill or a cash entry reached this shift while the drawer was being counted, so the cash it should hold has changed. The shift is still open and your count is still on screen — press Close Shift again to see the new figures.',
     operator: 'A bill or a cash entry reached this shift after its figures were read, so its Expected Cash has changed, and Crest will not file a closing report that leaves it out. The shift is still open and the count you entered is still on screen: press Close Shift again to count against the new figures.',
+  },
+  // S823 5c (migration 20261013100000). A Split bill's payment lines reach the database a moment after
+  // the bill closes, and pos_shifts_guard will not close the shift in that gap (for up to 11 minutes
+  // after the bill). Raised before the write, so the shift is still open; the close dialog keeps the
+  // count. The bill's time and the time the hold ends are in the detail (the server's sentence).
+  {
+    test: e => hasCode(e, 'pos_shift_split_pending'),
+    staff: 'A Split bill closed a moment ago is still recording how it was paid, so the shift was not closed. Your count is still on screen — press Close Shift again in a minute.',
+    operator: 'A Split bill on this shift closed a moment ago and its payments have not reached the shift yet, so Crest did not close it: the drawer report would have left that bill\'s cash out. The shift is still open and the count you entered is still on screen. Press Close Shift again in a minute. If the till that closed the bill went offline, the hold ends 11 minutes after that bill closed (the time is in the detail below).',
   },
   // S809 1l. The counted total (or the opening float) must be the notes counted. The Shifts screen
   // works the total out from the notes it sends, so only a write made some other way meets this.

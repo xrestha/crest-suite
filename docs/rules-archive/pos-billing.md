@@ -234,3 +234,15 @@ day a restore comes back empty.
 arbitrary row for an admin, because an admin can read every profile — it reported the admin
 account as `role: client`. Key the query to the JWT's `sub`, and cross-check with a row count
 (admin sees all profiles, a client sees exactly one).
+
+## Till release history
+
+Moved from `.claude/rules/pos-billing.md` (S823, to keep the POS rules load under its ceiling).
+
+A till is one long-lived page: the lock, a PIN sign-in and the KDS move by `navigate()`, and a
+`CACHE_NAME` bump replaces the worker's cache, never the page running. So until S809 a tablet ran the
+code it opened with until someone reloaded it. The defence was keeping every changed RPC callable by
+an old page (`p_expected_version DEFAULT NULL`), which protects only the changes someone remembered.
+The floor stood at NULL from S809 1b (2026-10-09) until S822's header probe proved `x-crest-build`
+reaches the database; S823 (5c) raises it to 438, the first build whose close carries `items_version`,
+in a second migration applied only once that build is live (`20261013100100`).

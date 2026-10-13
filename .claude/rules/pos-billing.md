@@ -175,12 +175,12 @@ covered: display figures.
 stamps `shift_id` from the outlet's open shift read `FOR SHARE` on every Charge/Complimentary (refuses
 `no_open_shift`), and `pos_cash_movements_guard` reads its shift `FOR SHARE`. A Close Shift waits for a
 bill or entry holding the lock and then counts it (1l refuses the stale report); one arriving after the
-Close locked the row is refused. A shift's `closed_at` and the report's `capturedAt` are `now()`. Not
-covered: a Split bill's legs, inserted in a later request (POS_TODO S809.4).
+Close locked the row is refused. A shift's `closed_at` and the report's `capturedAt` are `now()`.
+Split legs land after the close, so Close Shift waits (`pos_shift_split_pending`) while a Split bill
+closed in the last 11 minutes is short of its legs: one past the legs' 10-minute window (S823).
 
-**A Void reads the open shift before it writes but is never refused for it (S809 SHIFTS-6)**: none
-open stamps none, a failed read keeps the cached id. The guard stamps only Charge/Complimentary, so
-this read files a void until stage 5. A server `no_open_shift` clears the cached id.
+**A Void is filed by the guard on the shift open now (S823), or none, never refused for it.** A server
+`no_open_shift` on a Charge clears the till's cached id.
 
 **PosShifts (S809 4a): every read and write is time-limited, and no answer reads "not known", never
 "not opened/closed" (`shiftText.js`).** A lost Open re-reads the server; a retry meets the
@@ -222,7 +222,9 @@ it returns `{inserted, items_version, items}`. Four rules it enforces:
 - **`p_expected_version` against `pos_orders.items_version`** refuses a save from a tablet that
   loaded the order before another one saved it (`stale_order`). The screen reloads the order and
   says it changed on another device, unless this till holds an unanswered save of that order (S809
-  3e, below). NULL keeps the old behaviour for a stale bundle.
+  3e, below). NULL keeps the old behaviour for a stale bundle. **A close is pinned the same way
+  (S823)**: it sends its save's version, and a moved one is refused (`pos_bill_lines_changed`). Only
+  this function moves `items_version`; a new line writer that changes a priced total must bump it.
 - **`sent_qty`** — how much of a line the kitchen already has — is stored, not held only in memory.
 
 `guard_pos_item_price` refuses any browser write to a line's price, quantity or identity outside
@@ -626,7 +628,7 @@ the same four rules:
 
 **Attribution moved to the server at the same time.** The close stamps `closed_by := auth.uid()`
 and `closed_at := now()`, because a tablet's clock could backdate a bill into a closed month.
-`credit_settled_by` and `pos_credit_notes.issued_by` are stamped the same way. A foreign-key
+`credit_settled_by`, `credit_settled_at` (S823) and `pos_credit_notes.issued_by` are stamped the same way. A foreign-key
 cascade runs as the table owner and passes the `current_user` seam, which was measured live: deleting a profile or
 shift that a billed order names is Postgres's write, not the browser's, and is not refused.
 **That was measured on a BEFORE row trigger (`guard_pos_order_close`); an AFTER STATEMENT trigger on
@@ -654,7 +656,7 @@ an operator INSERT of a row dated before the transaction (`opened_at`/`created_a
 | What | Rank the table now requires |
 | --- | --- |
 | Close a bill (Pay, Void, Complimentary, Credit) | Supervisor |
-| Settle a Credit bill | Supervisor, once, `credit_settled_by` stamped |
+| Settle a Credit bill | Supervisor, once, `credit_settled_by` and `credit_settled_at` stamped |
 | Open or close a shift | Supervisor. A **closed shift is immutable**, and a client cannot DELETE one |
 | Cash In / Cash Out | Supervisor, against an OPEN shift. **Never edited or deleted**: a mistake is a second movement |
 | Cash refund on a credit note (`kind = 'refund'`) | Manager. One per note, written by the note's own trigger: the cash the bill took (`pos_bill_cash_taken`), no more than the note's net (S809 2e) |
@@ -691,10 +693,7 @@ tests the RAW `pos_role`/`ims_role` columns because `caller_can_set_menu_price()
 
 ## A till takes a release by itself, and the database can refuse one too old (S809 1b)
 
-A till is one long-lived page: the lock, a PIN sign-in and the KDS move by `navigate()`, and a
-`CACHE_NAME` bump replaces the worker's cache, never the page running. So until S809 a tablet ran the
-code it opened with until someone reloaded it. The defence was keeping every changed RPC callable by
-an old page (`p_expected_version DEFAULT NULL`), which protects only the changes someone remembered.
+History: docs/rules-archive/pos-billing.md#till-release-history
 
 - **`useReleaseReload(safe, idleMs, beforeReload)`** (`src/shared/releaseWatch.js`) is on the PIN
   screen, the order screen and the KDS. They ask the browser to re-check the worker on arrival and
@@ -939,7 +938,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 
 - `settleCredit.js`: the write waits 20 s (then aborted), reads 8 s. No answer or zero rows reads the bill back; only a server refusal says "not settled".
 - It is this page's own press only if `credit_settled_by` is this login with the pressed method while the page holds an unanswered press (memory, 15 min); its Cash In follows once the bill has none. Anyone else's settlement is named, never posted.
-- The Cash In has a minted id (no answer: sent once more, 23505 = landed); a refusal reads OVER. No shift: keep the cash out of the next float and record it, or count it and record nothing. The commission base is `{ orderId, base }` under `useLatestRequest`.
+- The Cash In has a minted id (no answer: sent once more, 23505 = landed); a refusal reads OVER. A unique index holds one entry per bill (S823), so a first-try 23505 is "already on the drawer record". No shift: keep the cash out of the next float and record it, or count it and record nothing. The commission base is `{ orderId, base }` under `useLatestRequest`.
 
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682, S809 4l)
 

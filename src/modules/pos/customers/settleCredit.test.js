@@ -229,6 +229,11 @@ describe('postSettlementCash — the drawer entry (SHIFTS-4)', () => {
     const out = await cash(fakeDb({ openShift: [SHIFT], addCash: [{ data: null, status: 400, error: { code: 'P0001', hint: 'pos_cash_movement_shift_closed', message: 'pos_cash_movement_shift_closed: that shift is closed' } }] }))
     expect(out.text).toMatch(/^ The shift closed before this NPR 3,000 could be added.*record nothing\.$/)
   })
+  test('S823 5c: the bill already has its settlement entry (made on another screen): not added again, never "over"', async () => {
+    const db = fakeDb({ openShift: [SHIFT], addCash: [{ data: null, status: 409, error: { code: '23505', message: 'duplicate key value violates unique constraint "pos_cash_movements_one_credit_settlement"' } }] })
+    expect(await cash(db)).toEqual({ warn: false, text: ' Its cash was already on the drawer record, so it was not added again.' })
+    expect(db.calls.addCash).toHaveLength(1)
+  })
   test('a lost answer is sent again with the same id; landing then, or a duplicate key, is added', async () => {
     const db = fakeDb({ openShift: [SHIFT], addCash: [DROPPED, ok([{}])] })
     expect(await cash(db)).toEqual({ warn: false, text: " Added to the open shift's cash count." })

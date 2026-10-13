@@ -23,7 +23,9 @@ import { randomUUID } from '../../../utils/uuid'
 // till's close marks), for SETTLE_TRY_MS.
 //
 // The Cash In carries an id minted here. A lost answer is sent again once with the same id, and a
-// duplicate-key answer means the first landed, so the drawer is never paid in twice.
+// duplicate-key answer means the first landed, so the drawer is never paid in twice. Since S823 (5c)
+// the database also holds one settlement entry per bill (pos_cash_movements_one_credit_settlement),
+// so an entry another screen already made answers a duplicate key too, and is not added again.
 
 /** How long the settle write, and the Cash In insert, wait for an answer. */
 export const SETTLE_WRITE_MS = 20000
@@ -34,7 +36,7 @@ export const SETTLE_READ_MS = 8000
  *  a later one by itself. */
 export const SETTLE_TRY_MS = 15 * 60 * 1000
 
-/** "9 Kartik 2083 at 7:42 PM". The settling tablet's own clock: the guard stamps who, not when. */
+/** "9 Kartik 2083 at 7:42 PM". The server's clock since S823 (5c): the guard stamps who and when. */
 export function settledWhen(ts) {
   const day = nepalBsLong(ts) || nepalDateAd(ts)
   const time = nepalTime(ts)
@@ -70,6 +72,7 @@ const whyNot = res => (res?.error && !noAnswer(res) ? ` ${errorText(res.error, '
 const NO_SHIFT_STEPS = 'Keep it out of the float you count when the next shift opens, then record it as a Cash In on that shift. If it stays in the drawer and is counted in the float, record nothing.'
 const lookFor = who => `look in Shifts for a "Credit settled" entry for ${who}, and add it as a Cash In only if there is none`
 const ADDED = { warn: false, text: " Added to the open shift's cash count." }
+const ALREADY = { warn: false, text: ' Its cash was already on the drawer record, so it was not added again.' }
 
 /**
  * A Cash settlement's drawer entry. The bill's payment_method stays 'Credit' forever, so without it
@@ -84,7 +87,7 @@ export async function postSettlementCash({ db, order, amount, profileId = null, 
   if (checkFirst) {
     const had = await settleWithin(db.cashFor(order.id), SETTLE_READ_MS, 'Checking the drawer record')
     if (had.error) return { warn: true, text: ` Could not check whether this ${amt} is already on the drawer record, so nothing was added — ${lookFor(who)}.${whyNot(had)}` }
-    if (had.data?.length) return { warn: false, text: ' Its cash was already on the drawer record, so it was not added again.' }
+    if (had.data?.length) return ALREADY
   }
   const shift = await settleWithin(db.openShift(), SETTLE_READ_MS, 'Checking for an open shift')
   // A failed read is not "no shift is open" (S682): nothing was added, whichever it is.
@@ -103,13 +106,17 @@ export async function postSettlementCash({ db, order, amount, profileId = null, 
   const first = await settleWithin(db.addCash(row), SETTLE_WRITE_MS, 'Adding the cash to the shift')
   if (!first.error) return ADDED
   if (!noAnswer(first)) {
+    // A fresh id cannot already exist, so a duplicate key is this bill's one settlement entry, made
+    // before (another screen, or a press this page no longer remembers): the cash is on a drawer
+    // record already (S823 5c).
+    if (isDuplicate(first.error)) return ALREADY
     // The server refused it, so nothing landed (a BEFORE trigger raised).
     if (shiftGone(first.error)) return { warn: true, text: ` The shift closed before this ${amt} could be added, so it is not on any drawer count. ${NO_SHIFT_STEPS}` }
     // The cash is in the drawer and not in Expected Cash, so the close reads OVER (it used to say short).
     return { warn: true, text: ` It could not be added to the open shift's cash count, so the drawer will read ${amt} over — add it as a Cash In on that shift.${whyNot(first)}` }
   }
   // No answer: the same row again. Its id makes a second copy impossible, and a duplicate key means
-  // the first one landed.
+  // the first one landed (or, since S823, that another entry for this bill already had).
   const again = await settleWithin(db.addCash(row), SETTLE_WRITE_MS, 'Adding the cash to the shift')
   if (!again.error || isDuplicate(again.error)) return ADDED
   return { warn: true, text: ` It is not known whether this ${amt} reached the open shift's cash count: the answer was lost. Before adding anything, ${lookFor(who)}.` }
@@ -139,6 +146,8 @@ export async function settleCreditBill({
   const who = order.buyer_name || 'customer'
   const at = now()
   const patch = {
+    // Replaced by the server's own time (S823 5c); sent because a NULL tells the guard this write is
+    // not a settlement at all.
     credit_settled_at: new Date(at).toISOString(),
     credit_settled_by: profileId,
     credit_settled_method: method,

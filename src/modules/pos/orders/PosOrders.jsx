@@ -3114,7 +3114,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (recoveredConflict) { conflictRecoveryRef.current = null; discardConflictOrder(recoveredConflict) }
 
     loadFloor()
-    return { ok: true, oid, oNo, items: serverItems }
+    return { ok: true, oid, oNo, items: serverItems, version: savedVersion }
   }
 
   // S809 3f: whether this order waits in this till's offline queue with lines still to upload. A conflict
@@ -3233,12 +3233,16 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   // Another device saved this order after this screen loaded it. Reload the server's order — lines
   // and version — and never keep anything silently: whatever this device had that the reloaded order
-  // does not carry is listed, with a one-tap "add them back as unsent".
-  async function reloadAfterStale(oid, snapshot, alreadyRead = null) {
+  // does not carry is listed, with a one-tap "add them back as unsent". `duringClose` (S823 5c): the
+  // change was found by the bill close, after this press's own save had landed, so the words are about
+  // the payment ("nothing was charged"), never "nothing was saved".
+  async function reloadAfterStale(oid, snapshot, alreadyRead = null, { duringClose = false } = {}) {
     const where = orderLabel()
     const { data: fresh, error } = alreadyRead || await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Loading the latest order', SEND_READ_MS)
     if (error) {
-      setMsg(`error:${where} was changed on another device, and the latest version could not be loaded — nothing was saved. Go back to the floor and open it again.`)
+      setMsg(duringClose
+        ? `error:${where} was changed on another device while it was being charged, so nothing was charged, and the latest version could not be loaded. Go back to the floor and open it again.`
+        : `error:${where} was changed on another device, and the latest version could not be loaded — nothing was saved. Go back to the floor and open it again.`)
       return
     }
     if (!fresh || fresh.status !== 'open') { showClosedElsewhere(); return }
@@ -3259,7 +3263,9 @@ export default function PosOrders({ billingStation = false } = {}) {
       forgetAcceptedGuestReqs(leftOff.map(r => r.id))
     }
     if (missing.length > 0) setStaleRecovery({ where, missing, guestReqs: leftOff })
-    setMsg(`error:${where} was changed on another device — here is the latest.${missing.length > 0 ? ' Add your items again.' : ' Check it, then save again.'}`)
+    setMsg(duringClose
+      ? `error:${where} was changed on another device while it was being charged, so nothing was charged — here is the latest.${missing.length > 0 ? ' Add your items again, then take the payment.' : ' Check the total, then take the payment again.'}`
+      : `error:${where} was changed on another device — here is the latest.${missing.length > 0 ? ' Add your items again.' : ' Check it, then save again.'}`)
   }
 
   function addBackStaleItems() {
@@ -4302,19 +4308,11 @@ export default function PosOrders({ billingStation = false } = {}) {
       // cached openShiftId: that cache is refreshed only after a close and deliberately survives a
       // failed read, so it can say "open" about a shift another device closed minutes ago. A failed
       // read refuses (fails closed). Runs before performSave, so a refusal here has written nothing.
-      // S809 SHIFTS-6: a Void reads it too, so the void lands on the shift open NOW and that shift's
-      // Z-report counts it (the cache could name a shift already closed and frozen without it). It is
-      // never refused for it: no shift open stamps none, and a failed read keeps the cached id.
+      // A Void reads nothing (S823 5c): guard_pos_order_close files it on the shift open at that
+      // instant, or on none, and never refuses it for want of one. The till's own read (S809
+      // SHIFTS-6) kept a cached id when it failed, which could name a shift already closed.
       let billShiftId = openShiftId
-      if (closeType === 'void') {
-        setCloseStep('Checking the shift…')
-        const { data: shiftRow, error: shiftErr } = await bounded(
-          scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle(), 'Checking the shift', 8000)
-        if (!shiftErr) {
-          billShiftId = shiftRow?.id ?? null
-          setOpenShiftId(billShiftId)
-        }
-      } else if (closeType === 'paid' || closeType === 'writeoff') {
+      if (closeType === 'paid' || closeType === 'writeoff') {
         setCloseStep('Checking the shift…')
         const { data: shiftRow, error: shiftErr } = await bounded(
           scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle(), 'Checking the shift')
@@ -4355,6 +4353,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       //
       // Bounded like every step here (S776). A save that timed out may still land, and a retry is safe:
       // performSave reads a stale refusal back and counts its own landed lines as saved.
+      //
+      // S823 5c: the close carries the items_version of the lines this total is worked out from, the one
+      // this save stored (or, with nothing to save, the one on screen). guard_pos_order_close refuses
+      // a Charge or Complimentary whose stored version has moved since (pos_bill_lines_changed): another
+      // till's save, or a later press of this one, landed in between. No version known sends none.
+      let pricedVersion = Number.isInteger(itemsVersionRef.current) ? itemsVersionRef.current : null
       if (orderItems.length > 0) {
         setCloseStep('Saving the order…')
         const persisted = await withTimeout(performSave(), CLOSE_STEP_MS + 10000, 'Saving the order')
@@ -4389,6 +4393,7 @@ export default function PosOrders({ billingStation = false } = {}) {
             : 'error:Item names were updated from the menu — check the bill and confirm again.')
           return false
         }
+        pricedVersion = Number.isInteger(persisted.version) ? persisted.version : null
       }
 
       const isSplit = closeType === 'paid' && splitMode && tenders.length > 0
@@ -4585,10 +4590,12 @@ export default function PosOrders({ billingStation = false } = {}) {
         // Complimentary that read refused the close when there was none (S754) — so an order left open
         // across a shift close is stamped with the NEXT shift when it is finally billed, which is
         // what PosShifts' close warning tells the supervisor; guard_pos_order_close re-stamps those
-        // two from the shift it locks (S809 2b) anyway. A Void reads it too since S809 SHIFTS-6 but is
-        // never refused for it: no shift open sends none, and only a failed read sends the cached id.
-        // The server does not stamp a void yet (stage 5), so this read is what files it.
+        // two from the shift it locks (S809 2b) anyway. A Void sends the cached id, unread: the guard
+        // files it on the shift open at that instant, or on none (S823 5c).
         shift_id: billShiftId,
+        // S823 5c: the lines this total was worked out from (see pricedVersion above). A void prices
+        // nothing, and the guard neither checks nor keeps a version it sends.
+        ...(closeType !== 'void' && pricedVersion !== null ? { items_version: pricedVersion } : {}),
       }
 
       setCloseStep('Closing the bill…')
@@ -4639,6 +4646,16 @@ export default function PosOrders({ billingStation = false } = {}) {
         if (error.hint === 'pos_vat_status_changed') {
           setBillingSettingsLoaded(false)
           loadTillSettings()
+        }
+        // S823 5c: the stored lines moved after this press saved and priced them (another till saved
+        // the order in between). Nothing was charged. The order screen loads the latest lines, offers
+        // back anything of this cart they lack, and the payment modal steps aside, as for a stale save.
+        if (error.hint === 'pos_bill_lines_changed') {
+          const keep = tenders.filter(t => t.method !== 'Loyalty')
+          refusedTendersRef.current = keep.length > 0 ? { orderId, tenders: keep } : null
+          dismissBillingAfterRefusal()
+          await reloadAfterStale(orderId, orderItems, null, { duringClose: true })
+          return false
         }
         // guard_pos_order_close() (migration 20260819120000) refuses an over-cap discount or a void
         // from an account without Allow Void, and phrases the refusal for the person holding the
