@@ -1,14 +1,20 @@
 // S809 4c: the printed Credit Note mirrors its bill (CREDIT-NOTES-8) — a customized line keeps its
-// choices and a Round Off line makes the printed figures add up to Net Credited — and a reprint's copy
-// label comes from the note's print count read just before it (the S809.4 reprint item).
+// choices and a Round Off line makes the printed figures add up to Net Credited. Since S828 5d a
+// print's copy label is the count the server returns from that print's own write (the S809.4 item).
 import { buildCreditNoteHtml, creditNoteRoundOff, nextCreditNoteCopy, printCreditNote } from './creditNoteHtml'
 
 // Plain functions, not jest.fn implementations: CRA's Jest config resets mocks before every test.
 const mockCalls = []
+const mockAnswer = { current: { data: { print_count: 1 }, error: null } }
 jest.mock('../../../shared/scopedDb', () => ({
   scopedUpdate: (...args) => {
     mockCalls.push(['update', ...args])
-    return { eq: async (...eq) => { mockCalls.push(['eq', ...eq]); return { error: null } } }
+    return {
+      eq: (...eq) => {
+        mockCalls.push(['eq', ...eq])
+        return { select: (...sel) => { mockCalls.push(['select', ...sel]); return { maybeSingle: async () => mockAnswer.current } } }
+      },
+    }
   },
 }))
 
@@ -97,28 +103,67 @@ describe('nextCreditNoteCopy — the copy a print is about to make', () => {
   })
 })
 
-describe('printCreditNote — labels from the stored count', () => {
+describe('printCreditNote — the copy the server counted (S828 5d)', () => {
   let written
+  let win
   beforeEach(() => {
     jest.useFakeTimers()
     written = ''
     mockCalls.length = 0
-    window.open = () => ({ document: { write: h => { written += h }, close() {} }, focus() {}, print() {}, close() {} })
+    win = { closed: false, document: { open() { written = '' }, write: h => { written += h }, close() {} }, focus() {}, print() {}, close() {} }
+    window.open = () => win
   })
   afterEach(() => { jest.useRealTimers() })
+  const n = over => note({ id: 'cn1', gross_amount: 100, non_taxable_amount: 100, net_amount: 100, ...over })
 
-  test('prints the next copy after the stored count and saves that count', async () => {
-    const n = note({ id: 'cn1', print_count: 1, gross_amount: 100, non_taxable_amount: 100, net_amount: 100 })
-    const r = await printCreditNote('c1', n, [], SETTINGS, 'Bhatti', {}, true, 3)
+  test('sends -1 and labels from the count the server returns, not the page\'s own', async () => {
+    // The page opened when the note had 1 print; two more were made elsewhere since.
+    mockAnswer.current = { data: { print_count: 4 }, error: null }
+    const r = await printCreditNote('c1', n({ print_count: 1 }), [], SETTINGS, 'Bhatti', {}, true)
     expect(r).toEqual({ printed: true, newCount: 4, countError: null })
     expect(written).toContain('COPY OF ORIGINAL - (3)')
-    expect(mockCalls).toEqual([['update', 'pos_credit_notes', 'c1', { print_count: 4 }], ['eq', 'id', 'cn1']])
+    expect(mockCalls).toEqual([
+      ['update', 'pos_credit_notes', 'c1', { print_count: -1 }], ['eq', 'id', 'cn1'], ['select', 'print_count'],
+    ])
   })
 
-  test('a blocked pop-up saves nothing and reports the count as it stood', async () => {
+  test('the first print, counted 1, is the original and carries no copy label', async () => {
+    mockAnswer.current = { data: { print_count: 1 }, error: null }
+    const r = await printCreditNote('c1', n({ print_count: 0 }), [], SETTINGS, 'Bhatti', {}, true)
+    expect(r).toEqual({ printed: true, newCount: 1, countError: null })
+    expect(written).not.toContain('COPY OF ORIGINAL')
+  })
+
+  test('a refused count still prints, labelled from the page\'s count, and says the count was not saved', async () => {
+    mockAnswer.current = { data: null, error: { code: '42501', message: 'refused' } }
+    const r = await printCreditNote('c1', n({ print_count: 2 }), [], SETTINGS, 'Bhatti', {}, true)
+    expect(r.printed).toBe(true)
+    expect(r.newCount).toBe(3)
+    expect(r.countError).toMatchObject({ code: '42501' })
+    expect(written).toContain('COPY OF ORIGINAL - (2)')
+  })
+
+  test('zero rows, or a count that did not go up (a server before 5d), is not a count', async () => {
+    mockAnswer.current = { data: null, error: null }
+    expect((await printCreditNote('c1', n({ print_count: 2 }), [], SETTINGS, 'Bhatti', {}, true)).countError).toBeTruthy()
+    mockAnswer.current = { data: { print_count: 2 }, error: null }
+    const r = await printCreditNote('c1', n({ print_count: 2 }), [], SETTINGS, 'Bhatti', {}, true)
+    expect(r.countError).toBeTruthy()
+    expect(r.newCount).toBe(3)
+  })
+
+  test('a blocked pop-up writes nothing and reports the count as the page knew it', async () => {
     window.open = () => null
-    const r = await printCreditNote('c1', note({ id: 'cn1', print_count: 1 }), [], SETTINGS, 'Bhatti', {}, true, 3)
-    expect(r).toEqual({ printed: false, newCount: 3, countError: null })
+    const r = await printCreditNote('c1', n({ print_count: 1 }), [], SETTINGS, 'Bhatti', {}, true)
+    expect(r).toEqual({ printed: false, newCount: 1, countError: null })
     expect(mockCalls).toEqual([])
+  })
+
+  test('a window closed before the count answered prints nothing', async () => {
+    mockAnswer.current = { data: { print_count: 2 }, error: null }
+    win.closed = true
+    const r = await printCreditNote('c1', n({ print_count: 1 }), [], SETTINGS, 'Bhatti', {}, true)
+    expect(r.printed).toBe(false)
+    expect(written).not.toContain('CREDIT NOTE')
   })
 })

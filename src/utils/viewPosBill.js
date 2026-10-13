@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom } from '../shared/scopedDb'
 import { buildBillHtml, buildCompSlipHtml } from '../modules/pos/orders/posOrderPrintHtml'
-import { computeRecipeCosts } from './recipeCost'
+import { posFoodCosts } from '../modules/pos/orders/posRecipeBook'
 import { withTimeout, settleWithin } from './withTimeout'
 import { readHscMap, staffNameFor, REPRINT_READ_MS } from '../modules/pos/orders/billReprintData'
 
@@ -23,6 +23,15 @@ function writeLoadFailure(w) {
   if (!w) return
   w.document.open()
   w.document.write('<p style="font-family:sans-serif;color:#c00;padding:24px">Couldn\'t load this bill. Close this tab and open it again from the report.</p>')
+  w.document.close()
+}
+
+// A Complimentary Slip prints what each comped dish cost in ingredients, which the till's recipe book
+// shows only to a POS Supervisor or above (S828 5d). One line for anyone else, never a slip at NPR 0.
+function writeCostsRefused(w) {
+  if (!w) return
+  w.document.open()
+  w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">This Complimentary Slip shows what the food cost, which only a POS supervisor, a POS manager or the Owner can see. Ask one of them to open it.</p>')
   w.document.close()
 }
 
@@ -80,23 +89,32 @@ export async function viewPosBill(clientId, row) {
   const { name: staffName, error: staffErr } = await staffNameFor(supabase, clientId, staffId)
   if (staffErr) { writeLoadFailure(w); return }
 
-  // computeRecipeCosts THROWS on a failed read (recipeCost.js), which used to leave the tab on
-  // "Loading…" with an unhandled rejection. A slip valued at zero would be a wrong document.
+  // Food costs through the till's recipe book (S828 5d), as the till's own Complimentary Slip and the
+  // Sales Report's comp cost read them: a POS manager on a PIN cannot read `items`, so the direct walk
+  // costed every comp at its typed Cost Price, usually NPR 0. The book answers a POS Supervisor or
+  // above, the Owner and the operator; a Staff login (Parking's View bill) is refused and told so.
+  // It THROWS on a failed read, which used to leave the tab on "Loading…" with an unhandled
+  // rejection. A slip valued at zero would be a wrong document.
   const slipCosts = async recipeIds => {
     if (recipeIds.length === 0) return {}
     try {
-      return await withTimeout(computeRecipeCosts(supabase, recipeIds), REPRINT_READ_MS, 'Reading food costs')
+      return await withTimeout(posFoodCosts(supabase, clientId, recipeIds), REPRINT_READ_MS, 'Reading food costs')
     } catch (e) {
       console.error('viewPosBill: food costs could not be read:', e)
-      return null
+      return e?.hint === 'rank_required' ? 'rank' : null
     }
+  }
+  const costsMissing = costMap => {
+    if (costMap === 'rank') { writeCostsRefused(w); return true }
+    if (!costMap) { writeLoadFailure(w); return true }
+    return false
   }
 
   let html
   if (row.isItemComp) {
     const compedItems = compedItemsForStaff
     const costMap = await slipCosts(compedItems.map(i => i.recipe_id).filter(Boolean))
-    if (!costMap) { writeLoadFailure(w); return }
+    if (costsMissing(costMap)) return
     html = buildCompSlipHtml({
       order: { ...order, invoice_no: row.compNo, close_reason: compedItems[0]?.comp_reason || '', bill_remarks: '' },
       items: compedItems, costMap, copyLabel: 'VIEW ONLY',
@@ -104,7 +122,7 @@ export async function viewPosBill(clientId, row) {
     })
   } else if (order.close_type === 'writeoff') {
     const costMap = await slipCosts(items.map(i => i.recipe_id).filter(Boolean))
-    if (!costMap) { writeLoadFailure(w); return }
+    if (costsMissing(costMap)) return
     html = buildCompSlipHtml({
       order, items, costMap, copyLabel: 'VIEW ONLY',
       outletName, tableName, authorizedBy: staffName,

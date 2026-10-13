@@ -326,7 +326,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     const print = await printCreditNote(clientId, created, payableItems, settings, outletName, hscMap, vatReg)
     // S754: a blocked pop-up printed nothing, and the modal closed as though it had.
     const printText = print.printed ? ''
-      : 'The print window was blocked by the browser, so nothing printed. Allow pop-ups for this site, then print it from Credit Notes → Credit Note Book → Print.'
+      : 'The print window was blocked by the browser, or closed before the note went into it, so nothing printed. Allow pop-ups for this site, then print it from Credit Notes → Credit Note Book → Print.'
 
     // Revenue correction into TODAY's open period (the period the correction is discovered in), not
     // the original bill's. Stock comes back only when the food was not served on this bill (S809 2e,

@@ -1,4 +1,4 @@
-import { bookFromPosRead, deltaIdsOf, loadPosRecipeBook, posFoodCosts, posStockLines } from './posRecipeBook'
+import { bookFromPosRead, deltaIdsOf, loadPosRecipeBook, posDeltaCosting, posFoodCosts, posStockLines } from './posRecipeBook'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 
@@ -146,6 +146,26 @@ describe('posFoodCosts / posStockLines / loadPosRecipeBook', () => {
     await expect(loadPosRecipeBook(sb, CLIENT, { recipeIds: [MOMO] })).rejects.toMatchObject({ hint: 'rank_required', code: '42501' })
     await expect(posFoodCosts(sb, CLIENT, [MOMO])).rejects.toThrow('pos_recipe_book: refused')
     await expect(posStockLines(sb, CLIENT, [MOMO], [])).rejects.toThrow('pos_recipe_book: refused')
+  })
+
+  it('posDeltaCosting: a choice\'s stock lines and their rates in one read, sub-recipe items included (S828 5d)', async () => {
+    const sb = rpcStub()
+    const deltas = [[{ item_id: CHEESE, qty: 30 }, { sub_recipe_id: SAUCE, qty: 20 }]]
+    const { explosion, rateOf } = await posDeltaCosting(sb, CLIENT, deltas)
+    expect(sb.calls).toEqual([['pos_recipe_book', { p_client_id: CLIENT, p_recipe_ids: [SAUCE], p_item_ids: [CHEESE] }]])
+    const cost = deltaItems(deltas[0], explosion).reduce((s, x) => s + x.qty * rateOf(x.item_id), 0)
+    // 37.5 g cheese at NPR 2 + 16 g tomato at 0.20 + 4 g onion at 0.10: what the Owner's reads give.
+    expect(cost).toBeCloseTo(75 + 3.2 + 0.4, 9)
+    expect(rateOf('not-in-the-book')).toBe(0)
+  })
+
+  it('posDeltaCosting asks nothing for plates with no stock lines, and a refused read throws', async () => {
+    const sb = rpcStub()
+    const none = await posDeltaCosting(sb, CLIENT, [[], null])
+    expect(none.explosion).toEqual({ itemYield: {}, subPerUnit: {} })
+    expect(sb.calls).toHaveLength(0)
+    const refused = rpcStub({ data: null, error: { code: '42501', hint: 'rank_required', message: 'pos_recipe_book: refused' } })
+    await expect(posDeltaCosting(refused, CLIENT, [[{ item_id: CHEESE, qty: 1 }]])).rejects.toMatchObject({ hint: 'rank_required' })
   })
 
   it('deltaIdsOf lists each item and sub-recipe once', () => {

@@ -64,6 +64,22 @@ export async function posFoodCosts(supabase, clientId, recipeIds) {
 }
 
 /**
+ * Choices' stock lines, priced, through one read (S828 5d, for the Customization report's Margin
+ * tab): `explosion` turns stored lines into raw items (loadDeltaExplosion's shape, for deltaItems),
+ * `rateOf(itemId)` is each raw item's per_uom_rate, 0 for one the book does not hold. A POS manager on
+ * a PIN read `items` directly and got every yield 100% and every rate 0.
+ */
+export async function posDeltaCosting(supabase, clientId, deltaLists) {
+  const { itemIds, subRecipeIds } = deltaIdsOf(deltaLists)
+  if (itemIds.length === 0 && subRecipeIds.length === 0) {
+    return { explosion: { itemYield: {}, subPerUnit: {} }, rateOf: () => 0 }
+  }
+  const book = await loadPosRecipeBook(supabase, clientId, { recipeIds: subRecipeIds, itemIds })
+  const explosion = await loadDeltaExplosion(supabase, deltaLists, { book })
+  return { explosion, rateOf: id => Number(book.items.get(id)?.per_uom_rate) || 0 }
+}
+
+/**
  * What a closing bill takes off the ledger, through one read: `breakdown` is the recipes' raw items
  * per plate (explodeRecipeIngredients' shape), `explosion` turns the choices' stored lines into raw
  * items (loadDeltaExplosion's shape, for deltaItems). Both trimmed by each item's yield %.

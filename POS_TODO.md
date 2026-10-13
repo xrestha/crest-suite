@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-13 (S823 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); stages 6–7 outlined)
+Last updated: 2026-10-13 (S828 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5f designed and Q30–Q32 answered (S828); stages 6–7 outlined)
 
 ---
 
@@ -75,7 +75,7 @@ Stage: 1 = security, tenant boundaries and REST holes; 2 = bills, tax and stock 
 | ID | Finding | Sev | Stage | Decision | Mig |
 | --- | --- | --- | --- | --- | --- |
 
-## S809.1 Owner decisions (Q1–Q29)
+## S809.1 Owner decisions (Q1–Q32)
 
 Each has a recommended answer. Answering "all as recommended" is enough to start; name any you want
 different.
@@ -117,6 +117,17 @@ from the recommendation:
 differs from the recommendation:
 
 - **Q29 (b):** the server-side post to Inventory is built now, as slice 5f, not left for stage 7.
+
+**Answered 2026-10-13: the three 5f design questions** (S828, asked in plain words after the 5f design
+pass), each as recommended:
+
+- **Q30 (a):** the server writes a closed bill's stock movement lines as well as its sales, in the
+  close's transaction. The recipe walk then exists twice (`recipeCost.js` and a SQL copy), checked
+  against each other at every apply; this reverses `pos-billing.md`'s "never a SQL copy of it".
+- **Q31 (a):** an outlet that switches Inventory on later starts that day. Earlier bills stay in every
+  POS report and are never sent to Inventory, nor their credit notes.
+- **Q32 (yes):** the server also sends a credit note to Inventory when it is issued, as a small
+  follow-on slice after the bills.
 
 **Stage 1**
 
@@ -370,9 +381,9 @@ rate-limit key and whether 5c raises the till build floor. Then 5c, 5d, 5e and 5
 | 5a ✅ | S782 grants (shipped 2026-10-12, S821, `20261012150000` applied live, migration only): TRUNCATE/REFERENCES/TRIGGER live on 19 tables (`pos_cash_movements`, `pos_loyalty_ledger` among them), MAINTAIN on about 80 (`pos_parking_slips`, `pos_payment_confirmations`, `pos_guest_order_requests` among them) | revoked from anon, authenticated and PUBLIC on every public table; the schema's default privileges stop handing them to new tables | Q28 |
 | 5b ✅ | A2 rate-limit first hop; A2 delete-open-order message; 4g `pos_customer_phone_locked` names Move (shipped 2026-10-12, S822: probe `20261012160000` created, called and dropped by `20261012160100`; `20261012170000` applied live; app wording crest-v437. The probe saw `x-crest-build` arrive, so 5c's floor raise stands; the limit now keys on `cf-connecting-ip`, which Cloudflare refuses from a caller) | a throwaway header probe first (created, called with a set `x-forwarded-for` and `x-crest-build`, dropped); `submit_reservation_request` keyed on the trusted hop (or left, with the reason recorded); `guard_pos_order_items_closed_del` tells a deleted parent from a closed one (S749 DEFINER lookup); the phone-lock sentence | — |
 | 5c ✅ | `credit_settled_at := now()`; the `credit_settlement` unique index; the close pins its priced lines (`items_version`, after checking what bumps it); a Split bill's legs inside the shift lock; a void's `shift_id` from the open shift (4a's browser read files it today); raise `pos_min_till_build()` (step 1 shipped 2026-10-13, S823, `20261013100000` applied live, crest-v438: only `save_pos_order_items` moves `items_version`; Close Shift waits 11 minutes for short Split legs; the till's void read removed. Step 2 `20261013100100` raised the floor to 438 once crest-v438 was live) | `guard_pos_order_close`, `pos_shifts_guard`, a partial unique index on `pos_cash_movements`; a second file raising the floor after the deploy, only if 5b's probe sees `x-crest-build` | — |
-| 5d | CREDIT-NOTES-5 server half (`original_invoice_*` from the bill); the server-side credit-note print counter (the parking slip's `OLD.print_count + 1`); `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows for a client without Inventory (4e); 2f: a comp-cost read IMS logins may use (`viewPosBill.js`, `loadDeltaExplosion`) | `guard_pos_credit_note`, `ims_sales_entries_guard`, a new DEFINER read | — |
+| 5d ✅ | CREDIT-NOTES-5 server half (`original_invoice_*` from the bill); the server-side credit-note print counter (the parking slip's `OLD.print_count + 1`); `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows for a client without Inventory (4e); 2f: a comp-cost read IMS logins may use (`viewPosBill.js`, `loadDeltaExplosion`) (shipped 2026-10-13, S828, `20261013140000` applied live, crest-v443. Also refuses a sales row naming the wrong kind of record, and the operator now keeps only its restore. 2f needed no new read: IMS logins cannot see till bills, so both screens read `pos_recipe_book`) | `guard_pos_credit_note`, `ims_sales_entries_guard` | — |
 | 5e | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`) | those two functions; `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys | — |
-| 5f | 4e: the server posts a closed bill to Inventory from the stored bill in the close's transaction (replacing `postClosedBill`'s browser read); posting a POS-only outlet's past unmarked bills when Inventory is switched on | its own plan first: the depletion walk lives only in `recipeCost.js` ("never a SQL copy of it", `pos-billing.md`), so a server post needs a SQL copy of it or another shape; may take more than one migration | Q29 |
+| 5f | 4e: the server posts a closed bill to Inventory from the stored bill in the close's transaction (replacing `postClosedBill`'s browser read); posting a POS-only outlet's past unmarked bills when Inventory is switched on | Designed S828 (Q30–Q32). Finding: every Inventory stock figure works usage out from `sales_entries` at read time; only the `stock_movements` ledger rows (Stock Movements, Reorder's Book Stock, a "not served" put-back) need the walk at close, and a read-only SQL port of the ~80-line walk matched all 71,725 live ledger rows. Slices: **5f-1** an AFTER UPDATE OF status trigger (DEFINER, inside an exception block so a failed post never refuses a close) writes the sales rows and ledger rows, checking for itself what the INVOKER guards would (Inventory on, open month holding the bill's Nepal day, billed bill of this outlet), plus a unique partial index on `stock_movements(ref_id, source, item_id)` for `pos_sale`/`pos_comp`, a fixture probe (nested and shared sub-recipes, trims, choices, comp, writeoff, discount) and a live parity query; **5f-2** a `post_waiting_pos_bills` RPC for the floor and Periods, the browser stops writing till rows (both guards refuse them outside the operator's restore), the till floor raised; **5f-3** an "Inventory since" stamp set when `ims_enabled` turns on, so earlier bills are never counted as waiting; **5f-4** credit notes posted by the server at issue | Q29, Q30 (a), Q31 (a), Q32 |
 
 Closed without work: S809.4's `pos_customers` audit trigger (1i) shipped in 3k. Not in stage 5 unless the
 owner pulls them in: an FK on `pos_orders.table_id` (4k, needs a decision on deleting a table with bill
@@ -403,6 +414,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
 - **IMS gate passes have the parking slip's numbering hole** (found by the 1k drafter):
   `ims_gate_pass_void_guard` does not clear a browser-sent `pass_no`, there is no `UNIQUE (client_id,
   pass_no)` (live: 3 rows, 0 duplicates), and vehicle, notes and print count are editable.
+- **The nightly expired-trial purge has never run** (found S828 by the 5f design pass, checked live
+  2026-10-13): `crest-purge-expired-trials` failed all 40 runs from 2026-09-03 to 2026-10-12 with
+  `function extensions.http_post(url => text, headers => jsonb, body => jsonb) does not exist`
+  (`20260903150000`, ~line 180; pg_net's function is `net.http_post`). Expired trials have never been
+  purged. Not POS; the owner was told the same day.
 - **Trial signup gives a working login before approval** (part of RESERVATIONS-1's reach): RLS honours a
   pending trial's JWT. This is the documented "UI gate, not a security boundary" (`subscription-access.md`).
   RESERVATIONS-1 does not need it changed, but any other cross-tenant read would be reachable the same way.
@@ -429,8 +445,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   fixed in 3k: three enrolment audit triggers, and the table row now says the tablet's clock.
 - ~~Credit Note Book reprint labels from the list loaded at page open, so two managers reprinting one note
   print the same copy number (the stored count is right since 1c) (1c).~~ App half fixed in 4c: the
-  reprint reads `print_count` just before printing (`nextCreditNoteCopy`). Two reprints at the same
-  instant can still share a number until the server keeps the counter (stage 5).
+  reprint reads `print_count` just before printing (`nextCreditNoteCopy`). ~~Two reprints at the same
+  instant can still share a number until the server keeps the counter (stage 5).~~ Server half fixed in
+  5d (S828): any differing count becomes OLD + 1 and the page labels from the count returned.
 - ~~Kitchen stage times (`started_at`/`ready_at`/`served_at`) are still tablet-supplied, so prep times
   can be shaded (1d).~~ Fixed in 3d: the server stamps each on entering its stage.
 - ~~Admin → Guest Menu Preview quotes "This menu isn't available right now"; the guest page says "This menu
@@ -490,9 +507,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     flag read when the report is generated, so a month generated after a VAT change loses its VAT. Fix:
     add `vat_registered` to its `pos_orders` select and pass `billVatRegistered(o, vatReg)` (2c).~~ Fixed
     in 3m: the section now goes through `salesReportMath.js`' `billAmounts`.
-  - CREDIT-NOTES-5's server half: `guard_pos_credit_note` accepts any sent `original_invoice_no`,
+  - ~~CREDIT-NOTES-5's server half: `guard_pos_credit_note` accepts any sent `original_invoice_no`,
     `original_invoice_label` and `original_invoice_date_bs`. Set them from the bill (`v_order.invoice_no`,
-    the TI/PB label from `v_order.vat_registered`); no note column needed (2c).
+    the TI/PB label from `v_order.vat_registered`); no note column needed (2c).~~ Fixed in 5d (S828),
+    the Miti from `bs_months`; the label keeps today's prefix, as the page does (the prefix is not
+    stored on a bill).
   - `PosCustomers.jsx`' settings comment says `is_vat_registered` moves the delivery commission base by
     about 13 points. It does not: taxable + non-taxable is ex-VAT under either flag (2c).
   - Do not switch an outlet's VAT status before every till has reloaded to crest-v420: an older till
@@ -507,7 +526,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - Same cause as IMS-HANDOFF-3, not switched: ~~Sales Report's and Sales Exceptions' comp food cost (one
     line each, `posFoodCosts`),~~ (switched in 4d) `viewPosBill.js` (also opened by IMS logins with no POS
     rank, which `pos_recipe_book` refuses, so it needs a fallback) and the Customization report
-    (`loadDeltaExplosion`) (2f). Stage 5: a server read IMS logins may use.
+    (`loadDeltaExplosion`) (2f). ~~Stage 5: a server read IMS logins may use.~~ Fixed in 5d (S828)
+    without one: both read `pos_recipe_book`. IMS logins never reach either (`no_ims_staff` hides till
+    bills), so the premise did not hold.
   - ~~A note's takeback has the race bills had (a late post after a Periods post); no refusal for notes
     yet. `creditNotePosting.js`' comment at its mark write and `posted: true` when only the mark failed
     are moot now (2f).~~ Fixed in 3j (`pos_credit_note_already_posted`).
@@ -603,8 +624,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~IMS-HANDOFF-9 is unchanged: neither the floor banner nor its post checks whether the client has
     Inventory at all; errorText's `pos_sale_unlinked` operator sentence names only Periods (3j).~~ Fixed
     in 4e (`tillPostsToIms`).
-  - `ims_sales_entries_guard` lets a `pos_credit` row name any note, with no check that the note belongs
-    to the row's outlet (the new lock simply skips a note of another outlet) (3j).
+  - ~~`ims_sales_entries_guard` lets a `pos_credit` row name any note, with no check that the note belongs
+    to the row's outlet (the new lock simply skips a note of another outlet) (3j).~~ Fixed in 5d (S828),
+    `pos_credit_note_other_outlet`.
   - ~~IMS-HANDOFF-5 (no "till bills still waiting" note when ending a month) could now use
     `pos_ims_waiting_counts` for any closer, IMS supervisors included (3j).~~ Done in 4e
     (`tillWaitingPreflight`).
@@ -684,15 +706,16 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - `handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
     fails; the server's `option_count` counts picks of hidden options (harmless while
     `option_not_on_menu` fires first) (3o).
-  - On a POS manager's PIN the Customization Report's Margin `items` read is fenced, so costs read NPR 0:
-    the 2f item above ("the Customization report (`loadDeltaExplosion`)"), not a new one (3o).
+  - ~~On a POS manager's PIN the Customization Report's Margin `items` read is fenced, so costs read NPR 0:
+    the 2f item above ("the Customization report (`loadDeltaExplosion`)"), not a new one (3o).~~ Fixed in
+    5d (S828), `posDeltaCosting`.
 - **Found while building stage 4, wave 2 (4d, 4e, 4f; 2026-10-12, not fixed):**
   - ~~The operator's `imsEnabled` is always true, so a bill the operator closes on an outlet without Crest
     IMS still posts to Inventory (4e).~~ Fixed the same day (owner): `outletHasIms` reads the viewed
     outlet's own module for the operator, on the till and both credit-note screens.
   - Stage 5: a server-side post from the stored bill, stamping it in one transaction (would replace
-    `postClosedBill`'s browser read); `ims_sales_entries_guard` refusing till rows for a client without
-    Inventory; and, when Inventory is switched on for a POS-only outlet, a way to settle (or post) its
+    `postClosedBill`'s browser read); ~~`ims_sales_entries_guard` refusing till rows for a client without
+    Inventory~~ (done in 5d, S828, `pos_outlet_no_ims`); and, when Inventory is switched on for a POS-only outlet, a way to settle (or post) its
     past unmarked bills, which D6 kept recoverable (4e).
   - ~~The POS-only Home's own POS sales pivot still shows money to Staff rank; D2 covered only the POS
     Dashboard (4d).~~ Fixed the same day (owner): Supervisor and above, as D2.

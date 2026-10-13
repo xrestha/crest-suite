@@ -246,3 +246,23 @@ an old page (`p_expected_version DEFAULT NULL`), which protects only the changes
 The floor stood at NULL from S809 1b (2026-10-09) until S822's header probe proved `x-crest-build`
 reaches the database; S823 (5c) raises it to 438, the first build whose close carries `items_version`,
 in a second migration applied only once that build is live (`20261013100100`).
+
+## Backfill batching
+
+Moved from `.claude/rules/pos-billing.md` (S828, to keep the POS rules load under its ceiling).
+
+**That backfill could not finish the months it exists for (fixed S629).** It wrote three sequential
+round trips per bill — `sales_entries` insert, `stock_movements` insert, `ims_posted_at` stamp —
+plus one update per already-posted bill, so an 800-bill month was ~2,400 requests against the 120 s
+wall clock `Periods.js` bounds it with. The operator saw a timeout, and the busier the month the
+more certainly it failed. It now prepares every bill's rows first and writes in batches of 40, with
+a per-bill retry when a batch is rejected so one bad bill cannot cost its 39 neighbours, and each
+bill stamped only after its own revenue lands so an abandoned run leaves the rest for the next one.
+
+**Its own double-post guard was the thing most likely to truncate.** The guard reads
+`sales_entries` by `.in('pos_order_id', everyCandidate)` — one row per sold *line*, so a few hundred
+bills is already thousands of rows, and the id list itself outran the request URL. Either failure
+makes posted bills look unposted, and the function then posts their revenue again: precisely the
+bug the guard exists to prevent. It is paged and chunked now, and a failed read **aborts** rather
+than being read as "none of these has posted". `backfillPosToIms.test.js` asserts the round-trip
+counts as exact numbers, because a regression to per-order writes is invisible otherwise.

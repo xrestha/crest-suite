@@ -235,6 +235,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         gotchas: [
           'A failed read is a failed report: the tiles and tables do not render over a read that did not complete, and the Margin tab can fail alone (stock lines or item rates unreadable) while the three sales tabs stand.',
           'The Margin tab appears only on a client WITH IMS — an admin viewing a POS-only client does not see it.',
+          'The Margin tab costs each choice through the till\'s own recipe book (S828), so a POS manager signed in with a PIN sees the same costs as the Owner. It used to read the item list directly, which a PIN login cannot, and every choice then cost NPR 0.',
           'The report reads the snapshot on each bill line, so a choice renamed or deleted since still appears under the name it was sold as.',
           'Extras earned and Cost / plate are already at the size that was sold (S760): a topping picked on a Large bowl contributes its scaled price and its scaled stock, because both were frozen on the line. There is no separate by-size tab — Recipe Costing\'s cost range is where a dish is compared size by size.',
         ],

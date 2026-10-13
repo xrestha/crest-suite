@@ -180,6 +180,34 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5d: CREDIT-NOTES-5's server half; the server-side credit-note print
+  counter; `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows without
+  Inventory (4e); 2f's comp-cost read~~ — **shipped S828, 2026-10-13**: migration `20261013140000`
+  applied live; app crest-v443; no Edge Function, no till floor change. **The note's references**
+  (original invoice number, TI/PB label, Miti) are the bill's, set by `guard_pos_credit_note` from the
+  bill's VAT stamp, today's prefix and `bs_months` (a bill with no number is refused as unpaid); the
+  restore keeps what it sends. Checked live first: both notes issued so far store exactly what the
+  server derives, and the apply re-checked every note. **The copy count** is the parking token's rule:
+  any differing `print_count` becomes OLD + 1, the page sends -1 and labels from the count returned,
+  so two reprints at one instant get two numbers. **`ims_sales_entries_guard`** refuses
+  `sales_entry_link_mismatch` (a row naming the wrong kind of record: the backfills' "already posted?"
+  reads do not look at source), `pos_outlet_no_ims` (a new till row where `ims_enabled` is false;
+  NULL counts as on) and `pos_credit_note_other_outlet` (a reversal naming another outlet's note, which
+  the stamp trigger let in unmarked). The operator now keeps only its restore (an insert dated before
+  the transaction, or undated) and its updates and deletes; it was waved through everything. Live: 0
+  rows name the wrong record, 0 POS outlets have Inventory off. **2f decided differently from the
+  plan**: no new DEFINER read. The plan's premise (IMS logins open `viewPosBill` and the Customization
+  report) did not hold, because `no_ims_staff` hides till bills from them; the two screens switched to
+  the existing `pos_recipe_book` (`posFoodCosts`, new `posDeltaCosting`), which fixes the POS manager on
+  a PIN, and a Staff PIN opening a comp slip is told only a Supervisor+ sees food costs. Verified inside
+  the apply (rolled back, as Bloom Cafe's POS manager and supervisor PINs and the operator): made-up
+  references on a PAN bill and a Tax Invoice stored the bills' own (a bill closed 00:15 Nepal on 13
+  October dated "27 Ashwin 2083", not the UTC day); prints sending -1, -1, 7, 3 counted 1, 2, 3, 3;
+  four wrong-record rows refused; a bill's sale and its note's reversal landed and marked both; a "not
+  served" note posted as ordinary still refused and as a put-back landed; the operator's reversal in
+  another outlet's month refused; a restored note kept its label; with Inventory off a supervisor's
+  till sale refused while the operator's restore and a hand-entered sale landed; Inventory on again,
+  the sale landed. Read back: both guards at the new md5s, INVOKER, triggers enabled, no probe rows.
 - [x] ~~S809 stage 5, slice 5c: `credit_settled_at := now()`; the `credit_settlement` unique index; the
   close pins its priced lines; a Split bill's legs inside the shift lock; a void's shift from the open
   shift; raise `pos_min_till_build()`~~ — **shipped S823, 2026-10-13**: migration `20261013100000`

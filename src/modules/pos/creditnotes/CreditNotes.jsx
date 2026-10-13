@@ -166,27 +166,25 @@ export default function CreditNotes() {
     setBookMsg(null)
     // With the lines (and their choices, S809 4c, CREDIT-NOTES-8), the credited bill's own tax status
     // (S809 2c, CREDIT-NOTES-5): the note reprints as a Tax Invoice or a PAN bill correction because
-    // its bill was one, not by today's setting. And the note's print count as it stands now (S809 4c):
-    // the copy label came from the list loaded at page open, so two managers reprinting one note
-    // printed the same copy number. Read in the same batch, so the print window waits no longer.
-    // Bounded: the pop-up opens only after these, and a hung read left the press doing nothing.
-    const [{ data: items, error: itemsErr }, { data: bill, error: billErr }, { data: stored, error: countReadErr }] = await Promise.all([
+    // its bill was one, not by today's setting. The copy label is the server's count from the print's
+    // own write (S828 5d), so no count is read here. Bounded: the pop-up opens only after these, and a
+    // hung read left the press doing nothing.
+    const [{ data: items, error: itemsErr }, { data: bill, error: billErr }] = await Promise.all([
       settleWithin(scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary, pos_order_item_options(option_name, price_delta, sort)').eq('order_id', note.order_id), REPRINT_READ_MS, 'Reading the note lines'),
       settleWithin(scopedFrom('pos_orders', 'vat_registered').eq('id', note.order_id).maybeSingle(), REPRINT_READ_MS, 'Reading the bill'),
-      settleWithin(scopedFrom('pos_credit_notes', 'print_count').eq('id', note.id).maybeSingle(), REPRINT_READ_MS, 'Reading the print count'),
     ])
     // S754: a failed read here printed a numbered Credit Note with no lines on it, and still
     // advanced its copy counter. Refuse instead — nothing has printed, so a retry is safe.
-    const readErr = itemsErr || billErr || countReadErr
+    const readErr = itemsErr || billErr
     if (readErr) { setBookMsg(asActionError(readErr, 'operator')); return }
     // Same exclusion as the original issuance (IssueCreditNoteModal.jsx) — item-level comps were
     // never billed, so they were never on this Credit Note in the first place.
     const payableItems = (items || []).filter(i => !i.comped)
     const { map: hscMap, error: hscErr } = await readHscMap(scopedFrom, payableItems.map(i => i.recipe_id))
     if (hscErr) { setBookMsg(asActionError(hscErr, 'operator')); return }
-    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap, bill?.vat_registered ?? null, stored?.print_count)
+    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap, bill?.vat_registered ?? null)
     if (!printed) {
-      setBookMsg(`The print window for CN${note.credit_note_no} was blocked by the browser, so nothing printed. Allow pop-ups for this site and press Reprint again.`)
+      setBookMsg(`The print window for CN${note.credit_note_no} was blocked by the browser, or closed before the note went into it, so nothing printed. Allow pop-ups for this site and press Reprint again.`)
       return
     }
     if (countError) {

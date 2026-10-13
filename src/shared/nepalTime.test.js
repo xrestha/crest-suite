@@ -110,6 +110,13 @@ describe('nepalBsLong', () => {
     expect(nepalBsLong('2026-09-03T06:00:00+05:45')).toBe('18 Bhadra 2083')
   })
 
+  it('agrees with the credit-note guard on a bill closed just after midnight in Nepal (S828 5d)', () => {
+    // guard_pos_credit_note writes a note's Invoice Date (Miti) from bs_months, and its probe in
+    // migration 20261013140000 expects exactly this string for a bill closed at this instant: 00:15
+    // on 13 October in Nepal, still 12 October in UTC. Change the two together.
+    expect(nepalBsLong('2026-10-12T18:30:00Z')).toBe('27 Ashwin 2083')
+  })
+
   it('falls back to empty rather than a confident wrong date outside the table', () => {
     // Same range guard as nepalBs, so a caller can print the AD date alone instead.
     expect(nepalBsLong('1900-01-01T00:00:00Z')).toBe('')

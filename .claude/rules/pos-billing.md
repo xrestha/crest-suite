@@ -54,21 +54,10 @@ operator, who post those from Periods). Periods' button is the Owner's and the o
 login cannot read till bills (`no_ims_staff`), so it reads `pos_ims_waiting_counts` (DEFINER, numbers
 per Nepali month) and is told who posts. **Never word a count an IMS login made itself.**
 
-**That backfill could not finish the months it exists for (fixed S629).** It wrote three sequential
-round trips per bill — `sales_entries` insert, `stock_movements` insert, `ims_posted_at` stamp —
-plus one update per already-posted bill, so an 800-bill month was ~2,400 requests against the 120 s
-wall clock `Periods.js` bounds it with. The operator saw a timeout, and the busier the month the
-more certainly it failed. It now prepares every bill's rows first and writes in batches of 40, with
-a per-bill retry when a batch is rejected so one bad bill cannot cost its 39 neighbours, and each
-bill stamped only after its own revenue lands so an abandoned run leaves the rest for the next one.
-
-**Its own double-post guard was the thing most likely to truncate.** The guard reads
-`sales_entries` by `.in('pos_order_id', everyCandidate)` — one row per sold *line*, so a few hundred
-bills is already thousands of rows, and the id list itself outran the request URL. Either failure
-makes posted bills look unposted, and the function then posts their revenue again: precisely the
-bug the guard exists to prevent. It is paged and chunked now, and a failed read **aborts** rather
-than being read as "none of these has posted". `backfillPosToIms.test.js` asserts the round-trip
-counts as exact numbers, because a regression to per-order writes is invisible otherwise.
+**The backfill writes in batches of 40 with a per-bill retry, each bill stamped after its own
+revenue lands, and its already-posted guard is paged and chunked: a failed read aborts, never reads
+as "none posted"** (S629). `backfillPosToIms.test.js` pins the round-trip counts.
+History: docs/rules-archive/pos-billing.md#backfill-batching
 
 **`sales_entries` and `stock_movements` can diverge, so neither is evidence of the other.**
 The till's post (`postClosedBill`) writes revenue first and depletion second, best-effort — by design, so a depletion problem never blocks a bill. The consequence is that a bill
@@ -94,8 +83,9 @@ bill's stock lines now read through `pos_recipe_book` (DEFINER; the operator, or
 the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`,
 `posStockLines`), which feed `recipeCost.js`' `{ book }` walk, never a SQL copy of it. A till or shift
 screen that costs or depletes uses those two. Sales Report's and Sales Exceptions'
-comp cost switched in S814 (`posFoodCosts`). Not switched yet: `viewPosBill` and the Customization
-report, which IMS logins with no POS rank open and `pos_recipe_book` refuses (stage 5).
+comp cost switched in S814 (`posFoodCosts`), `viewPosBill`'s comp slips and the Customization report's
+Margin tab (`posDeltaCosting`) in S828. A Staff PIN opening a comp slip is told only a Supervisor+ sees
+food costs; an IMS login reaches neither (`no_ims_staff` hides till bills).
 
 **`sales_entries` is period-scoped, not client-scoped**, so it is deliberately absent from
 `CLIENT_SCOPED_TABLES` and `scopedDb` throws for it — use plain `supabase.from()`, as
@@ -846,9 +836,9 @@ Times on every POS slip and screen go through `src/shared/nepalTime.js`; see
 - **A reprint takes its HSC codes and Cashier / Authorized by from the bill** (`billReprintData.js`:
   `readHscMap`, `staffNameFor`), never from the `hscMap` state or the reprinter's login. Either read
   failing prints nothing; a document with blank codes or the wrong name is wrong, not partial.
-- **A credit-note reprint's label is `nextCreditNoteCopy` over a `print_count` read just before
-  printing** and the page's list. Two reprints at the same instant can still share a number until the
-  server keeps the counter (stage 5).
+- **A credit note's copy count is the server's (S828 5d), as a parking token's.** The print sends
+  `print_count: -1`, `guard_pos_credit_note` writes OLD + 1 for any differing value, and the label is
+  the count returned; `nextCreditNoteCopy` labels only a print whose count write failed.
 - **A parking token's count is the server's (S814).** The window opens on the tap; a blocked one counts
   nothing. The print sends `print_count: -1` (the guard writes `OLD + 1` for any differing value) and
   labels from the count returned. Never send the page's own: a stale page sending the stored value
@@ -1148,9 +1138,15 @@ issued. A "not served" note posts its reversal as `pos_credit_restock` (counted,
 bill's own `pos_sale` depletion (one per bill and item, a unique index), in the note's month. It waits
 (`bill_waiting`) until the bill's own sale is in Inventory. `ims_sales_entries_guard` refuses a
 `pos_credit` row for a restock note (`credit_note_restock_mismatch`, an older page) and a malformed
-restock row (`pos_credit_restock_invalid`), the Owner included.
+restock row (`pos_credit_restock_invalid`), the Owner included. Since S828 5d it also refuses a row
+naming the wrong kind of record (`sales_entry_link_mismatch`: manual names nothing, a till sale no
+note, a reversal its note and no bill), any till row at an outlet with `ims_enabled` false
+(`pos_outlet_no_ims`) and a reversal naming another outlet's note (`pos_credit_note_other_outlet`);
+the operator meets all of these outside its restore.
 
-**Issuing is manager-only in the table too** (`guard_pos_credit_note`): `issued_by` is stamped,
+**Issuing is manager-only in the table too** (`guard_pos_credit_note`): `issued_by` is stamped, the
+original invoice number, label and Miti are the bill's (S828 5d; `invoiceLabel`/`nepalBsLong` are the
+JS twins, `bs_months` the table),
 a note is never edited except its print count (only upward) and its Inventory stamp (set once, by
 a POS manager, the Owner or the operator; S809 1c), never deleted, and a bill is
 credited once. **The amounts are checked against the bill (S755, HINT `credit_note_amounts`)**

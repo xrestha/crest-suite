@@ -910,6 +910,24 @@ const rules = [
     staff: 'Stock can only be put back by a Credit Note that said its food was not served. Nothing was recorded.',
     operator: 'Food goes back into Inventory only through a Credit Note that said the bill\'s food was not served, and only as stock added back. Nothing was recorded.',
   },
+  // S828 5d (migration 20261013140000, ims_sales_entries_guard): a sale in Inventory names only its
+  // own record, a till's sales go only to an outlet with Inventory, and a note's reversal only to its
+  // own outlet's month. 42501 from a BEFORE trigger, so above the generic 42501 rule; nothing written.
+  {
+    test: e => hasCode(e, 'sales_entry_link_mismatch'),
+    staff: 'This sale named the wrong kind of record, so it was not added to Inventory. Tell your manager.',
+    operator: "A sale in Inventory names only its own record (a till sale its bill, a credit note's reversal its note, a hand-entered sale neither), and this one did not, so nothing was recorded. Reload the page and post it again; if it happens again, contact Crest support.",
+  },
+  {
+    test: e => hasCode(e, 'pos_outlet_no_ims'),
+    staff: 'This outlet does not use Crest Inventory, so nothing was sent there. Nothing needs doing.',
+    operator: 'This outlet does not have Crest Inventory switched on, so its till sales and credit notes are not posted to Inventory and nothing was recorded. They stay in every POS report.',
+  },
+  {
+    test: e => hasCode(e, 'pos_credit_note_other_outlet'),
+    staff: "This credit note belongs to another outlet, so it was not taken off this outlet's Inventory sales. Tell your manager.",
+    operator: "A credit note's reversal is recorded in its own outlet's Inventory month, and this one named a note of another outlet, so nothing was recorded. Switch to the note's outlet and post it there.",
+  },
 
   // RLS refused, or EXECUTE was never granted on a new function signature.
   {

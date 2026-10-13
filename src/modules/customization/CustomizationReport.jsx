@@ -15,7 +15,8 @@ import Tip from '../../components/Tip'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
 import RangePresets from '../pos/reports/RangePresets'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
-import { loadDeltaExplosion, deltaItems } from '../../utils/orderLineIngredients'
+import { deltaItems } from '../../utils/orderLineIngredients'
+import { posDeltaCosting } from '../pos/orders/posRecipeBook'
 import { loadOptionCatalog } from './customizationData'
 import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS } from './customizationReportCalc'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer } from 'recharts'
@@ -236,16 +237,16 @@ export default function CustomizationReport() {
       // only, and says so there — the three sales tabs stand on their own reads.
       // S809 3o (REPORTS-4): every distinct set of stock lines the range's plates carried, not one
       // sample per choice, so each size's portion is costed as that size's.
+      // S828 5d: through the till's recipe book (pos_recipe_book), one read. A POS manager on a PIN
+      // cannot read `items` (no_pos_pin_staff), so every yield read 100% and every rate 0.
       let costed = null
       const deltaSets = allDeltaSets(report.options)
       if (imsOn && deltaSets.length > 0) {
         try {
-          const explosion = await loadDeltaExplosion(supabase, deltaSets)
+          const { explosion, rateOf } = await posDeltaCosting(supabase, clientId, deltaSets)
           const toItems = d => deltaItems(d, explosion)
           const itemIds = [...new Set(deltaSets.flatMap(d => toItems(d).map(x => x.item_id)))]
-          const ratesRes = await fetchAllRowsChunked(itemIds, ids => scopedFrom('items', 'id, per_uom_rate').in('id', ids).order('id'))
-          if (ratesRes.error) throw ratesRes.error
-          const rateByItem = Object.fromEntries((ratesRes.data || []).map(r => [r.id, Number(r.per_uom_rate) || 0]))
+          const rateByItem = Object.fromEntries(itemIds.map(id => [id, rateOf(id)]))
           costed = withOptionCosts(report.options, toItems, rateByItem)
         } catch (e) {
           if (!rangeReq.isCurrent(key)) return

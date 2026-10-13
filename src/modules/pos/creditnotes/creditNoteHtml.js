@@ -8,6 +8,7 @@
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { scopedUpdate } from '../../../shared/scopedDb'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
+import { settleWithin } from '../../../utils/withTimeout'
 
 // Imported (and re-exported for existing callers) rather than defined here. This file used to
 // carry its own ORIGINAL-COPY/SECOND-COPY/THIRD-COPY/REPRINT#n copy — the exact scheme
@@ -45,11 +46,9 @@ export function creditNoteRoundOff(creditNote, vatReg) {
   return Math.round((shown(creditNote.net_amount) - before) * 100) / 100 || 0
 }
 
-// The copy a print is about to make (S809 4c, the S809.4 reprint item). `counts` are every print
-// count known for the note: the Book's reprint passes the one it read from the database just before
-// printing as well as the one its list loaded at page open. Counts only go up, so the highest is the
-// truest. Before this the label came from the page-open list alone, so two managers reprinting one
-// note from pages opened earlier both printed the same copy number.
+// The copy a print makes when the server's count does not answer (S809 4c; since S828 5d the label
+// normally comes from the count the print's own write returns, printCreditNote below). `counts` are
+// every print count this page knows for the note. Counts only go up, so the highest is the truest.
 export function nextCreditNoteCopy(...counts) {
   const count = Math.max(0, ...counts.map(c => Number(c) || 0)) + 1
   return { count, label: COPY_LABEL(count) }
@@ -139,32 +138,67 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
 </body></html>`
 }
 
-export function printCreditNoteHtml(html, onPopupBlocked) {
-  // noopener as a window.open feature makes the call return null (no way to then write/print/
-  // close the popup) — sever window.opener manually instead, on the reference we keep, for the
-  // same "can't reach back into the live app" protection without losing that reference.
+// How long a print waits for its copy count before printing anyway. The window is already open and
+// says "Printing…", so this is a manager waiting at the till, not a background write.
+export const CN_COUNT_MS = 8000
+
+// What the count write sends (S828 5d). guard_pos_credit_note answers ANY print_count that differs
+// from the stored one with the stored one + 1, as pos_parking_slips_guard does for a parking token,
+// so the page never sends its own idea of the count: it sends a value no stored count can equal (the
+// column starts at 0 and only goes up) and labels from what the server made of it. Two managers
+// reprinting one note at the same moment each sent their page's count + 1 before this, so both
+// stored one count and printed the same copy number.
+export const CN_PRINT_COUNT_BUMP = -1
+
+// noopener as a window.open feature makes the call return null (no way to then write/print/close
+// the popup) — sever window.opener manually instead, on the reference we keep, for the same "can't
+// reach back into the live app" protection without losing that reference.
+function openCreditNoteWindow() {
   const w = window.open('', '_blank', 'width=340,height=480,left=200,top=100')
-  if (!w) { onPopupBlocked?.(); return false }
+  if (!w) return null
   w.opener = null
+  w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Printing…</p>')
+  return w
+}
+
+function writeAndPrint(w, html) {
+  // .open() clears "Printing…": document.write() on a still-open document appends instead.
+  w.document.open()
   w.document.write(html)
   w.document.close()
   w.focus()
   setTimeout(() => { w.print(); w.close() }, 300)
-  return true
 }
 
 // Shared by first-print (issuance) and reprint (Credit Note Book) so print_count/copy-label
 // behaves identically to buildBillHtml/printBill.
 //
-// Returns { printed, newCount, countError }. S754: the counter used to be bumped BEFORE the pop-up
-// was opened and whatever it returned, so a blocked pop-up still advanced print_count and the next
-// real print came out labelled as a later copy than any that had ever existed. The window is opened
-// first now, and the count only moves when it actually did. `storedCount` (S809 4c) is the note's
-// print_count read from the database just before this print, where the caller has one.
-export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap, billVat = null, storedCount = null) {
-  const { count: newCount, label } = nextCreditNoteCopy(creditNote.print_count, storedCount)
-  const printed = printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, label, billVat))
-  if (!printed) return { printed: false, newCount: newCount - 1, countError: null }
-  const { error } = await scopedUpdate('pos_credit_notes', clientId, { print_count: newCount }).eq('id', creditNote.id)
-  return { printed: true, newCount, countError: error || null }
+// Returns { printed, newCount, countError }. The window opens first, before anything is awaited, and
+// nothing is counted when the browser blocks it (S754: a blocked pop-up used to advance the count, so
+// the next real print came out as a later copy than any that existed). Then the count write, bounded;
+// the label is the copy the SERVER counted (S828 5d). When that write is refused, does not answer or
+// comes back without a higher count (a server older than 5d keeps the stored count for -1), the note
+// still prints, labelled from the count this page knows, and `countError` says the count was not
+// saved. A window closed before the note could go into it prints nothing (`printed: false`), though
+// the server may already have counted that copy.
+export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap, billVat = null, { timeoutMs = CN_COUNT_MS } = {}) {
+  const known = Number(creditNote.print_count) || 0
+  const w = openCreditNoteWindow()
+  if (!w) return { printed: false, newCount: known, countError: null }
+
+  const { data, error } = await settleWithin(
+    scopedUpdate('pos_credit_notes', clientId, { print_count: CN_PRINT_COUNT_BUMP })
+      .eq('id', creditNote.id).select('print_count').maybeSingle(),
+    timeoutMs, 'Saving the print count',
+  )
+  const counted = Number(data?.print_count)
+  // Zero rows matched is a refusal too (RLS answers it with no error), so it is not a count.
+  const countError = error
+    || (data ? null : { message: 'pos_credit_notes: print count update matched no row' })
+    || (counted > known ? null : { message: 'pos_credit_notes: the print count was not raised' })
+  const newCount = countError ? nextCreditNoteCopy(known).count : counted
+
+  if (w.closed) return { printed: false, newCount, countError }
+  writeAndPrint(w, buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, COPY_LABEL(newCount), billVat))
+  return { printed: true, newCount, countError }
 }

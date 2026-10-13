@@ -757,6 +757,28 @@ describe('an unlinked till sale names both ways to post it (S809 4e)', () => {
   })
 })
 
+// S828 5d (migration 20261013140000): Inventory's sales guard words its three new refusals, each
+// above the generic "not allowed" rule its 42501 would otherwise fall into.
+describe('Inventory sales refusals name the record and the outlet (S828 5d)', () => {
+  const raised = {
+    link: { code: '42501', hint: 'sales_entry_link_mismatch', message: 'sales_entry_link_mismatch: a hand-entered sale names no bill or credit note, a till sale names no credit note, and a credit note\'s reversal names its note and no bill, so this pos row was not recorded' },
+    noIms: { code: '42501', hint: 'pos_outlet_no_ims', message: 'pos_outlet_no_ims: this outlet does not have Crest Inventory, so its till sales and credit notes are not posted to Inventory, and this pos row was not recorded' },
+    other: { code: '42501', hint: 'pos_credit_note_other_outlet', message: 'pos_credit_note_other_outlet: a credit note\'s reversal is recorded in its own outlet\'s month, and this one named a note of another outlet, or one this login cannot see, so it was not recorded' },
+  }
+  const generic = errorText({ code: '42501', message: 'permission denied' }, 'operator')
+
+  it.each(Object.entries(raised))('%s is worded for itself, not as "not allowed"', (_, e) => {
+    expect(errorText(e, 'operator')).not.toBe(generic)
+    expect(errorText(e, 'staff')).not.toMatch(/not allowed/)
+  })
+
+  it('says what happened to the records', () => {
+    expect(errorText(raised.link, 'operator')).toMatch(/nothing was recorded/)
+    expect(errorText(raised.noIms, 'operator')).toMatch(/stay in every POS report/)
+    expect(errorText(raised.other, 'operator')).toMatch(/Switch to the note's outlet/)
+  })
+})
+
 // S824: festival allowances and incentives paid with the salary (migration 20261013120000).
 describe('errorText — bonus paid with salary (S824)', () => {
   const cases = [
