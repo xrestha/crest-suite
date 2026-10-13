@@ -23,8 +23,11 @@ export const CLOSE_LAND_GRACE_MS = 30000
 // supabase-js answers a dropped connection or a cancelled request with `status: 0`. A 2xx or 4xx is the
 // database's own answer (closed, or refused), after which nothing of that write can still land. A 5xx
 // may come from the gateway in front of it while the database is still working, so it counts as none.
+// `lastWriteAt` lets a mark kept on the tablet (closeAttemptStore.js, S833) work out after a reload when
+// that write must have stopped.
 export function trackCloseWrite(attempt, builder, now = Date.now) {
   attempt.writesInFlight = (attempt.writesInFlight || 0) + 1
+  attempt.lastWriteAt = now()
   const write = Promise.resolve(builder)
   const done = answered => {
     attempt.writesInFlight -= 1

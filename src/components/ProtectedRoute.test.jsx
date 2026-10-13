@@ -48,3 +48,18 @@ it('a signed-in session is let through', () => {
   renderAt()
   expect(screen.getByText('ORDERS')).toBeTruthy()
 })
+
+// S833 (S809.4): a session whose profile could not be read is no signed-in user either. On an
+// activated till it goes to the PIN screen (which signs it out), never to the owner's email login.
+it('a profile-less session on an activated till goes to its PIN screen', () => {
+  localStorage.setItem('pos_device_client_id', 'c-1')
+  mockAuth = { session: { user: { id: 'u-1' } }, profile: null, ready: true, loading: false }
+  renderAt()
+  expect(screen.getByText('PIN SCREEN')).toBeTruthy()
+})
+
+it('a profile-less session anywhere else goes to the email login, as before', () => {
+  mockAuth = { session: { user: { id: 'u-1' } }, profile: null, ready: true, loading: false }
+  renderAt()
+  expect(screen.getByText('EMAIL LOGIN')).toBeTruthy()
+})

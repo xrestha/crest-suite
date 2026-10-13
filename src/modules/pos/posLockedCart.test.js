@@ -1,6 +1,6 @@
 import {
   keepLockedCart, takeLockedCart, listLockedCarts, lockedCartWhere, runBeforePosLock, lockedCartFor,
-  LOCKED_CART_MAX_AGE_MS, POS_BEFORE_LOCK_EVENT,
+  sessionEndKeepsCart, beforePosLockRunning, LOCKED_CART_MAX_AGE_MS, POS_BEFORE_LOCK_EVENT,
 } from './posLockedCart'
 
 const cart = (over = {}) => ({
@@ -98,5 +98,69 @@ describe('posLockedCart', () => {
     // Still there to be taken.
     expect(takeLockedCart('p-ram', 'c-1', t0)).not.toBeNull()
     expect(lockedCartFor('p-ram', 'c-1', t0)).toBeNull()
+  })
+
+  // S833 (S809.4): a till PIN session that ends by itself keeps the cart the way a lock does.
+  describe('a session that ends by itself', () => {
+    const pin = { id: 'p-ram', role: 'client', pos_role: 'staff' }
+    const ending = (over = {}) => ({ endingUserId: 'p-ram', profile: pin, boundTablet: true, ownSignOut: false, lockRunning: false, ...over })
+
+    it('keeps the cart for a PIN login on an activated tablet', () => {
+      expect(sessionEndKeepsCart(ending())).toBe(true)
+      expect(sessionEndKeepsCart(ending({ profile: { ...pin, pos_role: 'manager' } }))).toBe(true)
+    })
+
+    it('never for an Owner or an admin, whatever rank they resolve to', () => {
+      expect(sessionEndKeepsCart(ending({ profile: { id: 'p-ram', role: 'client', pos_role: null } }))).toBe(false)
+      expect(sessionEndKeepsCart(ending({ profile: { id: 'p-ram', role: 'admin', pos_role: 'manager' } }))).toBe(false)
+    })
+
+    it('never on a browser that is not an activated till', () => {
+      expect(sessionEndKeepsCart(ending({ boundTablet: false }))).toBe(false)
+    })
+
+    it('not for our own sign-out, nor while a lock is already keeping it', () => {
+      expect(sessionEndKeepsCart(ending({ ownSignOut: true }))).toBe(false)
+      expect(sessionEndKeepsCart(ending({ lockRunning: true }))).toBe(false)
+    })
+
+    it('once per ending, and only with the ending login\'s own profile in hand', () => {
+      expect(sessionEndKeepsCart(ending({ endingUserId: null }))).toBe(false)
+      expect(sessionEndKeepsCart(ending({ profile: null }))).toBe(false)
+      expect(sessionEndKeepsCart(ending({ profile: { ...pin, id: 'p-sita' } }))).toBe(false)
+    })
+
+    it('files the cart only under the ending login', async () => {
+      // Read inside the listener, asserted after: a throw in a listener would not fail the test.
+      const seen = []
+      const onLock = e => {
+        seen.push(e.detail.reason, e.detail.profileId)
+        // The order screen names someone else: refused, and nothing is written.
+        seen.push(keepLockedCart(cart({ profileId: 'p-sita' })), keepLockedCart(cart()))
+      }
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      window.addEventListener(POS_BEFORE_LOCK_EVENT, onLock)
+      await runBeforePosLock(1000, 'ended', { profileId: 'p-ram' })
+      window.removeEventListener(POS_BEFORE_LOCK_EVENT, onLock)
+      errSpy.mockRestore()
+      expect(seen).toEqual(['ended', 'p-ram', false, true])
+      expect(lockedCartFor('p-sita', 'c-1')).toBeNull()
+      expect(lockedCartFor('p-ram', 'c-1')).not.toBeNull()
+      // Outside such a run nothing is narrowed: a lock keeps whatever login the screen names.
+      expect(keepLockedCart(cart({ profileId: 'p-sita' }))).toBe(true)
+    })
+
+    it('says a run is under way until its handed-back work is done', async () => {
+      let release
+      const onLock = e => e.detail.waitUntil(new Promise(r => { release = r }))
+      window.addEventListener(POS_BEFORE_LOCK_EVENT, onLock)
+      expect(beforePosLockRunning()).toBe(false)
+      const run = runBeforePosLock(1000)
+      expect(beforePosLockRunning()).toBe(true)
+      release()
+      await run
+      expect(beforePosLockRunning()).toBe(false)
+      window.removeEventListener(POS_BEFORE_LOCK_EVENT, onLock)
+    })
   })
 })

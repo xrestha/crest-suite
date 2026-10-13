@@ -21,6 +21,11 @@ export const LOCKED_CART_MAX_AGE_MS = 12 * 60 * 60 * 1000
 
 export const POS_BEFORE_LOCK_EVENT = 'crest:pos-before-lock'
 
+// The login a before-lock run keeps a cart for, while its event is being handed out (S833), and how
+// many runs are still finishing their handed-back work.
+let keepingFor = null
+let runsInFlight = 0
+
 function readAll() {
   try {
     const parsed = JSON.parse(localStorage.getItem(KEY) || '{}')
@@ -60,6 +65,13 @@ export function lockedCartWhere(entry) {
 export function keepLockedCart(entry, now = Date.now()) {
   if (!entry?.profileId || !entry?.clientId || !Array.isArray(entry.items) || entry.items.length === 0) return false
   if (!(Number(entry.unsentUnits) > 0)) return false
+  // A run started for one login never files a cart under another (S833). When a session ends by
+  // itself, the order screen still names the login from its own state; the ending login is the one
+  // the lines belong to.
+  if (keepingFor && entry.profileId !== keepingFor) {
+    console.error('not keeping the cart: it names a different login from the session that ended')
+    return false
+  }
   const all = prune(readAll(), now)
   all[entry.profileId] = { ...entry, savedAt: now }
   return writeAll(all)
@@ -99,13 +111,44 @@ export function listLockedCarts(clientId, now = Date.now()) {
 // Also called by AuthContext when the login has moved to another outlet and this window's till is
 // about to stop or close (S809 GAP-OUTLETS-1), with `reason` 'outlet'. The reason travels with the
 // kept cart, so the lines say why they were kept when they come back.
-export async function runBeforePosLock(ms = 5000, reason) {
+// And by AuthContext when a till PIN session ended by itself (S833), with reason 'ended' and the
+// ending login's `profileId`: a cart the order screen names under any other login is not kept.
+export async function runBeforePosLock(ms = 5000, reason, { profileId } = {}) {
   const pending = []
-  window.dispatchEvent(new CustomEvent(POS_BEFORE_LOCK_EVENT, {
-    detail: { waitUntil: p => pending.push(Promise.resolve(p)), reason },
-  }))
-  if (pending.length === 0) return
-  await withTimeout(Promise.allSettled(pending), ms, 'Handing work back before the lock').catch(e => {
-    console.error('before-lock work did not finish; locking anyway:', e)
-  })
+  runsInFlight += 1
+  try {
+    keepingFor = profileId || null
+    try {
+      window.dispatchEvent(new CustomEvent(POS_BEFORE_LOCK_EVENT, {
+        detail: { waitUntil: p => pending.push(Promise.resolve(p)), reason, profileId: profileId || null },
+      }))
+    } finally {
+      keepingFor = null
+    }
+    if (pending.length === 0) return
+    await withTimeout(Promise.allSettled(pending), ms, 'Handing work back before the lock').catch(e => {
+      console.error('before-lock work did not finish; locking anyway:', e)
+    })
+  } finally {
+    runsInFlight -= 1
+  }
+}
+
+/** True while a before-lock run (a lock, or the outlet stop) is still finishing. Its cart is already kept. */
+export function beforePosLockRunning() {
+  return runsInFlight > 0
+}
+
+/**
+ * Whether a session that just ended keeps the till's unsent cart the way a lock does (S833, S809.4).
+ * The lock's own gate: a PIN login (the RAW pos_role, never the resolved rank, which is 'manager' for
+ * every Owner and admin) on an activated tablet, and never an admin. Not when the ending is our own
+ * sign-out or a run is already under way (both already kept the cart), not when there is no ending
+ * session (a second sign-out event for the same ending), and only when the profile in hand is the
+ * ending session's own.
+ */
+export function sessionEndKeepsCart({ endingUserId, profile, boundTablet, ownSignOut, lockRunning }) {
+  if (ownSignOut || lockRunning || !boundTablet || !endingUserId) return false
+  if (!profile || profile.id !== endingUserId || profile.role === 'admin') return false
+  return !!profile.pos_role
 }

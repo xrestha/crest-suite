@@ -57,10 +57,10 @@ describe('buildCreditNoteHtml — Round Off', () => {
     // Three dishes at 442.48: VAT 172.5672 is stored unrounded and prints 172.57.
     const n = note({ gross_amount: 1327.44, taxable_amount: 1327.44, vat_amount: 172.5672, net_amount: 1500 })
     const h = html(n, [{ recipe_id: 'r1', name: 'Set', qty: 3, unit_price: 442.48 }], true)
-    expect(rowValue(h, 'Taxable')).toBe('1327.44')
+    expect(rowValue(h, 'Taxable')).toBe('1,327.44')
     expect(rowValue(h, 'VAT 13%')).toBe('172.57')
     expect(rowValue(h, 'Round Off')).toBe('-0.01')
-    expect(h).toMatch(/Net Credited:<\/span><span>1500\.00</)
+    expect(h).toMatch(/Net Credited:<\/span><span>1,500\.00</)
     expect(creditNoteRoundOff(n, true)).toBe(-0.01)
   })
 
@@ -70,7 +70,7 @@ describe('buildCreditNoteHtml — Round Off', () => {
     expect(h).not.toContain('VAT 13%')
     expect(h).toContain('PAN No: 123456789')
     expect(rowValue(h, 'Round Off')).toBe('-0.48')
-    expect(h).toMatch(/Net Credited:<\/span><span>1172\.00</)
+    expect(h).toMatch(/Net Credited:<\/span><span>1,172\.00</)
   })
 
   test('a PAN note with a discount rounds up with a plus', () => {
@@ -85,6 +85,39 @@ describe('buildCreditNoteHtml — Round Off', () => {
     const h = html(n, [{ recipe_id: 'r1', name: 'Tea', qty: 1, unit_price: 100 }], true)
     expect(rowValue(h, 'Round Off')).toBe('0.00')
     expect(h.split('Round Off:').length - 1).toBe(1)
+  })
+})
+
+describe('buildCreditNoteHtml — figures print as the bill prints them (S833)', () => {
+  test('every figure is grouped by the bill\'s npr2, bare, with the same values toFixed(2) gave', () => {
+    // A VAT note on a 1,23,456.78 bill: Taxable 1,09,253.79 + Nontaxable 12,968.49 + VAT 14,202.99 =
+    // 1,36,425.27 above a Net Credited of 1,36,425.00. Nepal groups in lakh, as npr2 does on the bill.
+    const n = note({
+      gross_amount: 123456.78, discount_amount: 1234.5, taxable_amount: 109253.79,
+      non_taxable_amount: 12968.49, vat_amount: 14202.99, net_amount: 136425,
+    })
+    const h = html(n, [{ recipe_id: 'r1', name: 'Banquet', qty: 2, unit_price: 61728.39 }], true)
+    expect(h).toContain('<td>2</td><td>61,728.39</td><td>1,23,456.78</td>')
+    expect(rowValue(h, 'Gross Amount')).toBe('1,23,456.78')
+    expect(rowValue(h, 'Discount')).toBe('1,234.50')
+    expect(rowValue(h, 'Taxable')).toBe('1,09,253.79')
+    expect(rowValue(h, 'Nontaxable')).toBe('12,968.49')
+    expect(rowValue(h, 'VAT 13%')).toBe('14,202.99')
+    expect(rowValue(h, 'Net Credited')).toBe('1,36,425.00')
+    // Round Off is still worked out on the numbers: 136,425 − (109,253.79 + 12,968.49 + 14,202.99).
+    expect(creditNoteRoundOff(n, true)).toBe(-0.27)
+    expect(rowValue(h, 'Round Off')).toBe('-0.27')
+    // No figure is left ungrouped, and no NPR prefix crept in (the bill prints its figures bare).
+    expect(h).not.toMatch(/\d{4}\.\d{2}/)
+    expect(h).not.toContain('NPR')
+  })
+
+  test('a figure under 1,000 prints exactly as before', () => {
+    const n = note({ gross_amount: 442.48, taxable_amount: 442.48, vat_amount: 57.5224, net_amount: 500 })
+    const h = html(n, [{ recipe_id: 'r1', name: 'Set', qty: 1, unit_price: 442.48 }], true)
+    expect(h).toContain('<td>1</td><td>442.48</td><td>442.48</td>')
+    expect(rowValue(h, 'VAT 13%')).toBe('57.52')
+    expect(rowValue(h, 'Net Credited')).toBe('500.00')
   })
 })
 

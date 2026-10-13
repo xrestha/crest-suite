@@ -15,6 +15,20 @@ export const LINK_DOWN_MS = 30000
 /** How often what waits in the queue is tried again while the browser says online. */
 export const UPLOAD_RETRY_MS = 15000
 
+/** While the internet is marked down, how often a small read asks whether it is back (S833). Until then
+ *  the till waited out the whole LINK_DOWN_MS, even when the link came back seconds after a lost answer. */
+export const LINK_PROBE_MS = 5000
+
+/** Tries in a row an entry may be kept, for a reason other than the connection, before the floor says
+ *  why (S833, POS_TODO B3). Fewer, and a passing hiccup would show; the reason then stands until it goes. */
+export const UPLOAD_TROUBLE_TRIES = 3
+
+/** The floor's line for an entry kept try after try for a reason other than the connection: `where` is
+ *  its table or takeaway, `text` the server's reason in the till's words. */
+export function uploadTroubleText({ where, text }) {
+  return `${where || 'An order'} is kept on this till and has still not uploaded — ${text} It is tried again every 15 seconds; if this message stays, tell a manager.`
+}
+
 /** The floor's refusal to open a bill for payment while the internet is down (Q16 keeps order-taking
  *  going; a bill still needs the server for its invoice number). */
 export const LINK_DOWN_BILL_TEXT = 'error:The internet is down — a bill takes its invoice number from the server, so billing waits until it is back. Orders can still be taken and sent to the kitchen.'

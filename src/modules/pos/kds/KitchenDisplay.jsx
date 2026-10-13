@@ -14,11 +14,12 @@ import { playGuestAlert, soundBlocked, unlockAudio, primeAudio } from '../posChi
 import { voidColumn, visibleVoids, VOID_READ_WINDOW_MS } from './voidedTickets'
 import ArrivalAlert from '../../../components/ArrivalAlert'
 import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
-import { errorText, errorLine } from '../../../shared/errorText'
+import { errorText } from '../../../shared/errorText'
 import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
 import { useReleaseReload } from '../../../shared/releaseWatch'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-import { settleWithin, isTimeout } from '../../../utils/withTimeout'
+import { settleWithin } from '../../../utils/withTimeout'
+import { tapMiss } from './tapAnswer'
 
 const KDS_RELEASE_IDLE_MS = 60 * 1000
 
@@ -447,29 +448,20 @@ export default function KitchenDisplay() {
     // matches nothing returns no error — only the empty result says it did not land.
     // S809 3d: time-limited, so a stalled request frees the button instead of freezing it ("…") until
     // the page is reloaded. A late landing is harmless: the write is conditional on the old stage.
-    const { data: moved, error } = await settleWithin(scopedUpdate('pos_kot_log', patch)
+    const res = await settleWithin(scopedUpdate('pos_kot_log', patch)
       .eq('id', ticket.id).eq('status', prevStatus).select('id'), KDS_TAP_MS, 'Moving the ticket')
-    const revert = () => {
+    // S833: tapMiss (tapAnswer.js) words a refusal, a ticket already moved, and no answer at all (a
+    // timeout, a dropped connection, a gateway error). With no answer the move may have landed, so the
+    // card goes back to the stage the server last confirmed and the board reads itself again at once,
+    // which shows where the ticket really is; only a refusal says it is back where it was.
+    const miss = tapMiss(res, { tableName: ticket.table_name, nextStatus })
+    if (miss) {
       localMoves.current.delete(ticket.id)
       setTickets(prev => prev.map(t => t.id === ticket.id
         ? { ...t, status: prevStatus, estimated_prep_minutes: ticket.estimated_prep_minutes, ready_at: ticket.ready_at }
         : t))
-    }
-    if (error && isTimeout(error)) {
-      // No answer, so whether it moved is not known: put it back and read the board again, which
-      // shows where the ticket really is.
-      revert()
-      setKdsError(`${ticket.table_name || 'This ticket'} may not have ${nextStatus === 'cancelled' ? 'cleared' : 'moved'} — the board is being checked again. ${errorLine(error, 'staff')}`)
-      load()
-    } else if (error) {
-      revert()
-      // errorLine, not error.message: the reader is a cook, and "Failed to fetch" is not a
-      // sentence they can act on (S683). The ticket is back where it was; say so.
-      setKdsError(`${ticket.table_name || 'This ticket'} was not ${nextStatus === 'cancelled' ? 'cleared' : 'moved'} — it is back where it was. ${errorLine(error, 'staff')}`)
-    } else if (!moved?.length) {
-      revert()
-      setKdsError('This ticket was already moved, served from the floor, or cancelled')
-      load()
+      setKdsError(miss.text)
+      if (miss.reread) load()
     } else {
       // Confirmed: kept over any read that left before now (load drops it once a newer read lands).
       localMoves.current.set(ticket.id, { status: nextStatus, est: estimatedMinutes, at, gen: ++boardGen.current })

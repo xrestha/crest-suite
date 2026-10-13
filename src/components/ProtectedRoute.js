@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import SubscriptionLock from './SubscriptionLock'
 import LegalReacceptance from './LegalReacceptance'
 import { IMS_COUNT_HOME, imsCountPathReachable } from '../shared/imsCountAccess'
+import { readTillDevice } from '../modules/pos/tillOutlet'
 
 export default function ProtectedRoute({ children, adminOnly = false }) {
   const { session, profile, ready, loading, accessLocked, legalReacceptRequired, imsCountOnly } = useAuth()
@@ -30,9 +31,11 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
 
   // S809 ACCESS-7: on an activated till, a session that ends by itself (its tablet revoked, the login
   // blocked, a refresh refused) goes back to that till's PIN screen, never to the owner's email login.
-  if (!session) return <Navigate to={localStorage.getItem('pos_device_client_id') ? '/pos/login' : '/login'} replace />
+  // A session whose profile could not be read goes there too (S833): the PIN screen signs it out.
+  const signInPage = readTillDevice().clientId ? '/pos/login' : '/login'
+  if (!session) return <Navigate to={signInPage} replace />
   if (adminOnly && profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
-  if (!profile) return <Navigate to="/login" replace />
+  if (!profile) return <Navigate to={signInPage} replace />
   // An HR self-service account's whole app is /hr/self-service (outside this Layout) — it has
   // no business on any Layout route, and RLS blocks its data there anyway.
   if (profile.hr_self_service) return <Navigate to="/hr/self-service" replace />

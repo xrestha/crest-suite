@@ -730,9 +730,15 @@ export default function GuestMenu() {
       // The menu on screen offered a dish the server no longer has. Re-read it in place — not via
       // retryLoadMenu, which blanks the page to its loading state and would close the sheet the
       // guest needs to fix the order in. A failed re-read keeps the menu they have.
+      // S833 (S809.4 3b): bounded like the first read. A hung re-read is a failed one: the menu stays as
+      // the guest sees it and the failure goes to the console only, since nothing here is theirs to fix.
       if (refusal.refreshMenu) {
-        Promise.all([supabase.rpc('get_guest_menu', { p_table_id: tableId }), loadOptions()]).then(([{ data: fresh, error: freshErr }, freshOptions]) => {
-          if (freshErr || !Array.isArray(fresh)) return
+        Promise.all([
+          settleWithin(supabase.rpc('get_guest_menu', { p_table_id: tableId }), MENU_TIMEOUT_MS, 'Reloading the menu'),
+          loadOptions(),
+        ]).then(([{ data: fresh, error: freshErr }, freshOptions]) => {
+          if (freshErr) { console.error('get_guest_menu re-read after a refusal failed; the menu on screen is kept', freshErr); return }
+          if (!Array.isArray(fresh)) return
           setRows(fresh)
           // A dish the fresh menu no longer carries would silently drop out of the order sheet
           // (cartLines filters on the menu), so take it off the cart and SAY it was taken off. Since

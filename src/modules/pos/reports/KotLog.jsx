@@ -16,6 +16,7 @@ import RangePresets from './RangePresets'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
+import { kotStage } from '../kds/ticketStage'
 // A CHANGE ticket's line (S809 3a) reads "Chicken Momo — now: No peanuts", never "×0".
 import { kotItemText } from '../kitchenNotes'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
@@ -49,19 +50,7 @@ function sumSentQtyByOrderItem(logs) {
 // Actual prep minutes for a pos_kot_log row — null until the ticket has both been started and
 // marked Ready in the Kitchen Display (KitchenDisplay.jsx). estimated_prep_minutes (entered by
 // staff on Start) is read straight off the row wherever it's needed, no helper required.
-// A ticket's kitchen stage (S754). 'served' is new: the floor marks a Ready ticket as delivered so
-// its Ready clears. Local rather than posSignals' KOT_STATUS_LABEL, which is the till's live-floor
-// vocabulary ('Sent' / 'Started') and does not know served or cancelled. Served and Ready are both
-// finished food, so both take the done verdict; the label is what tells them apart.
-const KOT_STAGE = {
-  new:         { label: 'Sent',      badge: 'badge-gray' },
-  in_progress: { label: 'Started',   badge: 'badge-yellow' },
-  ready:       { label: 'Ready',     badge: 'badge-green' },
-  served:      { label: 'Served',    badge: 'badge-green' },
-  cancelled:   { label: 'Cancelled', badge: 'badge-gray' },
-}
-const kotStage = status => KOT_STAGE[status] || { label: status || '—', badge: 'badge-gray' }
-
+// The Stage column's label and badge are kotStage (kds/ticketStage.js): Cleared vs Voided since S833.
 function actualPrepMin(r) {
   return (r.started_at && r.ready_at) ? Math.round((new Date(r.ready_at) - new Date(r.started_at)) / 60000) : null
 }
@@ -137,7 +126,9 @@ export default function KotLog() {
       // Paged: the Reconciliation and Bill Trail tabs below were already wrapped, and this — the
       // KOT Register, the one tab whose entire purpose is being a COMPLETE log — was not. A busy
       // outlet's month silently showed the most recent 1000 tickets as if that were all of them.
-      fetchAllRows(() => scopedFrom('pos_kot_log')
+      // S833: the ticket's order status rides along (`pos_orders(status)`, one embed, no second read),
+      // so a cancelled ticket reads Cleared or Voided (kds/ticketStage.js).
+      fetchAllRows(() => scopedFrom('pos_kot_log', '*, pos_orders(status)')
         .gte('sent_at', fromTs).lte('sent_at', toTs)
         .order('sent_at', { ascending: false }).order('id')),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
@@ -359,7 +350,7 @@ export default function KotLog() {
           'Table': r.table_name || 'Takeaway',
           'Order#': r.order_no,
           'Station': r.station,
-          'Stage': kotStage(r.status).label,
+          'Stage': kotStage(r).label,
           'Items': (r.items || []).map(kotItemText).join(', '),
           'Sent By': staffNames[r.sent_by] || '—',
           'Est. Prep (min)': r.estimated_prep_minutes ?? '',
@@ -484,10 +475,11 @@ export default function KotLog() {
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Date/Time (BS)</th><th>Table</th><th>Order#</th><th>Station</th><th><Tip text="Where the ticket got to on the Kitchen Display: Sent, Started, Ready, then Served once the floor has taken it to the table. Cancelled tickets were withdrawn." width={280}>Stage</Tip></th><th>Items</th><th>Sent By</th><th style={{ textAlign: 'right' }}><Tip text="Estimated prep time (entered by kitchen/bar staff on Start) vs. actual time from Start to Ready. Red when actual ran over the estimate." width={280}>Prep (Est/Actual)</Tip></th></tr>
+              <tr><th>Date/Time (BS)</th><th>Table</th><th>Order#</th><th>Station</th><th><Tip text="Where the ticket got to on the Kitchen Display: Sent, Started, Ready, then Served once the floor has taken it to the table. Cleared: the kitchen took it off the board because every dish on it was taken off the order. Voided: the bill was voided, which stops its tickets still in the kitchen." width={280}>Stage</Tip></th><th>Items</th><th>Sent By</th><th style={{ textAlign: 'right' }}><Tip text="Estimated prep time (entered by kitchen/bar staff on Start) vs. actual time from Start to Ready. Red when actual ran over the estimate." width={280}>Prep (Est/Actual)</Tip></th></tr>
             </thead>
             <tbody>
               {logRows.map(r => {
+                const stage = kotStage(r)
                 const actual = actualPrepMin(r)
                 const est = r.estimated_prep_minutes
                 const overEst = est != null && actual != null && actual > est
@@ -504,7 +496,7 @@ export default function KotLog() {
                     {/* KOT/BOT is a CATEGORY split, not a success state — green is reserved for
                         outcomes (statusBadge's 'Billed'), so KOT takes purple, BOT yellow (S613). */}
                     <td><span className={STATION_BADGE[r.station] || 'badge-gray'} style={{ fontSize: 11 }}>{r.station}</span></td>
-                    <td><span className={kotStage(r.status).badge} style={{ fontSize: 11 }}>{kotStage(r.status).label}</span></td>
+                    <td><span className={stage.badge} style={{ fontSize: 11 }}>{stage.label}</span></td>
                     <td>{(r.items || []).map(kotItemText).join(', ')}</td>
                     <td>{staffNames[r.sent_by] || '—'}</td>
                     <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red-text)' : undefined }}>

@@ -2,7 +2,7 @@
 // the waiter is told (ORDER-FLOW-6, -8, -15).
 import {
   queuedHasLines, queuedOrderId, ownQueuedEntry, printedWhileQueued, printedText, conflictPrintedNote, recoveredPrintedNote,
-  queuedSendText, LINK_DOWN_MS, UPLOAD_RETRY_MS,
+  queuedSendText, LINK_DOWN_MS, UPLOAD_RETRY_MS, LINK_PROBE_MS, UPLOAD_TROUBLE_TRIES, uploadTroubleText,
 } from './offlineUpload'
 
 const send = (station, items, extra = {}) => ({ id: `${station}-${items.length}`, order_id: 'o1', station, items, ...extra })
@@ -71,5 +71,23 @@ describe("the till's line for a send kept on the till (Q16)", () => {
 
   test('the internet stays marked down longer than one retry, so a failed retry renews it', () => {
     expect(LINK_DOWN_MS).toBeGreaterThan(UPLOAD_RETRY_MS)
+  })
+})
+
+describe('S833: a link back sooner, and an upload kept for a reason that says it', () => {
+  test('the internet is asked again well inside the time it stays marked down', () => {
+    expect(LINK_PROBE_MS).toBeLessThan(LINK_DOWN_MS)
+    expect(LINK_PROBE_MS).toBeLessThan(UPLOAD_RETRY_MS)
+  })
+
+  test('a passing hiccup is not shown, a repeated reason is', () => {
+    expect(UPLOAD_TROUBLE_TRIES).toBeGreaterThan(1)
+  })
+
+  test('the floor line names the table and the reason', () => {
+    const text = uploadTroubleText({ where: 'Table 4', text: 'This login cannot see that order.' })
+    expect(text).toMatch(/^Table 4 is kept on this till and has still not uploaded — This login cannot see that order\. /)
+    expect(text).toMatch(/tell a manager\.$/)
+    expect(uploadTroubleText({ text: 'x.' })).toMatch(/^An order is kept/)
   })
 })

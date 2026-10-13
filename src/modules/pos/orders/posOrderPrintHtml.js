@@ -4,6 +4,7 @@ import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { npr2 } from '../../../shared/nepalMoney'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
+import { changedOnSentUnits, changeNoteText } from '../kitchenNotes'
 
 // A line's Crest Customization choices (S758), in either shape a caller holds them: the cart/server
 // snapshot ({ option_name, kitchen_name, is_removal }) or a logged ticket's ({ kitchen, is_removal }).
@@ -67,7 +68,12 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
       // falling back to a plain "×qty" here would read as a fresh full order rather than a cut,
       // and the kitchen has no other way to tell "this is 3 now" from "make 3 more".
       const label = delta > 0 ? `+${delta}` : delta < 0 ? `↓${Math.abs(delta)} (now ${i.qty})` : `×${i.qty}`
-      return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">${label}</span></div>${note}`
+      // S833: the note changed on the units the station already has as well, so they are told apart
+      // from the "+N" (changedOnSentUnits).
+      const sentChange = changedOnSentUnits(i)
+        ? `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">CHANGE</span></div><div class="note b">CHANGE — the ${i.sent_qty} already sent, now: ${esc(changeNoteText(i))}</div>`
+        : ''
+      return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">${label}</span></div>${note}${sentChange}`
     }).join('')}
   <hr>
 </body></html>`

@@ -9,8 +9,8 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
-import { nepalBs, nepalBsLong } from '../../../shared/nepalTime'
+import { getBsFiscalYear, formatAd } from '../../../utils/bsCalendar'
+import { nepalBsLong, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, todayNepalBs } from '../reports/reportRange'
 import { settleWithin } from '../../../utils/withTimeout'
 import { readHscMap, REPRINT_READ_MS } from '../orders/billReprintData'
@@ -31,11 +31,15 @@ const stockLabel = n => (n.restock === true ? 'Put back' : 'Used')
 
 // A date as Nepal reads it (S809 4c, CREDIT-NOTES-9): `adToBsSafe(new Date(ts))` read the viewer's
 // clock zone, so an Owner abroad saw a note issued after 18:45 Nepal time dated the next day.
-const bsDayMonth = ts => {
-  const bs = nepalBs(ts)
-  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(ts).slice(0, 10)} (AD)`
+// The Book's Date cell carries its year too (S833), as the Sales Report's bill register dates a row:
+// day and month alone could not tell this Ashwin's note from last Ashwin's on a range crossing a
+// year. The AD fallback is Nepal's civil day too, never the timestamp's UTC slice.
+const bsDayMonthYear = ts => {
+  const long = nepalBsLong(ts)
+  if (long) return long
+  const civil = nepalCivilDate(ts)
+  return civil ? `${formatAd(civil)} (AD)` : '—'
 }
-const bsDayMonthYear = ts => nepalBsLong(ts) || `${String(ts).slice(0, 10)} (AD)`
 
 // The invoice-number search lists that number from every fiscal year, because numbers restart each
 // Shrawan (S809 4c, CREDIT-NOTES-7): typing 45 found this year's #45 and last year's, told apart only
@@ -366,7 +370,7 @@ export default function CreditNotes() {
                           )}
                         </td>
                         <td>{n.original_invoice_label}</td>
-                        <td>{bsDayMonth(n.created_at)}</td>
+                        <td><span style={{ whiteSpace: 'nowrap' }}>{bsDayMonthYear(n.created_at)}</span></td>
                         <td>{n.buyer_name || 'CASH SALES'}</td>
                         <td>{n.reason}</td>
                         <td>

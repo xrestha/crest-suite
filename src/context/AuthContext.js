@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 import { withTimeout } from '../utils/withTimeout'
 import { accountOutlet, outletMovedElsewhere, announceOutletSwitch, listenForOutletSwitch } from '../shared/outletWatch'
-import { runBeforePosLock, lockedCartFor } from '../modules/pos/posLockedCart'
+import { runBeforePosLock, lockedCartFor, sessionEndKeepsCart, beforePosLockRunning } from '../modules/pos/posLockedCart'
 import { outletSwitchArg, readTillDevice } from '../modules/pos/tillOutlet'
 import { signOutThisDevice } from '../shared/deviceSignOut'
 import { getAccessState, suiteLive } from '../utils/subscription'
@@ -172,6 +172,14 @@ export function AuthProvider({ children }) {
   const switchingRef = useRef(false)
   const outletCheckingRef = useRef(false)
   const outletCheckRef = useRef(null)
+  // A session that ends by itself (S833, S809.4). sessionUserRef: the login of the session this
+  // window holds, taken once when it ends. ownSignOutRef: the ending is our own signOut(), whose
+  // caller already ran the before-lock work. profileRef: the profile the auth listener, registered
+  // once, gates on.
+  const sessionUserRef = useRef(null)
+  const ownSignOutRef = useRef(false)
+  const profileRef = useRef(null)
+  profileRef.current = profile
 
   useEffect(() => {
     let mounted = true
@@ -190,8 +198,40 @@ export function AuthProvider({ children }) {
 
     initialize()
 
+    // A till PIN session that ends by itself (a refused or revoked refresh, a sign-out elsewhere)
+    // keeps the unsent cart the way a lock does (S833, S809.4; owner decision S776). Run before the
+    // state below changes, while the order screen is still mounted, under the ending login's id.
+    // The keep is local; nothing handed back can reach the server once the session is gone, so the
+    // wait is short. Never awaited, bounded and caught: ProtectedRoute's move to the PIN screen
+    // happens whatever it does.
+    function keepTillCartIfEndedByItself() {
+      const endingUserId = sessionUserRef.current
+      const ownSignOut = ownSignOutRef.current
+      sessionUserRef.current = null
+      ownSignOutRef.current = false
+      try {
+        if (!sessionEndKeepsCart({
+          endingUserId,
+          profile: profileRef.current,
+          boundTablet: !!readTillDevice().clientId,
+          ownSignOut,
+          lockRunning: beforePosLockRunning(),
+        })) return
+        void withTimeout(runBeforePosLock(2000, 'ended', { profileId: endingUserId }), 3000, 'Keeping the unsent order')
+          .catch(e => console.error('could not keep the unsent order when the session ended:', e))
+      } catch (e) {
+        console.error('could not keep the unsent order when the session ended:', e)
+      }
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
+      if (!session) keepTillCartIfEndedByItself()
+      else {
+        sessionUserRef.current = session.user?.id || null
+        // A new sign-in: no sign-out of ours is still waiting for its event.
+        if (event === 'SIGNED_IN') ownSignOutRef.current = false
+      }
       setSession(session)
       if (!session) {
         setProfile(null)
@@ -401,6 +441,8 @@ export function AuthProvider({ children }) {
   async function signOut(opts) {
     const to = typeof opts?.to === 'string' ? opts.to : '/login'
     const scope = opts?.scope === 'local' ? 'local' : undefined
+    // The sign-out event this raises is ours, not a session ending by itself (S833).
+    ownSignOutRef.current = true
     setOutletMoved(null)
     setOutletHeld(null)
     setProfile(null)

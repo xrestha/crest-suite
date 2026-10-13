@@ -6,6 +6,7 @@ import Tip from '../../../components/Tip'
 import RowMenu from '../../../components/RowMenu'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import {
   pointsValue, isDeliveryPartnerPhone, schemeNumberCommit, spendablePoints, schemeGivesBack, nprPoints,
   GIVE_BACK_CONFIRM_PCT,
@@ -52,6 +53,12 @@ import MovePointsModal from './MovePointsModal'
 // one-tap "add the points this bill earned"; Move takes a regular's points to their new number. Each
 // scheme says what it gives back in rupees, and a point value or rate that changes what customers get
 // asks first, naming the consequence (CUSTOMERS-PARKING-10).
+//
+// S833 (S809.4 3k, owner decision 2026-10-13): with no scheme at all the member list still shows, with
+// its points, History, Adjust and Move, under a note that nobody earns until a scheme is added. Points
+// outlive the scheme they were earned under, and the list used to hide, so a balance left after every
+// scheme was deleted could not be seen or corrected. None of pos_loyalty_balances, adjust_loyalty_points
+// or move_loyalty_points asks for a scheme, and redeem at the till does not either.
 export default function LoyaltyTab({ pointValue, pointValueError = null, onPointValueSaved, canManage = false, deliveryPartners = [] }) {
   const { clientId, scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -69,6 +76,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   const [moving, setMoving] = useState(null)       // the member whose points are moving to a new number
 
   const [newName, setNewName] = useState('')
+  const [nameMissing, setNameMissing] = useState(false) // S833: "+ Add scheme" was pressed with no name
   const [newRate, setNewRate] = useState('1')
   const [newMin, setNewMin] = useState('0')
   const [savingScheme, setSavingScheme] = useState(false)
@@ -140,7 +148,10 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
 
   async function addScheme() {
     const name = newName.trim()
-    if (!name || !canManage) return
+    if (!canManage || savingScheme) return
+    // S833 (S809.4 3k): the S759 pattern. The button used to sit greyed out with no reason; a press now
+    // says what is missing and moves to the box.
+    if (!name) { setNameMissing(true); document.getElementById('new-scheme-name')?.focus(); return }
     // S809 3k (CUSTOMERS-PARKING-12): a cleared rate box used to add a scheme that earns nothing.
     if (newRate.trim() === '' || !(Number(newRate) >= 0)) { setMsg('error:Enter how many points a member earns per NPR 100, for example 1.'); return }
     if (!askIfGenerous(Number(newRate), name, insertScheme)) return
@@ -279,6 +290,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   }
 
   const enrolled = members.filter(m => m.loyalty_scheme_id)
+  const anyPoints = Object.values(balances).some(n => n > 0) // S833: words the no-scheme note
   const q = search.trim().toLowerCase()
   // S815 4g: a phone matches by its digits, "+977" and a leading 0 taken off (phoneMatchesSearch).
   const shownMembers = !q ? members : members.filter(m =>
@@ -411,7 +423,9 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
             {canManage && <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: schemes.length ? 14 : 0 }}>
               <div className="form-field" style={{ margin: 0 }}>
                 <label htmlFor="new-scheme-name">Name</label>
-                <input id="new-scheme-name" className="form-input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Regulars" />
+                <input id="new-scheme-name" className="form-input" value={newName} placeholder="Regulars"
+                  onChange={e => { setNewName(e.target.value); setNameMissing(false) }}
+                  {...fieldAria('new-scheme-name', nameMissing ? 'Type a scheme name first.' : '')} />
               </div>
               <div className="form-field" style={{ margin: 0 }}>
                 <label htmlFor="new-scheme-rate">Points / NPR 100</label>
@@ -421,9 +435,18 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                 <label htmlFor="new-scheme-min">Min. spend</label>
                 <input id="new-scheme-min" type="number" min="0" step="1" className="form-input" style={{ width: 120 }} value={newMin} onChange={e => setNewMin(e.target.value)} />
               </div>
-              <button className="btn btn-primary" onClick={addScheme} disabled={savingScheme || !newName.trim()}>
+              {/* aria-disabled, not disabled (the S759 pattern): a press says what is missing and moves to it.
+                  disabled is only for the add in flight. */}
+              <button className="btn btn-primary" onClick={addScheme} disabled={savingScheme}
+                aria-disabled={!savingScheme && !newName.trim() ? true : undefined}>
                 {savingScheme ? 'Adding…' : '+ Add scheme'}
               </button>
+              {/* Its own line under the row, so the boxes beside the name stay level. */}
+              {nameMissing && (
+                <div style={{ flexBasis: '100%' }}>
+                  <FieldError id="new-scheme-name" message="Type a scheme name first." />
+                </div>
+              )}
             </div>}
           </div>
 
@@ -437,10 +460,17 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>
                 No customers yet — the book fills itself from any bill closed with a name and phone.
               </p>
-            ) : schemes.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{canManage ? 'Add a scheme above before enrolling anyone.' : 'Nobody can be enrolled until a scheme exists.'}</p>
             ) : (
               <>
+              {/* S833 (S809.4 3k): no scheme no longer hides the members. Their points stay, so they stay
+                  listed, with History, Adjust and Move as usual (none of those needs a scheme). */}
+              {schemes.length === 0 && (
+                <div className="note-banner" role="note">
+                  <strong>No scheme exists, so nobody earns new points.</strong>{' '}
+                  {canManage ? 'Add one above, then enrol customers in it.' : 'A POS manager or the Owner adds schemes.'}
+                  {anyPoints && ` Points customers already hold are kept: they are listed below and can still be spent at the till${canManage ? ', adjusted or moved' : ''}.`}
+                </div>
+              )}
               <div className="form-field" style={{ margin: '0 0 10px', maxWidth: 320 }}>
                 <label htmlFor="loyalty-member-search">Find a customer</label>
                 <input id="loyalty-member-search" type="search" className="form-input" value={search}
@@ -492,6 +522,9 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                                   <button className="btn btn-ghost btn-sm" onClick={() => tag(m.id, '')}>Take off scheme</button>
                                 )}
                               </span>
+                            ) : schemes.length === 0 && !m.loyalty_scheme_id ? (
+                              // S833: with no scheme there is nothing to pick, so the row says where it stands.
+                              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Not enrolled</span>
                             ) : (
                               <select
                                 className="form-select" style={{ maxWidth: 200 }}

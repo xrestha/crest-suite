@@ -36,6 +36,18 @@ export function isChangeOnlyLine(line) {
   return !line?.sent_to_kot && sent > 0 && (Number(line?.qty) || 0) === sent
 }
 
+/** S833 (owner decision, 2026-10-13): a line part of which the station already has, whose instruction
+ *  changed since it was sent, now going out again with more of it (2 sent, now 3). The "+1" carries the
+ *  new note, and the units already made get a change line too, or the station never hears of it.
+ *  `note_changed` is the till's own mark (PosOrders' updateItemNote), never stored on the server. */
+export function changedOnSentUnits(line) {
+  const sent = Number(line?.sent_qty) || 0
+  return !line?.sent_to_kot && line?.note_changed === true && sent > 0 && (Number(line?.qty) || 0) > sent
+}
+
+/** Whether a send carries a change line for this cart line. */
+export const sendsChangeLine = line => isChangeOnlyLine(line) || changedOnSentUnits(line)
+
 /** The instruction a change line carries, as the kitchen reads it. */
 export function changeNoteText(item) {
   const note = typeof item?.notes === 'string' ? item.notes.trim() : ''

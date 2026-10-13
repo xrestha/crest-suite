@@ -360,7 +360,10 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
 **After stage 4 (owner approved 2026-10-12):**
 
 - **Stage 5, database hardening (all migrations):** sliced below (owner approved 2026-10-12).
-- **Stage 6, till reliability (app only):** B3 offline sync failure message; unknown-close marks lost on
+- **Stage 6, till reliability (app only): shipped 2026-10-13 in one pass, S833, crest-v449** (owner: no
+  slices; decisions D31 another login's lost payment try locks the bill for a moment, D32 a change line
+  for a partly sent dish's sent units, D33 Loyalty lists members with no scheme). Left open: B3 live
+  clicks (needs the owner, a staff PIN, a second tablet and a non-Suite Owner). The list as planned: B3 offline sync failure message; unknown-close marks lost on
   reload; a self-ended session drops the unsent cart; offline tickets with null `order_no`; 5xx read as a
   refusal; KDS error wording; "Discard unsaved" copy during a send; unbounded reads (PosCustomers,
   `placeOrder` re-read); 30 s queue after one no-answer; note change on a partly sent line; B3 live clicks.
@@ -478,11 +481,12 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     bumps it (`apply_pos_item_comps`?) so a normal close is never refused. Since 2d the till says so on
     the floor when the stored lines don't add up to the money (2d).~~ Fixed in 5c (S823): only
     `save_pos_order_items` bumps it; `pos_bill_lines_changed`.
-  - Unknown-close marks live in memory only: a PIN lock, leaving Orders or a reload forgets them (2d).
+  - ~~Unknown-close marks live in memory only: a PIN lock, leaving Orders or a reload forgets them (2d).~~ Fixed
+    in S833: kept on the tablet (`closeAttemptStore.js`); another login sees the bill locked (D31).
     ~~The lock still hands back a standing redemption.~~ Fixed in 2g: the lock skips it while a try at
     that bill is unsettled, and the close itself returns forgotten points.
-  - A 5xx from the gateway on the close write is reported to the cashier as a refusal, though the
-    database may still commit it (2d).
+  - ~~A 5xx from the gateway on the close write is reported to the cashier as a refusal, though the
+    database may still commit it (2d).~~ Fixed in S833 (`noAnswer`), with the points award and ✓ Served.
   - ~~The Billing station shows no loyalty note, and has no way to Recent Bills, though many messages say
     "reprint it from Recent Bills" (2d).~~ Fixed in 4b: both render there, one element shared with the floor.
   - ~~A Split bill's payment legs are inserted in a request after the close, so 2b's shift lock does not
@@ -573,10 +577,10 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     guest's tracker can sit below "Ready" and a table badge read "Sent" meanwhile. Fix: `AND NOT
     (k.items @> '[{"change":true}]'::jsonb)` in each ticket loop. Fold into 3b's migration (3a).~~ Fixed
     in 3b, which also leaves cancelled tickets out of the table badge.
-  - A note changed on a partly sent line (2 sent, now 3) reaches only the "+1" ticket; the 2 already
-    made never hear of it, on paper or on the KDS (P3, 3a).
-  - The cart's note box shows every note, an allergy note included, in grey italic (`--theme-text3`)
-    (P3, 3a).
+  - ~~A note changed on a partly sent line (2 sent, now 3) reaches only the "+1" ticket; the 2 already
+    made never hear of it, on paper or on the KDS (P3, 3a).~~ Fixed in S833 (D32, `sendsChangeLine`).
+  - ~~The cart's note box shows every note, an allergy note included, in grey italic (`--theme-text3`)
+    (P3, 3a).~~ Fixed in S833: a written note is bold body ink.
   - ~~**For 3h (`pos-staff-login`):** a blocked login, or a settled leaver, picked from a stale till list
     gets "Invalid credentials" (shown as a wrong PIN), and each try counts toward the lockout. Filter
     `pos_blocked_at` and `settlement_blocked_by` in its staff lookup, or give its own answer (3i).~~
@@ -601,9 +605,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     only pre-3k bills typed differently (0 live) (3k).~~ Fixed in 4g: the history matches the stored phone
     and its number, and both Customers searches match by number (`phoneMatchesSearch`). "00977 98…" is not read as the same number by
     either twin (they agree, so nothing splits) (3k).
-  - ~~No screen shows a customer's full points history (Adjust shows the latest 10)~~ (History, 4g); Loyalty's member list
+  - ~~No screen shows a customer's full points history (Adjust shows the latest 10)~~ (History, 4g); ~~Loyalty's member list
     hides when no scheme exists, so balances left after every scheme is deleted cannot be adjusted;
-    "+ Add scheme" is `disabled` with no reason when the name is empty (3k).
+    "+ Add scheme" is `disabled` with no reason when the name is empty (3k).~~ Fixed in S833.
   - Between a release and every till reloading, an older till that creates a customer typed "+977…"
     stores that spelling, and a new till's later upsert for them is refused and logged (name/PAN
     updates do not land; points still work) (3k).
@@ -613,14 +617,14 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~The app-wide guest alert (`useGuestOrderAlerts`) keeps ringing on the very till that accepted a guest
     order until it saves, because the request still waits in the database (since S763) (3b).~~ Fixed in 3c:
     an accepted order is held out of that till's alert.
-  - `placeOrder`'s menu re-read after a refusal is unbounded (background only) (3b). ~~Help's Order Taking
+  - ~~`placeOrder`'s menu re-read after a refusal is unbounded (background only) (3b).~~ Fixed in S833. ~~Help's Order Taking
     bullet still says "(Pro plan)" and "Enable it per client in Admin → Manage Clients → Features".~~
     Fixed in 3c.
   - ~~The operator still bypasses `guard_pos_kot_log` entirely on UPDATE, so an operator's KDS taps keep
     tablet times and skip forward-only, against Q26 (a) (3d).~~ Fixed in 4k (S819): the restore only.
-  - The KDS's non-timeout error still says "was not moved — it is back where it was" for a dropped
+  - ~~The KDS's non-timeout error still says "was not moved — it is back where it was" for a dropped
     connection, where the write may have landed; KOT Log shows "Cancelled" for both a kitchen Clear
-    and a void (3d).
+    and a void (3d).~~ Fixed in S833 (`tapAnswer.js`, `ticketStage.js`: Cleared / Voided).
   - With two live tickets for one dish and one pulled, a direct API call could Clear either ticket
     (never both); a send whose ticket insert failed leaves food no ticket carries, so the board offers
     Clear and the server refuses it (a supervisor clears it) (3d).
@@ -653,9 +657,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     Order is pressed again (a table is protected by the one-open-order index). Fix: a client-minted order
     id, as the offline path already does (3e).~~ Fixed in 3f: the id is minted before the insert, and a
     no-answer is queued under it.
-  - The ← "Discard N unsaved items?" prompt during an in-flight send still says "nothing reaches the
+  - ~~The ← "Discard N unsaved items?" prompt during an in-flight send still says "nothing reaches the
     kitchen", but the send still lands and now prints; and a second take-off after a saved one (3→2
-    saved, then 2→1) prompts "2 × already sent" while the server records 1 (3e).
+    saved, then 2→1) prompts "2 × already sent" while the server records 1 (3e).~~ Fixed in S833.
   - ~~For 3f: when the unknown-send branch queues and prints offline, drop that order's send marks first
     (`putSendAttempts(oid, [])`), or the poll can print the same dishes again if the lost save landed (3e).~~
     Fixed in 3f.
@@ -684,9 +688,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at` and `pos_legacy_key_last_used_at`
     are read by nothing (`revokeClientTablets` still writes the first two, `AuditLog.js` lists
     `pos_device_secret`): a later column drop (3h).
-  - A session that ends by itself does not keep the till's unsent cart (`runBeforePosLock` is not run);
+  - ~~A session that ends by itself does not keep the till's unsent cart (`runBeforePosLock` is not run);
     `ProtectedRoute`'s `!profile` branch still sends a profile-less session on an activated tablet to
-    `/login` (3h).
+    `/login` (3h).~~ Fixed in S833 (`sessionEndKeepsCart`, reason 'ended').
   - ~~A guest QR order still waiting when its table's bill closes is never answered by anything
     (`get_pos_device_guest_alerts` has no age limit), so it rings on and the next party's screen offers
     its Accept (3g).~~ Fixed in 4i (D21): the close turns it away (`pos_orders_close_turns_away_guest_orders`).
@@ -695,17 +699,19 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     a takeaway closed between the two reads is kept under "could not be read" wording (3g).
   - A customized line reopened from a crest-v427 queue entry has no snapshot (the KOT prints without
     choices, the cart says "No choices picked") (3f).
-  - Tickets for an order created offline are logged with `order_no` null (3f).
+  - ~~Tickets for an order created offline are logged with `order_no` null (3f).~~ Fixed in S833 (past ones stay).
   - A send whose lost save landed, followed by another tablet saving on top before the upload, shows a
     "NOT applied" conflict though the lines landed (3f).
-  - After one no-answer, sends queue for 30 s even if the link recovered sooner; an older (v427) tab
-    draws a `kot:` entry as a 0-item takeaway (3f).
+  - ~~After one no-answer, sends queue for 30 s even if the link recovered sooner; an older (v427) tab
+    draws a `kot:` entry as a 0-item takeaway (3f).~~ Fixed in S833: a read every 5 s ends it. The v427
+    half is closed without work: the till floor is 448, so such a tab is refused and reloads.
   - ~~`credit_settled_at` is still the settling tablet's clock: one line, `NEW.credit_settled_at := now()`
     in `guard_pos_order_close`'s settlement branch, needs a migration (3l).~~ Fixed in 5c (S823).
   - ~~A unique partial index on `pos_cash_movements(order_id) WHERE kind = 'credit_settlement'` would make
     a settle's Cash In once-only across devices (live duplicates: 0) (3l).~~ Fixed in 5c (S823),
     `pos_cash_movements_one_credit_settlement`.
-  - PosCustomers' settings read, `loadCustomers` and `toggleHistory` have no time limit (3l).
+  - ~~PosCustomers' settings read, `loadCustomers` and `toggleHistory` have no time limit (3l).~~ Fixed in
+    S833, with `loadCredit`. LoyaltyTab's own load is still unbounded (found S833, not fixed).
   - `handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
     fails; the server's `option_count` counts picks of hidden options (harmless while
     `option_not_on_menu` fires first) (3o).
@@ -737,8 +743,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     still sent the reader to Adjust.
   - A till on crest-v430 or older shows held points as spendable until it reloads; the server refuses
     them with a sentence (`pos_points_held`).
-  - Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
-    with no reason when the name is empty (S809.4, 3k): stage 6 (left out of 4l, which changed copy only).
+  - ~~Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
+    with no reason when the name is empty (S809.4, 3k): stage 6 (left out of 4l, which changed copy only).~~
+    Fixed in S833 (D33).
 - **Found while building stage 4, slice 4h (2026-10-12, not fixed):**
   - The below-zero checks in the editors look at one option at a time. Two negative choices that only
     go below zero together, or a hidden option shown again with Show again, are refused only by the
@@ -914,7 +921,8 @@ when these were filed. Every item below assumes they are.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 
-- [ ] 🟡 **A failed offline sync tells the cashier nothing it can act on.**
+- [x] 🟡 **A failed offline sync tells the cashier nothing it can act on.** Closed S833: an entry kept three
+  tries in a row for a reason other than the connection is named on the floor with the server's sentence.
   `flushPosOrderQueue` catches per order, leaves the order queued for the next flush, and reports
   the reason with `console.error` — a log, not a breadcrumb. Better placed than Stock Count was
   before S731 (`pendingOrderIds` and the conflict list are real UI, and the shape here is a retry

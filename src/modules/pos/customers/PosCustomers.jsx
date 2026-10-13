@@ -13,16 +13,24 @@ import { IDENTITY_BADGE } from '../posSignals'
 import { normalizePhone, phoneMatchesSearch } from '../../../utils/phone'
 import { errorText } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { settleWithin } from '../../../utils/withTimeout'
 import { settleCreditBill, SETTLE_READ_MS } from './settleCredit'
+import { customerBookAfterRead } from './customerBook'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
 const SETTLE_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Cheque', 'Bank Transfer']
 const fmtNpr = npr
+
+// S833 (S809.4 3l): how long this page's reads wait before they count as failed. The customer book
+// and the Credit bills are paged (every customer, every Credit bill ever), so they get Parking's list
+// limit; the settings row and one customer's last 50 bills get the settle reads' limit.
+const LIST_READ_MS = 20000
+const ROW_READ_MS = SETTLE_READ_MS
 
 // TI or PB as the bill was issued (S809 2c): its own stamp, today's flag only for a bill with none.
 function invoiceLabel(order, vatReg, prefix) {
@@ -54,10 +62,12 @@ export default function PosCustomers() {
   // unmounted whenever another tab is open and would re-read it on every visit.
   const [pointValue, setPointValue] = useState(1)
 
-  // Customers
-  const [customers, setCustomers] = useState([])
-  const [custLoading, setCustLoading] = useState(true)
-  const [custError, setCustError] = useState(null) // S754
+  // Customers. S833 (S809.4 3l): the book as last read, and for which outlet (customerBook.js). A
+  // failed first read is the error card (S754); a reload that fails keeps the list and says it may be
+  // out of date. A load is keyed on its outlet plus a counter, so only the newest one lands.
+  const [book, setBook] = useState({ clientId: null, rows: null, error: null, stale: null })
+  const custReq = useLatestRequest()
+  const custSeq = useRef(0)
   // phone_canonical → no-show count from the reservations book (S677). null until read, so a
   // failed read renders as "unknown" rather than as a clean record for everyone.
   const [noShowByPhone, setNoShowByPhone] = useState(null)
@@ -70,6 +80,9 @@ export default function PosCustomers() {
   const [creditLoading, setCreditLoading] = useState(false)
   const [creditLoaded, setCreditLoaded] = useState(false)
   const [creditError, setCreditError] = useState(null) // S754
+  // S833: the tab's first load and the reload after a settle can overlap; only the newest lands.
+  const creditReq = useLatestRequest()
+  const creditSeq = useRef(0)
   const [settlingId, setSettlingId] = useState(null)  // order id with the method picker open
   const [settleBusy, setSettleBusy] = useState(false)
   const [settleMsg, setSettleMsg] = useState('')
@@ -102,11 +115,19 @@ export default function PosCustomers() {
 
   useEffect(() => {
     if (!clientId) return
+    let cancelled = false
     loadCustomers()
-    supabase.from('settings')
-      .select('is_vat_registered, invoice_prefix, pos_delivery_partners, pos_loyalty_point_value')
-      .eq('client_id', clientId).maybeSingle()
+    // S833 (S809.4 3l): bounded. A hung read used to leave settingsRead null for ever, so Settle said
+    // "still loading" and Loyalty's point value waited with no end; a timeout is now the failed read
+    // both already word. `cancelled`: an answer for an earlier run of this effect never lands.
+    settleWithin(
+      supabase.from('settings')
+        .select('is_vat_registered, invoice_prefix, pos_delivery_partners, pos_loyalty_point_value')
+        .eq('client_id', clientId).maybeSingle(),
+      ROW_READ_MS, "Reading this outlet's billing settings",
+    )
       .then(({ data, error }) => {
+        if (cancelled) return
         if (error) { setSettingsRead(error); return }
         setSettingsRead(true)
         setBillingSettings({
@@ -118,6 +139,7 @@ export default function PosCustomers() {
         // worth nothing at the till while the numbers still read fine on this page.
         setPointValue(Number(data?.pos_loyalty_point_value) || 1)
       })
+    return () => { cancelled = true }
   }, [clientId]) // eslint-disable-line
 
   // Memoized as one pass over creditBills — every Credit bill ever, so this is the array that
@@ -183,40 +205,45 @@ export default function PosCustomers() {
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
 
   async function loadCustomers() {
-    setCustLoading(true)
+    const forClient = clientId
+    const key = custReq.begin(`${forClient}#${++custSeq.current}`) // before any await
     // Paged. The customer book grows forever — a row per unique phone that has ever been on a
     // bill — so it is one of the few POS tables with no period to bound it, and a bare select
     // would quietly stop at 1000 with no error: the missing regulars simply would not be found
-    // by the search box, and nothing on screen would say why.
+    // by the search box, and nothing on screen would say why. S833: each read is bounded, so a hung
+    // one is a failed read rather than "Loading…" for ever.
     const [{ data, error: custErr }, { data: noShows, error: nsErr }] = await Promise.all([
-      fetchAllRows(() => scopedFrom('pos_customers').order('name').order('id')),
+      settleWithin(fetchAllRows(() => scopedFrom('pos_customers').order('name').order('id')), LIST_READ_MS, 'Reading the customer book'),
       // One row per no-show ever recorded — unbounded like the book itself, so paged too.
-      fetchAllRows(() => scopedFrom('pos_reservations', 'id, phone_canonical').eq('status', 'no_show').order('id')),
+      settleWithin(fetchAllRows(() => scopedFrom('pos_reservations', 'id, phone_canonical').eq('status', 'no_show').order('id')), LIST_READ_MS, 'Reading the no-shows'),
     ])
+    if (!custReq.isCurrent(key)) return // a newer load owns the page
     // S754: a failed book read rendered "No customers yet — the book fills automatically…", a
     // confident statement about a customer book the page never read.
-    setCustError(custErr || null)
-    setCustomers(custErr ? [] : (data || []))
+    if (custErr) console.error('customer book read failed:', custErr)
+    setBook(prev => customerBookAfterRead(prev, forClient, { data, error: custErr }))
     if (nsErr) { console.error('no-show read failed, column shows unknown:', nsErr); setNoShowByPhone(null) }
     else {
       const m = {}
       for (const r of noShows || []) { if (r.phone_canonical) m[r.phone_canonical] = (m[r.phone_canonical] || 0) + 1 }
       setNoShowByPhone(m)
     }
-    setCustLoading(false)
   }
 
   async function loadCredit() {
+    const key = creditReq.begin(++creditSeq.current) // before any await
     setCreditLoading(true)
     // Paged: unbounded by date — every Credit bill ever — so this is the read that gets worse
     // the longer the system is used, and outstandingTotal below is the figure an owner chases.
+    // S833: bounded like the reads beside it, so a hung one is the error card, not "Loading…" for ever.
     // Names beside it (S809 CUSTOMERS-PARKING-6): bounded, and a failure only marks the By column.
     const [{ data, error }, names] = await Promise.all([
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_by, credit_settled_method, credit_note_id, vat_registered')
+      settleWithin(fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_by, credit_settled_method, credit_note_id, vat_registered')
         .eq('payment_method', 'Credit').eq('status', 'billed')
-        .order('closed_at', { ascending: false }).order('id')),
+        .order('closed_at', { ascending: false }).order('id')), LIST_READ_MS, 'Reading the Credit bills'),
       settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), SETTLE_READ_MS, 'Reading staff names'),
     ])
+    if (!creditReq.isCurrent(key)) return // a newer load (the reload after a settle) owns the tab
     if (names.error) { console.error('staff names read failed, By shows ?:', names.error); setNamesFailed(true) }
     else { setNamesFailed(false); setStaffNames(Object.fromEntries((names.data || []).map(p => [p.id, p.full_name]))) }
     setCreditLoading(false)
@@ -242,9 +269,15 @@ export default function PosCustomers() {
     // S815 4g: the stored phone and the number it is, so a bill an older till stored as typed
     // ("+977 98…") is listed beside the ones stored as the number since S809 3k.
     const phones = [...new Set([cust.phone, normalizePhone(cust.phone)].filter(Boolean))]
-    const { data, error } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id, vat_registered')
-      .eq('status', 'billed').in('buyer_phone', phones)
-      .order('closed_at', { ascending: false }).limit(50)
+    // S833 (S809.4 3l): bounded, so a hung read is the row's error card (re-expanding retries it), not
+    // "Loading order history…" for ever. Two reads for one row cannot overlap: while this one runs the
+    // row holds 'loading', which the check above returns on, and a late answer past the limit is dropped.
+    const { data, error } = await settleWithin(
+      scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id, vat_registered')
+        .eq('status', 'billed').in('buyer_phone', phones)
+        .order('closed_at', { ascending: false }).limit(50),
+      ROW_READ_MS, "Reading this customer's bills",
+    )
     // S754: a failed read said "No billed orders found for this phone number".
     setHistoryMap(m => ({ ...m, [cust.id]: error ? { error } : (data || []) }))
   }
@@ -339,6 +372,10 @@ export default function PosCustomers() {
   // A settle that needs action shows amber (warn:), a refusal red, a settlement green.
   const settleMsgColor = settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : settleMsg.startsWith('warn:') ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'
 
+  // S833: still loading until a read has landed for this outlet.
+  const customers = book.rows || []
+  const custLoading = !clientId || book.clientId !== clientId
+  const custError = book.error
   const q = search.trim().toLowerCase()
   const filteredCustomers = q
     // S815 4g: a phone matches by its digits, so "+977 984…" finds the regular stored as 984….
@@ -422,6 +459,12 @@ export default function PosCustomers() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+
+          {/* S833: a reload that failed keeps the list it had, and says so. */}
+          {!custLoading && book.stale && (() => {
+            const why = asActionError(book.stale, 'operator')
+            return <ActionError error={{ text: `The customer book could not be read again, so this is the list as it was last read. Reload the page to try again. ${why.text}`, detail: why.detail }} />
+          })()}
 
           {custLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>

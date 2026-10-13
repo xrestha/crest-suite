@@ -2,7 +2,7 @@
 // reaches the Kitchen Display). See kitchenNotes.js for the rules these pin.
 import {
   KOT_CHANGE_ITEMS, CHANGE_NO_NOTE, isChangeLine, isChangeTicket, isChangeOnlyLine, changeNoteText,
-  kotItemText, joinNote, guestDishNote,
+  kotItemText, joinNote, guestDishNote, changedOnSentUnits, sendsChangeLine,
 } from './kitchenNotes'
 import { buildKotBotHtml } from './orders/posOrderPrintHtml'
 
@@ -118,5 +118,36 @@ describe('the paper ticket for a change', () => {
     ])
     expect(html).toContain('CHANGE ONLY')
     expect(html).toContain('×1')
+  })
+})
+
+describe('S833: a note changed on a line part of which the station already has', () => {
+  const momo = { name: 'Momo', recipe_id: 'r1', qty: 3, sent_qty: 2, sent_to_kot: false, notes: 'no onion' }
+
+  test('2 sent, now 3, note changed: the 2 get a change line beside the +1', () => {
+    expect(changedOnSentUnits({ ...momo, note_changed: true })).toBe(true)
+    expect(sendsChangeLine({ ...momo, note_changed: true })).toBe(true)
+  })
+
+  test('only the +1 goes when the note did not change', () => {
+    expect(changedOnSentUnits(momo)).toBe(false)
+    expect(sendsChangeLine(momo)).toBe(false)
+  })
+
+  test('the change-only line is still a change line, and a fully sent or unsent line is not', () => {
+    expect(sendsChangeLine({ ...momo, qty: 2 })).toBe(true)
+    expect(changedOnSentUnits({ ...momo, sent_to_kot: true, note_changed: true })).toBe(false)
+    expect(changedOnSentUnits({ ...momo, sent_qty: 0, note_changed: true })).toBe(false)
+  })
+
+  test('the ticket prints the +1 with its note and a CHANGE row for the 2 already sent', () => {
+    const html = buildKotBotHtml({ station: 'KOT', items: [{ ...momo, note_changed: true }], tableName: 'Table 4', covers: 2 })
+    expect(html).toContain('+1')
+    expect(html).toContain('CHANGE — the 2 already sent, now: no onion')
+  })
+
+  test('a note taken off says so', () => {
+    const html = buildKotBotHtml({ station: 'KOT', items: [{ ...momo, notes: '', note_changed: true }], tableName: 'Table 4', covers: 2 })
+    expect(html).toContain(`CHANGE — the 2 already sent, now: ${CHANGE_NO_NOTE}`)
   })
 })

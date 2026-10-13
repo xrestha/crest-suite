@@ -71,6 +71,9 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   const adDateStr = nepalDateAd(now)
   const bsDateStr = nepalBsLong(now)
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
+  // Every figure prints through the bill's own npr2 (S833), bare as the bill prints it, so a note
+  // reads 12,345.00 beside its bill rather than 12345.00. The maths (Round Off) stays on numbers;
+  // npr2 rounds to the paisa as toFixed(2) did, so only the grouping changes.
   const roundOff  = creditNoteRoundOff(creditNote, vatReg)
 
   return `<!DOCTYPE html>
@@ -115,19 +118,19 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${i.unit_price.toFixed(2)}</td><td>${(i.qty * i.unit_price).toFixed(2)}</td></tr>${billOptionRow(withChoices(i))}`).join('')}
+      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>${billOptionRow(withChoices(i))}`).join('')}
     </tbody>
   </table>
   <hr>
-  <div class="row"><span>Gross Amount:</span><span>${creditNote.gross_amount.toFixed(2)}</span></div>
-  <div class="row"><span>Discount:</span><span>${creditNote.discount_amount.toFixed(2)}</span></div>
+  <div class="row"><span>Gross Amount:</span><span>${npr2(creditNote.gross_amount)}</span></div>
+  <div class="row"><span>Discount:</span><span>${npr2(creditNote.discount_amount)}</span></div>
   ${vatReg ? `
-  <div class="row"><span>Taxable:</span><span>${creditNote.taxable_amount.toFixed(2)}</span></div>
-  <div class="row"><span>Nontaxable:</span><span>${creditNote.non_taxable_amount.toFixed(2)}</span></div>
-  <div class="row"><span>VAT 13%:</span><span>${creditNote.vat_amount.toFixed(2)}</span></div>
+  <div class="row"><span>Taxable:</span><span>${npr2(creditNote.taxable_amount)}</span></div>
+  <div class="row"><span>Nontaxable:</span><span>${npr2(creditNote.non_taxable_amount)}</span></div>
+  <div class="row"><span>VAT 13%:</span><span>${npr2(creditNote.vat_amount)}</span></div>
   ` : ''}
   <div class="row"><span>Round Off:</span><span>${roundOff > 0 ? '+' : ''}${npr2(roundOff)}</span></div>
-  <div class="row tot"><span>Net Credited:</span><span>${creditNote.net_amount.toFixed(2)}</span></div>
+  <div class="row tot"><span>Net Credited:</span><span>${npr2(creditNote.net_amount)}</span></div>
   <hr>
   <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
   <hr>

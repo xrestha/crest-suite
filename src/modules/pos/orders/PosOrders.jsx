@@ -53,20 +53,21 @@ import { playChime } from '../posChime'
 import { barCategoriesOf } from '../ticketRouting'
 import { publishTillGuestView, clearTillGuestView, useGuestAlertMute } from '../../../shared/guestAlertBridge'
 import { errorText, isNetworkError } from '../../../shared/errorText'
-import { withTimeout, isTimeout } from '../../../utils/withTimeout'
+import { withTimeout } from '../../../utils/withTimeout'
 import { keepLockedCart, takeLockedCart, lockedCartWhere, POS_BEFORE_LOCK_EVENT } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
-import { KOT_CHANGE_ITEMS, isChangeOnlyLine, joinNote, guestDishNote } from '../kitchenNotes'
+import { KOT_CHANGE_ITEMS, sendsChangeLine, joinNote, guestDishNote } from '../kitchenNotes'
 import {
   trackCloseWrite, openReadIsFinal, paymentDifferenceNote, describeStoredPayment, storedLinesMatchPaid,
   storedDiscountRatio, legsToRecord, customerRowFromBill, latestCompRows,
 } from './closeAttempt'
+import { keepOwnCloseAttempts, dropKeptCloseAttempt, restoreCloseAttempts, foreignCloseText } from './closeAttemptStore'
 import {
   SEND_STEP_MS, SEND_READ_MS, noAnswer, newSendAttempt, stopWaiting, sendLinesOf, firesTickets, stationsOf,
   judgeSendAttempts, unknownSendText,
 } from './sendAttempt'
 import {
-  LINK_DOWN_MS, UPLOAD_RETRY_MS, LINK_DOWN_BILL_TEXT, queuedHasLines, queuedOrderId, ownQueuedEntry, conflictPrintedNote,
+  LINK_DOWN_MS, UPLOAD_RETRY_MS, LINK_PROBE_MS, UPLOAD_TROUBLE_TRIES, uploadTroubleText, LINK_DOWN_BILL_TEXT, queuedHasLines, queuedOrderId, ownQueuedEntry, conflictPrintedNote,
   recoveredPrintedNote, queuedSendText, queuedRows, replayRows, QUEUED_BILL_TEXT, CONFLICT_HOLDS_TEXT,
   printedBackAsSent, recoveredSentNote,
 } from './offlineUpload'
@@ -122,9 +123,11 @@ const posUpload = { run: null }
 // How long an idle floor waits, untouched, before it reloads for a new release (S809 1b).
 const RELEASE_IDLE_MS = 60 * 1000
 
-// What a kept cart's lines were "not sent before": a lock, or a reload for a new release.
+// What a kept cart's lines were "not sent before": a lock, a reload for a new release, or (S833) a
+// sign-in that ended by itself.
 const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated'
-  : kept?.reason === 'outlet' ? 'the till stopped for the outlet change' : 'the till locked')
+  : kept?.reason === 'outlet' ? 'the till stopped for the outlet change'
+  : kept?.reason === 'ended' ? 'the sign-in ended' : 'the till locked')
 // The dishes a kept cart had not saved, as a waiter reads them: "1× Masala Tea, 2× Veg Momo" (S809 3g).
 const keptLinesText = kept => keptLinesToRestore(kept?.items, []).map(l => `${l.qty}× ${l.name}`).join(', ')
 
@@ -280,6 +283,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [staleRecovery, setStaleRecovery] = useState(null)
   // The bill on screen was closed on another device — the name to show while the notice is open.
   const [closedElsewhere, setClosedElsewhere] = useState(null)
+  // S833: who closed it, when it was another login's earlier try on this tablet rather than another till.
+  const [closedElsewhereBy, setClosedElsewhereBy] = useState(null)
   // "Served" on the order screen, in flight.
   const [servingTickets, setServingTickets] = useState(false)
   const [catTab,      setCatTab]      = useState('All')
@@ -444,6 +449,39 @@ export default function PosOrders({ billingStation = false } = {}) {
   const noteLinkDown = () => { linkDownUntilRef.current = Date.now() + LINK_DOWN_MS; setLinkDown(true) }
   const noteLinkUp = () => { linkDownUntilRef.current = 0; setLinkDown(false) }
   const tillOffline = () => !navigator.onLine || Date.now() < linkDownUntilRef.current
+  // S833: and while it is marked down, a small read every LINK_PROBE_MS asks whether it is back, rather
+  // than every send waiting out the whole LINK_DOWN_MS. Any answer ends it and uploads what waits.
+  useEffect(() => {
+    if (!linkDown) return
+    let busy = false
+    const probe = setInterval(async () => {
+      if (busy || !navigator.onLine) return
+      busy = true
+      try {
+        const res = await bounded(scopedFrom('pos_tables', 'id').limit(1), 'Checking the internet', LINK_PROBE_MS - 500)
+        if (!noAnswer(res)) { noteLinkUp(); void flushRef.current?.() }
+      } finally { busy = false }
+    }, LINK_PROBE_MS)
+    return () => clearInterval(probe)
+  }, [linkDown]) // eslint-disable-line react-hooks/exhaustive-deps
+  // S833 (POS_TODO B3): an entry the upload keeps for a reason other than the connection (a refused read,
+  // a failure on this device) used to say "kept on this till" for ever, the reason only in the console.
+  // After UPLOAD_TROUBLE_TRIES in a row the floor names it; it goes once the entry uploads or is settled.
+  const uploadTriesRef = useRef(new Map())
+  const keptErrorRef = useRef(null)
+  const [uploadTrouble, setUploadTrouble] = useState([])
+  const noteUploadTrouble = (q, err) => {
+    const oid = queuedOrderId(q)
+    if (!err) {
+      if (uploadTriesRef.current.delete(oid)) setUploadTrouble(prev => prev.filter(t => t.orderId !== oid))
+      return
+    }
+    const tries = (uploadTriesRef.current.get(oid) || 0) + 1
+    uploadTriesRef.current.set(oid, tries)
+    if (tries < UPLOAD_TROUBLE_TRIES) return
+    const item = { orderId: oid, where: q.table_name || 'A takeaway', text: errorText(err, 'staff') }
+    setUploadTrouble(prev => [...prev.filter(t => t.orderId !== oid), item])
+  }
   // What this till's queue holds for this outlet and is still to upload (conflicts excluded), and how many
   // entries it holds for another outlet, which an upload leaves alone (ORDER-FLOW-15). applyQueueCounts.
   const [waitingUploads, setWaitingUploads] = useState(0)
@@ -510,14 +548,38 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Since S809 CHECKOUT-7 each attempt also keeps what it sent (`sent`, see newCloseAttempt) and how many
   // of its writes are still travelling, and it outlives Cancel and the order screen: until a read settles
   // it either way, its payment controls stay locked and the floor marks its table (unsettledCloses).
+  // Since S833 they are kept on the tablet too (closeAttemptStore.js), so a reload, leaving Orders or a PIN
+  // lock no longer forgets them. Another login's kept try (owner decision, 2026-10-13) sits apart in
+  // foreignCloseRef: it locks that bill's payment, names who pressed, and is only ever read, never finished.
   const closeAttemptRef = useRef(new Map())
+  const foreignCloseRef = useRef(new Map())
   const [unsettledCloses, setUnsettledCloses] = useState([])
   const closeAttemptFor = oid => (oid && closeAttemptRef.current.get(oid)) || null
+  const foreignCloseFor = oid => (oid && foreignCloseRef.current.get(oid)) || null
+  const showUnsettledCloses = () => setUnsettledCloses([...closeAttemptRef.current.values(), ...foreignCloseRef.current.values()])
+  const keepCloseAttempts = () => keepOwnCloseAttempts({
+    profileId: profile?.id, profileName: profile?.full_name || '', clientId, attempts: [...closeAttemptRef.current.values()],
+  })
   const setCloseAttempt = (oid, attempt) => {
     if (attempt) closeAttemptRef.current.set(oid, attempt)
     else closeAttemptRef.current.delete(oid)
-    setUnsettledCloses([...closeAttemptRef.current.values()])
+    keepCloseAttempts()
+    showUnsettledCloses()
   }
+  const dropForeignClose = (mark, { forEveryone = false } = {}) => {
+    foreignCloseRef.current.delete(mark.orderId)
+    if (forEveryone) dropKeptCloseAttempt({ profileId: mark.profileId, clientId, orderId: mark.orderId })
+    showUnsettledCloses()
+  }
+  // The tries this tablet kept, read back once the login and outlet are known: this login's own carry on
+  // as marks; another login's lock their bill until read. The 15 s poll below settles both.
+  useEffect(() => {
+    if (!clientId || !profile?.id) return
+    const { own, foreign } = restoreCloseAttempts({ profileId: profile.id, clientId, writeLimitMs: CLOSE_STEP_MS })
+    for (const a of own) if (!closeAttemptRef.current.has(a.orderId)) closeAttemptRef.current.set(a.orderId, a)
+    foreignCloseRef.current = new Map(foreign.filter(f => !closeAttemptRef.current.has(f.orderId)).map(f => [f.orderId, f]))
+    showUnsettledCloses()
+  }, [clientId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // Every 15 s while any attempt is unsettled, it is read again (pollUnsettledCloses), wherever the till
   // is. Through a ref, so the interval always runs the current render's closure.
   const closePollRef = useRef(null)
@@ -536,6 +598,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // can enter performSave twice with orderId still null and insert two pos_orders rows. A ref for
   // the same reason as closingRef above: it needs to be readable/settable synchronously mid-call.
   const savingRef = useRef(false)
+  // S833: the cart as it stood when the save in flight was pressed (cartKeyMap), so ← can tell what that
+  // save already carries — it lands and prints whether or not the waiter stays — from what changed after.
+  const sendingCartRef = useRef(null)
   // S809 ORDER-FLOW-3, -4 (3e): saves of an order whose answer has not come back, by order id, oldest
   // first (sendAttempt.js). Each save is marked just before it goes out and the mark is dropped once its
   // answer is known, so a stale refusal, a reopened order and the 15 s poll below can tell this till's
@@ -886,9 +951,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   // S809 CHECKOUT-7: so is everything a close try sent while that try is unsettled — it can still land,
   // and a bill it closes is finished as it was sent. The method and tender controls lock with them.
   const closeLocked = !!orderId && unsettledCloses.some(a => a.orderId === orderId)
-  const closeLockText = billingTab === 'pay'
-    ? 'The first payment try may still go through — confirm again with the same payment, or wait for it.'
-    : 'The first try may still go through — press again as it is, or wait for it.'
+  const foreignClose = foreignCloseFor(orderId)
+  const closeLockText = foreignClose ? foreignCloseText(foreignClose)
+    : billingTab === 'pay'
+      ? 'The first payment try may still go through — confirm again with the same payment, or wait for it.'
+      : 'The first try may still go through — press again as it is, or wait for it.'
   const tendersLocked = tenders.length > 0 || closeLocked
   const tendersLockHint = closeLocked ? 'Locked until the till knows whether the first payment try went through.'
     : 'Payments are already recorded against this total — undo them below to change the discount or comps.'
@@ -939,7 +1006,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     // (the server refuses it there). Left standing, the points go back when the bill next closes any
     // way but a Split charge with points (guard_pos_order_close), or the next Split charge replaces them.
     const standing = liveRedemptionRef.current?.orderId
-    if (standing && reason !== 'outlet' && !closeAttemptFor(standing)) waitUntil(cancelLiveRedemption())
+    // S833: nor once the sign-in has ended by itself ('ended'): with no session the server refuses the
+    // handback, and the close returns the points anyway.
+    if (standing && reason !== 'outlet' && reason !== 'ended' && !closeAttemptFor(standing)) waitUntil(cancelLiveRedemption())
     if (view !== 'order' || !profile?.id || !clientId) return
     // Units beyond what is saved on the server. A note edit or a lowered quantity alone keeps nothing:
     // there is no line to bring back, and the saved order already holds the rest. Only the lines with
@@ -973,8 +1042,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // minute untouched. When the database refuses this page as too old it reloads within seconds from
   // wherever it is, keeping the unsent cart the way a lock does; nothing was written, so nothing is
   // lost but the reload. The lines come back on this screen's next mount (takeLockedCart below).
-  // Nor while a close is unsettled (S809 CHECKOUT-7): the attempt lives in memory, and a reload would
-  // forget a bill that may still close.
+  // Nor while a close is unsettled (S809 CHECKOUT-7): since S833 the attempt survives a reload on the
+  // tablet, but a reload mid-check still cuts off the read that would settle it.
   const releaseSafe = (view === 'floor' || view === 'bills') && !saving && !closing && !billingOpen &&
     !syncingOffline && !coversModal && !recentBillsOpen && !billPreviewOpen && unsettledCloses.length === 0
   useReleaseReload(releaseSafe, RELEASE_IDLE_MS, async () => {
@@ -1689,11 +1758,13 @@ export default function PosOrders({ billingStation = false } = {}) {
     setServingTickets(true)
     // S809 3d (FLOOR-KITCHEN-6): bounded, so a stalled request cannot leave ✓ Served stuck on
     // "Marking…" and refusing every table on this till. served_at is the server's since 3d.
-    const { data, error } = await bounded(scopedUpdate('pos_kot_log', {
+    const servedRes = await bounded(scopedUpdate('pos_kot_log', {
       status: 'served', served_at: new Date().toISOString(), status_updated_by: profile?.id || null,
     }).eq('order_id', orderId).eq('status', 'ready').select('id'), 'Marking served', 15000)
+    const { data, error } = servedRes
     setServingTickets(false)
-    if (error && isTimeout(error)) setMsg('error:The server took too long to answer, so it may or may not be marked served. Check your signal, then look at the order again in a moment.')
+    // S833: a dropped connection or a gateway 5xx is no answer too, not a refusal.
+    if (noAnswer(servedRes)) setMsg('error:No answer came back, so it may or may not be marked served. Check your signal, then look at the order again in a moment.')
     else if (error) setMsg(`error:Not marked as served — the kitchen still shows it ready. ${errorText(error, 'staff')}`)
     else if (!data?.length) setMsg('ok:Nothing was waiting — it was already marked served.')
     else setMsg(`ok:${data.length === 1 ? 'Ticket' : `${data.length} tickets`} marked served.`)
@@ -1725,20 +1796,28 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A conflict waits for the waiter's Start new order / Discard on the floor; after a reload it is
     // tried once more, and comes back as the same conflict.
     const mine = queue.filter(q => ownQueuedEntry(q, clientId) && !conflictIdsRef.current.has(q.order_id))
+    // An entry gone from the queue (uploaded elsewhere on this page, or discarded) takes its line with it.
+    const stillThere = new Set(mine.map(queuedOrderId))
+    for (const oid of [...uploadTriesRef.current.keys()]) if (!stillThere.has(oid)) uploadTriesRef.current.delete(oid)
+    setUploadTrouble(prev => (prev.every(t => stillThere.has(t.orderId)) ? prev : prev.filter(t => stillThere.has(t.orderId))))
     if (mine.length === 0) return
     setSyncingOffline(true)
     let moved = false
     try {
       for (const q of mine) {
         let outcome
+        keptErrorRef.current = null
         try {
           outcome = await uploadQueuedOrder(q)
         } catch (err) {
           console.error('POS offline order upload failed, will retry:', err) // left queued
+          keptErrorRef.current = err
           outcome = 'kept'
         }
         if (outcome === 'no_answer') { noteLinkDown(); break } // the connection: the rest waits for the next try
-        if (outcome !== 'kept') { noteLinkUp(); moved = true }
+        if (outcome !== 'kept') { noteLinkUp(); moved = true; noteUploadTrouble(q, null) }
+        // A lapsed sign-in keeps its entry with no reason recorded: it is asked again, and is no one's to fix.
+        else if (keptErrorRef.current) noteUploadTrouble(q, keptErrorRef.current)
       }
     } finally {
       setSyncingOffline(false)
@@ -1818,7 +1897,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         // gone is a conflict rather than a retry against a dead id for ever.
         const cur = await bounded(scopedFrom('pos_orders', 'status').eq('id', oid).maybeSingle(), 'Checking an order', SEND_READ_MS)
         if (noAnswer(cur)) return 'no_answer'
-        if (cur.error) { console.error('offline sync: status read refused, will retry:', cur.error); return 'kept' }
+        if (cur.error) { console.error('offline sync: status read refused, will retry:', cur.error); keptErrorRef.current = cur.error; return 'kept' }
         if (cur.data?.status !== 'open') return toConflict('closed') // stays queued — surfaced for review, not discarded
         // Only a count changed on this till (`covers_set`, ORDER-FLOW-14); an entry from before it says
         // nothing, and is written as it always was.
@@ -1868,7 +1947,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         // rest of the queue was built on it, so it goes again on top. Anything else is another device's.
         const back = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Checking an order', SEND_READ_MS)
         if (noAnswer(back)) return 'no_answer'
-        if (back.error) { console.error('offline sync: read-back refused, will retry:', back.error); return 'kept' }
+        if (back.error) { console.error('offline sync: read-back refused, will retry:', back.error); keptErrorRef.current = back.error; return 'kept' }
         if (back.data?.status !== 'open') return toConflict('closed')
         const stored = back.data.pos_order_items || []
         if (storedLinesMatchPayload(stored, q.items)) {
@@ -1932,9 +2011,19 @@ export default function PosOrders({ billingStation = false } = {}) {
   async function logQueuedSends(q, oid) {
     const out = { keys: [], ids: [], noAnswer: false }
     const already = new Set(q.logged_ids || [])
-    for (const send of q.kot_sends || []) {
-      if (already.has(queuedSendKey(send))) continue
-      const res = await bounded(scopedInsert('pos_kot_log', { ...send, order_id: oid }), 'Logging a ticket', SEND_READ_MS)
+    const toLog = (q.kot_sends || []).filter(send => !already.has(queuedSendKey(send)))
+    // S833: a ticket printed for an order created on this till carries no number (the server gives it at
+    // upload), so the Kitchen Display and KOT Log showed it with none. The order holds it by now; a read
+    // that fails logs the ticket without one, as before.
+    let orderNo = null
+    if (toLog.some(send => send.order_no == null)) {
+      const no = await bounded(scopedFrom('pos_orders', 'order_no').eq('id', oid).maybeSingle(), 'Reading the order number', SEND_READ_MS)
+      if (noAnswer(no)) { out.noAnswer = true; return out }
+      if (no.error) console.error('offline sync: order number read failed, tickets logged without it:', no.error)
+      else orderNo = no.data?.order_no ?? null
+    }
+    for (const send of toLog) {
+      const res = await bounded(scopedInsert('pos_kot_log', { ...send, order_no: send.order_no ?? orderNo, order_id: oid }), 'Logging a ticket', SEND_READ_MS)
       if (noAnswer(res)) { out.noAnswer = true; break }
       if (res.error && (Number(res.status) === 401 || /jwt/i.test(res.error.message || ''))) break // asked again next time
       // No such order on the server: one created here that has yet to upload keeps its tickets for then
@@ -2243,12 +2332,13 @@ export default function PosOrders({ billingStation = false } = {}) {
     return m
   }
   function markCartSaved(items) { savedItemsRef.current = cartKeyMap(items) }
-  function unsavedChangeCount(items) {
+  function unsavedChangeCount(items) { return changedSince(savedItemsRef.current, items) }
+  // Lines of `items` whose qty or note differ from `base` (a cartKeyMap), counting lines gone from it.
+  function changedSince(base, items) {
     const cur = cartKeyMap(items)
-    const saved = savedItemsRef.current
     let n = 0
-    for (const [k, v] of cur) if (saved.get(k) !== v) n++
-    for (const k of saved.keys()) if (!cur.has(k)) n++
+    for (const [k, v] of cur) if (base.get(k) !== v) n++
+    for (const k of base.keys()) if (!cur.has(k)) n++
     return n
   }
 
@@ -2784,7 +2874,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // advisory — so all this prompt owns is the reason, which the RPC has no way to invent.
   function setQty(idx, qty) {
     const item = orderItems[idx]
-    const kitchenQty = kitchenQtyOf(item)
+    // S833: never more than the line now holds. After a saved take-off (3 sent, 3 → 2) the line still
+    // remembers 3 sent, so a second (2 → 1) asked about "2 × already sent" where the server records 1.
+    const kitchenQty = Math.min(kitchenQtyOf(item), Number(item?.qty) || 0)
     if (kitchenQty > 0 && qty < kitchenQty) {
       setPullPrompt({ idx, qty, name: item.name, pulled: kitchenQty - Math.max(0, qty) })
       setPullReason('')
@@ -2814,13 +2906,20 @@ export default function PosOrders({ billingStation = false } = {}) {
   }
 
   function updateItemNote(idx, notes) {
-    setOrderItems(prev => prev.map((item, i) => i === idx
-      ? {
-          ...item, notes,
-          sent_to_kot: item.notes === notes ? item.sent_to_kot : false,
-          sent_qty: (item.sent_to_kot && item.notes !== notes) ? item.qty : (item.sent_qty || 0),
-        }
-      : item))
+    setOrderItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      // S833 (owner decision, 2026-10-13): remember what the station was sent, so a note changed on a line
+      // part of which it already has (2 sent, now 3) sends a change for those 2 beside the "+1"
+      // (changedOnSentUnits). In memory only: the server keeps no sent note, so a reload forgets it.
+      const atSend = kitchenQtyOf(item) > 0 ? (item.note_at_send ?? item.notes ?? '') : null
+      return {
+        ...item, notes,
+        sent_to_kot: item.notes === notes ? item.sent_to_kot : false,
+        sent_qty: (item.sent_to_kot && item.notes !== notes) ? item.qty : (item.sent_qty || 0),
+        note_at_send: atSend,
+        note_changed: atSend !== null && (notes || '').trim() !== (atSend || '').trim(),
+      }
+    }))
   }
 
   function addPresetToNote(idx, phrase) {
@@ -2854,7 +2953,7 @@ export default function PosOrders({ billingStation = false } = {}) {
 
     const snapshot = orderItems
     const isSent = sendKeys === 'all' ? () => true : sendKeys ? i => sendKeys.has(lineKeyOf(i)) : () => false
-    const savedLines = snapshot.map(i => (isSent(i) ? { ...i, sent_to_kot: true, sent_qty: i.qty } : i))
+    const savedLines = snapshot.map(i => (isSent(i) ? { ...i, sent_to_kot: true, sent_qty: i.qty, note_at_send: null, note_changed: false } : i))
     const itemsPayload = savedLines.map(toItemPayload)
     // ORDER-FLOW-5 (S809 3e): every wait below is bounded, and a save that answers after the waiter went
     // back to the floor finishes for its own order — its tickets print and log from this call's own
@@ -3298,6 +3397,7 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   function acknowledgeClosedElsewhere() {
     setClosedElsewhere(null)
+    setClosedElsewhereBy(null)
     backToFloor()
     loadFloor()
   }
@@ -3482,6 +3582,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const kotItems = unsentItems.filter(i => !botCategories.has(i.category || 'Other'))
     const botItems = unsentItems.filter(i =>  botCategories.has(i.category || 'Other'))
     savingRef.current = true
+    sendingCartRef.current = cartKeyMap(orderItems)
     setSaving(true); setMsg('')
     const screen = watchScreen()
     try {
@@ -3508,6 +3609,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     } finally {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
+      sendingCartRef.current = null
       setSaving(false)
     }
   }
@@ -3517,6 +3619,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (orderItems.length === 0) { setMsg('error:Add at least one item.'); return }
     if (savingRef.current) return
     savingRef.current = true
+    sendingCartRef.current = cartKeyMap(orderItems)
     setSaving(true); setMsg('')
     const screen = watchScreen()
 
@@ -3559,6 +3662,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     } finally {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
+      sendingCartRef.current = null
       setSaving(false)
     }
   }
@@ -3582,6 +3686,7 @@ export default function PosOrders({ billingStation = false } = {}) {
 
     if (savingRef.current) return
     savingRef.current = true
+    sendingCartRef.current = cartKeyMap(orderItems)
     setSaving(true); setMsg('')
     const screen = watchScreen()
     try {
@@ -3612,6 +3717,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     } finally {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
+      sendingCartRef.current = null
       setSaving(false)
     }
   }
@@ -3626,8 +3732,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     setOrderItems(prev => prev.map(i => {
       const s = sentByKey.get(lineKeyOf(i))
       if (!s) return i
-      if (i.qty === s.qty && (i.notes || '') === (s.notes || '')) return { ...i, sent_to_kot: true, sent_qty: i.qty }
-      return { ...i, sent_to_kot: false, sent_qty: s.qty }
+      if (i.qty === s.qty && (i.notes || '') === (s.notes || '')) return { ...i, sent_to_kot: true, sent_qty: i.qty, note_at_send: null, note_changed: false }
+      // The station now has what was sent, with the note it was sent with (S833).
+      const changed = (i.notes || '').trim() !== (s.notes || '').trim()
+      return { ...i, sent_to_kot: false, sent_qty: s.qty, note_at_send: changed ? (s.notes || '') : null, note_changed: changed }
     }))
   }
 
@@ -3664,7 +3772,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Kitchen Display shows it ("Seen" clears it) and no ticket count includes it (kitchenNotes.js).
     const sends = [
       { ...payload, items: payload.items.filter(i => i.qty > 0) },
-      { ...payload, items: payload.items.filter((_, n) => isChangeOnlyLine(items[n])).map(l => ({ ...l, qty: 0, change: true })) },
+      // S833: so is a note changed on the units already sent of a line now growing (sendsChangeLine).
+      { ...payload, items: payload.items.filter((_, n) => sendsChangeLine(items[n])).map(l => ({ ...l, qty: 0, change: true })) },
     ].filter(s => s.items.length > 0)
       // S809 3f (ORDER-FLOW-7, S809.4): each ticket carries the id it is logged under, minted here, so a
       // retry logs it once — a duplicate key then means the earlier try landed.
@@ -4006,6 +4115,10 @@ export default function PosOrders({ billingStation = false } = {}) {
   // payments exceed); `field` is the control the cashier is taken to.
   function closeBlocker(closeType) {
     const block = (text, label, field = null) => ({ text, label, field })
+    // S833 (owner decision, 2026-10-13): another login pressed a close on this bill on this tablet and its
+    // answer was lost. Until a read settles it, nobody else charges, comps or voids it: it may yet close.
+    const foreign = foreignCloseFor(orderId)
+    if (foreign) return block(foreignCloseText(foreign), 'Wait — checking an earlier payment try')
     // S809 2a: no Charge or Complimentary before the till's settings have answered (ORDER-FLOW-1),
     // or on an emptied cart (CHECKOUT-1, owner Q8 a). Void is not held back by either.
     const start = closeStartRefusal({
@@ -4248,6 +4361,26 @@ export default function PosOrders({ billingStation = false } = {}) {
         try { await finishSettledClose(attempt, outcome.row) } finally { closingRef.current = false; setClosing(false); setCloseStep('') }
         return
       }
+      // S833: another login's kept try is only read. Still open once nothing of it can land: it never
+      // closed, so it is forgotten for everyone. Closed: no longer this login's lock, but kept on the tablet
+      // for the login that pressed, whose till still owes the bill its Split legs and points.
+      for (const mark of [...foreignCloseRef.current.values()]) {
+        if (closingRef.current) return
+        const readAt = Date.now()
+        const outcome = await readCloseOutcome(mark.closeType, mark.orderId)
+        if (foreignCloseRef.current.get(mark.orderId) !== mark || outcome.state === 'unknown') continue
+        const onScreen = view === 'order' && mark.orderId === orderId
+        if (outcome.state === 'open') {
+          if (!openReadIsFinal(mark, readAt)) continue
+          dropForeignClose(mark, { forEveryone: true })
+          const text = `ok:${mark.by}'s earlier try on ${mark.where} did not go through — nothing was charged. It can be taken now.`
+          if (onScreen && billingOpen) setCloseMsg(text)
+          else if (onScreen) setMsg(text)
+          continue
+        }
+        dropForeignClose(mark)
+        if (onScreen) { showClosedElsewhere(); setClosedElsewhereBy(mark.by) }
+      }
     } finally {
       closePollBusyRef.current = false
     }
@@ -4272,7 +4405,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     const earlier = closeAttemptFor(orderId)
     if (!earlier) {
       const blocker = closeBlocker(closeType)
-      if (blocker) { setCloseMsg(`error:${blocker.text}`); return false }
+      if (blocker) {
+        setCloseMsg(`error:${blocker.text}`)
+        if (foreignCloseFor(orderId)) void closePollRef.current?.() // S833: check it now, not at the next tick
+        return false
+      }
     }
     // Guards a manual Charge tap and the QR auto-confirm poll from racing each other — the poll
     // calls closeOrder directly, bypassing the Confirm Payment button's own disabled={closing}.
@@ -4598,11 +4735,16 @@ export default function PosOrders({ billingStation = false } = {}) {
       // Cancelled when the till stops waiting (S809), so nothing more of it can be sent; only what the
       // server already received can still land, and that is finished within CLOSE_LAND_GRACE_MS.
       const closeAbort = new AbortController()
-      const { data: updated, error } = await bounded(trackCloseWrite(attempt,
-        scopedUpdate('pos_orders', payload).eq('id', orderId).select('*').abortSignal(closeAbort.signal).single()), 'Closing the bill')
-      // No answer — a timeout or a dropped connection. The write may have landed, so the bill is read
-      // back rather than the close reported as failed.
-      if (error && (isTimeout(error) || isNetworkError(error))) {
+      const closeWrite = trackCloseWrite(attempt,
+        scopedUpdate('pos_orders', payload).eq('id', orderId).select('*').abortSignal(closeAbort.signal).single())
+      keepCloseAttempts() // S833: when this write went out is on the tablet before its answer can be lost
+      const closeRes = await bounded(closeWrite, 'Closing the bill')
+      keepCloseAttempts()
+      const { data: updated, error } = closeRes
+      // No answer — a timeout, a dropped connection, or a gateway 5xx while the database may still be
+      // working (S833: a 5xx was told to the cashier as a refusal). The write may have landed, so the
+      // bill is read back rather than the close reported as failed.
+      if (noAnswer(closeRes)) {
         closeAbort.abort()
         return await settleUnknownClose({ justTried: true }) === 'finished'
       }
@@ -4861,13 +5003,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     const phone = updated.buyer_phone || (attempt ? '' : buyerPhone.trim())
     if (hasFeature('loyalty') && closeType === 'paid' && phone) {
       const who = updated.buyer_name || (attempt ? '' : buyerName.trim()) || phone
-      const { data: earned, error: loyErr } = await bounded(supabase.rpc('award_loyalty_points', { p_order_id: updated.id }), 'Adding the points')
+      const awardRes = await bounded(supabase.rpc('award_loyalty_points', { p_order_id: updated.id }), 'Adding the points')
+      const { data: earned, error: loyErr } = awardRes
       // The award's own refusals (not the closer, past the 10-minute window) already say where points
       // are added later (S815 4g: the customer's History in Customers → Loyalty, by the Owner or a POS
       // manager, in one tap).
       if (loyErr && (loyErr.hint === HINT.rank || loyErr.hint === 'award_window_closed')) {
         setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${loyErr.message}` })
-      } else if (loyErr && (isTimeout(loyErr) || isNetworkError(loyErr))) {
+      } else if (noAnswer(awardRes)) {
         // The award may have landed with its answer lost, so this must not invite adding them by hand.
         setLoyaltyNote({ ok: false, text: `It is not known whether points were added for ${who} — the connection dropped. The Owner or a POS manager can check the customer's History in Customers → Loyalty, and add this bill's points there if they are missing.` })
       } else if (loyErr) {
@@ -5159,6 +5302,26 @@ export default function PosOrders({ billingStation = false } = {}) {
   // in and never sent were thrown away by the one control a waiter presses to check another table.
   // Asks only when something would actually be lost; an untouched order goes straight back.
   function requestBackToFloor() {
+    // S833: during a send, the lines it carries are not lost by going back: the save still lands and its
+    // tickets still print (the floor says so, watchScreen). Only what changed after the press is dropped.
+    const sending = sendingCartRef.current
+    if (sending) {
+      const late = changedSince(sending, orderItems)
+      askConfirm({
+        title: 'Go back while this order is saving?',
+        confirmLabel: late > 0 ? 'Go back and drop them' : 'Go back', danger: late > 0,
+        cancelLabel: 'Stay', zIndex: 1200,
+        body: (
+          <p style={{ margin: 0 }}>
+            What you pressed is still on its way. It reaches the bill whether or not you stay, anything it sends
+            to the kitchen or bar still prints, and the floor says when it lands.
+            {late > 0 && ` ${late === 1 ? 'One line was' : `${late} lines were`} changed after you pressed it — going back drops ${late === 1 ? 'that change' : 'those changes'}.`}
+          </p>
+        ),
+        run: () => backToFloor(),
+      })
+      return
+    }
     const n = unsavedChangeCount(orderItems)
     if (n === 0) { backToFloor(); return }
     askConfirm({
@@ -5937,9 +6100,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
                     placeholder="+ Kitchen note (e.g. serve after starters)"
                     className="till-hit--row"
+                    // S833: a written note is an instruction (often an allergy), so it reads in the body ink;
+                    // only the empty box's prompt stays quiet. Every note was grey italic before.
                     style={{
                       background: 'none', border: 'none', outline: 'none',
-                      fontSize: 11, fontStyle: 'italic', color: 'var(--theme-text3)',
+                      fontSize: item.notes ? 12 : 11, fontStyle: item.notes ? 'normal' : 'italic',
+                      fontWeight: item.notes ? 600 : 400, color: item.notes ? 'var(--theme-text1)' : 'var(--theme-text3)',
                       padding: '0 0 0 2px', width: '100%',
                     }}
                   />
@@ -6828,10 +6994,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       )}
       {/* S754: the bill on screen was closed on another device — one way out, back to the floor. */}
       {closedElsewhere && (
-        <Modal title="This bill was already closed on another device" onClose={acknowledgeClosedElsewhere} maxWidth={420} zIndex={1300}>
+        <Modal title={closedElsewhereBy ? 'This bill was already closed' : 'This bill was already closed on another device'} onClose={acknowledgeClosedElsewhere} maxWidth={420} zIndex={1300}>
           <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            {closedElsewhere} was billed or voided on another till, so nothing more can be added to it and nothing
-            on this screen was saved to it. The floor shows the table as it is now — open it again to start a new order.
+            {closedElsewhereBy
+              ? `${closedElsewhere} was closed by ${closedElsewhereBy}'s earlier try on this tablet, so nothing more can be added to it and nothing on this screen was saved to it. Reprint it from Recent Bills if the guest needs the bill.`
+              : `${closedElsewhere} was billed or voided on another till, so nothing more can be added to it and nothing on this screen was saved to it.`}
+            {' '}The floor shows the table as it is now — open it again to start a new order.
           </p>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn-primary" onClick={acknowledgeClosedElsewhere}>Back to the floor</button>
@@ -7064,6 +7232,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             <button type="button" className="btn btn-ghost btn-sm till-hit--row" style={{ marginLeft: 'auto', flexShrink: 0 }}
               onClick={() => flushPosOrderQueue()}>Upload now</button>
           </Tip>
+        </div>
+      )}
+      {/* S833 (B3): an entry kept try after try for a reason other than the connection says why. */}
+      {isOnline && !linkDown && uploadTrouble.length > 0 && (
+        <div role="alert" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          {uploadTrouble.map(t => <span key={t.orderId}>⚠ {uploadTroubleText(t)}</span>)}
         </div>
       )}
       {/* ORDER-FLOW-15: another outlet's offline orders on this device are left for that outlet. */}
