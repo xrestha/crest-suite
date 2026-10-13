@@ -182,9 +182,10 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 - [x] ~~S809 stage 5, slice 5c: `credit_settled_at := now()`; the `credit_settlement` unique index; the
   close pins its priced lines; a Split bill's legs inside the shift lock; a void's shift from the open
-  shift; raise `pos_min_till_build()`~~ — **step 1 shipped S823, 2026-10-13**: migration `20261013100000`
-  applied live; app crest-v438. **Step 2** (`20261013100100`, the floor to 438) is written and is applied
-  only once crest-v438 is live. No owner decision needed. Checked first, live: only
+  shift; raise `pos_min_till_build()`~~ — **shipped S823, 2026-10-13**: migration `20261013100000`
+  applied live; app crest-v438; then **step 2** (`20261013100100`, the floor to 438) applied live once
+  crest-v438 was deployed (a rolled-back test: v437 and no header refused, v438 passes, a guest
+  passes). No owner decision needed. Checked first, live: only
   `save_pos_order_items` writes `items_version`, so a normal close is never refused; 0 settlement
   entries, so 0 duplicates. **The settle** stamps `credit_settled_at := now()` beside `credit_settled_by`.
   **The index** `pos_cash_movements_one_credit_settlement` (order_id, kind = 'credit_settlement'); the
@@ -202,7 +203,7 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   entry for the bill is refused by the new index; Close Shift with a just-closed Split bill short of its
   legs is refused while one 12 minutes old is not, and closes once the legs land. Read back separately:
   both md5s, both INVOKER, both triggers enabled, the index unique and valid on `order_id`, the floor
-  still NULL.
+  NULL until step 2, then 438.
 - [x] ~~S809 stage 5, slice 5b: A2 booking rate-limit key, A2 delete-open-order message, 4g phone-lock
   sentence~~ — **shipped S822, 2026-10-12**: migrations `20261012160000` + `20261012160100` (a header
   probe, created, called and dropped, live about two minutes) and `20261012170000`, all applied live;
