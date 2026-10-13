@@ -812,7 +812,8 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     and S812 (`04ebdb0e`); close it when 5e drops the columns.~~ Closed in 5e (S829).
 - **Found while building stage 5, slice 5e (2026-10-13, not fixed):**
   - **The HR manager's hour after a settlement, on the other HR pages** (owner 2026-10-13: its own job,
-    shared with hss-suite, so file it in `docs/CROSS-REPO.md` there). `hr_is_manager_rank()` and the HR
+    shared with hss-suite; filed in this repo's `docs/CROSS-REPO.md`, and still to file in hss's once
+    hss-suite is set up on this machine). `hr_is_manager_rank()` and the HR
     rank policies test the raw `hr_role`, so a settled HR manager keeps manager reach on payroll,
     attendance and the rest for the hour their token lives. 5e closed only the settings screen.
   - `register_trial`'s two rate-limit counts drop their read error (`ipCount ?? 0`), so a failed count

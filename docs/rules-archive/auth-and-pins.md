@@ -34,3 +34,9 @@ tablet key and rotate/retire the shared key (S755)**. `revokeClientTablets` runs
 `deleteClientDataFor`, with the service role, because `revoke_pos_device` and
 `retire_pos_legacy_device_key` refuse a caller with no session. The caller is recorded as
 `revoked_by`. A restore brings neither back, so each tablet is re-activated from Till Devices.
+
+**Closed (S829, 2026-10-13).** All of the above is done: the app code and `pos-staff-login`'s branch
+went in S809 3h, the four functions in S812, and the last three `client_secrets` columns
+(`pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at`) in
+`20261013150100`, once `revokeClientTablets` stopped rotating and stamping them. `pos-staff-login`'s
+other PGRST202 fallback, the pre-S791 lockout, went in the same slice.

@@ -16,7 +16,7 @@ Newest at the top; never delete a closed row — a shared defect that came back 
 
 | Date | Found in | Affects | Item | Status |
 | --- | --- | --- | --- | --- |
-| — | — | — | Nothing open. | — |
+| 2026-10-13 | crest-suite | crest-suite, hss-suite | **A settled HR manager keeps manager reach on the HR pages for the hour their token lives.** Crest S829 (POS stage 5e) made `settings_guard_staff_roles` refuse a login with `settlement_blocked_by` set, but `hr_is_manager_rank()` and the HR rank policies (`<table>_write_rank_*`, the payroll and settlement gates) test the raw `hr_role`, so after Final Settlement the leaver's existing token still passes them until it expires. Crest has no HR effective-rank helper; the POS and IMS ones (`pos_caller_has_rank`, `ims_caller_has_rank`) already refuse a settled login. | Open. Owner 2026-10-13: its own job, done in both repos together. Not yet checked in hss's copy, and not yet in hss's `docs/CROSS-REPO.md`: hss-suite is not set up on the Linux machine (file it there when it is). |
 
 ## Open — waiting on hss-suite
 
