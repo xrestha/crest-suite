@@ -180,6 +180,23 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5f-1: the server posts a closed bill to Inventory from the stored bill in
+  the close's transaction~~ — **shipped S830, 2026-10-13**: migration `20261013160000` applied live
+  (run by the owner from the terminal); app crest-v445 (Help and guide text only); no Edge Function, no
+  till floor change. **The post**: `pos_orders_post_to_inventory` (AFTER UPDATE OF status to billed,
+  DEFINER) calls `pos_post_bill_to_ims` inside an exception block, so a failed post never refuses a
+  close and is rolled back whole (the bill waits on the floor banner). It makes the INVOKER guards'
+  checks itself (Inventory on, NULL as on; the bill's Nepal month open; billed; not yet posted), writes
+  the sales rows in one statement (the stamp trigger marks the bill) and then the stock lines, and marks
+  a bill with no dish. **The walk exists twice** (Q30 a): `pos_bill_stock_lines` and
+  `pos_bill_sales_rows` are the SQL copies, held to `recipeCost.js` and `billSalesRows` by
+  `serverPostTwin.test.js` and the migration's probe (same fixture, same numbers) and by an apply-time
+  parity check over every bill on record (4,248 bills, 71,725 stock lines, all matching).
+  **`stock_movements_one_sale_per_bill_item`** allows one till stock line per bill, source and item.
+  The till's own post still runs after the close and is refused as already posted until 5f-2. One
+  deliberate difference from the app: a choice naming a missing item fails the whole post (the bill
+  waits) instead of posting sales without stock lines.
+
 - [x] ~~S809 stage 5, slice 5e: `settings_guard_staff_roles`' raw ranks; `set_active_outlet`'s home
   outlet; `admin-user-ops`' discount-limit default and first hop; `pos-staff-login`'s pre-S791
   fallback; the shared key's columns~~ — **shipped S829, 2026-10-13**: migration `20261013150000`

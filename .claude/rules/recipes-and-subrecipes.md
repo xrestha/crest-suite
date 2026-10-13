@@ -187,6 +187,10 @@ the till (comp costs, slips, the Z-report, a closing bill's stock lines), throug
 `pos_recipe_book` (`posRecipeBook.js`), because a PIN login cannot read `items`. The Periods backfill
 and the other readers still fetch level by level. A new multi-walk page should take the book.
 
+**The server's post has a SQL copy of this walk (S830, Q30 a): `pos_bill_stock_lines`.** A change
+to `walkRecipeTree`, `deltaItems` or `billMovementRows` changes both, pinned by `serverPostTwin.test.js`
+and the migration's probe.
+
 ## The walk is a PAGED read, and its seed list is the client's whole recipe book (S711)
 
 `explodeRecipeTree`'s two reads and `computeRecipeCosts`' two reads all go through

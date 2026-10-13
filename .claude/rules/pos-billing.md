@@ -30,6 +30,8 @@ the outlet's own module, never the always-true route flag; D6, D7). A silent
 return once left 15 bills out of Inventory unnoticed.
 History: docs/rules-archive/pos-billing.md#silent-ims-post
 
+**Since S830 5f-1 (`20261013160000`) the server posts the bill in the close.** `pos_orders_post_to_inventory` (AFTER UPDATE OF status to billed, DEFINER) calls `pos_post_bill_to_ims` inside an exception block, so a failed post never refuses a close and is rolled back whole. It makes the INVOKER guards' checks itself (Inventory on, the bill's Nepal month open, billed, not posted), writes `pos_bill_sales_rows` in one statement, then `pos_bill_stock_lines`, and marks a no-dish bill. The till's `postClosedBill` still runs after it and is refused `pos_bill_already_posted` (read as posted) until 5f-2. `stock_movements_one_sale_per_bill_item` allows one till stock line per bill, source and item.
+
 It now returns a boolean, the close path stamps `pos_orders.ims_posted_at` **only on a confirmed
 post**, the POS floor shows a standing count of unposted bills, and Periods carries **Post POS
 bills to Inventory** per period (`src/modules/pos/orders/backfillPosToIms.js`). The bill still
@@ -81,7 +83,7 @@ post.
 PIN every yield read 100% and every comp its typed Cost Price. The till's comp costs and a closing
 bill's stock lines now read through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
 the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`,
-`posStockLines`), which feed `recipeCost.js`' `{ book }` walk, never a SQL copy of it. A till or shift
+`posStockLines`), which feed `recipeCost.js`' `{ book }` walk. Its one SQL copy is the server's post, `pos_bill_stock_lines` (S830, owner Q30 a): a change to either lands in both, with `serverPostTwin.test.js` and a migration probe asserting the same fixture. A till or shift
 screen that costs or depletes uses those two. Sales Report's and Sales Exceptions'
 comp cost switched in S814 (`posFoodCosts`), `viewPosBill`'s comp slips and the Customization report's
 Margin tab (`posDeltaCosting`) in S828. A Staff PIN opening a comp slip is told only a Supervisor+ sees
@@ -99,16 +101,9 @@ already paged, with a comment explaining why, while the parent was not. Same asy
 Covers (truncation skews averages, not just totals), Exceptions, the KOT Register and Customers'
 unbounded outstanding-credit read.
 
-**That sweep stopped at the report pages, and S629 found the rest.** The reports were clean; the
-*operational* screens were not, and several of them read tables with nothing at all to bound them:
-`pos_customers` (a row per phone that has ever been on a bill, so past 1000 a regular cannot be
-found by the search box), `pos_parking_slips` (every slip ever; since S814 open slips plus a date range on All), `pos_shifts` history (two or three
-a day crosses 1000 inside the first year), Credit Notes' candidate list (its range is whatever the
-two pickers are set to), the Z-report's own `pos_orders` read, and `pos_kot_log` on the **Kitchen
-Display** — that one sorted oldest-first, so truncation drops the *newest* tickets, the ones the
-kitchen is waiting on. The lesson repeats S613's: a sweep organised by table finishes the table it
-was named after and leaves its neighbours. Ask rows-per-what, and ask it of the screen as well as
-the report.
+**The operational screens need it as much as the reports (S629):** ask rows-per-what of each screen
+(`pos_customers`, slips, shift history, the Kitchen Display's `pos_kot_log`), not of each table.
+History: docs/rules-archive/pos-billing.md#operational-screens-sweep
 
 **An `.in(column, ids)` list is a URL as well as a row count.** A uuid costs ~37 characters, so a
 few hundred ids is past what proxies accept — that failure is a loud 414, but the row cap still

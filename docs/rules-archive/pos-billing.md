@@ -266,3 +266,18 @@ makes posted bills look unposted, and the function then posts their revenue agai
 bug the guard exists to prevent. It is paged and chunked now, and a failed read **aborts** rather
 than being read as "none of these has posted". `backfillPosToIms.test.js` asserts the round-trip
 counts as exact numbers, because a regression to per-order writes is invisible otherwise.
+
+## Operational screens sweep
+
+Moved from `.claude/rules/pos-billing.md` (S830, to keep the POS rules load under its ceiling).
+
+**That sweep stopped at the report pages, and S629 found the rest.** The reports were clean; the
+*operational* screens were not, and several of them read tables with nothing at all to bound them:
+`pos_customers` (a row per phone that has ever been on a bill, so past 1000 a regular cannot be
+found by the search box), `pos_parking_slips` (every slip ever; since S814 open slips plus a date range on All), `pos_shifts` history (two or three
+a day crosses 1000 inside the first year), Credit Notes' candidate list (its range is whatever the
+two pickers are set to), the Z-report's own `pos_orders` read, and `pos_kot_log` on the **Kitchen
+Display** — that one sorted oldest-first, so truncation drops the *newest* tickets, the ones the
+kitchen is waiting on. The lesson repeats S613's: a sweep organised by table finishes the table it
+was named after and leaves its neighbours. Ask rows-per-what, and ask it of the screen as well as
+the report.
