@@ -191,8 +191,10 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   bills: the till reads the bill's mark back after the close and notes a miss; the floor banner and
   Periods call the RPC, then post credit notes from the page (until 5f-4). `postClosedBill`,
   `backfillPosOrdersToIms` and `posStockLines` are gone; `billSalesRows`/`billMovementRows` stay as the
-  app's twin of the SQL. **Step 2** (after crest-v446 is live): both guards refuse till sales and stock
-  lines from a browser outside the operator's restore, and the till floor goes to 446.
+  app's twin of the SQL. **Step 2 shipped the same session**: `20261013180000` applied once Vercel
+  reported crest-v446 deployed. `ims_sales_entries_guard` and `ims_stock_movements_guard` refuse a
+  till sale or till stock line from any login, the Owner and the operator included
+  (`pos_sale_server_only`), except the operator's restore; the till floor is 446.
 
 - [x] ~~S809 stage 5, slice 5f-1: the server posts a closed bill to Inventory from the stored bill in
   the close's transaction~~ — **shipped S830, 2026-10-13**: migration `20261013160000` applied live

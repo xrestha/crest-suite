@@ -42,6 +42,10 @@ until nothing moves, for Periods' **Post POS bills to Inventory** and the floor'
 `PosImsPostingBanner` → `postWaitingFromTill`; both then post credit notes from the page (until
 5f-4). A bill already carrying till sales but no mark is marked, never posted again.
 `stock_movements_one_sale_per_bill_item` allows one till stock line per bill, source and item.
+**Since `20261013180000` (till floor 446) only the server writes them:** `ims_sales_entries_guard` and
+`ims_stock_movements_guard` refuse a `pos`/`pos_comp` sale or `pos_sale`/`pos_comp` line from any login
+(`pos_sale_server_only`), the Owner and the operator included, except the operator's restore (dated
+before the transaction). Never add a page that writes them; call the server.
 History: docs/rules-archive/pos-billing.md#backfill-batching
 
 **Since S809 2f (`20261009220000`) the database sets the mark with the rows.**
