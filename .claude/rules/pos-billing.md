@@ -29,7 +29,9 @@ INVOKER guards' checks itself (billed, this outlet's, not yet posted, Inventory 
 bill's Nepal day in the month), writes `pos_bill_sales_rows` in one statement, then
 `pos_bill_stock_lines`, and marks a no-dish bill. A bill whose month is not the one OPEN in Inventory
 waits, unmarked, on the floor banner. An outlet without Crest IMS posts nothing and leaves bills and
-notes unmarked (`outletHasIms`; D6, D7). The till only reads the mark back (`billReachedInventory`,
+notes unmarked (`outletHasIms`). **Inventory starts the day it is switched on (5f-3, Q31 a, reverses
+D6/D7):** `clients.ims_since`, stamped at every switch-on; a bill closed before it, or a note on one, is
+never posted, counted or badged (`billCountsForIms`, SQL `before_inventory`). The till only reads the mark back (`billReachedInventory`,
 5f-2) and notes a miss. The bill still closes either way. A silent return once left 15 bills out of
 Inventory unnoticed.
 History: docs/rules-archive/pos-billing.md#silent-ims-post

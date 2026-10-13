@@ -1,4 +1,4 @@
-import { creditNoteReversalRows, creditNoteRestockMovements, backfillCreditNotesToIms, postCreditNoteToIms } from './creditNotePosting'
+import { creditNoteReversalRows, creditNoteRestockMovements, backfillCreditNotesToIms, postCreditNoteToIms, countUnpostedCreditNotesForPeriod } from './creditNotePosting'
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 import { billSalesRows } from '../orders/backfillPosToIms'
 
@@ -94,6 +94,34 @@ describe('postCreditNoteToIms', () => {
     expect(res).toEqual({ posted: true })
     expect(scopedUpdate).toHaveBeenCalledWith('pos_credit_notes', expect.objectContaining({ ims_posted_at: expect.any(String) }))
   })
+
+  // S831 5f-3 (Q31 a): Inventory starts on the day it was switched on; a note on an earlier bill is
+  // never sent, because its bill never reached Inventory. Nothing is read, written or marked.
+  it('sends nothing for a bill closed before the outlet\'s Inventory began', async () => {
+    const insert = jest.fn()
+    const scopedFrom = jest.fn(() => builder({ data: { id: 'p1', status: 'open' }, error: null }))
+    const scopedUpdate = jest.fn(() => builder({ error: null }))
+    const res = await postCreditNoteToIms({
+      supabase: { from: () => ({ insert }) }, scopedFrom, scopedUpdate,
+      note, order: { ...order, closed_at: '2026-10-12T20:00:00+05:45' }, items: ITEMS, today,
+      imsSince: '2026-10-12T18:15:00+00:00',
+    })
+    expect(res).toEqual({ posted: false, reason: 'before_inventory' })
+    expect(scopedFrom).not.toHaveBeenCalled()
+    expect(insert).not.toHaveBeenCalled()
+    expect(scopedUpdate).not.toHaveBeenCalled()
+  })
+
+  it('posts as usual for a bill closed on or after the day Inventory began', async () => {
+    const scopedUpdate = jest.fn(() => builder({ error: null }))
+    const res = await postCreditNoteToIms({
+      supabase: { from: () => ({ insert: async () => ({ error: null }) }) },
+      scopedFrom: () => builder({ data: { id: 'p1', status: 'open' }, error: null }),
+      scopedUpdate, note, order: { ...order, closed_at: '2026-10-13T09:00:00+05:45' }, items: ITEMS, today,
+      imsSince: '2026-10-12T18:15:00+00:00',
+    })
+    expect(res).toEqual({ posted: true })
+  })
 })
 
 describe('backfillCreditNotesToIms', () => {
@@ -139,6 +167,39 @@ describe('backfillCreditNotesToIms', () => {
     expect(res).toEqual({ posted: 1, skipped: 1 })
     expect(inserts).toHaveLength(1)
     expect(inserts[0].every(r => r.bs_day === 1 && r.pos_credit_note_id === 'cn1')).toBe(true)
+    expect(scopedUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  // S831 5f-3 (Q31 a): a note on a bill closed before the outlet's Inventory began never waits, so it
+  // is neither counted nor posted; a note on a later bill in the same month is.
+  it("leaves out a note on a bill from before the outlet's Inventory began", async () => {
+    const inserts = []
+    const supabase = {
+      from: () => ({
+        select: () => builder({ data: [], error: null }),
+        insert: async rows => { inserts.push(rows); return { error: null } },
+      }),
+    }
+    const npt = (m, d, hhmm) => `${formatAd(bsToAd(2083, m, d))}T${hhmm}:00+05:45`
+    const imsSince = npt(5, 2, '00:00')
+    const scopedFrom = table => builder(table === 'pos_credit_notes'
+      ? { data: [
+          { id: 'cn-old', order_id: 'o-old', created_at: npt(5, 3, '10:00'), pos_orders: { closed_at: npt(5, 1, '12:00') } },
+          { id: 'cn-new', order_id: 'o-new', created_at: npt(5, 3, '11:00'), pos_orders: { closed_at: npt(5, 3, '09:00') } },
+        ], error: null }
+      : { data: [
+          { id: 'o-old', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS },
+          { id: 'o-new', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS },
+        ], error: null })
+    const scopedUpdate = jest.fn(() => builder({ error: null }))
+
+    await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period, imsSince })).resolves.toBe(1)
+    await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period })).resolves.toBe(2)
+
+    const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period, imsSince })
+    expect(res).toEqual({ posted: 1, skipped: 0 })
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0].every(r => r.pos_credit_note_id === 'cn-new')).toBe(true)
     expect(scopedUpdate).toHaveBeenCalledTimes(1)
   })
 

@@ -130,9 +130,16 @@ export async function postWaitingBills(supabase, periodId, { batch = 100, maxCal
 // It reads as the signed-in login, so it is only for a login that can read till bills (the Owner,
 // the operator, a POS login): an IMS login meets no_ims_staff, reads an empty table with no error,
 // and would get 0 here (IMS-HANDOFF-1). An IMS login asks pos_ims_waiting_counts (posImsWaiting.js).
-export async function countUnpostedForPeriod({ supabase, scopedFrom, period }) {
+//
+// `imsSince` (clientModules.imsSince, S831 5f-3, Q31 a): a bill closed before the outlet's Inventory
+// began is never sent, so the window starts there, as post_waiting_pos_bills' does.
+export async function countUnpostedForPeriod({ supabase, scopedFrom, period, imsSince = null }) {
   if (!period?.id) return 0
-  const { fromIso, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)
+  const { fromIso: monthFrom, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)
+  // An instant, not a calendar date, so toISOString is the right form for it.
+  const fromIso = imsSince && new Date(imsSince).getTime() > new Date(monthFrom).getTime()
+    ? new Date(imsSince).toISOString()
+    : monthFrom
   // Counts candidates, then subtracts those that already have revenue rows — so the number in
   // the confirm dialog matches what will actually be posted rather than over-promising. Both
   // reads are paged for the same reasons the backfill's own are: a month of bills outgrows the

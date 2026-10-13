@@ -116,7 +116,7 @@ export function countPhrase(bills, notes) {
  * @returns {Promise<{ period?, bills?, notes?, reason?: 'no_open', step?: 'period'|'bills'|'notes', error? }>}
  *   `bills` is postWaitingBills' answer: { posted, skipped, waiting, failedText? }.
  */
-export async function postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate }) {
+export async function postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate, imsSince = null }) {
   const { data: period, error: pErr } = await withTimeout(
     scopedFrom('monthly_periods', 'id, bs_year, bs_month, status').eq('status', 'open').maybeSingle(),
     20000, 'Checking which month is open in Inventory')
@@ -127,7 +127,7 @@ export async function postWaitingFromTill({ supabase, scopedFrom, scopedInsert, 
   if (bills.error) return { period, step: 'bills', error: bills.error }
   // After the bills, so a credit note never goes into a month its own bill has not reached.
   const notes = await withTimeout(
-    backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }),
+    backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period, imsSince }),
     60000, 'Posting credit notes to Inventory')
   if (notes.error) return { period, bills, step: 'notes', error: notes.error }
   return { period, bills, notes }

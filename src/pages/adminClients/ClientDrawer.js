@@ -25,6 +25,7 @@ import {
   pickBackupDirectory, ensureBackupDirectory, isFileSystemAccessSupported,
 } from '../../modules/admin/dataExport/backupDirectory'
 import { errorLine } from '../../shared/errorText'
+import { nepalBsLong } from '../../shared/nepalTime'
 
 const EMPTY_USER = { email: '', password: '', full_name: '' }
 
@@ -1438,7 +1439,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     </p>
                   )}
                   {[
-                    { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms },
+                    { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms,
+                      // S831 5f-3 (owner Q31 a): for a till outlet, Inventory starts the day it is switched
+                      // on, and every switch-on starts it again (clients.ims_since, stamped by the database).
+                      note: !posEnabled ? null
+                        : !imsEnabled ? 'Switching it on starts Inventory that day: till bills from before then stay in the POS reports and are never sent to Inventory.'
+                        : client.ims_since ? `Inventory since ${nepalBsLong(client.ims_since) || 'the day it was switched on'}: till bills from before then are never sent to Inventory. Switching it off and on again starts it again.`
+                        : null },
                     { key: 'hr',  label: 'Crest HR',  sub: 'Human Resources',      enabled: hrEnabled,  toggle: handleToggleHr  },
                     { key: 'pos', label: 'Crest POS', sub: 'Point of Sale',        enabled: posEnabled, toggle: handleTogglePos  },
                     // An add-on on POS: the switch is inert until POS is on, and says why.
@@ -1449,6 +1456,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       <div>
                         <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{mod.label}</p>
                         <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>{mod.sub}</p>
+                        {mod.note && <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text2)', maxWidth: 520 }}>{mod.note}</p>}
                       </div>
                       {/* A real button with switch semantics. This was a bare <div onClick>: not
                           focusable, no role, no state exposed — three unreachable-by-keyboard

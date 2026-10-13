@@ -38,7 +38,7 @@ const detailOf = err => (!err ? '' : typeof err === 'string' ? err : errorInfo(e
  * banner shows while either is above 0. `onPosted` reloads them after a post.
  */
 export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) {
-  const { clientId, isAdmin, isOwner } = useAuth()
+  const { clientId, isAdmin, isOwner, clientModules } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const latest = useLatestRequest()
   const [waiting, setWaiting] = useState(null) // { rows, error }, null while the first read runs
@@ -60,7 +60,8 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
     setBusy(true)
     setResult(null)
     try {
-      const r = await postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate })
+      // A note on a bill from before the outlet's Inventory began is never sent (S831 5f-3, Q31 a).
+      const r = await postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate, imsSince: clientModules?.imsSince || null })
       if (r.reason === 'no_open') {
         setResult({ kind: 'error', text: 'No month is open in Inventory, so nothing was posted. The month has to be started in Inventory first (by the Owner or whoever runs Inventory); then press Post to Inventory again.' })
         return

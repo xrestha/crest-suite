@@ -3,6 +3,7 @@ import { daysInBsMonth, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { lineIngredientDeltas } from '../../../utils/orderLineIngredients'
 import { nepalDayInPeriod } from '../../../shared/nepalPeriodDay'
 import { storedDiscountRatio } from '../orders/closeAttempt'
+import { billCountsForIms } from '../orders/inventorySince'
 
 // A credit note's revenue reversal in Inventory (S747).
 //
@@ -106,9 +107,14 @@ async function writeRestockMovements({ scopedInsert, rows }) {
  * A note whose food was not served (`note.restock`, S809 2e) also puts its bill's stock back, and
  * waits ('bill_waiting') while the bill's own sale has not reached Inventory.
  *
- * @returns {Promise<{ posted: boolean, reason?: 'no_period'|'closed'|'read'|'write'|'bill_waiting', error?: any }>}
+ * A note on a bill closed before the outlet's Inventory began ('before_inventory', S831 5f-3, Q31 a)
+ * is never sent: its bill never reached Inventory, so there is no revenue to take back. Nothing is
+ * written and the note is not marked; nothing counts it as waiting either.
+ *
+ * @returns {Promise<{ posted: boolean, reason?: 'no_period'|'closed'|'read'|'write'|'bill_waiting'|'before_inventory', error?: any }>}
  */
-export async function postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note, order, items, today }) {
+export async function postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note, order, items, today, imsSince = null }) {
+  if (!billCountsForIms(order?.closed_at, imsSince)) return { posted: false, reason: 'before_inventory' }
   const { data: period, error: pErr } = await scopedFrom('monthly_periods', 'id, status')
     .eq('bs_year', today.year).eq('bs_month', today.month).maybeSingle()
   if (pErr) return { posted: false, reason: 'read', error: pErr }
@@ -149,13 +155,17 @@ function bsMonthRangeIso(bsYear, bsMonth) {
   }
 }
 
-// Notes issued inside this period's BS month and not yet stamped.
-async function unpostedNotesFor({ scopedFrom, period }) {
+// Notes issued inside this period's BS month and not yet stamped, leaving out a note on a bill closed
+// before the outlet's Inventory began (S831 5f-3, Q31 a): it is never sent, so it never waits. The
+// bill's close comes with each note (the hinted embed: pos_orders also points back at the note).
+async function unpostedNotesFor({ scopedFrom, period, imsSince = null }) {
   const { fromIso, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)
-  return fetchAllRows(() => scopedFrom('pos_credit_notes', 'id, order_id, created_at, restock')
+  const res = await fetchAllRows(() => scopedFrom('pos_credit_notes', 'id, order_id, created_at, restock, pos_orders!pos_credit_notes_order_id_fkey(closed_at)')
     .is('ims_posted_at', null)
     .gte('created_at', fromIso).lte('created_at', toIso)
     .order('created_at').order('id'))
+  if (res.error || !imsSince) return res
+  return { ...res, data: (res.data || []).filter(n => billCountsForIms(n.pos_orders?.closed_at, imsSince)) }
 }
 
 // Of these notes, the ids whose reversal rows already exist. A failed read is returned as an
@@ -171,9 +181,9 @@ async function alreadyReversed({ supabase, ids }) {
  * How many credit notes issued in this period's month are still waiting — for Periods' confirm.
  * Throws on a failed read, as countUnpostedForPeriod does.
  */
-export async function countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period }) {
+export async function countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period, imsSince = null }) {
   if (!period?.id) return 0
-  const { data, error } = await unpostedNotesFor({ scopedFrom, period })
+  const { data, error } = await unpostedNotesFor({ scopedFrom, period, imsSince })
   if (error) throw new Error(error.message)
   const ids = (data || []).map(n => n.id)
   if (ids.length === 0) return 0
@@ -190,9 +200,9 @@ export async function countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, 
  *
  * @returns {Promise<{ posted: number, skipped: number, error?: string }>}
  */
-export async function backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }) {
+export async function backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period, imsSince = null }) {
   if (!period?.id) return { posted: 0, skipped: 0, error: 'No period given' }
-  const { data: notes, error: nErr } = await unpostedNotesFor({ scopedFrom, period })
+  const { data: notes, error: nErr } = await unpostedNotesFor({ scopedFrom, period, imsSince })
   if (nErr) return { posted: 0, skipped: 0, error: nErr.message }
   let list = notes || []
   if (list.length === 0) return { posted: 0, skipped: 0 }

@@ -1,5 +1,6 @@
 import { npr } from '../../../shared/nepalMoney'
 import { outletHasIms } from '../orders/posImsWaiting'
+import { billCountsForIms } from '../orders/inventorySince'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -48,6 +49,8 @@ export default function CreditNotes() {
   const { clientId, hasPosAccess, isAdmin, imsEnabled: imsRoute, clientModules } = useAuth()
   // The outlet's own Inventory module, the operator included (outletHasIms, S814).
   const imsEnabled = outletHasIms({ isAdmin, imsEnabled: imsRoute, clientModules })
+  // When the outlet's Inventory began (S831 5f-3, Q31 a): a note on an earlier bill is never sent.
+  const imsSince = clientModules?.imsSince || null
   const { scopedFrom } = useScopedDb()
 
   const [tab, setTab] = useState('issue') // 'issue' | 'book'
@@ -127,7 +130,9 @@ export default function CreditNotes() {
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
     const results = await Promise.all([
-      scopedFrom('pos_credit_notes')
+      // The bill's close rides along (the hinted embed: pos_orders also points back at the note), so a
+      // note on a bill from before the outlet's Inventory began is not badged as waiting (S831 5f-3).
+      scopedFrom('pos_credit_notes', '*, pos_orders!pos_credit_notes_order_id_fkey(closed_at)')
         .gte('created_at', fromTs).lte('created_at', toTs).order('created_at', { ascending: false }),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
@@ -351,8 +356,9 @@ export default function CreditNotes() {
                           <span style={{ whiteSpace: 'nowrap' }}>{cnNo}</span>
                           {/* `in n` so a bundle deployed ahead of migration 20260914140200 (no such
                               column, select('*')) marks nothing rather than every note (S747). An
-                              outlet without Inventory owes it nothing, so nothing waits (S809 4e, D7). */}
-                          {imsEnabled && 'ims_posted_at' in n && n.ims_posted_at == null && (
+                              outlet without Inventory owes it nothing, so nothing waits (S809 4e, D7), and
+                              nor does a note on a bill from before its Inventory began (S831 5f-3, Q31 a). */}
+                          {imsEnabled && 'ims_posted_at' in n && n.ims_posted_at == null && billCountsForIms(n.pos_orders?.closed_at, imsSince) && (
                             <Tip width={320} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
                               text="This note has not yet taken its bill's revenue back out of Inventory, for one of four reasons: its month had not been started in Inventory, its month was already closed, its bill was not in Inventory yet (the note waits for it), or the save failed. While its month is open, a POS manager or the Owner presses Post to Inventory on the Orders floor (it posts the bill first, then the note). A closed month only the Owner (or Crest support) can post into, from Periods → Post POS bills to Inventory.">
                               <span className="badge-amber">Not in Inventory</span>

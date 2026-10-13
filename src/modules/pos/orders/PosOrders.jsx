@@ -138,10 +138,10 @@ export default function PosOrders({ billingStation = false } = {}) {
   // (Post to Inventory); a closed month stays the Owner's, in Periods. hasPosAccess resolves admin and
   // Owner to manager already.
   // Whether this outlet's bills go to Inventory at all (S809 4e, IMS-HANDOFF-9; owner decisions D6, D7).
-  // An outlet without Crest IMS posts nothing, counts nothing and shows no banner — and its bills are
-  // NOT marked settled, so switching Inventory on later still finds them waiting (Periods, or the
-  // floor's Post to Inventory). The operator follows the outlet's own module, not its always-true
-  // route flag (outletHasIms, S814).
+  // An outlet without Crest IMS posts nothing, counts nothing and shows no banner, and its bills are
+  // left unmarked. Since S831 (5f-3, Q31 a, reversing D6/D7) switching Inventory on later starts that
+  // day (clientModules.imsSince), so those bills never go and never count as waiting. The operator
+  // follows the outlet's own module, not its always-true route flag (outletHasIms, S814).
   const tillPostsToIms = outletHasIms({ isAdmin, imsEnabled, clientModules })
   const canSeeImsPosting = tillPostsToIms && (isAdmin || isOwner || hasPosAccess('manager'))
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -1284,6 +1284,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     const noCount = Promise.resolve({ count: 0, error: null })
     // Taken before the count is asked, so a miss noted while it is in flight is not pruned by it.
     const countStartedAt = Date.now()
+    // A bill closed before the outlet's Inventory began, and a note on one, never go to Inventory, so
+    // neither waits (S831 5f-3, Q31 a). No stamp (Inventory from the start): the counts as before.
+    const imsSinceIso = clientModules?.imsSince ? new Date(clientModules.imsSince).toISOString() : null
     const [tblRes, ordRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
@@ -1291,13 +1294,17 @@ export default function PosOrders({ billingStation = false } = {}) {
         .eq('status', 'open'),
       // head:true — a count, not rows, so the 1000-row cap cannot apply. Backed by the partial
       // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
-      tillPostsToIms
-        ? scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').is('ims_posted_at', null)
-        : noCount,
-      // Same shape, backed by idx_pos_credit_notes_unposted.
-      tillPostsToIms
-        ? scopedFrom('pos_credit_notes', 'id', { count: 'exact', head: true }).is('ims_posted_at', null)
-        : noCount,
+      !tillPostsToIms ? noCount
+        : imsSinceIso
+          ? scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').is('ims_posted_at', null).gte('closed_at', imsSinceIso)
+          : scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').is('ims_posted_at', null),
+      // Same shape, backed by idx_pos_credit_notes_unposted. With a stamp, the note's bill must have
+      // closed since it (an inner join on the hinted embed: pos_orders also points back at the note).
+      !tillPostsToIms ? noCount
+        : imsSinceIso
+          ? scopedFrom('pos_credit_notes', 'id, pos_orders!pos_credit_notes_order_id_fkey!inner(closed_at)', { count: 'exact', head: true })
+              .is('ims_posted_at', null).gte('pos_orders.closed_at', imsSinceIso)
+          : scopedFrom('pos_credit_notes', 'id', { count: 'exact', head: true }).is('ims_posted_at', null),
     ])
     if (seq !== floorReqSeq.current) return
     // A failed count keeps the last value (a failed poll must not blank live state, S654) — and a

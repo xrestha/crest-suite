@@ -335,20 +335,22 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     // not post is stamped "waiting", said so here, counted on the POS floor and posted from Periods.
     //
     // An outlet without Inventory posts nothing (S809 4e, owner decision D7, as its bills, D6): there is
-    // no Inventory revenue to take back, and the note is left unmarked, so switching Inventory on later
-    // posts it after its bill.
+    // no Inventory revenue to take back, and the note is left unmarked. Since S831 (5f-3, Q31 a, which
+    // reverses D6/D7) switching Inventory on later starts that day, so neither the note nor its bill is
+    // ever sent; nor is a note on a bill closed before the day Inventory began ('before_inventory').
     let ims
     if (!postsToIms) {
       ims = { posted: false, reason: 'no_ims' }
     } else {
       try {
-        ims = await withTimeout(postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note: created, order, items, today }), 30000, 'Posting to Inventory')
+        ims = await withTimeout(postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note: created, order, items, today, imsSince: clientModules?.imsSince || null }), 30000, 'Posting to Inventory')
       } catch (err) {
         ims = { posted: false, reason: 'write', error: err }
       }
     }
-    // Nothing more is owed to Inventory: the note is in it, or the outlet has none.
-    const imsSettled = ims.posted || ims.reason === 'no_ims'
+    // Nothing more is owed to Inventory: the note is in it, the outlet has none, or the bill is from
+    // before the outlet's Inventory began.
+    const imsSettled = ims.posted || ims.reason === 'no_ims' || ims.reason === 'before_inventory'
 
     setSubmitting(false)
     if (imsSettled && print.printed) { onIssued?.(created); return }

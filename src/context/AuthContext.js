@@ -286,7 +286,7 @@ export function AuthProvider({ children }) {
         const [{ data: client }, { data: flags }, { data: siblings }] = await Promise.all([
           supabase
             .from('clients')
-            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, customization_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
+            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
             .eq('id', effectiveClientId)
             .single(),
           supabase
@@ -699,9 +699,12 @@ export function AuthProvider({ children }) {
   // When admin "views as" a client, fetch that client's actual module subscription so the
   // sidebar + dashboard show ONLY their modules (admin's isAdmin bypass otherwise shows all).
   const [viewModules, setViewModules] = useState(null)
-  const MODULE_COLS = 'ims_enabled, hr_enabled, pos_enabled, customization_enabled'
+  const MODULE_COLS = 'ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled'
+  // imsSince (S831 5f-3, owner Q31 a): when this outlet's Inventory began, the start of the Nepal day
+  // it was last switched on, or null for "from the start". A till bill closed before it is never sent
+  // to Inventory, nor a credit note on it (posImsWaiting.js billCountsForIms).
   const modulesOf = data => (data
-    ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled, customization: !!data.pos_enabled && !!data.customization_enabled }
+    ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled, customization: !!data.pos_enabled && !!data.customization_enabled, imsSince: data.ims_since || null }
     : null)
   async function fetchViewModules(id) {
     const { data } = await supabase.from('clients').select(MODULE_COLS).eq('id', id).single()
@@ -728,12 +731,13 @@ export function AuthProvider({ children }) {
   // Separate from imsEnabled/hrEnabled, which keep the admin route-access bypass.
   const cIms = profile?.clients?.ims_enabled, cHr = profile?.clients?.hr_enabled, cPos = profile?.clients?.pos_enabled
   const cCust = profile?.clients?.customization_enabled
+  const cImsSince = profile?.clients?.ims_since || null
   const clientModules = useMemo(() => {
-    if (isAdmin && adminViewClientId) return viewModules || { ims: true, hr: false, pos: false, customization: false }
-    if (isAdmin) return { ims: true, hr: true, pos: false, customization: false } // admin's own view: full nav for management
+    if (isAdmin && adminViewClientId) return viewModules || { ims: true, hr: false, pos: false, customization: false, imsSince: null }
+    if (isAdmin) return { ims: true, hr: true, pos: false, customization: false, imsSince: null } // admin's own view: full nav for management
     const pos = cPos ?? false
-    return { ims: cIms ?? true, hr: cHr ?? false, pos, customization: pos && (cCust ?? false) }
-  }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos, cCust])
+    return { ims: cIms ?? true, hr: cHr ?? false, pos, customization: pos && (cCust ?? false), imsSince: cImsSince }
+  }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos, cCust, cImsSince])
   // False only while an operator's view of a client is still reading that client's switches, when
   // clientModules holds the placeholder above. A gate that acts on a switch being OFF waits for it.
   const clientModulesKnown = !(isAdmin && adminViewClientId) || viewModules !== null

@@ -584,9 +584,11 @@ export default function Periods() {
     try {
       // Credit notes ride on the same button (S747): a note issued while no period was open for its
       // month is marked waiting, exactly like a bill, and is posted here as a negative revenue row.
+      // A bill closed before the outlet's Inventory began, and a note on one, never go (S831 5f-3, Q31 a).
+      const imsSince = clientModules?.imsSince || null
       const [waiting, waitingNotes] = await withTimeout(Promise.all([
-        countUnpostedForPeriod({ supabase, scopedFrom, period }),
-        countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period }),
+        countUnpostedForPeriod({ supabase, scopedFrom, period, imsSince }),
+        countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period, imsSince }),
       ]), 20000, 'Checking for unposted bills')
       if (waiting === 0 && waitingNotes === 0) {
         ok(`No unposted POS bills or credit notes for ${label} — everything the till sold and corrected that month is already in Inventory.`)
@@ -624,7 +626,7 @@ export default function Periods() {
       if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
       // After the bills, so a credit note is never posted into a month its own bill has not reached.
       const notes = await withTimeout(
-        backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }), 60000, 'Posting credit notes')
+        backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period, imsSince: clientModules?.imsSince || null }), 60000, 'Posting credit notes')
       if (notes.error) { fail(`Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}, but its credit notes were not posted — re-running picks up wherever it stopped.`, notes.error); return }
       // The frozen snapshot does not follow the write (closed-periods.md): revenue just landed
       // in a month whose Monthly Report was minted at close, and the Purchases banner names the

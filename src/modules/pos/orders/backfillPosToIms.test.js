@@ -3,6 +3,7 @@
 // over the server's post of waiting bills (postWaitingBills, S830 5f-2). The functions take their
 // clients as parameters, so all of it runs by injection with no real client.
 import { countUnpostedForPeriod, billSalesRows, billMovementRows, postWaitingBills } from './backfillPosToIms'
+import { bsDayBoundaryIso } from '../../../utils/bsCalendar'
 
 // babel-jest hoists jest.mock above the imports; placed after them only to satisfy import/first.
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
@@ -96,6 +97,24 @@ describe('countUnpostedForPeriod', () => {
     })
     await expect(countUnpostedForPeriod({ supabase: h.supabase, scopedFrom: h.scopedFrom, period: PERIOD }))
       .rejects.toThrow('boom')
+  })
+
+  // S831 5f-3 (Q31 a): a bill closed before the outlet's Inventory began is never sent, so the count's
+  // window starts at the later of the month's first day and the stamp, as post_waiting_pos_bills' does.
+  test.each([
+    ['a stamp inside the month starts the window there', '2026-08-25T18:15:00+00:00', '2026-08-25T18:15:00.000Z'],
+    ['a stamp before the month leaves the month start', '2026-01-01T00:00:00+00:00', 'month'],
+    ['no stamp leaves the month start', null, 'month'],
+  ])('%s', async (_name, imsSince, expected) => {
+    const gte = []
+    const b = {
+      eq: () => b, is: () => b, lte: () => b, order: () => b,
+      gte: (col, v) => { gte.push([col, v]); return b },
+      range: () => Promise.resolve({ data: [], error: null }),
+    }
+    await expect(countUnpostedForPeriod({ supabase: {}, scopedFrom: () => b, period: PERIOD, imsSince })).resolves.toBe(0)
+    const from = expected === 'month' ? bsDayBoundaryIso(PERIOD.bs_year, PERIOD.bs_month, 1, false) : expected
+    expect(gte[0]).toEqual(['closed_at', from])
   })
 })
 
