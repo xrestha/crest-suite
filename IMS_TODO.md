@@ -157,7 +157,7 @@ Built by eight agents over disjoint files, then a follow-up pass (group dashboar
 - ✅ S792 stage 2 — PLANNING-4 Dead Stock ignores staff meals as movement, so staff rice reads "write it off". The Owner Report copy has the same flaw.
 - ✅ S792 stage 2 — SALES-4 Two quick Save Day presses can deplete stock twice. SALES-5 An import with a negative net quantity is dropped silently.
 - ✅ S792 stage 2 — MASTER-5 Two items added in one visit share a code, and Recipe Import resolves by code first.
-- ✅ S792 stage 2 — STOCK-5 (KNOWN+ of the banner item) A closed-month correction never reaches next month's opening. STOCK-6 A month switch shows old figures, with Export live.
+- ✅ S792 stage 2 — STOCK-5 (KNOWN+ of the banner item) A closed-month correction never reaches next month's opening (its banner crashed the page on every closed month until S827). STOCK-6 A month switch shows old figures, with Export live.
 - ✅ S792 stage 2 — COSTS-3 Overheads gives a verdict on the open month (D7 precedent). COSTS-9 The labour tooltip leaves out overtime. COSTS-10 Break-even shows red with no figure entered.
 
 ## S792.4 Stage 3 — hygiene (one sweep) — ✅ built S792 stage 3

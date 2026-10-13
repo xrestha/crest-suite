@@ -350,7 +350,8 @@ export default function Stock() {
     // `loading` covers the page from here; a month switch this load supersedes can no longer
     // clear its own flag (it is not the current request any more), so it is cleared here.
     setPeriodLoading(false)
-    setClosedCarry(null)
+    // An empty map, never null: the closed-month banner and both writers index it by period id.
+    setClosedCarry({})
     setLoadError(null)
 
     if (!navigator.onLine) {
