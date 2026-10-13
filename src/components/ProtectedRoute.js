@@ -15,12 +15,15 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   // session (a real fetch failure) still reaches /login rather than hanging here forever.
   if (!ready || (session && !profile && loading)) {
     return (
-      <div style={{
+      <div role="status" style={{
         minHeight: '100vh', background: 'var(--theme-bg, #191817)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'var(--theme-accent, #ff563c)', fontSize: 14, letterSpacing: '0.08em'
       }}>
-        Loading…
+        <span>
+          Loading
+          <span className="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+        </span>
       </div>
     )
   }

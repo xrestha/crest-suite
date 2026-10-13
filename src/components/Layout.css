@@ -1597,6 +1597,30 @@ tr.interactive-row:focus-visible {
   }
 }
 
+/* The three dots after "Loading" on the sign-in hand-off screen (ProtectedRoute) and the route
+   fallback: each lifts and brightens in turn, so a wait reads as work in progress rather than a
+   frozen page. Opacity and transform only, so it composites. The dots are aria-hidden; the word
+   itself is what a screen reader hears. Under reduced motion they sit still at full strength,
+   which reads as an ordinary "Loading..." */
+.loading-dots > span {
+  display: inline-block;
+  animation: loading-dot 1.2s ease-in-out infinite;
+}
+.loading-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.loading-dots > span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes loading-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30%           { opacity: 1;    transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-dots > span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 /* 15px/600 is the product's control-label size. It was defended here as a CONTRAST floor — white on
    Light's old accent #ec3013 measured 4.20:1, "and 15px/600 is where WCAG's large-text threshold
    begins" — and that premise was false: WCAG large text is 24px, or 18.66px bold, so 15px never

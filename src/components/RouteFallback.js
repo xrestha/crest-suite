@@ -19,7 +19,10 @@ export default function RouteFallback() {
       }}
     >
       <div className="skeleton" style={{ width: 160, height: 10 }} />
-      <div style={{ fontSize: 12, letterSpacing: '0.02em' }}>Loading…</div>
+      <div style={{ fontSize: 12, letterSpacing: '0.02em' }}>
+        Loading
+        <span className="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+      </div>
     </div>
   )
 }
