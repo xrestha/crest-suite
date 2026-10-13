@@ -174,30 +174,46 @@ export function periodAdBounds(period) {
 // third copy of the comparison is precisely the failure it was written to prevent.
 // `retirement_contribution` (S748): ticking "reduces taxable income" on an existing CIT deduction
 // moves no amount above, only the TDS — which would otherwise read as a hand override.
+// The four bonus fields (S824) come from finalized bonus rows and nobody types them on a payslip.
 export const FRESHNESS_INPUT_FIELDS = [
   'gross', 'ot_amount', 'absence_deduction', 'ssf_employee', 'other_deductions', 'advance_deduction',
   'retirement_contribution',
+  'festival_amount', 'festival_tds', 'incentive_amount', 'incentive_tds',
 ]
 
+// S824: a festival allowance or incentive paid WITH this salary rides the payslip in its own columns,
+// each carrying the tax its own run already took (bonusTax.js). The payslip's gross, allowances and
+// tds stay salary-only, so every reader that adds the bonus tables to payslip figures — fetchYtdMap,
+// payslipYtdForFy, monthDeposit, the TDS report and certificate, labourSource — still counts the
+// bonus exactly once. Only net pay and the screens read these columns. This is the one JS copy of
+// the bonus part of net pay: payslipNetGap, buildPayrollRows and Payroll Run's typed-TDS write use it.
+const BONUS_PAISA_FIELDS = new Set(['festival_amount', 'festival_tds', 'incentive_amount', 'incentive_tds'])
+export function bonusNet(s) {
+  const n = v => parseFloat(v) || 0
+  return n(s?.festival_amount) - n(s?.festival_tds) + n(s?.incentive_amount) - n(s?.incentive_tds)
+}
+
 // How far a payslip's stored net pay is from its own parts: gross + overtime − unpaid days − SSF −
-// other deductions − advance − TDS + TADA. The engine rounds net once to the paisa, so a true payslip
-// is within half a paisa. The same identity is the database's hr_payslips_guard_net and the check in
-// finalize_payroll_run (migration 20261001140000); the three change together.
+// other deductions − advance − TDS + TADA, plus a bonus paid with this salary less its own tax (S824).
+// The engine rounds net once to the paisa, so a true payslip is within half a paisa. The same identity
+// is the database's hr_payslips_guard_net and the check in finalize_payroll_run (migrations
+// 20261001140000 and 20261013120000); the three change together.
 export const NET_TOLERANCE = 0.01
 export function payslipNetGap(s) {
   const n = v => parseFloat(v) || 0
   const parts = n(s.gross) + n(s.ot_amount) - n(s.absence_deduction) - n(s.ssf_employee) - n(s.other_deductions)
-    - n(s.advance_deduction) - n(s.tds) + n(s.tada_amount)
+    - n(s.advance_deduction) - n(s.tds) + n(s.tada_amount) + bonusNet(s)
   return n(s.net_pay) - parts
 }
 
-// Order-independent identity for a payslip's TADA claim set.
+// Order-independent identity for a payslip's TADA claim set, and its bonus row sets (S824).
 const claimKey = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
 
 const near = (a, b) => Math.round(a || 0) === Math.round(b || 0)
 // The advance is recovered to the paisa (S791), so a whole-rupee comparison would call a draft that
-// cuts 2,499.50 where 2,500 is now due "unchanged" and let Finalize book the wrong split.
-const nearField = (f, a, b) => (f === 'advance_deduction' ? toPaisa(a) === toPaisa(b) : near(a, b))
+// cuts 2,499.50 where 2,500 is now due "unchanged" and let Finalize book the wrong split. A bonus is
+// compared to the paisa too (S824): finalize_payroll_run checks it at two places.
+const nearField = (f, a, b) => (f === 'advance_deduction' || BONUS_PAISA_FIELDS.has(f) ? toPaisa(a) === toPaisa(b) : near(a, b))
 
 // → 'moved'      the underlying data changed since Generate; the draft is genuinely out of date
 //   'overridden' inputs agree, so the only difference is a TDS a person typed in
@@ -219,6 +235,9 @@ export function payslipDrift(stored, live) {
   if (FRESHNESS_INPUT_FIELDS.some(f => !nearField(f, stored[f], live[f]))) return 'moved'
   if (claimKey(stored.tada_claim_ids) !== claimKey(live.tada_claim_ids)) return 'moved'
   if (!near(stored.tada_amount, live.tada_amount)) return 'moved'
+  // S824: a bonus run finalized, reopened or switched since Generate changes which rows ride the payslip.
+  if (claimKey(stored.festival_ids) !== claimKey(live.festival_ids)) return 'moved'
+  if (claimKey(stored.incentive_ids) !== claimKey(live.incentive_ids)) return 'moved'
   if (!near(stored.tds, live.tds)) return stored.tds_overridden ? 'overridden' : 'moved'
   return null
 }
@@ -389,16 +408,68 @@ export function writtenOffAdvancesForRun(advances, repayments, runId) {
 // actually earned — gross less unpaid days plus overtime — plus the employer's 20% SSF. Net Payable is
 // not that figure: it leaves out the employee SSF, CIT and income tax the business withholds and pays
 // on the staff's behalf, and it includes travel reimbursements, which are not pay. Paisa-rounded.
+// S824: a festival allowance or incentive paid with this salary is named apart (`bonus`, before its
+// tax) and kept OUT of `total`, which stays equal to labourSource's payrollLabourTotal (pinned in
+// labourSource.test.js): every labour reader counts the bonus once already, as its own festival or
+// incentive line from the bonus tables (loadOtherLabourPay).
 export function payrollCashCost(payslips) {
   const n = v => parseFloat(v) || 0
-  let earned = 0, employerSsf = 0, tada = 0
+  let earned = 0, employerSsf = 0, tada = 0, bonus = 0
   for (const s of payslips || []) {
     earned += n(s.gross) - n(s.absence_deduction) + n(s.ot_amount)
     employerSsf += n(s.ssf_employer)
     tada += n(s.tada_amount)
+    bonus += n(s.festival_amount) + n(s.incentive_amount)
   }
   const r2 = v => Math.round(v * 100) / 100
-  return { total: r2(earned + employerSsf), earned: r2(earned), employerSsf: r2(employerSsf), tada: r2(tada) }
+  return { total: r2(earned + employerSsf), earned: r2(earned), employerSsf: r2(employerSsf), tada: r2(tada), bonus: r2(bonus) }
+}
+
+// ── Festival allowances and incentives paid with salary (S824) ─────────────────────────────────
+// The month's finalized rows marked paid_through_payroll with an amount above 0 — exactly the set
+// finalize_payroll_run checks each payslip against. Paged and ordered on id: one row per employee per
+// run, and a month can carry several runs. Finalize does not change these rows (hr_bonus_rows_guard
+// freezes them once the month's payroll is finalized), so a live recompute of a locked month reads
+// what was paid. Returns { data: { [employee_id]: bonus }, error }; a failed read is never "no bonus".
+export async function fetchPayrollBonusMap(scopedFrom, period) {
+  const read = (table, nameCol) => fetchAllRows(() =>
+    scopedFrom(table, `id, employee_id, ${nameCol}, amount, tds`)
+      .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month)
+      .eq('status', 'finalized').eq('paid_through_payroll', true).gt('amount', 0)
+      .order('id'))
+  const [fest, inc] = await Promise.all([read('hr_festival_allowances', 'festival_name'), read('hr_incentives', 'run_label')])
+  const error = fest.error || inc.error
+  if (error) return { data: null, error }
+  return { data: payrollBonusMap(fest.data, inc.data), error: null }
+}
+
+const NO_BONUS_PART = Object.freeze({ amount: 0, tds: 0, ids: Object.freeze([]), names: Object.freeze([]) })
+export const NO_BONUS = Object.freeze({ festival: NO_BONUS_PART, incentive: NO_BONUS_PART })
+
+// The pure half: employee_id → { festival, incentive }, each { amount, tds, ids, names }, summed to the
+// paisa (a month can hold Dashain and Tihar for one person).
+export function payrollBonusMap(festivalRows, incentiveRows) {
+  const map = {}
+  const add = (kind, r, name) => {
+    const e = (map[r.employee_id] = map[r.employee_id] || {
+      festival: { amount: 0, tds: 0, ids: [], names: [] },
+      incentive: { amount: 0, tds: 0, ids: [], names: [] },
+    })
+    const part = e[kind]
+    part.amount = roundPaisa(part.amount + (parseFloat(r.amount) || 0))
+    part.tds = roundPaisa(part.tds + (parseFloat(r.tds) || 0))
+    part.ids.push(r.id)
+    if (name) part.names.push(name)
+  }
+  ;(festivalRows || []).forEach(r => add('festival', r, r.festival_name))
+  ;(incentiveRows || []).forEach(r => add('incentive', r, r.run_label))
+  return map
+}
+
+// Who has bonus money waiting on this payroll but is not on it (S824): no payslip would carry it, and
+// finalize_payroll_run refuses (payroll_bonus_no_payslip). `onPayroll` is a Set of employee ids.
+export function bonusWithoutPayslip(bonusMap, onPayroll) {
+  return Object.keys(bonusMap || {}).filter(id => !onPayroll.has(id))
 }
 
 // ── Who a month's payroll covers (S751) ────────────────────────────────────────────────────────
@@ -512,10 +583,12 @@ export async function fetchEmployeesByIds(scopedFrom, ids) {
 //      owed and is recovered by later cuts. A NPR 5,000 instalment against a NPR 3,000 month takes
 //      3,000 — it used to take 5,000, print a negative net pay, and book 5,000 as repaid.
 //   4. TADA added on top — a reimbursement, never consumed by a deduction.
+//   5. A festival allowance or incentive paid with this salary (S824), added on top less the tax its
+//      own run took — never consumed by a deduction either. `bonusMap` is fetchPayrollBonusMap's.
 //
 // Returns [{ payslip, detail }]. `payslip` has exactly the hr_payslips columns; `detail` carries the
 // working the Calculation page shows (engine breakdown, TDS breakdown, the advance that was due).
-export function buildPayrollRows({ runId = null, period, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap }) {
+export function buildPayrollRows({ runId = null, period, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap, bonusMap = {} }) {
   const advMap  = buildAdvanceMap(advances, repayments, period)
   const compsBy = groupByEmployee(components)
   const attBy   = groupByEmployee(attendance)
@@ -557,6 +630,15 @@ export function buildPayrollRows({ runId = null, period, employees, components, 
     const advance = recoverableAdvance(advanceDue, available - tds)
     const tada = tadaMap[emp.id] || { total: 0, ids: [] }
     const tadaAmount = Math.round(tada.total * 100) / 100   // paisa: the claims are marked paid in full
+    // S824: a festival allowance or incentive paid with this salary, on top, net of the tax its own run
+    // took. After the TDS and the advance cut, so neither is sized against it and an advance is never
+    // recovered out of it. The salary TDS above does not see it: monthly tax treats a bonus as settled
+    // at source, and a same-month bonus is left out of the YTD it projects from (ytdFromPayslips).
+    const bonus = bonusMap[emp.id] || NO_BONUS
+    const bonusCols = {
+      festival_amount: bonus.festival.amount, festival_tds: bonus.festival.tds, festival_ids: [...bonus.festival.ids],
+      incentive_amount: bonus.incentive.amount, incentive_tds: bonus.incentive.tds, incentive_ids: [...bonus.incentive.ids],
+    }
     const payslip = {
       run_id: runId, employee_id: emp.id, ...slip,
       advance_deduction: advance,
@@ -566,11 +648,12 @@ export function buildPayrollRows({ runId = null, period, employees, components, 
       life_insurance_premium:   parseFloat(emp.life_insurance_premium) || 0,
       health_insurance_premium: parseFloat(emp.health_insurance_premium) || 0,
       tada_amount: tadaAmount, tada_claim_ids: tada.ids,
-      net_pay: roundPaisa(slip.net_pay - tds - advance + tadaAmount),
+      ...bonusCols,
+      net_pay: roundPaisa(slip.net_pay - tds - advance + tadaAmount + bonusNet(bonusCols)),
     }
     return {
       payslip,
-      detail: { emp, comps, breakdown, tdsBreakdown, tdsCapped: tdsBreakdown.tds - tds, advanceDue, tada },
+      detail: { emp, comps, breakdown, tdsBreakdown, tdsCapped: tdsBreakdown.tds - tds, advanceDue, tada, bonus },
     }
   })
 }

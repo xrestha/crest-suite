@@ -94,9 +94,9 @@ function PaymentBadge({ row }) {
 
 // What finalize_final_settlement would refuse, said before the button is pressed (S798 3b): each with
 // what it would cost and where it is fixed. The database checks every one again at Finalize.
-function FinalizeBlockers({ name, lastDate, pendingLeave, pendingOt, pendingTada, priorOpen, managerLogins, checkFailures, checks, onRecheck, busy }) {
+function FinalizeBlockers({ name, lastDate, pendingLeave, pendingOt, pendingTada, priorOpen, bonusOnPayroll = [], managerLogins, checkFailures, checks, onRecheck, busy }) {
   const month = BS_MONTHS[lastDate.month - 1]
-  const failed = { leave: 'pending leave', ot: 'pending overtime', tada: 'pending travel claims', prior: 'earlier payroll months', logins: 'staff logins' }
+  const failed = { leave: 'pending leave', ot: 'pending overtime', tada: 'pending travel claims', prior: 'earlier payroll months', logins: 'staff logins', bonus: 'festival and bonus runs' }
   return (
     <div role="status" className="card" style={{ ...amberBanner, marginBottom: 12 }}>
       <strong style={{ color: 'var(--theme-amber-text)' }}>Before this settlement can be finalized</strong>
@@ -132,6 +132,16 @@ function FinalizeBlockers({ name, lastDate, pendingLeave, pendingOt, pendingTada
             {' '}The settlement works out the year's tax and the gratuity from finalized months only, so that month would be
             {' '}taxed apart and its gratuity paid twice. Finalize it in <Link to="/hr/payroll">Payroll</Link> first — a month
             {' '}finalized without {name} needs Reopen and Regenerate.
+          </li>
+        )}
+        {/* S824: money set to ride a payslip this settlement takes away. */}
+        {bonusOnPayroll.length > 0 && (
+          <li>
+            {bonusOnPayroll.map(b => `the ${b.what} “${b.name}” (NPR ${fmt(b.amount)}, ${bsMonthLabel(b)})`).join(', ')}
+            {' '}{bonusOnPayroll.length === 1 ? 'is' : 'are'} set to be paid with the salary, and settling takes {name} off that payroll,
+            {' '}so nothing would pay {bonusOnPayroll.length === 1 ? 'it' : 'them'}. Save this settlement as a draft, then reopen that run in
+            {' '}<Link to="/hr/festival">Festival Allowance</Link> or <Link to="/hr/incentives">Incentives</Link> and finalize it again: anyone
+            {' '}leaving is then paid separately, from that page's bank file.
           </li>
         )}
         {managerLogins.length > 0 && (
@@ -569,7 +579,13 @@ export default function FinalSettlement() {
     const lastAd = formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day))
     const joinDate = emp?.join_date || null
     ;(async () => {
-      const [leave, ot, tada, prior, logins] = await Promise.all([
+      // S824: a festival allowance or incentive finalized to be paid WITH the salary of the last month or
+      // a later one. Payroll leaves a leaver out from their last month, so nothing would pay it
+      // (finalize_final_settlement refuses, settlement_bonus_on_payroll).
+      const withSalary = (table, nameCol) => scopedFrom(table, `${nameCol}, bs_year, bs_month, amount`)
+        .eq('employee_id', empId).eq('status', 'finalized').eq('paid_through_payroll', true).gt('amount', 0)
+        .gte('bs_year', lastDate.year)
+      const [leave, ot, tada, prior, logins, fest, inc] = await Promise.all([
         scopedFrom('hr_leave_requests', 'id, start_date, end_date, days, day_type')
           .eq('employee_id', empId).eq('status', 'pending').lte('start_date', lastAd).order('start_date'),
         scopedFrom('hr_overtime_entries', 'id, bs_day, ot_hours, ot_type')
@@ -578,8 +594,15 @@ export default function FinalSettlement() {
           .eq('employee_id', empId).eq('status', 'pending').order('start_date'),
         supabase.rpc('settlement_open_prior_months', { p_employee_id: empId, p_last_working_date: lastAd }),
         supabase.rpc('settlement_linked_logins', { p_employee_id: empId }),
+        withSalary('hr_festival_allowances', 'festival_name'),
+        withSalary('hr_incentives', 'run_label'),
       ])
       if (!live) return
+      const fromIdx = lastDate.year * 12 + lastDate.month
+      const onPayroll = [
+        ...(fest.data || []).map(r => ({ what: 'festival allowance', name: r.festival_name, ...r })),
+        ...(inc.data || []).map(r => ({ what: 'incentive', name: r.run_label, ...r })),
+      ].filter(r => r.bs_year * 12 + r.bs_month >= fromIdx)
       setChecks({
         key: checkKey, loading: false,
         // An earlier employment's request is not this one's (the database bounds it the same way).
@@ -588,6 +611,7 @@ export default function FinalSettlement() {
         tada: tada.error ? { error: tada.error } : (tada.data || []),
         prior: prior.error ? { error: prior.error } : (prior.data || []),
         logins: logins.error ? { error: logins.error } : (logins.data || []),
+        bonus: fest.error || inc.error ? { error: fest.error || inc.error } : onPayroll,
       })
     })()
     return () => { live = false }
@@ -617,7 +641,8 @@ export default function FinalSettlement() {
   const pendingOt = listOf('ot')
   const pendingTada = listOf('tada')
   const priorOpen = listOf('prior')
-  const checkFailures = checksIn ? ['leave', 'ot', 'tada', 'prior', 'logins'].filter(k => checks[k]?.error) : []
+  const bonusOnPayroll = listOf('bonus')
+  const checkFailures = checksIn ? ['leave', 'ot', 'tada', 'prior', 'logins', 'bonus'].filter(k => checks[k]?.error) : []
   const linkedLogins = !checksIn ? null : checks.logins?.error ? { error: checks.logins.error } : listOf('logins')
   const exempt = isOwner || isAdmin
   const managerLogins = Array.isArray(linkedLogins) ? linkedLogins.filter(l => l.hr_manager) : []
@@ -630,6 +655,7 @@ export default function FinalSettlement() {
     pendingOt.length > 0 && 'overtime waiting for a decision',
     pendingTada.length > 0 && 'a travel claim waiting for a decision',
     priorOpen.length > 0 && 'an earlier payroll month that is not final',
+    bonusOnPayroll.length > 0 && 'a festival allowance or incentive set to be paid with a salary this settlement stops',
     managerBlock && 'an HR Manager login, which only the Owner can settle',
     checkFailures.length > 0 && 'a check that could not be read',
   ].filter(Boolean)
@@ -1171,6 +1197,7 @@ export default function FinalSettlement() {
                   <FinalizeBlockers
                     name={shownRow.employee_name} lastDate={lastDate}
                     pendingLeave={pendingLeave} pendingOt={pendingOt} pendingTada={pendingTada} priorOpen={priorOpen}
+                    bonusOnPayroll={bonusOnPayroll}
                     managerLogins={managerBlock ? managerLogins : []} checkFailures={checkFailures} checks={checks}
                     onRecheck={recalculate} busy={busy}
                   />

@@ -15,7 +15,7 @@ import { nepalBs, nepalCivilDate, nepalBsLong, nepalDateLong } from '../../../sh
 import {
   fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds, dueAdvances,
   fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments, payrollCashCost,
-  writtenOffAdvancesForRun, unendedLeavers,
+  writtenOffAdvancesForRun, unendedLeavers, fetchPayrollBonusMap, bonusNet, bonusWithoutPayslip,
 } from './payrollData'
 import PayslipBody from './PayslipBody'
 import PayrollApprovalSheet from './PayrollApprovalSheet'
@@ -61,7 +61,7 @@ const isRunFinalizedError = err => /hr_run_finalized/i.test(typeof err === 'stri
 const listNames = (ids, nameOf, max = 4) =>
   ids.slice(0, max).map(nameOf).join(', ') + (ids.length > max ? `, +${ids.length - max} more` : '')
 
-const FRESH = { live: null, stale: [], missing: [], departed: [], held: [], overridden: [], ok: true, reason: null, empty: false }
+const FRESH = { live: null, stale: [], missing: [], departed: [], held: [], unpaidBonus: [], overridden: [], ok: true, reason: null, empty: false }
 
 // Someone set off payroll with no last working day who worked this month (S798 3e, PAYROLL-1, H9 (a)),
 // in the owner's words: their status and what shows they worked. `prevName` is last month's name.
@@ -93,10 +93,14 @@ function describeHeld(r, prevName) {
 //   held      — someone set Inactive, Resigned or Terminated with NO End Date who worked this month
 //               (unendedLeavers, S798 3e, PAYROLL-1, H9 (a)). Not on the list, so nothing pays their days;
 //               Finalize waits until an End Date is entered (it puts them on the list) or they are settled.
+//   unpaidBonus — S824: someone with a festival allowance or incentive finalized to be paid with this
+//               salary who is not on this payroll (settled, or not employed this month). No payslip
+//               would carry it, so nothing would pay it; finalize_payroll_run refuses too. Regenerate
+//               cannot fix it — the bonus run is reopened and pays them separately.
 //   reason    — the comparison itself could not run. A check that could not run has not passed; it
 //               used to `catch { return ok: true }`.
-function assessDraft(storedSlips, buildLive, held = []) {
-  const out = { live: null, stale: [], missing: [], departed: [], held: held.map(r => r.employee.id), overridden: [], ok: false, reason: null }
+function assessDraft(storedSlips, buildLive, held = [], bonusMap = {}) {
+  const out = { live: null, stale: [], missing: [], departed: [], held: held.map(r => r.employee.id), unpaidBonus: [], overridden: [], ok: false, reason: null }
   try {
     out.live = buildLive() || []
   } catch (e) {
@@ -125,9 +129,15 @@ function assessDraft(storedSlips, buildLive, held = []) {
   })
   const liveIds = new Set(out.live.map(r => r.payslip.employee_id))
   out.departed = stored.filter(s => !liveIds.has(s.employee_id)).map(s => s.employee_id)
+  out.unpaidBonus = bonusWithoutPayslip(bonusMap, liveIds)
   out.ok = out.stale.length === 0 && out.missing.length === 0 && out.departed.length === 0 && out.held.length === 0
+    && out.unpaidBonus.length === 0
   return out
 }
+
+// The sentence for `unpaidBonus` (S824), on the banner, the Finalize refusal and the approval sheet's.
+const unpaidBonusText = (ids, nameOf, monthName) =>
+  `${listNames(ids, nameOf)} ${ids.length === 1 ? 'has' : 'have'} a festival allowance or incentive set to be paid with the ${monthName} salary but ${ids.length === 1 ? 'is' : 'are'} not on this payroll, so nothing would pay it. Reopen that run on its page and finalize it again: anyone not on this payroll is then paid separately.`
 
 // Where today sits against the payroll month, in Nepal — for the Finalize confirm (decision 5:
 // finalizing early is allowed, but the confirm says so). null once the month is over.
@@ -173,6 +183,7 @@ export default function PayrollRun() {
   const [repayments, setRepayments] = useState([])
   const [ytdMap,     setYtdMap]     = useState({})
   const [tadaMap,    setTadaMap]    = useState({})
+  const [bonusMap,   setBonusMap]   = useState({})
   const [loading,    setLoading]    = useState(true)
   // A failed read — periods, any payroll input, the run, its payslips, or the names they need. Renders
   // the error card INSTEAD of the register and hides every action: nothing below it is a real figure,
@@ -314,17 +325,20 @@ export default function PayrollRun() {
       // does not look like one — it under-withholds tax. Both return { data, error }.
       fetchYtdMap(scopedFrom, p),
       fetchApprovedTadaMap(scopedFrom, p),
+      // S824: festival allowances and incentives finalized to be paid with this month's salary. A failed
+      // read fails the load: "no bonus" would build payslips Finalize then refuses, or pay short.
+      fetchPayrollBonusMap(scopedFrom, p),
     ])
     const error = errorOf(results)
     if (error) return { data: null, error }
-    const [emps, comps, att, ot, advs, reps, ytd, tada] = results
+    const [emps, comps, att, ot, advs, reps, ytd, tada, bonus] = results
     return {
       data: {
         employees: emps.data.employees, settled: emps.data.settled,
         unended: emps.data.unended, paidLastMonth: emps.data.paidLastMonth,
         components: comps.data || [], attendance: att.data || [], otEntries: ot.data || [],
         advances: advs.data || [], repayments: reps.data || [],
-        ytdMap: ytd.data || {}, tadaMap: tada.data || {},
+        ytdMap: ytd.data || {}, tadaMap: tada.data || {}, bonusMap: bonus.data || {},
       },
       error: null,
     }
@@ -391,7 +405,7 @@ export default function PayrollRun() {
     setUnended(d.unended); setPaidLastMonth(d.paidLastMonth)
     setComponents(d.components); setAttendance(d.attendance); setOtEntries(d.otEntries)
     setAdvances(d.advances); setRepayments(d.repayments)
-    setYtdMap(d.ytdMap); setTadaMap(d.tadaMap)
+    setYtdMap(d.ytdMap); setTadaMap(d.tadaMap); setBonusMap(d.bonusMap)
     setRun(runRow); setPayslips(slips); setTdsDraft({})
     setPayments(pays); setPaymentsError(payErr)
   }
@@ -428,11 +442,11 @@ export default function PayrollRun() {
     // Only a saved run reads it (freshness, the OT badge, ↺); with no run there is nothing to compare.
     if (loading || loadError || !period || !run) return { rows: [], error: null }
     try {
-      return { rows: buildPayrollRows({ runId: null, period, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap }), error: null }
+      return { rows: buildPayrollRows({ runId: null, period, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap, bonusMap }), error: null }
     } catch (e) {
       return { rows: null, error: e }
     }
-  }, [loading, loadError, period, run, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap])
+  }, [loading, loadError, period, run, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap, bonusMap])
 
   const liveByEmp = useMemo(() => new Map((liveRows.rows || []).map(r => [r.payslip.employee_id, r])), [liveRows])
   // The advances this month is recovering, through the same dueAdvances() filter the deduction came
@@ -452,8 +466,8 @@ export default function PayrollRun() {
 
   const freshness = useMemo(() => {
     if (loading || loadError || !run || run.status === 'finalized') return FRESH
-    return assessDraft(payslips, () => { if (liveRows.error) throw liveRows.error; return liveRows.rows }, held)
-  }, [loading, loadError, run, payslips, liveRows, held])
+    return assessDraft(payslips, () => { if (liveRows.error) throw liveRows.error; return liveRows.rows }, held, bonusMap)
+  }, [loading, loadError, run, payslips, liveRows, held, bonusMap])
   // What Regenerate fixes, apart from `held`, which only an End Date or a settlement fixes. A held
   // person's own payslip here is in `departed` too, so it is taken out before deciding.
   const heldIds = new Set(freshness.held)
@@ -614,7 +628,9 @@ export default function PayrollRun() {
       setMsg(`error:Income tax for ${who} was not changed — NPR ${fmt(tds)} is more than the pay left to take it from (NPR ${fmt(room)}), so take-home pay would go below zero.`)
       return
     }
-    const net = beforeTds - advance - tds + num(slip.tada_amount)
+    // The net identity, all of it (S824: bonusNet is a festival allowance or incentive paid with this
+    // salary, less its own tax), or hr_payslips_guard_net refuses the typed figure in a bonus month.
+    const net = beforeTds - advance - tds + num(slip.tada_amount) + bonusNet(slip)
     const p = period
     setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tds, tds_overridden: overridden, net_pay: net } : s))
     // .select('id'): a write RLS refuses is 0 rows with no error, which used to read as saved.
@@ -684,11 +700,13 @@ export default function PayrollRun() {
     if (ownSlip) { setMsg(`error:Not finalized. This payroll pays you (${nameOf(ownSlip.employee_id)}), so the Owner finalizes it.`); return }
     if (!freshness.ok) {
       const lines = [
-        'Not finalized. ' + (freshness.reason || (needsRegenerate ? 'This draft no longer matches current salary, attendance, overtime and TADA data.' : `Someone who worked in ${monthName} is not on this payroll.`)),
+        'Not finalized. ' + (freshness.reason || (needsRegenerate ? 'This draft no longer matches current salary, attendance, overtime, TADA and festival or bonus data.'
+          : freshness.held.length ? `Someone who worked in ${monthName} is not on this payroll.` : 'Festival or bonus money is waiting on someone who is not on this payroll.')),
         freshness.stale.length ? `${freshness.stale.length} changed since Generate` : '',
         freshness.missing.length && payslips.length ? `${freshness.missing.length} with no payslip` : '',
         departedOnly.length ? `${departedOnly.length} who should not be paid by this run` : '',
         freshness.held.length ? `${freshness.held.length} who worked in ${monthName} but ${freshness.held.length === 1 ? 'is' : 'are'} off payroll with no last working day: enter it on their employee record, or settle them` : '',
+        freshness.unpaidBonus.length ? unpaidBonusText(freshness.unpaidBonus, nameOf, monthName) : '',
         freshness.live && !freshness.empty && needsRegenerate ? 'Press Regenerate, then Finalize.' : '',
       ].filter(Boolean)
       setMsg('error:' + lines.join(' · '))
@@ -726,7 +744,7 @@ export default function PayrollRun() {
     const nameFresh = id => freshNames.get(id) || nameOf(id)
     // Who worked the month but is off payroll with no End Date, judged on the data just re-read (S798 3e).
     const heldFresh = unendedLeavers({ unended: fresh.unended, attendance: fresh.attendance, otEntries: fresh.otEntries, payslips: slips, paidLastMonth: fresh.paidLastMonth })
-    const check = assessDraft(slips, () => buildPayrollRows({ runId, period: p, ...fresh }), heldFresh)
+    const check = assessDraft(slips, () => buildPayrollRows({ runId, period: p, ...fresh }), heldFresh, fresh.bonusMap)
     if (!check.ok) {
       const heldNow = new Set(check.held)
       const departedNow = check.departed.filter(id => !heldNow.has(id))
@@ -735,10 +753,13 @@ export default function PayrollRun() {
         check.missing.length && slips.length ? `no payslip: ${listNames(check.missing, nameFresh)}` : '',
         departedNow.length ? `should not be paid by this run: ${listNames(departedNow, nameFresh)}` : '',
         check.held.length ? `worked in ${BS_MONTHS[p.bs_month - 1]} but off payroll with no last working day (enter it on their employee record, or settle them): ${listNames(check.held, nameFresh)}` : '',
+        check.unpaidBonus.length ? unpaidBonusText(check.unpaidBonus, nameFresh, BS_MONTHS[p.bs_month - 1]) : '',
       ].filter(Boolean)
       const regen = check.stale.length > 0 || (check.missing.length > 0 && slips.length > 0) || departedNow.length > 0
       await stop('Payroll was NOT finalized — nothing has changed. '
-        + (check.reason || (regen ? 'Checked against current data just now, this draft is out of date.' : 'Checked against current data just now, someone who worked this month is not on it.'))
+        + (check.reason || (regen ? 'Checked against current data just now, this draft is out of date.'
+          : check.held.length ? 'Checked against current data just now, someone who worked this month is not on it.'
+          : 'Checked against current data just now, festival or bonus money is waiting on someone who is not on it.'))
         + (parts.length ? ' ' + parts.join(' · ') + '.' : '')
         + (check.live && !check.empty && regen ? ' Press Regenerate, then Finalize.' : ''))
       return
@@ -964,6 +985,17 @@ export default function PayrollRun() {
     setTimeout(() => { printWithTitle(`Payroll Calculation - ${emp.full_name} - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintCalc(null) }, 60)
   }
 
+  // S824: the bonus runs' names for the payslip ("Festival allowance — Dashain"), from the month's
+  // bonus map when it holds exactly the rows this payslip carries; otherwise (a draft gone stale) the
+  // payslip prints the plain words. A finalized month's rows cannot change, so its names always match.
+  function withBonusLabels(s) {
+    const b = bonusMap[s.employee_id]
+    if (!b) return s
+    const key = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
+    const label = (ids, part) => (part.ids.length > 0 && key(ids) === key(part.ids) ? part.names.join(', ') : null)
+    return { ...s, festival_label: label(s.festival_ids, b.festival), incentive_label: label(s.incentive_ids, b.incentive) }
+  }
+
   function printPayslip(slip, emp) {
     setPrintSlip({ slip, emp })
     setTimeout(() => { printWithTitle(`Payslip - ${emp.full_name} - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintSlip(null) }, 60)
@@ -976,7 +1008,8 @@ export default function PayrollRun() {
     if (!finalized && !freshness.ok) {
       setMsg('error:The approval sheet was not printed — this draft cannot be finalized as it stands, so the Owner would be signing figures that are about to change. '
         + (freshness.reason || (needsRegenerate ? 'Press Regenerate, then print it.'
-          : `Someone who worked in ${monthName} is off payroll with no last working day: enter it on their employee record, or settle them, then print it.`)))
+          : freshness.held.length ? `Someone who worked in ${monthName} is off payroll with no last working day: enter it on their employee record, or settle them, then print it.`
+          : unpaidBonusText(freshness.unpaidBonus, nameOf, monthName))))
       return
     }
     // The month's deposit is more than this run (S798 PAYROLL-2): a leaver's Final Settlement and a
@@ -1007,7 +1040,11 @@ export default function PayrollRun() {
         'Absence Ded': s.absence_deduction, 'SSF Employee': s.ssf_employee,
         'Other Ded': s.other_deductions, 'Retirement (CIT)': s.retirement_contribution || 0,
         'Advance Ded': s.advance_deduction || 0,
-        'TDS': s.tds, 'TADA': s.tada_amount || 0, 'Net Pay': s.net_pay,
+        'TDS': s.tds, 'TADA': s.tada_amount || 0,
+        // S824: paid with this salary, each with the tax its own run took (not in TDS, the salary tax).
+        'Festival Allowance': num(s.festival_amount), 'Festival Tax': num(s.festival_tds),
+        'Incentive': num(s.incentive_amount), 'Incentive Tax': num(s.incentive_tds),
+        'Net Pay': s.net_pay,
         'SSF Employer': s.ssf_employer,
         // What was recorded as paid (S782) — blank when payments could not be read, never 0.
         ...(showPaid && !paymentsError ? (() => {
@@ -1031,11 +1068,16 @@ export default function PayrollRun() {
     a.gross   += num(s.gross); a.ot += num(s.ot_amount)
     a.absence += num(s.absence_deduction); a.ssfEmp += num(s.ssf_employee); a.other += num(s.other_deductions)
     a.advDed  += num(s.advance_deduction); a.tds += num(s.tds); a.tada += num(s.tada_amount)
+    a.bonus   += bonusNet(s)
     a.net     += num(s.net_pay); a.ssfEmpr += num(s.ssf_employer)
     return a
-  }, { gross: 0, ot: 0, absence: 0, ssfEmp: 0, other: 0, advDed: 0, tds: 0, tada: 0, net: 0, ssfEmpr: 0 })
+  }, { gross: 0, ot: 0, absence: 0, ssfEmp: 0, other: 0, advDed: 0, tds: 0, tada: 0, bonus: 0, net: 0, ssfEmpr: 0 })
   const totalDeductions = totals.absence + totals.ssfEmp + totals.other + totals.advDed + totals.tds
   const cost = payrollCashCost(payslips)
+  // S824: the register's Festival & bonus column shows only in a month that pays one with salary.
+  const hasBonus = s => num(s.festival_amount) > 0 || num(s.incentive_amount) > 0
+  const showBonus = payslips.some(hasBonus)
+  const regColumns = 12 + (showPaid ? 1 : 0) + (showBonus ? 1 : 0)
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 
@@ -1165,12 +1207,13 @@ export default function PayrollRun() {
                 ? `⚠ Nobody is on the ${monthName} payroll`
                 : !freshness.live ? '⚠ This draft could not be checked, so it cannot be finalized'
                 : needsRegenerate ? '⚠ This draft is out of date — Regenerate before finalizing'
-                : `⚠ Someone who worked in ${monthName} is not on this payroll`}
+                : freshness.held.length ? `⚠ Someone who worked in ${monthName} is not on this payroll`
+                : '⚠ Festival or bonus money has no payslip to go on'}
             </p>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
               {freshness.reason && <>{freshness.reason}{' '}</>}
               {freshness.stale.length > 0 && (
-                <>Attendance, overtime, pay setup, advances or TADA changed since this run was generated, so{' '}
+                <>Attendance, overtime, pay setup, advances, TADA or a festival or bonus run changed since this run was generated, so{' '}
                   <strong style={{ color: 'var(--theme-text1)' }}>{freshness.stale.length}</strong>{' '}
                   employee{freshness.stale.length === 1 ? "'s figures no longer match" : "s' figures no longer match"}
                   {' '}({listNames(freshness.stale, nameOf)}).{' '}
@@ -1192,6 +1235,7 @@ export default function PayrollRun() {
                 </>
               )}
               {heldText && <>{heldText}{' '}</>}
+              {freshness.unpaidBonus.length > 0 && <>{unpaidBonusText(freshness.unpaidBonus, nameOf, monthName)}{' '}</>}
               {freshness.live && !freshness.empty && needsRegenerate && 'Regenerate rebuilds the draft from current data; income tax typed by hand is reset.'}
             </p>
             {freshness.empty && (
@@ -1268,15 +1312,15 @@ export default function PayrollRun() {
                 { label: 'Total Gross',  value: totals.gross, tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
                 { label: 'Deductions',   value: totalDeductions, tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
                 {
-                  label: 'Net Payable', value: totals.net, tip: 'Total take-home pay to disburse this period, TADA reimbursements included.',
+                  label: 'Net Payable', value: totals.net, tip: 'Total take-home pay to disburse this period, TADA reimbursements included, and any festival allowance or incentive paid with this salary (after its own income tax).',
                   sub: finalized && !paymentsError && paySummary.owed > 0
                     ? `${payslips.length} payslip${payslips.length === 1 ? '' : 's'} · ${paySummary.paid} of ${paySummary.owed} marked paid`
                     : undefined,
                 },
                 { label: 'Employer SSF', value: totals.ssfEmpr, tip: '20% SSF the company pays on top — not part of net payable.' },
                 {
-                  label: 'Cost to Business', value: cost.total, tip: 'What this month\'s payroll costs the business: pay earned (gross, less unpaid days, plus overtime) plus the employer\'s 20% SSF. It is more than Net Payable because the employee SSF, CIT and income tax withheld are still paid by the business — to the SSF fund and the tax office instead of to staff. Travel claims are reimbursements, not pay, and are shown underneath.',
-                  sub: `NPR ${fmt(cost.earned)} pay + NPR ${fmt(cost.employerSsf)} employer SSF${cost.tada > 0 ? ` · plus NPR ${fmt(cost.tada)} travel claims` : ''}`,
+                  label: 'Cost to Business', value: cost.total, tip: 'What this month\'s payroll costs the business: pay earned (gross, less unpaid days, plus overtime) plus the employer\'s 20% SSF. It is more than Net Payable because the employee SSF, CIT and income tax withheld are still paid by the business — to the SSF fund and the tax office instead of to staff. Travel claims are reimbursements, not pay, and are shown underneath. A festival allowance or incentive paid with this salary is shown underneath too: the labour figures count it as its own line.',
+                  sub: `NPR ${fmt(cost.earned)} pay + NPR ${fmt(cost.employerSsf)} employer SSF${cost.bonus > 0 ? ` · plus NPR ${fmt(cost.bonus)} festival & bonus` : ''}${cost.tada > 0 ? ` · plus NPR ${fmt(cost.tada)} travel claims` : ''}`,
                 },
               ].map(s => (
                 <div key={s.label} className="stat-card">
@@ -1305,6 +1349,11 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}><Tip text="Advance or loan instalment recovered this month from Advances & Loans. Recovery starts with the payroll of the month after an advance was issued, and never takes pay below zero — whatever this month cannot cover stays owed. Repayment rows are written on Finalize." width={300}>Advance</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Income tax, worked out from the fiscal-year tax slabs. You can type over it while this is a draft — a typed figure is kept when you Finalize, and ↺ puts back the calculated one." width={280}>TDS</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — the total of approved claims whose trip was over by the end of the month. Added after income tax and not taxed. To change it, change the claim in TADA Claims." width={290}>TADA</Tip></th>
+                      {showBonus && (
+                        <th style={{ textAlign: 'right' }}>
+                          <Tip text="A festival allowance or incentive set to be paid with this month's salary, after the income tax its own run worked out — that tax is not in the TDS column, which is salary tax. Hover a figure for the amount and its tax. To change it, reopen that run on Festival Allowance or Incentives, then Regenerate." width={300}>Festival &amp; bonus</Tip>
+                        </th>
+                      )}
                       <th style={{ textAlign: 'right' }}>Net Pay</th>
                       {showPaid && (
                         <th style={{ textAlign: 'right' }}>
@@ -1415,15 +1464,27 @@ export default function PayrollRun() {
                               <span style={{ color: tada > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{tada > 0 ? `+${fmt(tada)}` : '—'}</span>
                             </div>
                           </td>
+                          {showBonus && (
+                            <td style={{ textAlign: 'right' }}>
+                              {hasBonus(s) ? (
+                                <Tip text={[
+                                  num(s.festival_amount) > 0 ? `Festival allowance NPR ${nprPaisa(s.festival_amount)}, less its income tax NPR ${nprPaisa(s.festival_tds)}.` : '',
+                                  num(s.incentive_amount) > 0 ? `Incentive NPR ${nprPaisa(s.incentive_amount)}, less its income tax NPR ${nprPaisa(s.incentive_tds)}.` : '',
+                                ].filter(Boolean).join(' ')} width={280}>
+                                  <span style={{ color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>+{nprPaisa(bonusNet(s))}</span>
+                                </Tip>
+                              ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
+                            </td>
+                          )}
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14 }}>{nprPaisa(s.net_pay)}</td>
                           {showPaid && <td style={{ textAlign: 'right' }}>{renderPaidCell(s, emp)}</td>}
                           <td style={{ textAlign: 'right' }}>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip({ slip: s, emp })} aria-label={`Payslip for ${emp.full_name}`}>Payslip</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip({ slip: withBonusLabels(s), emp })} aria-label={`Payslip for ${emp.full_name}`}>Payslip</button>
                           </td>
                         </tr>
                         {open && (
                           <tr>
-                            <td colSpan={showPaid ? 13 : 12} style={{ padding: 0 }}>
+                            <td colSpan={regColumns} style={{ padding: 0 }}>
                               <div id={`working-${s.id}`} style={{ borderTop: '1px solid var(--theme-border)' }}>
                                 <div style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', display: 'flex', justifyContent: 'flex-end' }}>
                                   <button className="btn btn-ghost btn-sm" onClick={() => printWorking(s, emp)}>🖨 Print working</button>
@@ -1450,7 +1511,7 @@ export default function PayrollRun() {
                             <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                             {emp.employee_code && <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>{emp.employee_code}</div>}
                           </td>
-                          <td colSpan={9} style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                          <td colSpan={showBonus ? 10 : 9} style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                             No payslip in {monthName} any more — paid, then left out when the month was regenerated.
                           </td>
                           <td style={{ textAlign: 'right' }}>{renderPaidCell({ employee_id: id }, emp)}</td>
@@ -1473,6 +1534,7 @@ export default function PayrollRun() {
                       {negPaisaCell(totals.advDed)}
                       {negCell(totals.tds)}
                       {moneyCell(totals.tada, '+')}
+                      {showBonus && moneyCell(totals.bonus, '+', nprPaisa)}
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{nprPaisa(totals.net)}</td>
                       {showPaid && (
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap' }}>
@@ -1601,6 +1663,7 @@ export default function PayrollRun() {
         const netTotal  = totals.net
         const tadaCount = new Set(payslips.flatMap(p => (Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids : []))).size
         const advCount  = payslips.filter(p => num(p.advance_deduction) > 0).length
+        const bonusCount = payslips.filter(hasBonus).length
         const progress  = monthProgress(period)
         return (
           <ConfirmModal
@@ -1616,6 +1679,12 @@ export default function PayrollRun() {
               <li><strong>{payslips.length}</strong> payslip{payslips.length === 1 ? '' : 's'}, NPR <strong>{nprPaisa(netTotal)}</strong> total net pay</li>
               {advCount > 0 && <li>{advCount} advance/loan recover{advCount === 1 ? 'y' : 'ies'} will be recorded in Advances &amp; Loans</li>}
               {tadaCount > 0 && <li>{tadaCount} TADA claim{tadaCount === 1 ? '' : 's'} will be marked Paid</li>}
+              {/* S824: once this is finalized, those festival and bonus runs can no longer be reopened. */}
+              {bonusCount > 0 && (
+                <li>
+                  {bonusCount} payslip{bonusCount === 1 ? ' carries' : 's carry'} a festival allowance or incentive (NPR {nprPaisa(totals.bonus)} after its own income tax), paid with this salary — {bonusCount === 1 ? 'that run stays' : 'those runs stay'} locked until this payroll is reopened
+                </li>
+              )}
               {/* A typed income tax does not block Finalize (it is an intended edit, not staleness), so
                   this is the one place it gets stated: locking a hand-set figure is worth seeing. */}
               {freshness.overridden.length > 0 && (

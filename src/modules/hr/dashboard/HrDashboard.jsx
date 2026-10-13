@@ -482,7 +482,7 @@ export default function HrDashboard() {
               value={payInfo.failed ? '—' : `NPR ${fmt(payInfo.netPay)}`}
               sub={payInfo.failed ? 'payslips could not be read' : `${payInfo.periodLabel} take-home total`}
               color={payInfo.failed ? 'var(--theme-text2)' : undefined}
-              tip="Total net pay disbursed to all employees in the last finalized payroll run."
+              tip="Total net pay disbursed to all employees in the last finalized payroll run, including any festival allowance or incentive paid with it (after its own income tax)."
               onClick={() => navigate('/hr/payroll')}
             />
             <KCard

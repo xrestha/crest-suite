@@ -756,3 +756,29 @@ describe('an unlinked till sale names both ways to post it (S809 4e)', () => {
     expect(errorText(unlinked, 'staff')).toMatch(/Tell your manager/)
   })
 })
+
+// S824: festival allowances and incentives paid with the salary (migration 20261013120000).
+describe('errorText — bonus paid with salary (S824)', () => {
+  const cases = [
+    ['bonus_payroll_finalized: payroll for Ashwin 2083 is already finalized, so Ram Thapa\'s festival allowance cannot be paid with it', /reopen that month's payroll/i],
+    ['bonus_payroll_leaving: Ram Thapa has a Final Settlement with a last working day in or before Ashwin 2083', /paid separately/i],
+    ['bonus_payroll_not_employed: Ram Thapa is not employed in Ashwin 2083', /not employed/i],
+    ['payroll_bonus_no_payslip: Ram Thapa has a festival allowance or incentive to be paid with this month\'s salary but no payslip', /no payslip/i],
+    ['payroll_bonus_stale: the festival allowance or incentive on the payslip of Ram Thapa is not what is finalized', /regenerate/i],
+    ['settlement_bonus_on_payroll: Ram Thapa\'s festival allowance "Dashain" is set to be paid with a salary this settlement stops', /save this settlement as a draft/i],
+  ]
+  it.each(cases)('words %s for the operator, with its own next step', (message, next) => {
+    const text = errorText({ code: 'P0001', message }, 'operator')
+    expect(text).toMatch(next)
+    expect(text).not.toMatch(/isn't one we recognise/i)
+  })
+
+  it('words the tax-above-amount CHECK before the generic constraint rule', () => {
+    const err = { code: '23514', message: 'new row for relation "hr_festival_allowances" violates check constraint "hr_festival_allowances_payroll_tds_check"' }
+    expect(errorText(err, 'operator')).toMatch(/more income tax than its own amount/i)
+  })
+
+  it('does not let the older bonus_finalized rule swallow bonus_payroll_finalized', () => {
+    expect(errorText({ message: 'bonus_payroll_finalized: x' }, 'operator')).not.toBe(errorText({ message: 'bonus_finalized: x' }, 'operator'))
+  })
+})

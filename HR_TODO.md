@@ -820,6 +820,10 @@ filed in hss-suite's `docs/CROSS-REPO.md`.
   H17's answer. Filed 2026-10-02: Crest leaves it off (H17 (c)).
 - SISTER-1 — hss #4/#43 (72faa01) was never filed in either ledger. Crest ports #43; crest's own-cancel
   refusal (H8) is new and hss has none: file both ways.
+- S824 (2026-10-13, crest-v439, migration `20261013120000`) — a festival allowance or incentive run can
+  be paid with its month's salary: payslip columns `festival_*` / `incentive_*`, the net identity's bonus
+  terms, `hr_bonus_payroll_block` and the three refusals. A feature, not a fix: file it so hss decides
+  whether to take it; if it does, the net identity changes in all four places at once.
 
 **Record in crest's `docs/CROSS-REPO.md` as ported from hss when they ship:** BONUS-LEDGERS-2 (hss
 approved → pending, 20260925000010; filed with the 3a row 2026-10-02); ROSTER-3 (hss active-coworker check, 20260926000003:1781); SISTER-2

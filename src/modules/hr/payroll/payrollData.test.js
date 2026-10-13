@@ -153,12 +153,18 @@ describe('payrollCashCost (S753)', () => {
       { gross: 30000, absence_deduction: 1000, ot_amount: 500, ssf_employer: 6000, ssf_employee: 3300, tds: 250, net_pay: 26000, tada_amount: 1200 },
       { gross: 20000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0, tada_amount: 0 },
     ]
-    expect(payrollCashCost(slips)).toEqual({ total: 55500, earned: 49500, employerSsf: 6000, tada: 1200 })
+    expect(payrollCashCost(slips)).toEqual({ total: 55500, earned: 49500, employerSsf: 6000, tada: 1200, bonus: 0 })
   })
 
   it('treats blanks as zero and rounds to paisa', () => {
-    expect(payrollCashCost([{ gross: '100.005', ssf_employer: null }, {}])).toEqual({ total: 100.01, earned: 100.01, employerSsf: 0, tada: 0 })
+    expect(payrollCashCost([{ gross: '100.005', ssf_employer: null }, {}])).toEqual({ total: 100.01, earned: 100.01, employerSsf: 0, tada: 0, bonus: 0 })
     expect(payrollCashCost(null).total).toBe(0)
+  })
+
+  // S824: the labour readers count a bonus from the bonus tables, so `total` must not count it again.
+  it('names a festival allowance or incentive paid with salary apart, before its tax, and keeps it out of the total', () => {
+    const slips = [{ gross: 30000, ssf_employer: 6000, festival_amount: 30000, festival_tds: 300, incentive_amount: 5000, incentive_tds: 50 }]
+    expect(payrollCashCost(slips)).toEqual({ total: 36000, earned: 30000, employerSsf: 6000, tada: 0, bonus: 35000 })
   })
 })
 

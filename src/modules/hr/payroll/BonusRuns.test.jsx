@@ -75,7 +75,18 @@ describe('NewBonusRunDialog', () => {
     expect(name()).toHaveValue('Quarterly Sales')
     fireEvent.change(screen.getByLabelText('Paid in'), { target: { value: '8' } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(onContinue).toHaveBeenCalledWith({ name: 'Quarterly Sales', month: 8, typeId: 't1' })
+    expect(onContinue).toHaveBeenCalledWith({ name: 'Quarterly Sales', month: 8, typeId: 't1', withSalary: true })
+  })
+
+  // S824: a new run is paid with its month's salary unless chosen otherwise.
+  it('hands back how the new run is paid, with the salary by default', () => {
+    const onContinue = setup()
+    fireEvent.change(name(), { target: { value: 'Year End' } })
+    const paid = screen.getByLabelText('How it is paid')
+    expect(paid).toHaveValue('salary')
+    fireEvent.change(paid, { target: { value: 'separately' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({ name: 'Year End', withSalary: false }))
   })
 
   it('says how many runs already exist before a new one is taxed on top of them', () => {

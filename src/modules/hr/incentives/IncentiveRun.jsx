@@ -5,7 +5,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import RunStatusBadge from '../payroll/RunStatusBadge'
-import { BonusRunList, NewBonusRunDialog, normName } from '../payroll/BonusRuns'
+import { BonusRunList, NewBonusRunDialog, PAID_WITH_TIP, PaidWithSelect, normName } from '../payroll/BonusRuns'
+import { fetchBonusPayrollFacts, leavingIds, payrollStateLine, rowsToSwitch, runPaidWithSalary } from '../payroll/bonusPayroll'
 import Fab from '../../../components/Fab'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, formatAdAsBs, getBsToday } from '../../../utils/bsCalendar'
@@ -134,6 +135,9 @@ export default function IncentiveRun() {
   const [newOpen,      setNewOpen]      = useState(false)
   const [bsYear,       setBsYear]       = useState(today.year)
   const [draftMonth,   setDraftMonth]   = useState(today.month)
+  // How a run not generated yet is paid (S824): with its month's salary unless chosen otherwise. An
+  // existing run's answer is read off its rows.
+  const [draftWithSalary, setDraftWithSalary] = useState(true)
   const [base,         setBase]         = useState(null)
   const [baseError,    setBaseError]    = useState(null)
   const [baseLoading,  setBaseLoading]  = useState(true)
@@ -190,10 +194,16 @@ export default function IncentiveRun() {
     // Keyed on the EXACT trimmed label `shown` compares against (S751 review).
     const key = runReq.begin(`${clientId}:${year}:${label}`)
     if (!quiet) { setRunLoading(true); setMsg('') }
-    const res = await fetchAllRows(() => scopedFrom(TABLE).eq('bs_year', year).order('id'))
+    const [res, facts] = await Promise.all([
+      fetchAllRows(() => scopedFrom(TABLE).eq('bs_year', year).order('id')),
+      // S824: the year's payroll months and every settlement — whether a run paid with salary can be
+      // finalized or reopened in its month, and who is paid separately because they are leaving.
+      fetchBonusPayrollFacts(scopedFrom, year),
+    ])
     if (!runReq.isCurrent(key)) return
-    if (res.error) { setRunError(res.error); setRunLoading(false); return }
-    setRun({ year, label, yearRows: res.data || [] })
+    const failed = res.error || facts.error
+    if (failed) { setRunError(failed); setRunLoading(false); return }
+    setRun({ year, label, yearRows: res.data || [], facts: facts.data })
     setRunError(null); setRunLoading(false)
   }, [clientId, scopedFrom, runReq])
 
@@ -245,6 +255,12 @@ export default function IncentiveRun() {
   const selectedConfig = configs.find(c => c.id === effConfigId) || null
   const activeConfigs  = configs.filter(c => c.active || c.id === effConfigId)
 
+  // S824: how this run is paid, the pay month's payroll, and who is leaving by its end — that person's
+  // row is always paid separately, because payroll leaves a settled leaver out of their last month.
+  const withSalary   = runPaidWithSalary(rows, draftWithSalary)
+  const payrollState = run?.facts?.payrollByMonth?.[payMonth] || 'none'
+  const leaving      = useMemo(() => leavingIds(run?.facts?.settlements, empMap, bounds.end), [run, empMap, bounds])
+  const payMonthLabel = `${BS_MONTHS[payMonth - 1]} ${bsYear}`
   const eligible    = useMemo(() => employees.filter(e => onPayrollInMonth(e, bounds)), [employees, bounds])
   const eligibleIds = useMemo(() => new Set(eligible.map(e => e.id)), [eligible])
   const missing     = useMemo(() => { const have = new Set(rows.map(r => r.employee_id)); return eligible.filter(e => !have.has(e.id)) }, [rows, eligible])
@@ -253,8 +269,9 @@ export default function IncentiveRun() {
     if (!run || run.year !== bsYear) return NONE
     const m = new Map()
     for (const r of run.yearRows) {
-      const g = m.get(r.run_label) || { name: r.run_label, count: 0, staff: 0, finalized: 0, gross: 0, tds: 0, bs_month: monthOf(r) }
+      const g = m.get(r.run_label) || { name: r.run_label, count: 0, staff: 0, finalized: 0, gross: 0, tds: 0, withSalary: 0, bs_month: monthOf(r) }
       g.count += 1
+      if (r.paid_through_payroll) g.withSalary += 1
       if (!isExcluded(r)) g.staff += 1
       g.gross += parseFloat(r.amount) || 0
       g.tds += parseFloat(r.tds) || 0
@@ -327,6 +344,9 @@ export default function IncentiveRun() {
     return {
       employee_id: emp.id, config_id: effConfigId || null, run_label: runLabel, bs_year: bsYear, bs_month: payMonth,
       amount, tds: taxFor(emp, amount), tds_overridden: false, status: 'draft',
+      // S824: written explicitly, never left to the column's default (false, so an old cached page
+      // and a restored backup both read as "separately").
+      paid_through_payroll: withSalary && !leaving.has(emp.id),
     }
   }
 
@@ -507,6 +527,13 @@ export default function IncentiveRun() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <p style={{ margin: 0 }}>Every draft row moves to {BS_MONTHS[m - 1]} {bsYear} ({fyLabel(newFy)} tax year). Income tax on each is worked out again for that month — it counts only bonuses paid before it — replacing any tax you typed by hand.</p>
           <p style={{ margin: 0 }}>Amounts stay as they are{selectedConfig?.prorate_by_service ? `. This type is reduced for months worked — press Recompute afterwards if months should be counted to 15 ${BS_MONTHS[m - 1]}` : ''}.</p>
+          {/* S824: where the money would land. A finalized month cannot take a with-salary run. */}
+          {withSalary && (
+            <p style={{ margin: 0 }}>
+              It is paid with the {BS_MONTHS[m - 1]} salary. {payrollStateLine(run?.facts?.payrollByMonth?.[m], `${BS_MONTHS[m - 1]} ${bsYear}`)}
+              {run?.facts?.payrollByMonth?.[m] === 'finalized' && ' So this run could not be finalized there unless that payroll is reopened, or the run is paid separately.'}
+            </p>
+          )}
         </div>
       ),
       run: async () => {
@@ -529,6 +556,49 @@ export default function IncentiveRun() {
     })
   }
 
+  // S824: how the run is paid. Only while every row is a draft — a finalized row's answer is part of
+  // what was finalized, and the database freezes it. Someone leaving by the pay month stays separately.
+  async function writeSwitch(targets, value) {
+    let n = 0
+    for (let i = 0; i < targets.length; i += ID_CHUNK) {
+      const { data, error } = await scopedUpdate(TABLE, { paid_through_payroll: value })
+        .eq('status', 'draft').in('id', targets.slice(i, i + ID_CHUNK).map(r => r.id))
+        .select('id')
+      if (error) return { n, error }
+      n += data?.length || 0
+    }
+    return { n, error: null }
+  }
+
+  function changePaidWith(value) {
+    if (rows.length === 0) { setDraftWithSalary(value); return }
+    if (!ready || busy || anyFinalized || value === withSalary) return
+    const targets = rowsToSwitch(rows, value, leaving)
+    const leavers = rows.filter(r => leaving.has(r.employee_id)).map(r => nameOf(r.employee_id))
+    askConfirm({
+      title: value ? `Pay the ${runLabel} ${bsYear} run with the ${monthName} salary?` : `Pay the ${runLabel} ${bsYear} run separately?`,
+      confirmLabel: value ? 'Pay with salary' : 'Pay separately', busyLabel: 'Saving…',
+      body: value ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ margin: 0 }}>Once finalized, each person's incentive less its income tax goes on their {payMonthLabel} payslip, and payroll pays it with the salary. This page then has no bank file for it.</p>
+          <p style={{ margin: 0 }}>{payrollStateLine(payrollState, payMonthLabel)}</p>
+          {leavers.length > 0 && <p style={{ margin: 0 }}>Still paid separately, because their Final Settlement takes them off that payroll: {leavers.join(', ')}.</p>}
+        </div>
+      ) : (
+        <p style={{ margin: 0 }}>Once finalized, the run is paid from this page's own bank file, as before. Payroll does not carry it, and the payslips do not show it.</p>
+      ),
+      run: async () => {
+        setBusy(true); setMsg('')
+        const { n, error } = await writeSwitch(targets, value)
+        await reloadRun()
+        setBusy(false)
+        if (error) { setMsg(`error:The run was not fully switched — ${n} of ${targets.length} rows changed before it stopped. The register shows what is stored; switch again to finish. ` + errorLine(error)); return }
+        if (n < targets.length) { setMsg(`error:${targets.length - n} of ${targets.length} rows did not change — the run was changed in another tab. The register shows what is stored.`); return }
+        setMsg(`ok:${value ? `Paid with the ${monthName} salary` : 'Paid separately'}`)
+      },
+    })
+  }
+
   // Scoped to the ids on screen, chunked, and counted (a refused RLS update is 0 rows, no error).
   async function writeStatus(ids, status, fromStatus) {
     let n = 0
@@ -546,10 +616,17 @@ export default function IncentiveRun() {
   function setStatus(status) {
     if (ownRow) return
     const toFinal = status === 'finalized'
-    if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || !(total > 0) || staleTax.length)) return
+    if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || !(total > 0) || staleTax.length || payrollBlocks)) return
+    // S824: a row paid with a month's salary cannot come off a finalized payroll (the database refuses
+    // too, bonus_payroll_finalized).
+    if (!toFinal && payrollState === 'finalized' && rows.some(r => r.status === 'finalized' && r.paid_through_payroll)) {
+      setMsg(`error:Not reopened. This run was paid with the ${payMonthLabel} salary, and that payroll is finalized — reopen the ${payMonthLabel} payroll first.`)
+      return
+    }
     const ids = rows.filter(r => r.status === (toFinal ? 'draft' : 'finalized')).map(r => r.id)
     const verb = toFinal ? 'finalized' : 'reopened'
     const kept = toFinal ? keptTax : NONE
+    const separately = withSalary ? payRows.filter(r => (parseFloat(r.amount) || 0) > 0 && (!r.paid_through_payroll || leaving.has(r.employee_id))).map(r => nameOf(r.employee_id)) : NONE
     askConfirm({
       title: `${toFinal ? 'Finalize' : 'Reopen'} the ${runLabel} ${bsYear} incentive run?`,
       confirmLabel: `${toFinal ? 'Finalize' : 'Reopen'} Run`, busyLabel: `${toFinal ? 'Finalizing' : 'Reopening'}…`,
@@ -557,7 +634,15 @@ export default function IncentiveRun() {
       body: toFinal
         ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <p style={{ margin: 0 }}>{payRows.length - zeroRows.length} incentive{payRows.length - zeroRows.length === 1 ? '' : 's'}, NPR {fmt(total)} gross and NPR {fmt(total - totalTds)} to transfer, lock as a permanent record paid in {monthName} {bsYear}. From then on monthly payroll's income tax counts it as a bonus already paid this year. This can be undone with Reopen.</p>
+            <p style={{ margin: 0 }}>
+              {payRows.length - zeroRows.length} incentive{payRows.length - zeroRows.length === 1 ? '' : 's'}, NPR {fmt(total)} gross and NPR {fmt(total - totalTds)} after income tax, lock as a permanent record paid in {monthName} {bsYear}.
+              {withSalary
+                ? ` Each is added, after its income tax, to that person's ${payMonthLabel} payslip and paid with the salary.`
+                : ' It is paid from this page\'s bank file.'}
+              {' '}From then on monthly payroll's income tax counts it as a bonus already paid this year. This can be undone with Reopen.
+            </p>
+            {withSalary && <p style={{ margin: 0 }}>{payrollStateLine(payrollState, payMonthLabel)}</p>}
+            {separately.length > 0 && <p style={{ margin: 0 }}>Paid separately from this page's bank file, because their Final Settlement takes them off that payroll: {separately.join(', ')}.</p>}
             {zeroRows.length > 0 && <p style={{ margin: 0 }}><strong>{zeroRows.length} staff get nothing in this run:</strong> {zeroRows.map(r => nameOf(r.employee_id)).join(', ')}. If they should be paid, cancel and type their amounts.</p>}
             {excludedRows.length > 0 && <p style={{ margin: 0 }}>Excluded, paid nothing: {excludedRows.map(r => nameOf(r.employee_id)).join(', ')}.</p>}
             {kept.length > 0 && <p style={{ margin: 0 }}>Income tax kept as entered, not as it works out now: {kept.map(s => `${nameOf(s.row.employee_id)} (NPR ${fmt(s.row.tds)}, works out to NPR ${fmt(s.fresh)})`).join(', ')}.</p>}
@@ -567,10 +652,43 @@ export default function IncentiveRun() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <p style={{ margin: 0 }}>The run goes back to draft: amounts and income tax become editable again.</p>
             <p style={{ margin: 0 }}>Until it is finalized again it counts as <strong>not paid</strong>: monthly payroll, Final Settlement and every other bonus run stop counting it in the year's income, so tax worked out while it is reopened comes out lower than it should.</p>
+            {withSalary && payrollState === 'draft' && <p style={{ margin: 0 }}>It also comes off the {payMonthLabel} payslips: that payroll shows as out of date until it is regenerated.</p>}
           </div>
         ),
       run: async () => {
         setBusy(true); setMsg('')
+        // S824: paid with salary — read the pay month's payroll and the settlements again right before
+        // writing. A payroll finalized since refuses; anyone a settlement now takes off that payroll is
+        // switched to paid separately first, by name. The database checks both under hr_pay_lock.
+        let moved = NONE
+        let freshState = payrollState
+        if (toFinal && withSalary) {
+          const facts = await fetchBonusPayrollFacts(scopedFrom, bsYear)
+          if (facts.error) {
+            setBusy(false)
+            setMsg(`error:Nothing was finalized: could not check the ${payMonthLabel} payroll and who is leaving. Try again. ` + errorLine(facts.error))
+            return
+          }
+          freshState = facts.data.payrollByMonth[payMonth] || 'none'
+          if (freshState === 'finalized') {
+            await reloadRun()
+            setBusy(false)
+            setMsg(`error:Nothing was finalized: the ${payMonthLabel} payroll is finalized, so this run cannot be paid with it. Reopen that payroll, pick another Paid in month, or pay this run separately.`)
+            return
+          }
+          const leavingNow = leavingIds(facts.data.settlements, empMap, bounds.end)
+          const toMove = rows.filter(r => ids.includes(r.id) && r.paid_through_payroll && leavingNow.has(r.employee_id))
+          if (toMove.length > 0) {
+            const res = await writeSwitch(toMove, false)
+            if (res.error || res.n < toMove.length) {
+              await reloadRun()
+              setBusy(false)
+              setMsg(`error:Nothing was finalized: ${toMove.map(r => nameOf(r.employee_id)).join(', ')} ${toMove.length === 1 ? 'is' : 'are'} leaving by ${monthName} and could not be switched to paid separately. The register shows what is stored; try again. ` + (res.error ? errorLine(res.error) : ''))
+              return
+            }
+            moved = toMove.map(r => nameOf(r.employee_id))
+          }
+        }
         const { n, error } = await writeStatus(ids, status, toFinal ? 'draft' : 'finalized')
         await Promise.all([loadBase({ quiet: true }), reloadRun()])
         setBusy(false)
@@ -582,7 +700,13 @@ export default function IncentiveRun() {
           setMsg(`error:${ids.length - n} of the ${ids.length} rows on screen were not ${verb} — the run was changed in another tab (a row edited, removed or already ${verb}). The register now shows what is stored; check it and ${toFinal ? 'finalize' : 'reopen'} again.`)
           return
         }
-            setMsg(`ok:${toFinal ? 'Finalized' : 'Reopened'}`)
+        if (toFinal && withSalary) {
+          setMsg(`ok:Finalized — paid with the ${payMonthLabel} salary.`
+            + (freshState === 'draft' ? ` Regenerate the ${payMonthLabel} payroll so the payslips carry it.` : '')
+            + (moved.length ? ` Paid separately instead, because their Final Settlement takes them off that payroll: ${moved.join(', ')}.` : ''))
+          return
+        }
+        setMsg(`ok:${toFinal ? 'Finalized' : 'Reopened'}`)
       },
     })
   }
@@ -611,8 +735,10 @@ export default function IncentiveRun() {
     }), 'Incentive Register')
   }
   function exportBank(ext) {
-    const payable = sortedRows.filter(r => (parseFloat(r.amount) || 0) - (parseFloat(r.tds) || 0) > 0)
-    if (payable.length === 0) { setMsg('error:Nothing to transfer — every amount is 0.'); return }
+    // S824: a row paid with the salary is never in it — payroll pays that one, and this file would
+    // pay it a second time.
+    const payable = sortedRows.filter(r => !r.paid_through_payroll && (parseFloat(r.amount) || 0) - (parseFloat(r.tds) || 0) > 0)
+    if (payable.length === 0) { setMsg('error:Nothing to transfer — every amount here is 0, or paid with the salary.'); return }
     exportSheet(payable.map(r => {
       const e = empMap.get(r.employee_id) || {}
       const hasBank = !!(e.bank_name && e.bank_account_no)
@@ -631,13 +757,19 @@ export default function IncentiveRun() {
   const loading   = !loadError && !ready
   const taxBlocks = staleTax.length > 0
   const allZero   = rows.length > 0 && !(total > 0)
-  const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !allZero && !ownRow
+  // S824: a run paid with salary cannot be finalized onto a finalized payroll.
+  const payrollBlocks = withSalary && payrollState === 'finalized' && drafts.some(r => r.paid_through_payroll)
+  const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !allZero && !payrollBlocks && !ownRow
+  // Rows this page's bank file pays (S824): those paid separately, with something to transfer.
+  const bankRows = rows.filter(r => !r.paid_through_payroll && (parseFloat(r.amount) || 0) - (parseFloat(r.tds) || 0) > 0)
   const MONTH_TIP = 'The month the bonus is paid. It decides the tax year (a bonus paid Baisakh–Ashadh belongs to the tax year that began the Shrawan before), which other bonuses count as paid before it, and, for a type reduced for months worked, the date service is counted up to (the 15th). Locked once the run is finalized.'
   // Continue from the dialog: an existing name opens that run; a new one opens empty, on its type and
   // pay month, ready for Generate.
-  const openNew = ({ name, month, typeId }) => {
+  const openNew = ({ name, month, typeId, withSalary: paidWith }) => {
     setNewOpen(false)
     if (month) { setDraftMonth(month); setConfigId(typeId || '') }
+    // S824: and paid the way the dialog chose.
+    if (paidWith !== undefined) setDraftWithSalary(paidWith)
     pickRun(name)
   }
 
@@ -647,7 +779,7 @@ export default function IncentiveRun() {
         <div>
           <h1 className="page-title">Incentives / Bonus</h1>
           <p className="page-subtitle">
-            One-off bonus runs — {runLabel ? `${runLabel} ${bsYear}, paid in ${monthName}` : `BS ${bsYear}`}
+            One-off bonus runs — {runLabel ? `${runLabel} ${bsYear}, paid ${withSalary ? `with the ${monthName} salary` : `separately in ${monthName}`}` : `BS ${bsYear}`}
             {rows.length > 0 && (
               <RunStatusBadge finalized={finalized} />
             )}
@@ -684,6 +816,12 @@ export default function IncentiveRun() {
               >
                 {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
               </select>
+              {/* S824: with the pay month's salary, or separately. Locked once anything is finalized. */}
+              <Tip text={PAID_WITH_TIP} width={320}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Paid</span>
+              </Tip>
+              <PaidWithSelect value={withSalary} monthName={monthName}
+                disabled={busy || anyFinalized || (rows.length > 0 && !ready)} onChange={changePaidWith} />
             </>}
           </div>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowConfigs(true)} disabled={!configsReady}>⚙ Manage Types</button>
@@ -740,7 +878,7 @@ export default function IncentiveRun() {
             {[
               { label: 'Gross Payout',     value: fmt(total),            tip: 'Total bonus before income tax is taken off.' },
               { label: 'Income Tax (TDS)', value: fmt(totalTds),         tip: 'Income tax held back from this bonus and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so a bonus is taxed at the rate the employee actually falls in.' },
-              { label: 'Net Payout',       value: fmt(total - totalTds), tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
+              { label: 'Net Payout',       value: fmt(total - totalTds), tip: withSalary ? `What reaches staff: gross minus income tax, added to each person's ${payMonthLabel} payslip and paid with the salary.` : 'What actually reaches staff bank accounts: gross minus income tax.' },
               { label: 'Employees',        value: payRows.length,        tip: 'People in this run, not counting anyone marked Excluded.' },
               { label: 'Average Gross',    value: fmt(payRows.length ? total / payRows.length : 0), tip: 'Gross payout ÷ people in the run (excluded staff not counted).' },
             ].map(s => (
@@ -757,6 +895,14 @@ export default function IncentiveRun() {
             <Tip text="The bonus type a run is generated with stays with the run. Recompute uses it; a run with no type keeps every amount and only works the income tax out again." width={280}>Type</Tip>: {typeSummary(selectedConfig)}
             {runConfigId && !selectedConfig && ' (that type could not be found)'}
           </div>
+
+          {/* S824: a run paid with salary whose month's payroll is already finalized. */}
+          {payrollBlocks && (
+            <div role="alert" className="card" style={{ ...amberBanner, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+              <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>The {payMonthLabel} payroll is already finalized</div>
+              So this run cannot be finalized to be paid with it. Reopen that payroll, pick another Paid in month, or pay this run separately.
+            </div>
+          )}
 
           {splitMonth && (
             <div role="alert" className="card" style={{ ...amberBanner, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
@@ -823,8 +969,11 @@ export default function IncentiveRun() {
               </span>
             )}
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportRegister} disabled={busy}>⬇ Register</button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
+            {/* S824: only what this page pays. Payroll's own bank sheet pays a run paid with salary. */}
+            {bankRows.length > 0 && <>
+              <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel{withSalary ? ` (${bankRows.length} paid separately)` : ''}</button>
+              <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
+            </>}
             {!finalized && (
               <Tip text="Works every amount out again from today's settings and basic salary, so press it after a raise. Excluded staff stay excluded." width={260}>
                 <button className="btn btn-ghost btn-sm" onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>
@@ -850,7 +999,7 @@ export default function IncentiveRun() {
                       <Tip text="Income tax held back from this bonus. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so a waiter who already earns into a higher band pays that band's rate on the bonus too. Worked out again when you change the amount; you can also type it while draft." width={320}>Income tax (TDS)</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="What the employee receives: gross − income tax. This is the bank transfer amount." width={240}>Net</Tip>
+                      <Tip text={withSalary ? `What the employee receives: gross − income tax, added to the ${payMonthLabel} payslip and paid with the salary (or, for anyone marked paid separately, the bank transfer amount).` : 'What the employee receives: gross − income tax. This is the bank transfer amount.'} width={260}>Net</Tip>
                     </th>
                     <th>Note</th>
                     {!finalized && <th className="no-print"><span className="sr-only">Actions</span></th>}
@@ -888,7 +1037,13 @@ export default function IncentiveRun() {
                               )
                             })()}
                             {needsAmount && <span className="badge badge-amber" style={{ fontSize: 10 }}>amount needed</span>}
-                            {missingBank && !excluded && <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>⚠ no bank</span>}
+                            {missingBank && !excluded && !r.paid_through_payroll && <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>⚠ no bank</span>}
+                            {/* S824: someone a Final Settlement takes off the pay month's payroll. */}
+                            {withSalary && !excluded && !r.paid_through_payroll && (
+                              <Tip text={`Their Final Settlement takes them off the ${payMonthLabel} payroll, so this is paid separately, from this page's bank file.`} width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                                <span className="badge badge-gray" style={{ fontSize: 10 }}>paid separately</span>
+                              </Tip>
+                            )}
                           </div>
                         </td>
                         <td style={{ textAlign: 'right' }}>
@@ -941,6 +1096,7 @@ export default function IncentiveRun() {
           </div>
           <p className="page-footnote">
             Income tax is worked out on the whole {fyLabel(fyStart)} tax year: salary already paid, salary still to come and other bonuses finalized earlier in the year.
+            {withSalary && ` Once finalized, payroll adds each net amount to the ${payMonthLabel} payslip and pays it with the salary.`}
           </p>
         </>
       )}

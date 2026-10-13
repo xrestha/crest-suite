@@ -1,7 +1,7 @@
 import { nprInt, nprPaisa } from '../../../shared/nepalMoney'
 import { calcAmount, isSsfContributor, toPaisa } from './payrollCompute'
 import { slabsFor } from './tds'
-import { FRESHNESS_INPUT_FIELDS, NET_TOLERANCE, payslipNetGap } from './payrollData'
+import { FRESHNESS_INPUT_FIELDS, NET_TOLERANCE, bonusNet, payslipNetGap } from './payrollData'
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER, SSF_CAP } from '../payrollConstants'
 
 // How one employee's pay was worked out, step by step — the breakdown that used to be the whole of
@@ -70,12 +70,16 @@ function bandLabel(b, i) {
 const DRIFT_LABELS = {
   gross: 'Gross salary', ot_amount: 'Overtime', absence_deduction: 'Absence deduction', ssf_employee: 'SSF',
   other_deductions: 'Other deductions', advance_deduction: 'Advance cut', retirement_contribution: 'CIT / retirement contribution',
+  festival_amount: 'Festival allowance', festival_tds: 'Income tax on the festival allowance',
+  incentive_amount: 'Incentive', incentive_tds: 'Income tax on the incentive',
 }
 const idKey = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
 const differ = (a, b) => Math.round(num(a)) !== Math.round(num(b))
-// The advance is exact to the paisa (S791), like payslipDrift's own comparison of it.
-const differField = (f, a, b) => (f === 'advance_deduction' ? toPaisa(a) !== toPaisa(b) : differ(a, b))
-const fmtField = f => (f === 'advance_deduction' ? nprPaisa : fmt)
+// The advance and a bonus paid with salary are exact to the paisa (S791, S824), like payslipDrift's
+// own comparison of them.
+const PAISA_FIELDS = new Set(['advance_deduction', 'festival_amount', 'festival_tds', 'incentive_amount', 'incentive_tds'])
+const differField = (f, a, b) => (PAISA_FIELDS.has(f) ? toPaisa(a) !== toPaisa(b) : differ(a, b))
+const fmtField = f => (PAISA_FIELDS.has(f) ? nprPaisa : fmt)
 
 export function driftParts(stored, live) {
   const parts = FRESHNESS_INPUT_FIELDS
@@ -84,6 +88,14 @@ export function driftParts(stored, live) {
   const idsMoved = idKey(stored.tada_claim_ids) !== idKey(live.tada_claim_ids)
   if (idsMoved || differ(stored.tada_amount, live.tada_amount)) {
     parts.push(`Travel claims (TADA) NPR ${fmt(num(stored.tada_amount))} → NPR ${fmt(num(live.tada_amount))}${idsMoved ? ' (a different set of approved claims)' : ''}`)
+  }
+  // S824: the same amount from a different set of runs (one finalized, another reopened) moves nothing
+  // above, so it is named on its own.
+  const festMoved = idKey(stored.festival_ids) !== idKey(live.festival_ids)
+  const incMoved = idKey(stored.incentive_ids) !== idKey(live.incentive_ids)
+  if ((festMoved && !differField('festival_amount', stored.festival_amount, live.festival_amount))
+    || (incMoved && !differField('incentive_amount', stored.incentive_amount, live.incentive_amount))) {
+    parts.push('A different festival allowance or incentive run is now set to be paid with this salary')
   }
   if (differ(stored.tds, live.tds) && !stored.tds_overridden) {
     parts.push(`Income tax (TDS) NPR ${fmt(num(stored.tds))} → NPR ${fmt(num(live.tds))}`)
@@ -286,6 +298,8 @@ export function CalcDetail({ row, monthDays, advances, ytd }) {
           <Line label="TADA Reimbursement" value={`+ NPR ${fmt(slip.tada_amount)}`} />
         </Section>
 
+        <BonusSection slip={slip} names={row.bonus} />
+
         <Section title="Net Pay">
           <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} />
           <Line label="OT" op="+" value={`NPR ${fmt(slip.ot_amount)}`} />
@@ -301,10 +315,32 @@ export function CalcDetail({ row, monthDays, advances, ytd }) {
           <Line label="Income tax (TDS)" op="−" value={`NPR ${fmt(slip.tds)}`} />
           <Line label="Advance" op="−" value={`NPR ${nprPaisa(slip.advance_deduction)}`} />
           <Line label="TADA" op="+" value={`NPR ${fmt(slip.tada_amount)}`} />
+          {bonusNet(slip) > 0 && <Line label="Festival & bonus, after their own tax" op="+" value={`NPR ${nprPaisa(bonusNet(slip))}`} />}
           <Line label="Net Pay" op="=" value={`NPR ${nprPaisa(slip.net_pay)}`} strong />
         </Section>
       </div>
     </div>
+  )
+}
+
+// S824: a festival allowance or incentive paid with this salary, with the tax its own run worked out.
+// Nothing here is computed: the run's page decided the amount and the tax, and this payslip carries
+// them. `names` is buildPayrollRows' detail.bonus when there is one (the run names).
+function BonusSection({ slip, names }) {
+  const fa = num(slip.festival_amount)
+  const ia = num(slip.incentive_amount)
+  if (fa <= 0 && ia <= 0) return null
+  const named = (kind, base) => (names?.[kind]?.names?.length ? `${base} — ${names[kind].names.join(', ')}` : base)
+  const taxHint = 'Worked out on the run\'s own page when it was finalized, on top of the year\'s salary — the salary tax above does not include it.'
+  return (
+    <Section title="Paid with this salary">
+      {fa > 0 && <Line label={named('festival', 'Festival allowance')} value={`+ NPR ${nprPaisa(fa)}`} />}
+      {fa > 0 && <Line label="Its income tax" op="−" value={`NPR ${nprPaisa(num(slip.festival_tds))}`} hint={taxHint} />}
+      {ia > 0 && <Line label={named('incentive', 'Incentive')} value={`+ NPR ${nprPaisa(ia)}`} />}
+      {ia > 0 && <Line label="Its income tax" op="−" value={`NPR ${nprPaisa(num(slip.incentive_tds))}`} hint={taxHint} />}
+      <Line label="Added to take-home pay" op="=" value={`+ NPR ${nprPaisa(bonusNet(slip))}`} strong
+        hint="To change it, reopen the run on Festival Allowance or Incentives, then Regenerate this payroll." />
+    </Section>
   )
 }
 
@@ -361,6 +397,10 @@ export function StoredDetail({ slip, intro }) {
             />
             <Line label="Advance cut" op="−" value={`NPR ${nprPaisa(num(slip.advance_deduction))}`} hint="Recovered towards an advance or loan." />
             <Line label="TADA" op="+" value={`NPR ${fmt(num(slip.tada_amount))}`} hint={claims > 0 ? `${claims} travel claim${claims === 1 ? '' : 's'} reimbursed — not taxed.` : 'No travel claims on this payslip.'} />
+            {bonusNet(slip) > 0 && (
+              <Line label="Festival & bonus, after their own tax" op="+" value={`NPR ${nprPaisa(bonusNet(slip))}`}
+                hint={`Paid with this salary: festival allowance NPR ${nprPaisa(num(slip.festival_amount))} less its tax NPR ${nprPaisa(num(slip.festival_tds))}, incentive NPR ${nprPaisa(num(slip.incentive_amount))} less its tax NPR ${nprPaisa(num(slip.incentive_tds))}.`} />
+            )}
             <Line label="Net pay" op="=" value={`NPR ${nprPaisa(num(slip.net_pay))}`} strong />
           </Section>
         </div>

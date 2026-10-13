@@ -20,13 +20,31 @@ const amberNote = {
 // "Dashain", "dashain" and "Dash ain" are one festival to a reader and three runs to the database.
 export const normName = s => String(s || '').toLowerCase().replace(/\s+/g, '')
 
+// S824: how a run is paid. "With salary" puts each person's amount, less its income tax, on their
+// payslip for the pay month, and payroll pays it; "Separately" is this page's own bank file, as before.
+export const PAID_WITH_TIP = 'With salary: each person\'s amount, less its income tax, goes on their payslip for the pay month, and payroll pays it with the salary — there is no separate bank file. Choose Separately to pay it before payday from this page\'s own bank file, for a festival that comes before the salary does. Someone whose Final Settlement takes them off that month\'s payroll is always paid separately.'
+
+/** The how-it-is-paid select, on the run's header and in the New dialog. `value` is true for salary. */
+export function PaidWithSelect({ id, value, monthName, disabled, onChange, style }) {
+  return (
+    <select id={id} className="form-select" aria-label={id ? undefined : 'How it is paid'} value={value ? 'salary' : 'separately'}
+      disabled={disabled} onChange={e => onChange(e.target.value === 'salary')} style={style}>
+      <option value="salary">With the {monthName} salary</option>
+      <option value="separately">Separately (own bank file)</option>
+    </select>
+  )
+}
+
 // A run is a set of rows, so it can be part finalized; the colours are RunStatusBadge's.
 export const runStatusChip = g => (g.finalized === g.count
   ? { label: 'Finalized', cls: 'badge-green' }
   : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
 
+// How a listed run is paid (S824): `withSalary` counts its rows paid with the salary.
+const paidWord = g => (g.withSalary > 0 ? 'with salary' : 'separately')
+
 /**
- * `runs`: `[{ name, bs_month, count, staff, finalized, gross, tds }]`, one per run in the year.
+ * `runs`: `[{ name, bs_month, count, staff, finalized, gross, tds, withSalary }]`, one per run in the year.
  * `noun` names a run in labels ("festival allowance", "bonus run").
  */
 export function BonusRunList({ runs, year, noun, onOpen, emptyTitle, emptyText }) {
@@ -51,7 +69,7 @@ export function BonusRunList({ runs, year, noun, onOpen, emptyTitle, emptyText }
                   <span className="phone-card__figure">NPR {nprInt(g.gross)}</span>
                 </div>
                 <div className="phone-card__meta">
-                  Paid in {BS_MONTHS[g.bs_month - 1]} · {g.staff} staff · income tax {nprInt(g.tds)} · net {nprInt(g.gross - g.tds)}
+                  Paid in {BS_MONTHS[g.bs_month - 1]}, {paidWord(g)} · {g.staff} staff · income tax {nprInt(g.tds)} · net {nprInt(g.gross - g.tds)}
                 </div>
                 <div className="phone-card__meta"><span className={`badge ${chip.cls}`}>{chip.label}</span></div>
                 <div className="phone-card__actions">
@@ -68,7 +86,7 @@ export function BonusRunList({ runs, year, noun, onOpen, emptyTitle, emptyText }
             <tr>
               <th><Tip text="Press a name to open that run." width={200}>Run</Tip></th>
               <th>
-                <Tip text="The month the run is paid. It decides the tax year and which other bonuses count as paid before it." width={260}>Paid in</Tip>
+                <Tip text="The month the run is paid, and whether it is paid with that month's salary or separately. The month decides the tax year and which other bonuses count as paid before it." width={280}>Paid in</Tip>
               </th>
               <th style={{ textAlign: 'right' }}>
                 <Tip text="People in the run, not counting anyone marked Excluded." width={220}>Staff</Tip>
@@ -89,7 +107,10 @@ export function BonusRunList({ runs, year, noun, onOpen, emptyTitle, emptyText }
                   <td>
                     <button type="button" className="btn-linklike btn-linklike--prints" onClick={() => onOpen(g.name)}>{g.name}</button>
                   </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{BS_MONTHS[g.bs_month - 1]} {year}</td>
+                  <td>
+                    <span style={{ whiteSpace: 'nowrap' }}>{BS_MONTHS[g.bs_month - 1]} {year}</span>
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text2)' }}>{paidWord(g)}</span>
+                  </td>
                   <td style={{ textAlign: 'right' }}>{g.staff}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{nprInt(g.gross)}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{nprInt(g.tds)}</td>
@@ -117,11 +138,13 @@ export function NewBonusRunDialog({
   const [name, setName] = useState(defaultName)
   const [month, setMonth] = useState(defaultMonth)
   const [typeId, setTypeId] = useState('')
+  // S824: a new run is paid with its month's salary unless chosen otherwise.
+  const [withSalary, setWithSalary] = useState(true)
   const trimmed = name.trim()
   const exact = runs.find(g => g.name === trimmed)
   const lookalikes = trimmed ? runs.filter(g => g.name !== trimmed && normName(g.name) === normName(trimmed)) : []
   const others = runs.filter(g => normName(g.name) !== normName(trimmed))
-  const submit = e => { e.preventDefault(); if (trimmed) onContinue(exact ? { name: exact.name } : { name: trimmed, month, typeId }) }
+  const submit = e => { e.preventDefault(); if (trimmed) onContinue(exact ? { name: exact.name } : { name: trimmed, month, typeId, withSalary }) }
 
   return (
     <Modal onClose={onClose} title={title} maxWidth={560}>
@@ -152,6 +175,11 @@ export function NewBonusRunDialog({
               onChange={e => setMonth(parseInt(e.target.value, 10))}>
               {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m} {year}</option>)}
             </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="bonus-run-paid"><Tip text={PAID_WITH_TIP} width={320}>How it is paid</Tip></label>
+            <PaidWithSelect id="bonus-run-paid" value={exact ? exact.withSalary > 0 : withSalary} disabled={!!exact}
+              monthName={BS_MONTHS[(exact ? exact.bs_month : month) - 1]} onChange={setWithSalary} style={{ width: '100%' }} />
           </div>
         </div>
 

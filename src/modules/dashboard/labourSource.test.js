@@ -87,6 +87,11 @@ describe('payrollLabourTotal', () => {
   test('gross + employer SSF, tolerant of strings and nulls', () => {
     expect(payrollLabourTotal([{ gross: '30000', ssf_employer: '2000' }, { gross: 10000, ssf_employer: null }])).toBe(42000)
   })
+  // S824: a festival allowance or incentive paid with the salary is counted once, from the bonus
+  // tables (loadOtherLabourPay), so the payslip's own bonus columns are not labour here.
+  test('S824: the bonus columns on a payslip are not counted again', () => {
+    expect(payrollLabourTotal([{ gross: '30000', ssf_employer: '0', festival_amount: '30000', incentive_amount: '5000' }])).toBe(30000)
+  })
   test('S756 owner decision: overtime is included', () => {
     expect(payrollLabourTotal([{ gross: '92000', ot_amount: '7323', ssf_employer: '0' }])).toBe(99323)
   })

@@ -4,6 +4,7 @@ import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime
 import { isSsfContributor } from './payrollCompute'
 import { ssfDeadline } from './monthStatus'
 import { monthDeposit } from './monthDeposit'
+import { bonusNet } from './payrollData'
 
 // The payroll approval sheet (S777): the document the HR manager hands the Owner, who checks the
 // month's pay and signs it off. Print-only, the same shape as the payslip and the working —
@@ -41,6 +42,10 @@ export default function PayrollApprovalSheet({
   const rows = payslips
     .map(s => ({ slip: s, emp: empMap[s.employee_id] || null, name: empMap[s.employee_id]?.full_name || nameOf(s.employee_id) }))
     .sort(byName)
+  // S824: a festival allowance or incentive paid with this salary, after the tax its own run took. Its
+  // own column, only in a month that has one; that tax is in the TDS deposit below once, from the run.
+  const showBonus = payslips.some(s => num(s.festival_amount) > 0 || num(s.incentive_amount) > 0)
+  const bonusTotal = num(totals.bonus)
 
   const deductions = totals.absence + totals.ssfEmp + totals.other + totals.advDed + totals.tds
   const deductionParts = [
@@ -154,6 +159,9 @@ export default function PayrollApprovalSheet({
           <Line name="Overtime" value={money(totals.ot, '+')} />
           <Line name="Deductions" value={money(deductions, '−', fmtPaisa)} sub={deductionParts.join(' · ') || null} />
           <Line name="Travel claims (TADA), not taxed" value={money(totals.tada, '+')} />
+          {showBonus && (
+            <Line name="Festival allowance & incentives paid with this salary, after their own tax" value={money(bonusTotal, '+', fmtPaisa)} />
+          )}
           <Line name="Net pay to staff" value={`NPR ${fmtPaisa(totals.net)}`} strong />
         </div>
         <div>
@@ -161,7 +169,7 @@ export default function PayrollApprovalSheet({
           <Line name="Employer SSF (20%, paid on top of pay)" value={deposit(totals.ssfEmpr)} />
           <Line
             name="Cost to business" value={`NPR ${fmt(cost.total)}`} strong
-            sub={`pay earned ${fmt(cost.earned)} + employer SSF ${fmt(cost.employerSsf)}${cost.tada > 0 ? ` · travel claims ${fmt(cost.tada)} on top` : ''}`}
+            sub={`pay earned ${fmt(cost.earned)} + employer SSF ${fmt(cost.employerSsf)}${cost.bonus > 0 ? ` · festival & bonus ${fmt(cost.bonus)} on top` : ''}${cost.tada > 0 ? ` · travel claims ${fmt(cost.tada)} on top` : ''}`}
           />
           <Line
             name="SSF to deposit this month (employee 11% + employer 20%)" value={dep ? deposit(dep.ssf.total) : 'could not be read'}
@@ -185,6 +193,7 @@ export default function PayrollApprovalSheet({
             <th style={{ textAlign: 'right' }}>Advance</th>
             <th style={{ textAlign: 'right' }}>Income tax</th>
             <th style={{ textAlign: 'right' }}>TADA</th>
+            {showBonus && <th style={{ textAlign: 'right' }}>Festival &amp; bonus</th>}
             <th style={{ textAlign: 'right' }}>Net pay</th>
           </tr>
         </thead>
@@ -211,6 +220,7 @@ export default function PayrollApprovalSheet({
               <td style={{ textAlign: 'right' }}>{money(num(s.advance_deduction), '−', fmtPaisa)}</td>
               <td style={{ textAlign: 'right' }}>{money(num(s.tds), '−')}</td>
               <td style={{ textAlign: 'right' }}>{money(num(s.tada_amount), '+')}</td>
+              {showBonus && <td style={{ textAlign: 'right' }}>{money(bonusNet(s), '+', fmtPaisa)}</td>}
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtPaisa(s.net_pay)}</td>
             </tr>
           ))}
@@ -227,6 +237,7 @@ export default function PayrollApprovalSheet({
             <td style={{ textAlign: 'right' }}>{money(totals.advDed, '−', fmtPaisa)}</td>
             <td style={{ textAlign: 'right' }}>{money(totals.tds, '−')}</td>
             <td style={{ textAlign: 'right' }}>{money(totals.tada, '+')}</td>
+            {showBonus && <td style={{ textAlign: 'right' }}>{money(bonusTotal, '+', fmtPaisa)}</td>}
             <td style={{ textAlign: 'right' }}>{fmtPaisa(totals.net)}</td>
           </tr>
         </tfoot>

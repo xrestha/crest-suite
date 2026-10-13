@@ -18,6 +18,14 @@ describe('monthDeposit', () => {
     expect(d.tds.bonusRuns).toEqual([{ run: 'Dashain', tds: 420 }])
   })
 
+  // S824: a bonus paid with the salary sits on the payslip in its own columns; its tax comes from the
+  // bonus run (bonuses), never from the payslip, so it is counted once.
+  it('does not count the tax of a bonus paid with the salary twice', () => {
+    const withFest = [{ ...payslips[0], festival_amount: 30000, festival_tds: 300 }, payslips[1]]
+    const d = monthDeposit({ payslips: withFest, bonuses: [{ run: 'Dashain', tds: '300' }] })
+    expect(d.tds).toMatchObject({ payroll: 250, bonuses: 300, total: 550 })
+  })
+
   it('is the payroll alone when nothing else was paid this month', () => {
     const d = monthDeposit({ payslips })
     expect(d.ssf.total).toBe(4650)

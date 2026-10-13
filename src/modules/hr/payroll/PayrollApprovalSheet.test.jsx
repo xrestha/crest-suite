@@ -115,3 +115,21 @@ test('net pay and the advance cut print to the paisa, as the register does', () 
   // Whole-rupee figures are unchanged.
   expect(row).toHaveTextContent('20,000')
 })
+
+// S824: a festival allowance paid with the salary is its own column, after its own tax, and that tax
+// is in the TDS deposit once — from the bonus run, never again from the payslip.
+test('a festival allowance paid with the salary is its own column, and its tax is deposited once', () => {
+  const withFest = payslips.map(s => (s.id === 's1'
+    ? { ...s, festival_amount: 30000, festival_tds: 300, festival_ids: ['f1'], net_pay: 29963 + 29700 }
+    : s))
+  const totals = { ...totalsOf(withFest), bonus: 29700 }
+  const { container } = renderSheet({
+    payslips: withFest, totals,
+    extras: { data: { settlements: [], bonuses: [{ run: 'Dashain', tds: 300 }] } },
+  })
+  expect(screen.getByRole('columnheader', { name: 'Festival & bonus' })).toBeInTheDocument()
+  const row = [...container.querySelectorAll('tbody tr')].find(tr => tr.textContent.includes('RONISH DANGOL'))
+  expect(row).toHaveTextContent('+29,700')
+  // Salary tax 328 + 193 + 287 = 808, plus the Dashain run's 300 — not 300 twice.
+  expect(screen.getByText('Income tax (TDS) to deposit this month').parentElement.parentElement).toHaveTextContent('1,108')
+})

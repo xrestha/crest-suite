@@ -140,8 +140,8 @@ History: #s748-employees-pay-setup-holiday-calendar, #s751-payroll-decisions, #s
   calculated figure. Never write a second copy of the comparison.
 - Finalize's confirm is a consequence summary: payslip count, total net pay, advance recoveries,
   TADA claims to be closed.
-- **Net pay is its own parts:** gross + OT − absence − SSF − other − advance − TDS + TADA, within
-  0.01. `payslipNetGap` (JS), `hr_payslips_guard_net` and `finalize_payroll_run` hold three copies; a
+- **Net pay is its own parts:** gross + OT − absence − SSF − other − advance − TDS + TADA + a bonus
+  paid with the salary less its own tax (`bonusNet()`, S824), within 0.01. `payslipNetGap` (JS), `hr_payslips_guard_net` and `finalize_payroll_run` hold three copies; a
   new payslip column that moves money changes all three (S798 2b).
 - **The Calculation page is Payroll's expandable row** (S768). `/hr/calculation` redirects to
   `/hr/payroll`. `PayslipCalculation.jsx` holds `CalcDetail` (a draft, from `buildPayrollRows`'
@@ -196,8 +196,8 @@ History: #s570-stale-draft-and-fetch-helpers, #s600-leaver-proration-and-departe
   (`payroll_status_direct`).
 - **Locked by trigger, not by the page:** payslips of a finalized run (`hr_run_finalized`); a
   finalized run's delete; festival/incentive rows once finalized, where the only update allowed is
-  Reopen to draft (`bonus_finalized`; the guard freezes `amount`, `tds`, `employee_id`, `bs_year` and
-  `bs_month`, so other columns such as `tds_overridden` or the note can change with it); a period
+  Reopen to draft (`bonus_finalized`; the guard freezes `amount`, `tds`, `employee_id`, `bs_year`,
+  `bs_month` and, since S824, `paid_through_payroll`, so other columns such as `tds_overridden` or the note can change with it); a period
   with finalized payroll (`period_has_finalized_payroll`); and a period delete needs admin or Owner.
 - **The operator (`is_admin()`) passes the HR money guards on INSERT only** (S798 3a, H3): a restore
   into an empty client only inserts, and every later edit or delete takes the managers' path, so a
@@ -230,6 +230,24 @@ goes straight to REST.
 History: #s613-finalize-gates, #s620-reopen-rank, #s682-finalize-and-reopen-pointer,
 #s751-payroll-decisions, #s752-settlement-decisions, #s753-open-list, #s791-hss-ports,
 #s798-stage-2a, #s798-stage-2b
+
+## A bonus paid with the salary (S824)
+
+- **A Festival Allowance or Incentive run is paid with its Paid in month's salary or separately**, per
+  row (`paid_through_payroll`, DEFAULT false: older rows, a stale cached page and an old backup all read
+  as separately, so the pages write `true` explicitly). Someone a Final Settlement (draft or finalized)
+  takes off that month's payroll is always separately (`leavingIds` in `bonusPayroll.js`; SQL
+  `hr_bonus_payroll_block` 'leaving'). A bonus page's bank file lists separately-paid rows only.
+- **It rides the payslip in its own columns** (`festival_*`, `incentive_*`, the TADA pattern) with the
+  run's own tax. Payslip `gross`, `allowances` and `tds` stay salary-only, so YTD, `monthDeposit`, the
+  TDS report, labour and `payrollCashCost().total` count it once, from the bonus tables. Never fold it
+  into gross or tds. It is added after the TDS and the advance cut (`buildPayrollRows`).
+- **The database holds the edges:** `hr_bonus_rows_guard` refuses finalizing or reopening a
+  with-salary row while that month's payroll is finalized, and finalizing it for someone leaving or not
+  employed; `finalize_payroll_run` refuses a payslip that does not carry exactly the month's finalized
+  with-salary rows (`payroll_bonus_stale`) or such a row with no payslip (`payroll_bonus_no_payslip`);
+  `finalize_final_settlement` refuses while one waits on the last month or later
+  (`settlement_bonus_on_payroll`). Each page says so first, by name.
 
 ## Salary payments: finalizing pays nobody (S782)
 

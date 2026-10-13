@@ -14,6 +14,7 @@ import { fiscalYearOf, retirementRelief } from '../payroll/tds'
 import { DEFAULT_BONUS_MONTH, bonusFiscalYear, fetchFinalizedBonuses, settlementLump } from '../payroll/bonusTax'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, SSF_DEPOSIT_DAY } from '../payrollConstants'
 import { isSsfContributor } from '../payroll/payrollCompute'
+import { bonusNet } from '../payroll/payrollData'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -383,16 +384,18 @@ export default function HrReports() {
     XLSX.writeFile(wb, `${sheet.replace(/\s+/g, '_').toLowerCase()}${scoped ? `_${fileLabel}` : ''}${draftTag}.${ext}`, ext === 'csv' ? { bookType: 'csv' } : undefined)
   }
 
-  // Summary totals. Gross is earned pay (after absence), so Gross − Deductions + TADA = Net Payable;
-  // the advance cut was missing from Deductions and the absence deduction was counted as a cost.
+  // Summary totals. Gross is earned pay (after absence), so Gross − Deductions + TADA + Bonus = Net
+  // Payable; the advance cut was missing from Deductions and the absence deduction was counted as a
+  // cost. `bonus` (S824) is a festival allowance or incentive paid with the salary, after its own tax.
   const tot = rows.reduce((a, { s }) => {
     a.gross += num(s.gross) - num(s.absence_deduction) + num(s.ot_amount)
     a.ded   += num(s.ssf_employee) + num(s.other_deductions) + num(s.tds) + num(s.advance_deduction)
     a.tada  += num(s.tada_amount)
+    a.bonus += bonusNet(s)
     a.net   += num(s.net_pay)
     a.empCost += num(s.gross) - num(s.absence_deduction) + num(s.ot_amount) + num(s.ssf_employer)
     return a
-  }, { gross: 0, ded: 0, tada: 0, net: 0, empCost: 0 })
+  }, { gross: 0, ded: 0, tada: 0, bonus: 0, net: 0, empCost: 0 })
 
   // Department breakdown
   const deptMap = {}
@@ -656,8 +659,11 @@ export default function HrReports() {
                 {[
                   { label: 'Total Earned',   value: tot.gross,   tip: 'Pay actually earned across all payslips: gross, less absence and unpaid days, plus overtime.' },
                   { label: 'Total Deductions', value: tot.ded,   tip: 'Employee SSF + salary deductions (CIT, etc.) + TDS + advance recoveries.' },
-                  { label: 'Net Payable',    value: tot.net,     tip: tot.tada > 0 ? `Total take-home pay to disburse: earned − deductions + NPR ${fmt(tot.tada)} of travel claims (TADA) paid with the salary.` : 'Total take-home pay to disburse: earned − deductions.' },
-                  { label: 'Employer Cost',  value: tot.empCost, tip: 'What the business spends on salary: pay earned + employer SSF (20%). Travel claims are reimbursements and are not included.' },
+                  { label: 'Net Payable',    value: tot.net,     tip: 'Total take-home pay to disburse: earned − deductions'
+                    + (tot.tada > 0 ? ` + NPR ${fmt(tot.tada)} of travel claims (TADA)` : '')
+                    + (tot.bonus > 0 ? ` + NPR ${fmt(tot.bonus)} of festival allowance and incentives, after their own income tax` : '')
+                    + (tot.tada > 0 || tot.bonus > 0 ? ', paid with the salary.' : '.') },
+                  { label: 'Employer Cost',  value: tot.empCost, tip: 'What the business spends on salary: pay earned + employer SSF (20%). Travel claims are reimbursements and are not included, and a festival allowance or incentive paid with the salary is counted as its own labour line.' },
                 ].map(s => (
                   <div key={s.label} className="stat-card stat-card--compact">
                     <div className="stat-label"><Tip text={s.tip} width={250}>{s.label}</Tip></div>
@@ -675,7 +681,7 @@ export default function HrReports() {
                 </div>
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Earned</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right' }}><Tip text="Take-home pay, including any travel claims paid with the salary." width={220}>Net</Tip></th></tr></thead>
+                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Earned</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right' }}><Tip text="Take-home pay, including any travel claims and any festival allowance or incentive paid with the salary." width={240}>Net</Tip></th></tr></thead>
                     <tbody>
                       {depts.map(d => (
                         <tr key={d.dept}>
@@ -892,7 +898,7 @@ export default function HrReports() {
                     <th>Employee</th><th>PAN</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Taxable salary this month = pay earned (gross − absence and unpaid days + overtime) − employee SSF − CIT / provident fund. The same figure the month's tax was worked out on." width={270}>Taxable salary</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax (TDS) taken out of this month's payslip." width={240}>Tax on salary</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Festival allowances (e.g. Dashain) and incentives that were finalized with this month as their pay month. They are paid separately from the payslip, but they are income all the same." width={280}>Festival allowance &amp; incentives</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Festival allowances (e.g. Dashain) and incentives that were finalized with this month as their pay month. Whether paid separately or with the salary, they have their own tax and are listed here, never inside the salary columns." width={280}>Festival allowance &amp; incentives</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax (TDS) withheld from those festival allowances and incentives. It is due for deposit with this month's salary tax." width={270}>Tax on them</Tip></th>
                     {hasMonthSettlements && <th style={{ textAlign: 'right' }}><Tip text="Gratuity, leave encashment, festival share and notice pay paid in a Final Settlement finalized for this month, and the tax withheld on them." width={280}>Exit payments / tax</Tip></th>}
                     <th style={{ textAlign: 'right' }}><Tip text="Everything withheld from this employee this month: tax on salary + tax on festival allowances and incentives + tax on exit payments from a Final Settlement finalized for this month. This is what you deposit with the Inland Revenue Department for the month." width={290}>Total to deposit</Tip></th>
@@ -1093,7 +1099,7 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
         </div>
       </div>
 
-      {/* Festival allowances and incentives — paid outside the payslip, taxed all the same (S751) */}
+      {/* Festival allowances and incentives — taxed on their own, whether paid separately or with the salary (S751, S824) */}
       {oneOffCount > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Festival Allowances, Incentives &amp; Exit Payments</div>

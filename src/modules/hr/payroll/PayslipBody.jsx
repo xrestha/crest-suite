@@ -138,6 +138,23 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
         </>
       )}
 
+      {/* S824: a festival allowance or incentive paid with this salary, in its own section with the tax
+          its own run took. That tax is not the TDS above (that is salary tax), so the net pay below is
+          everything above plus these lines. `*_label` is the run's name when the caller has it. */}
+      {(num(slip.festival_amount) > 0 || num(slip.incentive_amount) > 0) && (
+        <>
+          <div style={{ fontSize: head, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '12px 0 4px' }}>Paid with this salary</div>
+          {num(slip.festival_amount) > 0 && (
+            <Row label={slip.festival_label ? `Festival allowance — ${slip.festival_label}` : 'Festival allowance'} value={slip.festival_amount} paisa />
+          )}
+          {num(slip.festival_tds) > 0 && <Row label="Income tax on the festival allowance" value={slip.festival_tds} neg paisa />}
+          {num(slip.incentive_amount) > 0 && (
+            <Row label={slip.incentive_label ? `Incentive — ${slip.incentive_label}` : 'Incentive'} value={slip.incentive_amount} paisa />
+          )}
+          {num(slip.incentive_tds) > 0 && <Row label="Income tax on the incentive" value={slip.incentive_tds} neg paisa />}
+        </>
+      )}
+
       <div style={{
         marginTop: 12, paddingTop: 12, borderTop: `2px solid ${forPrint ? '#000' : 'var(--theme-border)'}`,
         // Background tint only on screen — light fills are unreliable on B&W printers and the

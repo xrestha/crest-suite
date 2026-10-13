@@ -1323,6 +1323,44 @@ const rules = [
     staff: 'Someone in this run was already paid a festival share by their Final Settlement. Nothing more was finalized.',
     operator: 'The run stopped: someone in it (named below) left in a Final Settlement that already paid a festival share this fiscal year, so this allowance would pay them twice. Rows before them may already be finalized — reload to see what is stored, take that person out of the run, then finalize again.',
   },
+  // S824: a festival allowance or incentive paid WITH a month's salary (hr_bonus_rows_guard,
+  // finalize_payroll_run, finalize_final_settlement; migration 20261013120000). Every one is raised
+  // before the row or run is written, so each may say what was not done.
+  {
+    test: e => /bonus_payroll_finalized/i.test(e.message || ''),
+    staff: "That month's payroll is already finalized, so this festival or bonus money cannot be added to it or taken off it. Nothing was changed for that person.",
+    operator: "Not done for the person named below: the payroll of that month is finalized, and this festival allowance or incentive is set to be paid with that salary. Reopen that month's payroll first, or pick another Paid in month, or pay the run separately. Rows before them may already be done — reload to see what is stored.",
+  },
+  {
+    test: e => /bonus_payroll_leaving/i.test(e.message || ''),
+    staff: "That person is leaving by that month, so their festival or bonus money cannot go on that payroll. Nothing was changed for them.",
+    operator: "Not finalized for the person named below: their Final Settlement takes them off that month's payroll, so no payslip would carry this money. Reload the page and finalize again: anyone leaving is then paid separately, from this page's bank file. Rows before them may already be finalized — reload to see what is stored.",
+  },
+  {
+    test: e => /bonus_payroll_not_employed/i.test(e.message || ''),
+    staff: "That person is not employed in that month, so their festival or bonus money cannot go on that payroll. Nothing was changed for them.",
+    operator: "Not finalized for the person named below: they are not employed in that month (their join or end date falls outside it), so no payslip would carry this money. Pay the run separately, or take them out of it. Rows before them may already be finalized — reload to see what is stored.",
+  },
+  {
+    test: e => /payroll_bonus_no_payslip/i.test(e.message || ''),
+    staff: 'Someone has festival or bonus money waiting on this payroll but no payslip in it. Nothing was finalized.',
+    operator: 'Payroll was not finalized: the person named below has a festival allowance or incentive set to be paid with this salary but no payslip in this run, so nothing would pay it. Regenerate the run if they belong on it; if not, reopen that festival or bonus run and finalize it again, so they are paid separately.',
+  },
+  {
+    test: e => /payroll_bonus_stale/i.test(e.message || ''),
+    staff: 'A festival or bonus run changed since this payroll was made. Nothing was finalized.',
+    operator: 'Payroll was not finalized: a festival allowance or incentive run was finalized, reopened or switched since this payroll was generated, so the payslip named below does not carry the money now set to be paid with it. Press Regenerate, then Finalize.',
+  },
+  {
+    test: e => /settlement_bonus_on_payroll/i.test(e.message || ''),
+    staff: "That employee has festival or bonus money set to be paid with a salary the settlement stops. Nothing was finalized.",
+    operator: "Nothing was finalized: this employee has a festival allowance or incentive (named below) set to be paid with a month's salary, and this settlement takes them off that payroll, so nothing would pay it. Save this settlement as a draft, reopen that run on its page and finalize it again — anyone leaving is then paid separately — then finalize this settlement.",
+  },
+  {
+    test: e => /payroll_tds_check|hr_payslips_bonus_check/i.test(e.message || ''),
+    staff: 'That income tax is more than the amount it is taken from. Nothing was saved.',
+    operator: 'Not saved: a festival allowance or incentive paid with the salary cannot have more income tax than its own amount — the tax would come out of the salary. Lower the tax, or pay the run separately.',
+  },
   {
     test: e => /settlement_salary_paid/i.test(e.message || ''),
     staff: "That employee's salary for the last month is already recorded as paid. Nothing was finalized.",
