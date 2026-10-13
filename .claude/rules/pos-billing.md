@@ -1089,7 +1089,7 @@ Migrated from the root `CLAUDE.md` (S663).
 `pos_credit_notes_post_to_inventory` (AFTER INSERT, DEFINER, exception block) → `pos_post_credit_note_into`,
 the bill's `pos_bill_sales_rows` 'pos' rows negated, plus its 'pos_sale' lines back for a "not served"
 note, one transaction; waiting notes go through `post_waiting_credit_notes` (the bills RPC's rights).
-`creditNotePosting.js` only reads the mark back (`creditNoteInInventory`) and counts. Never add a page that writes them.
+`creditNotePosting.js` only reads the mark back (`creditNoteInInventory`) and counts. Since `20261013210000` (floor 448) the guards refuse a note's rows and its mark from any login (`pos_credit_server_only`) outside the operator's restore.
 
 - **`pos_credit_notes.ims_posted_at` is stamped only after the rows land** (since S809 2f by the
   database, in the same transaction), and every reversal row

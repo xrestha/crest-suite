@@ -190,8 +190,11 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   Inventory began is never sent. `post_waiting_credit_notes` (the bills RPC's rights) posts a month's
   waiting notes; the floor banner and Periods call it after the bills. The issue screen reads the mark
   back (`creditNoteInInventory`) and words why a note waits. The operator's restore is left alone.
-  **Step 2** (after crest-v448 is live): both guards refuse a note's rows from a browser, a login can
-  no longer mark a note posted, and the till floor goes to 448.
+  **Step 2 shipped the same session**: `20261013210000` applied once Vercel reported crest-v448
+  deployed. `ims_sales_entries_guard` and `ims_stock_movements_guard` refuse a note's reversal and
+  its stock put back from any login, the Owner and the operator included (`pos_credit_server_only`),
+  except the operator's restore; `guard_pos_credit_note` refuses a login setting a note's mark; the
+  till floor is 448.
 
 - [x] ~~S809 stage 5, slice 5f-3: Inventory starts on the day it is switched on (Q31 a)~~ — **shipped
   S831, 2026-10-13**: migration `20261013190000` applied live; app crest-v447. `clients.ims_since`
