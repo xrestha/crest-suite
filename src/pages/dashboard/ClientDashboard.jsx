@@ -19,11 +19,12 @@ import {
 import { useWeatherStrip } from '../../modules/dashboard/useWeatherStrip'
 import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
 import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
+import { fcTrendView, MIN_COMPARED_MONTHS } from '../../modules/dashboard/fcTrendMath'
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
   LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
-  BarChart, Bar, Dot
+  BarChart, Bar, Dot, ErrorBar
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
 import { TOOLTIP_CHROME } from '../../shared/tooltipChrome'
@@ -235,6 +236,60 @@ function TrendTooltipContent({ active, payload, label, big }) {
           </p>
         )
       })}
+    </div>
+  )
+}
+
+// The Food Cost % trend's hover box (S826). Custom because the chart draws each point through up
+// to four series (solid, faded, the dashed bridge and the markers), and Recharts' own box would list
+// the same figure once per series. Everything reads off the row fcTrendMath.js built. A plain <div>,
+// so the band colour is the CSS variable itself, with its ✓/△/▲ so the verdict is not colour-only.
+function FcTrendTooltipContent({ active, payload, big, bander, warn }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0]?.payload
+  if (!p || p.fc == null) return null
+  const line = { margin: '4px 0 0' }
+  const sub = { margin: '4px 0 0', color: 'var(--theme-text2)' }
+  const signed = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(Math.abs(n) < 10 ? 1 : 0)}%`
+  const since = p.change && p.change.salesPct != null && (
+    <p style={sub}>
+      Since {p.change.prevLabel}: revenue {signed(p.change.salesPct)}
+      {p.change.usedPct != null && ` · stock used ${signed(p.change.usedPct)}`}
+    </p>
+  )
+  const fig = bandFigure(p.fc, bander)
+  return (
+    <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 16px', maxWidth: 320 }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>{p.label}</p>
+      {p.open ? (
+        <>
+          <p style={line}>{SPEND_SO_FAR_LABEL}: {p.fc}% · part-month</p>
+          {p.purchases != null && <p style={sub}>Spent so far: {npr(p.purchases)}</p>}
+          {p.revenue != null && <p style={sub}>Revenue so far: {npr(p.revenue)}</p>}
+        </>
+      ) : p.unjudged ? (
+        <>
+          <p style={line}>{FOOD_COST_LABEL}: {p.fc}% · not judged: stock count incomplete</p>
+          <p style={sub}>Stock used: {npr(p.cogs)} · Revenue: {npr(p.revenue)}</p>
+          {p.uncountedCount > 0 && p.uncountedValue > 0 && (
+            <p style={sub}>
+              {p.uncountedCount} item{p.uncountedCount === 1 ? '' : 's'} with stock had no closing count
+              ({npr(p.uncountedValue)}), so all of it counts as used.
+            </p>
+          )}
+          {p.lowFc != null && <p style={line}>Real figure: somewhere between {p.lowFc}% and {p.fc}%</p>}
+          {since}
+        </>
+      ) : (
+        <>
+          <p style={line}>{FOOD_COST_LABEL}: <span style={fig.style} title={fig.title}>{fig.text}</span></p>
+          <p style={sub}>Stock used: {npr(p.cogs)} · Revenue: {npr(p.revenue)}</p>
+          {p.aboveGood != null && (
+            <p style={sub}>{npr(Math.abs(p.aboveGood))} {p.aboveGood >= 0 ? 'above' : 'under'} the {warn}% Good line</p>
+          )}
+          {since}
+        </>
+      )}
     </div>
   )
 }
@@ -1323,6 +1378,10 @@ export default function ClientDashboard({ scope = 'home' }) {
         label: `${BS_MONTHS_SHORT[p.bs_month - 1]} ${p.bs_year}`, fc, basis: 'cogs',
         cogs: v ? Math.round(v.cogsVal) : null, revenue: Math.round(rev), open: false,
         unjudged: !!v?.gap?.material,
+        // What the missing count could be hiding (S826): the uncounted items' opening + purchase
+        // value, which COGS reads as used. fcTrendMath turns it into the grey month's range.
+        uncountedValue: v?.gap ? Math.round(v.gap.uncountedValue) : null,
+        uncountedCount: v?.gap?.uncountedCount ?? null,
       }
     }).reverse()
 
@@ -1557,19 +1616,16 @@ export default function ClientDashboard({ scope = 'home' }) {
   const fcOpenPoint    = fcTrend.find(p => p.open) || null
   const fcOpenTooEarly = !!fcOpenPoint && periodTooEarly
   const fcChartData    = fcOpenTooEarly ? fcTrend.filter(p => !p.open) : fcTrend
-  const fcSettled      = fcTrend.filter(p => !p.open)
-  // Blended (total COGS ÷ total revenue), not the mean of the monthly ratios: a mean weights a
-  // quiet month equally with a busy one and is not a food cost % of anything. COGS since S792 (D30)
-  // — the settled months are Food Cost %, the used basis; the open Spend % point is never in it.
-  const fcSettledRev   = fcSettled.reduce((sum, p) => sum + (p.revenue || 0), 0)
-  const fcSettledCogs  = fcSettled.reduce((sum, p) => sum + (p.cogs || 0), 0)
-  const fcTrendAvg     = fcSettledRev > 0 ? (fcSettledCogs / fcSettledRev) * 100 : null
-  // A month closed with a material share of its stock uncounted (D6) cannot be the best or the
-  // worst month: its figure is an artefact of the missing count, as on Period Comparison.
-  const fcJudged       = fcSettled.filter(p => !p.unjudged)
-  const fcTrendBest    = fcJudged.length > 0 ? fcJudged.reduce((best, p) => p.fc < best.fc ? p : best) : null
-  const fcTrendWorst   = fcJudged.length > 0 ? fcJudged.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
   const fcBands        = fcThresholds(settings)
+  // The Average, Best / Highest month, the rupee pills and the line's solid / faded / dashed
+  // stretches all come from fcTrendMath.js (S826), and all are made from FULLY COUNTED closed
+  // months. A month closed with a material share of its stock uncounted (D6) reads high by an amount
+  // nobody knows, so it is drawn, faded and given its range, but never averaged or ranked — the
+  // Average used to blend it in, and with one counted month left, Best and Highest named the same
+  // month. The Average is blended (Σ COGS ÷ Σ sales); the open Spend % point is in none of it.
+  const fcView         = fcTrendView(fcChartData, { warnPct: fcBands.warn })
+  const fcAvg          = fcView.average
+  const fcGreyCount    = fcView.closedCount - fcView.countedCount
   // The three KPI ratios' banders, resolved once. Food cost reads the client's own Settings
   // thresholds; net margin is `nmBand`'s published ≥20 / ≥10 rather than a second copy of the
   // same two numbers (they were written out inline here, which is exactly the drift
@@ -1589,7 +1645,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     : colors.redText
   const fcTrendSummary = fcChartData.length === 0
     ? 'No food cost history yet.'
-    : `Food cost percentage over the last ${fcChartData.length} month${fcChartData.length === 1 ? '' : 's'}: ${fcChartData.map(p => `${p.label} ${p.fc}%${p.open ? ' spent so far (spend ÷ sales, month still open)' : p.unjudged ? ' (not judged: stock count incomplete)' : ''}`).join(', ')}.${fcTrendAvg != null ? ` Average across completed months: ${fcTrendAvg.toFixed(1)}%.` : ''}${fcOpenTooEarly ? ` ${fcOpenPoint.label} is only ${dayOfPeriod} days in and is not shown yet.` : ''}`
+    : `Food cost percentage over the last ${fcChartData.length} month${fcChartData.length === 1 ? '' : 's'}: ${fcView.rows.map(p => `${p.label} ${p.fc}%${p.open ? ' spent so far (spend ÷ sales, month still open)' : p.unjudged ? ` (not judged: stock count incomplete${p.lowFc != null ? `; really between ${p.lowFc}% and ${p.fc}%` : ''})` : ''}`).join(', ')}.${fcAvg ? ` Average across ${fcAvg.months} fully counted month${fcAvg.months === 1 ? '' : 's'}: ${fcAvg.pct.toFixed(1)}%.` : fcView.closedCount ? ' No closed month is fully counted yet, so there is no average.' : ''}${fcView.above ? ` That is ${npr(Math.abs(fcView.above.npr))} ${fcView.above.npr >= 0 ? 'above' : 'under'} the ${fcBands.warn}% Good line.` : ''}${fcOpenTooEarly ? ` ${fcOpenPoint.label} is only ${dayOfPeriod} days in and is not shown yet.` : ''}`
 
   // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of exactly the figures behind
   // the Est. Net Margin % card (revenue minus food cost and overheads), in the standard restaurant
@@ -2617,14 +2673,14 @@ export default function ClientDashboard({ scope = 'home' }) {
                   <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcBands.warn}% Good</span>
                   <span style={{ color: 'var(--theme-amber-text)' }}>● {fcBands.warn}–{fcBands.critical}% Watch</span>
                   <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcBands.critical}% High</span>
-                  {!fcOpenTooEarly && fcOpenPoint && <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = this month so far: {SPEND_SO_FAR_LABEL}</span>}
+                  {!fcOpenTooEarly && fcOpenPoint && <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ and dashed line = this month so far: {SPEND_SO_FAR_LABEL}</span>}
                 </div>
                 {/* Two bases on one line, said out loud (S792, D30): closed months are what was
                     USED ÷ sales, the running month what was SPENT, because it has no count yet. */}
                 <div style={{ fontSize: 11, marginTop: 6, color: 'var(--theme-text2)' }}>
                   Closed months: {FOOD_COST_LABEL} — stock used ÷ sales, the figure Monthly Summary shows.
                   {fcOpenPoint ? ' This month: spend ÷ sales until its stock count closes it.' : ''}
-                  {fcSettled.some(p => p.unjudged) ? ' A grey dot is a closed month whose stock count was incomplete — not judged.' : ''}
+                  {fcGreyCount > 0 ? ` A grey dot is a closed month whose stock count was incomplete: it reads high, so it is not judged and its line is faded${fcView.rows.some(r => r.lowFc != null) ? ', and the bar under it reaches as low as it could really be' : ''}.` : ''}
                 </div>
                 {/* A withheld month is stated, not silently dropped — otherwise the chart quietly
                     claims the current month has no figure at all. */}
@@ -2641,54 +2697,70 @@ export default function ClientDashboard({ scope = 'home' }) {
                 const big = h > 200
                 return (
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                  {big && fcTrendAvg != null && (
+                  {big && fcView.closedCount > 0 && (
                     <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <StatPill label={`Average · ${fcSettled.length} completed month${fcSettled.length === 1 ? '' : 's'}`} value={`${fcTrendAvg.toFixed(1)}%`} color={colors.text2} />
-                      {/* Null when every closed month is unjudged (D6) — nothing may win or lose. */}
-                      {fcTrendBest && <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} textColor={colors.greenText} />}
-                      {fcTrendWorst && <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} textColor={colors.redText} />}
+                      {fcAvg
+                        ? <StatPill label={`Average · ${fcAvg.months} fully counted month${fcAvg.months === 1 ? '' : 's'}${fcAvg.leftOut ? ` · ${fcAvg.leftOut} left out` : ''}`} value={`${fcAvg.pct.toFixed(1)}%`} color={colors.text2} />
+                        : <StatPill label="Average" value="No month fully counted yet" color={colors.text2} />}
+                      {/* One counted month would be both Best and Highest (S826), so neither is named
+                          until there are two to compare. */}
+                      {fcView.best
+                        ? <>
+                            <StatPill label="Best month" value={`${fcView.best.label} (${fcView.best.fc}%)`} color={colors.greenText} textColor={colors.greenText} />
+                            <StatPill label="Highest month" value={`${fcView.highest.label} (${fcView.highest.fc}%)`} color={colors.redText} textColor={colors.redText} />
+                          </>
+                        : <StatPill label="Best / Highest month" value={`After ${MIN_COMPARED_MONTHS} fully counted months`} />}
+                      {fcView.above && (
+                        <StatPill
+                          label={<Tip text={`What the fully counted months' stock really cost, minus what it would have cost at exactly your Good line (${fcBands.warn}% of their sales, set in Settings → Thresholds). Each point of Food Cost % is 1% of a month's sales. Months whose count was incomplete are left out, because they read high.`}>{fcView.above.npr >= 0 ? 'Above' : 'Under'} the {fcBands.warn}% line · {fcView.above.months} month{fcView.above.months === 1 ? '' : 's'}</Tip>}
+                          value={npr(Math.abs(fcView.above.npr))}
+                          color={colors.greenText}
+                        />
+                      )}
+                      {fcView.pointValue != null && (
+                        <StatPill
+                          label={<Tip text="1% of an average closed month's sales: what each point of Food Cost % costs or saves you in a month. Every closed month counts here, even one with an incomplete count, because a missing count does not change sales.">1 point of food cost</Tip>}
+                          value={`≈ ${npr(fcView.pointValue)} a month`}
+                        />
+                      )}
                     </div>
                   )}
                   <div style={{ minWidth: Math.max(0, fcChartData.length * 64), height: big ? h - 60 : h }}>
                     <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
-                      <LineChart data={fcChartData} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
+                      <LineChart data={fcView.rows} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
                         <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                         <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                        <ReferenceLine y={fcBands.warn} stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.warn}%`, fill: colors.greenText, fontSize: 9, position: 'right' }} />
-                        <ReferenceLine y={fcBands.critical} stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.critical}%`, fill: colors.redText, fontSize: 9, position: 'right' }} />
-                        {big && fcTrendAvg != null && <ReferenceLine y={fcTrendAvg} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcTrendAvg.toFixed(1)}%`, fill: colors.text2, fontSize: 9, position: 'insideBottomRight' }} />}
-                        <Tooltip
-                          contentStyle={{ ...TOOLTIP_CHROME, color: 'var(--theme-text1)' }}
-                          labelStyle={{ color: 'var(--theme-text1)' }}
-                          itemStyle={{ color: 'var(--theme-text1)' }}
-                          formatter={(v, _n, props) => {
-                            const p = props.payload
-                            // The open month is Spend % so far and says so; a closed month is Food
-                            // Cost % and shows what it was built from — stock USED, not bought (D30).
-                            if (p.open) {
-                              const lines = [`${v}% · part-month`]
-                              if (p.purchases != null) lines.push(`Spent so far: NPR ${p.purchases.toLocaleString('en-IN')}`)
-                              if (p.revenue != null)   lines.push(`Revenue so far: NPR ${p.revenue.toLocaleString('en-IN')}`)
-                              return [lines.join(' · '), SPEND_SO_FAR_LABEL]
-                            }
-                            const lines = [`${v}%${p.unjudged ? ' · not judged: stock count incomplete' : ''}`]
-                            if (p.cogs != null)    lines.push(`Stock used: NPR ${p.cogs.toLocaleString('en-IN')}`)
-                            if (p.revenue != null) lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-IN')}`)
-                            return [lines.join(' · '), FOOD_COST_LABEL]
-                          }}
-                        />
-                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accentInk} connectNulls={false} {...chartMotion()}
+                        {/* extendDomain (S826): with every month above 42%, the auto domain left the
+                            Good line off the chart and Recharts dropped it without a word, so the one
+                            line saying where "good" is never showed on the chart that needed it. */}
+                        <ReferenceLine y={fcBands.warn} ifOverflow="extendDomain" stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.warn}%`, fill: colors.greenText, fontSize: 9, position: 'right' }} />
+                        <ReferenceLine y={fcBands.critical} ifOverflow="extendDomain" stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.critical}%`, fill: colors.redText, fontSize: 9, position: 'right' }} />
+                        {big && fcAvg && <ReferenceLine y={fcAvg.pct} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcAvg.pct.toFixed(1)}%`, fill: colors.text2, fontSize: 9, position: 'insideBottomRight' }} />}
+                        <Tooltip content={<FcTrendTooltipContent big={big} bander={fcCardBand} warn={fcBands.warn} />} />
+                        {/* The line in three pieces (S826, fcTrendMath.js): faint wherever it touches
+                            a grey month, solid between fully counted months, dashed into the open
+                            month, which is a different measure. Linear, not monotone: the pieces
+                            are separate series, and three curves fitted through different point
+                            sets would not meet where they overlap. */}
+                        <Line type="linear" dataKey="faded" stroke={colors.accentInk} strokeWidth={2} strokeOpacity={0.35} dot={false} activeDot={false} connectNulls={false} {...chartMotion()} />
+                        <Line type="linear" dataKey="solid" stroke={colors.accentInk} strokeWidth={2} dot={false} activeDot={false} connectNulls={false} {...chartMotion()} />
+                        <Line type="linear" dataKey="bridge" stroke={colors.accentInk} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.8} dot={false} activeDot={false} connectNulls={false} {...chartMotion()} />
+                        {/* Markers only: no stroke of its own, the dots, and each grey month's range
+                            down to its lowest possible figure. */}
+                        <Line type="linear" dataKey="fc" stroke="none" {...chartMotion()}
                           dot={(props) => {
                             const { cx, cy, payload } = props
                             // An unfinished month wears no verdict colour — same rule as the KPI
                             // card above, which greys out rather than painting a part-month red.
                             // Neither does a closed month whose count was incomplete (D6, S792).
                             const col = payload.open || payload.unjudged ? colors.text2 : fcDotColor(payload.fc)
-                            return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
+                            return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 4} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                           }}
-                          activeDot={{ r: 5, fill: colors.accentInk }}
-                        />
+                          activeDot={{ r: 6, fill: colors.accentInk }}
+                        >
+                          <ErrorBar dataKey="range" direction="y" width={6} strokeWidth={1.5} stroke={colors.text2} {...chartMotion()} />
+                        </Line>
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
