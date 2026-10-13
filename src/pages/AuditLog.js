@@ -87,8 +87,9 @@ const ACTION_STYLE = {
 }
 
 // Columns that churn on nearly every write (housekeeping timestamps, PIN-lockout counters
-// bumped on every login attempt, session keep-alive) or that must never reach the UI at all
-// (the anon-facing POS device secret) — never worth showing as a "change". log_audit() skips a
+// bumped on every login attempt, session keep-alive) — never worth showing as a "change". The
+// shared POS key that used to be listed here is gone, column and all (S829); no audit row ever held
+// it, because log_audit() strips it. log_audit() skips a
 // write whose ONLY change is one of these; this list also hides them on rows that changed
 // something else, and on rows written before the trigger learned to skip them.
 const IGNORE_KEYS = new Set([
@@ -96,7 +97,6 @@ const IGNORE_KEYS = new Set([
   'pos_pin_failed_attempts', 'pos_pin_locked_until',
   'hr_pin_failed_attempts', 'hr_pin_locked_until',
   'ims_pin_failed_attempts', 'ims_pin_locked_until', 'last_seen_at',
-  'pos_device_secret',
 ])
 
 // Table-specific noise on top of the global list — fields that legitimately change on almost

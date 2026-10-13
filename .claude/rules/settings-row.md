@@ -125,6 +125,11 @@ over REST, a POS PIN waiter included, and `payment_qr_data` is the merchant QR a
 - **POS manager or Owner:** the till-setup columns `pos_bot_categories`, `pos_note_presets`,
   `pos_discount_reasons`, `pos_delivery_partners`, `pos_reservation_settings`, `pos_open_time`,
   `pos_close_time`, `pos_loyalty_point_value`.
+- **Every manager rank here is the effective one since S829 (`20261013150000`)**: a settled login
+  (`settlement_blocked_by`) holds none for the hour its token lives. HR lines test `hr_role = 'manager'
+  AND settlement_blocked_by IS NULL` inline (`hr_is_manager_rank()` is raw and shared with hss-suite);
+  IMS lines call `ims_caller_has_rank('manager')`, which refuses a count PIN, the IMS role list included;
+  POS lines call `pos_caller_has_rank` (S809 1j); the weather city ORs all three.
 - **Owner only, since S767** (`20260921100000`, hint `guest_menu_brand_rank`, admin exempt):
   `guest_menu_name`, `guest_menu_logo_url` — the restaurant name and logo every guest sees on every
   table's QR menu. POS Setup → Guest Menu shows them read-only to a POS manager rather than offering a
@@ -149,7 +154,8 @@ save that did would leave the context stale until a reload. **`settings_guard_st
 them since `20260923130000`**: the city to the Owner, admin or a manager of any module
 (`weather_city_rank`, never an IMS count PIN), `rain_sales_pct` to the Owner or admin
 (`weather_rain_rank`). `canEditWeatherCity()` is the browser's copy of the city rule and tests the RAW
-role columns, as the guard does. S784 had left all four unguarded; anyone except HR Self-Service could
+role columns; since S829 the guard tests effective ranks, so a settled or POS-blocked manager is
+offered the picker and refused. S784 had left all four unguarded; anyone except HR Self-Service could
 PATCH them.
 
 ## The second editor for the same columns is where the fix did not reach (S739)

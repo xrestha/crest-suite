@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-13 (S828 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5f designed and Q30–Q32 answered (S828); stages 6–7 outlined)
+Last updated: 2026-10-13 (S829 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); stages 6–7 outlined)
 
 ---
 
@@ -382,7 +382,7 @@ rate-limit key and whether 5c raises the till build floor. Then 5c, 5d, 5e and 5
 | 5b ✅ | A2 rate-limit first hop; A2 delete-open-order message; 4g `pos_customer_phone_locked` names Move (shipped 2026-10-12, S822: probe `20261012160000` created, called and dropped by `20261012160100`; `20261012170000` applied live; app wording crest-v437. The probe saw `x-crest-build` arrive, so 5c's floor raise stands; the limit now keys on `cf-connecting-ip`, which Cloudflare refuses from a caller) | a throwaway header probe first (created, called with a set `x-forwarded-for` and `x-crest-build`, dropped); `submit_reservation_request` keyed on the trusted hop (or left, with the reason recorded); `guard_pos_order_items_closed_del` tells a deleted parent from a closed one (S749 DEFINER lookup); the phone-lock sentence | — |
 | 5c ✅ | `credit_settled_at := now()`; the `credit_settlement` unique index; the close pins its priced lines (`items_version`, after checking what bumps it); a Split bill's legs inside the shift lock; a void's `shift_id` from the open shift (4a's browser read files it today); raise `pos_min_till_build()` (step 1 shipped 2026-10-13, S823, `20261013100000` applied live, crest-v438: only `save_pos_order_items` moves `items_version`; Close Shift waits 11 minutes for short Split legs; the till's void read removed. Step 2 `20261013100100` raised the floor to 438 once crest-v438 was live) | `guard_pos_order_close`, `pos_shifts_guard`, a partial unique index on `pos_cash_movements`; a second file raising the floor after the deploy, only if 5b's probe sees `x-crest-build` | — |
 | 5d ✅ | CREDIT-NOTES-5 server half (`original_invoice_*` from the bill); the server-side credit-note print counter (the parking slip's `OLD.print_count + 1`); `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows for a client without Inventory (4e); 2f: a comp-cost read IMS logins may use (`viewPosBill.js`, `loadDeltaExplosion`) (shipped 2026-10-13, S828, `20261013140000` applied live, crest-v443. Also refuses a sales row naming the wrong kind of record, and the operator now keeps only its restore. 2f needed no new read: IMS logins cannot see till bills, so both screens read `pos_recipe_book`) | `guard_pos_credit_note`, `ims_sales_entries_guard` | — |
-| 5e | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`) | those two functions; `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys. **Researched S828, not yet planned with the owner** (live md5s 2026-10-13: `settings_guard_staff_roles` `07adf2e7ab384cdca54fdc54b89853e5`, `set_active_outlet` `9371e7d44ab87052fe8bb980b9931b28`): no HR effective-rank helper exists (`hr_is_manager_rank()` is raw), so the HR lines test `hr_role = 'manager' AND settlement_blocked_by IS NULL` inline and the IMS lines call `ims_caller_has_rank('manager')`; `set_active_outlet` stores NULL for the caller's home id (every reader treats NULL and home alike); the discount default is dormant (POS Staff, the only caller, always sends 0); the retired columns have no reader anywhere (code, functions, views, policies, export), only `revokeClientTablets`' writes, and `pos_device_secret` is NOT NULL with a default, so the drop must follow the `admin-user-ops` deploy (the purge job and Archive/Clear/Delete call it); the A2 first-hop item fits here and needs a throwaway header-echo Edge Function first (deployed, called, deleted). Before the drop, check the deployed Edge Function `smooth-endpoint` (created 2026-06-17, not in the repo). Owner questions to ask: whether the hour-long HR manager window after a settlement on the other HR pages becomes its own job (shared with hss-suite), and whether the one BLOOM CAFE till login with no discount limit gets one | — |
+| 5e ✅ | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`); A2 `admin-user-ops` first hop (shipped 2026-10-13, S829: `20261013150000` applied live, then `20261013150100` after the deploys; admin-user-ops v67, pos-staff-login v11, crest-v444; the orphan `smooth-endpoint` deleted, owner's choice. The header probe found the Edge Function gateway already drops a caller's `x-forwarded-for` and writes `<caller>,<caller>, <AWS load balancer>`, so the trial limit was never fakeable; it now keys on `cf-connecting-ip`, then the FIRST hop, never the last) | those two functions; the `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys | Owner 2026-10-13: the HR manager's hour on the other HR pages is its own job (shared with hss-suite); Sita Shrestha's unlimited discount at BLOOM CAFE stays; `smooth-endpoint` deleted |
 | 5f | 4e: the server posts a closed bill to Inventory from the stored bill in the close's transaction (replacing `postClosedBill`'s browser read); posting a POS-only outlet's past unmarked bills when Inventory is switched on | Designed S828 (Q30–Q32). Finding: every Inventory stock figure works usage out from `sales_entries` at read time; only the `stock_movements` ledger rows (Stock Movements, Reorder's Book Stock, a "not served" put-back) need the walk at close, and a read-only SQL port of the ~80-line walk matched all 71,725 live ledger rows. Slices: **5f-1** an AFTER UPDATE OF status trigger (DEFINER, inside an exception block so a failed post never refuses a close) writes the sales rows and ledger rows, checking for itself what the INVOKER guards would (Inventory on, open month holding the bill's Nepal day, billed bill of this outlet), plus a unique partial index on `stock_movements(ref_id, source, item_id)` for `pos_sale`/`pos_comp`, a fixture probe (nested and shared sub-recipes, trims, choices, comp, writeoff, discount) and a live parity query; **5f-2** a `post_waiting_pos_bills` RPC for the floor and Periods, the browser stops writing till rows (both guards refuse them outside the operator's restore), the till floor raised; **5f-3** an "Inventory since" stamp set when `ims_enabled` turns on, so earlier bills are never counted as waiting; **5f-4** credit notes posted by the server at issue | Q29, Q30 (a), Q31 (a), Q32 |
 
 Closed without work: S809.4's `pos_customers` audit trigger (1i) shipped in 3k. Not in stage 5 unless the
@@ -392,12 +392,14 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
 
 **Added to stage 4 by the owner (2026-10-09, 2026-10-10):**
 
-- **One-tap "add the points this bill earned"** on a bill whose award did not land (the till said
+- ~~**One-tap "add the points this bill earned"** on a bill whose award did not land (the till said
   points were not added): works out the exact points from the bill and its scheme, and is reversed by
   a Credit Note on that bill like an ordinary award. Today a manager works the number out and types it
-  into Adjust, and a later Credit Note does not take those hand-added points back (3k).
-- **"Move points" for a regular's new number**: one action that takes the balance off the old number
-  and puts it on the new one, recorded as a pair. Today it is two hand corrections in Adjust (3k).
+  into Adjust, and a later Credit Note does not take those hand-added points back (3k).~~ Shipped in 4g
+  (S815).
+- ~~**"Move points" for a regular's new number**: one action that takes the balance off the old number
+  and puts it on the new one, recorded as a pair. Today it is two hand corrections in Adjust (3k).~~
+  Shipped in 4g (S815, `move_loyalty_points`).
 - ~~**A grey "no longer offered" note on a saved-but-unsent dish** whose choice was hidden since (owner
   2026-10-10, Q3 (b), later): "Granola is no longer offered", blocking nothing. 3o marks only lines not
   yet saved, because a saved line keeps its exemption on the server.~~ Shipped in 4h (S816,
@@ -430,8 +432,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   Till Devices shared-key panel,~~ fixed in 3h; ~~then drop `get_pos_staff`, `verify_pos_legacy_device`,
   `retire_pos_legacy_device_key`, `pos_legacy_device_key_status` (written in 3h as `20261010190500`,
   applied a day after the release; `auth-and-pins.md`).~~ Dropped 2026-10-12 (S812, 04ebdb0e).
-- `settings_guard_staff_roles`' HR, IMS, travel-claim and weather-city lines still test raw ranks, so a
-  settlement-blocked login passes them for the hour its token lives (1j did the POS lines).
+- ~~`settings_guard_staff_roles`' HR, IMS, travel-claim and weather-city lines still test raw ranks, so a
+  settlement-blocked login passes them for the hour its token lives (1j did the POS lines).~~ Fixed in
+  5e (S829, `20261013150000`).
 - ~~`apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
   NC number, so the till could print an empty comp slip (1j).~~ Fixed in 2b: the whole call is refused
   (`pos_comp_line_missing`).
@@ -464,10 +467,10 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
 - The Owner cannot see who reset a PIN: the new `staff_pin_vault` UPDATE row is in the admin-only
   Audit Log. The page labels its field "Pin Reset" (`FIELD_LABELS` in `AuditLog.js`). The till's
   lockout line now differs from `SelfServiceLogin.jsx`'s (HR, shared with hss-suite) (1f).
-- `set_active_outlet` refuses an allowlisted non-Owner who asks for their HOME outlet by id ("no
+- ~~`set_active_outlet` refuses an allowlisted non-Owner who asks for their HOME outlet by id ("no
   access"), because Outlet Access stores no home row, so the top-bar switcher's home entry fails for
   allowlisted staff (latent, 0 rows). The till's new buttons send NULL. Fix: `outletSwitchArg` inside
-  `switchOutlet`, or home-by-id as the reset in SQL (1g).
+  `switchOutlet`, or home-by-id as the reset in SQL (1g).~~ Fixed in 5e (S829): home-by-id is the reset in SQL.
 - **Found while drafting stage 2 (2026-10-09, not fixed):**
   - ~~The close write does not pin the lines it priced: `guard_pos_order_close` accepts a close whose
     `items_version` moved since `paid_amount` was worked out (a second press's save landing before a
@@ -804,9 +807,22 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     a bill does not store its prefix; a prefix change relabels a later note's reference to an earlier
     bill. Storing it means a `guard_pos_order_close` change (a later slice).
   - `hr-selfservice-login` and `ims-staff-login` carry the same dead pre-S791 fallback as
-    `pos-staff-login` (5e removes only the POS one), and once that goes `check_pos_pin_lock` has no caller.
-  - A2's "Remove the legacy shared device key" (🔵) is already done: the code and functions went in 3h
-    and S812 (`04ebdb0e`); close it when 5e drops the columns.
+    `pos-staff-login` (5e removed only the POS one, S829). `check_pos_pin_lock` now has no caller.
+  - ~~A2's "Remove the legacy shared device key" (🔵) is already done: the code and functions went in 3h
+    and S812 (`04ebdb0e`); close it when 5e drops the columns.~~ Closed in 5e (S829).
+- **Found while building stage 5, slice 5e (2026-10-13, not fixed):**
+  - **The HR manager's hour after a settlement, on the other HR pages** (owner 2026-10-13: its own job,
+    shared with hss-suite, so file it in `docs/CROSS-REPO.md` there). `hr_is_manager_rank()` and the HR
+    rank policies test the raw `hr_role`, so a settled HR manager keeps manager reach on payroll,
+    attendance and the rest for the hour their token lives. 5e closed only the settings screen.
+  - `register_trial`'s two rate-limit counts drop their read error (`ipCount ?? 0`), so a failed count
+    lets a signup through the limit (CLAUDE.md's vacuous-guard rule).
+  - `check_pos_pin_lock` is now dead (no caller since `pos-staff-login` v11); drop it with a later
+    migration, keeping its HR and IMS twins while their fallbacks remain.
+  - `canEditWeatherCity()` still tests raw roles, so a settled or POS-blocked manager is offered the city
+    picker and refused by the server (advisory only; the guard is right).
+  - `log_audit()` still strips a `pos_device_secret` key from `clients` snapshots; dead since S531 and
+    harmless. Drop it the next time that function is rebuilt for another reason.
 
 ---
 
@@ -863,13 +879,14 @@ when these were filed. Every item below assumes they are.
   the address it saw LAST, and sets `cf-connecting-ip` itself (a request that sends one is refused at
   the edge, 403 error 1000). `submit_reservation_request` keys on `cf-connecting-ip`, then the last
   hop, an IPv6 address as its /64.
-- [ ] 🟡 **`admin-user-ops` reads the same first hop** (found S822): the trial-signup limit and the
-  address stored with a legal acceptance (`index.ts` ~575, ~831, ~895). That path is the Edge Function
-  gateway, which the S822 probe (PostgREST) did not test, so confirm its headers before changing the
-  key. Fits 5e, which redeploys `admin-user-ops`.
-- [ ] 🔵 **Remove the legacy shared device key once every client has switched it off.** Code to
-  remove: the `verify_pos_legacy_device` branch in `pos-staff-login`, its `PGRST202` fallback, and
-  `get_pos_staff`'s secret comparison. Till Devices shows when each client's shared key was last used.
+- [x] **`admin-user-ops` read the same first hop** — closed S829 (5e). A throwaway Edge Function probe
+  showed the Edge Function gateway is not PostgREST's path: it drops a caller's own `x-forwarded-for` and
+  writes `<caller>,<caller>, <AWS load balancer>`, so the first hop was never fakeable there, and the LAST
+  hop (5b's fallback) would have put every caller on one key. `callerAddress()` now reads
+  `cf-connecting-ip`, then the first hop; the trial limit counts an IPv6 caller's /64 (`rateLimitKey()`).
+- [x] **Remove the legacy shared device key once every client has switched it off** — closed S829: the
+  code and `pos-staff-login`'s branch went in S809 3h, the four functions in S812 (`04ebdb0e`), and the
+  three `client_secrets` columns in 5e (`20261013150100`), after `revokeClientTablets` stopped writing them.
 - [x] **Archiving a client did not revoke its tablet keys** — closed S755: `deleteClientDataFor` in
   `admin-user-ops` (Archive, Clear Client Data, Delete Client, the trial purge) revokes every live
   `pos_devices` key and rotates/retires the shared key first; a restored client re-activates tablets.
@@ -939,10 +956,9 @@ when these were filed. Every item below assumes they are.
   (2) **the KDS estimate presets starting a ticket in one tap** — no New ticket was on the board;
   (3) **the unified variance display** (✓/▲/△) on a closed shift;
   (4) **the Billing station's "Find a table…"**, which needs two or more open bills.
-- [ ] 🟡 **`admin-user-ops` still defaults an unnamed discount limit to NULL (= unlimited) for admin
-  and Owner callers.** The S776 owner decision (a new POS login starts at 0%) is enforced by POS
-  Staff sending `pos_discount_limit: 0`; a create from any other caller still lands unlimited. Making
-  the Edge Function default 0 closes it, and needs a deploy.
+- [x] **`admin-user-ops` defaulted an unnamed discount limit to NULL (= unlimited) for admin and Owner
+  callers** — closed S829 (5e): `create_pos_staff` starts every new POS login at 0% unless the request
+  names a limit, whoever creates it (the S776 decision). Existing logins are untouched.
 
 ## B4. Timezone follow-ups left by S670
 

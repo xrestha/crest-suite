@@ -43,7 +43,7 @@ The Security Advisor's "Leaked Password Protection Disabled" warning is real but
 
 Worth generalising: **a fix that removes a constraint does not go back and update the decisions that were made because of it.** S538's reasoning was correct when written and half-obsolete within a session, with nothing to flag it. When the Security Advisor re-raises a warning you have already dismissed, re-read the *rationale* rather than re-dismissing from the note.
 
-**A PIN attempt is counted BEFORE the sign-in (S791, `20260928120000`).** Check-then-record let every request of a parallel burst pass the lock before the 5th failure landed. `reserve_hr/pos/ims_pin_attempt` (service role only) count the attempt in one `UPDATE … RETURNING` that refuses while locked; the three login functions sign in only holding a reservation, reset with `record_*_pin_attempt(true)` on success, and write nothing more on failure. The reservation **fails closed** (503 — `SelfServiceLogin` reads a 5xx as "couldn't reach the server" and keeps the PIN); only `PGRST202` falls back to check-then-record. It also clears an expired lock stamp, which `record_*(false)` never did — so an account locked once could never lock again. The rule is still 5 failures → 15 minutes.
+**A PIN attempt is counted BEFORE the sign-in (S791, `20260928120000`).** Check-then-record let every request of a parallel burst pass the lock before the 5th failure landed. `reserve_hr/pos/ims_pin_attempt` (service role only) count the attempt in one `UPDATE … RETURNING` that refuses while locked; the three login functions sign in only holding a reservation, reset with `record_*_pin_attempt(true)` on success, and write nothing more on failure. The reservation **fails closed** (503 — `SelfServiceLogin` reads a 5xx as "couldn't reach the server" and keeps the PIN); only `PGRST202` falls back to check-then-record, in `ims-staff-login` and `hr-selfservice-login`; `pos-staff-login` lost that fallback in S829 (5e). It also clears an expired lock stamp, which `record_*(false)` never did — so an account locked once could never lock again. The rule is still 5 failures → 15 minutes.
 
 **Only an answer about the PIN stays counted (S798, `20261005140000`).** The three functions derive the password before reserving (no pepper → 503, nothing counted), and `signInVerdict` in `_shared/pinSignIn.ts`, the one copy, keeps the reservation only for `invalid_credentials` / `user_banned`. Anything else (429, 5xx, a dropped fetch, no session) gives it back through `release_*_pin_attempt` (service role only; −1, and lifts only the lock that same attempt set) and answers 503. **If GoTrue ever stops sending `invalid_credentials` for a wrong password, every wrong PIN is given back and the lockout never fires**: the 503 log line carries status and code, and a wrong PIN must still read 401 after any auth upgrade.
 
@@ -117,11 +117,12 @@ when one was last used.
   `pos_device_key_valid` and raise `pos_device_not_active`/28000 on a dead key; neither stamps
   `last_used_at`.
 
-**The shared key is gone.** S809 1j (`20261009160000`, Q7 a) switched it off at every client (a new
-`client_secrets` row is born switched off; `get_pos_device_secret` dropped), and 3h removed its app
+**The shared key is gone.** S809 1j (`20261009160000`, Q7 a) switched it off at every client
+(`get_pos_device_secret` dropped), and 3h removed its app
 code and `pos-staff-login`'s branch with the PGRST202 fallback. Its four functions (`get_pos_staff`,
 `verify_pos_legacy_device`, `retire_pos_legacy_device_key`, `pos_legacy_device_key_status`) are dropped
-by `20261010190500`, applied after the release; its `client_secrets` columns stay, read by nothing.
+by `20261010190500`, applied after the release; its three `client_secrets` columns by `20261013150100`
+(S829), after the `admin-user-ops` deploy that stopped `revokeClientTablets` writing them.
 Deactivating a tablet that has its own key revokes that key, not just the localStorage copy.
 **Archive, Clear Client Data, Delete Client and the trial purge revoke every tablet key (S755) and end
 every till session (S809 3h)**: `revokeClientTablets` runs first inside `deleteClientDataFor`, with

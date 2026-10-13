@@ -180,6 +180,21 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5e: `settings_guard_staff_roles`' raw ranks; `set_active_outlet`'s home
+  outlet; `admin-user-ops`' discount-limit default and first hop; `pos-staff-login`'s pre-S791
+  fallback; the shared key's columns~~ — **shipped S829, 2026-10-13**: migration `20261013150000`
+  applied live, then `admin-user-ops` (v67) and `pos-staff-login` (v11) deployed, then
+  `20261013150100`; app crest-v444; no till floor change. **The settings guard** tests effective ranks:
+  a settled HR, IMS or POS manager holds none for the hour its token lives, and a count PIN cannot
+  change the IMS role list. **Home by id** is the reset (NULL) for every login. **A new POS login**
+  starts at 0% unless a limit is named, whoever creates it. **The caller's address** for the trial
+  limit and legal acceptances is `cf-connecting-ip`, then the FIRST hop: a throwaway probe showed the
+  Edge Function gateway drops a caller's `x-forwarded-for` (so the old key was never fakeable) and that
+  its last hop is the AWS load balancer. **The shared key's** `client_secrets` columns are dropped; the
+  orphan `smooth-endpoint` function (June 2026, admin-only createUser/deleteUser, no audit) was
+  deleted (owner's choice). Owner decisions: the HR manager's hour on the other HR pages is its own
+  job, shared with hss-suite; Sita Shrestha's unlimited discount at BLOOM CAFE stays.
+
 - [x] ~~S809 stage 5, slice 5d: CREDIT-NOTES-5's server half; the server-side credit-note print
   counter; `ims_sales_entries_guard` checks a `pos_credit` row's note and refuses till rows without
   Inventory (4e); 2f's comp-cost read~~ — **shipped S828, 2026-10-13**: migration `20261013140000`

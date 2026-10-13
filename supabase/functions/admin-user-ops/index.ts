@@ -9,7 +9,33 @@ const CORS = {
 }
 
 /**
- * Revokes every live tablet key a client holds and switches its legacy shared key off (S755).
+ * The caller's address, for the trial-signup limit and the legal-acceptance record (S829, 5e).
+ *
+ * A throwaway function probed the Edge Function gateway on 2026-10-13: Cloudflare sets
+ * cf-connecting-ip itself and refuses a request that sends one (403), so it comes first. The gateway
+ * also drops a caller's own x-forwarded-for and writes "<caller>,<caller>, <AWS load balancer>", so
+ * its FIRST hop is the fallback. Never the last: that is the load balancer, which every caller
+ * shares. (submit_reservation_request's last-hop fallback is right for PostgREST's path, not this one.)
+ */
+function callerAddress(req: Request): string {
+  const cf = (req.headers.get('cf-connecting-ip') || '').trim()
+  if (cf) return cf
+  return (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+}
+
+/** An IPv6 caller holds a whole /64 and can pick a new address from it, so a limit counts the /64. */
+function rateLimitKey(address: string): string {
+  if (!address.includes(':')) return address
+  if (address.includes('.')) return address.slice(address.lastIndexOf(':') + 1)   // ::ffff:a.b.c.d
+  const [head, tail] = address.toLowerCase().split('::')
+  const front = head ? head.split(':') : []
+  const back = tail ? tail.split(':') : []
+  const groups = tail === undefined ? front : [...front, ...Array(Math.max(0, 8 - front.length - back.length)).fill('0'), ...back]
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':') + '::/64'
+}
+
+/**
+ * Revokes every live tablet key a client holds and ends its till and stock-count sessions (S755).
  *
  * Archive, Clear Client Data, Delete Client and the trial purge all run deleteClientDataFor, and
  * none of them touched `pos_devices` (migration 20260916120000): an archived outlet's tablets kept
@@ -17,19 +43,17 @@ const CORS = {
  * counter of a client who had left could still sign a waiter in. Delete Client cascades the rows
  * away eventually; Archive and Clear never did.
  *
- * The same two writes as `revoke_pos_device` and `retire_pos_legacy_device_key` (dropped in S809 3h,
- * with nothing left that reads the shared key), done here with the
- * service role because both functions refuse a caller with no session (`pos_device_caller_may_manage`
- * keys on auth.uid(), which is NULL under the service role). The legacy key is ROTATED, not just
- * stamped, exactly as the SQL function does, so every comparison against the old value — a tablet
- * on a pre-S754 bundle included — stops matching. Both are idempotent: an already-revoked tablet
- * and an already-retired key are left alone, so a retried Archive changes nothing twice.
+ * The same write as `revoke_pos_device`, done here with the service role because that function
+ * refuses a caller with no session (`pos_device_caller_may_manage` keys on auth.uid(), which is NULL
+ * under the service role). Idempotent: an already-revoked tablet is left alone, so a retried Archive
+ * changes nothing twice. The client's shared key from before S754, which this also rotated and
+ * stamped, is gone with its columns (S829, migration 20261013150100).
  *
  * A restore brings the data back but NOT the keys (pos_devices is never exported), so a restored
  * client re-activates each tablet from POS Setup — the confirm copy in ClientDrawer says so.
  *
- * Audit rows mirror `pos_devices_audit` (never the hash) and the retire function's timestamp-only
- * row; `client_secrets` is deliberately unaudited because its snapshot would carry both secrets.
+ * Audit rows mirror `pos_devices_audit` (never the hash); `client_secrets` is deliberately unaudited
+ * because its snapshot would carry the stock-count key.
  * An audit insert that fails is logged, not thrown — the revocation it describes has already landed.
  */
 async function revokeClientTablets(admin: ReturnType<typeof createClient>, clientId: string, actorId: string | null) {
@@ -47,14 +71,6 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
   // counting tablets' are below (pos_revoke_till_sessions, migration 20261010180000, service role only).
   const { error: posSessErr } = await admin.rpc('pos_revoke_till_sessions', { p_client_id: clientId })
   if (posSessErr) throw new Error(`Failed to sign out this client's POS tills: ${posSessErr.message}`)
-
-  const { data: retired, error: keyErr } = await admin
-    .from('client_secrets')
-    .update({ pos_device_secret: crypto.randomUUID(), pos_legacy_key_retired_at: now, updated_at: now })
-    .eq('client_id', clientId)
-    .is('pos_legacy_key_retired_at', null)
-    .select('client_id, pos_legacy_key_retired_at')
-  if (keyErr) throw new Error(`Failed to switch off this client's shared POS key: ${keyErr.message}`)
 
   // The stock-count tablets hold a key of their own (S737), which this function used to leave
   // alone — an archived or wiped client's store-room tablet still read the roster and signed
@@ -74,8 +90,7 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
   const imsTabletsSignedOut = (imsRotated || []).length > 0
 
   const devices = (revoked || []) as Array<Record<string, unknown>>
-  const legacyRetired = (retired || []).length > 0
-  if (devices.length > 0 || legacyRetired || imsTabletsSignedOut) {
+  if (devices.length > 0 || imsTabletsSignedOut) {
     const { data: cl } = await admin.from('clients').select('name').eq('id', clientId).maybeSingle()
     let userName: string | null = null
     if (actorId) {
@@ -89,11 +104,6 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
         old_data: { ...d, revoked_at: null, revoked_by: null },
         new_data: d,
       })),
-      ...(legacyRetired ? [{
-        ...base, table_name: 'client_secrets', action: 'UPDATE', record_id: clientId,
-        old_data: { pos_legacy_key_retired_at: null },
-        new_data: { pos_legacy_key_retired_at: now },
-      }] : []),
       // Never the key itself: client_secrets is unaudited precisely so a secret cannot reach
       // audit_logs in plaintext.
       ...(imsTabletsSignedOut ? [{
@@ -106,7 +116,7 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     if (auditErr) console.error('[admin-user-ops] tablet revocation audit insert failed:', auditErr.message)
   }
 
-  return { tablets_revoked: devices.length, legacy_key_retired: legacyRetired, ims_tablets_signed_out: imsTabletsSignedOut }
+  return { tablets_revoked: devices.length, ims_tablets_signed_out: imsTabletsSignedOut }
 }
 
 // How long a settled leaver's login is banned for when a restore puts the block back (S798). Final
@@ -572,7 +582,7 @@ Deno.serve(async (req) => {
       //
       // Per-IP first, then a global circuit breaker so a distributed attempt still can't run away
       // — a real product doing 30 genuine signups in one hour is a good problem to notice manually.
-      const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+      const ip = rateLimitKey(callerAddress(req))
       // Read off the request, never from the payload. Trimmed because a user agent is
       // attacker-controlled text and there is no reason to store an unbounded string.
       const userAgent = (req.headers.get('user-agent') || '').slice(0, 400) || null
@@ -828,7 +838,7 @@ Deno.serve(async (req) => {
           doc_version:    r.version,
           content_sha256: r.sha,
           method:         'clickwrap_reaccept',
-          ip_address:     (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown',
+          ip_address:     callerAddress(req),
           user_agent:     (req.headers.get('user-agent') || '').slice(0, 400) || null,
         }))
       )
@@ -892,7 +902,7 @@ Deno.serve(async (req) => {
           // Who at Crest recorded it, taken from the verified JWT. An operator action on a legal
           // record needs a name against it.
           recorded_by:     user.id,
-          ip_address:      (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown',
+          ip_address:      callerAddress(req),
           user_agent:      (req.headers.get('user-agent') || '').slice(0, 400) || null,
         }))
       )
@@ -1132,11 +1142,11 @@ Deno.serve(async (req) => {
       }
       const createEscalation = refusePosPowerEscalation(pos_discount_limit, pos_allow_void)
       if (createEscalation) return createEscalation
-      // The column's default is NULL = unlimited, so a login a capped manager creates without naming a
-      // limit would hold more than its creator. It starts at the creator's own cap instead.
-      const createDiscountLimit = pos_discount_limit !== undefined
-        ? pos_discount_limit
-        : (!(isCallerAdmin || isCallerOwner) && callerDiscountCap !== null ? callerDiscountCap : undefined)
+      // The column's default is NULL = unlimited. A new POS login starts at 0% unless the request names
+      // a limit, whoever creates it (owner decision S776; until S829 only POS Staff sent the 0, so an
+      // admin or Owner create from anywhere else landed unlimited). 0 is never above a capped
+      // manager's own cap, which the older fallback to the creator's cap was there to keep.
+      const createDiscountLimit = pos_discount_limit !== undefined ? pos_discount_limit : 0
 
       if (employee_id) {
         const { data: employee } = await admin
@@ -1183,7 +1193,7 @@ Deno.serve(async (req) => {
         // Omitted (not `pos_team: pos_team || null`) so a brand-new row falls through to the
         // column's own DEFAULT 'foh' rather than an explicit null clashing with the NOT NULL.
         ...(pos_team ? { pos_team } : {}),
-        ...(createDiscountLimit !== undefined ? { pos_discount_limit: createDiscountLimit } : {}),
+        pos_discount_limit: createDiscountLimit,
         ...(pos_allow_void !== undefined ? { pos_allow_void } : {}),
       }, { onConflict: 'id' })
 
