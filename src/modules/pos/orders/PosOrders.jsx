@@ -15,9 +15,8 @@ import QRCode from 'qrcode'
 import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap, carryOverFrom, stillInPlay } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
-import { posFoodCosts, posStockLines } from './posRecipeBook'
+import { posFoodCosts } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
-import { postClosedBill } from './backfillPosToIms'
 import { noteImsMiss, pruneImsMisses, outletHasIms } from './posImsWaiting'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
@@ -3625,7 +3624,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     }))
   }
 
-  // Best-effort, non-blocking (matches writeSalesEntries' own error-swallow pattern) — logs
+  // Best-effort, non-blocking (a ticket log never stops a send) — logs
   // exactly what was printed on the ticket (delta-aware qty) so the KOT Register/Reconciliation
   // reports reflect the real kitchen/bar send history, not just the current live order state.
   // `tableName` is given when the ticket is for an order the screen no longer shows (S809 3e).
@@ -3977,36 +3976,20 @@ export default function PosOrders({ billingStation = false } = {}) {
     })
   }
 
-  // Posts the bill this till just closed into Inventory, and returns true when its sales reached it
-  // (S809 4e, IMS-HANDOFF-8/10). `bill` is the STORED row the close wrote (`updated`, or the read-back of
-  // a close settled after its answer was lost), never the screen: postClosedBill reads the bill's own
-  // lines and dates it by the day it closed in Nepal (`closed_at` is the server's), through the same two
-  // functions Periods' backfill uses. It used to post the cart under the tablet's date at the moment of
-  // posting and the screen's order id, so a bill closed at 23:59 and posted after midnight landed on the
-  // next day, or in the next month.
-  //
-  // The bill still closes whatever happens here — refusing a sale mid-service is not acceptable. A bill
-  // that did not post is left unmarked and counted on the floor banner, which posts the open month's
-  // (Post to Inventory); a bill from a month that is not the one open in Inventory waits for that month.
-  async function writeSalesEntries(bill) {
-    const res = await postClosedBill({
-      supabase, scopedFrom, scopedInsert, bill,
-      // One read the till is allowed to make (S809 IMS-HANDOFF-3): a PIN login cannot read `items`, so
-      // every yield came back 100% and the ledger took too little of any trimmed ingredient.
-      loadStockLines: (recipeIds, deltaLists) => posStockLines(supabase, clientId, recipeIds, deltaLists),
-      stepMs: CLOSE_STEP_MS,
-    })
-    // The floor banner's sentence blames a missing open month, so say when the real cause was a failed
-    // read instead: the month may be open and fine.
-    if (res.reason === 'period_read') {
-      warnWrite('Could not check which Inventory period is open, so the bill just closed was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', res.error)
-    } else if (res.reason === 'lines_read') {
-      warnWrite('Could not read the items on this bill back, so it was not posted to Inventory. Once the connection is back, a POS manager posts it with Post to Inventory on the floor.', res.error)
-    } else if (res.reason === 'write') {
-      // The banner chases it; the database marks it posted if the rows did land.
-      console.error('sales_entries insert failed — bill left unposted for Post to Inventory:', res.error)
+  // Whether the bill this till just closed is in Inventory (S830 5f-2). The database posts it inside the
+  // close itself (pos_orders_post_to_inventory, 5f-1), from the stored bill, dated by the day it closed in
+  // Nepal, sales and stock lines together, whoever closed it. The close's own answer is the row as the
+  // close wrote it, before that post marked it, so the mark is read back. A bill the server could not
+  // post (its month not open in Inventory, or a failed post) is left unmarked and counted on the floor
+  // banner, which posts the open month's (Post to Inventory). A failed read counts as waiting: the
+  // floor's next count is the truth either way.
+  async function billReachedInventory(bill) {
+    const { data, error } = await bounded(scopedFrom('pos_orders', 'ims_posted_at').eq('id', bill.id).maybeSingle(), 'Checking Inventory')
+    if (error) {
+      console.error('could not read back whether the closed bill reached Inventory:', error)
+      return false
     }
-    return res.posted
+    return !!data?.ims_posted_at
   }
 
   // What stops a close before anything is written — or null when nothing does (S776). One list, read by
@@ -4339,7 +4322,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       //   2. The printed bill is built from the in-memory cart, and until S809 4e so was the post to
       //      IMS. An unsaved line was reaching IMS revenue and the paper while never existing in
       //      pos_order_items — the bill and its own lines disagreeing, quietly, with nothing on either
-      //      side saying so. (The post now reads the stored lines itself: writeSalesEntries.)
+      //      side saying so. (Since S830 5f-1 the database posts the stored bill in the close itself.)
       //
       // Runs before apply_pos_item_comps, not after: save_pos_order_items replaces the lines
       // wholesale, so persisting afterwards would erase the comp rows it had just written.
@@ -4684,12 +4667,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   //
   // A close settled after its answer was lost (finishSettledClose, S809 CHECKOUT-7) passes `stored` (the
   // bill's lines and legs as the server holds them), `attempt` (what that try sent) and `note` (what the
-  // floor must be told). It prints and records legs from those, never from the screen; every close posts
-  // to Inventory from the stored bill itself (`updated`, through postClosedBill, S809 4e). With
+  // floor must be told). It prints and records legs from those, never from the screen; the database posted
+  // the bill to Inventory in the close itself (S830 5f-1), and this only reads whether it did. With
   // `background` the till has moved on to other work: the bill is not printed (nobody may be at the
-  // printer, and the guest may have gone — the floor says to reprint it), Inventory is left to Post to
-  // Inventory or Periods → Post POS bills (which post by the bill's own date and check first that nothing
-  // posted already), and nothing on screen is touched. What is time-bound still runs: the Split legs and the points, each
+  // printer, and the guest may have gone — the floor says to reprint it), and nothing on screen is
+  // touched. What is time-bound still runs: the Split legs and the points, each
   // admitted by the server only within 10 minutes of the close, then the customer, booking and table.
   async function finishClosedBill(closeType, updated, { compNo = null, compedItemRows = [], custRow = null, custUpsertDone = false, stored = null, attempt = null, background = false, note = null } = {}) {
     // The bill is closed and numbered. Nothing an earlier attempt redeemed is "standing" any more —
@@ -4828,27 +4810,17 @@ export default function PosOrders({ billingStation = false } = {}) {
           .then(({ error }) => { if (error) console.error('pos_customers upsert failed (non-fatal):', error) })
       : null
 
-    // Stamp only on a confirmed post. A void has nothing to post, so it is marked done rather
-    // than left looking like a failure the floor banner should chase. A post that timed out counts as
-    // not posted here; if its rows land later, the database marks the bill then, and it refuses a
-    // second post of the same bill (S809 2f), so the chase cannot double-post.
+    // The database posted the bill in the close (S830 5f-1) and marks it, a bill with no dish included.
+    // A bill it could not post waits, unmarked, for Post to Inventory; it is noted here so the floor
+    // banner counts it at once. A void has nothing to post, so it is marked done rather than left looking
+    // like a failure the floor banner should chase.
     if (closeType !== 'void' && !tillPostsToIms) {
       // An outlet without Inventory (S809 4e, owner decision D6): nothing is posted and nothing counted,
       // and the bill is deliberately NOT marked, so switching Inventory on later still finds it waiting.
     } else if (closeType !== 'void') {
-      // Every close posts the bill as STORED (`updated`: postClosedBill reads its own lines, S809 4e).
-      // One in the background is left unposted for Post to Inventory, which the floor banner offers.
-      const posted = background ? false
-        : await withTimeout(writeSalesEntries(updated), CLOSE_STEP_MS + 10000, 'Posting to Inventory')
-          .catch(e => { console.error('IMS post did not finish — bill left for Post to Inventory:', e); return false })
-      if (posted) {
-        // S809 2f (IMS-HANDOFF-2): the database marks a bill posted in the same transaction as its
-        // Inventory rows, so a bill whose rows landed is marked whatever happens here. This write
-        // only marks a bill with nothing to post (no recipe line, so no row), and the database keeps
-        // the first mark. A failure is logged, not shown: the cashier has nothing to do about it.
-        const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', updated.id), 'Marking the bill posted')
-        if (stampErr) console.error('ims_posted_at mark failed (a bill with Inventory rows is already marked by the database):', stampErr)
-      } else {
+      const inInventory = await withTimeout(billReachedInventory(updated), CLOSE_STEP_MS + 5000, 'Checking Inventory')
+        .catch(e => { console.error('could not check whether the closed bill reached Inventory:', e); return false })
+      if (!inInventory) {
         const missedId = updated.id
         setImsMisses(list => noteImsMiss(list, missedId, Date.now()))
       }
@@ -4868,7 +4840,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // resolves the customer from the order's buyer_phone, so the upsert above has to have
     // landed first.
     //
-    // Best-effort in the same shape writeSalesEntries established: a points problem must
+    // Best-effort, as every step after the close is: a points problem must
     // never stop a bill closing. But deliberately NOT silent — an earn that fails without a
     // word is how a regular discovers at the till next month that none of it counted. The
     // RPC computes from the order's own stored lines, so nothing here can influence the

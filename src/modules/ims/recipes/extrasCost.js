@@ -5,7 +5,7 @@ import { throwFirstError } from '../../../shared/queryError'
 // S792 RECIPES-3: the stock cost of the extras a guest adds, for the margin reports.
 //
 // A customized sale's `unit_price` already includes its choices' upcharges (the pricer adds them at
-// order time and `writeSalesEntries` carries them onto the sale), so Recipe Margin and Best Sellers
+// order time and the post (the server's since S830) carries them onto the sale), so Recipe Margin and Best Sellers
 // counted "Momo + Extra cheese (+NPR 50)" as NPR 50 more revenue — and costed the plate as plain
 // momo, because their COGS was the recipe's cost × qty. The cheese's NPR 36 of stock was nowhere, so
 // Total Contribution, margin % and the weighted FC% all read high, and a heavily customized dish

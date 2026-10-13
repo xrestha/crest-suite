@@ -88,7 +88,7 @@ async function readRestockSource({ supabase, scopedFrom, orderId }) {
   return { billPosted: (posted.data || []).length > 0, saleMovements: moves.data || [] }
 }
 
-// Best-effort, as the bill's own depletion is (writeSalesEntries, S573): the revenue reversal is what
+// Best-effort, as the bill's own depletion is (the browser's post until S830, S573): the revenue reversal is what
 // the waiting mark tracks. The database keeps one row per bill and item
 // (stock_movements_one_restock_per_bill_item), so a second post is refused rather than doubled.
 async function writeRestockMovements({ scopedInsert, rows }) {

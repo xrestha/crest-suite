@@ -1027,7 +1027,7 @@ It never selected `unit_price`. That is the exact defect
 `20260713065928_sales_entries_price_at_sale.sql` was written to fix — its comment lists the reports
 it covered and Recipe Margin was not among them — so a closed period's contribution silently
 restated itself whenever anyone edited a price. It also made **every POS bill discount invisible**,
-because `writeSalesEntries` folds a bill-level discount into `unit_price` and never writes
+because the till's post (the server's since S830) folds a bill-level discount into `unit_price` and never writes
 `sales_entries.discount`.
 
 Revenue is now built the way `Sales.js`'s `recipeRevenue()` builds it, and Total Contribution is

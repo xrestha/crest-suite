@@ -1,4 +1,4 @@
-import { bookFromPosRead, deltaIdsOf, loadPosRecipeBook, posDeltaCosting, posFoodCosts, posStockLines } from './posRecipeBook'
+import { bookFromPosRead, deltaIdsOf, loadPosRecipeBook, posDeltaCosting, posFoodCosts } from './posRecipeBook'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 
@@ -113,7 +113,7 @@ describe('the till reads the recipe book through pos_recipe_book (S809 IMS-HANDO
   })
 })
 
-describe('posFoodCosts / posStockLines / loadPosRecipeBook', () => {
+describe('posFoodCosts / loadPosRecipeBook', () => {
   it('asks once, for this outlet, with each id once and no blanks', async () => {
     const sb = rpcStub()
     const costs = await posFoodCosts(sb, CLIENT, [MOMO, COKE, MOMO, null, undefined])
@@ -124,28 +124,13 @@ describe('posFoodCosts / posStockLines / loadPosRecipeBook', () => {
   it('asks nothing for a bill with no dishes', async () => {
     const sb = rpcStub()
     expect(await posFoodCosts(sb, CLIENT, [])).toEqual({})
-    expect(await posStockLines(sb, CLIENT, [], [])).toEqual({ breakdown: {}, explosion: { itemYield: {}, subPerUnit: {} } })
     expect(sb.calls).toHaveLength(0)
-  })
-
-  it('a customized line: the choices\' items and sub-recipes are in the same read, trimmed the same way', async () => {
-    const sb = rpcStub()
-    const deltas = [[{ item_id: CHEESE, qty: 30 }, { sub_recipe_id: SAUCE, qty: 20 }], null]
-    const { breakdown, explosion } = await posStockLines(sb, CLIENT, [MOMO], deltas)
-    expect(sb.calls).toEqual([['pos_recipe_book', { p_client_id: CLIENT, p_recipe_ids: [MOMO, SAUCE], p_item_ids: [CHEESE] }]])
-    expect(byItem(breakdown[MOMO])[CHICKEN]).toBeCloseTo(100 / 0.85, 9)
-    expect(explosion.itemYield[CHEESE]).toBe(80)
-    const extra = byItem(deltaItems(deltas[0], explosion))
-    expect(extra[CHEESE]).toBeCloseTo(37.5, 9)   // 30 g at 80% yield
-    expect(extra[TOMATO]).toBeCloseTo(16, 9)     // 20 g of sauce
-    expect(extra[ONION]).toBeCloseTo(4, 9)
   })
 
   it('a refused read throws, keeping the hint for errorText, never an empty book', async () => {
     const sb = rpcStub({ data: null, error: { code: '42501', hint: 'rank_required', message: 'pos_recipe_book: refused' } })
     await expect(loadPosRecipeBook(sb, CLIENT, { recipeIds: [MOMO] })).rejects.toMatchObject({ hint: 'rank_required', code: '42501' })
     await expect(posFoodCosts(sb, CLIENT, [MOMO])).rejects.toThrow('pos_recipe_book: refused')
-    await expect(posStockLines(sb, CLIENT, [MOMO], [])).rejects.toThrow('pos_recipe_book: refused')
   })
 
   it('posDeltaCosting: a choice\'s stock lines and their rates in one read, sub-recipe items included (S828 5d)', async () => {

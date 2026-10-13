@@ -21,21 +21,28 @@ rows' own `unit_price`. Since `20260918100000` the database refuses a non-manual
 delete from anyone but the Owner or admin, and a `pos_sale`/`pos_comp` insert below POS or IMS
 supervisor.
 
-**A closed POS bill must reach IMS, and if it can't, that must be visible.** The till's post
-(`postClosedBill`, behind `writeSalesEntries`) leaves a bill unposted when no `monthly_periods` row is
-open or the bill's close month (Nepal date of the server's `closed_at`) is not it; it posts the STORED
-bill under its own id with the backfill's `billSalesRows`/`billMovementRows` (S814). An outlet without
-Crest IMS posts nothing and leaves bills and notes unmarked (`outletHasIms`: the operator follows
-the outlet's own module, never the always-true route flag; D6, D7). A silent
-return once left 15 bills out of Inventory unnoticed.
+**A closed POS bill must reach IMS, and if it can't, that must be visible.** Since S830 the DATABASE
+posts it. `pos_orders_post_to_inventory` (5f-1, `20261013160000`; AFTER UPDATE OF status to billed,
+DEFINER) runs `pos_post_bill_to_ims` → `pos_post_bill_into` in the close's transaction, inside an
+exception block, so a failed post never refuses a close and is rolled back whole. The step makes the
+INVOKER guards' checks itself (billed, this outlet's, not yet posted, Inventory on with NULL as on, the
+bill's Nepal day in the month), writes `pos_bill_sales_rows` in one statement, then
+`pos_bill_stock_lines`, and marks a no-dish bill. A bill whose month is not the one OPEN in Inventory
+waits, unmarked, on the floor banner. An outlet without Crest IMS posts nothing and leaves bills and
+notes unmarked (`outletHasIms`; D6, D7). The till only reads the mark back (`billReachedInventory`,
+5f-2) and notes a miss. The bill still closes either way. A silent return once left 15 bills out of
+Inventory unnoticed.
 History: docs/rules-archive/pos-billing.md#silent-ims-post
 
-**Since S830 5f-1 (`20261013160000`) the server posts the bill in the close.** `pos_orders_post_to_inventory` (AFTER UPDATE OF status to billed, DEFINER) calls `pos_post_bill_to_ims` inside an exception block, so a failed post never refuses a close and is rolled back whole. It makes the INVOKER guards' checks itself (Inventory on, the bill's Nepal month open, billed, not posted), writes `pos_bill_sales_rows` in one statement, then `pos_bill_stock_lines`, and marks a no-dish bill. The till's `postClosedBill` still runs after it and is refused `pos_bill_already_posted` (read as posted) until 5f-2. `stock_movements_one_sale_per_bill_item` allows one till stock line per bill, source and item.
-
-It now returns a boolean, the close path stamps `pos_orders.ims_posted_at` **only on a confirmed
-post**, the POS floor shows a standing count of unposted bills, and Periods carries **Post POS
-bills to Inventory** per period (`src/modules/pos/orders/backfillPosToIms.js`). The bill still
-closes either way — refusing a sale mid-service is not acceptable.
+**Waiting bills are posted by the server too (5f-2, `20261013170000`).** `post_waiting_pos_bills`
+(DEFINER; the Owner and the operator any month, a POS manager the open month only) runs
+`pos_post_bill_into` on up to 200 of a month's waiting bills per call, each in its own subtransaction,
+and answers what it did and how many still wait. `postWaitingBills` (`backfillPosToIms.js`) calls it
+until nothing moves, for Periods' **Post POS bills to Inventory** and the floor's
+`PosImsPostingBanner` → `postWaitingFromTill`; both then post credit notes from the page (until
+5f-4). A bill already carrying till sales but no mark is marked, never posted again.
+`stock_movements_one_sale_per_bill_item` allows one till stock line per bill, source and item.
+History: docs/rules-archive/pos-billing.md#backfill-batching
 
 **Since S809 2f (`20261009220000`) the database sets the mark with the rows.**
 `sales_entries_stamp_pos_source` (AFTER INSERT statement trigger, DEFINER) marks a bill from its
@@ -43,30 +50,19 @@ closes either way — refusing a sale mid-service is not acceptable.
 transaction. Outside the operator's restore it locks the bill `FOR NO KEY UPDATE` and refuses a till
 sale row naming no bill, an open bill or another outlet's (`pos_sale_unlinked`), and rows for a bill
 that already has till sale rows from an earlier statement (`pos_bill_already_posted`). **A bill's till
-sale rows go in ONE statement** (the till's insert and the backfill's per-bill retry both do). The
-till's and Periods' own mark writes stay, for a bill with nothing to post. Since S809 3j
-(`20261010140000`) a credit note's reversal meets the same rule: the note is locked and a second
-reversal statement is refused (`pos_credit_note_already_posted`), so a note's rows go in one statement.
+sale rows go in ONE statement.** Since S809 3j (`20261010140000`) a credit note's reversal meets the
+same rule: the note is locked and a second reversal statement is refused
+(`pos_credit_note_already_posted`), so a note's rows go in one statement.
 
-**The floor posts too (S809 3j, Q12 c).** `PosImsPostingBanner` → `postWaitingFromTill`
-(`posImsWaiting.js`): a POS manager, the Owner or the operator posts the OPEN month's waiting bills,
-then notes, through the same two functions, with the recipe book read through `pos_recipe_book`
-(`loadStockLines`). Never a closed month (`ims_closed_period_guard` admits only the Owner and the
-operator, who post those from Periods). Periods' button is the Owner's and the operator's only. An IMS
-login cannot read till bills (`no_ims_staff`), so it reads `pos_ims_waiting_counts` (DEFINER, numbers
-per Nepali month) and is told who posts. **Never word a count an IMS login made itself.**
+**An IMS login cannot read till bills (`no_ims_staff`)**, so it reads `pos_ims_waiting_counts`
+(DEFINER, numbers per Nepali month) and is told who posts. **Never word a count an IMS login made
+itself.**
 
-**The backfill writes in batches of 40 with a per-bill retry, each bill stamped after its own
-revenue lands, and its already-posted guard is paged and chunked: a failed read aborts, never reads
-as "none posted"** (S629). `backfillPosToIms.test.js` pins the round-trip counts.
-History: docs/rules-archive/pos-billing.md#backfill-batching
-
-**`sales_entries` and `stock_movements` can diverge, so neither is evidence of the other.**
-The till's post (`postClosedBill`) writes revenue first and depletion second, best-effort — by design, so a depletion problem never blocks a bill. The consequence is that a bill
-can have revenue and no movements. A backfill guard that inferred "already posted?" from
-`stock_movements` was therefore **wrong**, not merely incomplete, and double-posted two bills'
-revenue on real data. Both tables now carry a link to the order (`stock_movements.ref_id`,
-`sales_entries.pos_order_id`); ask the table you actually mean.
+**`sales_entries` and `stock_movements` can diverge on a bill posted before S830, so neither is
+evidence of the other.** The browser's post wrote revenue first and depletion second, best-effort,
+so such a bill can have revenue and no movements. A backfill guard that inferred "already posted?"
+from `stock_movements` double-posted two bills' revenue on real data. Both tables carry a link to the
+order (`stock_movements.ref_id`, `sales_entries.pos_order_id`); ask the table you actually mean.
 History: docs/rules-archive/pos-billing.md#two-writes-diverge
 
 **`ims_posted_at IS NULL` means "unknown" on any row closed before that column existed**, not
@@ -80,18 +76,17 @@ post.
 ## Table-scoping traps in this module
 
 **`items` is fenced from a POS PIN login, and a fenced read is `[]`, not an error (S809 2f).** On a
-PIN every yield read 100% and every comp its typed Cost Price. The till's comp costs and a closing
-bill's stock lines now read through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
-the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`,
-`posStockLines`), which feed `recipeCost.js`' `{ book }` walk. Its one SQL copy is the server's post, `pos_bill_stock_lines` (S830, owner Q30 a): a change to either lands in both, with `serverPostTwin.test.js` and a migration probe asserting the same fixture. A till or shift
-screen that costs or depletes uses those two. Sales Report's and Sales Exceptions'
+PIN every yield read 100% and every comp its typed Cost Price. The till's comp costs now read
+through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
+the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`), which feed `recipeCost.js`' `{ book }` walk. Its one SQL copy is the server's post, `pos_bill_stock_lines` (S830, owner Q30 a): a change to either lands in both, with `serverPostTwin.test.js` and a migration probe asserting the same fixture. A till or shift
+screen that costs uses `posFoodCosts`. Sales Report's and Sales Exceptions'
 comp cost switched in S814 (`posFoodCosts`), `viewPosBill`'s comp slips and the Customization report's
 Margin tab (`posDeltaCosting`) in S828. A Staff PIN opening a comp slip is told only a Supervisor+ sees
 food costs; an IMS login reaches neither (`no_ims_staff` hides till bills).
 
 **`sales_entries` is period-scoped, not client-scoped**, so it is deliberately absent from
 `CLIENT_SCOPED_TABLES` and `scopedDb` throws for it — use plain `supabase.from()`, as
-`postClosedBill` does. `stock_movements` and `pos_orders` *are* client-scoped and stay on
+`creditNotePosting.js` does. `stock_movements` and `pos_orders` *are* client-scoped and stay on
 `scopedDb`. Getting this wrong fails loudly, which is the point.
 
 **Every period-scoped read here needs `fetchAllRows`.** Six `pos_orders` reads had none and capped
@@ -270,10 +265,10 @@ table's food.
   sentence parses `option_not_on_menu`/`option_count` (`choiceRefusal.js`): change the RAISE text and
   its regexes together.
 - **Stock at close reads the SERVER snapshot, never the cart.** The cart's choices are built by the
-  till and carry no stock lines; `postClosedBill` reads the bill's own lines with their
-  `pos_order_item_options.ingredient_deltas` (`BILL_POST_LINES`) and posts nothing (unposted, chased
-  by the backfill) on a failed read.
-  `src/utils/orderLineIngredients.js` is the only place those lines become raw items.
+  till and carry no stock lines; the server's post (S830, `pos_line_choice_lines`) reads the bill's
+  own lines with their `pos_order_item_options.ingredient_deltas`.
+  `src/utils/orderLineIngredients.js` is the only place in the app those lines become raw items; its
+  SQL twin is `pos_bill_stock_lines`.
 - **The guest menu calls `get_guest_menu_options` beside `get_guest_menu`**, and a `PGRST202` (the
   function not deployed yet) reads as "no choices", not a warning to every guest.
 - **Every public guest function gates on `pos_enabled` AND `client_access_open()` (S809 1h).** A
@@ -400,8 +395,8 @@ Three things to know before touching it:
 - **`closeOrder` now persists the cart through `save_pos_order_items` before billing a paid
   order**, because the trigger can only measure the cap against STORED lines and the Payment
   button never gated on a dirty cart. That also closed a quieter divergence that predates the
-  trigger: `writeSalesEntries` posted revenue from the in-memory cart (until S814; it now reads the
-  stored bill), so an unsaved line was already reaching IMS revenue and the printed bill while never
+  trigger: the till posted revenue from the in-memory cart (until S814; the server posts the stored
+  bill since S830), so an unsaved line was already reaching IMS revenue and the printed bill while never
   existing in `pos_order_items`.
 
 History: docs/rules-archive/pos-billing.md#pos-write-guards-copy
@@ -951,7 +946,7 @@ codebase decide it, and both push the same way:
   a giveaway, and teaching it to would mean a second exemption rule inside a money guard.
 
 A tender touches none of `close_type`/`status`/`discount_amount`, so that trigger never fires, VAT
-is charged on the full bill, and **IMS revenue needs no change at all** — `writeSalesEntries` posts
+is charged on the full bill, and **IMS revenue needs no change at all** — the post (the server's since S830) takes
 `unit_price`, which a tender does not touch. `expectedCashOf` is likewise safe for free, because
 `cashSales` is `byMethod.Cash`.
 

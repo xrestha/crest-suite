@@ -60,7 +60,7 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
     setBusy(true)
     setResult(null)
     try {
-      const r = await postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate, clientId })
+      const r = await postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate })
       if (r.reason === 'no_open') {
         setResult({ kind: 'error', text: 'No month is open in Inventory, so nothing was posted. The month has to be started in Inventory first (by the Owner or whoever runs Inventory); then press Post to Inventory again.' })
         return
@@ -77,11 +77,13 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
       }
       const posted = countPhrase(r.bills.posted, r.notes.posted)
       const skipped = (r.bills.skipped || 0) + (r.notes.skipped || 0)
-      setResult({
-        kind: 'ok',
-        text: (posted ? `Posted ${posted} into ${label}.` : `Nothing from ${label} was left to post.`)
-          + (skipped > 0 ? ` ${skipped} skipped: already in Inventory, nothing to post, or refused (press again to retry; if one keeps failing, tell the Owner).` : ''),
-      })
+      const text = (posted ? `Posted ${posted} into ${label}.` : `Nothing from ${label} was left to post.`)
+        + (skipped > 0 ? ` ${skipped} skipped: already in Inventory, nothing to post, or refused (press again to retry; if one keeps failing, tell the Owner).` : '')
+      // A bill the server could not post stays waiting (S830 5f-2): say so, with its reason as fine print.
+      const stuck = Number(r.bills.waiting) || 0
+      setResult(stuck > 0
+        ? { kind: 'error', text: `${text} ${countPhrase(stuck, 0)} from ${label} could not be posted and ${stuck === 1 ? 'is' : 'are'} still waiting. Press Post to Inventory again; if ${stuck === 1 ? 'it keeps' : 'they keep'} failing, tell the Owner.`, detail: r.bills.failedText }
+        : { kind: 'ok', text })
     } catch (err) {
       setResult({
         kind: 'error',

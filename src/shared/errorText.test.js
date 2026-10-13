@@ -157,6 +157,12 @@ describe('errorText', () => {
       expect(errorText(hinted('rank_required', 'pos_orders: closing a bill needs POS Supervisor access or above'), 'operator')).toMatch(/POS Staff/)
     })
 
+    it('a refused post of waiting bills names who posts them and says nothing was posted (S830 5f-2)', () => {
+      const err = hinted('rank_required', 'post_waiting_pos_bills: till bills are posted to Inventory by the Owner, or by a POS manager of this outlet while the month is open')
+      expect(errorText(err, 'operator')).toMatch(/Owner.*POS manager.*nothing was posted/)
+      expect(errorText(err, 'staff')).toMatch(/Nothing was posted/)
+    })
+
     it('a stale order and a closed shift send the reader to reload, not to retry blind', () => {
       expect(errorText(hinted('stale_order', 'stale_order: this order was changed on another device…', 'P0001'), 'staff')).toMatch(/reload/i)
       expect(errorText(hinted('pos_shift_closed', 'pos_shift_closed: this shift is closed…'), 'operator')).toMatch(/reload/i)

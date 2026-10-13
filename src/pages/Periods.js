@@ -16,7 +16,7 @@ import {
 } from './periods/closePeriod'
 import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
-import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
+import { postWaitingBills, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { backfillCreditNotesToIms, countUnpostedCreditNotesForPeriod } from '../modules/pos/creditnotes/creditNotePosting'
 import { loadImsWaiting, waitingForPeriod, countPhrase } from '../modules/pos/orders/posImsWaiting'
 import { withTimeout } from '../utils/withTimeout'
@@ -616,11 +616,11 @@ export default function Periods() {
   async function performPosBackfill(period, label) {
     setBackfillBusy(period.id)
     try {
-      // Generous: this walks every unposted bill, exploding recipes and writing two tables per
-      // order, so a large backfill is legitimately slow — but it must still end.
-      const { posted, skipped, error } = await withTimeout(
-        backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }),
-        120000, 'Posting POS bills')
+      // The server posts them (S830 5f-2, post_waiting_pos_bills), a batch per call, each bill with its
+      // stock lines in one transaction. Generous, because a large month is legitimately slow, but it
+      // must still end.
+      const { posted, skipped, waiting, failedText, error } = await withTimeout(
+        postWaitingBills(supabase, period.id), 120000, 'Posting POS bills')
       if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
       // After the bills, so a credit note is never posted into a month its own bill has not reached.
       const notes = await withTimeout(
@@ -635,11 +635,16 @@ export default function Periods() {
       const frozenNote = (posted > 0 || notes.posted > 0) && period.status === 'closed'
         ? ` ${label} is closed, so its frozen Monthly Owner Report does not include these until you press Regenerate Snapshot on that month's report.`
         : ''
-      ok(
+      const done =
         `Posted ${posted} bill${posted === 1 ? '' : 's'}${notes.posted > 0 ? ` and ${notes.posted} credit note${notes.posted === 1 ? '' : 's'}` : ''} into ${label}.` +
         (skipped + notes.skipped > 0 ? ` ${skipped + notes.skipped} skipped (already posted, nothing to post, or the write failed — check the browser console).` : '') +
         frozenNote
-      )
+      // A bill the server could not post stays waiting, and the next run tries it again.
+      if (waiting > 0) {
+        fail(`${done} ${waiting} bill${waiting === 1 ? '' : 's'} from ${label} could not be posted and ${waiting === 1 ? 'is' : 'are'} still waiting — run it again; if ${waiting === 1 ? 'it keeps' : 'they keep'} failing, contact Crest support.`, failedText)
+        return
+      }
+      ok(done)
     } catch (err) {
       console.error('POS backfill failed:', err)
       fail(`Could not post POS bills for ${label}. Nothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`, err)

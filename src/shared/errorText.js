@@ -708,6 +708,13 @@ const rules = [
     staff: 'Points for a bill are added by whoever closed it, as it closes. The bill itself is fine — the owner or a POS manager can add the points in Customers → Loyalty.',
     operator: 'Loyalty points for a bill are added by the person who closed it as it closes, or later by the Owner or a POS manager, so none were added from this login. The bill is unaffected; the Owner or a POS manager adds them from the customer’s History in Customers → Loyalty.',
   },
+  // post_waiting_pos_bills (S830 5f-2): the Owner and Crest support post any month, a POS manager the
+  // open one. Refused before anything was posted.
+  {
+    test: e => hasCode(e, 'rank_required') && /post_waiting_pos_bills/.test(e.message || ''),
+    staff: 'Waiting bills are posted to Inventory by the owner, or by a POS manager while their month is open. Nothing was posted — ask one of them.',
+    operator: 'Waiting till bills are posted to Inventory by the Owner, or by a POS manager of this outlet while their month is still open, so nothing was posted from this login. A closed month’s bills are the Owner’s to post, from Periods.',
+  },
   {
     test: e => hasCode(e, 'rank_required'),
     staff: 'Your login does not have the rank for that. Nothing was changed — ask a supervisor or manager.',

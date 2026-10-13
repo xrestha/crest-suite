@@ -180,6 +180,20 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5f-2: a `post_waiting_pos_bills` RPC for the floor and Periods; the browser
+  stops writing till rows; the till floor raised~~ — **step 1 shipped S830, 2026-10-13**: migration
+  `20261013170000` applied live (run by the owner from the terminal); app crest-v446. **The RPC**
+  (DEFINER) posts a month's waiting bills through `pos_post_bill_into`, the close's own step taken out
+  of `pos_post_bill_to_ims` (unchanged in what it posts), up to 200 a call, each in its own
+  subtransaction, and answers what it did and how many still wait; the page calls until nothing moves.
+  Who may is unchanged: the Owner and the operator any month, a POS manager the open month only. A bill
+  already carrying till sales but no mark is marked, never posted again. **The app** no longer posts
+  bills: the till reads the bill's mark back after the close and notes a miss; the floor banner and
+  Periods call the RPC, then post credit notes from the page (until 5f-4). `postClosedBill`,
+  `backfillPosOrdersToIms` and `posStockLines` are gone; `billSalesRows`/`billMovementRows` stay as the
+  app's twin of the SQL. **Step 2** (after crest-v446 is live): both guards refuse till sales and stock
+  lines from a browser outside the operator's restore, and the till floor goes to 446.
+
 - [x] ~~S809 stage 5, slice 5f-1: the server posts a closed bill to Inventory from the stored bill in
   the close's transaction~~ — **shipped S830, 2026-10-13**: migration `20261013160000` applied live
   (run by the owner from the terminal); app crest-v445 (Help and guide text only); no Edge Function, no

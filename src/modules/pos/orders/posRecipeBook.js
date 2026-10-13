@@ -1,4 +1,4 @@
-import { buildRecipeBook, computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { buildRecipeBook, computeRecipeCosts } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 
 // The till's view of the recipe book (S809 IMS-HANDOFF-3).
@@ -15,8 +15,8 @@ import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 // recipe's yield_qty and cost_price, its ingredient rows, its sub-recipes to any depth, and each
 // ingredient's yield_pct and per_uom_rate; plus the loose items named (a choice's stock lines). It
 // is fed to the ONE walk, recipeCost.js' `{ book }` path (S793), so this file adds no arithmetic:
-// the stock lines and the costs come out exactly as they do for the Owner (recipeCost.test.js holds
-// the book path and the fetch path to deep-equal output).
+// the costs come out exactly as they do for the Owner (recipeCost.test.js holds the book path and the
+// fetch path to deep-equal output). A closing bill's stock lines are the database's since S830 (5f-1).
 
 /** The rows the read returns → the lookups the walk consumes (recipeCost.buildRecipeBook), loose items added. Pure. */
 export function bookFromPosRead(data) {
@@ -77,23 +77,4 @@ export async function posDeltaCosting(supabase, clientId, deltaLists) {
   const book = await loadPosRecipeBook(supabase, clientId, { recipeIds: subRecipeIds, itemIds })
   const explosion = await loadDeltaExplosion(supabase, deltaLists, { book })
   return { explosion, rateOf: id => Number(book.items.get(id)?.per_uom_rate) || 0 }
-}
-
-/**
- * What a closing bill takes off the ledger, through one read: `breakdown` is the recipes' raw items
- * per plate (explodeRecipeIngredients' shape), `explosion` turns the choices' stored lines into raw
- * items (loadDeltaExplosion's shape, for deltaItems). Both trimmed by each item's yield %.
- */
-export async function posStockLines(supabase, clientId, recipeIds, deltaLists) {
-  const ids = uniq(recipeIds)
-  const { itemIds, subRecipeIds } = deltaIdsOf(deltaLists)
-  if (ids.length === 0 && itemIds.length === 0 && subRecipeIds.length === 0) {
-    return { breakdown: {}, explosion: { itemYield: {}, subPerUnit: {} } }
-  }
-  const book = await loadPosRecipeBook(supabase, clientId, { recipeIds: [...ids, ...subRecipeIds], itemIds })
-  const [breakdown, explosion] = await Promise.all([
-    explodeRecipeIngredients(supabase, ids, { book }),
-    loadDeltaExplosion(supabase, deltaLists, { book }),
-  ])
-  return { breakdown, explosion }
 }
