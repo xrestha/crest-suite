@@ -1,48 +1,15 @@
-import { creditNoteReversalRows, creditNoteRestockMovements, backfillCreditNotesToIms, postCreditNoteToIms, countUnpostedCreditNotesForPeriod } from './creditNotePosting'
+import { creditNoteInInventory, postWaitingCreditNotes, countUnpostedCreditNotesForPeriod } from './creditNotePosting'
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
-import { billSalesRows } from '../orders/backfillPosToIms'
+
+// Since S832 (5f-4) the server posts a credit note as it is issued and posts waiting notes; the page
+// reads the mark back, words why a note waits, and asks the server. The reversal itself is the SQL
+// pos_post_credit_note_into (the bill's own pos_bill_sales_rows, negated), proved by its migration's
+// probe and parity check against every note on record.
 
 jest.mock('../../../shared/fetchAllRows', () => ({
   fetchAllRows: async make => make(),
   fetchAllRowsChunked: async (ids, make) => make(ids),
-  runChunkedByIds: async (ids, make) => make(ids),
 }))
-
-const ITEMS = [
-  { recipe_id: 'r1', qty: 2, unit_price: 500, vat_rate: 0.13, comped: false },
-  { recipe_id: 'r2', qty: 1, unit_price: 1000, vat_rate: 0.13, comped: false },
-  { recipe_id: 'r3', qty: 1, unit_price: 300, vat_rate: 0.13, comped: true },
-  { recipe_id: null, qty: 1, unit_price: 50, vat_rate: 0, comped: false },
-]
-
-describe('creditNoteReversalRows — the revenue the bill POSTED, negated', () => {
-  it('skips comped and non-recipe lines, and links every row to its note', () => {
-    const rows = creditNoteReversalRows({ order: { close_type: 'paid', discount_amount: 0 }, items: ITEMS, periodId: 'p', bsDay: 7, creditNoteId: 'cn1' })
-    expect(rows.map(r => r.recipe_id)).toEqual(['r1', 'r2'])
-    expect(rows.every(r => r.source === 'pos_credit' && r.pos_credit_note_id === 'cn1' && r.bs_day === 7)).toBe(true)
-    expect(rows.map(r => r.qty_sold)).toEqual([-2, -1])
-  })
-
-  it('spreads the bill discount over the payable lines, exactly as the close posted it', () => {
-    // payable gross 2,050 (the non-recipe line is paid for too); a 410 discount leaves 80% of each price
-    const rows = creditNoteReversalRows({ order: { close_type: 'paid', discount_amount: 410 }, items: ITEMS, periodId: 'p', bsDay: 1, creditNoteId: 'cn' })
-    expect(rows.map(r => r.unit_price)).toEqual([400, 800])
-    const reversed = rows.reduce((s, r) => s + -r.qty_sold * r.unit_price, 0)
-    expect(reversed).toBe(1600)
-  })
-
-  it('takes back exactly what billSalesRows posted for the same bill', () => {
-    const order = { id: 'o1', close_type: 'paid', discount_amount: 333, pos_order_items: ITEMS }
-    const posted = billSalesRows(order, { id: 'p' }, 1).filter(r => r.source === 'pos')
-    const reversal = creditNoteReversalRows({ order, items: ITEMS, periodId: 'p', bsDay: 2, creditNoteId: 'cn' })
-    expect(reversal.map(r => [r.recipe_id, -r.qty_sold, r.unit_price]))
-      .toEqual(posted.map(r => [r.recipe_id, r.qty_sold, r.unit_price]))
-  })
-
-  it('reverses nothing for a whole-bill comp, which posted no revenue', () => {
-    expect(creditNoteReversalRows({ order: { close_type: 'writeoff' }, items: ITEMS, periodId: 'p', bsDay: 1, creditNoteId: 'cn' })).toEqual([])
-  })
-})
 
 // A tiny query-builder stand-in: every chained call returns itself, and awaiting it resolves the
 // canned result for that table/operation.
@@ -55,277 +22,134 @@ function builder(result) {
   return b
 }
 
-describe('postCreditNoteToIms', () => {
-  const today = { year: 2083, month: 5, day: 12 }
-  const note = { id: 'cn1' }
-  const order = { close_type: 'paid', discount_amount: 0 }
+describe('creditNoteInInventory — the server posted it, or why it waits', () => {
+  const today = { year: 2083, month: 6, day: 27 }
+  const order = { id: 'o1', closed_at: '2026-10-13T09:00:00+05:45' }
 
-  it('does not post, and says why, when no period exists for today', async () => {
-    const insert = jest.fn()
-    const res = await postCreditNoteToIms({
-      supabase: { from: () => ({ insert }) },
-      scopedFrom: () => builder({ data: null, error: null }),
-      scopedUpdate: jest.fn(),
-      note, order, items: ITEMS, today,
+  function harness({ mark = null, markError = null, period = { id: 'p6', status: 'open' }, periodError = null, billSale = [] } = {}) {
+    const asked = []
+    const scopedFrom = jest.fn(table => {
+      asked.push(table)
+      if (table === 'pos_credit_notes') return builder({ data: markError ? null : { ims_posted_at: mark }, error: markError })
+      return builder({ data: periodError ? null : period, error: periodError })
     })
-    expect(res).toEqual({ posted: false, reason: 'no_period' })
-    expect(insert).not.toHaveBeenCalled()
-  })
+    const salesReads = []
+    const supabase = { from: table => { salesReads.push(table); return builder({ data: billSale, error: null }) } }
+    return { scopedFrom, supabase, asked, salesReads }
+  }
 
-  it('reports a refused insert instead of swallowing it, and does not stamp', async () => {
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    const res = await postCreditNoteToIms({
-      supabase: { from: () => ({ insert: async () => ({ error: { message: 'refused' } }) }) },
-      scopedFrom: () => builder({ data: { id: 'p1', status: 'open' }, error: null }),
-      scopedUpdate, note, order, items: ITEMS, today,
-    })
-    expect(res.posted).toBe(false)
-    expect(res.reason).toBe('write')
-    expect(scopedUpdate).not.toHaveBeenCalled()
-  })
-
-  it('stamps the note once the rows land', async () => {
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    const res = await postCreditNoteToIms({
-      supabase: { from: () => ({ insert: async () => ({ error: null }) }) },
-      scopedFrom: () => builder({ data: { id: 'p1', status: 'open' }, error: null }),
-      scopedUpdate, note, order, items: ITEMS, today,
-    })
+  it('reads the mark the issue wrote, and says nothing more when it is there', async () => {
+    const h = harness({ mark: '2026-10-13T04:00:00Z' })
+    const res = await creditNoteInInventory({ ...h, note: { id: 'cn1' }, order, today })
     expect(res).toEqual({ posted: true })
-    expect(scopedUpdate).toHaveBeenCalledWith('pos_credit_notes', expect.objectContaining({ ims_posted_at: expect.any(String) }))
+    expect(h.asked).toEqual(['pos_credit_notes'])
+    expect(h.salesReads).toEqual([])
   })
 
-  // S831 5f-3 (Q31 a): Inventory starts on the day it was switched on; a note on an earlier bill is
-  // never sent, because its bill never reached Inventory. Nothing is read, written or marked.
-  it('sends nothing for a bill closed before the outlet\'s Inventory began', async () => {
-    const insert = jest.fn()
-    const scopedFrom = jest.fn(() => builder({ data: { id: 'p1', status: 'open' }, error: null }))
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    const res = await postCreditNoteToIms({
-      supabase: { from: () => ({ insert }) }, scopedFrom, scopedUpdate,
-      note, order: { ...order, closed_at: '2026-10-12T20:00:00+05:45' }, items: ITEMS, today,
+  // S831 5f-3 (Q31 a): a note on a bill closed before the outlet's Inventory began is never sent.
+  it("reads nothing for a bill closed before the outlet's Inventory began", async () => {
+    const h = harness()
+    const res = await creditNoteInInventory({
+      ...h, note: { id: 'cn1' }, order: { ...order, closed_at: '2026-10-12T20:00:00+05:45' }, today,
       imsSince: '2026-10-12T18:15:00+00:00',
     })
     expect(res).toEqual({ posted: false, reason: 'before_inventory' })
-    expect(scopedFrom).not.toHaveBeenCalled()
-    expect(insert).not.toHaveBeenCalled()
-    expect(scopedUpdate).not.toHaveBeenCalled()
+    expect(h.scopedFrom).not.toHaveBeenCalled()
   })
 
-  it('posts as usual for a bill closed on or after the day Inventory began', async () => {
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    const res = await postCreditNoteToIms({
-      supabase: { from: () => ({ insert: async () => ({ error: null }) }) },
-      scopedFrom: () => builder({ data: { id: 'p1', status: 'open' }, error: null }),
-      scopedUpdate, note, order: { ...order, closed_at: '2026-10-13T09:00:00+05:45' }, items: ITEMS, today,
-      imsSince: '2026-10-12T18:15:00+00:00',
-    })
-    expect(res).toEqual({ posted: true })
+  it("waits, and says so, when today's month has not been started in Inventory", async () => {
+    const h = harness({ period: null })
+    await expect(creditNoteInInventory({ ...h, note: { id: 'cn1' }, order, today })).resolves.toEqual({ posted: false, reason: 'no_period' })
+    expect(h.asked).toEqual(['pos_credit_notes', 'monthly_periods'])
+  })
+
+  it("waits when today's month is closed in Inventory", async () => {
+    const h = harness({ period: { id: 'p6', status: 'closed' } })
+    await expect(creditNoteInInventory({ ...h, note: { id: 'cn1' }, order, today })).resolves.toEqual({ posted: false, reason: 'closed' })
+  })
+
+  it("a not-served note waits for its bill when the bill's own sale is not in Inventory", async () => {
+    const h = harness({ billSale: [] })
+    await expect(creditNoteInInventory({ ...h, note: { id: 'cn9', restock: true }, order, today }))
+      .resolves.toEqual({ posted: false, reason: 'bill_waiting' })
+    expect(h.salesReads).toEqual(['sales_entries'])
+  })
+
+  it('an unmarked note in an open month, its bill in, is a post that failed', async () => {
+    const h = harness({ billSale: [{ id: 's1' }] })
+    await expect(creditNoteInInventory({ ...h, note: { id: 'cn9', restock: true }, order, today }))
+      .resolves.toEqual({ posted: false, reason: 'write' })
+    const plain = harness()
+    await expect(creditNoteInInventory({ ...plain, note: { id: 'cn1', restock: false }, order, today }))
+      .resolves.toEqual({ posted: false, reason: 'write' })
+    // a served note never asks about its bill
+    expect(plain.salesReads).toEqual([])
+  })
+
+  it('a failed read of the mark is unknown, never "posted" or "waiting"', async () => {
+    const err = { message: 'Failed to fetch' }
+    const h = harness({ markError: err })
+    await expect(creditNoteInInventory({ ...h, note: { id: 'cn1' }, order, today })).resolves.toEqual({ posted: false, reason: 'read', error: err })
+    expect(h.asked).toEqual(['pos_credit_notes'])
   })
 })
 
-describe('backfillCreditNotesToIms', () => {
+describe('postWaitingCreditNotes — the server posts the month, a batch per call', () => {
+  it('asks the server for the month and adds up what it did', async () => {
+    const rpc = jest.fn(async () => ({ data: { posted: 2, already: 1, nothing_to_post: 1, bill_waiting: 0, remaining: 0 }, error: null }))
+    const res = await postWaitingCreditNotes({ rpc }, 'p6')
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledWith('post_waiting_credit_notes', { p_period_id: 'p6', p_limit: 200 })
+    expect(res).toEqual({ posted: 2, skipped: 2, billWaiting: 0, waiting: 0 })
+  })
+
+  it('calls again while notes remain, and stops when a call moves nothing', async () => {
+    const answers = [
+      { posted: 200, already: 0, nothing_to_post: 0, bill_waiting: 1, remaining: 3 },
+      { posted: 1, already: 0, nothing_to_post: 0, bill_waiting: 1, remaining: 2, error: 'duplicate key', failed: 1 },
+      { posted: 0, already: 0, nothing_to_post: 0, bill_waiting: 1, remaining: 2, error: 'duplicate key', failed: 1 },
+    ]
+    const rpc = jest.fn(async () => ({ data: answers.shift(), error: null }))
+    const res = await postWaitingCreditNotes({ rpc }, 'p6')
+    expect(rpc).toHaveBeenCalledTimes(3)
+    expect(res).toEqual({ posted: 201, skipped: 0, billWaiting: 1, waiting: 2, failedText: 'duplicate key' })
+  })
+
+  it("returns the server's refusal with what had already gone in", async () => {
+    const refusal = { code: '42501', hint: 'rank_required', message: 'post_waiting_credit_notes: refused' }
+    const rpc = jest.fn(async () => ({ data: null, error: refusal }))
+    const res = await postWaitingCreditNotes({ rpc }, 'p6')
+    expect(res).toEqual({ posted: 0, skipped: 0, billWaiting: 0, waiting: null, error: refusal })
+  })
+})
+
+describe('countUnpostedCreditNotesForPeriod — for Periods\' confirm', () => {
   const period = { id: 'p1', bs_year: 2083, bs_month: 5 }
+  const npt = (m, d, hhmm) => `${formatAd(bsToAd(2083, m, d))}T${hhmm}:00+05:45`
 
-  it('stamps a note whose reversal rows already exist instead of posting it again', async () => {
-    const inserts = []
-    const supabase = {
-      from: () => ({
-        select: () => builder({ data: [{ pos_credit_note_id: 'cn1', id: 's1' }], error: null }),
-        insert: async rows => { inserts.push(rows); return { error: null } },
-      }),
-    }
-    const scopedFrom = table => builder(table === 'pos_credit_notes'
-      ? { data: [{ id: 'cn1', order_id: 'o1', created_at: '2026-08-20T10:00:00Z' }], error: null }
-      : { data: [], error: null })
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period })
-    expect(res).toEqual({ posted: 0, skipped: 1 })
-    expect(inserts).toHaveLength(0)
-    expect(scopedUpdate).toHaveBeenCalled()
-  })
-
-  // S792, SALES-6: the day comes from Nepal's calendar, whatever zone the backfill runs in (the old
-  // `adToBs(new Date(created_at))` fails this under TZ=UTC).
-  it("dates each reversal by the day the note was issued in Nepal, and leaves another month's note waiting", async () => {
-    const inserts = []
-    const supabase = {
-      from: () => ({
-        select: () => builder({ data: [], error: null }),
-        insert: async rows => { inserts.push(rows); return { error: null } },
-      }),
-    }
-    const npt = (m, d, hhmm) => `${formatAd(bsToAd(2083, m, d))}T${hhmm}:00+05:45`
-    const scopedFrom = table => builder(table === 'pos_credit_notes'
-      ? { data: [
-          { id: 'cn1', order_id: 'o1', created_at: npt(5, 1, '00:10') },
-          { id: 'cn2', order_id: 'o1', created_at: npt(6, 1, '00:10') },
-        ], error: null }
-      : { data: [{ id: 'o1', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS }], error: null })
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period })
-    expect(res).toEqual({ posted: 1, skipped: 1 })
-    expect(inserts).toHaveLength(1)
-    expect(inserts[0].every(r => r.bs_day === 1 && r.pos_credit_note_id === 'cn1')).toBe(true)
-    expect(scopedUpdate).toHaveBeenCalledTimes(1)
-  })
-
-  // S831 5f-3 (Q31 a): a note on a bill closed before the outlet's Inventory began never waits, so it
-  // is neither counted nor posted; a note on a later bill in the same month is.
+  // S831 5f-3 (Q31 a): a note on a bill closed before the outlet's Inventory began never waits.
   it("leaves out a note on a bill from before the outlet's Inventory began", async () => {
-    const inserts = []
-    const supabase = {
-      from: () => ({
-        select: () => builder({ data: [], error: null }),
-        insert: async rows => { inserts.push(rows); return { error: null } },
-      }),
-    }
-    const npt = (m, d, hhmm) => `${formatAd(bsToAd(2083, m, d))}T${hhmm}:00+05:45`
-    const imsSince = npt(5, 2, '00:00')
-    const scopedFrom = table => builder(table === 'pos_credit_notes'
-      ? { data: [
-          { id: 'cn-old', order_id: 'o-old', created_at: npt(5, 3, '10:00'), pos_orders: { closed_at: npt(5, 1, '12:00') } },
-          { id: 'cn-new', order_id: 'o-new', created_at: npt(5, 3, '11:00'), pos_orders: { closed_at: npt(5, 3, '09:00') } },
-        ], error: null }
-      : { data: [
-          { id: 'o-old', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS },
-          { id: 'o-new', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS },
-        ], error: null })
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-
-    await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period, imsSince })).resolves.toBe(1)
+    const supabase = { from: () => builder({ data: [], error: null }) }
+    const scopedFrom = () => builder({ data: [
+      { id: 'cn-old', order_id: 'o-old', created_at: npt(5, 3, '10:00'), pos_orders: { closed_at: npt(5, 1, '12:00') } },
+      { id: 'cn-new', order_id: 'o-new', created_at: npt(5, 3, '11:00'), pos_orders: { closed_at: npt(5, 3, '09:00') } },
+    ], error: null })
+    await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period, imsSince: npt(5, 2, '00:00') })).resolves.toBe(1)
     await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period })).resolves.toBe(2)
-
-    const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period, imsSince })
-    expect(res).toEqual({ posted: 1, skipped: 0 })
-    expect(inserts).toHaveLength(1)
-    expect(inserts[0].every(r => r.pos_credit_note_id === 'cn-new')).toBe(true)
-    expect(scopedUpdate).toHaveBeenCalledTimes(1)
   })
 
-  it('aborts rather than posting when it cannot check what already posted', async () => {
-    const insert = jest.fn()
-    const supabase = { from: () => ({ select: () => builder({ data: null, error: { message: 'boom' } }), insert }) }
-    const scopedFrom = () => builder({ data: [{ id: 'cn1', order_id: 'o1', created_at: '2026-08-20T10:00:00Z' }], error: null })
-    const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate: jest.fn(), period })
-    expect(res.error).toMatch(/Could not check/)
-    expect(insert).not.toHaveBeenCalled()
-  })
-})
-
-// S809 2e (CREDIT-NOTES-1, owner decision Q10 a): a note whose food was not served on its bill puts
-// that food back — its reversal rows count against stock usage, and the bill's own depletion is undone.
-describe('a note whose food was not served (restock)', () => {
-  const today = { year: 2083, month: 6, day: 23 }
-  const order = { id: 'o1', close_type: 'paid', discount_amount: 0 }
-  const note = { id: 'cn9', restock: true }
-
-  it('posts the same reversal rows under the restock source', () => {
-    const plain = creditNoteReversalRows({ order, items: ITEMS, periodId: 'p', bsDay: 7, creditNoteId: 'cn9' })
-    const back = creditNoteReversalRows({ order, items: ITEMS, periodId: 'p', bsDay: 7, creditNoteId: 'cn9', restock: true })
-    expect(back.every(r => r.source === 'pos_credit_restock')).toBe(true)
-    // revenue, quantities, prices and the link are exactly a plain reversal's
-    expect(back.map(({ source, ...r }) => r)).toEqual(plain.map(({ source, ...r }) => r))
+  it('does not count a note whose reversal is already in Inventory', async () => {
+    const supabase = { from: () => builder({ data: [{ pos_credit_note_id: 'cn1', id: 's1' }], error: null }) }
+    const scopedFrom = () => builder({ data: [
+      { id: 'cn1', order_id: 'o1', created_at: npt(5, 3, '10:00') },
+      { id: 'cn2', order_id: 'o2', created_at: npt(5, 3, '11:00') },
+    ], error: null })
+    await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period })).resolves.toBe(1)
   })
 
-  it("puts back exactly the bill's POS Sale depletion, item by item, linked to the bill", () => {
-    const rows = creditNoteRestockMovements({
-      saleMovements: [
-        { item_id: 'chicken', qty: -0.4 },
-        { item_id: 'flour', qty: -0.25 },
-        { item_id: 'chicken', qty: -0.2 },   // a second row for one item (a double post in the past)
-        { item_id: 'oil', qty: 0 },          // nothing taken, nothing to put back
-        { item_id: null, qty: -1 },
-      ],
-      periodId: 'p6', bsDay: 23, orderId: 'o1',
-    })
-    expect(rows).toHaveLength(2)
-    expect(rows.find(r => r.item_id === 'chicken').qty).toBeCloseTo(0.6)
-    expect(rows.every(r => r.qty > 0 && r.source === 'pos_credit_restock' && r.ref_id === 'o1' && r.period_id === 'p6' && r.bs_day === 23)).toBe(true)
-    expect(creditNoteRestockMovements({ saleMovements: [], periodId: 'p', bsDay: 1, orderId: 'o' })).toEqual([])
-  })
-
-  function harness({ billPosted, salesInsertError = null, movements = [{ item_id: 'chicken', qty: -0.4 }] }) {
-    const salesInserts = []
-    const supabase = {
-      from: () => ({
-        select: () => builder({ data: billPosted ? [{ id: 's1' }] : [], error: null }),
-        insert: async rows => { salesInserts.push(rows); return { error: salesInsertError } },
-      }),
-    }
-    const scopedFrom = table => builder(table === 'monthly_periods'
-      ? { data: { id: 'p6', status: 'open' }, error: null }
-      : { data: movements, error: null })
-    const scopedInsert = jest.fn(async () => ({ error: null }))
-    const scopedUpdate = jest.fn(() => builder({ error: null }))
-    return { supabase, scopedFrom, scopedInsert, scopedUpdate, salesInserts }
-  }
-
-  it("waits for its bill when the bill's own sale has not reached Inventory, writing nothing", async () => {
-    const h = harness({ billPosted: false })
-    const res = await postCreditNoteToIms({ ...h, note, order, items: ITEMS, today })
-    expect(res).toEqual({ posted: false, reason: 'bill_waiting' })
-    expect(h.salesInserts).toHaveLength(0)
-    expect(h.scopedInsert).not.toHaveBeenCalled()
-    expect(h.scopedUpdate).not.toHaveBeenCalled()
-  })
-
-  it('posts the restock reversal, puts the stock back and stamps the note', async () => {
-    const h = harness({ billPosted: true })
-    const res = await postCreditNoteToIms({ ...h, note, order, items: ITEMS, today })
-    expect(res).toEqual({ posted: true })
-    expect(h.salesInserts).toHaveLength(1)
-    expect(h.salesInserts[0].every(r => r.source === 'pos_credit_restock' && r.bs_day === 23 && r.period_id === 'p6')).toBe(true)
-    expect(h.scopedInsert).toHaveBeenCalledWith('stock_movements', [
-      { item_id: 'chicken', period_id: 'p6', bs_day: 23, qty: 0.4, source: 'pos_credit_restock', ref_id: 'o1' },
-    ])
-    expect(h.scopedUpdate).toHaveBeenCalledWith('pos_credit_notes', expect.objectContaining({ ims_posted_at: expect.any(String) }))
-  })
-
-  it('puts no stock back when the revenue reversal is refused', async () => {
-    const h = harness({ billPosted: true, salesInsertError: { message: 'refused' } })
-    const res = await postCreditNoteToIms({ ...h, note, order, items: ITEMS, today })
-    expect(res.reason).toBe('write')
-    expect(h.scopedInsert).not.toHaveBeenCalled()
-    expect(h.scopedUpdate).not.toHaveBeenCalled()
-  })
-
-  it('a served note never touches stock', async () => {
-    const h = harness({ billPosted: true })
-    const res = await postCreditNoteToIms({ ...h, note: { id: 'cn8', restock: false }, order, items: ITEMS, today })
-    expect(res).toEqual({ posted: true })
-    expect(h.salesInserts[0].every(r => r.source === 'pos_credit')).toBe(true)
-    expect(h.scopedInsert).not.toHaveBeenCalled()
-  })
-
-  it('the backfill leaves a not-served note waiting while its bill is not in Inventory, and posts it once it is', async () => {
-    const period = { id: 'p6', bs_year: 2083, bs_month: 6 }
-    const npt = (m, d, hhmm) => `${formatAd(bsToAd(2083, m, d))}T${hhmm}:00+05:45`
-    for (const billPosted of [false, true]) {
-      const salesInserts = []
-      const supabase = {
-        from: () => ({
-          // the already-reversed check finds nothing; the bill-posted check (select 'id') answers billPosted
-          select: cols => builder({ data: cols === 'id' ? (billPosted ? [{ id: 's1' }] : []) : [], error: null }),
-          insert: async rows => { salesInserts.push(rows); return { error: null } },
-        }),
-      }
-      const scopedFrom = table => builder(
-        table === 'pos_credit_notes' ? { data: [{ id: 'cn9', order_id: 'o1', created_at: npt(6, 23, '12:00'), restock: true }], error: null }
-          : table === 'pos_orders' ? { data: [{ id: 'o1', close_type: 'paid', discount_amount: 0, pos_order_items: ITEMS }], error: null }
-            : { data: [{ item_id: 'chicken', qty: -0.4 }], error: null })
-      const scopedInsert = jest.fn(async () => ({ error: null }))
-      const scopedUpdate = jest.fn(() => builder({ error: null }))
-      const res = await backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period })
-      if (!billPosted) {
-        expect(res).toEqual({ posted: 0, skipped: 1 })
-        expect(salesInserts).toHaveLength(0)
-        expect(scopedInsert).not.toHaveBeenCalled()
-      } else {
-        expect(res).toEqual({ posted: 1, skipped: 0 })
-        expect(salesInserts[0].every(r => r.source === 'pos_credit_restock' && r.bs_day === 23)).toBe(true)
-        expect(scopedInsert).toHaveBeenCalledWith('stock_movements', [expect.objectContaining({ item_id: 'chicken', qty: 0.4, ref_id: 'o1', bs_day: 23 })])
-      }
-    }
+  it('throws rather than counting none when it cannot check what already posted', async () => {
+    const supabase = { from: () => builder({ data: null, error: { message: 'boom' } }) }
+    const scopedFrom = () => builder({ data: [{ id: 'cn1', order_id: 'o1', created_at: npt(5, 3, '10:00') }], error: null })
+    await expect(countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period })).rejects.toThrow('boom')
   })
 })

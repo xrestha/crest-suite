@@ -12,7 +12,7 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { errorLine, errorText, isNetworkError } from '../../../shared/errorText'
-import { postCreditNoteToIms } from './creditNotePosting'
+import { creditNoteInInventory } from './creditNotePosting'
 import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
 
 // "Was money returned to the customer?" (S754, owner decision). Asked on every note, because a
@@ -79,7 +79,7 @@ function lostReplyText(cashShift, cashOut) {
 export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   const { clientId, profile, hasPosAccess, isAdmin, imsEnabled, clientModules } = useAuth()
   const hasIms = outletHasIms({ isAdmin, imsEnabled, clientModules })
-  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedInsert } = useScopedDb()
 
   const [items, setItems] = useState([])
   const [settings, setSettings] = useState({ is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '' })
@@ -330,9 +330,10 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 
     // Revenue correction into TODAY's open period (the period the correction is discovered in), not
     // the original bill's. Stock comes back only when the food was not served on this bill (S809 2e,
-    // Q10 a); otherwise the food was used and this corrects money and tax only. It used to skip
-    // silently with no open period and never read its insert's error (S747); now a note that could
-    // not post is stamped "waiting", said so here, counted on the POS floor and posted from Periods.
+    // Q10 a); otherwise the food was used and this corrects money and tax only. Since S832 (5f-4, Q32)
+    // the database posted it inside the insert that issued the note (pos_credit_notes_post_to_inventory),
+    // so this only reads the mark back and, when it waits, why. A note that could not post is said so
+    // here, counted on the POS floor and posted from there or from Periods (S747).
     //
     // An outlet without Inventory posts nothing (S809 4e, owner decision D7, as its bills, D6): there is
     // no Inventory revenue to take back, and the note is left unmarked. Since S831 (5f-3, Q31 a, which
@@ -343,9 +344,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       ims = { posted: false, reason: 'no_ims' }
     } else {
       try {
-        ims = await withTimeout(postCreditNoteToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, note: created, order, items, today, imsSince: clientModules?.imsSince || null }), 30000, 'Posting to Inventory')
+        ims = await withTimeout(creditNoteInInventory({ supabase, scopedFrom, note: created, order, today, imsSince: clientModules?.imsSince || null }), 20000, 'Checking Inventory')
       } catch (err) {
-        ims = { posted: false, reason: 'write', error: err }
+        ims = { posted: false, reason: 'read', error: err }
       }
     }
     // Nothing more is owed to Inventory: the note is in it, the outlet has none, or the bill is from
@@ -371,7 +372,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
           ? `${month} is closed in Inventory, so this credit note has not been taken off Inventory sales. Only the Owner can post into a closed month: Periods → "Post POS bills to Inventory" on ${month}.`
           : ims.reason === 'bill_waiting'
             ? `This bill has not reached Inventory yet, so this credit note waits for it: its food can only go back once the bill's own sale is in. "Post to Inventory" on the Orders floor posts the bill first and then this note, while their month is open in Inventory; for a closed month the Owner posts them from Periods.`
-            : `This credit note could not be taken off Inventory sales just now (the connection or the database refused it). It is marked as waiting: press "Post to Inventory" on the Orders floor to post it.`,
+            : ims.reason === 'read'
+              ? `Could not check whether this credit note was taken off Inventory sales (the connection dropped before the answer came back). If it was not, the Orders floor counts it as waiting, and "Post to Inventory" there posts it.`
+              : `This credit note could not be taken off Inventory sales just now (the database could not post it). It is marked as waiting: press "Post to Inventory" on the Orders floor to post it.`,
       detail: ims.error ? errorLine(ims.error) : '',
     })
   }

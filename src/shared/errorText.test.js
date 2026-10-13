@@ -163,6 +163,13 @@ describe('errorText', () => {
       expect(errorText(err, 'staff')).toMatch(/Nothing was posted/)
     })
 
+    it('a refused post of waiting credit notes names who posts them, and is not worded as bills (S832 5f-4)', () => {
+      const err = hinted('rank_required', 'post_waiting_credit_notes: credit notes are posted to Inventory by the Owner, or by a POS manager of this outlet while the month is open')
+      expect(errorText(err, 'operator')).toMatch(/credit notes.*Owner.*POS manager.*nothing was posted/)
+      expect(errorText(err, 'operator')).not.toMatch(/bills/)
+      expect(errorText(err, 'staff')).toMatch(/Nothing was posted/)
+    })
+
     it('a stale order and a closed shift send the reader to reload, not to retry blind', () => {
       expect(errorText(hinted('stale_order', 'stale_order: this order was changed on another device…', 'P0001'), 'staff')).toMatch(/reload/i)
       expect(errorText(hinted('pos_shift_closed', 'pos_shift_closed: this shift is closed…'), 'operator')).toMatch(/reload/i)

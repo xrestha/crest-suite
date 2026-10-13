@@ -1,15 +1,15 @@
 // S809 3j: the till floor's Post to Inventory and the waiting counts every screen words. The sorting
 // of months decides which ones a POS manager is offered and who is named for the rest, so it is
-// pinned here; postWaitingFromTill is exercised with its two posting functions mocked (the bills'
-// is the server's since S830 5f-2).
+// pinned here; postWaitingFromTill is exercised with its two posting functions mocked (both call the
+// server: the bills' since S830 5f-2, the notes' since S832 5f-4).
 import { summarizeWaiting, waitingForPeriod, countPhrase, loadImsWaiting, postWaitingFromTill, noteImsMiss, pruneImsMisses, outletHasIms } from './posImsWaiting'
 import { postWaitingBills } from './backfillPosToIms'
-import { backfillCreditNotesToIms } from '../creditnotes/creditNotePosting'
+import { postWaitingCreditNotes } from '../creditnotes/creditNotePosting'
 
 // babel-jest hoists jest.mock above the imports; placed after them only to satisfy import/first.
 // CRA's preset sets resetMocks: true, so each test gives these their behaviour itself.
 jest.mock('./backfillPosToIms', () => ({ postWaitingBills: jest.fn() }))
-jest.mock('../creditnotes/creditNotePosting', () => ({ backfillCreditNotesToIms: jest.fn() }))
+jest.mock('../creditnotes/creditNotePosting', () => ({ postWaitingCreditNotes: jest.fn() }))
 
 const row = (bs_year, bs_month, period_status, bills, notes, period_id = period_status ? `p-${bs_year}-${bs_month}` : null) =>
   ({ bs_year, bs_month, period_id, period_status, bills, notes })
@@ -96,27 +96,27 @@ describe('postWaitingFromTill', () => {
     fn.asked = asked
     return fn
   }
-  const deps = scopedFrom => ({ supabase: { tag: 'sb' }, scopedFrom, scopedInsert: jest.fn(), scopedUpdate: jest.fn() })
+  const deps = scopedFrom => ({ supabase: { tag: 'sb' }, scopedFrom })
 
   test('posts the open month only: its bills on the server, then its notes', async () => {
     postWaitingBills.mockResolvedValue({ posted: 3, skipped: 1, waiting: 0 })
-    backfillCreditNotesToIms.mockResolvedValue({ posted: 1, skipped: 0 })
+    postWaitingCreditNotes.mockResolvedValue({ posted: 1, skipped: 0, billWaiting: 0, waiting: 0 })
     const scopedFrom = scopedFromWith({ data: OPEN, error: null })
     const r = await postWaitingFromTill(deps(scopedFrom))
 
     expect(scopedFrom.asked).toEqual([['monthly_periods', 'id, bs_year, bs_month, status', 'status', 'open']])
-    expect(r).toEqual({ period: OPEN, bills: { posted: 3, skipped: 1, waiting: 0 }, notes: { posted: 1, skipped: 0 } })
+    expect(r).toEqual({ period: OPEN, bills: { posted: 3, skipped: 1, waiting: 0 }, notes: { posted: 1, skipped: 0, billWaiting: 0, waiting: 0 } })
     expect(postWaitingBills).toHaveBeenCalledWith({ tag: 'sb' }, 'p6')
-    expect(backfillCreditNotesToIms.mock.calls[0][0].period).toBe(OPEN)
-    // Bills first, then notes (a note never goes in ahead of its bill).
-    expect(postWaitingBills.mock.invocationCallOrder[0]).toBeLessThan(backfillCreditNotesToIms.mock.invocationCallOrder[0])
+    expect(postWaitingCreditNotes).toHaveBeenCalledWith({ tag: 'sb' }, 'p6')
+    // Bills first, then notes (a "not served" note finds its bill in).
+    expect(postWaitingBills.mock.invocationCallOrder[0]).toBeLessThan(postWaitingCreditNotes.mock.invocationCallOrder[0])
   })
 
   test('no open month: nothing is posted, and it says so', async () => {
     const r = await postWaitingFromTill(deps(scopedFromWith({ data: null, error: null })))
     expect(r).toEqual({ reason: 'no_open' })
     expect(postWaitingBills).not.toHaveBeenCalled()
-    expect(backfillCreditNotesToIms).not.toHaveBeenCalled()
+    expect(postWaitingCreditNotes).not.toHaveBeenCalled()
   })
 
   test('a failed month read stops before any post', async () => {
@@ -130,12 +130,12 @@ describe('postWaitingFromTill', () => {
     postWaitingBills.mockResolvedValue({ posted: 0, skipped: 0, waiting: null, error: refusal })
     const r = await postWaitingFromTill(deps(scopedFromWith({ data: OPEN, error: null })))
     expect(r).toMatchObject({ period: OPEN, step: 'bills', error: refusal })
-    expect(backfillCreditNotesToIms).not.toHaveBeenCalled()
+    expect(postWaitingCreditNotes).not.toHaveBeenCalled()
   })
 
   test('a failed note post keeps what the bills did', async () => {
     postWaitingBills.mockResolvedValue({ posted: 2, skipped: 0, waiting: 0 })
-    backfillCreditNotesToIms.mockResolvedValue({ posted: 0, skipped: 0, error: 'boom' })
+    postWaitingCreditNotes.mockResolvedValue({ posted: 0, skipped: 0, billWaiting: 0, waiting: null, error: 'boom' })
     const r = await postWaitingFromTill(deps(scopedFromWith({ data: OPEN, error: null })))
     expect(r).toEqual({ period: OPEN, bills: { posted: 2, skipped: 0, waiting: 0 }, step: 'notes', error: 'boom' })
   })

@@ -173,8 +173,8 @@ export function sortByMethodOrder(rows, order) {
  * Category / Product Type / Item Wise. A bill contributes its lines as sales; a credit note issued in
  * the range contributes the credited bill's charged lines as RETURNS — `qtyReturn` up, every amount
  * down — spread with the same discount ratio the bill used (computeGroupAmounts), which is also how
- * creditNotePosting.js reverses the bill in Inventory: comped lines skipped (the caller's items
- * already exclude them), the bill discount spread by one ratio.
+ * the server's credit-note post (pos_post_credit_note_into, S832) reverses the bill in Inventory:
+ * comped lines skipped (the caller's items already exclude them), the bill discount spread by one ratio.
  */
 export function buildGroupedRows({ orders, creditNotes, orderById, itemsByOrder, vatReg, keyOf, labelOf }) {
   const grouped = {}

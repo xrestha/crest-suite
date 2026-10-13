@@ -715,6 +715,12 @@ const rules = [
     staff: 'Waiting bills are posted to Inventory by the owner, or by a POS manager while their month is open. Nothing was posted — ask one of them.',
     operator: 'Waiting till bills are posted to Inventory by the Owner, or by a POS manager of this outlet while their month is still open, so nothing was posted from this login. A closed month’s bills are the Owner’s to post, from Periods.',
   },
+  // post_waiting_credit_notes (S832 5f-4): the same people, the same rule, for waiting credit notes.
+  {
+    test: e => hasCode(e, 'rank_required') && /post_waiting_credit_notes/.test(e.message || ''),
+    staff: 'Waiting credit notes are posted to Inventory by the owner, or by a POS manager while their month is open. Nothing was posted — ask one of them.',
+    operator: 'Waiting credit notes are posted to Inventory by the Owner, or by a POS manager of this outlet while their month is still open, so nothing was posted from this login. A closed month’s notes are the Owner’s to post, from Periods.',
+  },
   {
     test: e => hasCode(e, 'rank_required'),
     staff: 'Your login does not have the rank for that. Nothing was changed — ask a supervisor or manager.',

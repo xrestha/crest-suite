@@ -1,7 +1,7 @@
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { withTimeout } from '../../../utils/withTimeout'
 import { postWaitingBills } from './backfillPosToIms'
-import { backfillCreditNotesToIms } from '../creditnotes/creditNotePosting'
+import { postWaitingCreditNotes } from '../creditnotes/creditNotePosting'
 
 // Till bills and credit notes waiting for Inventory: who is told, and who posts (S809 3j).
 //
@@ -106,17 +106,17 @@ export function countPhrase(bills, notes) {
 /**
  * The till floor's "Post to Inventory" (Q12 c): the waiting bills, then the waiting credit notes, of
  * the month OPEN in Inventory. Never a closed month: the server refuses a POS manager there (only the
- * Owner and the operator post one, from Periods). The bills are posted by the server (S830 5f-2,
- * postWaitingBills), from the stored bills, sales and stock lines together; the notes still from here
- * (creditNotePosting, until 5f-4). Nothing is posted twice: a posted bill is marked in the same
- * transaction, and a second post of a note is refused (pos_credit_note_already_posted), so two people
- * pressing at once cost nothing.
+ * Owner and the operator post one, from Periods). Both are posted by the server, from the stored bills
+ * (S830 5f-2, postWaitingBills; S832 5f-4, postWaitingCreditNotes). Nothing is posted twice: a posted
+ * bill or note is marked in the same transaction, and a second post of either is refused, so two
+ * people pressing at once cost nothing.
  *
  * Each step is bounded, as Periods bounds it. Throws only on a timeout (the caller words it).
  * @returns {Promise<{ period?, bills?, notes?, reason?: 'no_open', step?: 'period'|'bills'|'notes', error? }>}
- *   `bills` is postWaitingBills' answer: { posted, skipped, waiting, failedText? }.
+ *   `bills` is postWaitingBills' answer: { posted, skipped, waiting, failedText? }; `notes` is
+ *   postWaitingCreditNotes': { posted, skipped, billWaiting, waiting, failedText? }.
  */
-export async function postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate, imsSince = null }) {
+export async function postWaitingFromTill({ supabase, scopedFrom }) {
   const { data: period, error: pErr } = await withTimeout(
     scopedFrom('monthly_periods', 'id, bs_year, bs_month, status').eq('status', 'open').maybeSingle(),
     20000, 'Checking which month is open in Inventory')
@@ -125,10 +125,8 @@ export async function postWaitingFromTill({ supabase, scopedFrom, scopedInsert, 
 
   const bills = await withTimeout(postWaitingBills(supabase, period.id), 120000, 'Posting till bills to Inventory')
   if (bills.error) return { period, step: 'bills', error: bills.error }
-  // After the bills, so a credit note never goes into a month its own bill has not reached.
-  const notes = await withTimeout(
-    backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period, imsSince }),
-    60000, 'Posting credit notes to Inventory')
+  // After the bills, so a "not served" note finds its bill's sale in Inventory.
+  const notes = await withTimeout(postWaitingCreditNotes(supabase, period.id), 60000, 'Posting credit notes to Inventory')
   if (notes.error) return { period, bills, step: 'notes', error: notes.error }
   return { period, bills, notes }
 }

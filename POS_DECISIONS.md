@@ -180,6 +180,27 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~S809 stage 5, slice 5f-4: the server sends a credit note to Inventory as it is issued (Q32)~~ —
+  **step 1 shipped S832, 2026-10-13**: migration `20261013200000` applied live; app crest-v448.
+  `pos_credit_notes_post_to_inventory` (AFTER INSERT, DEFINER, inside an exception block, so a failed
+  post never refuses a note) posts the note into the open month holding its Nepal issue day through
+  `pos_post_credit_note_into`: the bill's own 'pos' sales rows from `pos_bill_sales_rows`, negated, and
+  for a "not served" note the bill's 'pos_sale' stock lines put back, in one transaction (no longer
+  best-effort). A "not served" note waits for its bill; a note on a bill from before the outlet's
+  Inventory began is never sent. `post_waiting_credit_notes` (the bills RPC's rights) posts a month's
+  waiting notes; the floor banner and Periods call it after the bills. The issue screen reads the mark
+  back (`creditNoteInInventory`) and words why a note waits. The operator's restore is left alone.
+  **Step 2** (after crest-v448 is live): both guards refuse a note's rows from a browser, a login can
+  no longer mark a note posted, and the till floor goes to 448.
+
+- [x] ~~S809 stage 5, slice 5f-3: Inventory starts on the day it is switched on (Q31 a)~~ — **shipped
+  S831, 2026-10-13**: migration `20261013190000` applied live; app crest-v447. `clients.ims_since`
+  (the start of the Nepal day Inventory was last switched on, stamped at every switch-on by
+  `clients_stamp_ims_since`; NULL = from the start). `pos_post_bill_into` answers `before_inventory`,
+  `post_waiting_pos_bills` and `pos_ims_waiting_counts` start at the stamp, and
+  `ims_first_till_bill_at` reads from it. The app reads it as `clientModules.imsSince`
+  (`billCountsForIms`). Reverses D6/D7. (Recorded here in S832; S831's own commit left this file out.)
+
 - [x] ~~S809 stage 5, slice 5f-2: a `post_waiting_pos_bills` RPC for the floor and Periods; the browser
   stops writing till rows; the till floor raised~~ — **step 1 shipped S830, 2026-10-13**: migration
   `20261013170000` applied live (run by the owner from the terminal); app crest-v446. **The RPC**

@@ -17,7 +17,7 @@ import {
 import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
 import { postWaitingBills, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
-import { backfillCreditNotesToIms, countUnpostedCreditNotesForPeriod } from '../modules/pos/creditnotes/creditNotePosting'
+import { postWaitingCreditNotes, countUnpostedCreditNotesForPeriod } from '../modules/pos/creditnotes/creditNotePosting'
 import { loadImsWaiting, waitingForPeriod, countPhrase } from '../modules/pos/orders/posImsWaiting'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
@@ -77,7 +77,7 @@ function TillWaitingNote({ waiting, period }) {
 export default function Periods() {
   const { isAdmin, isOwner, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
   const posEnabled = !!clientModules?.pos
-  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
   const [backfillBusy, setBackfillBusy] = useState(null) // period id currently posting POS bills
@@ -624,9 +624,10 @@ export default function Periods() {
       const { posted, skipped, waiting, failedText, error } = await withTimeout(
         postWaitingBills(supabase, period.id), 120000, 'Posting POS bills')
       if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
-      // After the bills, so a credit note is never posted into a month its own bill has not reached.
-      const notes = await withTimeout(
-        backfillCreditNotesToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period, imsSince: clientModules?.imsSince || null }), 60000, 'Posting credit notes')
+      // After the bills, so a "not served" note finds its bill's sale in Inventory. The server posts them
+      // too (S832 5f-4, post_waiting_credit_notes), and leaves out a note on a bill from before the
+      // outlet's Inventory began.
+      const notes = await withTimeout(postWaitingCreditNotes(supabase, period.id), 60000, 'Posting credit notes')
       if (notes.error) { fail(`Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}, but its credit notes were not posted — re-running picks up wherever it stopped.`, notes.error); return }
       // The frozen snapshot does not follow the write (closed-periods.md): revenue just landed
       // in a month whose Monthly Report was minted at close, and the Purchases banner names the
@@ -639,11 +640,17 @@ export default function Periods() {
         : ''
       const done =
         `Posted ${posted} bill${posted === 1 ? '' : 's'}${notes.posted > 0 ? ` and ${notes.posted} credit note${notes.posted === 1 ? '' : 's'}` : ''} into ${label}.` +
-        (skipped + notes.skipped > 0 ? ` ${skipped + notes.skipped} skipped (already posted, nothing to post, or the write failed — check the browser console).` : '') +
+        (skipped + notes.skipped > 0 ? ` ${skipped + notes.skipped} skipped (already in Inventory, or nothing to post).` : '') +
         frozenNote
-      // A bill the server could not post stays waiting, and the next run tries it again.
-      if (waiting > 0) {
-        fail(`${done} ${waiting} bill${waiting === 1 ? '' : 's'} from ${label} could not be posted and ${waiting === 1 ? 'is' : 'are'} still waiting — run it again; if ${waiting === 1 ? 'it keeps' : 'they keep'} failing, contact Crest support.`, failedText)
+      // A bill or note the server could not post stays waiting, and the next run tries it again.
+      const waitingNotes = Number(notes.waiting) || 0
+      if (waiting > 0 || waitingNotes > 0) {
+        const stuck = [
+          waiting > 0 && `${waiting} bill${waiting === 1 ? '' : 's'}`,
+          waitingNotes > 0 && `${waitingNotes} credit note${waitingNotes === 1 ? '' : 's'}`,
+        ].filter(Boolean).join(' and ')
+        const one = waiting + waitingNotes === 1
+        fail(`${done} ${stuck} from ${label} could not be posted and ${one ? 'is' : 'are'} still waiting — run it again; if ${one ? 'it keeps' : 'they keep'} failing, contact Crest support.`, failedText || notes.failedText)
         return
       }
       ok(done)

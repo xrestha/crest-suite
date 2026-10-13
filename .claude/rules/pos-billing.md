@@ -41,8 +41,8 @@ History: docs/rules-archive/pos-billing.md#silent-ims-post
 `pos_post_bill_into` on up to 200 of a month's waiting bills per call, each in its own subtransaction,
 and answers what it did and how many still wait. `postWaitingBills` (`backfillPosToIms.js`) calls it
 until nothing moves, for Periods' **Post POS bills to Inventory** and the floor's
-`PosImsPostingBanner` → `postWaitingFromTill`; both then post credit notes from the page (until
-5f-4). A bill already carrying till sales but no mark is marked, never posted again.
+`PosImsPostingBanner` → `postWaitingFromTill`; both then call `post_waiting_credit_notes` (5f-4,
+below). A bill already carrying till sales but no mark is marked, never posted again.
 `stock_movements_one_sale_per_bill_item` allows one till stock line per bill, source and item.
 **Since `20261013180000` (till floor 446) only the server writes them:** `ims_sales_entries_guard` and
 `ims_stock_movements_guard` refuse a `pos`/`pos_comp` sale or `pos_sale`/`pos_comp` line from any login
@@ -1085,18 +1085,18 @@ Migrated from the root `CLAUDE.md` (S663).
 
 ## A credit note that cannot reach Inventory is marked and posted later, like a bill (S747)
 
-`src/modules/pos/creditnotes/creditNotePosting.js` is the one implementation. The reversal used to
-be best-effort and silent — no open period for today, nothing written and nothing said; a refused
-insert never read — so a printed note left Inventory revenue overstated by the whole bill with no
-way to post it afterwards.
+**The server posts a note as it is issued (S832 5f-4, Q32, `20261013200000`):**
+`pos_credit_notes_post_to_inventory` (AFTER INSERT, DEFINER, exception block) → `pos_post_credit_note_into`,
+the bill's `pos_bill_sales_rows` 'pos' rows negated, plus its 'pos_sale' lines back for a "not served"
+note, one transaction; waiting notes go through `post_waiting_credit_notes` (the bills RPC's rights).
+`creditNotePosting.js` only reads the mark back (`creditNoteInInventory`) and counts. Never add a page that writes them.
 
 - **`pos_credit_notes.ims_posted_at` is stamped only after the rows land** (since S809 2f by the
   database, in the same transaction), and every reversal row
   carries **`sales_entries.pos_credit_note_id`**. The backfill asks the link, never the stamp alone —
   the same reason bills carry `pos_order_id` (above).
-- **The reversal takes back what the bill POSTED**: comped lines skipped, the bill discount spread by
-  the same `storedDiscountRatio` `billSalesRows` uses (over every non-comped line, S814), a `writeoff` bill reverses nothing. It used raw
-  `unit_price`, so a discounted bill's note removed more revenue than the bill ever added.
+- **The reversal takes back what the bill POSTED**: comped lines skipped, the bill discount spread as
+  the bill posted it, a `writeoff` bill reverses nothing (raw `unit_price` once over-reversed).
 - **The note issues whatever happens**, so failure is a notice with one button, not an error with a
   retry. Recovery is the floor banner's Post to Inventory (open month) or Periods → Post POS bills to
   Inventory (the Owner; any month), each posting waiting notes after the bills; the floor counts them (`unpostedNotes`, head-count, keeps last value on a failed poll) and

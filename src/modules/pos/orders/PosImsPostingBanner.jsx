@@ -38,8 +38,8 @@ const detailOf = err => (!err ? '' : typeof err === 'string' ? err : errorInfo(e
  * banner shows while either is above 0. `onPosted` reloads them after a post.
  */
 export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) {
-  const { clientId, isAdmin, isOwner, clientModules } = useAuth()
-  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  const { clientId, isAdmin, isOwner } = useAuth()
+  const { scopedFrom } = useScopedDb()
   const latest = useLatestRequest()
   const [waiting, setWaiting] = useState(null) // { rows, error }, null while the first read runs
   const [reloadKey, setReloadKey] = useState(0)
@@ -60,8 +60,8 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
     setBusy(true)
     setResult(null)
     try {
-      // A note on a bill from before the outlet's Inventory began is never sent (S831 5f-3, Q31 a).
-      const r = await postWaitingFromTill({ supabase, scopedFrom, scopedInsert, scopedUpdate, imsSince: clientModules?.imsSince || null })
+      // The server leaves out a bill or note from before the outlet's Inventory began (S831 5f-3, Q31 a).
+      const r = await postWaitingFromTill({ supabase, scopedFrom })
       if (r.reason === 'no_open') {
         setResult({ kind: 'error', text: 'No month is open in Inventory, so nothing was posted. The month has to be started in Inventory first (by the Owner or whoever runs Inventory); then press Post to Inventory again.' })
         return
@@ -80,10 +80,13 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
       const skipped = (r.bills.skipped || 0) + (r.notes.skipped || 0)
       const text = (posted ? `Posted ${posted} into ${label}.` : `Nothing from ${label} was left to post.`)
         + (skipped > 0 ? ` ${skipped} skipped: already in Inventory, nothing to post, or refused (press again to retry; if one keeps failing, tell the Owner).` : '')
-      // A bill the server could not post stays waiting (S830 5f-2): say so, with its reason as fine print.
-      const stuck = Number(r.bills.waiting) || 0
+      // A bill or note the server could not post stays waiting (S830 5f-2, S832 5f-4): say so, with its
+      // reason as fine print. A "not served" note waits for its bill, which is posted first.
+      const stuckBills = Number(r.bills.waiting) || 0
+      const stuckNotes = Number(r.notes.waiting) || 0
+      const stuck = stuckBills + stuckNotes
       setResult(stuck > 0
-        ? { kind: 'error', text: `${text} ${countPhrase(stuck, 0)} from ${label} could not be posted and ${stuck === 1 ? 'is' : 'are'} still waiting. Press Post to Inventory again; if ${stuck === 1 ? 'it keeps' : 'they keep'} failing, tell the Owner.`, detail: r.bills.failedText }
+        ? { kind: 'error', text: `${text} ${countPhrase(stuckBills, stuckNotes)} from ${label} could not be posted and ${stuck === 1 ? 'is' : 'are'} still waiting. Press Post to Inventory again; if ${stuck === 1 ? 'it keeps' : 'they keep'} failing, tell the Owner.`, detail: r.bills.failedText || r.notes.failedText }
         : { kind: 'ok', text })
     } catch (err) {
       setResult({
