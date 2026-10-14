@@ -36,7 +36,7 @@ import {
   Blend, CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, House, LifeBuoy,
-  History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart, ListPlus,
+  History, Hourglass, IdCardLanyard, Landmark, Layers, LayoutDashboard, LayoutGrid, LineChart, ListPlus,
   LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree,
   ListChecks, ListTodo, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
   Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
@@ -214,6 +214,8 @@ const POS_GROUPS = [
 const CUSTOMIZATION_GROUPS = [
   { key: 'cust-setup', label: null, items: [
     { to: '/customization/groups', label: 'Option Groups', icon: ListPlus, menuPricingAccess: true },
+    // Combos (S839) open for the same set as Option Groups: save_pos_combo refuses everyone else.
+    { to: '/customization/combos', label: 'Combos', icon: Layers, menuPricingAccess: true },
     { to: '/customization/report', label: 'Customization Report', icon: ListChecks, minPosRole: 'manager' },
   ]},
 ]
@@ -1160,7 +1162,12 @@ export default function Layout() {
     ims: () => firstReachable([homeIsOverview ? IMS_DASHBOARD : dashNavItem, ...IMS_GROUPS.flatMap(g => g.items)]),
     hr: () => firstReachable([HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)]),
     pos: () => firstReachable([POS_DASHBOARD, ...POS_GROUPS.flatMap(g => g.items)]),
-    customization: () => firstReachable([...CUSTOMIZATION_GROUPS.flatMap(g => g.items)].reverse()),
+    // The report first, then the setup pages in nav order, so Option Groups stays the home of a login
+    // that cannot read the report (an IMS manager) now that Combos sits between the two.
+    customization: () => {
+      const items = CUSTOMIZATION_GROUPS.flatMap(g => g.items)
+      return firstReachable([...items.filter(i => i.to === '/customization/report'), ...items])
+    },
     // A group owner's first question is the group, so Group Console leads when it is offered.
     suite: () => firstReachable([...suiteNavItems.filter(i => i.needsGroup), ...suiteNavItems]),
   }
