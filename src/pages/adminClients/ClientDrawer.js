@@ -3,7 +3,7 @@ import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedUpdate, scopedDelete } from '../../shared/scopedDb'
 import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
-import { formatAd } from '../../utils/bsCalendar'
+import { formatAd, BS_MONTHS, bsDayOrdinal } from '../../utils/bsCalendar'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
 import { getDateStatus, extendedFrom } from '../../utils/subscription'
 import { validateEmvQr } from '../../utils/emvQr'
@@ -24,10 +24,48 @@ import { restoreClientData } from '../../modules/admin/dataExport/restoreClientD
 import {
   pickBackupDirectory, ensureBackupDirectory, isFileSystemAccessSupported,
 } from '../../modules/admin/dataExport/backupDirectory'
-import { errorLine } from '../../shared/errorText'
+import { errorLine, errorInfo } from '../../shared/errorText'
 import { nepalBsLong } from '../../shared/nepalTime'
+import { settleWithin } from '../../utils/withTimeout'
+import { andList } from '../../shared/offeredPicks'
+import { findTillCoveredManualDays, recountManualSalesDays, SAVE_TIMEOUT_MS } from '../../modules/ims/sales/persistSalesDay'
 
 const EMPTY_USER = { email: '', password: '', full_name: '' }
+
+// The hand-entered days Clear POS's re-count could not confirm (S835), in the words Sales Entry
+// shows: "Shrawan 2082: the Bulk total, 3rd and 5th". A long month is a count rather than a list.
+function recountLeftText(left, periodById) {
+  return left
+    .map(j => ({ ...j, p: periodById.get(j.periodId) }))
+    .sort((a, b) => ((a.p?.bs_year || 0) - (b.p?.bs_year || 0)) || ((a.p?.bs_month || 0) - (b.p?.bs_month || 0)))
+    .map(({ p, days }) => {
+      const month = p ? `${BS_MONTHS[p.bs_month - 1] || `month ${p.bs_month}`} ${p.bs_year}` : 'a month that could not be named'
+      const list = days.length > 12
+        ? `${days.length} days${days.includes(0) ? ', the Bulk total among them' : ''}`
+        : andList(days.map(d => (d === 0 ? 'the Bulk total' : bsDayOrdinal(d))))
+      return `${month}: ${list}`
+    })
+    .join('; ')
+}
+
+// Which table still holds the client's rows when the final `clients` delete is refused (S835). A
+// foreign-key refusal names it twice: `… is still referenced from table "x"` in its details and
+// `… on table "x"` at the end of its message. Read defensively: any other shape, or a name that is
+// the clients table itself, gives null and the message names no table.
+function blockingTableOf(err) {
+  const texts = [err?.details, err?.message].filter(t => typeof t === 'string')
+  for (const t of texts) {
+    const m = t.match(/referenced from table "([A-Za-z0-9_]+)"/)
+    if (m && m[1] !== 'clients') return m[1]
+  }
+  for (const t of texts) {
+    const re = /on table "([A-Za-z0-9_]+)"/g
+    let m, last = null
+    while ((m = re.exec(t))) if (m[1] !== 'clients') last = m[1]
+    if (last) return last
+  }
+  return null
+}
 
 // Auto-fit instead of a declared column count (DESIGN.md's Auto-Fit-First Rule). This drawer is a
 // centred modal that is 880px on a desktop and ~340px on a phone; the hardcoded `1fr 1fr` this
@@ -936,7 +974,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // go with their depreciation, tax-pool and repair rows — admin-user-ops clearModuleData.
       ims: 'IMS transactions (purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs)\n\nALSO DELETED: the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs and openings, and repair expenses\n\nKEPT: items, vendors, categories, recipes, par levels, periods, and everything the till posted to Inventory (its sales and stock movements stay with its bills)',
       hr:  'HR transactions (attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster)\n\nKEPT: employees, salary components, leave types, holiday calendar, shift types',
-      pos: 'POS transactions (orders, order items, shifts, customers, and what the till posted to Inventory: its sales entries and stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs, and hand-entered sales with their stock movements. Occupied tables are freed.',
+      pos: 'POS transactions (orders, order items, shifts, customers, and what the till posted to Inventory: its sales entries and stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs, and hand-entered sales with their stock movements. Occupied tables are freed.\n\nAFTERWARDS: the hand-entered sales days the till also covered get their stock re-counted, because it was skipped while the till covered them. Other days are left as they were saved.',
     }
     if (!window.confirm(
       `Clear ${module.toUpperCase()} transactions for "${client.name}"?\n\n` +
@@ -947,14 +985,68 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeleteMsg('')
     try {
       if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
+      // Clear POS reads which hand-entered days the till covered first, right before the clear,
+      // because the till rows that decide it are what the clear deletes (S835). A failed read stops
+      // the clear: those days could not be re-counted afterwards.
+      let covered = null
+      if (module === 'pos') {
+        covered = await readTillCoveredDays()
+        if (covered.refusal) { setDeleteMsg(covered.refusal); setDeletingAction(null); return }
+      }
       await adminOp('clearModuleData', { clientId: client.id, module })
-      setDeleteMsg(module === 'ims'
+      if (module === 'pos') setDeleteMsg(await recountAfterClearPos(covered))
+      else setDeleteMsg(module === 'ims'
         ? 'ok:IMS transactions and the Fixed Assets register cleared. Other setup data was kept.'
         : `ok:${module.toUpperCase()} transactions cleared. Setup data was kept.`)
     } catch (err) {
       setDeleteMsg('error:' + err.message)
     }
     setDeletingAction(null)
+  }
+
+  // Clear POS takes the till's sales rows and stock movements away, and with them the reason Sales
+  // Entry skipped stock for the hand-entered days the till had covered (S835, owner decision). Those
+  // days would read as consuming nothing until someone re-saved them, so they, and only they, are
+  // re-counted straight after the clear, through Sales Entry's own re-post path; a day the till
+  // never covered keeps the figures it was saved with. Which days is read here, BEFORE the clear,
+  // with the write path's own rule (findTillCoveredManualDays). Months by `scopedFrom` with this
+  // client's id, as every other read on this drawer: the operator is acting on another client.
+  // → { jobs, periodById }, or { refusal } (the message) when a read failed.
+  async function readTillCoveredDays() {
+    const refuse = err => ({
+      refusal: `error:POS transactions were NOT cleared and nothing was deleted: Crest could not read which hand-entered sales days the till covers. Their stock has to be re-counted once the till's rows are gone, so the clear does not start without that list. Try again. ${errorLine(err)}`,
+    })
+    try {
+      const { data: periods, error } = await settleWithin(scopedFrom('monthly_periods', client.id, 'id, bs_year, bs_month'), SAVE_TIMEOUT_MS, 'Reading the months')
+      if (error) return refuse(error)
+      const periodById = new Map((periods || []).map(p => [p.id, p]))
+      const { data: jobs, error: coverErr } = await findTillCoveredManualDays(supabase, { periodIds: [...periodById.keys()] })
+      if (coverErr) return refuse(coverErr)
+      return { jobs, periodById }
+    } catch (err) {
+      return refuse(err)
+    }
+  }
+
+  // After the clear: re-count the covered days, and say how many were or which were not confirmed.
+  // It never throws: the clear has already happened, and a failure here must not read as the clear
+  // failing.
+  async function recountAfterClearPos({ jobs, periodById }) {
+    const cleared = 'POS transactions cleared. Setup data was kept.'
+    const redo = 'In Sales Entry, save each of those again without changing anything: saving rebuilds its stock.'
+    try {
+      const res = await recountManualSalesDays(supabase, { clientId: client.id, jobs })
+      const count = list => list.reduce((n, j) => n + j.days.length, 0)
+      const done = count(res.recounted)
+      const doneText = done
+        ? `Stock was re-counted for ${done} hand-entered sales day${done !== 1 ? 's' : ''} the till had covered, now that the till no longer covers them.`
+        : 'No hand-entered sales day was covered by the till, so none needed its stock re-counted.'
+      if (!res.left.length) return `ok:${cleared} ${doneText}`
+      const left = count(res.left)
+      return `error:${cleared} ${done ? doneText + ' ' : ''}The stock of ${left} hand-entered day${left !== 1 ? 's' : ''} could not be confirmed as re-counted — ${recountLeftText(res.left, periodById)}. ${redo}`
+    } catch (err) {
+      return `error:${cleared} The stock of these hand-entered days may not have been re-counted — ${recountLeftText(jobs, periodById)}. ${redo} ${errorLine(err)}`
+    }
   }
 
   // Confirmation happens in the typed-name modal (confirmAction) before this is called.
@@ -1046,7 +1138,19 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         const { error: cliErr } = await supabase.from('clients').delete().eq('id', client.id)
         if (cliErr) throw cliErr
       } catch (err) {
-        setDeleteMsg(`error:All logins were removed, but deleting ${stage} failed: ${err.message} — the client row still exists. Run Delete Client again to finish.`)
+        // The last step refused (S835): its data was cleared, but rows still pointing at the client
+        // were left behind — written after the clear, or in a table the clear does not reach — so
+        // the record stays. The message names the table when the refusal does, and keeps the
+        // technical text as the fine print in brackets, as the other messages on this drawer do.
+        // Only a refusal says so: a dropped connection proves nothing about rows, so it keeps the
+        // general message below.
+        const table = stage === 'the client record' ? blockingTableOf(err) : null
+        if (stage === 'the client record' && (err?.code === '23503' || table)) {
+          const { detail } = errorInfo(err, 'operator')
+          setDeleteMsg(`error:All logins were removed and the client's data was cleared, but some of its rows were left behind${table ? ` in ${table}` : ''}, so the client record itself was not deleted and still exists. Press Delete Client again: it clears what was left and then deletes the record. If it stops on the same table again, Delete does not clear that table and it needs fixing before this client can be deleted.${detail ? ` (${detail})` : ''}`)
+        } else {
+          setDeleteMsg(`error:All logins were removed, but deleting ${stage} failed: ${err.message} — the client row still exists. Run Delete Client again to finish.`)
+        }
         setDeletingAction(null)
         onClientUpdated()
         return
@@ -2179,7 +2283,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     {deletingAction === 'hr' ? 'Working…' : 'Clear HR Transactions'}
                   </button>
                 </Tip>
-                <Tip text="Deletes POS activity: orders, order items, shifts, customers, credit notes, payment confirmations, guest order requests, and what the till posted to Inventory (its sales entries and stock movements). Keeps tables, floor plan, staff accounts/PINs, and hand-entered sales with their stock movements; occupied tables are freed. Invoice numbering restarts. Cannot be undone.">
+                <Tip text="Deletes POS activity: orders, order items, shifts, customers, credit notes, payment confirmations, guest order requests, and what the till posted to Inventory (its sales entries and stock movements). Keeps tables, floor plan, staff accounts/PINs, and hand-entered sales with their stock movements; occupied tables are freed, and the hand-entered sales days the till also covered then get their stock re-counted (other days are left as saved). Invoice numbering restarts. Cannot be undone.">
                   <button onClick={() => handleClearModule('pos')} disabled={deleting}
                     className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'pos' ? 'Working…' : 'Clear POS Transactions'}

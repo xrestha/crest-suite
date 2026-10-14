@@ -1170,8 +1170,10 @@ applied once, at order time. **Usage of a sales row is recipe × qty_sold + delt
   beside the recipe walk under the same error handling. Revenue readers do not need it; MARGIN
   readers do (S792, RECIPES-3), because the upcharges are in `unit_price` — Recipe Margin and Best
   Sellers cost each row's extras through `extrasCost.js` at today's rates, credit rows reversing theirs.
-- **Nothing is clamped.** "No onion" on a dish whose recipe has no onion still takes onion off; a
-  negative total is a data-entry problem to show, not to hide.
+- **A choice's lines are not clamped on their own, but they follow their dish (S835).** "No onion" on a
+  dish whose recipe has no onion still takes onion off; a negative total is a data-entry problem to
+  show, not to hide. In a month where a dish's net sold is 0 or less, its choices add nothing either,
+  as the base recipe does (`stockReportCalc.js`, Theoretical Variance).
 - **Stock Movements' Sub-Recipes tab and its reconciliation note are recipe-only in release 1**, and
   say so; the raw ledger already includes choice usage from POS closes.
 

@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
+Last updated: 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
 
 ---
 
@@ -388,10 +388,9 @@ rate-limit key and whether 5c raises the till build floor. Then 5c, 5d, 5e and 5
 | 5e ✅ | `settings_guard_staff_roles` raw ranks; `set_active_outlet` home outlet; B3 `admin-user-ops` discount-limit default; `pos-staff-login`'s pre-S791 fallback; the retired key columns (`AuditLog.js`, `revokeClientTablets`); A2 `admin-user-ops` first hop (shipped 2026-10-13, S829: `20261013150000` applied live, then `20261013150100` after the deploys; admin-user-ops v67, pos-staff-login v11, crest-v444; the orphan `smooth-endpoint` deleted, owner's choice. The header probe found the Edge Function gateway already drops a caller's `x-forwarded-for` and writes `<caller>,<caller>, <AWS load balancer>`, so the trial limit was never fakeable; it now keys on `cf-connecting-ip`, then the FIRST hop, never the last) | those two functions; the `admin-user-ops` and `pos-staff-login` deploys; a second file dropping `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at`, `pos_legacy_key_last_used_at` after both deploys | Owner 2026-10-13: the HR manager's hour on the other HR pages is its own job (shared with hss-suite); Sita Shrestha's unlimited discount at BLOOM CAFE stays; `smooth-endpoint` deleted |
 | 5f ✅ (5f-1 to 5f-4) | 4e: the server posts a closed bill to Inventory from the stored bill in the close's transaction (replacing `postClosedBill`'s browser read); posting a POS-only outlet's past unmarked bills when Inventory is switched on (5f-1 shipped 2026-10-13, S830: `20261013160000` applied live by the owner from the terminal, crest-v445 Help and guide text. The apply re-checked the SQL walk and sales rule against every bill on record: 4,248 bills, 71,725 stock lines, all matching; the probe closed seven fixture bills at BLOOM CAFE, one as the supervisor through the full close guard. The index is `stock_movements_one_sale_per_bill_item`. 5f-2 step 1 shipped the same session: `20261013170000` applied live by the owner, `post_waiting_pos_bills` (DEFINER; the Owner and the operator any month, a POS manager the open month) through `pos_post_bill_into`, the close's step taken out of `pos_post_bill_to_ims`; crest-v446: the till only reads the mark back, the floor banner and Periods call the server, the browser's bill posting and `posStockLines` removed. Step 2 `20261013180000` applied by the owner once Vercel reported crest-v446 deployed: both guards refuse till sales and stock lines from any login outside the operator's restore (`pos_sale_server_only`), and the till floor is 446. 5f-3 shipped 2026-10-13, S831: `20261013190000` applied live, crest-v447: `clients.ims_since`, stamped at every switch-on, and the four server steps leave out a bill closed before it and a note on one. 5f-4 step 1 shipped 2026-10-13, S832: `20261013200000` applied live, crest-v448: the issue posts its note in the note's own transaction (`pos_credit_notes_post_to_inventory` → `pos_post_credit_note_into`: the bill's `pos_bill_sales_rows` 'pos' rows negated, and a "not served" note's stock lines back, together), waiting notes go through `post_waiting_credit_notes` after the bills, and the page only reads the mark back (`creditNoteInInventory`); the apply re-checked both notes on record against the server's reversal. Step 2 `20261013210000` applied once Vercel reported crest-v448 deployed: both guards refuse a note's rows from any login outside the operator's restore, a login cannot set a note's mark (`pos_credit_server_only`), and the till floor is 448. Slice 5f is complete) | Designed S828 (Q30–Q32). Finding: every Inventory stock figure works usage out from `sales_entries` at read time; only the `stock_movements` ledger rows (Stock Movements, Reorder's Book Stock, a "not served" put-back) need the walk at close, and a read-only SQL port of the ~80-line walk matched all 71,725 live ledger rows. Slices: **5f-1** an AFTER UPDATE OF status trigger (DEFINER, inside an exception block so a failed post never refuses a close) writes the sales rows and ledger rows, checking for itself what the INVOKER guards would (Inventory on, open month holding the bill's Nepal day, billed bill of this outlet), plus a unique partial index on `stock_movements(ref_id, source, item_id)` for `pos_sale`/`pos_comp`, a fixture probe (nested and shared sub-recipes, trims, choices, comp, writeoff, discount) and a live parity query; **5f-2** a `post_waiting_pos_bills` RPC for the floor and Periods, the browser stops writing till rows (both guards refuse them outside the operator's restore), the till floor raised; **5f-3** an "Inventory since" stamp set when `ims_enabled` turns on, so earlier bills are never counted as waiting; **5f-4** credit notes posted by the server at issue | Q29, Q30 (a), Q31 (a), Q32 |
 
-Closed without work: S809.4's `pos_customers` audit trigger (1i) shipped in 3k. Not in stage 5 unless the
-owner pulls them in: an FK on `pos_orders.table_id` (4k, needs a decision on deleting a table with bill
-history), refusing an order on an inactive table (4i, "if it shows up"), and
-`pos_payment_confirmations.matched_order_id`'s NO ACTION key (latent until auto-confirm is live).
+Closed without work: S809.4's `pos_customers` audit trigger (1i) shipped in 3k. The three left out of stage 5
+shipped in S835: deleting a table with bill history is refused (D41, no FK), an order on an inactive
+table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE SET NULL.
 
 **Added to stage 4 by the owner (2026-10-09, 2026-10-10):**
 
@@ -441,9 +440,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
 - ~~`apply_pos_item_comps` skips a `p_partial` row whose line is not found (`CONTINUE`) and still returns an
   NC number, so the till could print an empty comp slip (1j).~~ Fixed in 2b: the whole call is refused
   (`pos_comp_line_missing`).
-- `pos_payment_confirmations.matched_order_id` is NO ACTION: once auto-confirm is live, Clear Occupied of a
+- ~~`pos_payment_confirmations.matched_order_id` is NO ACTION: once auto-confirm is live, Clear Occupied of a
   bill holding an unused matched confirmation is refused by that key. `pos-payment-webhook` drops the error
-  of both its reads (1k).
+  of both its reads (1k).~~ Fixed in S835: the key is ON DELETE SET NULL (a cleared bill's payment is left unmatched for staff), and the webhook answers 503 on any failed read.
 - ~~Grants hygiene (the S782 trap): `anon` MAINTAIN on `pos_parking_slips` / `pos_payment_confirmations`,
   and TRUNCATE/REFERENCES/TRIGGER on `pos_cash_movements` (1k, 1l).~~ Fixed in 5a (S821), on every table.
 - ~~`pos_customers` has no audit trigger, so enrolment changes leave no record; `supabase-sql.md`'s
@@ -461,15 +460,15 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
 - ~~One-line pulls-forward, now that their functions were rebuilt: SHIFTS-7 (`NEW.closed_at := now()` in
   `pos_shifts_guard`) and SHIFTS-1's database half (`FOR SHARE` on the shift read in
   `pos_cash_movements_guard`) (1l).~~ Both shipped in 2b.
-- Sign-out scope: the Owner's and admin's account-menu Sign out, and Crest Staff's (shared with
+- ~~Sign-out scope: the Owner's and admin's account-menu Sign out, and Crest Staff's (shared with
   hss-suite), are still `global`, so signing out on a shared device ends that login on every device
   (ACCESS-7's shape). An Owner left on a wall KDS never locks, and its Exit opens the till as the
-  Owner; Help should steer wall screens onto a Kitchen login (1e).
+  Owner; Help should steer wall screens onto a Kitchen login (1e).~~ Fixed in S835 (D37, D38): every sign-out is this device only, and an Owner or the operator on an activated tablet's KDS is told to use a Kitchen login, its Exit going to the PIN screen.
 - ~~A Release reload restarts the idle clock, so a till locks at about 4 minutes once per release
   (ACCESS-6, stage 3) (1e).~~ Fixed in 3h: the last real input is kept per session on the device.
-- The Owner cannot see who reset a PIN: the new `staff_pin_vault` UPDATE row is in the admin-only
+- ~~The Owner cannot see who reset a PIN: the new `staff_pin_vault` UPDATE row is in the admin-only
   Audit Log. The page labels its field "Pin Reset" (`FIELD_LABELS` in `AuditLog.js`). The till's
-  lockout line now differs from `SelfServiceLogin.jsx`'s (HR, shared with hss-suite) (1f).
+  lockout line now differs from `SelfServiceLogin.jsx`'s (HR, shared with hss-suite) (1f).~~ Fixed in S835 (D39): POS Staff shows the Owner each login's last reset (`get_staff_pin_resets`), the Audit Log labels it "PIN Reset", and the HR and IMS lockout lines match the till's.
 - ~~`set_active_outlet` refuses an allowlisted non-Owner who asks for their HOME outlet by id ("no
   access"), because Outlet Access stores no home row, so the top-bar switcher's home entry fails for
   allowlisted staff (latent, 0 rows). The till's new buttons send NULL. Fix: `outletSwitchArg` inside
@@ -499,11 +498,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~`save_pos_order_items` leaves comped rows out of `before_sent` and `stored_sent`, so after a cancelled
     close the folded, already-sent comped dish reads as not sent and could print on a KOT again (main
     session, 2b review).~~ Fixed in 2h: comped rows count in both.
-  - Raise `pos_min_till_build()` to crest-v417 so a till older than 2a cannot charge an emptied cart, but
+  - ~~Raise `pos_min_till_build()` to crest-v417 so a till older than 2a cannot charge an emptied cart, but
     only after checking that `x-crest-build` reaches `request.headers` through PostgREST in production
     (1b's open check); every till would be refused otherwise (2b). **5c step 2 (S823):** the header was
     proven in 5b (S822); `20261013100100` raised it to 438 (the first build whose close carries
-    `items_version`), applied live once crest-v438 was deployed. Done.
+    `items_version`), applied live once crest-v438 was deployed. Done.~~ Closed in S835 (done in 5c).
   - ~~On a server `no_open_shift` the till keeps its cached shift id until the next press (cosmetic, 2b).~~
     Fixed in 4a: the refusal clears it.
   - ~~`viewPosBill.js`' `get_client_profile_names` read drops its error (blank Cashier), and its reads have
@@ -521,8 +520,8 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     stored on a bill).
   - ~~`PosCustomers.jsx`' settings comment says `is_vat_registered` moves the delivery commission base by
     about 13 points. It does not: taxable + non-taxable is ex-VAT under either flag (2c).~~ Fixed in S834 (comment corrected).
-  - Do not switch an outlet's VAT status before every till has reloaded to crest-v420: an older till
-    prints under its old setting while the bill is stamped with the new one (2c).
+  - ~~Do not switch an outlet's VAT status before every till has reloaded to crest-v420: an older till
+    prints under its old setting while the bill is stamped with the new one (2c).~~ Closed in S835: moot, the till floor is 448.
   - ~~`openBilling` and `openCompTab` never catch a failed cost read, so the comp cost silently shows
     NPR 0 (S695 says callers must) (2f).~~ Fixed in S834: bounded, and a failure shows "—" with a line, never NPR 0.
   - ~~`imsPostWarning` is a local counter that never goes down: a timed-out post that later lands (now
@@ -542,31 +541,31 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~"Manual Sales by Category" (`useSalesPivotData.js`) excludes only `pos`/`pos_comp`, so it counts
     `pos_credit` and `pos_credit_restock` rows as hand-entered sales (2e, predates it).~~ Fixed in 4d
     (`isManualSource`).
-  - `buildUsageMap` clamps a recipe's net sold at 0 for the base recipe but not for choice extras
-    (`ingredient_deltas`); matters only for a negative month (2e).
-  - A "not served" note on a bill from an earlier Inventory month puts the food back in the note's
-    month; the screen warns that the earlier month's count already settled it, but does not block (2e).
-  - Drafting briefs should give each parallel drafter its own scratchpad subfolder and local Postgres
-    port: two drafters overwrote each other's replica scripts (2c, 2e).
+  - ~~`buildUsageMap` clamps a recipe's net sold at 0 for the base recipe but not for choice extras
+    (`ingredient_deltas`); matters only for a negative month (2e).~~ Fixed in S835: a dish's choice extras follow it (Stock Report and Theoretical Variance).
+  - ~~A "not served" note on a bill from an earlier Inventory month puts the food back in the note's
+    month; the screen warns that the earlier month's count already settled it, but does not block (2e).~~ Closed in S835 as accepted (owner): the warning stays, since "not served" is right when the food is being billed again now.
+  - ~~Drafting briefs should give each parallel drafter its own scratchpad subfolder and local Postgres
+    port: two drafters overwrote each other's replica scripts (2c, 2e).~~ Closed in S835: a process note; this machine has no local Postgres, and helpers now own disjoint files.
 - ~~A held non-till laptop that is RELOADED with queued POS orders comes back in the login's new outlet,
   and Orders would replay the queue there (ORDER-FLOW-15, queue entries carrying their client) (1g).~~
   Fixed in 3f: each entry carries its outlet, and another outlet's are left alone.
   ~~The cart save on an outlet move also tries to cancel a standing points redemption, which fails once
   the login has moved.~~ Fixed in 2g: an outlet move leaves the points for that bill's own close.
 - **Found while drafting stage 2, wave 3 (2g, 2h; 2026-10-09, not fixed):**
-  - A guest whose points stand on an open bill from an earlier try sees a lower balance on another till
+  - ~~A guest whose points stand on an open bill from an earlier try sees a lower balance on another till
     and cannot use them there until that bill closes; a line like "N points held on bill 12" would help
-    (2g).
+    (2g).~~ Fixed in S835: the payment window names them (`pointsOnOtherBills`).
   - ~~Customers → Loyalty still offers a delivery partner's customer row for enrolment; enrolling it now
     does nothing (cosmetic, 2g).~~ Fixed in 3k: the row reads "Delivery partner — earns no points".
   - Menu Pricing (both branches) lets a manager tick On POS on a dish with no price, and IMS recipes
     default to `pos_enabled = true`; such a dish now just stays off the till, so Menu Pricing should say
-    "not on the till until it has a price" (2h). Fixed in S834 for the Menu Pricing note (both branches); the IMS default and the push preview stand.
-  - `push_master_data`'s preview for a dish matched by name on the first push never says its price is
+    "not on the till until it has a price" (2h). Fixed in S834 for the Menu Pricing note (both branches). Closed in S835: the IMS default stays (a dish with no price stays off the till and Menu Pricing says so); the push preview is fixed below.
+  - ~~`push_master_data`'s preview for a dish matched by name on the first push never says its price is
     overwritten when Selling prices is ticked; its plan table has no `DROP … IF EXISTS`, so two calls in
-    one transaction fail with 42P07 (tests only) (2h).
-  - The till's menu read requires `is_active`/`pos_enabled = true` while `save_pos_order_items` accepts
-    NULL (0 NULL rows, latent)~~, and the till's `option_count` message names no dish though the server
+    one transaction fail with 42P07 (tests only) (2h).~~ Fixed in S835: the preview says "its selling price is replaced with HQ's", and `_plan` is dropped first.
+  - ~~The till's menu read requires `is_active`/`pos_enabled = true` while `save_pos_order_items` accepts
+    NULL (0 NULL rows, latent)~~ (fixed in S835: both columns NOT NULL)~~, and the till's `option_count` message names no dish though the server
     sends one (CUSTOMIZATION-2 would help)~~ (2h). The message half is fixed in 3o (`choiceRefusal.js`).
 - **Found while drafting stage 3, wave 1 (3a, 3i, 3k; 2026-10-09, not fixed):**
   - ~~`mergeUnsentLines` (`posOrdersConstants.js`) keeps the base line's note and drops the incoming one,
@@ -591,13 +590,13 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     narrowed it to a restore, the body does not (3i).~~ Fixed in 4k (S819): the restore only.
   - ~~Clear IMS also deletes the Fixed Assets register and categories, which neither its confirm nor the
     "setup kept" heading mentions (3i).~~ Fixed in S834: the confirm, the Tip, the Danger Zone line and the success message name the Fixed Assets register.
-  - After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
-    stays un-depleted until that day is re-saved (3i).
+  - ~~After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
+    stays un-depleted until that day is re-saved (3i).~~ Fixed in S835: Clear POS re-counts the hand-entered days the till had covered (read before the clear; a failed read refuses it).
   - ~~The retired shared-key picker `get_pos_staff` still lists blocked logins (nothing calls it since 3h;
     `20261010190500` drops it)~~ (dropped, S812), and the Audit
-    Log shows `pos_blocked_at` under its raw column name (`FIELD_LABELS` in AuditLog.js) (3i).
-  - Recorded-rows counts are full table scans per Delete press; the Unblock leaver check reads
-    `hr_employee_id` only, not the S798 3f-1 employee links (3i).
+    Log shows `pos_blocked_at` under its raw column name (`FIELD_LABELS` in AuditLog.js) (3i). The label is fixed in S835.
+  - ~~Recorded-rows counts are full table scans per Delete press; the Unblock leaver check reads
+    `hr_employee_id` only, not the S798 3f-1 employee links (3i).~~ The leaver half is fixed in S835 (every linked employee record; gone at any outlet keeps it blocked). The scans stay: one Delete press, accepted.
   - ~~`pos_loyalty_ledger` carries the S782 grants trap: anon and authenticated hold REFERENCES, TRIGGER
     and TRUNCATE (not reachable through REST). `REVOKE TRUNCATE, REFERENCES, TRIGGER ON
     public.pos_loyalty_ledger FROM anon, authenticated;` (3k).~~ Fixed in 5a (S821).
@@ -608,9 +607,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~No screen shows a customer's full points history (Adjust shows the latest 10)~~ (History, 4g); ~~Loyalty's member list
     hides when no scheme exists, so balances left after every scheme is deleted cannot be adjusted;
     "+ Add scheme" is `disabled` with no reason when the name is empty (3k).~~ Fixed in S833.
-  - Between a release and every till reloading, an older till that creates a customer typed "+977…"
+  - ~~Between a release and every till reloading, an older till that creates a customer typed "+977…"
     stores that spelling, and a new till's later upsert for them is refused and logged (name/PAN
-    updates do not land; points still work) (3k).
+    updates do not land; points still work) (3k).~~ Closed in S835: moot, the till floor is 448.
 - **Found while drafting stage 3, wave 2 (3b, 3d, 3j; 2026-10-10, not fixed):**
   - ~~Grants hygiene (the S782 trap): anon and authenticated hold MAINTAIN on `pos_guest_order_requests`
     (3b).~~ Fixed in 5a (S821).
@@ -625,9 +624,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~The KDS's non-timeout error still says "was not moved — it is back where it was" for a dropped
     connection, where the write may have landed; KOT Log shows "Cancelled" for both a kitchen Clear
     and a void (3d).~~ Fixed in S833 (`tapAnswer.js`, `ticketStage.js`: Cleared / Voided).
-  - With two live tickets for one dish and one pulled, a direct API call could Clear either ticket
+  - ~~With two live tickets for one dish and one pulled, a direct API call could Clear either ticket
     (never both); a send whose ticket insert failed leaves food no ticket carries, so the board offers
-    Clear and the server refuses it (a supervisor clears it) (3d).
+    Clear and the server refuses it (a supervisor clears it) (3d).~~ Closed in S835: the second half is moot (3f queues and retries a ticket insert); the first is parked, a board mismatch with no money in it.
   - ~~IMS-HANDOFF-9 is unchanged: neither the floor banner nor its post checks whether the client has
     Inventory at all; errorText's `pos_sale_unlinked` operator sentence names only Periods (3j).~~ Fixed
     in 4e (`tillPostsToIms`).
@@ -669,10 +668,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     `save_pos_order_items` (3e).
   - ~~The Owner Report (`computeMonthlyReport.js`) counts takeaway as covers and drops credited bills from
     them (now owner-decided, slice 3m).~~ Fixed in 3m (schema 15: seated guests, credited bills kept).
-    `hr_labour_actuals` counts every paid bill as at least 1 cover and
+    ~~`hr_labour_actuals` counts every paid bill as at least 1 cover and
     Demand Forecast does `o.covers || 1` over all channels; possibly intended for staffing, but the Roster
     calls the figure "covers". `ClientDashboard.jsx` keeps its own copy of `bsDayBoundaryIso` (correct
-    today) (3n).
+    today) (3n).~~ Closed in S835 (D43): the staffing count stays and both screens say what it counts in
+    a Tip; the dashboard imports the shared helper.
 - **Found while drafting stage 3, wave 4 (3f, 3g, 3h, 3l, 3m, 3o; 2026-10-10, not fixed):**
   - ~~Ticket Routing lists only categories with a dish on the till, so a bar category with no dish (the
     default Beverage where the drinks are "Drinks") cannot be moved to KOT there, and that till keeps a
@@ -680,28 +680,28 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~The 1L+ year's line read fires every 150-bill chunk at once (about 730 requests for a 1,09,500-bill
     year) (3m).~~ Fixed in S834: six chunks at a time (`fetchAllRowsChunked` concurrency).
   - ~~The KOT button's Tip still says "food items"; Avg Bill Value on the Owner Report has no Tip~~ (both
-    fixed in 4l); a no-bar till shows BOT for a moment on load (3m).
-  - The stock-count tablet's lock still signs out on every device (`scope: 'local'` would be safe there:
-    `ims_revoke_count_sessions` covers a lost counting tablet) (3h).
-  - `pos-staff-login` still carries the dead pre-S791 fallback for a missing `reserve_pos_pin_attempt`
-    (3h).
-  - `client_secrets.pos_device_secret`, `pos_legacy_key_retired_at` and `pos_legacy_key_last_used_at`
+    fixed in 4l); ~~a no-bar till shows BOT for a moment on load (3m).~~ Fixed in S835 (`routingShown`).
+  - ~~The stock-count tablet's lock still signs out on every device (`scope: 'local'` would be safe there:
+    `ims_revoke_count_sessions` covers a lost counting tablet) (3h).~~ Fixed in S835 (D37).
+  - ~~`pos-staff-login` still carries the dead pre-S791 fallback for a missing `reserve_pos_pin_attempt`
+    (3h).~~ Closed in S835: removed in 5e.
+  - ~~`client_secrets.pos_device_secret`, `pos_legacy_key_retired_at` and `pos_legacy_key_last_used_at`
     are read by nothing (`revokeClientTablets` still writes the first two, `AuditLog.js` lists
-    `pos_device_secret`): a later column drop (3h).
+    `pos_device_secret`): a later column drop (3h).~~ Closed in S835: dropped in 5e.
   - ~~A session that ends by itself does not keep the till's unsent cart (`runBeforePosLock` is not run);
     `ProtectedRoute`'s `!profile` branch still sends a profile-less session on an activated tablet to
     `/login` (3h).~~ Fixed in S833 (`sessionEndKeepsCart`, reason 'ended').
   - ~~A guest QR order still waiting when its table's bill closes is never answered by anything
     (`get_pos_device_guest_alerts` has no age limit), so it rings on and the next party's screen offers
     its Accept (3g).~~ Fixed in 4i (D21): the close turns it away (`pos_orders_close_turns_away_guest_orders`).
-  - A table tapped while the sign-in restore's reads are running takes the kept lines (since S776);
+  - ~~A table tapped while the sign-in restore's reads are running takes the kept lines (since S776);
     offline between the restore's two reads on a free table, the covers numpad hides the floor message;
-    a takeaway closed between the two reads is kept under "could not be read" wording (3g).
-  - A customized line reopened from a crest-v427 queue entry has no snapshot (the KOT prints without
-    choices, the cart says "No choices picked") (3f).
+    a takeaway closed between the two reads is kept under "could not be read" wording (3g).~~ Fixed in S835: kept lines go only to their own table or takeaway (`keptCartFor`), offline too, and a takeaway closed meanwhile gets a new one.
+  - ~~A customized line reopened from a crest-v427 queue entry has no snapshot (the KOT prints without
+    choices, the cart says "No choices picked") (3f).~~ Closed in S835: moot; such an entry uploads on the first online load and reopens from the server's copy.
   - ~~Tickets for an order created offline are logged with `order_no` null (3f).~~ Fixed in S833 (past ones stay).
-  - A send whose lost save landed, followed by another tablet saving on top before the upload, shows a
-    "NOT applied" conflict though the lines landed (3f).
+  - ~~A send whose lost save landed, followed by another tablet saving on top before the upload, shows a
+    "NOT applied" conflict though the lines landed (3f).~~ Fixed in S835 (owner): an entry whose every dish is on the order reads as landed, unless it took food off (`storedLinesContainPayload`).
   - ~~After one no-answer, sends queue for 30 s even if the link recovered sooner; an older (v427) tab
     draws a `kot:` entry as a 0-item takeaway (3f).~~ Fixed in S833: a read every 5 s ends it. The v427
     half is closed without work: the till floor is 448, so such a tab is refused and reloads.
@@ -712,9 +712,9 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     `pos_cash_movements_one_credit_settlement`.
   - ~~PosCustomers' settings read, `loadCustomers` and `toggleHistory` have no time limit (3l).~~ Fixed in
     S833, with `loadCredit`. LoyaltyTab's own load (found S833): fixed in S834.
-  - `handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
-    fails; the server's `option_count` counts picks of hidden options (harmless while
-    `option_not_on_menu` fires first) (3o).
+  - ~~`handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
+    fails~~ (closed in S835: fixed in 4h, `refuseAndReloadMenu`); the server's `option_count` counts picks of hidden options (harmless while
+    `option_not_on_menu` fires first) (3o). Parked: add `AND o.is_active` the next time those bodies are rebuilt.
   - ~~On a POS manager's PIN the Customization Report's Margin `items` read is fenced, so costs read NPR 0:
     the 2f item above ("the Customization report (`loadDeltaExplosion`)"), not a new one (3o).~~ Fixed in
     5d (S828), `posDeltaCosting`.
@@ -722,94 +722,94 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~The operator's `imsEnabled` is always true, so a bill the operator closes on an outlet without Crest
     IMS still posts to Inventory (4e).~~ Fixed the same day (owner): `outletHasIms` reads the viewed
     outlet's own module for the operator, on the till and both credit-note screens.
-  - Stage 5: a server-side post from the stored bill, stamping it in one transaction (would replace
-    `postClosedBill`'s browser read); ~~`ims_sales_entries_guard` refusing till rows for a client without
-    Inventory~~ (done in 5d, S828, `pos_outlet_no_ims`); and, when Inventory is switched on for a POS-only outlet, a way to settle (or post) its
-    past unmarked bills, which D6 kept recoverable (4e).
+  - ~~Stage 5: a server-side post from the stored bill, stamping it in one transaction (would replace
+    `postClosedBill`'s browser read); `ims_sales_entries_guard` refusing till rows for a client without
+    Inventory (done in 5d, S828, `pos_outlet_no_ims`); and, when Inventory is switched on for a POS-only outlet, a way to settle (or post) its
+    past unmarked bills, which D6 kept recoverable (4e).~~ Closed in S835: done in 5d and 5f (5f-3 starts Inventory on its switch-on day).
   - ~~The POS-only Home's own POS sales pivot still shows money to Staff rank; D2 covered only the POS
     Dashboard (4d).~~ Fixed the same day (owner): Supervisor and above, as D2.
   - ~~Table Management's "skewed by bills left open" note can no longer show, now that sittings over 12
     hours are left out (4d): remove it in 4j.~~ Removed in 4j (S818).
-  - `pos_parking_slips` has no index on `time_in`; the All tab's date range filters on it. Fine at
-    today's volume (0 slips live) (4f).
+  - ~~`pos_parking_slips` has no index on `time_in`; the All tab's date range filters on it. Fine at
+    today's volume (0 slips live) (4f).~~ Fixed in S835: `pos_parking_slips_client_time_in_idx`.
 - **Found while building stage 4, slice 4g (2026-10-12, not fixed):**
-  - A late award (the one-tap) uses the customer's scheme as it is now, not as it was when the bill
+  - ~~A late award (the one-tap) uses the customer's scheme as it is now, not as it was when the bill
     closed; the History row shows the points before the tap, and the answer says when the server's
-    figure differs. Fine while schemes rarely change.
-  - A Credit Note on a bill closed before a Move takes its points back from the OLD number, which can go
-    below 0 while the new number keeps them (the ledger's true position, as for any spent points).
+    figure differs. Fine while schemes rarely change.~~ Closed in S835 as accepted.
+  - ~~A Credit Note on a bill closed before a Move takes its points back from the OLD number, which can go
+    below 0 while the new number keeps them (the ledger's true position, as for any spent points).~~ Closed in S835 as accepted.
   - ~~`pos_customer_phone_locked`'s sentence still says "the points stay with the old number"; it should
     name Move. Stage 5 (it is a guard body).~~ Fixed in 5b (S822), with `errorText.js` and Help, which
     still sent the reader to Adjust.
-  - A till on crest-v430 or older shows held points as spendable until it reloads; the server refuses
-    them with a sentence (`pos_points_held`).
+  - ~~A till on crest-v430 or older shows held points as spendable until it reloads; the server refuses
+    them with a sentence (`pos_points_held`).~~ Closed in S835: moot, the till floor is 448.
   - ~~Loyalty's member list still hides when no scheme exists, and "+ Add scheme" is still `disabled`
     with no reason when the name is empty (S809.4, 3k): stage 6 (left out of 4l, which changed copy only).~~
     Fixed in S833 (D33).
 - **Found while building stage 4, slice 4h (2026-10-12, not fixed):**
-  - The below-zero checks in the editors look at one option at a time. Two negative choices that only
+  - ~~The below-zero checks in the editors look at one option at a time. Two negative choices that only
     go below zero together, or a hidden option shown again with Show again, are refused only by the
-    till's save (`option_price_below_zero`, naming the dish). 0 negative options live besides sizes.
-  - Put it on dishes checks only the dishes newly ticked, not ones already carrying the group.
-  - Menu Pricing's size line and refusal are advisory: on a failed option-catalog read they say
-    nothing and the price saves, and the till then refuses the below-zero line by name.
-  - A guest whose dish its choices price below zero hears the generic "choices no longer available"
-    (`unavailable_options`); the guest page cannot tell it from a hidden choice.
-  - A till on crest-v431 or older still numbers a "No …" removal as a free pick on screen and greys
-    other picks under its "Max"; the server prices the new rule (0 removals live).
+    till's save (`option_price_below_zero`, naming the dish). 0 negative options live besides sizes.~~ Fixed in S835: every editor checks the dish's lowest reachable price (`dishesBelowZero`), Show again included.
+  - ~~Put it on dishes checks only the dishes newly ticked, not ones already carrying the group.~~ Fixed in S835: those are named in a warning; new ticks are refused.
+  - ~~Menu Pricing's size line and refusal are advisory: on a failed option-catalog read they say
+    nothing and the price saves, and the till then refuses the below-zero line by name.~~ Fixed in S835: the row says "Choices not checked", and the price still saves.
+  - ~~A guest whose dish its choices price below zero hears the generic "choices no longer available"
+    (`unavailable_options`); the guest page cannot tell it from a hidden choice.~~ Fixed in S835: `below_zero_options`, with its own sentence.
+  - ~~A till on crest-v431 or older still numbers a "No …" removal as a free pick on screen and greys
+    other picks under its "Max"; the server prices the new rule (0 removals live).~~ Closed in S835: moot, the till floor is 448.
   - The server's `option_count` still counts picks of hidden options (harmless while
-    `option_not_on_menu` fires first), as filed in 3o.
+    `option_not_on_menu` fires first), as filed in 3o. Parked (S835): with the next rebuild of those bodies.
 
 - **Found while building stage 4, slice 4i (2026-10-12, not fixed):**
-  - `guard_pos_order_insert` does not refuse an order on an inactive table. A till whose floor read is up
+  - ~~`guard_pos_order_insert` does not refuse an order on an inactive table. A till whose floor read is up
     to 15 s old can still open one on a table retired a moment ago; its seat write then leaves the table
-    Inactive, and the floor opens that bill from the tile. Stage 5 if it shows up.
+    Inactive, and the floor opens that bill from the tile. Stage 5 if it shows up.~~ Fixed in S835: refused (`pos_table_inactive_new_order`), the table read FOR SHARE.
   - ~~A guest QR order on a table that never gets a bill is still answered by nothing and rings on
     (`get_pos_device_guest_alerts` has no age limit); 4i answers it only when a bill on that table closes.~~ Fixed in S834 (D34): turned away after 30 minutes unanswered (`pos_turn_away_stale_guest_orders`).
-  - A guest order accepted into the cart whose "accepted" mark failed to save before the close is turned
-    away by the close although its dishes were billed (the save marks it first; a failed mark is rare).
-  - A bill voided outside a till (REST) prints no VOID slip: only the Kitchen Display card tells the
-    kitchen. A till on crest-v432 or older still cancels a voided order's Served tickets itself.
-  - The 12 live tickets of voided orders (all from before S817) stay cancelled, Served ones included.
+  - ~~A guest order accepted into the cart whose "accepted" mark failed to save before the close is turned
+    away by the close although its dishes were billed (the save marks it first; a failed mark is rare).~~ Fixed in S835 (D40): one more bounded try before the close; if it still waits, the bill closes and the floor tells the waiter.
+  - ~~A bill voided outside a till (REST) prints no VOID slip: only the Kitchen Display card tells the
+    kitchen. A till on crest-v432 or older still cancels a voided order's Served tickets itself.~~ Closed in S835: a void whose answer was lost and confirmed later now prints its VOID slip (owner); a REST void stays KDS-only (Supervisor+ with Allow Void, accepted); the v432 half is moot.
+  - ~~The 12 live tickets of voided orders (all from before S817) stay cancelled, Served ones included.~~ Closed in S835 (a record, nothing to do).
 
 - **Found while building stage 4, slice 4j (2026-10-12, not fixed):**
   - ~~An unanswered request whose time has passed expires only when the same number asks again; other
     stale requests wait for staff (marked "time passed") and still count on the nav chip. A sweep that
     answers every passed request (on the staff page's load, or a schedule) would clear the chip too.
     0 requests waiting live.~~ Fixed in S834: counted nowhere once passed, and closed when Reservations opens (`requestExpiry.js`).
-  - The Seat dialog's busy marks come from the page's last read (frozen while the dialog is open); the
-    till now refuses a taken table, but the dialog still shows it free until then.
-  - A Seat prompt on the floor (a due booking's table tapped) that meets the one-open-order index on its
+  - ~~The Seat dialog's busy marks come from the page's last read (frozen while the dialog is open); the
+    till now refuses a taken table, but the dialog still shows it free until then.~~ Fixed in S835: the dialog reads them itself on opening and every 15 s.
+  - ~~A Seat prompt on the floor (a due booking's table tapped) that meets the one-open-order index on its
     first save is adopted onto that order by the existing 23505 path, as before; only the Reservations
-    hand-off was changed.
-  - A till lock's kept dishes still go onto a new order ahead of a Reservations hand-off to the same
-    table, and the booking is then linked to that order.
-  - No-show is gated on the booked time in the page only; the table takes it at any time (REST).
-  - The S818 read-back of `submit_reservation_request` after the apply was blocked by auto mode; the
+    hand-off was changed.~~ Closed in S835: benign (the booking is never linked to the other party's order).
+  - ~~A till lock's kept dishes still go onto a new order ahead of a Reservations hand-off to the same
+    table, and the booking is then linked to that order.~~ Fixed in S835 (owner): the booking is seated and the kept dishes are named, not added.
+  - ~~No-show is gated on the booked time in the page only; the table takes it at any time (REST).~~ Fixed in S835: `pos_reservations_guard_no_show`.
+  - ~~The S818 read-back of `submit_reservation_request` after the apply was blocked by auto mode; the
     migration's own section 2 asserted md5, SECURITY DEFINER and anon / authenticated / service_role
-    EXECUTE inside the apply.
+    EXECUTE inside the apply.~~ Closed in S835 (a record).
 
 - **Found while building stage 4, slice 4k (2026-10-12, not fixed):**
   - `pos_orders.table_id` still has no FK (FLOOR-KITCHEN's offline-delete note): a table deleted while a
     till holds an offline order for it leaves that order on neither the floor nor Billing. A FK has to
-    decide what deleting a table with bill history means (refuse, or SET NULL and keep `table_name`). The open order itself is fixed in S834: the floor and Billing show it as its own card, named after the old table; the FK question stands.
-  - The new client FKs make a client delete with POS rows left behind cascade only as far as the guards
+    decide what deleting a table with bill history means (refuse, or SET NULL and keep `table_name`). The open order itself is fixed in S834: the floor and Billing show it as its own card, named after the old table. Decided in S835 (D41): a table with bills on record is refused (`pos_table_has_bills`); no FK, since SET NULL would turn its bills into takeaways.
+  - ~~The new client FKs make a client delete with POS rows left behind cascade only as far as the guards
     allow: `guard_pos_order_delete` refuses a billed bill in that cascade from the operator's browser
     session, so Delete Client stops at its last step and says to run it again. Safe (deleteClientDataFor
-    clears POS first), but the message names no table.
+    clears POS first), but the message names no table.~~ Fixed in S835: the message names the table it stopped at and says pressing Delete again clears it.
   - ~~`fetchViewModules` (AuthContext) still drops its read error; on a failed read `clientModulesKnown`
     stays false and the D30 till notice never shows for support (it fails open, as every UI gate does).~~ Fixed in S834: logged, and a failed read keeps the last good list.
   - `get_client_profile_names` now returns every Crest operator login's id (as "Crest support") to any
-    client's caller. One login today; ids only, no name.
-  - Live today: 0 bills closed and 0 tickets sent by support (BLOOM CAFE was rebuilt in S810), so the
-    new label shows on nothing yet.
-  - `POS_DECISIONS.md` has no entry for slice 4j (S818 moved its rows out of this file and wrote none
-    there); the CHANGELOG entry is the only record of D22–D26.
+    client's caller. One login today; ids only, no name. Parked (S835).
+  - ~~Live today: 0 bills closed and 0 tickets sent by support (BLOOM CAFE was rebuilt in S810), so the
+    new label shows on nothing yet.~~ Closed in S835 (a record).
+  - ~~`POS_DECISIONS.md` has no entry for slice 4j (S818 moved its rows out of this file and wrote none
+    there); the CHANGELOG entry is the only record of D22–D26.~~ Fixed in S835: the S818 entry is written.
 
 - **Found while building stage 5, slice 5d (2026-10-13, not fixed):**
-  - The Customization report admits an IMS manager (`canView`), but `no_ims_staff` hides till bills from
+  - ~~The Customization report admits an IMS manager (`canView`), but `no_ims_staff` hides till bills from
     IMS logins, so the report reads no bills and shows nothing for them. Owner question: keep the page
-    for them (then the server must give them the choice counts) or take it away.
+    for them (then the server must give them the choice counts) or take it away.~~ Fixed in S835 (D42): taken away for Inventory-only managers, nav entry included.
   - ~~A credit note's original-invoice label uses today's invoice prefix, as the page always did, because
     a bill does not store its prefix; a prefix change relabels a later note's reference to an earlier
     bill. Storing it means a `guard_pos_order_close` change (a later slice).~~ Fixed in S834 (D35): bills and notes keep their own code (`invoice_prefix`, stamped at close and issue).

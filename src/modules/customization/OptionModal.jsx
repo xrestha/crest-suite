@@ -7,7 +7,7 @@ import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { OPTION_COLS, DIET_LABEL, parseAllergens } from './customizationData'
-import { exFromIncl, inclFromEx, signedPrice, optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { exFromIncl, inclFromEx, signedPrice, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 import { VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import { npr } from '../../shared/nepalMoney'
 
@@ -32,8 +32,10 @@ const newKey = () => Math.random().toString(36).slice(2)
 
 // `vatUnknown` (S809 2h, CUSTOMIZATION-1): the page could not confirm whether the outlet charges VAT
 // (settings loading, failed, or another client's row), so `vat` is a guess and nothing is saved.
+// `catalog` (S835): the page's { groups, options, attachments }, so the below-zero check prices each
+// dish over every group it offers, not this option alone.
 export default function OptionModal({
-  group, option, ingredients, attachedDishes, vat, vatUnknown = false, imsEnabled,
+  group, option, ingredients, attachedDishes, catalog, vat, vatUnknown = false, imsEnabled,
   itemChoices, onClose, onSaved,
 }) {
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -95,16 +97,23 @@ export default function OptionModal({
     if (!form.name.trim()) e.name = 'Give the option a name, e.g. “Extra cheese”.'
     if (!form.is_removal && form.price !== '' && !Number.isFinite(Number(form.price))) e.price = 'Enter a number.'
     if (fullPriceMode && form.price !== '' && Number(form.price) < 0) e.price = 'A price cannot be below zero.'
-    // S809 4h (CUSTOMIZATION-6, D17): refused here rather than by the till mid-service. A hidden
-    // option is offered nowhere, so it is not checked until it is shown again.
-    if (!e.price && !form.is_removal && form.is_active && Number.isFinite(deltaIncl)) {
-      const found = optionsBelowZero(attachedDishes, [{ name: form.name.trim() || 'this option', price_delta: exFromIncl(deltaIncl, vat) }])
-      if (found.length) {
-        e.price = `${belowZeroText(found)}, and the till refuses a dish priced below zero. Raise the price, or take this group off ${found.length === 1 ? 'that dish' : 'those dishes'} first.`
-      }
-    }
     if (isSize && form.portion !== '' && !(Number(form.portion) > 0 && Number(form.portion) <= 10)) {
       e.portion = 'Enter a portion above 0 and up to 10 — 1 is a regular plate, 1.5 is half as much again.'
+    }
+    // S809 4h (CUSTOMIZATION-6, D17): refused here rather than by the till mid-service. S835: over
+    // the whole dish — this option beside every other group it is offered with, as the till prices
+    // a plate — so two cheaper choices that only go below zero together are caught too. A hidden
+    // option drops out of the dishes' offer, and a "No …" one can let a guest skip a paid pick.
+    if (!e.price && !e.portion && Number.isFinite(deltaIncl)) {
+      const found = dishesBelowZero(attachedDishes, catalogAfterSave(), { before: catalog })
+      if (found.length) {
+        const these = found.length === 1 ? 'that dish' : 'those dishes'
+        if (form.is_removal) {
+          e.removal = `${belowZeroText(found)}, and the till refuses a dish priced below zero. A “No …” choice lets a guest skip this group’s paid options — change the prices first, or take this group off ${these}.`
+        } else {
+          e.price = `${belowZeroText(found)}, and the till refuses a dish priced below zero. Raise the price, or take this group off ${these} first.`
+        }
+      }
     }
     lines.forEach((l, i) => {
       if (!l.ref) e[`line${i}`] = 'Choose an item.'
@@ -116,6 +125,24 @@ export default function OptionModal({
     if (Object.keys(e).some(k => k.startsWith('line'))) setStockOpen(true)
     setErrors(e)
     return Object.keys(e).length === 0
+  }
+
+  // The catalog as this save would leave it: this option as the form has it, beside the rest.
+  function catalogAfterSave() {
+    const nextPortion = isSize && form.portion !== '' ? Number(form.portion) : null
+    const edited = {
+      ...(option || {}),
+      id: option?.id || NEW_OPTION_ID,
+      group_id: group.id,
+      name: form.name.trim() || 'this option',
+      price_delta: form.is_removal ? 0 : exFromIncl(deltaIncl, vat),
+      is_removal: isSize ? false : form.is_removal,
+      is_active: form.is_active,
+      sort: option ? option.sort : nextSortOf(group),
+      portion_factor: isSize ? nextPortion : option?.portion_factor,
+    }
+    const options = (catalog?.options || []).filter(o => o.id !== edited.id)
+    return { ...catalog, options: [...options, edited] }
   }
 
   async function save() {
@@ -235,6 +262,7 @@ export default function OptionModal({
             Always free. Prints in bold as <strong>NO {form.name.replace(/^no\s+/i, '') || '…'}</strong> on the kitchen ticket.
           </p>
         )}
+        {form.is_removal && errors.removal && <p className="field-error" role="alert" style={{ margin: 0 }}>{errors.removal}</p>}
 
         {!form.is_removal && (
           <div className="form-field">
@@ -430,6 +458,9 @@ export default function OptionModal({
     </Modal>
   )
 }
+
+// Stands in for a new option's id in the below-zero check, before the database gives it one.
+const NEW_OPTION_ID = '__new_option__'
 
 // New options go to the end of their group. `group.options` is attached by the page.
 function nextSortOf(group) {

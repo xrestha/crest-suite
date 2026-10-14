@@ -281,3 +281,12 @@ Display** — that one sorted oldest-first, so truncation drops the *newest* tic
 kitchen is waiting on. The lesson repeats S613's: a sweep organised by table finishes the table it
 was named after and leaves its neighbours. Ask rows-per-what, and ask it of the screen as well as
 the report.
+
+## Dropped write errors count
+
+Moved out of `.claude/rules/pos-billing.md` (S835, to keep the POS rules load under its warning line).
+
+supabase-js **resolves** with `{ data, error }` — it does not throw on a database error. The general
+rule is in root CLAUDE.md; what follows is what that cost specifically here, because `PosOrders.jsx`
+carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destructuring nothing) and
+**three `try/catch` blocks whose `console.error` had never once run.**

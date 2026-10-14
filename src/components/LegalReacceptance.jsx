@@ -206,8 +206,9 @@ export default function LegalReacceptance() {
               {busy ? 'Recording…' : 'Accept and continue'}
             </button>
           )}
-          {/* Leaving must stay possible. A gate with no exit is a lockout. */}
-          <button type="button" className="btn btn-ghost" onClick={signOut} disabled={busy}>
+          {/* Leaving must stay possible. A gate with no exit is a lockout. This device only
+              (S835, D37): the library default signed the login out everywhere. */}
+          <button type="button" className="btn btn-ghost" onClick={() => signOut({ scope: 'local' })} disabled={busy}>
             Sign out
           </button>
         </div>

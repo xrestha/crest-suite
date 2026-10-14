@@ -1,7 +1,7 @@
 import {
   exFromIncl, inclFromEx, effectiveRule, ruleText, countAllowed, optionsPriceDelta, signedPrice,
   describeSelection, groupsForDish, defaultSelection, selectionProblems, lowestDishPrice,
-  sizeFactor, scaledDelta, scaledQty, cheapestValidSelection, optionsBelowZero, belowZeroText, groupShortfalls,
+  sizeFactor, scaledDelta, scaledQty, cheapestValidSelection, dishesBelowZero, belowZeroText, groupShortfalls,
 } from './optionPricing'
 
 describe('VAT conversion', () => {
@@ -460,21 +460,99 @@ describe('"No …" removals, free picks and the maximum (S809 4h, Q20 a, D15)', 
   })
 })
 
-describe('optionsBelowZero (S809 4h, CUSTOMIZATION-6)', () => {
-  const dishes = [{ id: 'veg', name: 'Veg Momo', selling_price: 247.79 }, { id: 'kids', name: 'Kids Momo', selling_price: 70.80 }]
+describe('dishesBelowZero (S809 4h, CUSTOMIZATION-6; whole dish S835)', () => {
+  const G = (id, kind, min, max, extra = {}) => ({ id, name: id, kind, min_select: min, max_select: max, included_count: 0, size_scaling: 'none', sort: 0, is_active: true, ...extra })
+  const O = (id, group_id, price_delta, extra = {}) => ({ id, group_id, name: id, price_delta, sort: 0, is_active: true, ...extra })
+  const on = (recipe_id, ...groupIds) => groupIds.map((group_id, sort) => ({ recipe_id, group_id, sort }))
+  const veg = { id: 'veg', name: 'Veg Momo', selling_price: 247.79 }
+  const kids = { id: 'kids', name: 'Kids Momo', selling_price: 70.80 }
+  const sizes = G('size', 'size', 1, 1)
+  const half = O('Half', 'size', -88.50, { sort: 1 })
+  const full = O('Full', 'size', 0)
+
   it('names the dish a cheaper size takes below zero, ex-VAT as the server compares', () => {
-    const half = { id: 'half', name: 'Half', price_delta: -88.50 }
-    expect(optionsBelowZero(dishes, [half]).map(x => [x.dish.id, x.option.id, x.price])).toEqual([['kids', 'half', -17.70]])
+    const cat = { groups: [sizes], options: [full, half], attachments: [...on('veg', 'size'), ...on('kids', 'size')] }
+    expect(dishesBelowZero([veg, kids], cat).map(x => [x.dish.id, x.price, x.picks])).toEqual([['kids', -17.70, ['Half']]])
   })
-  it('passes a dish brought to exactly zero, a positive option, a hidden one and an unpriced dish', () => {
-    expect(optionsBelowZero(dishes, [{ id: 'z', price_delta: -70.80 }, { id: 'p', price_delta: 30 }, { id: 'h', price_delta: -500, is_active: false }])).toEqual([])
-    expect(optionsBelowZero([{ id: 'new', name: 'New dish', selling_price: 0 }], [{ id: 'half', price_delta: -88.5 }])).toEqual([])
+
+  it('passes a dish brought to exactly zero, a hidden option, a hidden group and an unpriced dish', () => {
+    const zero = { groups: [sizes], options: [full, O('Tiny', 'size', -70.80)], attachments: on('kids', 'size') }
+    expect(dishesBelowZero([kids], zero)).toEqual([])
+    expect(dishesBelowZero([kids], { groups: [sizes], options: [full, { ...half, is_active: false }], attachments: on('kids', 'size') })).toEqual([])
+    expect(dishesBelowZero([kids], { groups: [{ ...sizes, is_active: false }], options: [full, half], attachments: on('kids', 'size') })).toEqual([])
+    expect(dishesBelowZero([{ id: 'new', name: 'New dish', selling_price: 0 }], { groups: [sizes], options: [half], attachments: on('new', 'size') })).toEqual([])
   })
+
+  it('finds two cheaper choices that only go below zero together, which a per-option check passed', () => {
+    // Kids Momo 70.80: Half −50 alone is 20.80, "Less filling" −30 alone is 40.80, both −9.20.
+    const less = G('less', 'choice', 0, 1)
+    const cat = {
+      groups: [sizes, less],
+      options: [full, O('Half', 'size', -50, { sort: 1 }), O('Less filling', 'less', -30)],
+      attachments: on('kids', 'size', 'less'),
+    }
+    expect(dishesBelowZero([kids], cat).map(x => [x.price, x.picks])).toEqual([[-9.20, ['Half', 'Less filling']]])
+  })
+
+  it('counts negative picks only up to the maximum, and the first free picks in display order cost nothing', () => {
+    const cuts = G('cuts', 'addon', 0, 2)
+    const opts = [O('a', 'cuts', -30, { sort: 0 }), O('b', 'cuts', -30, { sort: 1 }), O('c', 'cuts', -30, { sort: 2 })]
+    // Up to 2 of three −30s: 70.80 − 60 = 10.80, never 70.80 − 90.
+    expect(dishesBelowZero([kids], { groups: [cuts], options: opts, attachments: on('kids', 'cuts') })).toEqual([])
+    expect(dishesBelowZero([kids], { groups: [{ ...cuts, max_select: 3 }], options: opts, attachments: on('kids', 'cuts') })
+      .map(x => x.price)).toEqual([-19.20])
+    // First 1 free: the first picked −30 is charged 0, so three picks reach 70.80 − 60.
+    expect(dishesBelowZero([kids], { groups: [{ ...cuts, max_select: 3, included_count: 1 }], options: opts, attachments: on('kids', 'cuts') })).toEqual([])
+    // A per-dish maximum is the dish's own rule.
+    expect(dishesBelowZero([kids], { groups: [{ ...cuts, max_select: 3 }], options: opts,
+      attachments: [{ recipe_id: 'kids', group_id: 'cuts', sort: 0, max_override: 2 }] })).toEqual([])
+  })
+
+  it('scales a stock-and-price choice by the size picked with it, as the server prices it', () => {
+    const big = O('Large', 'size', 0, { sort: 1, portion_factor: 2 })
+    const disc = G('disc', 'addon', 0, 1, { size_scaling: 'stock_and_price' })
+    const cat = { groups: [sizes, disc], options: [full, big, O('Promo', 'disc', -40)], attachments: on('kids', 'size', 'disc') }
+    // Regular: 70.80 − 40 = 30.80. Large scales the −40 to −80: 70.80 − 80 = −9.20.
+    expect(dishesBelowZero([kids], cat).map(x => [x.price, x.picks])).toEqual([[-9.20, ['Large', 'Promo']]])
+  })
+
+  it('lets a free "No …" removal answer a required group, and names it', () => {
+    const sauce = G('sauce', 'choice', 1, 1)
+    const opts = [full, O('Half', 'size', -80, { sort: 1 }), O('Mayo', 'sauce', 20, { sort: 1 })]
+    const cat = { groups: [sizes, sauce], options: opts, attachments: on('kids', 'size', 'sauce') }
+    // A paid sauce is forced: 70.80 − 80 + 20 = 10.80.
+    expect(dishesBelowZero([kids], cat)).toEqual([])
+    // "No sauce" answers the minimum for nothing, so the Half alone is reachable: −9.20.
+    const withNo = { ...cat, options: [...opts, O('No sauce', 'sauce', 0, { is_removal: true })] }
+    expect(dishesBelowZero([kids], withNo).map(x => [x.price, x.picks])).toEqual([[-9.20, ['Half', 'No sauce']]])
+  })
+
+  it('skips a dish that cannot be ordered at all: the server refuses it before pricing', () => {
+    const must = G('must', 'addon', 2, 3)
+    expect(dishesBelowZero([kids], { groups: [must], options: [O('only', 'must', -100)], attachments: on('kids', 'must') })).toEqual([])
+  })
+
+  it('with `before`, names only a dish the change takes lower', () => {
+    const less = G('less', 'choice', 0, 1)
+    const base = { groups: [sizes, less], options: [full, O('Half', 'size', -60, { sort: 1 }), O('Less', 'less', -20)], attachments: on('kids', 'size', 'less') }
+    // Already at −9.20. Renaming "Less" (no price change) is not this edit's doing.
+    const renamed = { ...base, options: [base.options[0], base.options[1], { ...base.options[2], name: 'Less rice' }] }
+    expect(dishesBelowZero([kids], renamed, { before: base })).toEqual([])
+    // Raising it towards the fix is not refused either; lowering it further is.
+    const better = { ...base, options: [base.options[0], base.options[1], O('Less', 'less', -15)] }
+    expect(dishesBelowZero([kids], better, { before: base })).toEqual([])
+    const worse = { ...base, options: [base.options[0], base.options[1], O('Less', 'less', -25)] }
+    expect(dishesBelowZero([kids], worse, { before: base }).map(x => x.price)).toEqual([-14.20])
+    // A dish that was fine and is now below zero is named.
+    const fine = { ...base, options: [base.options[0], base.options[1], O('Less', 'less', -5)] }
+    expect(dishesBelowZero([kids], base, { before: fine }).map(x => x.price)).toEqual([-9.20])
+  })
+
   it('words it as a guest would pay', () => {
-    const vat = [{ id: 'kids', name: 'Kids Momo', selling_price: 70.80, inclPrice: 80 }]
-    const found = optionsBelowZero(vat, [{ id: 'half', name: 'Half', price_delta: -88.50 }])
-    expect(belowZeroText(found)).toBe('Kids Momo would cost −NPR 20 as “Half”')
-    expect(belowZeroText([...found, ...found, ...found])).toBe('Kids Momo would cost −NPR 20 as “Half”, Kids Momo would cost −NPR 20 as “Half” and 1 more')
+    const found = dishesBelowZero([{ ...kids, inclPrice: 80 }], { groups: [sizes], options: [full, half], attachments: on('kids', 'size') })
+    expect(belowZeroText(found)).toBe('Kids Momo would cost −NPR 20 with “Half”')
+    expect(belowZeroText([...found, ...found, ...found])).toBe('Kids Momo would cost −NPR 20 with “Half”, Kids Momo would cost −NPR 20 with “Half” and 1 more')
+    expect(belowZeroText([{ dish: kids, incl: -9.2, picks: ['Half', 'Less', 'No sauce'] }])).toBe('Kids Momo would cost −NPR 9 with “Half”, “Less” and “No sauce”')
   })
 })
 
@@ -525,6 +603,6 @@ describe('the S816 probe fixture (shared with the 4h migration)', () => {
   })
   it('refuses three real toppings, and finds the Half below zero', () => {
     expect(selectionProblems(dg, ['reg', 'egg', 'cheese', 'bacon']).map(p => p.group.id)).toEqual(['gt'])
-    expect(optionsBelowZero([dish], options).map(x => [x.option.id, x.price])).toEqual([['half', -17.70]])
+    expect(dishesBelowZero([dish], { groups, options, attachments }).map(x => [x.picks, x.price])).toEqual([[['Half'], -17.70]])
   })
 })

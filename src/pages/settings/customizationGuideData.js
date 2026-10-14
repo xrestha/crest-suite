@@ -76,7 +76,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'Build-your-own template (S760) → pick the dish and, if you like, a shorter name for its groups. One save creates "<dish> · Size" (Small 0.75, Medium, Large 1.5), "· Base" (pick 1, uses more at a bigger size), "· Sauces" (up to 2, uses more) and "· Toppings" (any number, uses more and costs more), puts them on the dish in that order and marks it build-your-own. Nothing is priced: add the bases, sauces and toppings with + Option and set every price. If groups with those names already exist, nothing is created.',
         ],
         fields: [
-          { label: 'Price (Size on same-priced dishes)', desc: 'Typed as the full menu price of that size — "Half 150, Full 250" — because every dish this group is on currently costs the same, so the difference from the dish is worked out for you. What is stored is that difference, so the size follows the dish when its price changes. The moment the group is on two dishes with different prices the field flips to a DIFFERENCE from the dish price and shows each dish\'s result underneath. A price that would put any of those dishes below zero is refused, naming the dish, because the till refuses such a line.' },
+          { label: 'Price (Size on same-priced dishes)', desc: 'Typed as the full menu price of that size — "Half 150, Full 250" — because every dish this group is on currently costs the same, so the difference from the dish is worked out for you. What is stored is that difference, so the size follows the dish when its price changes. The moment the group is on two dishes with different prices the field flips to a DIFFERENCE from the dish price and shows each dish\'s result underneath. A price that would put any of those dishes below zero is refused, naming the dish, because the till refuses such a line. Since S835 the check is the whole dish, not one option at a time (its cheapest valid set of picks across every group it offers, free picks and size scaling included), so two money-off choices that only go below zero together are refused too, and so is Show again on a hidden group or option that would do it.' },
           { label: 'Price (Add-ons / Choice)', desc: 'What the option adds to the dish, as the guest pays it (including VAT when the outlet is VAT-registered; stored before VAT). Blank or 0 = free. A "takes something off" option is always free and the price box is not shown.' },
           { label: 'Free picks before charging', desc: 'Add-on groups only. "First 2 free" makes the earliest-listed two of a guest\'s picks free and charges for the rest. Put the options you are happy to give away at the top of the list. A "No …" option is never a free pick, wherever it is listed. The till and guest sheet mark a free pick as Included and count "1 of 2 free picks used".' },
           { label: 'Pre-selected', desc: 'Ticked when the choice window or guest sheet opens, on every dish this group is on (a dish can override it with its own default in its Choices dialog). A dish whose required groups all have a pre-selected option adds in ONE TAP on the till — the window never opens unless something still has to be chosen.' },
@@ -121,6 +121,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         ],
         gotchas: [
           'A hidden group that is still on a dish stays listed in the dialog, ticked and badged Hidden, so it can be unticked; it is offered nowhere until shown again.',
+          'Below zero, whole dish (S835): ticking or unticking a group in the Choices dialog, or in Put it on dishes, is refused when it lets the dish be ordered below zero, naming the choices that get it there. A dish that can ALREADY go below zero, and that this save does not make worse, is named with a △ warning instead of a refusal: the fix is a price in Option Groups. On Menu Pricing, a price is checked against the dish\'s choices the same way; if the choices cannot be read the row says "Choices not checked — couldn\'t read them" and the price still saves (owner decision), since the till refuses a below-zero line anyway.',
           'A group with no options in it can be ticked but offers nothing — the till and guest menu skip any group with nothing to pick, so it can never make a dish unorderable.',
           'The Dishes tab search matches name or category; the count above it is of ALL dishes, not the filtered list.',
           'Build-your-own (S760): ⋯ on a dish → Mark as build-your-own / Make it an ordinary dish. A marked dish wears a Build-your-own badge, always opens its choices on the till, walks the guest through steps on the QR menu, and is costed as a range. A marked dish with no groups says so in amber, because guests would have nothing to build. Its "typical build" is the most-picked build on bills PAID in the last 30 days, dated by when the bill closed; voided, still-open and written-off bills do not count (S792 stage 3, RECIPES-10).',
@@ -193,6 +194,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         gotchas: [
           'The guest RPC (get_guest_menu_options) is public to anon; the pricer (pos_price_selection) is callable by NO client role — it runs only inside submit_guest_order, which prices the guest\'s request; the till\'s save prices the line itself (save_pos_order_items).',
           'Prices on the sheet apply VAT only when the outlet is VAT-registered, the same rule the menu card uses.',
+          'A guest whose picks would price a dish below zero is told "<dish> can\'t be ordered with those choices — pick different ones or ask a staff member" (S835), and the menu is re-read. Nothing is taken off the order, because the choices are still offered.',
           'Since S767 the sheet wears the app\'s default theme (Modernist Night) with square corners, like the rest of the guest menu (the bone-and-pine palette ran from S604 to S767) — it is the one surface in the product a stranger sees.',
         ],
         connections: 'get_guest_menu_options beside get_guest_menu; submit_guest_order carries option ids; the accept path on the till prices and snapshots. The Customization Report counts guest-picked choices exactly like waiter-picked ones.',
@@ -209,7 +211,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         id: 'customization-report',
         title: 'Customization Report',
         route: '/customization/report',
-        plan: 'Owner, POS manager, IMS manager, admin',
+        plan: 'Owner, POS manager, admin',
         summary:
           'Four questions an owner asks of their choices, over a date range that opens on this BS month with Today / This month / Last month / Last 3 months presets: which choices are picked (Popular choices), how often guests customize at all (How often customized), what the "No …" requests are, and — with IMS — whether a paid choice earns more than it costs (Choice margin). Every column sorts; Export Excel writes every tab with the range and basis on each sheet.',
         workflow: [
@@ -233,6 +235,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'Share customized (per dish) = plates with at least one choice ÷ plates sold.',
         ],
         gotchas: [
+          'POS managers, the Owner and admin only (S835, owner decision D42). An Inventory-only manager could open it until then, but an Inventory login cannot read till bills, so it always said no choices were picked. Option Groups and Menu Pricing stay open to an IMS manager.',
           'A failed read is a failed report: the tiles and tables do not render over a read that did not complete, and the Margin tab can fail alone (stock lines or item rates unreadable) while the three sales tabs stand.',
           'The Margin tab appears only on a client WITH IMS — an admin viewing a POS-only client does not see it.',
           'The Margin tab costs each choice through the till\'s own recipe book (S828), so a POS manager signed in with a PIN sees the same costs as the Owner. It used to read the item list directly, which a PIN login cannot, and every choice then cost NPR 0.',

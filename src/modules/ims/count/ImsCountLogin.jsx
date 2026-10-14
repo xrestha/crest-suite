@@ -146,7 +146,7 @@ export default function ImsCountLogin() {
           setDevice({ clientId: null, clientName: 'Crest Stock Count', secret: null })
           setLoadError(SIGNED_OUT_TEXT)
         } else if (body?.locked) {
-          setError(`Too many incorrect attempts. Try again ${formatLockRemaining(body.locked_until)}, or ask your manager to reset your PIN.`)
+          setError(`Too many incorrect attempts. Try again ${formatLockRemaining(body.locked_until)}, or ask a manager or the owner to reset your PIN.`)
         } else if (status === 401) {
           setError('Incorrect PIN. Try again.')
         } else {

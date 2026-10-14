@@ -17,7 +17,7 @@ import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
 import AttachGroupsModal from '../../customization/AttachGroupsModal'
 import { loadOptionCatalog } from '../../customization/customizationData'
-import { optionsBelowZero, belowZeroText } from '../../../shared/optionPricing'
+import { dishesBelowZero, belowZeroText, groupsForDish } from '../../../shared/optionPricing'
 import { npr } from '../../../shared/nepalMoney'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
@@ -46,6 +46,19 @@ function vatLabel(vat) {
 // its own does not say what to do about it.
 const NO_COST_TITLE = 'No food cost yet — add ingredients to this recipe in Recipe Costing.'
 const NO_COST_TITLE_POS = 'No cost price yet — add one with Edit on this row.'
+
+// S835: said under a price being typed when the option catalog could not be read, so the below-zero
+// check did not run. The price still saves (owner decision).
+const CHOICES_UNCHECKED = 'Choices not checked — couldn’t read them'
+
+// "With “Half” and “Less rice” it would cost −NPR 20" — the size line's own words for a price that
+// would let the dish be ordered below zero (S835).
+function belowZeroLine(found) {
+  const { picks, incl } = found[0]
+  const q = (picks || []).map(n => `“${n}”`)
+  const names = q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : q[0]
+  return `${names ? `With ${names} it` : 'It'} would cost −${npr(Math.abs(Math.round(incl)))}`
+}
 
 const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice: '' }
 
@@ -84,47 +97,52 @@ export default function MenuPricing() {
   // "2 pairings" — an 11px grey "Customize" with no count gave no way to tell from the menu which
   // dishes were customized (S759). Its own small load, so a failed read here costs only the labels.
   const [choiceNames, setChoiceNames] = useState({}) // recipe_id -> [group name]
-  // S809 4h (CUSTOMIZATION-6, D16): each dish's offered choices, so a new dish price can say what
-  // its sizes become and refuse one that puts a choice below zero. A size is stored as a difference
-  // from the dish, so it moves with the dish's price. Advisory: on a failed read this stays empty
-  // and the price saves as before, and the till then refuses the below-zero line by name.
-  const [dishOptions, setDishOptions] = useState({}) // recipe_id -> [{ name, price_delta, kind }]
+  // S809 4h (CUSTOMIZATION-6, D16): the option catalog, so a new dish price can say what its sizes
+  // become and refuse one that puts the dish below zero. A size is stored as a difference from the
+  // dish, so it moves with the dish's price. S835: the refusal prices the whole dish (every group it
+  // offers, as the till does), and a failed read is SAID on the row being priced rather than reading
+  // as "no choices": the price still saves (owner decision), and the till refuses a below-zero line
+  // by name if one slips through.
+  const [optionCatalog, setOptionCatalog] = useState(null) // { groups, options, attachments }
+  const [choicesReadFailed, setChoicesReadFailed] = useState(false)
   const loadChoiceNames = useCallback(async () => {
     if (!customizationOn || !effectiveClientId) return
     const cat = await loadOptionCatalog(scopedFrom)
-    if (cat.error) return
+    if (cat.error) {
+      console.error('Menu Pricing: the option catalog could not be read, so new prices are saved without the below-zero check', cat.error)
+      setChoicesReadFailed(true)
+      return
+    }
+    setChoicesReadFailed(false)
     const groupById = new Map(cat.groups.map(g => [g.id, g]))
     const map = {}
-    const opts = {}
     cat.attachments.slice().sort((a, b) => (a.sort || 0) - (b.sort || 0)).forEach(a => {
       const g = groupById.get(a.group_id)
       if (!g) return
       ;(map[a.recipe_id] = map[a.recipe_id] || []).push(g.name)
-      if (g.is_active === false) return
-      cat.options.filter(o => o.group_id === g.id && o.is_active !== false).forEach(o => {
-        ;(opts[a.recipe_id] = opts[a.recipe_id] || []).push({ name: o.name, price_delta: o.price_delta, kind: g.kind, sort: o.sort ?? 0 })
-      })
     })
     setChoiceNames(map)
-    setDishOptions(opts)
+    setOptionCatalog({ groups: cat.groups, options: cat.options, attachments: cat.attachments })
   }, [customizationOn, effectiveClientId, scopedFrom])
   useEffect(() => { loadChoiceNames() }, [loadChoiceNames])
-  // What a new price does to the dish's sizes: "Half NPR 180 · Full NPR 280", and any choice it
-  // would take below zero. `stored` is storedFromMenuPrice's answer for the typed price.
+  // What a new price does to the dish's sizes: "Half NPR 180 · Full NPR 280", and whether the dish
+  // could then be ordered below zero with its choices. `stored` is storedFromMenuPrice's answer for
+  // the typed price. `unchecked` is a failed catalog read: nothing here can be said, and the row says so.
   const sizeEffect = (recipe, stored) => {
-    const opts = dishOptions[recipe?.id] || []
-    if (!stored || !opts.length) return { sizesText: '', below: [] }
+    const unchecked = customizationOn && choicesReadFailed
+    if (!stored || !optionCatalog || !recipe?.id) return { sizesText: '', below: [], unchecked }
     const incl = ex => ex * (1 + (Number(stored.vat_rate) || 0))
     const fmt = v => (v < 0 ? `−${npr(Math.abs(v))}` : npr(v))
-    const sizesText = opts.filter(o => o.kind === 'size').sort((a, b) => a.sort - b.sort)
+    const sizesText = groupsForDish(recipe.id, optionCatalog).filter(d => d.group.kind === 'size').flatMap(d => d.options)
       .map(o => `${o.name} ${fmt(incl(stored.selling_price + (Number(o.price_delta) || 0)))}`).join(' · ')
-    const below = optionsBelowZero(
-      [{ id: recipe.id, name: recipe.name, selling_price: stored.selling_price, inclPrice: incl(stored.selling_price) }], opts)
-    return { sizesText, below }
+    const below = dishesBelowZero(
+      [{ id: recipe.id, name: recipe.name, selling_price: stored.selling_price, inclPrice: incl(stored.selling_price) }], optionCatalog)
+    return { sizesText, below, unchecked }
   }
   const belowZeroRefusal = (name, below) =>
-    `“${name}” — not saved. ${belowZeroText(below)}, and the till refuses a dish priced below zero. Raise the price, or change that choice in Option Groups first.`
-  const choicesLabel = r => (choiceNames[r.id]?.length ? choiceNames[r.id].join(' · ') : 'Add choices')
+    `“${name}” — not saved. ${belowZeroText(below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Option Groups first.`
+  // A failed catalog read is not "no choices" (S835): the link says only Choices until a read lands.
+  const choicesLabel = r => (choiceNames[r.id]?.length ? choiceNames[r.id].join(' · ') : choicesReadFailed ? 'Choices' : 'Add choices')
   const choicesColor = r => (choiceNames[r.id]?.length ? 'var(--theme-accent-ink)' : 'var(--theme-text3)')
   const [recipes, setRecipes]   = useState([])
   const [loading, setLoading]   = useState(true)
@@ -408,7 +426,7 @@ export default function MenuPricing() {
     }
     const { below } = sizeEffect(recipe, stored)
     if (below.length) {
-      setErrors(e => ({ ...e, [recipe.id]: 'A choice would go below zero' }))
+      setErrors(e => ({ ...e, [recipe.id]: 'Its choices would go below zero' }))
       setPageError(belowZeroRefusal(recipe.name, below))
       return
     }
@@ -604,12 +622,18 @@ export default function MenuPricing() {
       : addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0
         ? <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}</div>
         : null
-  const addSizes = editingId ? sizeEffect({ id: editingId }, storedFromMenuPrice(addForm.price, addForm.vatRate, vatMode)).sizesText : ''
+  const addEffect = editingId ? sizeEffect({ id: editingId }, storedFromMenuPrice(addForm.price, addForm.vatRate, vatMode)) : null
   const addPriceNote = (
     <>
       {addPriceBasis}
-      {addSizes && (
-        <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>Its sizes follow this price: {addSizes}</div>
+      {addEffect?.sizesText && (
+        <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>Its sizes follow this price: {addEffect.sizesText}</div>
+      )}
+      {addEffect?.below.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>{belowZeroLine(addEffect.below)}, and the till refuses that.</div>
+      )}
+      {addEffect?.unchecked && (
+        <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{CHOICES_UNCHECKED}</div>
       )}
     </>
   )
@@ -1246,10 +1270,15 @@ export default function MenuPricing() {
                           names WHICH dish as well (S576's template-label rule). */}
                       <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
                       {changed && draftNum > 0 && (() => {
-                        const { sizesText } = sizeEffect(r, storedFromMenuPrice(draftNum, r.storedVat, vatMode))
-                        return sizesText
-                          ? <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, maxWidth: 220, marginLeft: 'auto' }}>Sizes become {sizesText}</div>
-                          : null
+                        const { sizesText, below, unchecked } = sizeEffect(r, storedFromMenuPrice(draftNum, r.storedVat, vatMode))
+                        const line = { fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, maxWidth: 220, marginLeft: 'auto' }
+                        return (
+                          <>
+                            {sizesText && <div style={line}>Sizes become {sizesText}</div>}
+                            {below.length > 0 && <div style={{ ...line, color: 'var(--theme-red-text)' }}>{belowZeroLine(below)}</div>}
+                            {unchecked && <div style={{ ...line, color: 'var(--theme-text3)' }}>{CHOICES_UNCHECKED}</div>}
+                          </>
+                        )
                       })()}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? newFcFig.style.color : 'var(--theme-text3)' }}

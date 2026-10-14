@@ -26,12 +26,24 @@ describe('guestOrderRefusal', () => {
     expect(guestOrderRefusal(refused('unavailable_items')).text).toMatch(/no longer available/)
   })
 
+  it('names a dish its choices would price below zero, and keeps it on the order (S835)', () => {
+    const r = guestOrderRefusal(refused('below_zero_options', { details: '["Kids Momo"]' }), 'X')
+    expect(r.text).toBe("Kids Momo can't be ordered with those choices — pick different ones or ask a staff member.")
+    expect(r.refreshMenu).toBe(true)
+    expect(r.removedText).toBeUndefined()
+    expect(r.unknown).toBeUndefined()
+    expect(guestOrderRefusal(refused('below_zero_options', { details: '["Kids Momo","Veg Momo"]' })).text)
+      .toMatch(/^Kids Momo and Veg Momo can't be ordered with those choices/)
+    expect(guestOrderRefusal(refused('below_zero_options', { details: 'not json' })).text)
+      .toMatch(/^A dish in your order can't be ordered with those choices/)
+  })
+
   it('names the outlet rather than "the restaurant" when it knows it', () => {
     expect(guestOrderRefusal(refused('not_accepting'), 'Bhatti Choila').text).toMatch(/^Bhatti Choila isn't taking orders/)
   })
 
   it('never shows the raw server message, whatever the code', () => {
-    for (const hint of ['table_not_found', 'not_accepting', 'inactive', 'empty', 'too_many_items', 'unavailable_items', 'no_valid_items', 'pending', 'something_new']) {
+    for (const hint of ['table_not_found', 'not_accepting', 'inactive', 'empty', 'too_many_items', 'unavailable_items', 'below_zero_options', 'no_valid_items', 'pending', 'something_new']) {
       const r = guestOrderRefusal({ hint, message: 'new row violates row-level security policy for table "pos_guest_order_requests"' }, 'X')
       expect(r.text).not.toMatch(/row-level|pos_guest_order_requests/)
     }

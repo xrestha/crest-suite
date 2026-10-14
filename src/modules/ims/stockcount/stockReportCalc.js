@@ -68,8 +68,13 @@ export function buildUsageMap(sales, breakdown, explosion = null) {
     if (sold <= 0) return
     rows.forEach(({ item_id, qty }) => { usageMap[item_id] = (usageMap[item_id] || 0) + sold * qty })
   })
+  // Choices follow their dish (S835, owner decision): a dish whose month net sold is 0 or less
+  // consumes nothing above, so its choice extras add nothing either. Before, the recipe part was
+  // skipped while each row's extras were still added, so a month netted to zero by a credit note
+  // took the base off nothing and the extras off the shelf anyway.
   depleting.forEach(s => {
     if (!s.ingredient_deltas) return
+    if ((soldMap[s.recipe_id] || 0) <= 0) return
     const n = num(s.qty_sold)
     if (!n) return
     deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id, qty }) => {

@@ -132,7 +132,8 @@ export default function SubscriptionLock() {
               ✓ Request sent — we'll be in touch shortly
             </span>
           )}
-          <button className="btn btn-ghost" onClick={signOut}>Sign Out</button>
+          {/* This device only (S835, D37): the library default signed the login out everywhere. */}
+          <button className="btn btn-ghost" onClick={() => signOut({ scope: 'local' })}>Sign Out</button>
         </div>
       </div>
     </div>

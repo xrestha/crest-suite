@@ -5,7 +5,8 @@ import ActionError, { asActionError } from '../../components/ActionError'
 import ReportLoadError from '../../components/ReportLoadError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { loadOptionCatalog, KIND_LABEL } from './customizationData'
-import { effectiveRule, ruleText, optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { effectiveRule, ruleText, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { nprInt } from '../../shared/nepalMoney'
 
 // Which option groups one dish offers. Opened from two places that must behave identically — the
 // Dishes tab of Option Groups and the "Customize" button on Menu Pricing — so it loads its own data
@@ -21,6 +22,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [groups, setGroups] = useState([])
+  const [options, setOptions] = useState([])
   const [optionsByGroup, setOptionsByGroup] = useState({})
   const [existing, setExisting] = useState([])
   const [draft, setDraft] = useState({}) // { [groupId]: { on, min, max, def, sort } }
@@ -49,6 +51,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         }
       })
       setGroups(cat.groups)
+      setOptions(cat.options)
       setOptionsByGroup(byGroup)
       setExisting(cat.attachments)
       setDraft(current)
@@ -64,13 +67,23 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   )
   const chosen = visibleGroups.filter(g => draft[g.id]?.on)
 
-  // S809 4h (CUSTOMIZATION-6, D17): a group newly put on this dish whose option takes it below
-  // zero is refused here, before the till refuses it mid-service. Option Groups passes the dish
-  // with `inclPrice`, Menu Pricing its row with `exVat` / `inclVat`.
-  const belowZero = optionsBelowZero(
-    [{ ...recipe, selling_price: recipe.selling_price ?? recipe.exVat, inclPrice: recipe.inclPrice ?? recipe.inclVat }],
-    chosen.filter(g => !existing.some(a => a.group_id === g.id)).flatMap(g => optionsByGroup[g.id] || []),
-  )
+  // S809 4h (CUSTOMIZATION-6, D17): a setup that takes this dish below zero is refused here, before
+  // the till refuses it mid-service. Option Groups passes the dish with `inclPrice`, Menu Pricing
+  // its row with `exVat` / `inclVat`. S835: over the whole dish as it would be saved — every ticked
+  // group with this dish's own must-pick / at-most — so two cheaper groups that only go below zero
+  // together are caught, and so is unticking a paid group a cheaper size was leaning on. A dish
+  // already below zero that the ticks here leave alone is said, not refused: the fix is a price.
+  const dish = { ...recipe, selling_price: recipe.selling_price ?? recipe.exVat, inclPrice: recipe.inclPrice ?? recipe.inclVat }
+  const draftAttachments = chosen.map(g => ({
+    recipe_id: recipe.id,
+    group_id: g.id,
+    min_override: g.kind === 'size' ? null : toInt(draft[g.id].min),
+    max_override: g.kind === 'size' ? null : toInt(draft[g.id].max),
+    sort: draft[g.id].sort ?? 0,
+  }))
+  const before = { groups, options, attachments: existing }
+  const belowZero = loading || loadError ? [] : dishesBelowZero([dish], { groups, options, attachments: draftAttachments }, { before })
+  const alreadyBelow = loading || loadError || belowZero.length ? [] : dishesBelowZero([dish], { groups, options, attachments: draftAttachments })
 
   const toggle = g => setDraft(d => {
     const cur = d[g.id]
@@ -243,7 +256,12 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       </div>
       {belowZero.length > 0 && (
         <p role="alert" className="field-error" style={{ margin: '12px 0 0' }}>
-          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Untick that group, or change the option’s price in Option Groups first.
+          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Change what is ticked here, or change the prices in Option Groups first.
+        </p>
+      )}
+      {alreadyBelow.length > 0 && (
+        <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          △ {recipe.name} can already reach NPR −{nprInt(Math.abs(Math.round(alreadyBelow[0].incl)))} with these choices, and the till refuses it at that price — fix its prices in Option Groups.
         </p>
       )}
       <ActionError error={actionError} />

@@ -37,7 +37,7 @@ import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClos
 import { backfillLeaveText } from '../../modules/hr/leave/backfillApprovedLeave'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
-import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd } from '../../utils/bsCalendar'
+import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
 import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalTime'
 import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reservationStatus'
 import { getSubStatus } from '../../utils/subscription'
@@ -1049,12 +1049,10 @@ export default function ClientDashboard({ scope = 'home' }) {
   // offset, not Nepal's fixed +05:45 — for a viewer (e.g. an admin) outside Nepal, that silently
   // shifts the day boundary compared against `closed_at` (a genuine UTC timestamptz), mis-
   // bucketing orders near the start/end of the month. Build the boundary explicitly with Nepal's
-  // own offset instead of trusting the runtime's.
-  function bsDayBoundaryIso(bsYear, bsMonth, bsDay, endOfDay) {
-    const d = bsToAd(bsYear, bsMonth, bsDay)
-    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0')
-    return endOfDay ? `${y}-${m}-${dd}T23:59:59.999+05:45` : `${y}-${m}-${dd}T00:00:00.000+05:45`
-  }
+  // own offset instead of trusting the runtime's: the shared bsDayBoundaryIso (bsCalendar.js) does
+  // exactly that (S835; this page kept its own copy). It answers null for a date it cannot build,
+  // where the copy built "NaN-NaN-NaN…", which the server refused as a failed read and the bookings
+  // window threw on. A null boundary is a failed read here too, never a query sent without one.
 
   async function loadPosStats(myId) {
     // See loadStats' identical .single() comment above — PGRST116 (no open period) is expected,
@@ -1066,10 +1064,10 @@ export default function ClientDashboard({ scope = 'home' }) {
 
     let ordersErr = null, notesErr = null
     let summary = summariseBills([])
-    if (period) {
-      const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
-      const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
-      const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)
+    const fromTs = period ? bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false) : null
+    const toTs = period ? bsDayBoundaryIso(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month), true) : null
+    if (period && !(fromTs && toTs)) ordersErr = { message: `No calendar dates for BS ${period.bs_year}-${period.bs_month}` }
+    if (fromTs && toTs) {
       // Paged (S734). This is one row per BILL for a whole month: a restaurant closing 40 bills a
       // day crosses PostgREST's 1000-row cap inside one period, and a bare .select() returns the
       // first 1000 with no error and nothing in the data to say so — so Revenue, Covers, Bills and
@@ -1115,9 +1113,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     // Requests are public-page bookings waiting for a staff Accept, whatever day they are for.
     const todayBs = nepalBs(new Date())
     let bookings = [], bookingsErr = null, requestsPending = 0, requestsErr = null
-    if (todayBs) {
-      const dayStart = bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, false)
-      const dayEnd = new Date(new Date(bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, true)).getTime() + 6 * 3600000).toISOString()
+    const dayStart = todayBs ? bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, false) : null
+    const dayEndBoundary = todayBs ? bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, true) : null
+    if (todayBs && !(dayStart && dayEndBoundary)) bookingsErr = { message: `No calendar dates for BS ${todayBs.year}-${todayBs.month}-${todayBs.day}` }
+    if (dayStart && dayEndBoundary) {
+      const dayEnd = new Date(new Date(dayEndBoundary).getTime() + 6 * 3600000).toISOString()
       const [b, r] = await Promise.all([
         scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
           .in('status', ['booked', 'confirmed', 'arrived', 'seated'])

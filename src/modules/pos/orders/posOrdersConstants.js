@@ -234,6 +234,41 @@ export function storedLinesMatchPayload(storedLines, payload) {
   return sig(storedLines) === sig(payload)
 }
 
+// S835 (S809.4, 3f): whether the stored lines CONTAIN `payload` — every line of it on the order at its
+// quantity or more, its sent count or more and the same note. A queued upload refused as stale whose
+// lost first send landed, and which another tablet then saved on top of, is this. Weaker than
+// storedLinesMatchPayload on purpose, so the caller asks it only of an entry that takes nothing off
+// (no pulled food): a removal another tablet re-added would otherwise read as landed. It can still be
+// fooled by another tablet ringing the same dishes at the same table, which the owner accepted.
+// `firstPayload` (the entry's first queued save, when it has one): an entry that took anything off
+// since then — a lower quantity or a line gone, unsent food included — is never read as landed, since
+// the larger stored count may be the first save, not this one.
+export function storedLinesContainPayload(storedLines, payload, firstPayload = null) {
+  const key = r => `${r.recipe_id || ''}#${r.selection_key || selectionKeyOf(r.options)}`
+  if (Array.isArray(firstPayload)) {
+    const now = new Map()
+    for (const r of payload || []) now.set(key(r), (now.get(key(r)) || 0) + (Number(r.qty) || 0))
+    const first = new Map()
+    for (const r of firstPayload) first.set(key(r), (first.get(key(r)) || 0) + (Number(r.qty) || 0))
+    for (const [k, q] of first) if ((now.get(k) || 0) < q) return false
+  }
+  const stored = new Map()
+  for (const r of storedLines || []) {
+    const k = key(r)
+    const cur = stored.get(k) || { qty: 0, sent: 0, notes: new Set() }
+    cur.qty += Number(r.qty) || 0
+    cur.sent += Number(r.sent_qty) || 0
+    cur.notes.add((r.notes || '').trim())
+    stored.set(k, cur)
+  }
+  const rows = payload || []
+  if (rows.length === 0) return false
+  return rows.every(r => {
+    const s = stored.get(key(r))
+    return !!s && s.qty >= (Number(r.qty) || 0) && s.sent >= (Number(r.sent_qty) || 0) && s.notes.has((r.notes || '').trim())
+  })
+}
+
 const SAME_NUMBER = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.0001
 
 // How the server's priced lines (save_pos_order_items' returned `items`) differ from the cart:

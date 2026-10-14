@@ -180,6 +180,33 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~POS small leftovers, second pass (the rest of the S809.4 lists): about twenty fixes, sixteen
+  closed without work~~ — **shipped S835, 2026-10-14**: migration `20261014110000` applied live on the
+  first try (its rolled-back probe passed at BLOOM CAFE as an anonymous guest, the POS manager and the
+  Owner, and as an outlet group's Owner for the menu-copy preview); pos-payment-webhook redeployed; app
+  crest-v451. Decisions asked in plain words; the owner took every recommendation ("approve"):
+  **D37** every sign-out ends this device's session only (account menu, rail, subscription lock, legal
+  re-acceptance, Crest Staff, the stock-count tablet's lock). **D38** an Owner or the operator on an
+  activated till tablet's Kitchen Display is told to use a Kitchen login, and Exit signs the tablet out
+  to the PIN screen. **D39** the Owner sees who last reset each staff PIN (`get_staff_pin_resets`, the
+  operator as "Crest support"). **D40** a guest QR order on the bill whose "accepted" mark has not
+  saved gets one more bounded try before the close; if it still waits, the bill closes and the floor
+  tells the waiter. **D41** a table with bills on record is not deleted (`pos_table_has_bills`);
+  Inactive keeps it with its history; no FK (SET NULL would turn its bills into takeaways). **D42** the
+  Customization report is not offered to Inventory-only managers. **D43** the staffing "covers" keep
+  their count and say what it is in a Tip. Recommended defaults the owner approved with the batch: points
+  on another open bill are named; kept dishes go only to their own table or takeaway, and a booking
+  seated onto that table leaves them named, not added; a void confirmed later prints its VOID slip; a
+  queued upload whose every dish is on the order reads as landed unless it took food off; a cleared
+  bill's QR payment is left unmatched (FK ON DELETE SET NULL); unblock is refused while the person is
+  gone at any linked outlet; Clear POS re-counts the hand-entered days the till had covered; a dish's
+  choice extras follow it in a negative month; the editors check the whole dish; Menu Pricing says when
+  choices were not checked; a guest's below-zero dish has its own sentence; menu copy's preview names a
+  replaced price. Accepted, no work: a "not served" note on an earlier month's bill keeps its warning,
+  IMS recipes keep `pos_enabled` on by default, the delete-login scans, a late award's current scheme,
+  a credit note after a Move. Parked: "00977" phone spellings, operator ids in
+  `get_client_profile_names`, the KDS two-ticket Clear, `option_count` and hidden picks, ORDER-FLOW-4's
+  residual. Record: CHANGELOG S835.
 - [x] ~~POS small leftovers (S809.4 lists): twelve items in one pass~~ — **shipped S834, 2026-10-14**:
   migration `20261014100000` applied live (second try; the first stopped on its read-back SELECT and
   rolled back whole); admin-user-ops v68, hr-selfservice-login v13, ims-staff-login v7; app crest-v450.
@@ -421,6 +448,18 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   **D30 (owner, a):** `TillOutletGate` stops Orders, Billing, Shifts and the Kitchen Display for the
   operator on a client whose POS is off; the setup pages stay open. Original rows: `DATABASE.md`,
   `GAPS.md`.
+
+- [x] ~~S809 stage 4, slice 4j: RESERVATIONS-6 to -11 (P3)~~ — **shipped S818, 2026-10-12**, migration
+  `20261012130000` applied live, crest-v434 (entry written in S835; the CHANGELOG S818 entry was the only
+  record). Owner Q23 (a): a cancel or no-show can be undone until the end of the booking's day, the days
+  before it included. Build decisions answered as recommended: **D22** Clear Occupied puts a seated
+  booking back to Arrived, unlinked, before deleting its order. **D23** No-show is offered only from the
+  booked time (the server refuses it earlier too since S835). **D24** a booking from before midnight
+  stays in play on the floor, the Bookings Tonight tile and Upcoming/Unconfirmed until its window ends.
+  **D25** a Seat hand-off the picked table cannot take is dropped and named on the floor
+  (`seatRefusedText`), never left armed. **D26** deleting a table, or taking it out of service, first
+  names the bookings still to come that hold it. Also: an online request nobody answered is declined as
+  "Not answered in time" when the same number asks again. Original rows: `RESERVATIONS.md`.
 
 - [x] ~~S809 stage 4, slice 4i: FLOOR-KITCHEN-4, -7, -8, -9, ORDER-FLOW-17, -19 (P3); plus the S809.4
   follow-ups "Ticket Routing hides dishless bar categories" (3m) and "a waiting guest QR order when its

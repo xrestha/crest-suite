@@ -212,6 +212,30 @@ export function spendablePoints(balance, held) {
   return Math.max(0, b - h)
 }
 
+/**
+ * Points this customer has put on other bills still open (S835, S809.4 2g), one entry per bill, from
+ * their `redeem` ledger rows with the bill embedded (`pos_orders!inner(order_no, table_name, status)`).
+ * A redemption row is negative; the entry carries the points as a positive count. Bills with nothing
+ * left on them (a handed-back try) are dropped.
+ */
+export function pointsOnOtherBills(rows) {
+  const byOrder = new Map()
+  for (const r of rows || []) {
+    if (!r?.order_id) continue
+    const cur = byOrder.get(r.order_id) || { orderId: r.order_id, points: 0, orderNo: r.pos_orders?.order_no ?? null, tableName: r.pos_orders?.table_name || null }
+    cur.points += -(Math.floor(Number(r.points) || 0))
+    byOrder.set(r.order_id, cur)
+  }
+  return [...byOrder.values()].filter(b => b.points > 0)
+}
+
+/** "40 points held on order #12 (Table 4) until it closes." for one pointsOnOtherBills entry. */
+export function pointsOnOtherBillText({ points, orderNo, tableName }) {
+  const n = `${points.toLocaleString('en-IN')} point${points === 1 ? '' : 's'}`
+  const bill = `${orderNo != null ? `order #${orderNo}` : 'another open order'}${tableName ? ` (${tableName})` : ''}`
+  return `${n} held on ${bill} until it closes, or until that bill hands them back.`
+}
+
 /** Money with paisa only when there are some: a point worth NPR 2.5 shows as NPR 2.50, NPR 10 as NPR 10. */
 export function nprPoints(n) {
   const v = Math.round((Number(n) || 0) * 100) / 100

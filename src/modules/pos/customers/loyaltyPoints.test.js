@@ -2,6 +2,7 @@ import {
   loyaltyPoints, pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers,
   pointsAdjustment, schemeNumberCommit, describeLedgerRow, MAX_POINTS_ADJUST,
   spendablePoints, nprPoints, schemeGivesBack, earnPreview, billEarnBase, billsMissingPoints, pointsMove,
+  pointsOnOtherBills, pointsOnOtherBillText,
 } from './loyaltyPoints'
 
 // These encode the same boundaries award_loyalty_points() enforces in SQL. The till renders a
@@ -343,5 +344,25 @@ describe('pointsMove (owner addition)', () => {
       .toBe('That is a delivery partner’s number, which does not earn or spend points.')
     expect(pointsMove({ toPhone: '9841234567', reason: '   ', fromPhone: '9801111111' }).errors.reason).toBe('Say why — the reason is kept on both numbers.')
     expect(pointsMove({ toPhone: '9841234567', reason: 'x'.repeat(301), fromPhone: '9801111111' }).errors.reason).toMatch(/under 300/)
+  })
+})
+
+// S835 (S809.4, 2g): points a guest put on another bill still open are named, not just missing.
+describe('pointsOnOtherBills', () => {
+  test('one entry per open bill, points positive, a handed-back try dropped', () => {
+    const rows = [
+      { order_id: 'a', points: -40, pos_orders: { order_no: 12, table_name: 'Table 4', status: 'open' } },
+      { order_id: 'b', points: -10, pos_orders: { order_no: 15, table_name: null, status: 'open' } },
+      { order_id: 'b', points: 10, pos_orders: { order_no: 15, table_name: null, status: 'open' } },
+      { order_id: null, points: -5 },
+    ]
+    expect(pointsOnOtherBills(rows)).toEqual([{ orderId: 'a', points: 40, orderNo: 12, tableName: 'Table 4' }])
+    expect(pointsOnOtherBills(null)).toEqual([])
+  })
+  test('the sentence names the bill and its table', () => {
+    expect(pointsOnOtherBillText({ points: 40, orderNo: 12, tableName: 'Table 4' }))
+      .toBe('40 points held on order #12 (Table 4) until it closes, or until that bill hands them back.')
+    expect(pointsOnOtherBillText({ points: 1, orderNo: null, tableName: null }))
+      .toBe('1 point held on another open order until it closes, or until that bill hands them back.')
   })
 })

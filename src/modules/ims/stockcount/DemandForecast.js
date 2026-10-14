@@ -456,8 +456,10 @@ export default function DemandForecast() {
     XLSX.writeFile(wb, `Demand_Forecast_${horizon}d.xlsx`)
   }
 
+  // What a cover counts (S835, owner decision D43): the same sentence as Roster.jsx's
+  // COVERS_COUNT_TIP, on the staffing screens that read this figure. Change both together.
   const coversHeader = hasPos
-    ? <Tip text="Average covers on this weekday, from closed POS bills. Scaled by the holiday multiplier where one is set." width={260}>Forecast Covers</Tip>
+    ? <Tip text="Average covers on this weekday, from closed POS bills. Scaled by the holiday multiplier where one is set. Covers: Seated guests on dine-in bills, and each takeaway or delivery order as one. The Owner Report's Guests Seated counts dine-in guests only." width={280}>Forecast Covers</Tip>
     : null
 
   return (

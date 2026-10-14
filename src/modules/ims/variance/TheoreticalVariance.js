@@ -248,8 +248,11 @@ export default function TheoreticalVariance() {
       })
     })
     // Option deltas × qty sold, per surviving (depleting) row — signed, so "no onion" subtracts.
+    // Choices follow their dish (S835, owner decision, as stockReportCalc.js): a dish whose month
+    // net sold is 0 or less consumes nothing above, so its choice extras add nothing either.
     depleting.forEach(e => {
       if (!e.ingredient_deltas) return
+      if ((salesMap[e.recipe_id] || 0) <= 0) return
       const n = parseFloat(e.qty_sold || 0)
       if (!n) return
       deltaItems(e.ingredient_deltas, explosion).forEach(({ item_id, qty }) => {

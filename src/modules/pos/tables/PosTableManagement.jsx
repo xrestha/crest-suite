@@ -22,6 +22,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { settleWithin } from '../../../utils/withTimeout'
 import GuestMenuSetup from './GuestMenuSetup'
 import WeatherCityPicker from '../../dashboard/WeatherCityPicker'
 
@@ -36,6 +37,10 @@ const QS_EMPTY  = { prefix: 'Table', start: 1, count: 10, section: '', capacity:
 const ADD_EMPTY = { name: '', section: '', capacity: 4 }
 
 const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
+
+// S835 (D41): the page's refusal for a table with bills, naming the way out. The database's own
+// refusal (pos_table_has_bills) is worded in errorText.
+const hasBillsText = name => `${name} has bills on record, so it can't be deleted. Take it out of service instead (set its Status to Inactive) — its bill history stays with it.`
 
 export default function PosTableManagement() {
   const { clientId, hasPosAccess, hasWeather } = useAuth()
@@ -280,13 +285,20 @@ export default function PosTableManagement() {
     // Three references, three behaviours, none visible from the button (S682, corrected S754):
     // pos_reservation_tables cascades only the LINK, so a booking survives with this table taken
     // off it; pos_guest_order_requests is a plain FK and refuses the delete (worded in errorText);
-    // pos_orders.table_id has no FK at all, so an open bill would outlive its table and vanish from
-    // the floor — which is why run() reads for one first.
+    // pos_orders.table_id has no FK at all, so a bill would outlive its table — which is why this
+    // reads for one first.
     // S818 RESERVATIONS-11: once the link is gone nothing records which bookings lost the table, so
     // they are named here, before the delete. A check that could not run has not passed.
+    // S835 (D41, owner decision): a table with ANY bill on record, open or closed, is not deleted; it
+    // is taken out of service (Inactive), so its bill history stays tied to it. The database refuses
+    // it too (pos_table_has_bills, worded in errorText); this asks before the confirm, so the Owner is
+    // not asked to confirm a delete that cannot happen.
     setMsg('')
-    const { labels, error: holdErr } = await bookingsHolding(target.id)
-    if (holdErr) { setMsg('error:"' + target.name + '" was not deleted — could not check which bookings hold it. ' + errorLine(holdErr)); return }
+    const t = target
+    const [{ labels, error: holdErr }, { count: billCount, error: billErr }] = await Promise.all([bookingsHolding(t.id), billsOn(t.id)])
+    if (billErr) { setMsg('error:"' + t.name + '" was not deleted — could not check whether it has bills on record. ' + errorLine(billErr)); return }
+    if (billCount > 0) { setMsg('error:' + hasBillsText(t.name)); return }
+    if (holdErr) { setMsg('error:"' + t.name + '" was not deleted — could not check which bookings hold it. ' + errorLine(holdErr)); return }
     askConfirm({
       title: `Delete "${target.name}"?`,
       confirmLabel: 'Delete Table', danger: true, busyLabel: 'Deleting…',
@@ -303,27 +315,35 @@ export default function PosTableManagement() {
             <p style={{ margin: '0 0 8px' }}>No booking still to come holds it.</p>
           )}
           <p style={{ margin: '0 0 8px' }}>
-            A table with an open bill cannot be deleted, and nor can one that has ever taken a QR guest order — mark that
-            one Inactive instead.
+            A table that has ever had a bill or a QR guest order cannot be deleted — take that one out of service
+            (Inactive) instead, and its history stays with it.
           </p>
-          <p style={{ margin: 0 }}>Past bills keep the table name they were closed under. This cannot be undone.</p>
+          <p style={{ margin: 0 }}>This cannot be undone.</p>
         </>
       ),
       run: async () => {
-        // S754: the page half of the open-bill guard (a DB trigger is separate). A check that could
-        // not run has not passed, so a failed read refuses the delete rather than waving it through.
-        const { data: openBills, error: openErr } = await scopedFrom('pos_orders', 'id')
-          .eq('table_id', target.id).eq('status', 'open').limit(1)
-        if (openErr) { setMsg('error:"' + target.name + '" was not deleted — could not check whether it has an open bill. ' + errorLine(openErr)); return }
-        if (openBills?.length) { setMsg('error:' + target.name + ' has an open bill — close or bill it first.'); return }
+        // S754, widened S835 (D41): the page half of the guard (pos_table_has_bills is the database's),
+        // read again here because a bill can be opened on it while this dialog is up. A check that
+        // could not run has not passed, so a failed read refuses the delete rather than waving it through.
+        const { count, error: countErr } = await billsOn(t.id)
+        if (countErr) { setMsg('error:"' + t.name + '" was not deleted — could not check whether it has bills on record. ' + errorLine(countErr)); return }
+        if (count > 0) { setMsg('error:' + hasBillsText(t.name)); return }
         // .select('id'): a delete RLS refuses matches zero rows with no error, which would otherwise
         // close the dialog as though it had worked.
-        const { data: deleted, error } = await scopedDelete('pos_tables').eq('id', target.id).select('id')
-        if (error) { setMsg('error:"' + target.name + '" was not deleted — it is still on the floor. ' + errorLine(error)); return }
-        if (!deleted?.length) { setMsg('error:"' + target.name + '" was not deleted — this account may not remove tables, or it was already removed on another device. Reload the page to check.'); return }
+        const { data: deleted, error } = await scopedDelete('pos_tables').eq('id', t.id).select('id')
+        if (error) { setMsg('error:"' + t.name + '" was not deleted — it is still on the floor. ' + errorLine(error)); return }
+        if (!deleted?.length) { setMsg('error:"' + t.name + '" was not deleted — this account may not remove tables, or it was already removed on another device. Reload the page to check.'); return }
         await load(); closeModal()
       },
     })
+  }
+
+  // S835 (D41). How many bills, of any status, name this table. A head count: no rows travel. Bounded,
+  // because the confirm waits on it and a busy confirm cannot be cancelled; a timeout is a failed check.
+  async function billsOn(tableId) {
+    const { count, error } = await settleWithin(
+      scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('table_id', tableId), 15000, 'Bill check')
+    return { count: count ?? 0, error }
   }
 
   // ── Guest Menu QR ────────────────────────────────────────────────────────────

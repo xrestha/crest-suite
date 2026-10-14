@@ -6,7 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature, mapSignature } from '../../../shared/setIfChanged'
-import { pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers, spendablePoints, earnPreview } from '../customers/loyaltyPoints'
+import { pointsValue, maxRedeemablePoints, isDeliveryPartnerPhone, redeemedAmountDiffers, spendablePoints, earnPreview, pointsOnOtherBills, pointsOnOtherBillText } from '../customers/loyaltyPoints'
 import { phoneForRecord, customerPhoneKey } from '../../../utils/phone'
 import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
@@ -77,7 +77,7 @@ import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
+  storedLinesMatchPayload, storedLinesContainPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
   keptLinesToRestore, mergeRecoveredLines,
@@ -236,7 +236,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   acceptedGuestReqIdsRef.current = pendingAcceptedGuestReqIds
   const acceptedGuestItemsRef = useRef(new Map())
   const unmarkedGuestAcceptsRef = useRef(new Map())
-  const markingGuestAcceptsRef = useRef(false)
+  const markingGuestAcceptsRef = useRef(null)
   // Requests whose dishes a reload from another device left off, held off the banner while the
   // "changed on another device" box is open (ORDER-FLOW-18).
   const staleGuestReqIdsRef = useRef(new Set())
@@ -299,6 +299,10 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [msg,         setMsg]         = useState('')
   // categories that route to BOT — loaded from settings, default to ['Beverage']
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
+  // S835: whether the screen may SHOW routing yet (the BOT button, a sent line's station). Until the
+  // settings read or the offline copy lands, the default above would flash a BOT on a no-bar till.
+  // Sending still routes by whatever is known, the built-in default included (S809 3m).
+  const [routingShown, setRoutingShown] = useState(false)
   const [outletName,    setOutletName]    = useState('')
   const [notePresets,   setNotePresets]   = useState([])
   const [noteFocusIdx,  setNoteFocusIdx]  = useState(null)
@@ -534,6 +538,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // S815 4g (Q19 c): the part of the balance earned on unpaid Credit bills, spendable once each is
   // settled; and the customer's scheme (null when in none), so the window can say what this bill earns.
   const [loyaltyHeld, setLoyaltyHeld] = useState(0)
+  // S835: points this customer has put on another bill that is still open ([{ points, orderNo,
+  // tableName }]). They are already out of the balance, so the window names where they are.
+  const [loyaltyOnOtherBills, setLoyaltyOnOtherBills] = useState([])
   const [loyaltyScheme, setLoyaltyScheme] = useState(null)
   const [loyaltyPointValue, setLoyaltyPointValue] = useState(1)
   const [redeemStr, setRedeemStr] = useState('')
@@ -651,7 +658,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (!clientId) return
     loadFloor()
     // S809 2a: another client's settings (an admin's "view as" switch) are not this one's.
-    setBillingSettingsLoaded(false); setSettingsFailure(null)
+    setBillingSettingsLoaded(false); setSettingsFailure(null); setRoutingShown(false)
     cacheAppliedForRef.current = null
     loadTillSettings()
     if (navigator.onLine) flushRef.current?.()
@@ -663,6 +670,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // routing standing.
   function applyTillSettings(data, outlet) {
     setBotCategories(new Set(barCategoriesOf(data?.pos_bot_categories)))
+    setRoutingShown(true)
     setReservationSettings(normalizeReservationSettings(data?.pos_reservation_settings))
     setNotePresets(data?.pos_note_presets || [])
     setDiscountReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
@@ -729,7 +737,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       cachePosSettings(forClient, { ...read.settings, outlet_name: read.outletName })
         .catch(err => console.error('POS settings offline copy not saved:', err))
     } finally {
-      if (seq === settingsReqSeq.current) { settingsInFlightRef.current = null; setSettingsReading(false) }
+      // S835: answered or not, the till now routes by what it has (no copy: the built-in default).
+      if (seq === settingsReqSeq.current) { settingsInFlightRef.current = null; setSettingsReading(false); setRoutingShown(true) }
     }
   }
   loadTillSettingsRef.current = loadTillSettings
@@ -1164,6 +1173,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const phone = buyerPhone.trim()
     if (!phone) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
     let cancelled = false
+    setLoyaltyOnOtherBills([])
     // S809 3k (CUSTOMERS-PARKING-4): found by the number, however it is typed, as the server finds it.
     const key = customerPhoneKey(phone)
     const timer = setTimeout(async () => {
@@ -1189,6 +1199,16 @@ export default function PosOrders({ billingStation = false } = {}) {
       setLoyaltyBalance(Number(rows?.[0]?.balance) || 0)
       setLoyaltyHeld(Number(rows?.[0]?.held) || 0)
       setLoyaltyScheme(custRes.data.pos_loyalty_schemes || null)
+      // S835 (S809.4, 2g): points spent on another bill still open (an earlier try, or another till)
+      // are out of the balance until that bill closes or hands them back. Named, so the cashier can
+      // tell the guest where they are. Supplementary: a failed read says nothing and is logged.
+      let held = scopedFrom('pos_loyalty_ledger', 'points, order_id, pos_orders!inner(order_no, table_name, status)')
+        .eq('customer_id', custRes.data.id).eq('kind', 'redeem').eq('pos_orders.status', 'open')
+      if (orderId) held = held.neq('order_id', orderId)
+      const { data: heldRows, error: heldErr } = await held
+      if (cancelled) return
+      if (heldErr) { console.error('POS loyalty: points on other open bills not read:', heldErr); return }
+      setLoyaltyOnOtherBills(pointsOnOtherBills(heldRows))
     }, 400)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [billingOpen, buyerPhone, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1662,34 +1682,36 @@ export default function PosOrders({ billingStation = false } = {}) {
   // it, or another till turned it away while this one had it — its dishes are on this bill now, so the
   // waiter is told. A failed write keeps it for the next poll; its dishes are saved, so it never goes
   // back on the banner, where Accept would add them a second time.
-  async function markGuestAccepts() {
-    if (markingGuestAcceptsRef.current || unmarkedGuestAcceptsRef.current.size === 0) return
-    markingGuestAcceptsRef.current = true
-    try {
-      const byBill = new Map()
-      for (const [id, oid] of unmarkedGuestAcceptsRef.current) byBill.set(oid, [...(byBill.get(oid) || []), id])
-      for (const [oid, ids] of byBill) {
-        const { data: marked, error } = await bounded(scopedUpdate('pos_guest_order_requests', {
-          status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null, order_id: oid,
-        }).in('id', ids).eq('status', 'pending').select('id'), 'Marking the guest order accepted')
-        if (error) { console.error('guest request accept failed — kept for the next poll (its dishes are saved):', error); continue }
-        for (const r of marked || []) unmarkedGuestAcceptsRef.current.delete(r.id)
-        const rest = ids.filter(id => !(marked || []).some(r => r.id === id))
-        if (rest.length === 0) continue
-        const { data: current, error: readErr } = await bounded(scopedFrom('pos_guest_order_requests', 'id, status, order_id').in('id', rest), 'Reading the guest order')
-        if (readErr) { console.error('guest request read failed — kept for the next poll:', readErr); continue }
-        // A request that is no longer there (a restore, a clear) needs nothing more.
-        for (const id of rest) unmarkedGuestAcceptsRef.current.delete(id)
-        for (const r of current || []) {
-          if (r.status === 'accepted' && r.order_id === oid) continue
-          if (r.status === 'dismissed') setMsg('error:Another till turned this guest\'s QR order away while you had it, but its dishes are saved on this order. Tell the guest their food is coming — their phone says it was not taken — or take the dishes off.')
-          else if (r.status === 'accepted') setMsg('error:Another till had already accepted this guest\'s QR order. Check this order does not have their dishes twice.')
-          // Still waiting means the write was refused for another reason: try again at the next poll.
-          else unmarkedGuestAcceptsRef.current.set(r.id, oid)
-        }
+  // S835: returns the run in flight, so a bill close can wait for it rather than for nothing.
+  function markGuestAccepts() {
+    if (markingGuestAcceptsRef.current) return markingGuestAcceptsRef.current
+    if (unmarkedGuestAcceptsRef.current.size === 0) return Promise.resolve()
+    const run = markGuestAcceptsNow().finally(() => { markingGuestAcceptsRef.current = null })
+    markingGuestAcceptsRef.current = run
+    return run
+  }
+  async function markGuestAcceptsNow() {
+    const byBill = new Map()
+    for (const [id, oid] of unmarkedGuestAcceptsRef.current) byBill.set(oid, [...(byBill.get(oid) || []), id])
+    for (const [oid, ids] of byBill) {
+      const { data: marked, error } = await bounded(scopedUpdate('pos_guest_order_requests', {
+        status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null, order_id: oid,
+      }).in('id', ids).eq('status', 'pending').select('id'), 'Marking the guest order accepted')
+      if (error) { console.error('guest request accept failed — kept for the next poll (its dishes are saved):', error); continue }
+      for (const r of marked || []) unmarkedGuestAcceptsRef.current.delete(r.id)
+      const rest = ids.filter(id => !(marked || []).some(r => r.id === id))
+      if (rest.length === 0) continue
+      const { data: current, error: readErr } = await bounded(scopedFrom('pos_guest_order_requests', 'id, status, order_id').in('id', rest), 'Reading the guest order')
+      if (readErr) { console.error('guest request read failed — kept for the next poll:', readErr); continue }
+      // A request that is no longer there (a restore, a clear) needs nothing more.
+      for (const id of rest) unmarkedGuestAcceptsRef.current.delete(id)
+      for (const r of current || []) {
+        if (r.status === 'accepted' && r.order_id === oid) continue
+        if (r.status === 'dismissed') setMsg('error:Another till turned this guest\'s QR order away while you had it, but its dishes are saved on this order. Tell the guest their food is coming — their phone says it was not taken — or take the dishes off.')
+        else if (r.status === 'accepted') setMsg('error:Another till had already accepted this guest\'s QR order. Check this order does not have their dishes twice.')
+        // Still waiting means the write was refused for another reason: try again at the next poll.
+        else unmarkedGuestAcceptsRef.current.set(r.id, oid)
       }
-    } finally {
-      markingGuestAcceptsRef.current = false
     }
   }
 
@@ -1981,6 +2003,11 @@ export default function PosOrders({ billingStation = false } = {}) {
         } else if (Array.isArray(q.first_items) && storedLinesMatchPayload(stored, q.first_items)) {
           res = await replay(back.data.items_version)
           if (noAnswer(res)) return 'no_answer'
+        } else if (!q.removal_reason && storedLinesContainPayload(stored, q.items, q.first_items)) {
+          // S835 (S809.4, 3f; owner 2026-10-14): the lost send landed and another tablet saved on top of
+          // it before this upload. Every dish here is on the order, so it landed; nothing here takes any off.
+          landed = true
+          version = back.data.items_version
         } else {
           return toConflict('stale')
         }
@@ -2302,13 +2329,24 @@ export default function PosOrders({ billingStation = false } = {}) {
     return bookingToSeatOnTap(floorReservations, tableId, Date.now(), reservationSettings.seat_window_minutes)
   }
 
+  // S835: the lines a till lock kept, but only for the place they were rung on: their table, or their
+  // takeaway by its order id. The restore opens that place itself; a table tapped while its reads run
+  // used to take them. A kept new takeaway is put back only by the restore's own direct call.
+  function keptCartFor(table, loadedOrderId) {
+    const kept = lockedCartRef.current
+    if (!kept) return null
+    if (kept.tableId) return table?.id === kept.tableId ? kept : null
+    if (kept.orderId) return !table && loadedOrderId === kept.orderId ? kept : null
+    return null
+  }
+
   // The original tail of openTable for a table with no order on it: a pending guest QR request
   // supplies the covers, otherwise the numpad asks. Also the "Walk-in instead" answer to the
   // seat prompt below.
   function startFreshOrder(table) {
     // Lines a till lock kept for this login, for a table whose order was never saved or has since
     // closed (S776): straight onto a new order with the covers they had, no numpad to re-answer.
-    const kept = lockedCartRef.current
+    const kept = keptCartFor(table, null)
     if (kept) {
       setActiveTable(table)
       setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); itemsVersionRef.current = null
@@ -2391,7 +2429,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (billOnOpenRef.current) { billOnOpenRef.current = false; setBillOnLoad(true) }
     // The same funnel brings back what a till lock kept for this login (S776), measured against the
     // order AS IT NOW STANDS — anything another device saved meanwhile is not added twice.
-    if (lockedCartRef.current) applyLockedCart(items, id)
+    if (keptCartFor(table, id)) applyLockedCart(items, id)
     // S809 ORDER-FLOW-3 (3e): a save of this order the till never heard back from is settled now — a
     // send that landed prints the ticket the kitchen never got.
     if (sendAttemptsFor(id).length > 0) void settleSendAttempts(id)
@@ -2475,8 +2513,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       } else if (kept.orderId) {
         const { data: order, error } = await bounded(scopedFrom('pos_orders', 'id, status').eq('id', kept.orderId).maybeSingle(), 'Reading the takeaway')
         if (error) { keepAgain(); return }
-        if (order?.status === 'open') await openOrderById(kept.orderId)
-        else { openTakeaway(); applyLockedCart([], null) }
+        // S835: closed between this read and the next, it goes onto a new takeaway like one closed before.
+        if (order?.status !== 'open' || (await openOrderById(kept.orderId)) === 'closed') { setFloorMsg(''); openTakeaway(); applyLockedCart([], null) }
       } else {
         openTakeaway()
         applyLockedCart([], null)
@@ -2528,7 +2566,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (!existing || existing.status !== 'open') {
       setFloorMsg('error:That takeaway order was already closed on another device.')
       loadFloor({ quiet: true })
-      return
+      return 'closed'
     }
     showLoadedOrder(null, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
   }
@@ -2574,6 +2612,9 @@ export default function PosOrders({ billingStation = false } = {}) {
         return
       }
       if (table.status === 'inactive') { setFloorMsg(`error:${inactiveTableText(table.name)}`); return } // S817 4i
+      // S835: kept lines for this table go onto the new order, as online; the numpad used to open
+      // over the floor's "not put back" line instead.
+      if (keptCartFor(table, null)) { startFreshOrder(table); return }
       // No known order on this table — safe to start fresh, same as the online empty-table path.
       setPendingTable(table)
       setPendingCoversStr('')
@@ -2639,7 +2680,17 @@ export default function PosOrders({ billingStation = false } = {}) {
       }
       // Lines a till lock kept for this login go straight onto a new order (S776), before a booking
       // prompt can ask about a party that is not the one these items were rung for.
-      if (lockedCartRef.current) { startFreshOrder(table); return }
+      const keptHere = keptCartFor(table, null)
+      // S835 (owner, 2026-10-14): a booking handed over from Reservations is seated, and the kept lines,
+      // rung for another party, are named instead of going onto the booking's bill.
+      if (keptHere && handoff?.id) {
+        lockedCartRef.current = null
+        seatReservation(table, handoff)
+        const what = keptLinesText(keptHere)
+        if (what) setMsg(`error:Not added to ${handoff.customer_name || 'this booking'}'s order: ${what}, not sent before ${keptBefore(keptHere)}. They were rung for another party at this table. If this party wants them, add them by hand.`)
+        return
+      }
+      if (keptHere) { startFreshOrder(table); return }
       // An explicit handoff from the Reservations page seats straight away; a table whose
       // booking is due offers the party by name before falling back to the numpad.
       if (handoff?.id) { seatReservation(table, handoff); return }
@@ -3942,7 +3993,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
-    setLoyaltyBalance(null); setLoyaltyHeld(0); setLoyaltyScheme(null); setRedeemStr(''); setLoyaltyLookupMsg('')
+    setLoyaltyBalance(null); setLoyaltyHeld(0); setLoyaltyOnOtherBills([]); setLoyaltyScheme(null); setRedeemStr(''); setLoyaltyLookupMsg('')
     setBillPreviewOpen(false)
     // A try at this bill is still unsettled (S809 CHECKOUT-7): the window opens on what that try sent,
     // locked, rather than on a blank payment the cashier could change before it lands.
@@ -4763,6 +4814,20 @@ export default function PosOrders({ billingStation = false } = {}) {
         ...(closeType !== 'void' && pricedVersion !== null ? { items_version: pricedVersion } : {}),
       }
 
+      // S835 (S809.4, 4i; owner 2026-10-14): a guest QR order whose dishes are on this bill but whose
+      // "accepted" mark has not saved would be turned away by the close itself
+      // (pos_orders_close_turns_away_guest_orders), and the guest's phone would say it was not taken. One
+      // more bounded try first; if it still waits, the bill closes anyway and the waiter is told.
+      const guestMarkWaits = () => [...unmarkedGuestAcceptsRef.current.values()].includes(orderId)
+      let guestMarkMissed = false
+      if (closeType !== 'void' && guestMarkWaits()) {
+        setCloseStep('Saving the guest order…')
+        // A run already in flight may have started before this bill's ids were added: then once more.
+        await withTimeout(markGuestAccepts().then(() => (guestMarkWaits() ? markGuestAccepts() : null)), SEND_READ_MS, 'Marking the guest order accepted')
+          .catch(e => console.error('guest order mark before the close did not finish:', e))
+        guestMarkMissed = guestMarkWaits()
+      }
+
       setCloseStep('Closing the bill…')
       // Marked BEFORE the write (S776): if its answer is lost, this is what tells the next press — or
       // Cancel — that "already closed" may be this till's own write rather than another till's.
@@ -4835,6 +4900,10 @@ export default function PosOrders({ billingStation = false } = {}) {
         return false
       }
       setCloseAttempt(orderId, null)
+      if (guestMarkMissed) {
+        const guestWhere = activeTable?.name || (updated.order_no ? `Takeaway #${updated.order_no}` : 'this takeaway')
+        warnWrite(`A guest's QR order is on the bill for ${guestWhere}, but it was not marked as taken before the bill closed, so their phone may say it was turned away. Let the guest know their food was on this bill.`)
+      }
       return await finishClosedBill(closeType, updated, { compNo, compedItemRows, custRow, custUpsertDone })
     } finally {
       closingRef.current = false
@@ -4934,14 +5003,16 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
 
     step('Finishing up…')
-    if (closeType === 'void' && !background) {
+    if (closeType === 'void') {
       // S817 4i (FLOOR-KITCHEN-4, D18): the database cancels this order's tickets still being made in
       // the void's own transaction (pos_orders_void_cancels_tickets), whichever way the bill was
       // voided, so nothing is written here any more; the Kitchen Display shows them as "VOIDED — stop"
       // for a few minutes. What the till adds is the paper: a VOID slip for each station whose ticket
       // the void stopped, read back from the tickets themselves (stamped at the void's own instant, so
       // a ticket the kitchen cleared earlier is not printed again). A Served ticket is left alone, and
-      // a comp (writeoff) cancels nothing: that food was made. In the background (S809) nothing prints.
+      // a comp (writeoff) cancels nothing: that food was made. S835: the VOID slip prints in the
+      // background too (a void whose answer was lost and was confirmed later), whatever the till is on,
+      // because the kitchen must stop cooking either way; a blocked print says so on the floor.
       step('Telling the kitchen…')
       let stopRead = scopedFrom('pos_kot_log', 'station, items')
         .eq('order_id', updated.id).eq('status', 'cancelled').not('cancelled_at', 'is', null)
@@ -4953,8 +5024,8 @@ export default function PosOrders({ billingStation = false } = {}) {
         const byStation = {}
         for (const r of stopped || []) (byStation[r.station] ||= []).push(...(r.items || []))
         const voidPrinted = ['KOT', 'BOT'].filter(st => byStation[st]?.length).map(st => printHtml(buildVoidSlipHtml({
-          station: st, items: byStation[st], ticketNo: updated.order_no ?? orderNo, outletName,
-          tableName: updated.table_name || activeTable?.name || 'Takeaway', voidedBy: printedStaffName(profile, isAdmin), voidedAt: updated.closed_at,
+          station: st, items: byStation[st], ticketNo: updated.order_no ?? (background ? null : orderNo), outletName,
+          tableName: updated.table_name || (background ? null : activeTable?.name) || 'Takeaway', voidedBy: printedStaffName(profile, isAdmin), voidedAt: updated.closed_at,
         })))
         if (voidPrinted.some(p => p === false)) {
           warnWrite(`The bill for ${where} was voided, but the VOID slip did not print — allow pop-ups for this site, and tell the kitchen and bar to stop ${where}'s order.`)
@@ -6037,7 +6108,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                             color: 'var(--theme-accent-ink)',
                             borderRadius: 0, padding: '1px 5px', cursor: 'default',
                           }}>
-                            ✓ {botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
+                            ✓ {!routingShown ? 'Sent' : botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
                           </span>
                         </Tip>
                       )}
@@ -6336,7 +6407,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 </Tip>
               </div>
               {/* S809 3m (Q15): an outlet whose Ticket Routing sends nothing to the bar has no BOT to press. */}
-              {botCategories.size > 0 && <div style={{ flex: 1, minWidth: 0 }}>
+              {routingShown && botCategories.size > 0 && <div style={{ flex: 1, minWidth: 0 }}>
                 <Tip text="Bar Order Ticket — sends unsent bar/beverage items to the bar printer. Bold + badge show how many items are waiting."
                   style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
                   <button
@@ -6516,6 +6587,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         + {loyaltyHeld} pt{loyaltyHeld === 1 ? '' : 's'} from a Credit bill not paid yet — usable once it is settled.
                       </p>
                     )}
+                    {loyaltyOnOtherBills.map(b => (
+                      <p key={b.orderId} style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+                        {pointsOnOtherBillText(b)}
+                      </p>
+                    ))}
                     {applied ? (
                       <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-purple-text)' }}>
                         {applied.points} pt{applied.points === 1 ? '' : 's'} applied ({fmtNpr(applied.amount)}) — undo it in the tender list below to change it.

@@ -1,4 +1,4 @@
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 import { isAuthExpiredError } from '../../../utils/sessionKeepAlive'
 import { scopedInsert, scopedDelete } from '../../../shared/scopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
@@ -272,17 +272,21 @@ export async function depleteManualSales(supabase, { clientId, periodId, bsDay, 
 // [0] for the Bulk row a Daily save wipes). A day left with no manual rows gets its movements
 // cleared and nothing re-posted, which is exactly its new state. Best-effort, like the ordinary
 // depletion: the sales save has already committed and nothing here may undo it.
+//
+// Resolves true once the days' movements are rebuilt and false when a step failed and was logged
+// (S835) — never rejects. Sales Entry ignores the answer, as before; Clear POS's re-count reads it
+// to name the days it could not rebuild.
 export async function repostSupersededMovements(supabase, { clientId, periodId, days }) {
   try {
     const uniqueDays = [...new Set((days || []).map(Number))].filter(d => Number.isInteger(d) && d >= 0)
-    if (uniqueDays.length === 0) return
+    if (uniqueDays.length === 0) return true
 
     // The read happens INSIDE the days' locks (S792 stage 2 review, P3). Read outside them, a read
     // that stalled could resolve after a newer save of one of these days had written its movements,
     // and the rebuild — waiting its turn on the lock with pre-save rows in hand — then deleted that
     // save's movements and re-posted the old figures. Under the lock, read → delete → insert for a
     // day is one turn, so a later save of the day waits for it and an earlier one has finished.
-    await withDayLocks(uniqueDays.map(d => `${clientId}:${periodId}:${d}`), async () => {
+    return await withDayLocks(uniqueDays.map(d => `${clientId}:${periodId}:${d}`), async () => {
       // Bounded (≤ 33 distinct days, so the .in() is short), paged, uniquely ordered. manualOnly so
       // a POS row on the same day is never re-posted as a manual movement.
       const { data, error } = await fetchAllRows(() =>
@@ -290,7 +294,7 @@ export async function repostSupersededMovements(supabase, { clientId, periodId, 
           .in('bs_day', uniqueDays).order('id'))
       if (error) {
         console.error('manual stock_movements: could not read the superseded days, so their movements were left as they were (they still count the replaced entries):', error)
-        return
+        return false
       }
 
       const rowsByDay = new Map(uniqueDays.map(d => [d, []]))
@@ -299,11 +303,123 @@ export async function repostSupersededMovements(supabase, { clientId, periodId, 
         if (rowsByDay.has(day)) rowsByDay.get(day).push(r)
       }
       // Now, not replaceManualMovements: that takes these same locks, and this turn already holds them.
-      await replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days: uniqueDays })
+      return replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days: uniqueDays })
     })
   } catch (err) {
     console.error('manual stock_movements: re-posting the superseded days failed:', err)
+    return false
   }
+}
+
+// Which hand-entered days had their stock skipped because the till covered them (S835, owner
+// decision). The Crest operator's Clear POS deletes the till's sales rows and stock movements, and
+// a manual day the till covered was deliberately left un-depleted, so once the till's rows are gone
+// that day consumes nothing until someone re-saves it. These are the days to re-count, and ONLY
+// these: a re-post rebuilds a day with today's recipes, so a day the till never covered is left as
+// it was saved. Read BEFORE the clear, because afterwards the till rows that decide it are gone.
+//
+// The test is the write path's own, per period (replaceManualMovementsNow): the same POS read for
+// the manual rows' dishes, the same D35 handover read when a Bulk total's dish was sold by the till,
+// then posSupersedesManual per row. So a dated row is covered when the till sold its dish that day,
+// and a Bulk total (day 0) only when the till sold its dish in the period AND the till ran from day
+// 1 or a day before the till has been entered as a daily figure. The rule is per DISH; a day is
+// listed when any of its dishes was skipped, because a re-post replaces a day's movements whole
+// (stock_movements has no recipe_id).
+//
+// Paged, each period bounded by `timeoutMs`, and it stops at the first failed read: a check that
+// could not run has not passed, so the caller must not clear on a partial answer.
+// → { data: [{ periodId, days }], error }
+export async function findTillCoveredManualDays(supabase, { periodIds, timeoutMs = SAVE_TIMEOUT_MS * 2, concurrency = 3 }) {
+  const ids = [...new Set((periodIds || []).filter(Boolean))]
+  if (ids.length === 0) return { data: [], error: null }
+  try {
+    const { data: manual, error } = await settleWithin(fetchAllRowsChunked(ids, chunk =>
+      manualOnly(supabase.from('sales_entries').select('period_id, recipe_id, bs_day, qty_sold, source').in('period_id', chunk)).order('id'),
+    { chunkSize: 1, concurrency: 6 }), timeoutMs, 'Reading the hand-entered sales')
+    if (error) return { data: null, error }
+
+    // Only a row that would deplete can have been skipped (the write path's own candidate filter).
+    const rowsByPeriod = new Map()
+    for (const r of manual || []) {
+      if (!(Number(r.qty_sold) > 0)) continue
+      if (!rowsByPeriod.has(r.period_id)) rowsByPeriod.set(r.period_id, [])
+      rowsByPeriod.get(r.period_id).push(r)
+    }
+    const periods = [...rowsByPeriod]
+    const found = []
+    let next = 0, failed = null
+    const lane = async () => {
+      while (!failed && next < periods.length) {
+        const [periodId, rows] = periods[next++]
+        const { data: days, error: dayErr } = await settleWithin(tillCoveredDaysOf(supabase, periodId, rows), timeoutMs, 'Checking which days the till covered')
+        if (dayErr) { failed = failed || dayErr; return }
+        if (days.length > 0) found.push({ periodId, days })
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, periods.length) }, lane))
+    if (failed) return { data: null, error: failed }
+    return { data: found, error: null }
+  } catch (err) {
+    return { data: null, error: err }
+  }
+}
+
+// One period of the test above. `rows` are its depleting manual rows. → { data: days[], error }
+async function tillCoveredDaysOf(supabase, periodId, rows) {
+  const recipeIds = [...new Set(rows.map(r => r.recipe_id))]
+  const days = [...new Set(rows.map(r => Number(r.bs_day) || 0))]
+  // As the write path: a Bulk total is covered by a till sale anywhere in the period, so a period
+  // holding one reads every day; otherwise only the manual rows' own days.
+  const wholePeriod = days.includes(0)
+  const { data: posRows, error } = await fetchAllRowsChunked(recipeIds, ids => {
+    const q = supabase.from('sales_entries').select('recipe_id, bs_day')
+      .eq('period_id', periodId).in('recipe_id', ids).in('source', ['pos', 'pos_comp'])
+    return (wholePeriod ? q : q.in('bs_day', days)).order('id')
+  })
+  if (error) return { data: null, error }
+  const scopedPos = (posRows || []).map(r => ({ ...r, source: 'pos' }))
+  let posIndex = buildPosIndex(scopedPos)
+  const bulkTillSold = [...new Set(rows.filter(r => (Number(r.bs_day) || 0) === 0).map(r => r.recipe_id))]
+    .filter(id => posIndex.anyDay.has(id))
+  if (bulkTillSold.length > 0) {
+    const handover = await readTillHandover(supabase, { periodId, recipeIds: bulkTillSold })
+    if (handover.error) return { data: null, error: handover.error }
+    posIndex = buildPosIndex(scopedPos, { tillStart: handover.tillStart, manualRows: handover.manualRows })
+  }
+  const covered = new Set()
+  for (const r of rows) {
+    const day = Number(r.bs_day) || 0
+    if (posSupersedesManual(r.recipe_id, day, posIndex)) covered.add(day)
+  }
+  return { data: [...covered].sort((a, b) => a - b), error: null }
+}
+
+// Re-count the days findTillCoveredManualDays found, once Clear POS has removed the till's rows
+// (S835). Each period goes through the same re-post path a cross-mode save uses, so the locks and
+// the refuse-on-failed-read behaviour are Sales Entry's; with no till rows left every manual row of
+// those days depletes. `clientId` is the client the periods belong to, which for the operator is
+// not their own. A few periods at a time, each bounded by `timeoutMs`. A period that fails or
+// outlasts the clock lands in `left`; one that timed out may still finish, so its days are "not
+// confirmed", never "not done". Never rejects. → { recounted: [{ periodId, days }], left: [...] }
+export async function recountManualSalesDays(supabase, { clientId, jobs, timeoutMs = SAVE_TIMEOUT_MS * 2, concurrency = 3 }) {
+  const todo = (jobs || []).filter(j => j?.periodId && j.days?.length)
+  const recounted = [], left = []
+  if (!clientId) return { recounted, left: todo }
+  let next = 0
+  const lane = async () => {
+    while (next < todo.length) {
+      const job = todo[next++]
+      let ok = false
+      try {
+        ok = await withTimeout(repostSupersededMovements(supabase, { clientId, periodId: job.periodId, days: job.days }), timeoutMs, 'Re-counting stock')
+      } catch (err) {
+        console.error('manual stock_movements: the re-count did not answer in time; it may still finish:', job.periodId, err)
+      }
+      ;(ok ? recounted : left).push(job)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, todo.length) }, lane))
+  return { recounted, left }
 }
 
 // The two facts the Bulk test needs (D35, S792) that the recipe-scoped guard read below cannot
@@ -340,6 +456,8 @@ async function replaceManualMovements(supabase, { clientId, periodId, rowsByDay 
     () => replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days }))
 }
 
+// Resolves true when the days' movements now match their rows, false when a step failed and was
+// logged (S835). A thrown error (the recipe walk) still propagates to the caller's catch.
 async function replaceManualMovementsNow(supabase, { clientId, periodId, rowsByDay, days }) {
   const candidatesByDay = new Map(days.map(d => [d, (rowsByDay.get(d) || []).filter(r => Number(r.qty_sold) > 0)]))
   const allCandidates = [...candidatesByDay.values()].flat()
@@ -369,7 +487,7 @@ async function replaceManualMovementsNow(supabase, { clientId, periodId, rowsByD
     })
     if (posErr) {
       console.error("manual stock_movements: the POS-supersedes check could not run, so this day's movements were left as they were:", posErr)
-      return
+      return false
     }
     // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
     // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
@@ -385,7 +503,7 @@ async function replaceManualMovementsNow(supabase, { clientId, periodId, rowsByD
       const handover = await readTillHandover(supabase, { periodId, recipeIds: bulkTillSold })
       if (handover.error) {
         console.error("manual stock_movements: the Bulk-total check (D35) could not run, so this day's movements were left as they were:", handover.error)
-        return
+        return false
       }
       posIndex = buildPosIndex(scopedPos, { tillStart: handover.tillStart, manualRows: handover.manualRows })
     }
@@ -401,13 +519,13 @@ async function replaceManualMovementsNow(supabase, { clientId, periodId, rowsByD
   const { error: delErr } = await (days.length === 1 ? del.eq('bs_day', days[0]) : del.in('bs_day', days)).eq('source', 'manual')
   if (delErr) {
     console.error('manual stock_movements: could not clear this day before re-depleting; left as they were:', delErr)
-    return
+    return false
   }
-  if (allCandidates.length === 0) return
+  if (allCandidates.length === 0) return true
 
   const qualifyingByDay = days.map(d => [d, candidatesByDay.get(d).filter(r => !posSupersedesManual(r.recipe_id, d, posIndex))])
   const qualifyingRecipes = [...new Set(qualifyingByDay.flatMap(([, rows]) => rows.map(r => r.recipe_id)))]
-  if (qualifyingRecipes.length === 0) return
+  if (qualifyingRecipes.length === 0) return true
 
   const breakdown = await explodeRecipeIngredients(supabase, qualifyingRecipes)
   const movementRows = []
@@ -424,6 +542,7 @@ async function replaceManualMovementsNow(supabase, { clientId, periodId, rowsByD
   }
   if (movementRows.length > 0) {
     const { error } = await scopedInsert('stock_movements', clientId, movementRows)
-    if (error) console.error('manual stock_movements write failed:', error)
+    if (error) { console.error('manual stock_movements write failed:', error); return false }
   }
+  return true
 }

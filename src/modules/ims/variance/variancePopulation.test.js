@@ -158,6 +158,12 @@ describe('the three pages share the population (S792)', () => {
     expect(read('TheoreticalVariance.js')).not.toMatch(/theoretical\[item\.id\][^\n]*>\s*0\.001/)
   })
 
+  // S835 (owner decision): a dish's choice extras follow the dish, as in stockReportCalc.js —
+  // a dish whose month net sold is 0 or less adds no extras to theoretical usage either.
+  test('Theoretical vs Actual adds choice extras only for a dish that sold', () => {
+    expect(read('TheoreticalVariance.js')).toMatch(/depleting\.forEach\(e => \{\s*if \(!e\.ingredient_deltas\) return\s*if \(\(salesMap\[e\.recipe_id\] \|\| 0\) <= 0\) return/)
+  })
+
   test('Shrinkage no longer skips a month before looking at its count when nothing sold', () => {
     expect(read('shrinkageCalc.js')).not.toMatch(/if \(theor <= 0\) return/)
   })

@@ -70,7 +70,8 @@ are load-bearing, each with the reason it exists:
   from)` clears the mark being left (`no_show_at`; `cancelled_at` + `cancel_reason`) in the same
   write, so the Covers Report and the Customers no-show column forget it too. `canRevive()` gates
   it to the end of the Nepal civil day of `reserved_for`, and `canMarkNoShow()` offers No-show only
-  from the booked time (D23) — the table says what is ever legal, the page says when. `completed` stays terminal: the bill that closed it is its own record. **Mark done, the
+  from the booked time (D23; the database refuses an earlier one too since S835,
+  `pos_reservations_guard_no_show`) — the table says what is ever legal, the page says when. `completed` stays terminal: the bill that closed it is its own record. **Mark done, the
   reversals and No-show all confirm through `ConfirmModal`** with consequence copy; nothing that
   ends or revives a booking is a bare button.
 - **A request is DECLINED, a booking is CANCELLED, and the two reason lists differ** because the

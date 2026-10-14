@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -10,6 +10,8 @@ import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { settleWithin } from '../../../utils/withTimeout'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 
 const PERMISSION_LEVELS = [
@@ -133,6 +135,14 @@ export default function PosStaff() {
   // Bumped to throw away an uncontrolled discount input's typed value after a refusal (S754).
   const [inputEpoch,  setInputEpoch]  = useState(0)
 
+  // S835 (D39): who last reset each login's PIN, from the audit trail. The Owner's and the Crest
+  // operator's alone (get_staff_pin_resets refuses anyone else), so a POS manager never asks.
+  // Supplementary: a failed read is logged and the rows simply show no reset line.
+  const canSeePinResets = isOwner || isAdmin
+  const [pinResets,   setPinResets]   = useState({}) // user_id → { reset_at, reset_by_name }
+  const pinResetReq = useLatestRequest()
+  const pinResetSeq = useRef(0)
+
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
   const linkedEmployeeIds = new Set(staff.map(p => p.hr_employee_id).filter(Boolean))
   const unlinkedEmployees = employees.filter(e => !linkedEmployeeIds.has(e.id))
@@ -145,6 +155,18 @@ export default function PosStaff() {
     : staff
 
   useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
+
+  // S835 (D39). Beside every staff read (init, load, a PIN reset), never in front of it. Keyed per
+  // read, so an answer for an earlier read or another outlet never lands over a newer one.
+  async function loadPinResets() {
+    if (!canSeePinResets || !clientId) return
+    const key = pinResetReq.begin(`${clientId}:${++pinResetSeq.current}`)
+    const { data, error } = await settleWithin(
+      supabase.rpc('get_staff_pin_resets', { p_client_id: clientId }), 15000, 'PIN reset history')
+    if (!pinResetReq.isCurrent(key)) return
+    if (error) { console.error('PIN reset history could not be read, rows show none:', error); return }
+    setPinResets(Object.fromEntries((data || []).map(r => [r.user_id, r])))
+  }
 
   // Escape-to-close — none of this file's 3 hand-rolled overlays use the shared Modal.js
   // component, so each needs its own listener; only one is ever open at a time in practice.
@@ -162,6 +184,7 @@ export default function PosStaff() {
   async function init() {
     setLoading(true)
     setLoadError(null)
+    void loadPinResets()
     const [staffRes, settingsRes, empRes] = await Promise.all([
       supabase.rpc('get_pos_staff_list', { p_client_id: clientId }),
       // maybeSingle: a client with no settings row yet is not a failed read. `.single()` turned
@@ -238,6 +261,7 @@ export default function PosStaff() {
   }
 
   async function load() {
+    void loadPinResets()
     const { data, error } = await supabase.rpc('get_pos_staff_list', { p_client_id: clientId })
     // A failed read is not "no POS staff" (S682): keep the last-good list and say so.
     if (error) { setMsg('Could not load the staff list — what is shown is from the last successful load. ' + errorLine(error)); return }
@@ -504,6 +528,7 @@ export default function PosStaff() {
       setMsg(`${pinTarget.full_name || 'This login'}’s new PIN is saved, but the lockout from wrong tries could not be lifted, so the till will refuse it until ${nepalTime(data.locked_until)}. Reset the PIN again to lift the lockout now.`)
     }
     setPinTarget(null); setResetting(false)
+    void loadPinResets() // S835 (D39): the reset just made is now the latest
   }
 
   // ── Role update ────────────────────────────────────────────────────────────
@@ -732,6 +757,15 @@ export default function PosStaff() {
                         <Tip text="This POS login belongs to an HR employee. Its name was copied from HR when the login was made, and does not change if the employee is renamed later. When this person leaves through Final Settlement, this login is blocked with their others.">
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
                         </Tip>
+                      )}
+                      {/* S835 (D39): Owner and operator only (pinResets stays empty for anyone else).
+                          BS first, the calendar the owner reads; AD and the time in the title. */}
+                      {pinResets[p.id]?.reset_at && (
+                        <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 2 }}
+                          title={`${nepalDateLong(pinResets[p.id].reset_at)}, ${nepalTime(pinResets[p.id].reset_at)}`}>
+                          PIN reset {nepalBsLong(pinResets[p.id].reset_at) || nepalDateLong(pinResets[p.id].reset_at)}
+                          {pinResets[p.id].reset_by_name ? ` by ${pinResets[p.id].reset_by_name}` : ''}
+                        </div>
                       )}
                     </td>
                     <td>

@@ -149,6 +149,10 @@ const round1 = n => (n == null ? '' : parseFloat(n.toFixed(1)))
 // The muted second line under a figure in the Labor Forecast table — what was planned, what the
 // day needs, or which basis a number came from. One definition, used by the rows and the footer.
 const plan = text => <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)' }}>{text}</div>
+// What a "cover" counts on the staffing figures (S835, owner decision D43): the count stays as it
+// is, and every place that labels it says what it is. The same sentence is on Demand Forecast's
+// Forecast Covers heading (DemandForecast.js); change both together.
+const COVERS_COUNT_TIP = 'Seated guests on dine-in bills, and each takeaway or delivery order as one. The Owner Report\'s Guests Seated counts dine-in guests only.'
 
 // ── Main Roster ───────────────────────────────────────────────────────────────
 
@@ -1643,7 +1647,7 @@ export default function Roster() {
                                   <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
                                     <Tip text={fr.staffRequired
                                       ? `Recommended ${fr.recommended} staff — the forecast revenue needs about ${fr.staffRequired.hours}h across the outlet at its own sales per labour hour. Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`
-                                      : `Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers || 0)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
+                                      : `Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers || 0)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. Covers: ${COVERS_COUNT_TIP} See the Labor Forecast tab for the full breakdown.`} width={240}>
                                       <span style={{ fontSize: 10, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber-text)' : 'var(--theme-text3)', cursor: 'default' }}>
                                         Rec: {fr.recommended}
                                       </span>
@@ -2026,7 +2030,7 @@ export default function Roster() {
             {hasPos && (
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <label htmlFor="roster-covers-target" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                  <Tip text="Target covers each staff member can comfortably serve — used to compute Recommended Staff below. Saved per client.">
+                  <Tip text={`Target covers each staff member can comfortably serve — used to compute Recommended Staff below. Saved per client. Covers: ${COVERS_COUNT_TIP}`} width={280}>
                     Covers/Staff target
                   </Tip>
                 </label>
@@ -2220,7 +2224,7 @@ export default function Roster() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {a == null ? '—' : a.revenue != null ? fmtNpr(a.revenue) : dash('No period exists for this month yet, so there is nowhere for this day\'s sales to be recorded')}
-                            {a?.covers != null && plan(`${a.covers} covers`)}
+                            {a?.covers != null && <Tip text={COVERS_COUNT_TIP} width={260}>{plan(`${a.covers} covers`)}</Tip>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {a && a.cost > 0 ? fmtNpr(a.cost) : '—'}

@@ -34,7 +34,10 @@ export function clearStoredAuthSession(storage = window.localStorage) {
 // uses its documented default, 'global', which revokes every session of the login, so its phone and
 // laptop drop to the sign-in page within the hour. A till lock passes 'local' too (S809 ACCESS-7, owner
 // decision Q18 a, Layout.js), so a waiter's other tills stay signed in; a lost tablet is cut off by
-// revoking it, which ends the sessions opened on it. The Owner's own Sign out still uses the default.
+// revoking it, which ends the sessions opened on it. Since S835 (D37) every sign-out in the app passes
+// 'local': the Owner's and operator's Sign out, a counting tablet's lock, the subscription-lock and
+// Terms screens, and Crest Staff. Nothing calls this without a scope any more; the default stays only
+// so a caller that forgets is no worse than the library itself.
 export async function signOutThisDevice({ scope } = {}) {
   try {
     const request = scope === 'local' ? supabase.auth.signOut({ scope: 'local' }) : supabase.auth.signOut()

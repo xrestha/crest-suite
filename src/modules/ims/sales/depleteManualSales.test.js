@@ -18,7 +18,7 @@ jest.mock('../../../utils/recipeCost', () => ({
 }))
 
 import { supabase as moduleClient } from '../../../supabaseClient'
-import { depleteManualSales, repostSupersededMovements } from './persistSalesDay'
+import { depleteManualSales, repostSupersededMovements, recountManualSalesDays, findTillCoveredManualDays } from './persistSalesDay'
 
 // Chainable, thenable stand-in for a PostgrestBuilder that records every filter applied to it.
 function builder(result, rec = { filters: [] }) {
@@ -298,5 +298,155 @@ describe('the Bulk row the till also sold (D35)', () => {
     await depleteManualSales(handed, BULK_ARGS)
     expect(handed.recs.map(r => r.cols)).toEqual(['recipe_id, bs_day'])
     expect(inserts).toHaveLength(1)
+  })
+})
+
+// S835 (owner decision): Clear POS takes the till's rows away, and with them the reason the manual
+// days the till covered were left un-depleted. Before the clear, the write path's own rule finds
+// those days; after it, only they are re-posted, and the answer names what could not be confirmed.
+describe('Clear POS: the days the till covered, and their re-count', () => {
+  // One sales_entries table that every read filters for itself, as PostgREST would.
+  function salesClient(rows, { failCols = null } = {}) {
+    const recs = []
+    const query = rec => {
+      if (rec.cols === failCols) return { data: null, error: { message: 'TypeError: Failed to fetch' } }
+      let out = rows.filter(r => rec.filters.every(([op, c, v]) => {
+        if (op === 'eq') return r[c] === v
+        if (op === 'in') return v.includes(r[c])
+        if (op === 'gt') return r[c] > v
+        if (op === 'lt') return r[c] < v
+        if (op === 'or') return r.source == null || r.source === 'manual'
+        return true
+      }))
+      if (rec.limit) out = [...out].sort((a, b) => a.bs_day - b.bs_day).slice(0, rec.limit)
+      return { data: out, error: null }
+    }
+    return {
+      recs,
+      from: () => ({
+        select: (cols) => {
+          const rec = { cols, filters: [] }
+          recs.push(rec)
+          const b = builder(null, rec)
+          b.then = (res, rej) => Promise.resolve().then(() => query(rec)).then(res, rej)
+          return b
+        },
+      }),
+    }
+  }
+  const sale = (period_id, recipe_id, bs_day, qty_sold, source = 'manual') => ({ period_id, recipe_id, bs_day, qty_sold, source })
+  const periodOfDelete = rec => rec.filters.find(f => f[1] === 'period_id')?.[2]
+  function moduleWrites({ refuseDeleteFor = null } = {}) {
+    moduleClient.from.mockImplementation(() => ({
+      delete: () => {
+        const rec = { filters: [] }
+        deletes.push(rec)
+        const b = builder(null, rec)
+        b.then = (res, rej) => Promise.resolve().then(() => (periodOfDelete(rec) === refuseDeleteFor
+          ? { error: { code: '42501', message: 'permission denied' } } : { error: null })).then(res, rej)
+        return b
+      },
+      insert: (rows) => { inserts.push(rows); return builder({ data: [], error: null }) },
+    }))
+  }
+
+  test('a dated day is covered when the till sold the same dish that day, and only then', async () => {
+    const handed = salesClient([
+      sale('p1', 'r1', 3, 2), sale('p1', 'r2', 4, 1),
+      sale('p1', 'r1', 3, 1, 'pos'), sale('p1', 'r2', 5, 1, 'pos'),
+      sale('p2', 'r1', 6, 1),
+    ])
+    const out = await findTillCoveredManualDays(handed, { periodIds: ['p1', 'p2'] })
+    expect(out).toEqual({ data: [{ periodId: 'p1', days: [3] }], error: null })
+    // No Bulk total in p1, so its till read is limited to the manual days, as the write path's is.
+    const tillRead = handed.recs.find(r => r.cols === 'recipe_id, bs_day' && r.filters.some(f => f[2] === 'p1'))
+    expect(tillRead.filters).toEqual(expect.arrayContaining([['in', 'source', ['pos', 'pos_comp']], ['in', 'bs_day', [3, 4]]]))
+    expect(tillRead.order).toBe('id')
+  })
+
+  test('a Bulk total the till sold, before any day ahead of the till is entered, still depleted: not covered', async () => {
+    const out = await findTillCoveredManualDays(salesClient([
+      sale('p1', 'r2', 0, 10), sale('p1', 'r2', 12, 1, 'pos'), sale('p1', 'r9', 3, 1, 'pos'),
+    ]), { periodIds: ['p1'] })
+    expect(out.data).toEqual([])
+  })
+
+  test('once a day before the till holds a daily figure, the Bulk total was skipped: day 0 is covered', async () => {
+    const out = await findTillCoveredManualDays(salesClient([
+      sale('p1', 'r2', 0, 10), sale('p1', 'r2', 2, 1), sale('p1', 'r2', 12, 1, 'pos'), sale('p1', 'r9', 3, 1, 'pos'),
+    ]), { periodIds: ['p1'] })
+    expect(out.data).toEqual([{ periodId: 'p1', days: [0] }])
+  })
+
+  test('a till from day 1 covers a Bulk total of a dish it sold', async () => {
+    const out = await findTillCoveredManualDays(salesClient([
+      sale('p1', 'r2', 0, 10), sale('p1', 'r2', 1, 1, 'pos'),
+    ]), { periodIds: ['p1'] })
+    expect(out.data).toEqual([{ periodId: 'p1', days: [0] }])
+  })
+
+  test('a row that would not deplete (qty 0) was never skipped', async () => {
+    const out = await findTillCoveredManualDays(salesClient([
+      sale('p1', 'r1', 3, 0), sale('p1', 'r1', 3, 1, 'pos'),
+    ]), { periodIds: ['p1'] })
+    expect(out.data).toEqual([])
+  })
+
+  test.each([
+    ['the manual read', 'period_id, recipe_id, bs_day, qty_sold, source'],
+    ['the till read', 'recipe_id, bs_day'],
+    ['the D35 till-start read', 'bs_day, source'],
+  ])('%s failing is an error, never an empty list', async (_, failCols) => {
+    const out = await findTillCoveredManualDays(salesClient([
+      sale('p1', 'r2', 0, 10), sale('p1', 'r2', 2, 1), sale('p1', 'r2', 12, 1, 'pos'),
+    ], { failCols }), { periodIds: ['p1'] })
+    expect(out.data).toBeNull()
+    expect(out.error).toEqual({ message: 'TypeError: Failed to fetch' })
+  })
+
+  test('the re-count rebuilds only the days it is given, under the client the periods belong to', async () => {
+    moduleWrites()
+    // After the clear: the till rows are gone, the manual rows are not.
+    const handed = salesClient([sale('p1', 'r1', 3, 2), sale('p1', 'r1', 3, 1), sale('p1', 'r2', 4, 1), sale('p2', 'r1', 6, 4)])
+    const out = await recountManualSalesDays(handed, { clientId: 'c9', jobs: [{ periodId: 'p1', days: [3] }] })
+    expect(out).toEqual({ recounted: [{ periodId: 'p1', days: [3] }], left: [] })
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].filters).toEqual(expect.arrayContaining([['eq', 'period_id', 'p1'], ['eq', 'bs_day', 3], ['eq', 'source', 'manual']]))
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]).toEqual([expect.objectContaining({ item_id: 'flour', period_id: 'p1', bs_day: 3, source: 'manual', client_id: 'c9' })])
+    expect(inserts[0][0].qty).toBeCloseTo(-0.6)
+  })
+
+  test('a period whose rebuild is refused is named in `left`; the others still count', async () => {
+    moduleWrites({ refuseDeleteFor: 'p2' })
+    const handed = salesClient([sale('p1', 'r1', 3, 2), sale('p2', 'r1', 6, 4)])
+    const out = await recountManualSalesDays(handed, { clientId: 'c9', jobs: [{ periodId: 'p1', days: [3] }, { periodId: 'p2', days: [6] }] })
+    expect(out.recounted).toEqual([{ periodId: 'p1', days: [3] }])
+    expect(out.left).toEqual([{ periodId: 'p2', days: [6] }])
+  })
+
+  test('a period that outlasts the clock is left as not confirmed', async () => {
+    moduleWrites()
+    let release
+    mockExplodeGate = new Promise(r => { release = r })
+    const out = await recountManualSalesDays(salesClient([sale('p2', 'r1', 6, 4)]), { clientId: 'c9', jobs: [{ periodId: 'p2', days: [6] }], timeoutMs: 30 })
+    expect(out).toEqual({ recounted: [], left: [{ periodId: 'p2', days: [6] }] })
+    release()
+  })
+
+  test('nothing covered: no re-count reads, nothing to report', async () => {
+    const handed = salesClient([])
+    expect(await recountManualSalesDays(handed, { clientId: 'c9', jobs: [] })).toEqual({ recounted: [], left: [] })
+    expect(await findTillCoveredManualDays(handed, { periodIds: [] })).toEqual({ data: [], error: null })
+    expect(handed.recs).toHaveLength(0)
+  })
+
+  test('repostSupersededMovements answers whether the rebuild landed', async () => {
+    const handed = salesClient([sale('p2', 'r1', 6, 4)])
+    moduleWrites()
+    expect(await repostSupersededMovements(handed, { clientId: 'c9', periodId: 'p2', days: [6] })).toBe(true)
+    moduleWrites({ refuseDeleteFor: 'p2' })
+    expect(await repostSupersededMovements(handed, { clientId: 'c9', periodId: 'p2', days: [6] })).toBe(false)
+    expect(await repostSupersededMovements(handed, { clientId: 'c9', periodId: 'p2', days: [] })).toBe(true)
   })
 })

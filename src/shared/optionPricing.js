@@ -251,36 +251,76 @@ export function selectionProblems(dishGroups, optionIds) {
 }
 
 /**
- * S809 4h (CUSTOMIZATION-6): the dishes an option would take below zero. A size is stored as a
- * difference from its dish's price, so a "Half" made NPR 100 cheaper sells a NPR 80 dish at
- * NPR −20, and the server refuses that line. Ex-VAT on both sides, as the server compares. A dish
- * with no price yet is skipped: it cannot be sold until Menu Pricing prices it, which checks then.
- * @param {Array<{ id, name, selling_price, inclPrice? }>} dishes
- * @param {Array<{ id, name, price_delta, is_active? }>} options  hidden ones are skipped
- * @returns {Array<{ dish, option, price, incl }>}  the dish at that option, ex-VAT and as a guest
- *          pays (through the dish's own `inclPrice` when given)
+ * The lowest price one dish can be ordered at over its whole offer, or null when the dish cannot
+ * be ordered at all (a group asks for more picks than it offers, so the server refuses every line
+ * of it with option_count before it prices one). `picks` names what takes the price down: the
+ * choices charged below zero, any "No …" removal that answers a required group for free, and a
+ * size whose portion scales the rest.
  */
-export function optionsBelowZero(dishes, options) {
+function lowestReachable(recipeId, sellingPrice, catalog) {
+  const dg = groupsForDish(recipeId, catalog || {})
+  if (dg.some(d => d.options.length < (Number(d.rule.min) || 0))) return null
+  const { ids } = cheapestValidSelection(dg)
+  const sel = describeSelection(ids, {
+    optionsById: Object.fromEntries(dg.flatMap(d => d.options.map(o => [o.id, { ...o, group_id: d.group.id }]))),
+    groupsById: Object.fromEntries(dg.map(d => [d.group.id, d.group])),
+    attachByGroup: Object.fromEntries(dg.map(d => [d.group.id, d.attachment])),
+  })
+  return {
+    price: round2(sellingPrice + sel.delta),
+    // A size that scales the picks after it is named too: a Large that doubles a −40 is half the reason.
+    picks: sel.options.filter(o => o.price_delta < 0 || o.is_removal || (o.group_kind === 'size' && sel.portion_factor !== 1))
+      .map(o => o.option_name),
+  }
+}
+
+/**
+ * S809 4h (CUSTOMIZATION-6, D17), S835: the dishes a choice setup can price below zero. A size is
+ * stored as a difference from its dish's price, so a "Half" made NPR 100 cheaper sells a NPR 80
+ * dish at NPR −20, and the server refuses that line (option_price_below_zero). Until S835 each
+ * option was checked alone, so two cheaper choices that only went below zero TOGETHER passed every
+ * editor and were refused at the till. This works out the whole dish's lowest price through
+ * cheapestValidSelection — every offered group, its minimum and its maximum, the first free picks
+ * in display order, a "No …" removal answering a minimum for free, and the size scaling the picks
+ * after it — the server's arithmetic, ex-VAT on both sides. A dish with no price yet is skipped: it
+ * cannot be sold until Menu Pricing prices it, which checks then.
+ *
+ * `before` is the catalog as it stands now. When given, a dish is named only when the change LOWERS
+ * its lowest price below zero: one already below zero that this change leaves alone (or raises) is
+ * not this change's doing, and refusing an unrelated rename over it would block every edit until
+ * someone found the real cause.
+ * @param {Array<{ id, name, selling_price, inclPrice? }>} dishes
+ * @param {{ groups, options, attachments }} catalog  as it would stand after the change
+ * @param {{ before?: { groups, options, attachments } }} [opts]
+ * @returns {Array<{ dish, price, incl, picks: string[] }>}  the dish's lowest price, ex-VAT and as
+ *          a guest pays (through the dish's own `inclPrice` when given), and the choices that reach it
+ */
+export function dishesBelowZero(dishes, catalog, { before } = {}) {
   const out = []
-  for (const o of options || []) {
-    if (o.is_active === false) continue
-    const d = Number(o.price_delta) || 0
-    if (d >= 0) continue
-    for (const dish of dishes || []) {
-      const sp = Number(dish.selling_price) || 0
-      if (sp <= 0) continue
-      const price = round2(sp + d)
-      if (price < 0) out.push({ dish, option: o, price, incl: dish.inclPrice > 0 ? price * (dish.inclPrice / sp) : price })
+  for (const dish of dishes || []) {
+    const sp = Number(dish?.selling_price) || 0
+    if (sp <= 0) continue
+    const low = lowestReachable(dish.id, sp, catalog)
+    if (!low || low.price >= 0) continue
+    if (before) {
+      const was = lowestReachable(dish.id, sp, before)
+      if (was && was.price <= low.price) continue
     }
+    out.push({ dish, price: low.price, picks: low.picks, incl: dish.inclPrice > 0 ? low.price * (dish.inclPrice / sp) : low.price })
   }
   return out
 }
 
-/** "Kids Momo would cost −NPR 20 as Half" for the first two found, then "and 3 more". */
+const quotedList = names => {
+  const q = names.map(n => `“${n}”`)
+  return q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : (q[0] || '')
+}
+
+/** "Kids Momo would cost −NPR 20 with “Half” and “No sauce”" for the first two found, then "and 3 more". */
 export function belowZeroText(found) {
   const xs = found || []
-  const parts = xs.slice(0, 2).map(({ dish, option, incl }) =>
-    `${dish.name} would cost −NPR ${nprInt(Math.abs(Math.round(incl)))} as “${option.name}”`)
+  const parts = xs.slice(0, 2).map(({ dish, picks, incl }) =>
+    `${dish.name} would cost −NPR ${nprInt(Math.abs(Math.round(incl)))}${picks?.length ? ` with ${quotedList(picks)}` : ''}`)
   if (xs.length > 2) parts.push(`${xs.length - 2} more`)
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] || '')
 }

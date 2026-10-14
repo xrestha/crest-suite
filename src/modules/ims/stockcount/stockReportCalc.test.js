@@ -143,3 +143,52 @@ describe('Stock Report usage goes through the shared depletion rule', () => {
     expect(usage.rice).toBeCloseTo(1)
   })
 })
+
+// S835 (owner decision): a dish's choice extras follow the dish. Its recipe part is skipped when the
+// month's net sold is 0 or less, and its extras now are too, instead of being added row by row.
+describe('choice extras follow their dish', () => {
+  const cheese = [{ item_id: 'cheese', qty: 0.03 }]
+
+  test('a dish that sold: each plate adds its extras', () => {
+    const usage = buildUsageMap([
+      { recipe_id: 'dish', qty_sold: 3, bs_day: 3, source: 'pos', ingredient_deltas: cheese },
+    ], dish)
+    expect(usage.rice).toBeCloseTo(0.6)
+    expect(usage.cheese).toBeCloseTo(0.09)
+  })
+
+  test('a month netted to zero by a restock credit: no base and no extras', () => {
+    const usage = buildUsageMap([
+      { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos', ingredient_deltas: cheese },
+      { recipe_id: 'dish', qty_sold: -2, bs_day: 3, source: 'pos_credit_restock', ingredient_deltas: cheese },
+    ], dish)
+    expect(usage.rice).toBeUndefined()
+    expect(usage.cheese).toBeUndefined()
+  })
+
+  test('a month netted below zero: the extras on the sold rows are not added', () => {
+    const usage = buildUsageMap([
+      { recipe_id: 'dish', qty_sold: 1, bs_day: 3, source: 'pos', ingredient_deltas: cheese },
+      { recipe_id: 'dish', qty_sold: -3, bs_day: 4, source: 'pos_credit_restock' },
+    ], dish)
+    expect(usage.rice).toBeUndefined()
+    expect(usage.cheese).toBeUndefined()
+  })
+
+  test('another dish that sold keeps its own extras', () => {
+    const usage = buildUsageMap([
+      { recipe_id: 'dish', qty_sold: 1, bs_day: 3, source: 'pos', ingredient_deltas: cheese },
+      { recipe_id: 'dish', qty_sold: -1, bs_day: 3, source: 'pos_credit_restock', ingredient_deltas: cheese },
+      { recipe_id: 'bowl', qty_sold: 2, bs_day: 3, source: 'pos', ingredient_deltas: cheese },
+    ], { ...dish, bowl: [] })
+    expect(usage.rice).toBeUndefined()
+    expect(usage.cheese).toBeCloseTo(0.06)
+  })
+
+  test('a "no onion" extra on a dish that sold still takes onion off, unclamped', () => {
+    const usage = buildUsageMap([
+      { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos', ingredient_deltas: [{ item_id: 'onion', qty: -0.05 }] },
+    ], dish)
+    expect(usage.onion).toBeCloseTo(-0.1)
+  })
+})

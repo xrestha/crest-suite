@@ -295,7 +295,10 @@ export default function CustomizationReport() {
     margin: o => (o.costPerPick == null ? null : o.chargedPerPick - o.costPerPick), picks: o => o.picks,
   }, byName('option_name')), [marginRows, sorts.margin])
 
-  const canView = isAdmin || isOwner || profile?.pos_role === 'manager' || profile?.ims_role === 'manager'
+  // S835, D42: no IMS manager clause. An Inventory login cannot read till bills (no_ims_staff), so a
+  // manager let in here got an empty read and a confident "No choices were picked". The nav item
+  // (Layout.js, minPosRole: 'manager') offers it to the same set: admin, Owner, a POS manager.
+  const canView = isAdmin || isOwner || profile?.pos_role === 'manager'
   if (!canView) return <Navigate to="/dashboard" replace />
 
   async function exportExcel() {

@@ -70,6 +70,18 @@ export function guestOrderRefusal(err, outletName, { online = true } = {}) {
         refreshMenu: true,
       }
     }
+    // S835: the server prices a dish with those choices below zero (pos_price_selection's
+    // option_price_below_zero), raised with unavailable_options' DETAIL shape, the dish names as a
+    // JSON array. The choices are still offered, so nothing is taken off the order: the guest picks
+    // again. The menu is re-read so any price the owner changed since it opened is the one shown.
+    case 'below_zero_options': {
+      const names = unavailableNames(err)
+      const subject = names.length ? joinNames(names) : 'A dish in your order'
+      return {
+        text: `${subject} can't be ordered with those choices — pick different ones or ask a staff member.`,
+        refreshMenu: true,
+      }
+    }
     case 'not_accepting':
       return { text: `${who} isn't taking orders from this menu right now, so your order was not sent. Please ask a staff member to take it.`, refreshMenu: true }
     case 'inactive':

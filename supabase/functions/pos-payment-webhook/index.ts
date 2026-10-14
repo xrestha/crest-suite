@@ -70,8 +70,20 @@ Deno.serve(async (req) => {
     // staff policies on settings cover INSERT/UPDATE/DELETE only, never SELECT. A waiter holding
     // this secret could forge a confirmation for their own open bill and have the floor screen
     // close it as digitally paid.
-    const { data: secrets } = await admin
+    //
+    // A failed read is not "not configured" (S835). Each of the three reads below used to drop its
+    // error: a blip on this one answered 400, which a provider takes as final and never retries, so
+    // a real payment's confirmation was lost; on the duplicate check it fell through to an insert;
+    // on the order match it stored the confirmation unmatched. A 503 is the answer a provider
+    // retries, and the retry lands once the database answers. 400 is kept for a read that worked
+    // and found no secret.
+    const unavailable = (what: string, error: unknown) => {
+      console.error(`pos-payment-webhook: could not read ${what}, answering 503 so the provider retries:`, error)
+      return json({ error: 'Temporarily unavailable, please retry' }, 503)
+    }
+    const { data: secrets, error: secretsErr } = await admin
       .from('client_secrets').select('pos_webhook_secret').eq('client_id', client_id).maybeSingle()
+    if (secretsErr) return unavailable('the webhook secret', secretsErr)
     if (!secrets?.pos_webhook_secret) return json({ error: 'Webhook not configured for this client' }, 400)
 
     const ok = await verifySignature(secrets.pos_webhook_secret, { txn_ref, amount, provider }, signature)
@@ -79,11 +91,12 @@ Deno.serve(async (req) => {
 
     // Idempotent — a provider retry lands the same txn_ref twice; the unique constraint on
     // (client_id, provider, txn_ref) makes the second call a no-op instead of a duplicate row.
-    const { data: existing } = await admin
+    const { data: existing, error: existingErr } = await admin
       .from('pos_payment_confirmations')
       .select('id, matched_order_id')
       .eq('client_id', client_id).eq('provider', provider).eq('txn_ref', txn_ref)
       .maybeSingle()
+    if (existingErr) return unavailable('whether this payment was already recorded', existingErr)
     if (existing) return json({ ok: true, already_processed: true, matched_order_id: existing.matched_order_id })
 
     // Best-effort match by the reference embedded in the QR (buildDynamicQr's `reference`
@@ -93,11 +106,15 @@ Deno.serve(async (req) => {
     let matchedOrderId: string | null = null
     const orderNo = typeof reference === 'string' ? parseInt(reference.replace(/^CR/i, ''), 10) : NaN
     if (!isNaN(orderNo)) {
-      const { data: order } = await admin
+      // .limit(2), not .maybeSingle() (S835): order_no has no unique index, and maybeSingle answers
+      // two rows with an error, which a 503 would turn into a retry that can never succeed. Two
+      // open orders under one number is ambiguous, so it stays unmatched for staff, as before.
+      const { data: orders, error: orderErr } = await admin
         .from('pos_orders').select('id')
         .eq('client_id', client_id).eq('order_no', orderNo).eq('status', 'open')
-        .maybeSingle()
-      matchedOrderId = order?.id ?? null
+        .limit(2)
+      if (orderErr) return unavailable('the open order this payment names', orderErr)
+      matchedOrderId = orders?.length === 1 ? orders[0].id : null
     }
 
     const { data: inserted, error } = await admin

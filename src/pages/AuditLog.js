@@ -115,6 +115,9 @@ const FIELD_LABELS = {
   ims_role: 'IMS Role', hr_role: 'HR Role', pos_role: 'POS Role',
   pos_team: 'POS Team', pos_discount_limit: 'Discount Limit %', pos_allow_void: 'Allow Void',
   pos_job_title: 'POS Job Title', ims_job_title: 'IMS Job Title', hr_job_title: 'HR Job Title',
+  // S835: the PIN-reset row admin-user-ops writes (staff_pin_vault, S809 1f) and POS Staff's Block
+  // (S809 3i). pos_blocked_by is a login id, shown as stored like every other "who" column here.
+  pin_reset: 'PIN Reset', pos_blocked_at: 'Blocked from POS', pos_blocked_by: 'Blocked By',
   hr_self_service: 'Self-Service', hr_self_service_email: 'Self-Service Email',
   ot_hours: 'OT Hours', ot_amount: 'OT Amount', ssf_employer: 'SSF (Employer)', ssf_employee: 'SSF (Employee)',
   bs_day: 'BS Day', bs_year: 'BS Year', bs_month: 'BS Month',

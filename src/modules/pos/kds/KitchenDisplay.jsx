@@ -23,6 +23,14 @@ import { tapMiss } from './tapAnswer'
 
 const KDS_RELEASE_IDLE_MS = 60 * 1000
 
+// The board's amber banner, PayrollRun's stale-draft card (S741): "this works, but it is not the usual
+// case". One object for both banners that wear it, the Owner-on-a-till notice and sound-off (S835).
+const AMBER_BANNER = {
+  display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+  background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+  borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 14, color: 'var(--theme-text2)',
+}
+
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
 // S754: the board's day is the SERVICE day, not the device's calendar day. It used to start at the
@@ -161,7 +169,7 @@ const BOARD_STATUSES = COLUMNS.map(c => c.status)
 // gets its own row, matching how a second small paper ticket prints for just the new items), so
 // this maps 1:1 onto existing rows rather than a new ticket concept.
 export default function KitchenDisplay() {
-  const { profile, hasPosAccess, posTeam } = useAuth()
+  const { profile, hasPosAccess, posTeam, isAdmin, isOwner, signOut } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
 
@@ -170,6 +178,28 @@ export default function KitchenDisplay() {
   // to 'foh') keeps today's manual toggle, remembered per-browser via localStorage.
   const isTeamLocked = posTeam === 'kitchen' || posTeam === 'bar'
   const lockedStation = posTeam === 'bar' ? 'BOT' : 'KOT'
+
+  // S835, D38: the Owner or the Crest operator left signed in on a wall screen. Neither ever idle-locks
+  // (no raw pos_role, posIdleLockApplies), and Exit opened the till as them. On an ACTIVATED till tablet,
+  // the place a KDS hangs on a wall, the board now says so and Exit signs this tablet out to its PIN
+  // screen, the code path of Till Devices' "Sign out and open the PIN screen" (Pos.js openPinScreen).
+  // Activated means the tablet's own key is stored, the test PosLogin asks before it announces guest
+  // orders. On any other browser (the Owner's own laptop) Exit is unchanged.
+  const ownerOnTill = !profile?.pos_role && !!(isAdmin || isOwner) &&
+    !!(localStorage.getItem('pos_device_client_id') && localStorage.getItem('pos_device_id') && localStorage.getItem('pos_device_secret'))
+  const [leaving, setLeaving] = useState(false)
+  async function exitBoard() {
+    // '/pos/orders' was every POS staffer's home before kitchen/bar teams (S431) existed — a
+    // locked-team account doesn't have Orders in its sidebar at all, so exiting there would land on
+    // a page that isn't theirs. Dashboard is the one destination every team always has.
+    if (!ownerOnTill) { navigate(isTeamLocked ? '/dashboard' : '/pos/orders'); return }
+    if (leaving) return
+    setLeaving(true)
+    // This tablet only ('local'), so the Owner's phone and laptop stay signed in. false: the network
+    // sign-out failed, and AuthContext cleared this tablet and is reloading it to the PIN screen itself.
+    if (!(await signOut({ to: '/pos/login', scope: 'local' }))) return
+    navigate('/pos/login', { replace: true })
+  }
   const [station, setStation] = useState(() => isTeamLocked ? lockedStation : (localStorage.getItem('pos_kds_station') || 'KOT'))
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
@@ -573,12 +603,9 @@ export default function KitchenDisplay() {
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 'var(--arrival-alert-h, 76px)' : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* '/pos/orders' was every POS staffer's home before kitchen/bar teams (S431) existed —
-              a locked-team account doesn't have Orders in its sidebar at all, so exiting there
-              would land on a page that isn't theirs. Dashboard is the one destination every team
-              always has. */}
-          <button onClick={() => navigate(isTeamLocked ? '/dashboard' : '/pos/orders')} className="btn btn-ghost" style={{ fontSize: 13 }}>
-            ← Exit
+          {/* Where Exit goes, and when it signs out, is exitBoard's (S835, D38). */}
+          <button onClick={exitBoard} disabled={leaving} className="btn btn-ghost" style={{ fontSize: 13 }}>
+            {leaving ? 'Signing out…' : '← Exit'}
           </button>
           <div>
             {/* The page's one h1, on the title step — it was an h2 at 26px, off the ramp, with
@@ -612,14 +639,22 @@ export default function KitchenDisplay() {
         )}
       </div>
 
+      {/* S835, D38: an Owner or operator login on an activated till tablet. Amber, not red: the board
+          works, but this is not how a wall screen should be signed in. */}
+      {ownerOnTill && (
+        <div role="note" style={AMBER_BANNER}>
+          <span style={{ flex: 1, minWidth: 220 }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>You're signed in as {isOwner ? 'the Owner' : 'Crest support'}.</strong>{' '}
+            A wall screen should use a Kitchen or Bar login (POS Staff → Team) — anyone here can leave this screen as you.
+            Exit signs you out on this tablet and opens the PIN screen.
+          </span>
+        </div>
+      )}
+
       {/* S817 4i (FLOOR-KITCHEN-9): the browser is holding the sound. The amber banner's shape
           (PayrollRun's stale-draft card): the board still works, but nothing will ring. */}
       {soundOff && (
-        <div role="alert" style={{
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
-          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 14, color: 'var(--theme-text2)',
-        }}>
+        <div role="alert" style={AMBER_BANNER}>
           <span style={{ flex: 1, minWidth: 220 }}>
             <strong style={{ color: 'var(--theme-amber-text)' }}>🔇 Sound is off on this screen.</strong>{' '}
             The browser holds it until someone touches the screen, so new tickets will not ring. Tap anywhere to turn it on.

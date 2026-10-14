@@ -132,12 +132,13 @@ export default function SelfServiceLogin() {
         // error.context rather than in `data` — same unwrap the shared invokeEdge() helper does.
         let body = null
         try { body = await err.context.json() } catch (_) { /* no JSON body — handled below */ }
-        // Same wording as PosLogin.jsx on purpose — one lockout message across the product. The
-        // employee doesn't need to know the mechanism differs (there is no reset_hr_pin action;
-        // Self-Service is re-enrolled rather than reset), only who to ask.
+        // Same wording as PosLogin.jsx on purpose — one lockout message across the product. It had
+        // drifted to "ask your manager" after the till's changed in S809 (S835). The employee doesn't
+        // need to know the mechanism differs (there is no reset_hr_pin action; Self-Service is removed
+        // and enabled again from Employees, by an HR manager or the Owner, S748), only who to ask.
         if (status === 423 || body?.locked) {
           const when = body?.locked_until ? formatLockRemaining(body.locked_until) : 'later'
-          setError(`Too many incorrect attempts. Try again ${when}, or ask your manager to reset your PIN.`)
+          setError(`Too many incorrect attempts. Try again ${when}, or ask a manager or the owner to reset your PIN.`)
         } else {
           setError('Incorrect PIN. Try again.')
         }

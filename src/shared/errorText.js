@@ -488,6 +488,20 @@ const rules = [
     staff: 'That table still has an open bill, so it cannot be deleted. Nothing was removed.',
     operator: 'That table still has an open bill (its order number is in the detail below), so it was not deleted — the bill would vanish from the floor with nobody able to reach it. Bill or void that order first.',
   },
+  // S835 (migration 20261014110000, D41): pos_tables_guard_open_order_delete, a BEFORE trigger, so
+  // nothing was removed. After the open-bill rule, which the same trigger raises first.
+  {
+    test: e => hasCode(e, 'pos_table_has_bills'),
+    staff: 'That table has bills on record, so it cannot be deleted. Nothing was removed — a POS manager can take it out of service instead.',
+    operator: 'That table has bills on record, so it was not deleted — its bills would be left pointing at a table that no longer exists. Nothing was removed. Take it out of service instead (set its Status to Inactive): it leaves the floor and keeps its history.',
+  },
+  // S835 (migration 20261014110000, FLOOR-KITCHEN-7's server half): guard_pos_order_insert, raised
+  // before the insert, so no order was opened. The till says it in its own words first (S817).
+  {
+    test: e => hasCode(e, 'pos_table_inactive_new_order'),
+    staff: 'That table was taken out of service a moment ago, so no order was opened on it. Pick another table.',
+    operator: 'That table was taken out of service (perhaps on another device a moment ago), so no order was opened on it. Pick another table, or bring this one back in POS Setup first.',
+  },
   // S817 4i (migration 20261012120000): pos_tables_guard_open_bill, a BEFORE trigger, so nothing changed.
   {
     test: e => hasCode(e, 'pos_table_inactive_open_bill'),
@@ -508,6 +522,14 @@ const rules = [
   },
   // S755 (migration 20260917100000). Both are raised by a trigger in the statement that wrote, so
   // the statement rolled back and each may say this write did not land.
+  // S835 (migration 20261014110000, D23's server half): pos_reservations_guard_no_show, raised before
+  // the update, so the booking is unchanged. The page offers No-show only from the booked time; a
+  // tablet whose clock runs ahead meets this.
+  {
+    test: e => hasCode(e, 'reservation_no_show_early'),
+    staff: 'That booking\'s time has not come yet, so it was not marked a no-show. The booking is unchanged. If the guest called to say they are not coming, Cancel it instead.',
+    operator: 'That booking\'s time has not come yet, so it was not marked a no-show — the booking is unchanged. A party is a no-show only once its booked time has passed. If the guest said they will not come, Cancel it instead; if this tablet\'s clock is ahead, check its time.',
+  },
   {
     // guard_pos_reservation_table_hold. ReservationModal and PosReservations word it themselves
     // from the structured DETAIL (reservationConflicts.describeHoldRefusal); this is the fallback.

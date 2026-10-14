@@ -580,7 +580,8 @@ export default function SelfServiceHome() {
     // `serviceWorker.ready` never settles where no worker registered.
     await withTimeout(unsubscribeFromPush(), 4000, 'Notifications')
       .catch(e => console.error('Could not turn notifications off at sign-out', e))
-    const clean = await signOutThisDevice()
+    // This phone only (S835, D37): the library default ended the login on every device it was open on.
+    const clean = await signOutThisDevice({ scope: 'local' })
     const known = rememberedStaffClient() || profile?.client_id
     const to = known ? `/hr/self-service/login/${known}` : '/login'
     // Cleared by hand: the in-memory client still holds the session, so only a page load drops it.

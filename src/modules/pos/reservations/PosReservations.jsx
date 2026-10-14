@@ -33,7 +33,7 @@ import { closePassedRequests } from './requestExpiry'
 import { bookedCoversByHour, overSeatsHours } from './reservationCapacity'
 import { fillTemplate, openWhatsApp } from './whatsappLink'
 import ReservationModal from './ReservationModal'
-import SeatTableModal from './SeatTableModal'
+import SeatTableModal, { SEAT_TABLE_SELECT } from './SeatTableModal'
 
 const REQUEST_POLL_MS = 15000
 // The day list refreshes on its own too, so a colleague's "Arrived" on the door phone reaches the
@@ -154,7 +154,7 @@ export default function PosReservations() {
     const results = await Promise.all([
       listQuery,
       scopedFrom('pos_reservations', RESERVATION_SELECT).eq('status', 'requested').order('reserved_for').order('id'),
-      scopedFrom('pos_tables', 'id, name, section, capacity, status').order('sort_order').order('name'),
+      scopedFrom('pos_tables', SEAT_TABLE_SELECT).order('sort_order').order('name'),
       scopedFrom('pos_orders', 'id, table_id').eq('status', 'open'),
       supabase.from('settings').select('pos_reservation_settings, pos_open_time, pos_close_time').eq('client_id', clientId).maybeSingle(),
       // Changed since this device last looked — the same count the sidebar chip shows, so the two
@@ -239,7 +239,8 @@ export default function PosReservations() {
   }, [clientId, scopedFrom, commitRequests])
 
   // The day list too — see LIST_POLL_MS. Skipped while a dialog is open so a refresh cannot
-  // pull a row out from under a decision being made about it.
+  // pull a row out from under a decision being made about it. The Seat dialog reads its own busy
+  // marks meanwhile (S835, SeatTableModal).
   const dialogOpen = !!(modal || seatTarget || cancelTarget || noShowTarget || doneTarget || reviveTarget)
   useEffect(() => {
     if (!clientId || dialogOpen) return
@@ -438,7 +439,7 @@ export default function PosReservations() {
           '-',
           // S818 (D23): from the booked time only. Before it a party is not late, and a guest who
           // calls to say they will not come is a Cancel.
-          canTransition(r.status, 'no_show') && { key: 'noshow', label: 'No-show…', danger: true, disabled: !canMarkNoShow(r, now), hint: `From ${whenOf(r)}`, onSelect: () => setNoShowTarget(r) },
+          canTransition(r.status, 'no_show') && { key: 'noshow', label: 'No-show…', danger: true, disabled: !canMarkNoShow(r, now), hint: `From ${whenOf(r)}`, onSelect: () => { setActionError(null); setNoShowTarget(r) } },
           canTransition(r.status, 'cancelled') && { key: 'cancel', label: 'Cancel booking…', danger: true, onSelect: () => { setCancelTarget(r); setCancelReason('') } },
           r.status === 'no_show' && { key: 'revive', label: 'They turned up…', disabled: !revivable, hint: 'Only until the end of the booking\'s day', onSelect: () => setReviveTarget(r) },
           r.status === 'cancelled' && { key: 'revive', label: 'Reinstate booking…', disabled: !revivable, hint: 'Only until the end of the booking\'s day', onSelect: () => setReviveTarget(r) },
@@ -850,6 +851,10 @@ export default function PosReservations() {
             <li>Feeds the no-show rate on the Covers Report.</li>
             <li>If they turn up later today, undo it from the ⋯ menu — <em>They turned up</em>.</li>
           </ul>
+          {/* S835: a refusal stays in the dialog (it stays open), where it is seen. The page's own
+              ActionError sits behind this scrim; the server refuses a no-show before the booked time
+              (reservation_no_show_early) when this device's clock runs ahead of it. */}
+          <ActionError error={actionError} />
         </ConfirmModal>
       )}
 

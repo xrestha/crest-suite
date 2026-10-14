@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react'
 import Modal from '../../components/Modal'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { npr } from '../../shared/nepalMoney'
-import { optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { npr, nprInt } from '../../shared/nepalMoney'
+import { dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 
 // Attach ONE group to many dishes — the bulk half of attaching (S759).
 //
@@ -17,7 +17,9 @@ import { optionsBelowZero, belowZeroText } from '../../shared/optionPricing'
 // next sort slot on ITS dish, so it lands after whatever that dish already offers; per-dish
 // overrides (min/max/default) are left to the dish dialog and untouched here.
 
-export default function AttachToDishesModal({ group, dishes, attachments, onClose, onSaved }) {
+// `catalog` (S835): the page's { groups, options, attachments }, so each dish is priced over every
+// group it offers, not this group alone.
+export default function AttachToDishesModal({ group, dishes, attachments, catalog, onClose, onSaved }) {
   const { scopedUpsert, scopedDelete } = useScopedDb()
   const initial = useMemo(
     () => new Set(attachments.filter(a => a.group_id === group.id).map(a => a.recipe_id)),
@@ -46,19 +48,40 @@ export default function AttachToDishesModal({ group, dishes, attachments, onClos
     return n
   }, [dishes, picked, initial])
 
-  // S809 4h (CUSTOMIZATION-6, D17): a dish newly ticked that one of this group's options takes
-  // below zero is refused here, before the till refuses it mid-service. "Select all" on a category
-  // is how a NPR 80 Kids Momo picks up a "Half" made NPR 100 cheaper.
-  const belowZero = useMemo(
-    () => optionsBelowZero(dishes.filter(d => picked.has(d.id) && !initial.has(d.id)), group.options || []),
-    [dishes, picked, initial, group.options],
-  )
+  // S809 4h (CUSTOMIZATION-6, D17): a dish newly ticked that this group takes below zero is refused
+  // here, before the till refuses it mid-service. "Select all" on a category is how a NPR 80 Kids
+  // Momo picks up a "Half" made NPR 100 cheaper. S835: each dish is priced over every group it
+  // offers, so this group's −30 beside another group's −60 is caught too. A dish that ALREADY
+  // carries the group and can go below zero is not this save's doing, so it is named, not refused
+  // (owner decision, S835): unticking it would hide the problem rather than fix it. And taking a
+  // group a dish MUST pick from off it can drop a paid pick a cheaper size was leaning on, so an
+  // untick that lands a dish below zero is refused the same way.
+  const { belowZero, droppedBelow, alreadyBelow } = useMemo(() => {
+    const ticked = dishes.filter(d => picked.has(d.id) && !initial.has(d.id))
+    const unticked = dishes.filter(d => !picked.has(d.id) && initial.has(d.id))
+    const kept = dishes.filter(d => picked.has(d.id) && initial.has(d.id))
+    const nextSortByDish = {}
+    catalog.attachments.forEach(a => { nextSortByDish[a.recipe_id] = Math.max(nextSortByDish[a.recipe_id] ?? -1, a.sort || 0) })
+    const after = {
+      ...catalog,
+      attachments: [
+        ...catalog.attachments.filter(a => a.group_id !== group.id || picked.has(a.recipe_id)),
+        ...ticked.map(d => ({ recipe_id: d.id, group_id: group.id, sort: (nextSortByDish[d.id] ?? -1) + 1 })),
+      ],
+    }
+    return {
+      belowZero: dishesBelowZero(ticked, after, { before: catalog }),
+      droppedBelow: dishesBelowZero(unticked, after, { before: catalog }),
+      alreadyBelow: dishesBelowZero(kept, catalog),
+    }
+  }, [dishes, picked, initial, catalog, group.id])
+  const refused = belowZero.length + droppedBelow.length > 0
 
   const toggle = id => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const setMany = (ids, on) => setPicked(p => { const n = new Set(p); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n })
 
   async function save() {
-    if (saving || belowZero.length) return
+    if (saving || refused) return
     setSaving(true)
     setActionError(null)
     const nextSortByDish = {}
@@ -142,14 +165,31 @@ export default function AttachToDishesModal({ group, dishes, attachments, onClos
           {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Untick {belowZero.length === 1 ? 'it' : 'them'}, or change the option’s price first.
         </p>
       )}
+      {droppedBelow.length > 0 && (
+        <p role="alert" className="field-error" style={{ margin: '12px 0 0' }}>
+          Taking “{group.name}” off: {belowZeroText(droppedBelow)}, and the till refuses a dish priced below zero. Keep {droppedBelow.length === 1 ? 'it' : 'them'} ticked, or change the prices first.
+        </p>
+      )}
+      {alreadyBelow.length > 0 && (
+        <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          △ Already on: {reachList(alreadyBelow)} with these choices — fix {alreadyBelow.length === 1 ? 'its' : 'their'} prices.
+        </p>
+      )}
       <ActionError error={actionError} />
       <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
         <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save}
-          disabled={saving || changed === 0} aria-disabled={belowZero.length > 0 || undefined} aria-busy={saving || undefined}>
+          disabled={saving || changed === 0} aria-disabled={refused || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : changed ? `Save (${changed} change${changed === 1 ? '' : 's'})` : 'No changes'}
         </button>
       </div>
     </Modal>
   )
+}
+
+// "Veg Momo can reach NPR −20", "… and Kids Momo can reach NPR −5", then "and 3 more".
+function reachList(found) {
+  const parts = found.slice(0, 3).map(({ dish, incl }) => `${dish.name} can reach NPR −${nprInt(Math.abs(Math.round(incl)))}`)
+  if (found.length > 3) parts.push(`${found.length - 3} more`)
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]
 }

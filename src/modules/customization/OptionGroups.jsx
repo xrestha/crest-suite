@@ -13,7 +13,7 @@ import RowMenu from '../../components/RowMenu'
 import ReportLoadError from '../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { loadOptionCatalog, KIND_LABEL, DIET_LABEL } from './customizationData'
-import { STANDARD_VAT, inclFromEx, ruleText, signedPrice, groupShortfalls } from '../../shared/optionPricing'
+import { STANDARD_VAT, inclFromEx, ruleText, signedPrice, groupShortfalls, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 import { andList } from '../../shared/offeredPicks'
 import { vatModeOf, VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import OptionGroupModal from './OptionGroupModal'
@@ -203,9 +203,23 @@ export default function OptionGroups() {
     return swapSort(table, renumbered, idx, dir)
   }
 
+  // S835 (D17): showing a hidden group or option again puts its choices back on every dish it is
+  // on, so it is checked like an edit: refused when it would let one of those dishes be ordered
+  // below zero. Until S835 neither "Show again" ran any check, so a choice hidden for a bad price
+  // came straight back with it and the till refused the dish by name mid-service.
+  function showAgainRefusal(name, groupId, after) {
+    const found = dishesBelowZero(dishesForGroup(groupId), after, { before: catalog })
+    if (!found.length) return null
+    return `“${name}” is still hidden. ${belowZeroText(found)}, and the till refuses a dish priced below zero. Change the prices with Edit first, or take the group off ${found.length === 1 ? 'that dish' : 'those dishes'}.`
+  }
+
   // ── Groups ──
   async function toggleGroupActive(g) {
     setPageError(null)
+    if (!g.is_active) {
+      const refusal = showAgainRefusal(g.name, g.id, { ...catalog, groups: catalog.groups.map(x => (x.id === g.id ? { ...x, is_active: true } : x)) })
+      if (refusal) { setPageError(refusal); return }
+    }
     const { data, error } = await scopedUpdate('pos_option_groups', { is_active: !g.is_active }).eq('id', g.id).select('id')
     if (error) { setPageError(asActionError(error)); return }
     if (!data?.length) { setPageError('That group no longer exists — reload the page.'); return }
@@ -273,6 +287,11 @@ export default function OptionGroups() {
   }
 
   function toggleOptionActive(o) {
+    if (!o.is_active) {
+      setPageError(null)
+      const refusal = showAgainRefusal(o.name, o.group_id, { ...catalog, options: catalog.options.map(x => (x.id === o.id ? { ...x, is_active: true } : x)) })
+      if (refusal) { setPageError(refusal); return }
+    }
     const loss = optionLossText(o)
     if (!loss) { setOptionActive(o, !o.is_active); return }
     ask({
@@ -636,6 +655,7 @@ export default function OptionGroups() {
           option={openOption}
           ingredients={openOption?.ingredients || []}
           attachedDishes={dishesForGroup(openGroup.id)}
+          catalog={catalog}
           vat={entryVat}
           vatUnknown={vatMode == null}
           imsEnabled={imsOn}
@@ -675,7 +695,7 @@ export default function OptionGroups() {
       )}
 
       {attachGroup && (
-        <AttachToDishesModal group={attachGroup} dishes={dishes} attachments={catalog.attachments}
+        <AttachToDishesModal group={attachGroup} dishes={dishes} attachments={catalog.attachments} catalog={catalog}
           onClose={() => setAttachGroup(null)}
           onSaved={r => {
             load({ quiet: true })

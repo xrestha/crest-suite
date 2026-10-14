@@ -208,11 +208,13 @@ const POS_GROUPS = [
 // Crest Customization (S758) — its own panel, an add-on that exists only on a client with POS.
 // Option Groups opens for the menu-price set (menuPricingAccess), the same people who may change a
 // dish's price, which is exactly who the database lets write these tables. The Customization
-// Report is for the same set (owner decision: managers and the Owner).
+// Report is for managers and the Owner (owner decision), but a POS manager only (S835, D42): an
+// Inventory login cannot read till bills, so an IMS manager there saw "No choices were picked".
+// minPosRole is the page's own guard (CustomizationReport.jsx); admin and the Owner resolve to manager.
 const CUSTOMIZATION_GROUPS = [
   { key: 'cust-setup', label: null, items: [
     { to: '/customization/groups', label: 'Option Groups', icon: ListPlus, menuPricingAccess: true },
-    { to: '/customization/report', label: 'Customization Report', icon: ListChecks, menuPricingAccess: true },
+    { to: '/customization/report', label: 'Customization Report', icon: ListChecks, minPosRole: 'manager' },
   ]},
 ]
 const HR_GROUPS = [
@@ -650,8 +652,11 @@ export default function Layout() {
     // only. The library's default ('global') ended every session of the login, so a waiter's second
     // till dropped to the email login within the hour and lost its unsent order. A lost tablet is cut
     // off by revoking it in Till Devices, which ends the sessions opened on it (20261010180000).
+    // Every sign-out here is this device's only (S835, D37): the Owner's or operator's Sign out, and a
+    // counting tablet's lock (a count PIN carries no pos_role, so it used to fall to 'global' and end
+    // that login on every other tablet too). Signing out of a laptop no longer signs the phone out.
     // false: the network sign-out failed and the device is already reloading there (S798).
-    if (!(await signOut({ to, scope: isPinStaff ? 'local' : undefined }))) return
+    if (!(await signOut({ to, scope: 'local' }))) return
     navigate(to)
   }
 

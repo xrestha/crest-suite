@@ -286,7 +286,8 @@ table's food.
   `decided_by`/`decided_at` are the server's and the bill must be the request's outlet's. The till
   answers with `.eq('status','pending').select('id')` and never puts a saved-but-unmarked request back
   on the banner. Guest stage reads leave CHANGE and cancelled tickets out. Closing a table's bill turns
-  its waiting ones away (S817, D21), as do 30 minutes unanswered (S834, `guestOrderStale.js`).
+  its waiting ones away (S817, D21), as do 30 minutes unanswered (S834, `guestOrderStale.js`); the close
+  first retries this bill's unmarked accepts (S835, D40).
 
 ### A size scales the picks after it (S760, build-your-own dishes)
 
@@ -297,7 +298,7 @@ table's food.
   well (`round(price × factor, 2)`, half away from zero on both sides; JS in integer paisa, 4h). A size group is always
   `none`, so a size's own lines never scale. The free-picks rule runs first, so a free pick stays 0.
   A "No …" removal is never a free pick and never counts toward the maximum, only the minimum (Q20 a,
-  D15), and a new line priced below zero is refused (`option_price_below_zero`).
+  D15), and a new line priced below zero is refused (`option_price_below_zero`); the editors check first (`dishesBelowZero`, S835).
   Change the rule in all three, and extend the fixture shared by `optionPricing.test.js` and the
   migration's verification block.
 - **The scaled quantity is frozen at order time.** `ingredient_deltas` already holds it, so no IMS
@@ -344,7 +345,7 @@ table's food.
   for a PIN session; `PosOrders` keeps the unsaved units for that login in `posLockedCart.js`
   (localStorage, never the replaying offline queue) and restores them once, as unsent, through
   `showLoadedOrder`/`startFreshOrder` (`applyLockedCart`; `keptLinesToRestore`: what the server lacks,
-  capped at each line's `unsaved_qty`, S809 3g), never into another open order (listed instead), with
+  capped at each line's `unsaved_qty`, S809 3g), only on their own table or takeaway (`keptCartFor`, S835), never into another open order (listed instead), with
   accepted guest request ids (`guestReqs`); what is not consumed is kept again. The PIN screen names
   them. The countdown toast is `zIndex: 1100`, above the till's 1000 layer — at 400 it was invisible.
 - **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
@@ -650,7 +651,7 @@ an operator INSERT of a row dated before the transaction (`opened_at`/`created_a
 | Menu price, VAT rate, `pos_enabled` (`guard_recipe_menu_price`) | POS manager, IMS manager or Owner |
 | Till setup `settings` columns (discount reasons, note presets, ticket routing, delivery partners, reservation settings, opening hours, loyalty point value) | POS manager |
 | Invoice prefix, VAT number and flag, property address and phone, payment QR | Owner (admin exempt) |
-| `pos_tables` but `status` (and `inactive`, S817) | POS manager. **No delete, retire or rename under an open bill**, for everyone; names unique in service |
+| `pos_tables` but `status` (and `inactive`, S817) | POS manager. **No delete, retire or rename under an open bill**, for everyone; no delete with bills on record, no new order when inactive (S835); names unique in service |
 | Loyalty schemes and enrolment (deleting an enrolled customer too) | POS manager |
 | Add or take off loyalty points by hand (`adjust_loyalty_points`, S809 3k) | POS manager; reason required, never below 0 |
 | Block / Unblock / Delete a till login (admin-user-ops, S809 3i) | POS manager, as a PIN reset (never a peer manager, own login, or a stronger login). Delete only a login with no rows in `pos_login_recorded_rows` |
@@ -705,7 +706,7 @@ History: docs/rules-archive/pos-billing.md#till-release-history
 `pos-payment-webhook` (service role) creates one. A browser session may only set `consumed_at`, once,
 after the matched bill is `billed`, and the server stamps the time; every other column, insert and
 delete is refused, the operator included. Keep it that way when the feature goes live: the poll
-trusts `matched_order_id`, `provider` and `amount`.
+trusts `matched_order_id`, `provider` and `amount`. A deleted bill leaves it unmatched (SET NULL, S835).
 
 Open POS work is tracked in `POS_TODO.md` A2; payment-QR auto-confirm is still blocked on FonePay/eSewa merchant onboarding. The phase-6 critique record (what S575–S767 closed) moved word for word to `docs/rules-archive/pos-billing.md`.
 
@@ -862,10 +863,8 @@ Two POS-specific details from that convergence:
 
 ## A dropped write error in this file is how a dish gets cooked twice (S654)
 
-supabase-js **resolves** with `{ data, error }` — it does not throw on a database error. The general
-rule is in root CLAUDE.md; what follows is what that cost specifically here, because `PosOrders.jsx`
-carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destructuring nothing) and
-**three `try/catch` blocks whose `console.error` had never once run.**
+The general rule is in root CLAUDE.md; what follows is what it costs in this file.
+History: docs/rules-archive/pos-billing.md#dropped-write-errors-count
 
 - **Printing a ticket is gated on the `sent_to_kot` write, never the other way round.** That flag is
   what makes "already sent" true for every other device and for this one after a reload. It was
@@ -901,7 +900,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 
 - **Every await on the close path is bounded** (`bounded()` / `CLOSE_STEP_MS` in `PosOrders.jsx`). Cancel stays disabled while a close is in flight, so an unbounded await was a till with no way out.
 - **A timeout, a dropped connection or a gateway 5xx on the close write is not a failure** (`noAnswer`, S833 for the 5xx). `closeAttemptRef` is set just before the write; `settleUnknownClose()` reads the bill: closed by this login with this close type → `finishClosedBill()` (legs, print, the rest); open straight after the timeout → keep the mark, the write can still land; unreadable → say it is unknown. The next press AND Cancel settle it first. Without this a retry was refused "already closed" and blamed on another till, and the bill never printed.
-- **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`; kept on the tablet since S833, `closeAttemptStore.js`, another login's locking the bill until read; since 2g the lock hands back points only when no try at that bill is unsettled, never on an outlet move, and the close returns forgotten points itself). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print, no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
+- **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`; kept on the tablet since S833, `closeAttemptStore.js`, another login's locking the bill until read; since 2g the lock hands back points only when no try at that bill is unsettled, never on an outlet move, and the close returns forgotten points itself). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print (but a void's VOID slip, S835), no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
 - **Order after the close is an owner decision: Split legs → print → table, booking, IMS, customer, loyalty.** Legs first because of their 10-minute window and because `printBill` reads them. Print counters are not awaited. Don't move bookkeeping back in front of the paper.
 - Verified live by letting the PATCH reach the server and aborting its response (`route.fetch()` then `route.abort()`), and again with the read-back also aborted.
 - **The close buttons are never `disabled` for a missing input, only `aria-disabled`.** `closeBlocker()` is the one list: closeOrder refuses with its `text`, the button shows its `label`, and `pressClose()` opens the folded section and focuses its `field`. A new close precondition goes into `closeBlocker`, never into a button's `disabled` expression. Void asks first (`confirmVoid`). `closeStartRefusal` (`tillBillChecks.js`) runs first: unread till settings, then an emptied cart (Void exempt, owner Q8 a); `fullInvoiceRefusal` follows the buyer-ID check (a VAT bill above `ABBREVIATED_INVOICE_LIMIT`, measured on what the guest pays, needs name and address, Q9 a).
