@@ -180,6 +180,29 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~POS small leftovers (S809.4 lists): twelve items in one pass~~ — **shipped S834, 2026-10-14**:
+  migration `20261014100000` applied live (second try; the first stopped on its read-back SELECT and
+  rolled back whole); admin-user-ops v68, hr-selfservice-login v13, ims-staff-login v7; app crest-v450.
+  **D34 (owner):** a guest QR order nobody answers is turned away after 30 minutes
+  (`pos_turn_away_stale_guest_orders`, run by the guest's polls, a new guest order, the PIN screen's read
+  and the tills' `turn_away_stale_guest_orders()`; JS twin `guestOrderStale.js`), which also frees the
+  table's one waiting place. **D35 (owner):** a bill and a credit note keep the invoice code they were
+  printed with (`pos_orders.invoice_prefix` at the close, `pos_credit_notes.invoice_prefix` at issue;
+  `invoiceCodeOf`); rows from before follow today's code. **D36 (owner):** deleting an IMS or HR staff
+  login still blanks its name on past records; the fix (a switch-off for those logins) waits for the
+  shared HR job. Also: an order on a deleted table shows as its own card; a failed comp food-cost read
+  shows "—"; passed booking requests are counted nowhere and closed when Reservations opens; register_trial
+  refuses an unread rate-limit count; the HR and IMS PIN logins' dead fallback and `check_pos_pin_lock`
+  are gone. Record: CHANGELOG S834.
+- [x] ~~S809 stage 6, till reliability (app only)~~ — **shipped S833, 2026-10-13** in one pass (owner:
+  no slices), app crest-v449, no migration. **D31 (owner):** a close try whose answer was lost is kept
+  on the tablet (`closeAttemptStore.js`); another login there sees the bill locked, naming who pressed,
+  until a read settles it. **D32 (owner):** a note changed on a partly sent line sends a change line for
+  the units already sent (`sendsChangeLine`). **D33 (owner):** Loyalty lists members and points with no
+  scheme. Also: a gateway 5xx is no answer on the close, the award and Served; stuck uploads say why; a
+  5 s link probe; offline tickets get their order number; ← during a send; a self-ended PIN session keeps
+  its cart; KDS no-answer wording and KOT Log Cleared/Voided; time-limited Customers and guest-menu reads;
+  credit note figures grouped and the Book's date with its year. Record: CHANGELOG S833.
 - [x] ~~S809 stage 5, slice 5f-4: the server sends a credit note to Inventory as it is issued (Q32)~~ —
   **step 1 shipped S832, 2026-10-13**: migration `20261013200000` applied live; app crest-v448.
   `pos_credit_notes_post_to_inventory` (AFTER INSERT, DEFINER, inside an exception block, so a failed

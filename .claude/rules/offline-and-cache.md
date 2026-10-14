@@ -198,3 +198,7 @@ Two things make this safe to do, and both are worth checking before copying the 
   older till uploads every entry as an order save, and an empty entry there would delete every dish.
 - **The replay sends the rows as queued (`replayRows`), never through `toItemPayload` again**: that
   dropped a customized dish's choices.
+- **An entry kept for a reason other than the connection says why (S833)**: after
+  `UPLOAD_TROUBLE_TRIES` in a row the floor names the table and the server's sentence; a lapsed sign-in
+  is kept silently. A ticket of an order created on the till is logged with the order number the upload
+  gave it.
