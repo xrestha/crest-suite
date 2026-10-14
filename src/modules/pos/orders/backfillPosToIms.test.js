@@ -222,3 +222,20 @@ describe('postWaitingBills — the server posts a month\'s waiting bills (S830 5
     expect(r).toMatchObject({ posted: 3, waiting: 999 })
   })
 })
+
+// S839 (docs/pos-combos.md): Inventory revenue never takes a bill discount off a combo's dishes.
+describe('billSalesRows and combos', () => {
+  const { billSalesRows } = require('./backfillPosToIms')
+  test('a combo dish posts at its own price; the discount spreads over the other lines', () => {
+    const order = {
+      id: 'o1', close_type: 'paid', discount_amount: 20,
+      pos_order_items: [
+        { recipe_id: 'tea', qty: 2, unit_price: 100, vat_rate: 0.13, selection_key: '' },
+        { recipe_id: 'momo', qty: 1, unit_price: 206.49, vat_rate: 0.13, combo_line_id: 'c1', selection_key: '@c1/g1', pos_order_item_options: [] },
+      ],
+    }
+    const rows = billSalesRows(order, { id: 'p' }, 3)
+    expect(rows.find(r => r.recipe_id === 'tea').unit_price).toBeCloseTo(90, 10)
+    expect(rows.find(r => r.recipe_id === 'momo').unit_price).toBe(206.49)
+  })
+})

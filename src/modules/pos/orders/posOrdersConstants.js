@@ -32,14 +32,44 @@ export const toItemPayload = i => {
     // payload is byte-identical to before. The server prices and snapshots them; nothing else about
     // an option rides along, because nothing else would be trusted.
     ...(lineOptionIds(i).length ? { options: lineOptionIds(i) } : {}),
+    // Combos (S839, docs/pos-combos.md): which combo and pick this dish belongs to. The server reads
+    // only the three ids and prices the dish itself; the names ride along so a queued copy of the
+    // save still shows the combo in the cart (offlineUpload.queuedRows).
+    ...(comboLineIdOf(i) ? { combo: {
+      line_id: comboLineIdOf(i), combo_id: i.combo_id ?? i.combo?.combo_id ?? null, group_id: comboGroupIdOf(i),
+      name: i.combo_name ?? i.combo?.name ?? null, group_name: i.combo_group_name ?? i.combo?.group_name ?? null,
+      sort: i.combo_sort ?? i.combo?.sort ?? null, price: i.combo_price ?? i.combo?.price ?? null,
+    } } : {}),
   }
 }
+
+// ── Combos (S839, docs/pos-combos.md) ─────────────────────────────────────────────────────────────
+// A combo's dish is an ordinary line whose selection key carries '@<combo_line_id>/<combo_group_id>'
+// after its own option ids, so it never merges with the same dish ordered alone or in another combo,
+// wherever a line is matched by its key. Everything that reads option ids out of a key cuts it at '@'.
+const comboLineIdOf = i => i?.combo_line_id || i?.combo?.line_id || null
+const comboGroupIdOf = i => i?.combo_group_id || i?.combo?.group_id || null
+
+/** The '@<combo_line_id>/<combo_group_id>' tail of a combo dish's selection key; '' for any other line. */
+export const comboSuffixOf = i => {
+  const line = comboLineIdOf(i), group = comboGroupIdOf(i)
+  return line && group ? `@${String(line).toLowerCase()}/${String(group).toLowerCase()}` : ''
+}
+
+/** The option-id part of a selection key: everything before a combo's '@'. */
+export const optionPartOfKey = key => String(key || '').split('@')[0]
+
+/** Whether a line is a combo's dish (by its tag, or by its key when only the key was read). */
+export const isComboLine = i => !!comboLineIdOf(i) || String(i?.selection_key || '').includes('@')
+
+/** A payload row's selection key, as the server builds it: its option ids, then its combo tail. */
+export const payloadSelectionKey = r => r?.selection_key || (selectionKeyOf(r?.options) + comboSuffixOf(r))
 
 // A line's chosen option ids: the cart's own `option_ids`, else the ids in its selection key (a line
 // read back from the server carries the key and its snapshot, not the array).
 export const lineOptionIds = i => {
   if (Array.isArray(i.option_ids) && i.option_ids.length) return i.option_ids.filter(Boolean).map(String)
-  return i.selection_key ? String(i.selection_key).split('+').filter(Boolean) : []
+  return i.selection_key ? optionPartOfKey(i.selection_key).split('+').filter(Boolean) : []
 }
 
 // Every read that puts an OPEN order on the order screen selects exactly this, so the three paths
@@ -53,6 +83,8 @@ export const OPEN_ORDER_SELECT =
   'pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, comped, ' +
   // Crest Customization (S758, migration 20260919130000): the line's selection and its frozen choices.
   'selection_key, base_unit_price, options_delta, option_summary, ' +
+  // Combos (S839): the dish's combo, as the server stamped it.
+  'combo_line_id, combo_id, combo_name, combo_price, combo_group_id, combo_group_name, combo_sort, ' +
   'pos_order_item_options(option_id, group_id, group_name, group_kind, option_name, kitchen_name, is_removal, price_delta, included, ingredient_deltas, sort))'
 
 // A stored line as the cart holds it. sent_qty is the stored count, falling back to the whole qty for
@@ -65,13 +97,21 @@ export const OPEN_ORDER_SELECT =
 // offlineUpload.queuedRows). Read as a plain dish, its next save dropped the choices and a conflict
 // recovery doubled it.
 export const cartLineFromStored = i => {
-  const { pos_order_item_options: snap, option_snapshot: kept, ...line } = i
+  const { pos_order_item_options: snap, option_snapshot: kept, combo, ...line } = i
   const out = { ...line, sent_qty: i.sent_qty || (i.sent_to_kot ? i.qty : 0) }
+  // S839: a queued save's combo dish carries its combo as the payload's `combo` object.
+  if (combo && !out.combo_line_id) {
+    Object.assign(out, {
+      combo_line_id: combo.line_id || null, combo_id: combo.combo_id || null, combo_group_id: combo.group_id || null,
+      combo_name: combo.name ?? null, combo_group_name: combo.group_name ?? null,
+      combo_sort: combo.sort ?? null, combo_price: combo.price ?? null,
+    })
+  }
   const queuedIds = !line.selection_key && Array.isArray(line.options) && line.options.length > 0
     && line.options.every(o => typeof o === 'string') ? line.options : null
-  if (queuedIds) out.selection_key = selectionKeyOf(queuedIds)
+  if (!line.selection_key && (queuedIds || comboSuffixOf(out))) out.selection_key = selectionKeyOf(queuedIds || []) + comboSuffixOf(out)
   if (out.selection_key) {
-    out.option_ids = String(out.selection_key).split('+').filter(Boolean)
+    out.option_ids = optionPartOfKey(out.selection_key).split('+').filter(Boolean)
     out.options = [...(snap || kept || (queuedIds ? [] : line.options) || [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
   }
   return out
@@ -110,7 +150,8 @@ export function foldCompedSplits(rows) {
 // Mirrors the SQL in save_pos_order_items (line_key = recipe_id || '#' || selection_key).
 export const lineKeyOf = i => {
   if (i.line_key) return i.line_key
-  const sel = i.selection_key || (Array.isArray(i.option_ids) ? selectionKeyOf(i.option_ids) : '')
+  // S839: a combo's dish adds its '@<combo_line_id>/<combo_group_id>' tail (comboSuffixOf).
+  const sel = i.selection_key || ((Array.isArray(i.option_ids) ? selectionKeyOf(i.option_ids) : '') + comboSuffixOf(i))
   if (i.recipe_id) return sel ? `${i.recipe_id}#${sel}` : i.recipe_id
   return `name:${i.name}`
 }
@@ -133,7 +174,10 @@ export const seatRefusedText = (tableName, res, why) =>
 // keeps matching by recipe (ticketForRecipe in PosOrders.jsx).
 export function ticketForLine(tickets, line) {
   if (!line?.recipe_id) return null
-  const key = lineKeyOf({ recipe_id: line.recipe_id, selection_key: line.selection_key, option_ids: line.option_ids })
+  const key = lineKeyOf({
+    recipe_id: line.recipe_id, selection_key: line.selection_key, option_ids: line.option_ids,
+    combo_line_id: line.combo_line_id, combo_group_id: line.combo_group_id,
+  })
   return (tickets || []).find(t => (t.items || []).some(i => i.recipe_id && lineKeyOf({ recipe_id: i.recipe_id, selection_key: i.selection_key }) === key)) || null
 }
 
@@ -156,6 +200,7 @@ export function missingFromServer(localLines, serverLines) {
         recipe_id: i.recipe_id || null, name: i.name, category: i.category || 'Other', qty: diff,
         unit_price: i.unit_price, vat_rate: i.vat_rate, notes: i.notes || '', sent_to_kot: false, sent_qty: 0,
         ...(i.selection_key ? { selection_key: i.selection_key, option_ids: i.option_ids, options: i.options } : {}),
+        ...(isComboLine(i) ? comboFieldsOf(i) : {}),
       })
     }
   }
@@ -231,7 +276,7 @@ export function keptLinesToRestore(keptLines, serverLines) {
 // success, not a conflict (S754).
 export function storedLinesMatchPayload(storedLines, payload) {
   const sig = rows => (rows || [])
-    .map(r => [r.recipe_id || '', r.selection_key || selectionKeyOf(r.options), Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
+    .map(r => [r.recipe_id || '', payloadSelectionKey(r), Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
     .sort()
     .join('')
   return sig(storedLines) === sig(payload)
@@ -247,7 +292,7 @@ export function storedLinesMatchPayload(storedLines, payload) {
 // since then — a lower quantity or a line gone, unsent food included — is never read as landed, since
 // the larger stored count may be the first save, not this one.
 export function storedLinesContainPayload(storedLines, payload, firstPayload = null) {
-  const key = r => `${r.recipe_id || ''}#${r.selection_key || selectionKeyOf(r.options)}`
+  const key = r => `${r.recipe_id || ''}#${payloadSelectionKey(r)}`
   if (Array.isArray(firstPayload)) {
     const now = new Map()
     for (const r of payload || []) now.set(key(r), (now.get(key(r)) || 0) + (Number(r.qty) || 0))
@@ -271,6 +316,13 @@ export function storedLinesContainPayload(storedLines, payload, firstPayload = n
     return !!s && s.qty >= (Number(r.qty) || 0) && s.sent >= (Number(r.sent_qty) || 0) && s.notes.has((r.notes || '').trim())
   })
 }
+
+// A combo dish's tag, to carry over to a copy of the line (S839).
+export const comboFieldsOf = i => ({
+  combo_line_id: comboLineIdOf(i), combo_id: i.combo_id ?? i.combo?.combo_id ?? null, combo_group_id: comboGroupIdOf(i),
+  combo_name: i.combo_name ?? i.combo?.name ?? null, combo_group_name: i.combo_group_name ?? i.combo?.group_name ?? null,
+  combo_sort: i.combo_sort ?? i.combo?.sort ?? null, combo_price: i.combo_price ?? i.combo?.price ?? null,
+})
 
 const SAME_NUMBER = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.0001
 
@@ -313,6 +365,8 @@ export function withServerLineFields(localLines, serverItems) {
         base_unit_price: s.base_unit_price, options_delta: s.options_delta,
         option_summary: s.option_summary, options: s.options,
       } : {}),
+      // S839: a combo's dish takes the server's stamp of its combo (name, price, pick).
+      ...(s.combo_line_id ? comboFieldsOf(s) : {}),
     }
   })
   return changed ? next : localLines

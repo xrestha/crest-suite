@@ -126,7 +126,8 @@ export function typicalSelections(lines, sizeOptionIds, minPlates = 10) {
   const byDish = {}
   for (const l of lines || []) {
     if (!l.recipe_id) continue
-    const ids = String(l.selection_key || '').split('+').filter(Boolean).filter(id => !sizeOptionIds.has(id))
+    // S839: a combo dish's key carries '@<combo>/<pick>' after its option ids; only the ids count.
+    const ids = String(l.selection_key || '').split('@')[0].split('+').filter(Boolean).filter(id => !sizeOptionIds.has(id))
     const key = [...ids].sort().join('+')
     const d = (byDish[l.recipe_id] = byDish[l.recipe_id] || { total: 0, counts: {} })
     const q = num(l.qty) || 1

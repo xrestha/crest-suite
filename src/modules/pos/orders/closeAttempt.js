@@ -1,5 +1,5 @@
 import { fmtNpr } from './posOrdersConstants'
-import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, billVatRegistered, isComboItem } from '../../../utils/posBillingMath'
 import { phoneForRecord } from '../../../utils/phone'
 
 // A bill close whose answer was lost (S776) — the pure half of S809 CHECKOUT-7.
@@ -80,9 +80,11 @@ export function storedLinesMatchPaid(row, items, vatReg) {
 }
 
 // The bill-level discount as a share of what was charged before it, from the STORED lines with the
-// comped ones left out — the same base the till's own discRatio uses (paySubEx).
+// comped ones left out — the same base the till's own discRatio uses (paySubEx). S839: a combo's
+// dishes are left out too, since a bill discount never touches a combo; the ratio applies to the
+// other lines only (isComboItem, posBillingMath.js).
 export function storedDiscountRatio(items, discountAmount) {
-  const base = (items || []).filter(i => !i.comped)
+  const base = (items || []).filter(i => !i.comped && !isComboItem(i))
     .reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.unit_price) || 0), 0)
   const d = Number(discountAmount) || 0
   return base > 0 && d > 0 ? Math.min(1, d / base) : 0

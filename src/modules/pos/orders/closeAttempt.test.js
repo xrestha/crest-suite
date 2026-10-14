@@ -183,3 +183,17 @@ describe('finishing from the stored bill', () => {
     expect(latestCompRows(null)).toEqual({ compNo: null, rows: [] })
   })
 })
+
+// S839 (docs/pos-combos.md): a combo's dishes are outside the discount base.
+describe('storedDiscountRatio leaves a combo out', () => {
+  const { storedDiscountRatio } = require('./closeAttempt')
+  test('the discount spreads over the non-combo lines only', () => {
+    const items = [
+      { qty: 1, unit_price: 100 },
+      { qty: 1, unit_price: 300, combo_line_id: 'c1' },
+      { qty: 1, unit_price: 50, selection_key: '@c1/g2' },
+    ]
+    expect(storedDiscountRatio(items, 10)).toBeCloseTo(0.1, 10)
+    expect(storedDiscountRatio(items.slice(1), 10)).toBe(0)
+  })
+})

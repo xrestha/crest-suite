@@ -213,13 +213,13 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'option_edit_rank'),
-    staff: 'Only the Owner or a manager can change the customization options. Nothing was changed.',
-    operator: 'Only the Owner, a POS manager or an IMS manager can change customization options, and this login is none of those — nothing was changed.',
+    staff: 'Only the Owner or a manager can change customization options and combos. Nothing was changed.',
+    operator: 'Only the Owner, a POS manager or an IMS manager can change customization options and combos, and this login is none of those — nothing was changed.',
   },
   {
     test: e => hasCode(e, 'customization_off'),
     staff: 'Crest Customization is not switched on for this outlet. Nothing was changed.',
-    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so options cannot be changed — nothing was changed. Ask Crest to switch it on.',
+    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so options and combos cannot be changed — nothing was changed. Ask Crest to switch it on.',
   },
   {
     test: e => hasCode(e, 'option_ingredient_foreign'),
@@ -270,6 +270,62 @@ const rules = [
     test: e => hasCode(e, 'option_count'),
     staff: 'A dish on this order is missing a choice it must have (a size, a base…) or has too many. Nothing was saved — tap Choices on that dish, pick, and save again.',
     operator: 'The choices on a dish break its rule — too few picks (or none) in a group that must be chosen, or too many (named in the detail below) — so the order was not saved. Change the choices and save again.',
+  },
+  // ── Combos (S839, docs/pos-combos.md) ────────────────────────────────────────────────────────
+  {
+    test: e => hasCode(e, 'combo_incomplete'),
+    staff: 'A combo on this order is missing a dish, or its dishes are at different quantities. Nothing was saved — swap a dish within its pick, or remove the whole combo, and save again.',
+    operator: 'A combo on this order (named in the detail below) needs one dish for each of its picks, all at the same quantity, so the order was not saved. Swap a dish within its pick, or remove the whole combo and add the dishes on their own.',
+  },
+  {
+    test: e => hasCode(e, 'combo_dish_not_offered'),
+    staff: 'A dish picked in a combo is no longer offered in it. Nothing was saved — choose again and save.',
+    operator: 'A dish picked in a combo (named in the detail below) is no longer one of its pick\'s dishes, so the order was not saved. Choose again, or add the dish back to the combo in Customization → Combos.',
+  },
+  {
+    test: e => hasCode(e, 'combo_unavailable'),
+    staff: 'A combo on this order is not offered any more. Nothing was saved — remove it and save again.',
+    operator: 'A combo on this order (named in the detail below) is switched off or deleted, or Crest Customization is off here, so the order was not saved. Remove the combo, or switch it back on in Customization → Combos.',
+  },
+  {
+    test: e => hasCode(e, 'combo_comp_whole'),
+    staff: 'A combo is made complimentary as a whole — every dish of it. Nothing was made complimentary: tick the whole combo.',
+    operator: 'A combo is made complimentary as a whole, every dish of it by the same number, so nothing was made complimentary. Comp the whole combo, or none of it.',
+  },
+  {
+    test: e => hasCode(e, 'combo_move_whole'),
+    staff: 'A combo moves as a whole — every dish of it. Nothing was moved: move the whole combo.',
+    operator: 'A combo moves to another bill as a whole, every dish of it by the same number, so nothing was moved. Move the whole combo, or leave it.',
+  },
+  {
+    test: e => hasCode(e, 'discount_on_combo'),
+    staff: 'A combo is already a deal, so a bill discount cannot come off it. Nothing was charged — lower the discount to what the other dishes come to.',
+    operator: 'A bill discount never comes off a combo, and this one is more than the rest of the bill comes to (the detail below says how much), so the bill was not charged. Lower the discount and charge again.',
+  },
+  {
+    test: e => hasCode(e, 'combo_name_taken'),
+    staff: 'That combo name is taken or empty. Nothing was saved.',
+    operator: 'Another combo already has that name (or the name is empty), so the combo was not saved. Give it a different name.',
+  },
+  {
+    test: e => hasCode(e, 'combo_price_invalid'),
+    staff: 'A combo needs a price above zero. Nothing was saved.',
+    operator: 'A combo\'s price must be an amount above zero, to the paisa, so it was not saved. Enter the price the guest pays.',
+  },
+  {
+    test: e => hasCode(e, 'combo_needs_picks', 'combo_pick_empty'),
+    staff: 'Every pick of a combo needs a name and at least one dish. Nothing was saved.',
+    operator: 'A combo needs at least one pick, and every pick a name and at least one dish (the detail below names any that has none), so the combo was not saved.',
+  },
+  {
+    test: e => hasCode(e, 'combo_pick_name_taken', 'combo_default_twice'),
+    staff: 'Two picks have the same name, or a pick has the same dish twice or two defaults. Nothing was saved.',
+    operator: 'Two picks of this combo have the same name, or a pick lists a dish twice or has two defaults (named in the detail below), so the combo was not saved.',
+  },
+  {
+    test: e => hasCode(e, 'combo_dish_unavailable'),
+    staff: 'A dish in this combo cannot be used. Nothing was saved.',
+    operator: 'A dish in this combo (named in the detail below) is inactive, a sub-recipe or another outlet\'s, or its extra charge is not an amount, so the combo was not saved. Take it out or fix it.',
   },
   {
     test: e => hasCode(e, 'line_not_on_menu'),

@@ -152,3 +152,63 @@ describe('computeGroupAmounts with an arbitrary key', () => {
     expect(byItem['r3'].name).toBe('Water')
   })
 })
+
+// S839 (docs/pos-combos.md): a bill discount never touches a combo's dishes.
+describe('a bill discount skips combo dishes', () => {
+  const { discountableSubtotal, lineDiscountRatio, isComboItem } = require('./posBillingMath')
+  const plain = { recipe_id: 'r1', qty: 1, unit_price: 100, vat_rate: 0.13 }
+  const comboMomo = { recipe_id: 'r2', qty: 1, unit_price: 206.49, vat_rate: 0.13, combo_line_id: 'c1', selection_key: '@c1/g1' }
+  const comboCoke = { recipe_id: 'r3', qty: 1, unit_price: 103.25, vat_rate: 0.13, selection_key: '@c1/g2' }  // key only
+
+  test('a combo dish is known by its tag or by its key', () => {
+    expect(isComboItem(comboMomo)).toBe(true)
+    expect(isComboItem(comboCoke)).toBe(true)
+    expect(isComboItem(plain)).toBe(false)
+    expect(isComboItem({ selection_key: 'opt1+opt2' })).toBe(false)
+  })
+
+  test('the discountable subtotal leaves the combo out', () => {
+    expect(discountableSubtotal([plain, comboMomo, comboCoke])).toBe(100)
+    const ratioOf = lineDiscountRatio({ discount_amount: 10 }, [plain, comboMomo, comboCoke])
+    expect(ratioOf(plain)).toBeCloseTo(0.1, 10)
+    expect(ratioOf(comboMomo)).toBe(0)
+  })
+
+  test('VAT and the bases follow each line: the combo is taxed in full', () => {
+    const a = computeOrderAmounts({ discount_amount: 10 }, [plain, comboMomo, comboCoke], true)
+    expect(a.grossAmt).toBeCloseTo(409.74, 6)
+    expect(a.taxableBase).toBeCloseTo(90 + 206.49 + 103.25, 6)
+    expect(a.vatAmt).toBeCloseTo((90 + 206.49 + 103.25) * 0.13, 6)
+    expect(a.net).toBe(Math.round(409.74 - 10 + (90 + 206.49 + 103.25) * 0.13))
+    expect(a.taxableBase + a.nonTaxableBase).toBeCloseTo(a.grossAmt - a.discount, 6)
+  })
+
+  test('grouped amounts reconcile to the bill with a combo on it', () => {
+    const items = [plain, comboMomo, comboCoke]
+    const order = { discount_amount: 10 }
+    const groups = Object.values(computeGroupAmounts(order, items, true, i => i.recipe_id))
+    const bill = computeOrderAmounts(order, items, true)
+    expect(groups.reduce((s, g) => s + g.discount, 0)).toBeCloseTo(10, 6)
+    expect(groups.reduce((s, g) => s + g.vat, 0)).toBeCloseTo(bill.vatAmt, 6)
+    expect(groups.find(g => g.gross === 206.49).discount).toBe(0)
+  })
+
+  test('a bill with no combo computes exactly as before', () => {
+    const items = [plain, { ...plain, recipe_id: 'r9', unit_price: 50, vat_rate: 0 }]
+    const a = computeOrderAmounts({ discount_amount: 15 }, items, true)
+    const discRatio = 15 / 150
+    expect(a.vatAmt).toBe(100 * 0.13 * (1 - discRatio))
+    expect(a.taxableBase).toBe(100 * (1 - discRatio))
+  })
+})
+
+describe('Total Qty counts a combo once', () => {
+  test('a two-dish combo at qty 2 counts 2, beside a plain line', () => {
+    const items = [
+      { qty: 1, unit_price: 100, vat_rate: 0.13 },
+      { qty: 2, unit_price: 200, vat_rate: 0.13, combo_line_id: 'c1', combo_group_id: 'g1', selection_key: '@c1/g1' },
+      { qty: 2, unit_price: 100, vat_rate: 0.13, combo_line_id: 'c1', combo_group_id: 'g2', selection_key: '@c1/g2' },
+    ]
+    expect(computeOrderAmounts({ discount_amount: 0 }, items, true).totalQty).toBe(3)
+  })
+})

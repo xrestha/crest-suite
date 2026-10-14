@@ -104,3 +104,46 @@ describe('the helpers key on lineKeyOf', () => {
     expect(Object.keys(withServerLineFields([{ ...plain, unit_price: 90 }], [plain])[0])).not.toContain('option_summary')
   })
 })
+
+// S839 (docs/pos-combos.md): a combo's dish keys apart from the same dish alone or in another combo.
+describe('combo dishes', () => {
+  const { comboSuffixOf, optionPartOfKey, isComboLine, payloadSelectionKey, cartLineFromStored } = require('./posOrdersConstants')
+  const LINE = 'c0000000-0000-4000-8000-00000000000a'
+  const PICK = 'c0000000-0000-4000-8000-00000000000b'
+  const cartCombo = { recipe_id: 'r-momo', name: 'Momo', qty: 1, option_ids: [B, A], combo_line_id: LINE, combo_group_id: PICK, combo_id: 'cmb', combo_name: 'Momo Combo' }
+
+  test('the key carries the combo tail after the dish\'s own options', () => {
+    expect(comboSuffixOf(cartCombo)).toBe(`@${LINE}/${PICK}`)
+    expect(lineKeyOf(cartCombo)).toBe(`r-momo#${selectionKeyOf([A, B])}@${LINE}/${PICK}`)
+    expect(lineKeyOf({ recipe_id: 'r-momo', combo_line_id: LINE, combo_group_id: PICK })).toBe(`r-momo#@${LINE}/${PICK}`)
+    expect(lineKeyOf(cartCombo)).not.toBe(lineKeyOf({ recipe_id: 'r-momo', option_ids: [A, B] }))
+  })
+
+  test('option ids are read from the part before @', () => {
+    const stored = { recipe_id: 'r-momo', selection_key: `${selectionKeyOf([A, B])}@${LINE}/${PICK}` }
+    expect(optionPartOfKey(stored.selection_key)).toBe(selectionKeyOf([A, B]))
+    expect(lineOptionIds(stored)).toEqual([A, B].sort())
+    expect(lineOptionIds({ selection_key: `@${LINE}/${PICK}` })).toEqual([])
+    expect(isComboLine(stored)).toBe(true)
+  })
+
+  test('the payload names the combo, and a queued copy reads back as the same line', () => {
+    const p = toItemPayload(cartCombo)
+    expect(p.options).toEqual([B, A])
+    expect(p.combo).toMatchObject({ line_id: LINE, combo_id: 'cmb', group_id: PICK, name: 'Momo Combo' })
+    expect(payloadSelectionKey(p)).toBe(`${selectionKeyOf([A, B])}@${LINE}/${PICK}`)
+    const back = cartLineFromStored(p)
+    expect(back.combo_line_id).toBe(LINE)
+    expect(lineKeyOf(back)).toBe(lineKeyOf(cartCombo))
+    expect(back.option_ids).toEqual([A, B].sort())
+  })
+
+  test('a stored combo dish matches the payload that saved it', () => {
+    const stored = [{ recipe_id: 'r-momo', selection_key: `${selectionKeyOf([A, B])}@${LINE}/${PICK}`, qty: 1, sent_to_kot: false, sent_qty: 0, notes: '' }]
+    expect(storedLinesMatchPayload(stored, [toItemPayload(cartCombo)])).toBe(true)
+  })
+
+  test('a plain line\'s payload has no combo', () => {
+    expect(toItemPayload({ recipe_id: 'r1', name: 'Tea', qty: 1 }).combo).toBeUndefined()
+  })
+})

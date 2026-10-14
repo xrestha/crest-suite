@@ -53,6 +53,9 @@ export const CLIENT_SCOPED_TABLES = [
   'pos_option_groups', 'pos_options', 'pos_option_ingredients', 'pos_recipe_option_groups',
   // The per-line options snapshot on an order (stage 4) — written only by save_pos_order_items.
   'pos_order_item_options',
+  // Combos (S839, docs/pos-combos.md): a combo, its picks and the dishes in each pick. Read here by any
+  // login of the outlet; written only through save_pos_combo / delete_pos_combo.
+  'pos_combos', 'pos_combo_groups', 'pos_combo_items',
   // Cross-module
   'monthly_owner_reports',
   // Each person's own checklist choices per outlet (S790): admin view-as reads it here; exported, never restored.

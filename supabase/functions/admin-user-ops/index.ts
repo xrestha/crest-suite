@@ -390,6 +390,11 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('pos_option_ingredients').delete().eq('client_id', clientId), 'pos_option_ingredients')
   await del(admin.from('pos_options').delete().eq('client_id', clientId), 'pos_options')
   await del(admin.from('pos_option_groups').delete().eq('client_id', clientId), 'pos_option_groups')
+  // Combos (S839): their dishes would cascade away with the recipes below, leaving empty picks
+  // behind; cleared here instead, children first, like the option tables.
+  await del(admin.from('pos_combo_items').delete().eq('client_id', clientId), 'pos_combo_items')
+  await del(admin.from('pos_combo_groups').delete().eq('client_id', clientId), 'pos_combo_groups')
+  await del(admin.from('pos_combos').delete().eq('client_id', clientId), 'pos_combos')
   await del(admin.from('recipes').delete().eq('client_id', clientId), 'recipes')
   await del(admin.from('items').delete().eq('client_id', clientId), 'items')
   await del(admin.from('ims_gate_passes').delete().eq('client_id', clientId), 'ims_gate_passes')

@@ -1,4 +1,5 @@
 import { lineIngredientDeltas, deltaItems } from '../../../utils/orderLineIngredients'
+import { isComboItem } from '../../../utils/posBillingMath'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { daysInBsMonth, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { withTimeout } from '../../../utils/withTimeout'
@@ -48,7 +49,8 @@ export function billSalesRows(order, period, bsDay) {
       bs_day: bsDay,
       qty_sold: i.qty,
       source: isComp ? 'pos_comp' : 'pos',
-      unit_price: isComp ? i.unit_price : i.unit_price * (1 - disc),
+      // S839: a combo's dish is never discounted (storedDiscountRatio leaves it out of the base too).
+      unit_price: isComp || isComboItem(i) ? i.unit_price : i.unit_price * (1 - disc),
       vat_rate: i.vat_rate ?? 0,
       pos_order_id: order.id,
       ...(deltas ? { ingredient_deltas: deltas } : {}),
