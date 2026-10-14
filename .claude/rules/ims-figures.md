@@ -1174,8 +1174,11 @@ applied once, at order time. **Usage of a sales row is recipe × qty_sold + delt
   dish whose recipe has no onion still takes onion off; a negative total is a data-entry problem to
   show, not to hide. In a month where a dish's net sold is 0 or less, its choices add nothing either,
   as the base recipe does (`stockReportCalc.js`, Theoretical Variance).
-- **Stock Movements' Sub-Recipes tab and its reconciliation note are recipe-only in release 1**, and
-  say so; the raw ledger already includes choice usage from POS closes.
+- **Stock Movements' Sub-Recipes tab counts choices too (S838, `subRecipeUsage.js`).** A choice's
+  `{sub_recipe_id}` line is walked like a recipe line (reached straight from the plate), its
+  `{item_id}` lines feed the reconciliation, and credit-note put-backs are rows with a minus under
+  their own filter, all under the S835 rule above: a dish netting 0 or less in the month adds
+  nothing, recipe or choices.
 
 ## The `settings` row, and the screens that write it
 

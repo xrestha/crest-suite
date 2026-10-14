@@ -252,6 +252,166 @@ describe('loadSubRecipeUsage', () => {
   })
 })
 
+// Crest Customization (S758): a sale's choice stock lines (`ingredient_deltas`, per plate, already
+// scaled by size) are usage too — recipe × qty_sold + deltas × qty_sold — and a sub-recipe a choice
+// takes belongs on this tab. Until this the tab was recipe-only and said so.
+describe('loadSubRecipeUsage — choices on customized dishes', () => {
+  // House Sauce (2000 ml / batch) is made from 100 g of Herb Base (500 g / batch), which is 200 g of
+  // herb at NPR 2. Pasta's RECIPE takes 50 ml of the sauce; the Acai Bowl has no recipe lines and
+  // takes the same 50 ml through a CHOICE.
+  const NESTED_CHOICE = {
+    ingredients: [
+      { recipe_id: 'pasta', qty_per_portion: 50,  item_id: null, sub_recipe_id: 'sauce', items: null },
+      { recipe_id: 'sauce', qty_per_portion: 100, item_id: null, sub_recipe_id: 'base',  items: null },
+      { recipe_id: 'base',  qty_per_portion: 200, item_id: 'herb', sub_recipe_id: null, items: { yield_pct: 100 } },
+    ],
+    recipes: [
+      { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Sub-Recipe', cost_price: null },
+      { id: 'base',  yield_qty: 500,  yield_uom: 'g',  name: 'Herb Base',   category: 'Sub-Recipe', cost_price: null },
+      { id: 'pasta', yield_qty: 1, yield_uom: 'portion', name: 'Pasta',     category: 'Food', cost_price: null },
+      { id: 'bowl',  yield_qty: 1, yield_uom: 'portion', name: 'Acai Bowl', category: 'Food', cost_price: null },
+    ],
+    items: [{ id: 'herb', name: 'Fresh Herbs', per_uom_rate: 2 }],
+  }
+
+  test('a sub-recipe taken by a choice — nested prep included — counts exactly as the same recipe line', async () => {
+    const viaRecipe = makeStub({ ...NESTED_CHOICE, sales: [{ recipe_id: 'pasta', qty_sold: 10, bs_day: 1, source: 'pos' }] })
+    const viaChoice = makeStub({
+      ...NESTED_CHOICE,
+      sales: [{ recipe_id: 'bowl', qty_sold: 10, bs_day: 1, source: 'pos', ingredient_deltas: [{ sub_recipe_id: 'sauce', qty: 50 }] }],
+    })
+    const r = await loadSubRecipeUsage(viaRecipe.supabase, viaRecipe.scopedFrom, 'p1')
+    const c = await loadSubRecipeUsage(viaChoice.supabase, viaChoice.scopedFrom, 'p1')
+    const byName = res => Object.fromEntries(res.rows.map(x => [x.name, x]))
+    const [R, C] = [byName(r), byName(c)]
+
+    expect(Object.keys(C).sort()).toEqual(['Herb Base', 'House Sauce'])
+    for (const name of ['House Sauce', 'Herb Base']) {
+      for (const f of ['qty', 'batches', 'topBatches', 'value', 'topValue']) {
+        expect(C[name][f]).toBeCloseTo(R[name][f], 6)
+      }
+    }
+    // The figures themselves: 50 ml × 10 plates; the base is reached THROUGH the sauce, so the
+    // plate charges none of it directly.
+    expect(C['House Sauce'].qty).toBeCloseTo(500, 6)
+    expect(C['House Sauce'].batches).toBeCloseTo(0.25, 6)
+    expect(C['House Sauce'].topBatches).toBeCloseTo(0.25, 6)
+    expect(C['Herb Base'].qty).toBeCloseTo(25, 6)
+    expect(C['Herb Base'].batches).toBeCloseTo(0.05, 6)
+    expect(C['Herb Base'].topBatches).toBeCloseTo(0, 6)
+    // Ties to the raw items, counting each once — 10 g of herb at NPR 2.
+    expect(c.derivedItemValue).toBeCloseTo(20, 6)
+    expect(c.rows.reduce((s, x) => s + x.topValue, 0)).toBeCloseTo(c.derivedItemValue, 6)
+    // And a sub-recipe used only through a choice is no longer "unused this period".
+    expect(c.unusedSubRecipes).toEqual([])
+  })
+
+  test('a negative (Half) choice line takes its share of the sub-recipe off the plate', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      sales: [{ recipe_id: 'dish', qty_sold: 4, bs_day: 3, source: 'pos', ingredient_deltas: [{ sub_recipe_id: 'sauce', qty: -25 }] }],
+    })
+    const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows[0].qty).toBeCloseTo(100, 6)          // (50 − 25) × 4
+    expect(rows[0].batches).toBeCloseTo(0.05, 6)
+    expect(rows[0].topBatches).toBeCloseTo(0.05, 6)
+    expect(rows[0].value).toBeCloseTo(25, 6)         // 0.05 batch × 500
+    expect(derivedItemValue).toBeCloseTo(25, 6)      // 50 g tomato × 0.5
+  })
+
+  test('an item a choice takes reaches the reconciliation value, at its own rate and yield', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      // Cheese is on no recipe, so it is not on the recipe book.
+      items: [...BASE.items, { id: 'cheese', name: 'Cheese', per_uom_rate: 1.5, yield_pct: 75 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 2, bs_day: 1, source: 'pos', ingredient_deltas: [{ item_id: 'cheese', qty: 30 }] }],
+    })
+    const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows[0].qty).toBeCloseTo(100, 6)          // the sauce is the recipe's alone: 50 × 2
+    // Tomato through the sauce: 2 × 25 g × 0.5 = 25. Cheese: 30 g ÷ 75% yield = 40 g a plate,
+    // × 2 plates × 1.5 = 120. Before the extra read it valued at rate 0 and this read 25.
+    expect(derivedItemValue).toBeCloseTo(145, 6)
+  })
+
+  test('a credit note\'s put-back row comes off, and the put-back source shows it', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      sales: [
+        { recipe_id: 'dish', qty_sold: 4, bs_day: 3, source: 'pos' },
+        { recipe_id: 'dish', qty_sold: -1, bs_day: 3, source: 'pos_credit_restock' },
+      ],
+    })
+    const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows[0].qty).toBeCloseTo(150, 6)          // (4 − 1) × 50
+    expect(derivedItemValue).toBeCloseTo(37.5, 6)    // 75 g tomato × 0.5
+    // The tab's "Credit Note — put back" filter: it showed nothing at all while `qty_sold > 0`
+    // dropped every one of these rows.
+    const put = usageForSource(rows[0], 'pos_credit_restock')
+    expect(put.qty).toBeCloseTo(-50, 6)
+    expect(put.batches).toBeCloseTo(-0.025, 6)
+    expect(put.value).toBeCloseTo(-12.5, 6)
+    expect(put.topValue).toBeCloseTo(-12.5, 6)
+    expect(usageForSource(rows[0], 'pos_sale').qty).toBeCloseTo(200, 6)
+  })
+
+  test('a put-back row takes its choices back off with its plates', async () => {
+    const deltas = [{ sub_recipe_id: 'sauce', qty: 50 }]
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      sales: [
+        { recipe_id: 'dish', qty_sold: 3, bs_day: 3, source: 'pos', ingredient_deltas: deltas },
+        { recipe_id: 'dish', qty_sold: -1, bs_day: 4, source: 'pos_credit_restock', ingredient_deltas: deltas },
+      ],
+    })
+    const { rows } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows[0].qty).toBeCloseTo(200, 6)          // (50 recipe + 50 choice) × (3 − 1)
+    expect(usageForSource(rows[0], 'pos_credit_restock').qty).toBeCloseTo(-100, 6)
+  })
+
+  // S835: a choice's lines follow their dish. Where the dish's net sold in the period is 0 or less,
+  // neither its recipe nor its choices add usage — as buildUsageMap (stockReportCalc.js) has it.
+  test('a dish netted to zero or below by credit notes uses nothing — recipe and choices alike', async () => {
+    const deltas = [{ sub_recipe_id: 'sauce', qty: 50 }]
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      ingredients: [
+        ...BASE.ingredients,
+        { recipe_id: 'soup', qty_per_portion: 100, item_id: null, sub_recipe_id: 'sauce', items: null },
+      ],
+      sales: [
+        // Pasta: sold 2, both put back — net 0.
+        { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos', ingredient_deltas: deltas },
+        { recipe_id: 'dish', qty_sold: -2, bs_day: 3, source: 'pos_credit_restock', ingredient_deltas: deltas },
+        // Soup: sold 1, three put back (two of them sold last month) — net −2, never a negative usage.
+        { recipe_id: 'soup', qty_sold: 1, bs_day: 5, source: 'pos' },
+        { recipe_id: 'soup', qty_sold: -3, bs_day: 5, source: 'pos_credit_restock' },
+      ],
+    })
+    const usage = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(usage.rows).toEqual([])
+    expect(usage.derivedItemValue).toBe(0)
+  })
+
+  test('a dish netted to zero does not take another dish\'s usage with it', async () => {
+    const deltas = [{ sub_recipe_id: 'sauce', qty: 50 }]
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      ingredients: [
+        ...BASE.ingredients,
+        { recipe_id: 'soup', qty_per_portion: 100, item_id: null, sub_recipe_id: 'sauce', items: null },
+      ],
+      sales: [
+        { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos', ingredient_deltas: deltas },
+        { recipe_id: 'dish', qty_sold: -2, bs_day: 3, source: 'pos_credit_restock', ingredient_deltas: deltas },
+        { recipe_id: 'soup', qty_sold: 1, bs_day: 5, source: 'pos' },
+      ],
+    })
+    const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows[0].qty).toBeCloseTo(100, 6)          // the soup's alone
+    expect(derivedItemValue).toBeCloseTo(25, 6)      // 50 g tomato × 0.5
+  })
+})
+
 describe('ingredient search', () => {
   test('each row carries its own raw ingredients, named and sorted', async () => {
     const { supabase, scopedFrom } = makeStub({
@@ -372,6 +532,54 @@ describe('loadSubRecipeUsage — round trips', () => {
     expect(shared).toEqual(own)
   })
 
+  // The book holds only items some recipe names, so an item only a CHOICE takes is read on its own
+  // — one chunked `items` read, and only when such an item exists.
+  test('a sub-recipe choice, or an item choice the book already holds, costs no extra read', async () => {
+    const { reads, supabase, scopedFrom } = counted({
+      ...NESTED,
+      sales: [{ recipe_id: 'dish', qty_sold: 2, bs_day: 1, source: 'pos',
+        ingredient_deltas: [{ sub_recipe_id: 'base', qty: 10 }, { item_id: 'tomato', qty: 10 }] }],
+    })
+    const { derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(reads.sort()).toEqual(['recipe book', 'sales_entries'])
+    expect(derivedItemValue).toBeGreaterThan(0)
+  })
+
+  test('an item only a choice takes costs exactly one items read', async () => {
+    const { reads, supabase, scopedFrom } = counted({
+      ...NESTED,
+      items: [...NESTED.items, { id: 'cheese', name: 'Cheese', per_uom_rate: 1.5, yield_pct: 100 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 2, bs_day: 1, source: 'pos', ingredient_deltas: [{ item_id: 'cheese', qty: 30 }] }],
+    })
+    await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(reads.sort()).toEqual(['items', 'recipe book', 'sales_entries'])
+  })
+
+  test('a failed choice-items read rejects rather than valuing the items at zero', async () => {
+    const fx = {
+      ...NESTED,
+      items: [...NESTED.items, { id: 'cheese', name: 'Cheese', per_uom_rate: 1.5 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 2, bs_day: 1, source: 'pos', ingredient_deltas: [{ item_id: 'cheese', qty: 30 }] }],
+    }
+    const { supabase, scopedFrom } = makeStub(fx)
+    const failing = (table, cols) => (table === 'items'
+      ? { in() { return this }, order() { return this }, range: () => Promise.resolve({ data: null, error: { message: 'items down' } }) }
+      : scopedFrom(table, cols))
+    await expect(loadSubRecipeUsage(supabase, failing, 'p1')).rejects.toThrow('items down')
+  })
+
+  test('the shared book is not changed by the choice-items read', async () => {
+    const fx = {
+      ...NESTED,
+      items: [...NESTED.items, { id: 'cheese', name: 'Cheese', per_uom_rate: 1.5 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 2, bs_day: 1, source: 'pos', ingredient_deltas: [{ item_id: 'cheese', qty: 30 }] }],
+    }
+    const { supabase, scopedFrom } = makeStub(fx)
+    const book = await loadRecipeBook(scopedFrom)
+    await loadSubRecipeUsage(supabase, scopedFrom, 'p1', { book })
+    expect(book.items.has('cheese')).toBe(false)
+  })
+
   test('a failed book read rejects — it is never an empty, quiet period', async () => {
     const { supabase, scopedFrom } = makeStub(NESTED)
     const failing = (table, cols) => (cols && cols.includes('recipe_ingredients')
@@ -404,17 +612,24 @@ describe('subRecipeHasIngredient', () => {
 })
 
 describe('usageForSource', () => {
-  const row = { qty: 200, batches: 0.1, value: 50, bySource: { pos_sale: 150, pos_comp: 50 } }
+  const row = {
+    qty: 200, batches: 0.1, topBatches: 0.1, value: 50, topValue: 50, batchCost: 500,
+    bySource: {
+      pos_sale: { qty: 150, batches: 0.075, topBatches: 0.075 },
+      pos_comp: { qty: 50, batches: 0.025, topBatches: 0.025 },
+    },
+  }
 
   test('"all" passes the row through untouched', () => {
     expect(usageForSource(row, 'all')).toBe(row)
   })
 
-  test('a single source scales qty, batches and value by that source\'s share', () => {
+  test('a single source carries its own qty, batches and value', () => {
     const comp = usageForSource(row, 'pos_comp')
     expect(comp.qty).toBeCloseTo(50, 6)
-    expect(comp.batches).toBeCloseTo(0.025, 6) // 0.1 × (50/200)
-    expect(comp.value).toBeCloseTo(12.5, 6)
+    expect(comp.batches).toBeCloseTo(0.025, 6)
+    expect(comp.value).toBeCloseTo(12.5, 6)     // 0.025 batch × 500
+    expect(comp.topValue).toBeCloseTo(12.5, 6)
   })
 
   test('a source with no usage collapses to zero rather than NaN', () => {
@@ -422,5 +637,34 @@ describe('usageForSource', () => {
     expect(manual.qty).toBe(0)
     expect(manual.batches).toBe(0)
     expect(manual.value).toBe(0)
+    expect(manual.topValue).toBe(0)
+  })
+
+  // A share of the row's qty could not say this: the row nets to zero, so every share was 0.
+  test('a put-back source keeps its own negative figures, even where the row nets to zero', () => {
+    const netZero = {
+      qty: 0, batches: 0, topBatches: 0, value: 0, topValue: 0, batchCost: 500,
+      bySource: {
+        pos_sale: { qty: 50, batches: 0.025, topBatches: 0.025 },
+        pos_credit_restock: { qty: -50, batches: -0.025, topBatches: -0.025 },
+      },
+    }
+    const put = usageForSource(netZero, 'pos_credit_restock')
+    expect(put.qty).toBeCloseTo(-50, 6)
+    expect(put.value).toBeCloseTo(-12.5, 6)
+    expect(put.topValue).toBeCloseTo(-12.5, 6)
+  })
+
+  // topBatches does not split by qty: one source reached the sub-recipe nested, the other directly.
+  test('topValue is the source\'s own direct share, not a share of qty', () => {
+    const mixed = {
+      qty: 200, batches: 0.4, topBatches: 0.2, value: 200, topValue: 100, batchCost: 500,
+      bySource: {
+        pos_sale: { qty: 100, batches: 0.2, topBatches: 0 },
+        pos_comp: { qty: 100, batches: 0.2, topBatches: 0.2 },
+      },
+    }
+    expect(usageForSource(mixed, 'pos_sale').topValue).toBeCloseTo(0, 6)
+    expect(usageForSource(mixed, 'pos_comp').topValue).toBeCloseTo(100, 6)
   })
 })

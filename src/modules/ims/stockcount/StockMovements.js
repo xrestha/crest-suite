@@ -17,6 +17,8 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tabs from '../../../components/Tabs'
 import { movementFigures } from './stockMovementRows'
+import { isCostedByBuild } from '../recipes/buildYourOwnRating'
+import { isMissingColumn } from '../../customization/customizationData'
 
 // Module scope so the memoized derivation below can reference them without them becoming
 // unstable dependencies (they're pure column definitions).
@@ -46,7 +48,7 @@ const SUB_SORTS = {
 }
 
 export default function StockMovements() {
-  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess, customizationEnabled } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [searchParams] = useSearchParams()
@@ -174,13 +176,20 @@ export default function StockMovements() {
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId).order('id')),
       // Settled into the { error } shape so firstError below sees a failed book like any failed read.
       recipeBook().then(book => ({ data: book, error: null }), error => ({ data: null, error })),
+      // Which dishes are build-your-own (S760), for the no-BOM banner below. Read on its own, as
+      // Menu Repricing does, so the recipe book's select never names a column a database without
+      // the S760 migration lacks. Without Customization no dish is costed by its build.
+      customizationEnabled
+        ? fetchAllRows(() => scopedFrom('recipes', 'id').eq('is_build_your_own', true).order('id'))
+          .then(r => (isMissingColumn(r.error) ? { data: [], error: null } : r))
+        : Promise.resolve({ data: [], error: null }),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S612 silent-zero rule).
     // That includes the book: a failed one would silently hide the no-BOM warning banner.
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setNoBomRecipes([]); return }
-    const [{ data: movements }, { data: profs }, { data: soldEntries }, { data: book }] = results
+    const [{ data: movements }, { data: profs }, { data: soldEntries }, { data: book }, { data: byoRows }] = results
     setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
 
     // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
@@ -193,10 +202,16 @@ export default function StockMovements() {
     // whose rows are missing is NAMED by the amber banner as having no BOM and sends the owner to
     // Recipes to add ingredients that are already there, so the rows must be complete. The book is
     // paged on its recipes and its embedded ingredient lists are not cut by the row cap.
+    //
+    // A build-your-own dish is not one of them while Customization is on (isCostedByBuild): it is
+    // saved with no ingredient rows on purpose, and its stock comes off through the guest's choices.
+    // With Customization off the till sells it plain and it really takes no stock, so it stays named.
+    const byoIds = new Set((byoRows || []).map(r => r.id))
     const soldRecipeIds = [...new Set((soldEntries || []).map(s => s.recipe_id).filter(Boolean))]
     setNoBomRecipes(soldRecipeIds
       .map(id => book.recipes.get(id))
-      .filter(r => r && (book.ingredientsByRecipe.get(r.id) || []).length === 0)
+      .filter(r => r && (book.ingredientsByRecipe.get(r.id) || []).length === 0
+        && !isCostedByBuild({ ...r, is_build_your_own: byoIds.has(r.id) }, customizationEnabled))
       .map(r => r.name)
       .sort())
 
@@ -258,10 +273,15 @@ export default function StockMovements() {
     // Sub-recipe usage shares the search + source filters (both map cleanly onto the sales rows it
     // derives from) but deliberately not the Day range — the derivation includes Bulk rows, which
     // carry bs_day 0 and belong to no single day, so a day filter here would quietly drop them.
+    //
+    // Non-zero, not positive: a Credit Note's put-back is negative, so under the "Credit Note — put
+    // back" filter every row is below zero. `qty > 0` hid all of them, and that filter could only
+    // ever show an empty table. A row that nets below zero on All (a choice taking off more of a
+    // sub-recipe than the dishes used) shows with its minus too, as the Raw Items tab shows one.
     const ingQ = ingSearch.trim().toLowerCase()
     const subRows = usage.rows
       .map(r => usageForSource(r, filterSource))
-      .filter(r => r.qty > 0
+      .filter(r => Math.abs(r.qty) > 1e-9
         && (r.name || '').toLowerCase().includes(q)
         && subRecipeHasIngredient(r, ingQ))
       .sort((a, b) => cmp(SUB_SORTS[subSort].get(a), SUB_SORTS[subSort].get(b)))
@@ -280,9 +300,12 @@ export default function StockMovements() {
 
   // Reconciliation. The sub-recipe figures come from sales_entries; the ledger is what was
   // actually written. They legitimately diverge — manual-sales depletion only started 2026-07-30
-  // with no backfill, credit notes never restore stock, and a recipe with no ingredients depletes
+  // with no backfill, a recipe edited since a sale is walked as it stands today, a dish whose
+  // credit notes put back MORE plates than the period sold (food sold last month) counts as using
+  // nothing here (S835) while the ledger takes the extra put-back off, and a recipe with no ingredients depletes
   // nothing — so when the derivation's own raw-item value doesn't match the ledger's, say why
-  // rather than leaving two numbers on one page disagreeing in silence.
+  // rather than leaving two numbers on one page disagreeing in silence. Choices on customized
+  // dishes and put-backs are in both.
   // Compared against the UNFILTERED ledger total, since the derivation ignores the day filter.
   const ledgerTotalValue = useMemo(() => rows.reduce((s, r) => s + r.value, 0), [rows])
   // Items a SALE added stock to this period (S809 4e): named in a banner, like the no-BOM one, because
@@ -560,7 +583,7 @@ export default function StockMovements() {
             <Tip text="A sub-recipe is never depleted as itself — recipe_ingredients stores it as a reference, so the ledger on the Raw Items tab only ever holds the raw ingredients at the bottom of the tree. This tab re-walks the same recipes against this period's sales to show the prep layer in between." width={320}>
               Derived from this period's sales entries
             </Tip>
-            {' '}— not a second set of ledger rows. The same ingredients appear on the Raw Items tab; this groups them by the prep item they passed through. Choices on customized dishes (Crest Customization) are not included here.
+            {' '}— not a second set of ledger rows. The same ingredients appear on the Raw Items tab; this groups them by the prep item they passed through. A sub-recipe taken by a choice on a customized dish counts here too.
           </p>
         </div>
 
@@ -588,7 +611,7 @@ export default function StockMovements() {
           <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber-text)' }}>
             These figures imply NPR {usage.derivedItemValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of raw ingredients, but the ledger recorded NPR {ledgerTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             {' '}({reconGap > 0 ? '+' : '−'}NPR {Math.abs(reconGap).toLocaleString('en-IN', { maximumFractionDigits: 0 })} difference).
-            {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; POS credit notes reverse revenue but never restore stock; choices on customized dishes (Crest Customization) change what a plate uses in the ledger but not in this recipe-only view; and recipes with no ingredients linked deplete nothing (see the banner above when that applies).
+            {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; a Credit Note that put back more plates of a dish than this period sold (food sold in an earlier month) adds that stock back in the ledger, while this view counts the dish as using nothing; and recipes with no ingredients linked deplete nothing (see the banner above when that applies). Choices on customized dishes are in both figures, and so is stock a Credit Note put back (see the Credit Note — put back filter).
           </div>
         )}
 
@@ -606,7 +629,7 @@ export default function StockMovements() {
                 <tr>
                   <th>Sub-Recipe</th>
                   <th><Tip text="How much one batch of this sub-recipe produces, from its Recipe Costing record." width={240}>Yield per Batch</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Output units consumed — e.g. 25,000 g of a sauce, regardless of how many batches that took. Summed across every dish sold that uses it, including through other sub-recipes." width={300}>Qty Used</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Output units consumed — e.g. 25,000 g of a sauce, regardless of how many batches that took. Summed across every dish sold that uses it, including through other sub-recipes and through the choices on customized dishes. Stock a Credit Note put back comes off, and shows with a minus under the Credit Note — put back filter." width={300}>Qty Used</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Qty Used ÷ Yield per Batch. How many full batches of prep this period's sales actually consumed." width={260}>Batches Used</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Total ingredient cost of one batch, from Recipe Costing — nested sub-recipes included." width={250}>Cost / Batch</Tip></th>
                   <th style={{ textAlign: 'right' }}>Value (NPR)</th>
