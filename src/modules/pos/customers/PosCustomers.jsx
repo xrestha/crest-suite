@@ -314,7 +314,8 @@ export default function PosCustomers() {
     const defaultPct = partner?.commission_pct
     setSettleCommissionPct(defaultPct != null ? String(defaultPct) : '')
     setSettleExVatLoading(true)
-    const { data: items, error: itemsErr } = await settleWithin(scopedFrom('pos_order_items', 'qty, unit_price, vat_rate, comped').eq('order_id', order.id), SETTLE_READ_MS, "Reading the bill's lines")
+    // selection_key marks a combo's dish, which takes none of the bill discount (S839, isComboItem).
+    const { data: items, error: itemsErr } = await settleWithin(scopedFrom('pos_order_items', 'qty, unit_price, vat_rate, comped, selection_key').eq('order_id', order.id), SETTLE_READ_MS, "Reading the bill's lines")
     if (!settleBaseReq.isCurrent(order.id)) return // another bill was opened meanwhile
     if (itemsErr) {
       // A dropped read here used to give an ex-VAT base of 0, and settleBill then STORED

@@ -352,8 +352,9 @@ export default function SalesReport() {
         // uuids is past what a proxy accepts in a URL — a 414 that would fail the whole page.
         // Where the outlet has Crest IMS, each line's choices' stock lines too: a comped dish's food cost
         // includes them (Comped Bills). An outlet without IMS costs comps without them, so it skips the embed.
+        // selection_key marks a combo's dish ('@'), which the bill discount never touches (S839, isComboItem).
         fetchAllRowsChunked(allOrders.map(o => o.id),
-          ids => scopedFrom('pos_order_items', `order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason${inventory ? `, ${LINE_CHOICE_STOCK}` : ''}`).in('order_id', ids).order('id')),
+          ids => scopedFrom('pos_order_items', `order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason, selection_key${inventory ? `, ${LINE_CHOICE_STOCK}` : ''}`).in('order_id', ids).order('id')),
         // The legs of every Split bill — what Payment Summary spreads the bill across. The same
         // read the shift Z-report makes (PosShifts.jsx loadShiftReport), so the two count the
         // same legs. Both reads derive their ids from the orders and nothing from each other.
@@ -838,8 +839,9 @@ export default function SalesReport() {
       // threshold, so a truncated read could drop a customer below one lakh incorrectly (S529).
       // Chunked (S754): the id list is every paid bill in a fiscal year — thousands of uuids, far
       // past any URL limit, so this read could not succeed at all on a real client's year.
+      // selection_key: a combo's dish takes none of the bill discount (S839, isComboItem).
       fetchAllRowsChunked(list.map(o => o.id),
-        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id'),
+        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped, selection_key').in('order_id', ids).order('id'),
         { concurrency: ONE_LAKH_CHUNK_CONCURRENCY }),
       fetchAllRowsChunked(outsideIds,
         ids => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan').in('id', ids).order('id'),

@@ -10,6 +10,10 @@ import Modal from '../../../components/Modal'
 import { useGuestDocumentIdentity } from './guestDocument'
 import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
+import GuestComboSheet, {
+  comboOrderable, comboMatches, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
+  comboLineProblem, comboCartWithout, comboContents, comboPicksOf, pickChoices,
+} from './GuestComboSheet'
 import { groupsForDish, describeSelection, lowestDishPrice, selectionProblems, inclFromEx } from '../../../shared/optionPricing'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
 import { playChime } from '../posChime'
@@ -114,6 +118,8 @@ function loadStoredCart(tableId) {
 // The cart is { [lineKey]: { recipe_id, qty, option_ids } } since Crest Customization (S758): the
 // same dish with different choices is two lines. A cart saved by the page before that was
 // { recipe_id: qty } and is read as plain lines, so a guest mid-order across a deploy keeps it.
+// A combo (S839) is one line { combo_id, qty, picks: [{ group_id, recipe_id, option_ids }] } under
+// comboCartKey, so the same combo with the same picks adds to its line.
 const cartKey = (recipeId, optionIds) => {
   const sel = selectionKeyOf(optionIds)
   return sel ? `${recipeId}#${sel}` : recipeId
@@ -122,6 +128,12 @@ function normalizeCart(cart) {
   const out = {}
   for (const [key, v] of Object.entries(cart || {})) {
     if (typeof v === 'number') { if (v > 0) out[key] = { recipe_id: key, qty: v, option_ids: [] } }
+    else if (v && v.combo_id && Number(v.qty) > 0 && Array.isArray(v.picks)) {
+      out[key] = {
+        combo_id: v.combo_id, qty: Number(v.qty),
+        picks: v.picks.map(p => ({ group_id: p.group_id, recipe_id: p.recipe_id, option_ids: p.option_ids || [] })),
+      }
+    }
     else if (v && v.recipe_id && Number(v.qty) > 0) out[key] = { recipe_id: v.recipe_id, qty: Number(v.qty), option_ids: v.option_ids || [] }
   }
   return out
@@ -134,6 +146,8 @@ function normalizeCart(cart) {
 // once already and embedded a literal NUL byte in this file, which makes the whole source read as
 // BINARY to grep, ripgrep and every review tool. Keep the source plain text.
 const UNCATEGORISED = String.fromCharCode(0) + 'uncategorised'
+// S839: the Combos section's key among the menu's sections, a sentinel for the same reason.
+const COMBOS = String.fromCharCode(0) + 'combos'
 
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
@@ -193,10 +207,13 @@ export default function GuestMenu() {
   const [cart, setCart] = useState(() => loadStoredCart(tableId)?.cart || {}) // lineKey -> { recipe_id, qty, option_ids }
   // Crest Customization (S758): { groups, options, attachments } from get_guest_menu_options. A failed
   // read keeps the menu and says so (optionsFailed); the server still refuses a dish that needed a choice.
-  const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
+  // S839: and `combos`, the combos on the guest menu (docs/pos-combos.md); none before the migration.
+  const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [], combos: [] })
   const [optionsFailed, setOptionsFailed] = useState(false)
   // { item, dishGroups, editKey?, initialIds? } while the choice sheet is open.
   const [optionSheet, setOptionSheet] = useState(null)
+  // { combo, editKey?, initialPicks? } while the combo sheet is open (S839).
+  const [comboSheet, setComboSheet] = useState(null)
   const [covers, setCovers] = useState(() => loadStoredCart(tableId)?.covers ?? 2)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [guestNote, setGuestNote] = useState(() => loadStoredCart(tableId)?.guestNote || '')
@@ -308,9 +325,12 @@ export default function GuestMenu() {
       setOptionsFailed(false)
       // S760: build_your_own is absent before migration 20260920100000, which reads as "no dish is
       // build-your-own" — every dish keeps the one-screen sheet.
+      // S839: `combos` is absent before the combos migration (or with Customization off), which
+      // reads as "no combos", never as a failed read.
       const next = {
         groups: data?.groups || [], options: data?.options || [], attachments: data?.attachments || [],
         buildYourOwn: Array.isArray(data?.build_your_own) ? data.build_your_own : [],
+        combos: Array.isArray(data?.combos) ? data.combos : [],
       }
       setOptionCatalog(next)
       return next
@@ -469,8 +489,19 @@ export default function GuestMenu() {
     }
     return { categories: orderCategories(present, meta?.category_order, DEFAULT_RECIPE_CATS, UNCATEGORISED), byCategory: groups }
   }, [filteredRows, meta])
-  const categoryKey = categories.join('|')
-  const categoryLabel = cat => (cat === UNCATEGORISED ? 'More' : tidyName(cat))
+  // S839: the combos on offer, under the same search and filters as the dishes (comboMatches), first
+  // on the menu. A combo with a pick that has no dish left cannot be ordered and is not shown.
+  const combosById = useMemo(() => Object.fromEntries((optionCatalog.combos || []).map(c => [c.id, c])), [optionCatalog])
+  const visibleCombos = useMemo(() => (optionCatalog.combos || [])
+    .filter(c => comboOrderable(c) && comboMatches(c, {
+      query: trimmedQuery, vegOnly, excludedAllergens, allergensOf: rid => byRecipe[rid]?.allergens || [],
+    }))
+    .sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0) || String(a.name).localeCompare(String(b.name))),
+  [optionCatalog, trimmedQuery, vegOnly, excludedAllergens, byRecipe])
+  // The menu's sections in order, for the chips and the section in view: Combos, then the categories.
+  const sections = useMemo(() => (visibleCombos.length > 0 ? [COMBOS, ...categories] : categories), [visibleCombos.length, categories])
+  const categoryKey = sections.join('|')
+  const categoryLabel = cat => (cat === COMBOS ? 'Combos' : cat === UNCATEGORISED ? 'More' : tidyName(cat))
 
   // The tab, the address-bar colour and a saved home-screen shortcut belong to the restaurant, in
   // every state including loading and failure (guestDocument.js).
@@ -496,16 +527,16 @@ export default function GuestMenu() {
   // guest scrolls by hand.
   useEffect(() => {
     const root = scrollRootRef.current
-    if (!root || categories.length < 2) return undefined
+    if (!root || sections.length < 2) return undefined
     let frame = 0
     const compute = () => {
       frame = 0
       if (tappedCategoryRef.current) { setActiveCategory(tappedCategoryRef.current); return }
       const rootTop = root.getBoundingClientRect().top
       const line = rootTop + navHeight + 16
-      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) { setActiveCategory(categories[categories.length - 1]); return }
-      let current = categories[0]
-      for (const cat of categories) {
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) { setActiveCategory(sections[sections.length - 1]); return }
+      let current = sections[0]
+      for (const cat of sections) {
         const el = categoryRefs.current[cat]
         if (el && el.getBoundingClientRect().top <= line) current = cat
       }
@@ -557,6 +588,7 @@ export default function GuestMenu() {
   useBackToClose(reviewOpen, () => setReviewOpen(false), !inPreview)
   useBackToClose(filtersOpen, () => setFiltersOpen(false), !inPreview)
   useBackToClose(!!optionSheet, () => setOptionSheet(null), !inPreview)
+  useBackToClose(!!comboSheet, () => setComboSheet(null), !inPreview)
 
   // ── The three states before a menu ────────────────────────────────────────────────────────────
   // All three render inside the page's own shell and theme. They used to render outside it, in the
@@ -615,7 +647,7 @@ export default function GuestMenu() {
   const vatApplies = vatRegistered && rows.some(r => (parseFloat(r.vat_rate) || 0) > 0)
 
   const cartLines = Object.entries(cart)
-    .filter(([, l]) => l.qty > 0)
+    .filter(([, l]) => l.qty > 0 && !l.combo_id)
     .map(([key, l]) => {
       const item = byRecipe[l.recipe_id]
       if (!item) return null
@@ -627,10 +659,45 @@ export default function GuestMenu() {
       return { key, item, name: tidyName(item.name), qty: l.qty, option_ids: l.option_ids || [], summary: tidyName(desc.summary), unit }
     })
     .filter(Boolean)
-  const cartCount = cartLines.reduce((s, l) => s + l.qty, 0)
-  const cartTotal = cartLines.reduce((s, l) => s + l.unit * l.qty, 0)
+  // S839: a combo dish's own choices are shown through its VAT rate, as the server prices them
+  // (COALESCE(vat_rate, 0.13) on a VAT outlet; a dish sold only in combos is not in `rows`).
+  const vatOf = rid => {
+    if (!vatRegistered) return 0
+    const r = byRecipe[rid]
+    return r && r.vat_rate != null ? (parseFloat(r.vat_rate) || 0) : 0.13
+  }
+  const comboCtx = { optionMaps, dishGroupsByRecipe, vatOf }
+  // A combo asks the guest something when a pick offers more than one dish or its dish has choices.
+  const comboAsks = combo => comboPicksOf(combo).some(g => g.items.length > 1 || !!dishGroupsByRecipe[g.items[0]?.recipe_id])
+  // The order's combos, one line each. A combo the menu no longer offers drops out of the order sheet
+  // as a dish does; the refusal re-read below takes it off the cart and says so.
+  const comboLines = Object.entries(cart)
+    .filter(([, l]) => l.qty > 0 && l.combo_id)
+    .map(([key, l]) => {
+      const combo = combosById[l.combo_id]
+      if (!combo) return null
+      const all = comboPicksOf(combo)
+      const summary = l.picks.map(p => {
+        const it = all.find(g => g.id === p.group_id)?.items.find(x => x.recipe_id === p.recipe_id)
+        if (!it) return null
+        const choices = pickChoices(p, comboCtx).summary
+        return choices ? `${tidyName(it.name)} (${tidyName(choices)})` : tidyName(it.name)
+      }).filter(Boolean).join(', ')
+      return {
+        key, isCombo: true, combo, combo_id: l.combo_id, picks: l.picks, name: tidyName(combo.name), qty: l.qty,
+        summary, unit: Math.round(comboUnitPrice(combo, l.picks, comboCtx)),
+      }
+    })
+    .filter(Boolean)
+  // Dishes and combos in the order the guest added them: the order sheet, the count and the total.
+  const lineByKey = Object.fromEntries([...cartLines, ...comboLines].map(l => [l.key, l]))
+  const orderLines = Object.keys(cart).map(k => lineByKey[k]).filter(Boolean)
+  const cartCount = orderLines.reduce((s, l) => s + l.qty, 0)
+  const cartTotal = orderLines.reduce((s, l) => s + l.unit * l.qty, 0)
   const qtyByRecipe = {}
   for (const l of cartLines) qtyByRecipe[l.item.recipe_id] = (qtyByRecipe[l.item.recipe_id] || 0) + l.qty
+  const qtyByCombo = {}
+  for (const l of comboLines) qtyByCombo[l.combo_id] = (qtyByCombo[l.combo_id] || 0) + l.qty
 
   function setQty(key, qty) {
     setCart(prev => {
@@ -667,6 +734,22 @@ export default function GuestMenu() {
       return next
     })
   }
+  // From the combo sheet (S839), by the same rule: the same combo with the same picks adds to its line.
+  function addCombo(combo, picks, editKey) {
+    const key = comboCartKey(combo.id, picks)
+    setCart(prev => {
+      const next = { ...prev }
+      const editing = editKey ? prev[editKey] : null
+      if (editing) delete next[editKey]
+      const addQty = editing ? editing.qty : 1
+      const existing = next[key]
+      next[key] = {
+        combo_id: combo.id, qty: Math.min(50, (existing?.qty || 0) + addQty),
+        picks: picks.map(p => ({ group_id: p.group_id, recipe_id: p.recipe_id, option_ids: [...(p.option_ids || [])] })),
+      }
+      return next
+    })
+  }
 
   async function placeOrder() {
     if (submitting) return
@@ -675,16 +758,26 @@ export default function GuestMenu() {
     // Force a false->true transition even if a previous order's pulse hasn't finished yet — React
     // bails out of the justPlaced effect on a same-value update.
     setJustPlaced(false)
-    const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, ...(l.option_ids.length ? { options: l.option_ids } : {}) }))
-    const itemsSnapshot = cartLines.map(l => ({ name: l.summary ? `${l.name} (${l.summary})` : l.name, qty: l.qty }))
+    // S839: a combo goes as one item, { combo_id, qty, note, picks } (docs/pos-combos.md).
+    const payload = orderLines.map(l => (l.isCombo
+      ? comboOrderItem(l)
+      : { recipe_id: l.item.recipe_id, qty: l.qty, ...(l.option_ids.length ? { options: l.option_ids } : {}) }))
+    const itemsSnapshot = orderLines.map(l => ({
+      name: l.isCombo ? comboOrderName(l.combo, l.picks) : l.summary ? `${l.name} (${l.summary})` : l.name, qty: l.qty,
+    }))
     // When the guest sent it, by this phone's clock: how the tracker tells an order nobody answered
     // in time from one staff turned away (S834, D34).
     const sentAt = new Date().toISOString()
-    const linesSnapshot = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, option_ids: l.option_ids }))
+    const linesSnapshot = orderLines.map(l => (l.isCombo
+      ? { combo_id: l.combo_id, qty: l.qty, picks: l.picks }
+      : { recipe_id: l.item.recipe_id, qty: l.qty, option_ids: l.option_ids }))
     // GUEST-2 (S809 3b): the same order sent again carries the key of the send whose answer never
     // came back, so the server hands back that order if it landed. An order changed since then first
-    // asks whether the earlier one landed, and takes it up if it did (adoptEarlierOrder).
-    const sig = orderSignature(linesSnapshot, guestNote, covers)
+    // asks whether the earlier one landed, and takes it up if it did (adoptEarlierOrder). A combo is
+    // signed by its cart key, which names the combo, its dishes and their choices.
+    const sig = orderSignature(linesSnapshot.map(l => (l.combo_id
+      ? { recipe_id: comboCartKey(l.combo_id, l.picks), option_ids: [], qty: l.qty }
+      : l)), guestNote, covers)
     let attempt = loadStoredAttempt(tableId)
     if (attempt && attempt.sig !== sig) {
       const landed = await earlierOrderLanded(attempt.key)
@@ -749,7 +842,10 @@ export default function GuestMenu() {
           // S758 the same goes for a dish whose choices no longer fit what it offers.
           const onMenu = new Set(fresh.map(r => r.recipe_id))
           const cat = freshOptions || optionCatalog
+          // S839: a combo stays while the menu still offers it with these dishes and choices.
+          const freshCombos = Object.fromEntries((cat.combos || []).map(c => [c.id, c]))
           const stillValid = l => {
+            if (l.combo_id) return !comboLineProblem(l, freshCombos, cat)
             if (!onMenu.has(l.recipe_id)) return false
             const dg = groupsForDish(l.recipe_id, cat)
             if (dg.length === 0) return !(l.option_ids?.length)
@@ -805,7 +901,7 @@ export default function GuestMenu() {
     } catch { /* the tracker still works for this session */ }
     setRequestId(attempt.key)
     setRequestSnapshot({ items: attempt.items || [], lines: attempt.lines || [], covers: attempt.covers || 1, sentAt: attempt.sentAt || null })
-    setCart(prev => cartWithout(prev, attempt.lines, cartKey))
+    setCart(prev => comboCartWithout(cartWithout(prev, (attempt.lines || []).filter(l => !l.combo_id), cartKey), attempt.lines))
     if ((guestNote || '').trim() === (attempt.note || '').trim()) setGuestNote('')
     setReviewOpen(false)
     setRestoreNote('Your earlier order did reach the restaurant. Anything you added after it is still in your order.')
@@ -821,6 +917,16 @@ export default function GuestMenu() {
     setCart(prev => {
       const next = { ...prev }
       lines.forEach((l, i) => {
+        // S839: a combo comes back only as the menu still offers it, with the same dishes and choices.
+        if (l.combo_id) {
+          if (comboLineProblem(l, combosById, optionCatalog)) { missing.push(requestSnapshot.items?.[i]?.name || 'A combo'); return }
+          const key = comboCartKey(l.combo_id, l.picks)
+          next[key] = {
+            combo_id: l.combo_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)),
+            picks: (l.picks || []).map(p => ({ group_id: p.group_id, recipe_id: p.recipe_id, option_ids: [...(p.option_ids || [])] })),
+          }
+          return
+        }
         if (!byRecipe[l.recipe_id]) { missing.push(requestSnapshot.items?.[i]?.name || 'A dish'); return }
         const key = cartKey(l.recipe_id, l.option_ids || [])
         next[key] = { recipe_id: l.recipe_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)), option_ids: [...(l.option_ids || [])] }
@@ -832,8 +938,8 @@ export default function GuestMenu() {
     if (lines.length > missing.length) setReviewOpen(true)
   }
 
-  const showNav = categories.length > 1 || searchable
-  const firstCategory = categories[0]
+  const showNav = sections.length > 1 || searchable
+  const firstCategory = sections[0]
   const showFilters = hasVegMarks || allAllergens.length > 0
 
   return (
@@ -903,9 +1009,9 @@ export default function GuestMenu() {
                 />
               </div>
             )}
-            {categories.length > 1 && (
+            {sections.length > 1 && (
               <div ref={chipBarRef} className="tab-bar tab-bar--scroll gm-chips">
-                {categories.map(cat => (
+                {sections.map(cat => (
                   <button
                     key={cat} type="button"
                     ref={el => { chipRefs.current[cat] = el }}
@@ -923,12 +1029,12 @@ export default function GuestMenu() {
 
         {trimmedQuery && (
           <p role="status" className="gm-search-count">
-            {filteredRows.length === 0 ? '' : `${filteredRows.length} ${filteredRows.length === 1 ? 'dish matches' : 'dishes match'} “${trimmedQuery}”`}
+            {searchCountText(filteredRows.length, visibleCombos.length, trimmedQuery)}
           </p>
         )}
 
         <main>
-          {categories.length === 0 && (
+          {categories.length === 0 && visibleCombos.length === 0 && (
             <div className="gm-empty">
               {trimmedQuery ? (
                 <>
@@ -944,13 +1050,29 @@ export default function GuestMenu() {
             </div>
           )}
 
+          {/* S839: combos first. A tap opens the combo sheet, which asks one question per pick. */}
+          {visibleCombos.length > 0 && (
+            <section ref={el => { categoryRefs.current[COMBOS] = el }} className="gm-section" aria-labelledby="gm-sec-combos">
+              <h2 id="gm-sec-combos" className="gm-section-title">Combos</h2>
+              <ul className="gm-list">
+                {visibleCombos.map(combo => (
+                  <ComboRow
+                    key={combo.id} combo={combo} orderingEnabled={orderingEnabled}
+                    qty={qtyByCombo[combo.id] || 0}
+                    onChoose={() => setComboSheet({ combo })}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+
           {categories.map(cat => (
             <section
               key={cat} ref={el => { categoryRefs.current[cat] = el }}
-              className="gm-section" aria-label={cat === UNCATEGORISED && categories.length === 1 ? 'Menu' : undefined}
-              aria-labelledby={cat === UNCATEGORISED && categories.length === 1 ? undefined : `gm-sec-${categories.indexOf(cat)}`}
+              className="gm-section" aria-label={cat === UNCATEGORISED && sections.length === 1 ? 'Menu' : undefined}
+              aria-labelledby={cat === UNCATEGORISED && sections.length === 1 ? undefined : `gm-sec-${categories.indexOf(cat)}`}
             >
-              {!(cat === UNCATEGORISED && categories.length === 1) && (
+              {!(cat === UNCATEGORISED && sections.length === 1) && (
                 <h2 id={`gm-sec-${categories.indexOf(cat)}`} className="gm-section-title">{categoryLabel(cat)}</h2>
               )}
               <ul className="gm-list">
@@ -1032,7 +1154,7 @@ export default function GuestMenu() {
           <SheetHeader title="Your order" onClose={() => { if (!submitting) setReviewOpen(false) }} />
           {/* Emptying the cart from inside this sheet used to leave a single sentence and no way
               forward. */}
-          {cartLines.length === 0 ? (
+          {orderLines.length === 0 ? (
             <div className="gm-empty">
               <p>Nothing in your order yet.</p>
               <button type="button" className="btn btn-primary" onClick={() => setReviewOpen(false)}>Back to the menu</button>
@@ -1042,14 +1164,21 @@ export default function GuestMenu() {
             <fieldset className="gm-fieldset" disabled={submitting}>
               <legend className="sr-only">Your order</legend>
               <ul className="gm-review-lines">
-                {cartLines.map(l => (
+                {orderLines.map(l => (
                   <li key={l.key} className="gm-review-line">
                     <div className="gm-review-line-name">
                       <span className="gm-dish-name">{l.name}</span>
                       {l.summary && <span className="gm-review-line-summary">{l.summary}</span>}
                       {/* Edit from the order, not "remove and start again": the thing a guest most
-                          often wants to change is the choice they just made (S758). */}
-                      {dishGroupsByRecipe[l.item.recipe_id] && (
+                          often wants to change is the choice they just made (S758). A combo changes
+                          its picks the same way (S839); removing it is its stepper's minus. */}
+                      {l.isCombo ? comboAsks(l.combo) && (
+                        <button
+                          type="button" className="btn btn-ghost btn-sm gm-edit-choices"
+                          aria-label={`Change choices for ${l.name}`}
+                          onClick={() => setComboSheet({ combo: l.combo, editKey: l.key, initialPicks: l.picks })}
+                        >Change choices</button>
+                      ) : dishGroupsByRecipe[l.item.recipe_id] && (
                         <button
                           type="button" className="btn btn-ghost btn-sm gm-edit-choices"
                           aria-label={`Change choices for ${l.name}`}
@@ -1084,7 +1213,7 @@ export default function GuestMenu() {
               />
             </fieldset>
           )}
-          {cartLines.length > 0 && (
+          {orderLines.length > 0 && (
             <div className="gm-place">
               {submitError && <p role="alert" className="gm-error">{submitError}</p>}
               {/* The last thing read before committing. A QR sticker that has been moved, or a guest
@@ -1121,6 +1250,19 @@ export default function GuestMenu() {
           stepped={(optionCatalog.buildYourOwn || []).includes(optionSheet.item.recipe_id)}
           onClose={() => setOptionSheet(null)}
           onConfirm={ids => { addCustom(optionSheet.item, ids, optionSheet.editKey); setOptionSheet(null) }}
+        />
+      )}
+
+      {comboSheet && (
+        <GuestComboSheet
+          combo={comboSheet.combo}
+          dishGroupsByRecipe={dishGroupsByRecipe}
+          catalog={optionMaps}
+          vatOf={vatOf}
+          initialPicks={comboSheet.initialPicks}
+          editing={!!comboSheet.editKey}
+          onClose={() => setComboSheet(null)}
+          onConfirm={picks => { addCombo(comboSheet.combo, picks, comboSheet.editKey); setComboSheet(null) }}
         />
       )}
     </GuestShell>
@@ -1260,6 +1402,45 @@ function VegMark({ isVeg }) {
       <span aria-hidden="true" />
     </span>
   )
+}
+
+// S839: a combo on the menu. Its price is what the guest pays before any extra charge; the Add opens
+// the combo sheet every time, since even a set meal is worth one look at what comes in it.
+function ComboRow({ combo, orderingEnabled, qty, onChoose }) {
+  const name = tidyName(combo.name)
+  return (
+    <li className="gm-row">
+      <div className="gm-row-main">
+        <p className="gm-name-line">
+          <span className="gm-dish-name">{name}</span>
+        </p>
+        {combo.description && <p className="gm-desc">{combo.description}</p>}
+        <p className="gm-desc">{comboContents(combo)}</p>
+      </div>
+      <div className="gm-row-side">
+        <span className="gm-price">{fmtNpr(Number(combo.guest_price) || 0)}</span>
+        {orderingEnabled && (
+          <button
+            type="button" className="btn btn-ghost btn-sm gm-add"
+            aria-label={`Choose and add ${name} to your order`}
+            onClick={onChoose}
+          >
+            <Plus size={15} aria-hidden="true" />{qty > 0 ? `Add another (${qty})` : 'Add'}
+          </button>
+        )}
+      </div>
+    </li>
+  )
+}
+
+// "3 dishes match", "1 combo and 2 dishes match"; empty when nothing does (the empty state says so).
+function searchCountText(dishes, combos, query) {
+  const parts = [
+    combos > 0 ? `${combos} ${combos === 1 ? 'combo' : 'combos'}` : null,
+    dishes > 0 ? `${dishes} ${dishes === 1 ? 'dish' : 'dishes'}` : null,
+  ].filter(Boolean)
+  if (parts.length === 0) return ''
+  return `${parts.join(' and ')} ${dishes + combos === 1 ? 'matches' : 'match'} “${query}”`
 }
 
 function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, qty, onQtyChange, dishGroups, onChoose }) {

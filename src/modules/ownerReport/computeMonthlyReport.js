@@ -526,8 +526,9 @@ async function computePosSection(clientId, period) {
     // record of that period, with no later recompute to correct it (S529).
     // Chunked as well: every paid bill's id goes in the URL, and a month of a few hundred bills
     // was a 400 Bad Request that froze the POS section as failed.
+    // selection_key marks a combo's dish ('@'), which takes none of the bill discount (S839, isComboItem).
     fetchAllRowsChunked(allOrders.map(o => o.id),
-      ids => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', ids).order('id')),
+      ids => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, selection_key').in('order_id', ids).order('id')),
     // The legs of every Split bill, the read Sales Report's Payment Summary and the Z-report make.
     fetchAllRowsChunked(splitIds,
       ids => scopedFrom('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),

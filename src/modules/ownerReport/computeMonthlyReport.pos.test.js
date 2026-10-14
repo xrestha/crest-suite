@@ -148,3 +148,36 @@ describe('the reads behind it', () => {
     expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(16)
   })
 })
+
+// S839 (docs/pos-combos.md): a bill discount never touches a combo's dishes. The line read takes
+// `selection_key` (a combo dish's carries '@'), never the newer `combo_line_id`, which a database the
+// combo migration has not reached would refuse and freeze the POS section as failed.
+describe('a bill discount never touches a combo', () => {
+  const C = { id: 'C', table_id: 'table-4', covers: 2, payment_method: 'Cash', discount_amount: 60, vat_registered: true }
+  const combo = '@22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333'
+  const items = {
+    C: [
+      { ...line('C', 'Food', 2, 300, 0.13), selection_key: '' },              // 600, discountable
+      { ...line('C', 'Beverage', 1, 250, 0.13), selection_key: combo },       // 250, a combo's dish
+    ],
+  }
+  const f = () => posSalesFigures({ orders: [C], creditNotes: [], orderById: { C }, itemsByOrder: items, vatReg: true })
+
+  test('the discount comes off the other lines only, so the combo keeps its full VAT', () => {
+    // VAT: (600 − 60) × 13% + 250 × 13% = 70.2 + 32.5.
+    expect(f().totalVat).toBeCloseTo(102.7, 9)
+    expect(f().totalNetSales).toBe(Math.round(850 - 60 + 102.7))
+  })
+  test('Category breakdown: the combo dish\'s category takes none of it, and the rows add up to Net Sales', () => {
+    const by = Object.fromEntries(f().categoryBreakdown.map(r => [r.category, r]))
+    expect(by.Beverage.net).toBeCloseTo(250 * 1.13, 9)
+    expect(by.Food.net).toBeCloseTo(540 * 1.13, 9)
+    expect(by.Food.net + by.Beverage.net).toBeCloseTo(850 - 60 + 102.7, 9)
+  })
+  test('the line read carries selection_key and does not name combo_line_id', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
+    const pos = src.slice(src.indexOf('async function computePosSection'), src.indexOf('export function computeCombinedMetrics'))
+    expect(pos).toMatch(/scopedFrom\('pos_order_items', clientId, '[^']*\bselection_key\b[^']*'\)\.in\('order_id', ids\)\.order\('id'\)/)
+    expect(pos).not.toMatch(/combo_line_id/)
+  })
+})

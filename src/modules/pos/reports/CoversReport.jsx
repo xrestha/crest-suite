@@ -177,9 +177,10 @@ export default function CoversReport() {
     const secondWave = await Promise.all([
       // Paged — a month of bill lines runs to thousands, past the silent 1000-row cap (S529).
       // Chunked as well (S754): the `.in()` list is every paid bill in the range, and a few hundred
-      // uuids is past what a proxy accepts in a URL.
+      // uuids is past what a proxy accepts in a URL. selection_key marks a combo's dish ('@'), which
+      // takes none of the bill discount, so its VAT and the bill's net follow (S839, isComboItem).
       fetchAllRowsChunked(orderList.map(o => o.id),
-        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id')),
+        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped, selection_key').in('order_id', ids).order('id')),
       // The bills this range's credit notes credit that closed before it: a return needs its bill's
       // table (dine-in or takeaway, a part bill dine-in since S836), party size (turnover band) and server.
       fetchAllRowsChunked(outsideIds,

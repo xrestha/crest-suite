@@ -111,8 +111,9 @@ export async function loadFromPos(period, scopedFrom, clientId) {
 
   // Paged AND chunked: a month of bill lines runs to thousands, past the 1000-row cap (S529), and a
   // month of order ids in one `.in()` is a 414 before the row cap is reached (S629, S734).
+  // selection_key marks a combo's dish ('@'), which takes none of the bill discount (S839, isComboItem).
   const items = await fetchAllRowsChunked(allOrders.map(o => o.id),
-    ids => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id'))
+    ids => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, vat_rate, comped, selection_key').in('order_id', ids).order('id'))
   throwIfFailed([items])
   const itemsByOrder = {}
   for (const i of items.data || []) {

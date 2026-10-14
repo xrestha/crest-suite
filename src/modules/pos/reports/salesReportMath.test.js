@@ -360,3 +360,78 @@ describe('buildCategoryDayRows', () => {
     expect(buildCategoryDayRows({ ...base, orders: [], creditNotes: [{ id: 'x', order_id: 'missing', created_at: '2026-09-12T06:00:00Z' }] })).toEqual([])
   })
 })
+
+// S839 (docs/pos-combos.md, "Discounts never touch a combo"): a bill discount spreads over the lines
+// that are neither comped nor a combo's dishes. The report's line reads take only `selection_key`
+// (never `combo_line_id`, a newer column), so a combo dish is known here by its key's '@' tail.
+describe('a bill discount never touches a combo', () => {
+  const COMBO = '@11111111-1111-4111-8111-111111111111'
+  // Discount 100 over a discountable NPR 600 (Momo 500 + Water 100): 1/6 off each; the combo's two
+  // dishes (Chicken Momo 200, Coke 150 with a choice) keep their price.
+  const BILL_D = { id: 'D', payment_method: 'Cash', discount_amount: 100, closed_at: '2026-09-10T11:00:00Z' }
+  const ITEMS_D = [
+    { order_id: 'D', recipe_id: 'r1', name: 'Momo', category: 'Food', qty: 2, unit_price: 250, vat_rate: 0.13, selection_key: '' },
+    { order_id: 'D', recipe_id: 'r4', name: 'Chicken Momo', category: 'Food', qty: 1, unit_price: 200, vat_rate: 0.13, selection_key: `${COMBO}/aaaaaaaa-0000-4000-8000-000000000001` },
+    { order_id: 'D', recipe_id: 'r5', name: 'Coke', category: 'Beverage', qty: 1, unit_price: 150, vat_rate: 0.13, selection_key: `o-ice${COMBO}/aaaaaaaa-0000-4000-8000-000000000002` },
+    { order_id: 'D', recipe_id: 'r2', name: 'Water', category: 'Beverage', qty: 1, unit_price: 100, vat_rate: 0, selection_key: null },
+  ]
+  const byOrder = { D: ITEMS_D }
+  const byId = { D: BILL_D }
+  const grouped = (keyOf, extra = {}) => buildGroupedRows({ orders: [BILL_D], creditNotes: [], orderById: byId, itemsByOrder: byOrder, vatReg: true, keyOf, labelOf: keyOf, ...extra })
+
+  test('the bill: the discount comes off the non-combo lines only, so the combo keeps its VAT', () => {
+    const a = billAmounts(BILL_D, ITEMS_D, true)
+    expect(a.gross).toBe(950)
+    expect(a.discount).toBe(100)
+    // Momo 500 × 5/6 + Chicken Momo 200 + Coke 150 taxable; Water 100 × 5/6 non-taxable.
+    expect(a.taxable).toBeCloseTo(500 * 5 / 6 + 350, 9)
+    expect(a.nonTaxable).toBeCloseTo(100 * 5 / 6, 9)
+    expect(a.vat).toBeCloseTo((500 * 5 / 6 + 350) * 0.13, 9)
+    expect(a.net).toBe(950)
+  })
+
+  test('Item Wise: a combo dish carries no discount, and the buckets reconcile to the bill', () => {
+    const rows = grouped(i => i.name)
+    const by = Object.fromEntries(rows.map(r => [r.key, r]))
+    expect(by['Chicken Momo'].discount).toBe(0)
+    expect(by.Coke.discount).toBe(0)
+    expect(by.Momo.discount).toBeCloseTo(500 / 6, 9)
+    expect(by.Water.discount).toBeCloseTo(100 / 6, 9)
+    expect(by['Chicken Momo'].vat).toBeCloseTo(26, 9)
+    const a = billAmounts(BILL_D, ITEMS_D, true)
+    for (const [k, total] of [['gross', a.gross], ['discount', a.discount], ['taxable', a.taxable], ['nonTaxable', a.nonTaxable], ['vat', a.vat]]) {
+      expect(sum(rows, k)).toBeCloseTo(total, 9)
+    }
+  })
+
+  test('Category Wise reconciles too, each category taking only its non-combo lines\' share', () => {
+    const by = Object.fromEntries(grouped(i => i.category).map(r => [r.key, r]))
+    expect(by.Food.discount).toBeCloseTo(500 / 6, 9)
+    expect(by.Beverage.discount).toBeCloseTo(100 / 6, 9)
+    expect(by.Food.discount + by.Beverage.discount).toBeCloseTo(100, 9)
+  })
+
+  test('without selection_key on the read, the combo would wrongly take a share: the column is load-bearing', () => {
+    const bare = ITEMS_D.map(({ selection_key, ...rest }) => rest)
+    const rows = buildGroupedRows({ orders: [BILL_D], creditNotes: [], orderById: byId, itemsByOrder: { D: bare }, vatReg: true, keyOf: i => i.name, labelOf: i => i.name })
+    expect(rows.find(r => r.key === 'Chicken Momo').discount).toBeGreaterThan(0)
+  })
+
+  test('a credit note against it returns the combo at full price, and the minus ties to the stored note', () => {
+    const note = noteFor(BILL_D, ITEMS_D, 'n-d')
+    const minus = buildGroupedRows({ orders: [], creditNotes: [note], orderById: byId, itemsByOrder: byOrder, vatReg: true, keyOf: i => i.name, labelOf: i => i.name })
+    expect(minus.find(r => r.key === 'Coke').discount).toBeCloseTo(0, 9)
+    expect(minus.find(r => r.key === 'Coke').gross).toBeCloseTo(-150, 9)
+    expect(sum(minus, 'discount')).toBeCloseTo(-note.discount_amount, 9)
+    expect(sum(minus, 'vat')).toBeCloseTo(-note.vat_amount, 9)
+    const both = buildSalesEntries({ orders: [BILL_D], creditNotes: [note], orderById: byId, itemsByOrder: byOrder, vatReg: true })
+    for (const k of AMOUNT_KEYS) expect(sum(both.map(e => e.amounts), k)).toBeCloseTo(0, 9)
+  })
+
+  test('the POS sales pivot\'s Category × Day rows sum to the bill after discount', () => {
+    const rows = buildCategoryDayRows({ orders: [BILL_D], creditNotes: [], orderById: byId, itemsByOrder: byOrder, vatReg: true, dayOf: () => 10 })
+    expect(sum(rows, 'exVat')).toBeCloseTo(850, 9)
+    expect(sum(rows, 'billed')).toBeCloseTo(850 + (500 * 5 / 6 + 350) * 0.13, 9)
+    expect(rows.find(r => r.category === 'Beverage').exVat).toBeCloseTo(150 + 100 * 5 / 6, 9)
+  })
+})

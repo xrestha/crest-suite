@@ -180,7 +180,8 @@ export default function CreditNotes() {
     // own write (S828 5d), so no count is read here. Bounded: the pop-up opens only after these, and a
     // hung read left the press doing nothing.
     const [{ data: items, error: itemsErr }, { data: bill, error: billErr }] = await Promise.all([
-      settleWithin(scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary, pos_order_item_options(option_name, price_delta, sort)').eq('order_id', note.order_id), REPRINT_READ_MS, 'Reading the note lines'),
+      // S839: with each combo dish's combo, so the reprint prints a combo as one row, as the note did.
+      settleWithin(scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, selection_key, combo_line_id, combo_name, combo_sort, option_summary, pos_order_item_options(option_name, price_delta, sort)').eq('order_id', note.order_id), REPRINT_READ_MS, 'Reading the note lines'),
       settleWithin(scopedFrom('pos_orders', 'vat_registered').eq('id', note.order_id).maybeSingle(), REPRINT_READ_MS, 'Reading the bill'),
     ])
     // S754: a failed read here printed a numbered Credit Note with no lines on it, and still

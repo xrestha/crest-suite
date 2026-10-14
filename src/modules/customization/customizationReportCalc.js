@@ -36,7 +36,12 @@
 //                    taken as the choice's answer. The rate is the only one available and moves
 //                    with purchases, which the page says.
 
+import { optionPartOfKey } from '../pos/orders/posOrdersConstants'
+
 const num = v => Number(v) || 0
+// Whether a line carries choices. A combo's dish (S839) has a selection key ending in
+// '@<combo_line_id>/<combo_group_id>' even with no choices, so only the part before '@' counts.
+const hasChoices = l => optionPartOfKey(l?.selection_key) !== ''
 const has = (obj, k) => k != null && Object.prototype.hasOwnProperty.call(obj || {}, k)
 
 // The kind most of a choice's plates were billed under; ties go to the kind seen first.
@@ -71,7 +76,7 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
   let sizeAdjustments = 0
 
   const attached = attachedRecipeIds || new Set()
-  const soldCustomized = new Set((lines || []).filter(l => l.selection_key).map(l => l.recipe_id))
+  const soldCustomized = new Set((lines || []).filter(hasChoices).map(l => l.recipe_id))
 
   for (const l of lines || []) {
     if (!l.recipe_id) continue
@@ -82,7 +87,7 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
     customizablePlates += plates
     const d = dishes.get(l.recipe_id) || { recipe_id: l.recipe_id, name: l.name, plates: 0, customizedPlates: 0 }
     d.plates += plates
-    const picks = l.selection_key ? (byLine.get(l.id) || []) : []
+    const picks = hasChoices(l) ? (byLine.get(l.id) || []) : []
     if (picks.length) {
       d.customizedPlates += plates
       customizedPlates += plates
@@ -230,7 +235,7 @@ export const TREND_DROP_POINTS = 10
  * before — the flag the owner acts on.
  */
 export function weeklyDishShares({ lines, snapshots, weekOfOrder, weekCount, attachedRecipeIds, topN = 5 }) {
-  const attached = new Set([...(attachedRecipeIds || []), ...(lines || []).filter(l => l.selection_key).map(l => l.recipe_id)])
+  const attached = new Set([...(attachedRecipeIds || []), ...(lines || []).filter(hasChoices).map(l => l.recipe_id)])
   const whole = buildCustomizationReport({ lines, snapshots, attachedRecipeIds: attached })
   const top = whole.dishes.slice(0, topN).map(d => ({ recipe_id: d.recipe_id, name: d.name }))
   const weeks = Array.from({ length: weekCount }, () => new Set())
@@ -255,4 +260,95 @@ export function weeklyDishShares({ lines, snapshots, weekOfOrder, weekCount, att
     }
   }
   return { dishes: top, rows, drops }
+}
+
+// ── Combos (S839, docs/pos-combos.md) ────────────────────────────────────────────────────────────
+// A combo on a bill is not a line of its own: each picked dish is an ordinary line carrying the
+// combo's tag (combo_line_id, one per combo on the bill; combo_id; the names as sold). So:
+//   sold       Σ over the combo's distinct combo_line_ids of that combo's quantity. Every dish of one
+//              combo carries the same quantity, so it is read off ONE pick (the first by sort) — the
+//              comped and the charged rows of a part-comped combo together, since a comp takes every
+//              dish by the same quantity. `comped` is how many of those were comped.
+//   revenue    Σ the dishes' qty × unit_price, ex-VAT, comped rows adding nothing. A bill discount
+//              never touches a combo, so this is the figure before AND after the discount.
+//   pick mix   per pick, how many plates of each dish were picked (comped ones too: they were
+//              chosen and made) and that dish's share of the pick.
+// Names are the latest as sold (`closedAtOf(order_id)` orders the bills); a combo is keyed by its
+// id, a pick by its group id, so a rename does not split a combo in two.
+
+/**
+ * @param {{ lines, closedAtOf? }} input
+ *   lines  [{ id, order_id, recipe_id, name, qty, unit_price, comped, combo_line_id, combo_id,
+ *            combo_name, combo_group_id, combo_group_name, combo_sort }] — paid bills in range; lines
+ *            that are not combo dishes are ignored
+ *   closedAtOf  (order_id) => an ISO time, for which name is the latest; absent, the last line read wins
+ * @returns {Array<{ combo_id, name, sold, comped, revenue, perCombo, picks: Array<{ group_id, name,
+ *          sort, plates, dishes: Array<{ recipe_id, name, plates, share }> }> }>}
+ */
+export function buildComboReport({ lines, closedAtOf = null }) {
+  const stamp = l => (closedAtOf ? String(closedAtOf(l.order_id) || '') : '')
+  const later = (a, b) => (stamp(a) > stamp(b) || (stamp(a) === stamp(b) && String(a.id) > String(b.id)))
+  const combos = new Map()
+  const byComboLine = new Map()
+  for (const l of lines || []) {
+    if (!l?.combo_line_id) continue
+    const key = l.combo_id || l.combo_name || 'unknown'
+    const c = combos.get(key) || { combo_id: l.combo_id || null, nameFrom: null, revenue: 0, comboLines: new Set(), picks: new Map() }
+    if (!c.nameFrom || later(l, c.nameFrom)) c.nameFrom = l
+    if (!l.comped) c.revenue += num(l.qty) * num(l.unit_price)
+    c.comboLines.add(l.combo_line_id)
+    const gk = l.combo_group_id || l.combo_group_name || 'unknown'
+    const g = c.picks.get(gk) || { group_id: l.combo_group_id || null, nameFrom: null, plates: 0, dishes: new Map() }
+    if (!g.nameFrom || later(l, g.nameFrom)) g.nameFrom = l
+    g.plates += num(l.qty)
+    const dk = l.recipe_id || l.name
+    const d = g.dishes.get(dk) || { recipe_id: l.recipe_id || null, nameFrom: null, plates: 0 }
+    if (!d.nameFrom || later(l, d.nameFrom)) d.nameFrom = l
+    d.plates += num(l.qty)
+    g.dishes.set(dk, d)
+    c.picks.set(gk, g)
+    combos.set(key, c)
+    if (!byComboLine.has(l.combo_line_id)) byComboLine.set(l.combo_line_id, { key, rows: [] })
+    byComboLine.get(l.combo_line_id).rows.push(l)
+  }
+
+  // One combo's quantity, read off its first pick.
+  const soldBy = new Map()
+  for (const { key, rows } of byComboLine.values()) {
+    const first = [...rows].sort((a, b) => num(a.combo_sort) - num(b.combo_sort)
+      || String(a.combo_group_id || '').localeCompare(String(b.combo_group_id || '')))[0]
+    const pickRows = rows.filter(r => (r.combo_group_id || null) === (first.combo_group_id || null))
+    const s = soldBy.get(key) || { sold: 0, comped: 0 }
+    for (const r of pickRows) {
+      s.sold += num(r.qty)
+      if (r.comped) s.comped += num(r.qty)
+    }
+    soldBy.set(key, s)
+  }
+
+  return [...combos.entries()].map(([key, c]) => {
+    const { sold, comped } = soldBy.get(key) || { sold: 0, comped: 0 }
+    const paid = sold - comped
+    return {
+      combo_id: c.combo_id,
+      name: c.nameFrom?.combo_name || 'Combo',
+      sold,
+      comped,
+      revenue: c.revenue,
+      // What one charged combo brought in, on average (null when every one was comped).
+      perCombo: paid > 0 ? c.revenue / paid : null,
+      combo_lines: c.comboLines.size,
+      picks: [...c.picks.values()]
+        .map(g => ({
+          group_id: g.group_id,
+          name: g.nameFrom?.combo_group_name || 'Pick',
+          sort: num(g.nameFrom?.combo_sort),
+          plates: g.plates,
+          dishes: [...g.dishes.values()]
+            .map(d => ({ recipe_id: d.recipe_id, name: d.nameFrom?.name || '', plates: d.plates, share: g.plates > 0 ? d.plates / g.plates : 0 }))
+            .sort((a, b) => b.plates - a.plates || String(a.name).localeCompare(String(b.name))),
+        }))
+        .sort((a, b) => a.sort - b.sort || String(a.name).localeCompare(String(b.name))),
+    }
+  }).sort((a, b) => b.sold - a.sold || String(a.name).localeCompare(String(b.name)))
 }

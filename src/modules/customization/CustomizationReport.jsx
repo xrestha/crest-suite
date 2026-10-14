@@ -17,8 +17,8 @@ import RangePresets from '../pos/reports/RangePresets'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { deltaItems } from '../../utils/orderLineIngredients'
 import { posDeltaCosting } from '../pos/orders/posRecipeBook'
-import { loadOptionCatalog } from './customizationData'
-import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS } from './customizationReportCalc'
+import { loadOptionCatalog, isMissingColumn } from './customizationData'
+import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS, buildComboReport } from './customizationReportCalc'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer } from 'recharts'
 import ChartCard from '../../components/ChartCard'
 import { compareFigures } from '../../shared/compareFigures'
@@ -39,12 +39,16 @@ import { CHART_COLORS } from '../../shared/chartColors'
 // S759 critique fixes: the range opens on the BS month rather than one day; the KPI strip splits
 // add-on income from size discounts and names the most ADDED choice (a size is answered, not
 // added); the Margin tab stops painting a free-by-design choice as a loss; every table sorts.
+//
+// S839, combos (docs/pos-combos.md): a Combos tab — per combo, how many sold, what they brought in
+// (ex-VAT; a bill discount never touches a combo) and each pick's dish mix (buildComboReport).
 
 const TABS = [
   { key: 'popular',  label: 'Popular choices' },
   { key: 'dishes',   label: 'How often customized' },
   { key: 'removals', label: '"No …" requests' },
   { key: 'margin',   label: 'Choice margin' },
+  { key: 'combos',   label: 'Combos' },
 ]
 
 const DEFAULT_SORT = {
@@ -52,7 +56,13 @@ const DEFAULT_SORT = {
   dishes:   { key: 'plates', dir: 'desc' },
   removals: { key: 'picks',  dir: 'desc' },
   margin:   { key: 'picks',  dir: 'desc' },
+  combos:   { key: 'sold',   dir: 'desc' },
 }
+
+// The bill lines the report reads. S839 adds each combo dish's combo; a database the combos migration
+// has not reached has no such columns and no combos, so the read falls back to the lines alone.
+const LINE_COLS = 'id, order_id, recipe_id, name, qty, comped, selection_key'
+const COMBO_LINE_COLS = `${LINE_COLS}, unit_price, combo_line_id, combo_id, combo_name, combo_group_id, combo_group_name, combo_sort`
 
 const pct = v => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
 // AD ISO date arithmetic in UTC, so no runtime timezone can shift a day (S800).
@@ -196,9 +206,14 @@ export default function CustomizationReport() {
       const listPriceByOptionId = Object.fromEntries(catalog.options.map(o => [o.id, Number(o.price_delta) || 0]))
 
       const orderIds = (ordersRes.data || []).map(o => o.id)
+      const readLines = async () => {
+        const r = await fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', COMBO_LINE_COLS).in('order_id', ids).order('id'))
+        return isMissingColumn(r.error)
+          ? fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', LINE_COLS).in('order_id', ids).order('id'))
+          : r
+      }
       const [linesRes, snapRes] = await Promise.all([
-        fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', 'id, order_id, recipe_id, name, qty, comped, selection_key')
-          .in('order_id', ids).order('id')),
+        readLines(),
         fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_item_options',
           'id, order_item_id, option_id, group_name, group_kind, option_name, is_removal, price_delta, list_price_delta, included, ingredient_deltas')
           .in('order_id', ids).order('id')),
@@ -219,6 +234,8 @@ export default function CustomizationReport() {
         listPriceByOptionId,
       })
       const prevReport = buildCustomizationReport({ lines: prev.lines, snapshots: prev.snapshots, attachedRecipeIds, kindByOptionId, listPriceByOptionId })
+      const closedAtById = new Map(curOrders.map(o => [o.id, o.closed_at]))
+      const combos = buildComboReport({ lines: cur.lines, closedAtOf: id => closedAtById.get(id) })
       // The weekly trend: whole weeks counted back from the range's last day, for a range of two
       // weeks or more. Days before the earliest whole week stay in the tiles, not in the trend.
       const weekCount = Math.floor(rangeDays / 7)
@@ -254,7 +271,7 @@ export default function CustomizationReport() {
         }
       }
       if (!rangeReq.isCurrent(key)) return
-      setData({ report, costed, prevReport, weekly })
+      setData({ report, costed, prevReport, weekly, combos })
     } catch (e) {
       if (!rangeReq.isCurrent(key)) return
       setLoadError(e)
@@ -267,7 +284,7 @@ export default function CustomizationReport() {
   useEffect(() => { load() }, [load])
 
   const report = data?.report
-  const scopeLine = `Paid bills closed ${fromIso} (B.S. ${bsSlash(fromIso)}) to ${toIso} (B.S. ${bsSlash(toIso)}) · choice prices ex-VAT, before bill discounts · credit notes not netted`
+  const scopeLine = `Paid bills closed ${fromIso} (B.S. ${bsSlash(fromIso)}) to ${toIso} (B.S. ${bsSlash(toIso)}) · choice prices ex-VAT, before bill discounts · combos ex-VAT, never discounted · credit notes not netted`
   const marginRows = useMemo(() => (data?.costed || []).filter(o => !o.is_removal), [data])
   const top = report ? mostAddedOf(report.options) : null
   const onlySizes = !!report && !top && report.options.some(o => !o.is_removal && o.group_kind === 'size')
@@ -294,6 +311,9 @@ export default function CustomizationReport() {
     option_name: o => o.option_name, chargedPerPick: o => o.chargedPerPick, costPerPick: o => o.costPerPick,
     margin: o => (o.costPerPick == null ? null : o.chargedPerPick - o.costPerPick), picks: o => o.picks,
   }, byName('option_name')), [marginRows, sorts.margin])
+  const comboRows = useMemo(() => sortRows(data?.combos || [], sorts.combos, {
+    name: c => c.name, sold: c => c.sold, revenue: c => c.revenue, perCombo: c => c.perCombo,
+  }, byName('name')), [data, sorts.combos])
 
   // S835, D42: no IMS manager clause. An Inventory login cannot read till bills (no_ims_staff), so a
   // manager let in here got an empty read and a confident "No choices were picked". The nav item
@@ -316,6 +336,16 @@ export default function CustomizationReport() {
     add('No requests', 'Customization — "No …" requests', removalRows.map(r => ({
       Dish: r.dish, Request: r.option_name, 'Plates': r.picks, 'Share of the dish': pct(r.dishPlates ? r.picks / r.dishPlates : null),
     })))
+    if (comboRows.length) {
+      add('Combos', 'Customization — Combos', comboRows.map(c => ({
+        Combo: c.name, 'Combos sold': c.sold, 'Of which comped': c.comped,
+        'Revenue (NPR, ex-VAT)': Math.round(c.revenue),
+        'Average per charged combo (NPR, ex-VAT)': c.perCombo == null ? '' : Math.round(c.perCombo),
+      })))
+      add('Combo picks', 'Customization — What guests picked in each combo', comboRows.flatMap(c => c.picks.flatMap(g => g.dishes.map(d => ({
+        Combo: c.name, Pick: g.name, Dish: d.name, 'Plates': d.plates, 'Share of the pick': pct(d.share),
+      })))))
+    }
     if (marginSorted.length) {
       add('Choice margin', 'Customization — Choice margin', marginSorted.map(o => ({
         Choice: o.option_name, 'List price as billed (NPR, average per plate)': o.listPriceDelta == null ? '' : Math.round(o.listPriceDelta),
@@ -370,8 +400,8 @@ export default function CustomizationReport() {
       )}
       loading={loading}
       error={loadError}
-      empty={!!report && report.customizablePlates === 0}
-      emptyText="No dish with choices was sold in this range. Attach option groups to dishes on Option Groups → Dishes, then check back after some bills."
+      empty={!!report && report.customizablePlates === 0 && (data?.combos || []).length === 0}
+      emptyText="No dish with choices and no combo was sold in this range. Attach option groups to dishes on Option Groups → Dishes, or set up a combo, then check back after some bills."
       filters={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -551,6 +581,45 @@ export default function CustomizationReport() {
                   </table>
                 </div>
               )
+          )}
+
+          {tab === 'combos' && (
+            comboRows.length === 0 ? (
+              <p className="empty-state">No combo was sold in this range.</p>
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead><tr>
+                    <SortTh label="Combo" sortKey="name" sort={sort} onSort={toggleSort} />
+                    <SortTh label="Sold" tip="Combos on paid bills in the range: each combo once, at its quantity. Comped combos are counted too." sortKey="sold" sort={sort} onSort={toggleSort} numeric />
+                    <SortTh label="Revenue" tip="What its dishes were charged, ex-VAT. A bill discount never touches a combo, so this is after discounts too. Comped dishes add nothing." sortKey="revenue" sort={sort} onSort={toggleSort} numeric />
+                    <SortTh label="Per combo" tip="Revenue ÷ the combos that were charged. Above the combo's own price when guests pick dishes or choices that cost extra." sortKey="perCombo" sort={sort} onSort={toggleSort} numeric />
+                    <th><Tip text="Each pick's dishes by how many plates guests chose, and their share of that pick.">What guests picked</Tip></th>
+                  </tr></thead>
+                  <tbody>
+                    {comboRows.map(c => (
+                      <tr key={c.combo_id || c.name}>
+                        <td>{c.name}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {nprInt(c.sold)}
+                          {c.comped > 0 && <div className="stat-sub" style={{ marginTop: 2 }}>{nprInt(c.comped)} comped</div>}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{npr(Math.round(c.revenue))}</td>
+                        <td style={{ textAlign: 'right' }}>{c.perCombo == null ? '—' : npr(Math.round(c.perCombo))}</td>
+                        <td>
+                          {c.picks.map(g => (
+                            <div key={g.group_id || g.name}>
+                              <span style={{ color: 'var(--theme-text2)' }}>{g.name}:</span>{' '}
+                              {g.dishes.map(d => `${d.name} ${nprInt(d.plates)} (${pct(d.share)})`).join(' · ')}
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
 
           {tab === 'margin' && imsOn && (

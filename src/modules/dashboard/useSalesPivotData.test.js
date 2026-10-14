@@ -135,6 +135,28 @@ describe('loadFromPos', () => {
     expect(await loadFromPos(PERIOD, scopedFrom, 'c1')).toEqual([])
   })
 
+  // S839 (docs/pos-combos.md): a bill discount never touches a combo's dishes. Only the columns the
+  // loader names come back here, as from PostgREST, so this fails if the line read drops selection_key.
+  test('a combo dish takes none of the bill discount, so the line read must carry selection_key', async () => {
+    const projecting = (table, cols) => {
+      const b = mockBuilder(table)
+      const keep = String(cols || '').split(',').map(c => c.trim())
+      const range = b.range
+      b.range = (from, to) => range(from, to).then(r => ({ ...r, data: r.data && r.data.map(row => Object.fromEntries(Object.entries(row).filter(([k]) => keep.includes(k)))) }))
+      return b
+    }
+    mockTables.pos_orders = [{ id: 'cb', close_type: 'paid', closed_at: nepalAt(7, '13:00'), discount_amount: 100, vat_registered: true }]
+    mockTables.pos_order_items = [
+      line('cb', { unit_price: 500 }),
+      line('cb', { category: 'Beverage', unit_price: 300, selection_key: '@44444444-4444-4444-8444-444444444444/55555555-5555-4555-8555-555555555555' }),
+    ]
+    const by = Object.fromEntries((await loadFromPos(PERIOD, projecting, 'c1')).map(r => [r.category, r]))
+    expect(by.Food.exVat).toBeCloseTo(400, 9)
+    expect(by.Food.billed).toBeCloseTo(452, 9)
+    expect(by.Beverage.exVat).toBeCloseTo(300, 9)
+    expect(by.Beverage.billed).toBeCloseTo(339, 9)
+  })
+
   test('a failed read throws, so the card says so rather than showing an empty month', async () => {
     const failing = table => {
       const b = mockBuilder(table)

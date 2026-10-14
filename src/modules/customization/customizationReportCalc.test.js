@@ -1,4 +1,4 @@
-import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES } from './customizationReportCalc'
+import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, buildComboReport } from './customizationReportCalc'
 import { bsMonthRangeIso, shiftBsMonth } from '../pos/reports/reportRange'
 
 const MOMO = 'r-momo'
@@ -278,5 +278,91 @@ describe('the period comparison and the weekly trend (S800)', () => {
     const t = weeklyDishShares({ lines: small, snapshots: [snapshots[0]], weekOfOrder: new Map([['o1', 1]]), weekCount: 2, attachedRecipeIds: new Set(['bowl']) })
     expect(t.rows.map(r => r.bowl)).toEqual([null, null])
     expect(t.drops).toEqual([])
+  })
+})
+
+// ── Combos (S839, docs/pos-combos.md) ────────────────────────────────────────────────────────────
+const CL1 = 'aaaaaaaa-0000-0000-0000-000000000001'
+const CL2 = 'aaaaaaaa-0000-0000-0000-000000000002'
+const CL3 = 'aaaaaaaa-0000-0000-0000-000000000003'
+const G_MOMO = 'g-momo', G_DRINK = 'g-drink'
+const comboDish = (id, orderId, line, group, groupName, sort, recipe, name, qty, unit, extra = {}) => ({
+  id, order_id: orderId, recipe_id: recipe, name, qty, unit_price: unit, comped: false,
+  selection_key: `@${line}/${group}`, combo_line_id: line, combo_id: 'c-momo', combo_name: 'Momo Combo',
+  combo_group_id: group, combo_group_name: groupName, combo_sort: sort, ...extra,
+})
+const comboLines = [
+  // Bill 1: two Momo Combos (chicken + coke), at qty 2.
+  comboDish('k1', 'o1', CL1, G_MOMO, 'Pick a momo', 0, 'r-chicken', 'Chicken Momo', 2, 265.49),
+  comboDish('k2', 'o1', CL1, G_DRINK, 'Drink', 1, 'r-coke', 'Coke', 2, 88.5),
+  // Bill 2: one Momo Combo (veg + coke), one of the two comped and split off — the comp takes every
+  // dish by the same quantity, so the pick holds a charged row and a comped one.
+  comboDish('k3', 'o2', CL2, G_MOMO, 'Pick a momo', 0, 'r-veg', 'Veg Momo', 1, 221.24),
+  comboDish('k4', 'o2', CL2, G_MOMO, 'Pick a momo', 0, 'r-veg', 'Veg Momo', 1, 221.24, { comped: true }),
+  comboDish('k5', 'o2', CL2, G_DRINK, 'Drink', 1, 'r-coke', 'Coke', 1, 88.5),
+  comboDish('k6', 'o2', CL2, G_DRINK, 'Drink', 1, 'r-coke', 'Coke', 1, 88.5, { comped: true }),
+  // Bill 3, closed later, after the combo and its pick were renamed: same ids, so the same rows.
+  comboDish('k7', 'o3', CL3, G_MOMO, 'Choose your momo', 0, 'r-chicken', 'Chicken Momo', 1, 265.49, { combo_name: 'Momo Meal' }),
+  comboDish('k8', 'o3', CL3, G_DRINK, 'Drink', 1, 'r-coke', 'Coke', 1, 88.5, { combo_name: 'Momo Meal' }),
+  // Not a combo dish: ignored.
+  { id: 'k9', order_id: 'o1', recipe_id: 'r-chicken', name: 'Chicken Momo', qty: 5, unit_price: 300, comped: false, selection_key: '' },
+]
+const closedAt = { o1: '2026-10-01T10:00:00Z', o2: '2026-10-02T10:00:00Z', o3: '2026-10-03T10:00:00Z' }
+
+describe('buildComboReport', () => {
+  const [row, ...rest] = buildComboReport({ lines: comboLines, closedAtOf: id => closedAt[id] })
+
+  test('one row per combo id, named as it was last sold', () => {
+    expect(rest).toEqual([])
+    expect(row.combo_id).toBe('c-momo')
+    expect(row.name).toBe('Momo Meal')
+    expect(row.combo_lines).toBe(3)
+  })
+
+  test('sold counts each combo once at its quantity, read off one pick, comped ones included', () => {
+    expect(row.sold).toBe(2 + 2 + 1)
+    expect(row.comped).toBe(1)
+  })
+
+  test('revenue is the charged dishes, ex-VAT and never discounted', () => {
+    const expected = 2 * 265.49 + 2 * 88.5 + 221.24 + 88.5 + 265.49 + 88.5
+    expect(row.revenue).toBeCloseTo(expected, 6)
+    expect(row.perCombo).toBeCloseTo(expected / 4, 6)
+  })
+
+  test('each pick has its dish mix, in pick order, under its latest name', () => {
+    expect(row.picks.map(p => p.name)).toEqual(['Choose your momo', 'Drink'])
+    const momo = row.picks[0]
+    expect(momo.plates).toBe(5)
+    expect(momo.dishes.map(d => [d.name, d.plates])).toEqual([['Chicken Momo', 3], ['Veg Momo', 2]])
+    expect(momo.dishes[0].share).toBeCloseTo(0.6)
+    expect(row.picks[1].dishes).toEqual([{ recipe_id: 'r-coke', name: 'Coke', plates: 5, share: 1 }])
+  })
+
+  test('nothing sold is no rows, and every combo comped has no average', () => {
+    expect(buildComboReport({ lines: [] })).toEqual([])
+    const allComped = buildComboReport({ lines: comboLines.slice(0, 2).map(l => ({ ...l, comped: true })) })[0]
+    expect(allComped.sold).toBe(2)
+    expect(allComped.comped).toBe(2)
+    expect(allComped.revenue).toBe(0)
+    expect(allComped.perCombo).toBeNull()
+  })
+})
+
+describe('a combo dish is not a customized plate by its key alone', () => {
+  test('the combo tail of a selection key is not a choice', () => {
+    const r = buildCustomizationReport({
+      lines: [
+        comboDish('k1', 'o1', CL1, G_MOMO, 'Pick a momo', 0, 'r-plain', 'Plain Momo', 2, 200),
+        { ...comboDish('k2', 'o1', CL1, G_DRINK, 'Drink', 1, MOMO, 'Momo', 1, 200), selection_key: `o-half@${CL1}/${G_DRINK}` },
+      ],
+      snapshots: [{ order_item_id: 'k2', option_id: 'o-half', group_name: 'Size', group_kind: 'size', option_name: 'Half', is_removal: false, price_delta: -100 }],
+      attachedRecipeIds: new Set(),
+    })
+    // The plain momo has no groups and no choices: not a customizable dish. The combo's Momo with a
+    // Half is a customized plate like any other.
+    expect(r.dishes.map(d => d.recipe_id)).toEqual([MOMO])
+    expect(r.customizablePlates).toBe(1)
+    expect(r.customizedPlates).toBe(1)
   })
 })
