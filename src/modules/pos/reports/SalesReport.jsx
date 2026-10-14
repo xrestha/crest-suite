@@ -28,7 +28,8 @@ import {
 import { barCategoriesOf, NO_BAR_TEXT } from '../ticketRouting'
 import { settleWithin } from '../../../utils/withTimeout'
 import { viewPosBill } from '../../../utils/viewPosBill'
-import { posFoodCosts } from '../orders/posRecipeBook'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../orders/posRecipeBook'
+import { outletHasIms } from '../orders/posImsWaiting'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
@@ -167,8 +168,11 @@ const ONE_LAKH_READ_MAX_ROWS = 200000
 const ONE_LAKH_CHUNK_CONCURRENCY = 6
 
 export default function SalesReport() {
-  const { clientId, hasPosAccess } = useAuth()
+  const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules, customizationEnabled } = useAuth()
   const { scopedFrom } = useScopedDb()
+  // How Comped Bills costs a comp (posLineCosts): with its choices where the outlet has Crest IMS, a
+  // build-your-own dish by its build while Customization is on — as on its Complimentary Slip.
+  const inventory = outletHasIms({ isAdmin, imsEnabled, clientModules })
   const today = getBsToday()
   const currentFy = getBsFiscalYear(today.year, today.month)
 
@@ -346,8 +350,10 @@ export default function SalesReport() {
         // from roughly the first tenth of the month while looking like a full month (S529).
         // Chunked as well (S754): the `.in()` list is every paid bill in the range, and a few hundred
         // uuids is past what a proxy accepts in a URL — a 414 that would fail the whole page.
+        // Where the outlet has Crest IMS, each line's choices' stock lines too: a comped dish's food cost
+        // includes them (Comped Bills). An outlet without IMS costs comps without them, so it skips the embed.
         fetchAllRowsChunked(allOrders.map(o => o.id),
-          ids => scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', ids).order('id')),
+          ids => scopedFrom('pos_order_items', `order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason${inventory ? `, ${LINE_CHOICE_STOCK}` : ''}`).in('order_id', ids).order('id')),
         // The legs of every Split bill — what Payment Summary spreads the bill across. The same
         // read the shift Z-report makes (PosShifts.jsx loadShiftReport), so the two count the
         // same legs. Both reads derive their ids from the orders and nothing from each other.
@@ -376,16 +382,19 @@ export default function SalesReport() {
       // because a note credits it belongs to an earlier range's comps.
       const compedItems = (items || []).filter(i => i.comped && inRangeIds.has(i.order_id))
       if (compedItems.length > 0) {
-        const recipeIds = [...new Set(compedItems.map(i => i.recipe_id).filter(Boolean))]
         // Food cost through the till's recipe book (S814 4d, `pos_recipe_book`), the read the
         // Z-report and the comp slips use: it answers this page's readers (Manager rank, the Owner,
         // the operator) with the yields and rates `items` would, where a POS login's own `items`
-        // read is fenced to nothing. It THROWS on a failed or refused read, as the walk did (S695);
-        // unwrapped, that rejection escaped loadRange entirely: rangeLoading never went false and
-        // the page sat on "Loading…" for good, with no error anywhere (S754).
-        let costMap = {}
+        // read is fenced to nothing. Each dish is costed with its choices (posLineCosts). It THROWS
+        // on a failed or refused read, as the walk did (S695); unwrapped, that rejection escaped
+        // loadRange entirely: rangeLoading never went false and the page sat on "Loading…" for good,
+        // with no error anywhere (S754).
+        let costing
         try {
-          costMap = recipeIds.length > 0 ? await posFoodCosts(supabase, clientId, recipeIds) : {}
+          costing = await posLineCosts(supabase, clientId, compedItems, {
+            inventory,
+            buildYourOwn: inventory && customizationEnabled ? buildYourOwnAmong(scopedFrom, compedItems.map(i => i.recipe_id)) : [],
+          })
         } catch (err) {
           if (!rangeReq.isCurrent(reqKey)) return
           fail(err)
@@ -400,7 +409,7 @@ export default function SalesReport() {
             items: [], foodCost: 0, potentialValue: 0,
           }
           g.items.push(i)
-          g.foodCost += i.qty * (costMap[i.recipe_id] || 0)
+          g.foodCost += i.qty * costing.costOf(i)
           // Menu price before VAT (S814 4d, REPORTS-7): the Sales Exceptions basis, one figure for a
           // comp wherever it is shown. VAT on a sale that never happened was never revenue.
           g.potentialValue += forgoneMenuValue([i])
@@ -417,7 +426,7 @@ export default function SalesReport() {
     setPaymentsByOrder(paymentsNext)
     setCompsByOrder(compsByOrderNext)
     setRangeLoading(false)
-  }, [clientId, fromIso, toIso, scopedFrom, rangeReq])
+  }, [clientId, fromIso, toIso, scopedFrom, rangeReq, inventory, customizationEnabled])
 
   useEffect(() => { loadRange() }, [loadRange])
 

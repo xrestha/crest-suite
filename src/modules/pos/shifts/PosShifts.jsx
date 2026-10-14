@@ -16,7 +16,8 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { posFoodCosts } from '../orders/posRecipeBook'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../orders/posRecipeBook'
+import { outletHasIms } from '../orders/posImsWaiting'
 import { forgoneMenuValue } from '../reports/salesReportMath'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
@@ -209,8 +210,10 @@ function throwIfFailed(results) {
 // Shared X/Z-report totals from a shift's closed orders — used for the live Current Shift view
 // and for expanding a past shift in History. Voided Value is the voided bills' menu value before VAT
 // (forgoneMenuValue, S814 4d), the Sales Exceptions basis; Comp Food Cost is the till's own recipe
-// book (posFoodCosts), as on the Complimentary Slip.
-async function loadShiftReport(clientId, shiftId) {
+// book with each dish's choices (posLineCosts), as on the Complimentary Slip. `compCost` says how:
+// { inventory } the outlet has Crest IMS, { customization } Crest Customization is on. A shift already
+// closed keeps the figure frozen in its closing_report; only a live read or a close uses this.
+async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // Both reads are filtered on the shift alone — neither needs the other's result — so they go
   // together. This is the report the drawer is counted against and it is rebuilt every time a
   // history row is expanded, so a needless round trip here is paid over and over.
@@ -276,8 +279,9 @@ async function loadShiftReport(clientId, shiftId) {
   const secondWave = await Promise.all([
     fetchAllRowsChunked(splitOrderIds,
       ids => scopedFromRaw('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
+    // With each line's choices' stock lines, which a Complimentary bill's food cost includes.
     fetchAllRowsChunked(needItems.map(o => o.id),
-      ids => scopedFromRaw('pos_order_items', clientId, 'order_id, qty, unit_price, vat_rate, recipe_id').in('order_id', ids).order('id')),
+      ids => scopedFromRaw('pos_order_items', clientId, `order_id, qty, unit_price, vat_rate, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).order('id')),
   ])
   throwIfFailed(secondWave)
   const [{ data: payments }, { data: items }] = secondWave
@@ -286,12 +290,18 @@ async function loadShiftReport(clientId, shiftId) {
 
   // One lookup per order id instead of a .find() down `needItems` per item row.
   const closeTypeById = new Map(needItems.map(o => [o.id, o.close_type]))
-  const compRecipeIds = [...new Set((items || [])
-    .filter(i => closeTypeById.get(i.order_id) === 'writeoff')
-    .map(i => i.recipe_id).filter(Boolean))]
+  const compLines = (items || []).filter(i => closeTypeById.get(i.order_id) === 'writeoff')
   // The till's own read (S809 IMS-HANDOFF-3): a supervisor closing the shift on a PIN cannot read
   // `items`, so the Z-report froze each Complimentary bill at its typed Cost Price (usually NPR 0).
-  const costMap = compRecipeIds.length > 0 ? await posFoodCosts(supabase, clientId, compRecipeIds) : {}
+  // Each dish is costed with its choices, as on its Complimentary Slip.
+  const inventory = compCost.inventory !== false
+  const costing = compLines.length > 0
+    ? await posLineCosts(supabase, clientId, compLines, {
+        inventory,
+        buildYourOwn: inventory && compCost.customization
+          ? buildYourOwnAmong((t, sel) => scopedFromRaw(t, clientId, sel), compLines.map(i => i.recipe_id)) : [],
+      })
+    : null
 
   const byMethod = Object.fromEntries(PAY_METHODS.map(m => [m, 0]))
   let discountTotal = 0, voidTotal = 0, compTotal = 0, salesTotal = 0, orderCount = 0
@@ -314,7 +324,7 @@ async function loadShiftReport(clientId, shiftId) {
       voidTotal += forgoneMenuValue(itemsByOrder[o.id])
     } else if (o.close_type === 'writeoff') {
       orderCount++; compCount++
-      compTotal += (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)
+      compTotal += (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * costing.costOf(i), 0)
     }
   }
 
@@ -438,8 +448,11 @@ function ReportBody({ report, opening, closing, variance }) {
 }
 
 export default function PosShifts() {
-  const { clientId, profile, hasPosAccess } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, imsEnabled, clientModules, customizationEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  // How the Z-report costs a Complimentary bill (loadShiftReport): with its choices where the outlet has
+  // Crest IMS, a build-your-own dish by its build while Customization is on.
+  const compCost = { inventory: outletHasIms({ isAdmin, imsEnabled, clientModules }), customization: customizationEnabled }
 
   const [mainTab, setMainTab] = useState('current') // 'current' | 'history'
 
@@ -600,7 +613,7 @@ export default function PosShifts() {
     let report = null
     let failure = null
     try {
-      report = await withTimeout(loadShiftReport(clientId, shiftId), SHIFT_REPORT_MS, 'Reading the shift totals')
+      report = await withTimeout(loadShiftReport(clientId, shiftId, compCost), SHIFT_REPORT_MS, 'Reading the shift totals')
     } catch (err) {
       failure = err
     }
@@ -655,7 +668,7 @@ export default function PosShifts() {
     // back to a live recompute.
     try {
       const report = shift.closing_report
-        || await withTimeout(loadShiftReport(clientId, shift.id), SHIFT_REPORT_MS, 'Reading the closing report')
+        || await withTimeout(loadShiftReport(clientId, shift.id, compCost), SHIFT_REPORT_MS, 'Reading the closing report')
       setReportsMap(m => ({ ...m, [shift.id]: report }))
     } catch (err) {
       // S754: the row shows the failure, not a Z-report of zeros. Not cached, so re-expanding retries.
@@ -819,7 +832,7 @@ export default function PosShifts() {
     // this shift's figures. This is the snapshot that gets frozen and signed.
     let freshReport
     try {
-      freshReport = await withTimeout(loadShiftReport(clientId, openShift.id), SHIFT_REPORT_MS, "Reading this shift's sales")
+      freshReport = await withTimeout(loadShiftReport(clientId, openShift.id, compCost), SHIFT_REPORT_MS, "Reading this shift's sales")
     } catch (err) {
       // S754: this used to freeze a Z-report of zeros into closing_report and print it on the
       // signed slip. The close write has not been attempted, so "nothing was closed" is true.

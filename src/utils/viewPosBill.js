@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom } from '../shared/scopedDb'
 import { buildBillHtml, buildCompSlipHtml } from '../modules/pos/orders/posOrderPrintHtml'
-import { posFoodCosts } from '../modules/pos/orders/posRecipeBook'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../modules/pos/orders/posRecipeBook'
 import { withTimeout, settleWithin } from './withTimeout'
 import { readHscMap, staffNameFor, REPRINT_READ_MS } from '../modules/pos/orders/billReprintData'
 
@@ -53,7 +53,9 @@ export async function viewPosBill(clientId, row) {
   const [{ data: order, error: orderErr }, { data: settings, error: settingsErr }, { data: client, error: clientErr }] = await Promise.all([
     within(scopedFrom('pos_orders', clientId).eq('id', orderId).single(), 'Reading the bill'),
     within(supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(), 'Reading the billing settings'),
-    within(supabase.from('clients').select('name').eq('id', clientId).single(), 'Reading the outlet'),
+    // The module switches too: whether a comp is costed with its choices' stock (the outlet has Crest
+    // IMS) and which dishes are costed by their build (Customization on) — as AuthContext reads them.
+    within(supabase.from('clients').select('name, ims_enabled, pos_enabled, customization_enabled').eq('id', clientId).single(), 'Reading the outlet'),
   ])
   // The settings decide the document itself — TAX INVOICE or BILL, the seller's VAT/PAN number, the
   // prefix, the address — so a failed read of them is a failed read of the bill (S809 2a, CHECKOUT-9).
@@ -73,7 +75,8 @@ export async function viewPosBill(clientId, row) {
   const outletName = client?.name || ''
   const tableName = order.table_name || 'Takeaway'
 
-  const { data: allItems, error: itemsErr } = await within(scopedFrom('pos_order_items', clientId).eq('order_id', orderId), 'Reading the bill lines')
+  // With each line's choices' stock lines, which a Complimentary Slip is costed from (posLineCosts).
+  const { data: allItems, error: itemsErr } = await within(scopedFrom('pos_order_items', clientId, `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderId), 'Reading the bill lines')
   if (itemsErr) { writeLoadFailure(w); return }
   const items = allItems || []
 
@@ -94,37 +97,41 @@ export async function viewPosBill(clientId, row) {
   // costed every comp at its typed Cost Price, usually NPR 0. The book answers a POS Supervisor or
   // above, the Owner and the operator; a Staff login (Parking's View bill) is refused and told so.
   // It THROWS on a failed read, which used to leave the tab on "Loading…" with an unhandled
-  // rejection. A slip valued at zero would be a wrong document.
-  const slipCosts = async recipeIds => {
-    if (recipeIds.length === 0) return {}
+  // rejection. A slip valued at zero would be a wrong document. Each dish is costed with its choices
+  // (posLineCosts), as the till's own slip is: the client's switches, not the viewer's, decide how.
+  const inventory = client?.ims_enabled !== false
+  const customization = !!client?.pos_enabled && !!client?.customization_enabled
+  const slipCosts = async lines => {
     try {
-      return await withTimeout(posFoodCosts(supabase, clientId, recipeIds), REPRINT_READ_MS, 'Reading food costs')
+      const buildYourOwn = inventory && customization
+        ? buildYourOwnAmong((t, sel) => scopedFrom(t, clientId, sel), lines.map(i => i.recipe_id)) : []
+      return await withTimeout(posLineCosts(supabase, clientId, lines, { inventory, buildYourOwn }), REPRINT_READ_MS, 'Reading food costs')
     } catch (e) {
       console.error('viewPosBill: food costs could not be read:', e)
       return e?.hint === 'rank_required' ? 'rank' : null
     }
   }
-  const costsMissing = costMap => {
-    if (costMap === 'rank') { writeCostsRefused(w); return true }
-    if (!costMap) { writeLoadFailure(w); return true }
+  const costsMissing = costing => {
+    if (costing === 'rank') { writeCostsRefused(w); return true }
+    if (!costing) { writeLoadFailure(w); return true }
     return false
   }
 
   let html
   if (row.isItemComp) {
     const compedItems = compedItemsForStaff
-    const costMap = await slipCosts(compedItems.map(i => i.recipe_id).filter(Boolean))
-    if (costsMissing(costMap)) return
+    const costing = await slipCosts(compedItems)
+    if (costsMissing(costing)) return
     html = buildCompSlipHtml({
       order: { ...order, invoice_no: row.compNo, close_reason: compedItems[0]?.comp_reason || '', bill_remarks: '' },
-      items: compedItems, costMap, copyLabel: 'VIEW ONLY',
+      items: compedItems, plateCostOf: costing.costOf, copyLabel: 'VIEW ONLY',
       outletName, tableName, authorizedBy: staffName,
     })
   } else if (order.close_type === 'writeoff') {
-    const costMap = await slipCosts(items.map(i => i.recipe_id).filter(Boolean))
-    if (costsMissing(costMap)) return
+    const costing = await slipCosts(items)
+    if (costsMissing(costing)) return
     html = buildCompSlipHtml({
-      order, items, costMap, copyLabel: 'VIEW ONLY',
+      order, items, plateCostOf: costing.costOf, copyLabel: 'VIEW ONLY',
       outletName, tableName, authorizedBy: staffName,
     })
   } else {

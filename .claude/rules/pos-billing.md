@@ -84,10 +84,10 @@ post.
 **`items` is fenced from a POS PIN login, and a fenced read is `[]`, not an error (S809 2f).** On a
 PIN every yield read 100% and every comp its typed Cost Price. The till's comp costs now read
 through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
-the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`), which feed `recipeCost.js`' `{ book }` walk. Its one SQL copy is the server's post, `pos_bill_stock_lines` (S830, owner Q30 a): a change to either lands in both, with `serverPostTwin.test.js` and a migration probe asserting the same fixture. A till or shift
-screen that costs uses `posFoodCosts`. Sales Report's and Sales Exceptions'
-comp cost switched in S814 (`posFoodCosts`), `viewPosBill`'s comp slips and the Customization report's
-Margin tab (`posDeltaCosting`) in S828. A Staff PIN opening a comp slip is told only a Supervisor+ sees
+the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`), which feed `recipeCost.js`' `{ book }` walk. Its one SQL copy is the server's post, `pos_bill_stock_lines` (S830, owner Q30 a): a change to either lands in both, with `serverPostTwin.test.js` and a migration probe asserting the same fixture. Every comp
+figure costs through `posLineCosts` (S838): recipe cost plus the STORED line's choices
+(`LINE_CHOICE_STOCK`, never the cart); a build-your-own dish is never its typed Cost Price. The
+Customization report's Margin tab uses `posDeltaCosting` (S828). A Staff PIN opening a comp slip is told only a Supervisor+ sees
 food costs; an IMS login reaches neither (`no_ims_staff` hides till bills).
 
 **`sales_entries` is period-scoped, not client-scoped**, so it is deliberately absent from

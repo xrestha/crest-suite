@@ -15,7 +15,7 @@ import QRCode from 'qrcode'
 import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap, carryOverFrom, stillInPlay } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
-import { posFoodCosts } from './posRecipeBook'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
 import { noteImsMiss, pruneImsMisses, outletHasIms } from './posImsWaiting'
 import { buildDynamicQr } from '../../../utils/emvQr'
@@ -85,7 +85,7 @@ import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, storedLinesContainPayload, lineKeyOf, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
+  storedLinesMatchPayload, storedLinesContainPayload, lineKeyOf, lineOptionIds, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
   keptLinesToRestore, mergeRecoveredLines,
@@ -380,7 +380,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [billRemarks,  setBillRemarks]  = useState('')
   const [closing,     setClosing]     = useState(false)
   const [closeMsg,    setCloseMsg]    = useState('')
-  const [compCostMap, setCompCostMap] = useState({}) // { recipeId: foodCostPerPortion } — fetched when Complimentary tab opens
+  // { costOf(line) → food cost per plate, choices included; unsaved(line) } from loadCompCosts, read when
+  // the payment window opens; null until then (posLineCosts).
+  const [compCosting, setCompCosting] = useState(null)
   const [compCostFailed, setCompCostFailed] = useState(false) // S834: that read failed, so no comp figure is shown
   // Item-level comp (Pay tab, Supervisor+) — { [recipe_id]: qty comped }, excluded from this bill
   // and printed on a separate mini Complimentary Slip instead, while the rest (the remaining qty
@@ -927,7 +929,12 @@ export default function PosOrders({ billingStation = false } = {}) {
   const subEx    = orderItems.reduce((s, i) => s + i.qty * i.unit_price, 0)
   const vatAmt   = vatReg ? orderItems.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
   const total    = Math.round(subEx + vatAmt) // rounded to the nearest rupee — matches the bill's Net Amount/Round Off line
-  const compTotal = orderItems.reduce((s, i) => s + i.qty * (compCostMap[i.recipe_id] || 0), 0)
+  const compPlateCost = i => (compCosting ? compCosting.costOf(i) : 0)
+  const compTotal = orderItems.reduce((s, i) => s + i.qty * compPlateCost(i), 0)
+  // A dish whose choices were picked after the last save: their stock lines are written by the server
+  // when it saves the line, so they are not in the figure on screen. The close saves first, and the
+  // slip is costed from the stored lines, so the printed figure has them.
+  const compChoicesUnsaved = !!compCosting && orderItems.some(i => compCosting.unsaved(i))
 
   // Item-level comp — only ever populated in the Pay tab, so `subEx`/`vatAmt`/`total`/`compTotal`
   // above (used by the Void and whole-order Complimentary tabs) stay exactly as they were: full
@@ -943,7 +950,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       return compQty > 0 ? { ...i, qty: i.qty - compQty } : i
     })
     .filter(i => i.qty > 0)
-  const itemCompFoodCost  = compedOrderItems.reduce((s, i) => s + i.qty * (compCostMap[i.recipe_id] || 0), 0)
+  const itemCompFoodCost  = compedOrderItems.reduce((s, i) => s + i.qty * compPlateCost(i), 0)
+  const itemCompChoicesUnsaved = !!compCosting && compedOrderItems.some(i => compCosting.unsaved(i))
   const itemCompCount     = compedOrderItems.length
   const hasItemComp       = itemCompCount > 0
   // Every item comped out — nothing left to actually bill. Confirm Payment gets blocked for this
@@ -1266,7 +1274,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         cashierName: printedStaffName(profile, isAdmin),
       })
     : billingTab === 'writeoff' ? buildCompSlipHtml({
-        order: previewDraftOrder, items: orderItems, costMap: compCostMap, copyLabel: 'PREVIEW',
+        order: previewDraftOrder, items: orderItems, plateCostOf: compPlateCost, copyLabel: 'PREVIEW',
         outletName,
         tableName: screenTableName,
         authorizedBy: printedStaffName(profile, isAdmin),
@@ -4381,7 +4389,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
     setCloseMsg('')
-    setCompCostMap({}); setCompCostFailed(false)
+    setCompCosting(null); setCompCostFailed(false)
     setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
@@ -4406,31 +4414,58 @@ export default function PosOrders({ billingStation = false } = {}) {
       // nothing saying so.
       if (hscErr) warnWrite('HSC codes could not be loaded, so the next bill will print without them.', hscErr)
       setHscMap(Object.fromEntries((data || []).map(r => [r.id, r.hsc_code])))
-      // Food-cost map, needed up front for item-level comp in the Pay tab (not just the
+      // Food costs, needed up front for item-level comp in the Pay tab (not just the
       // Complimentary tab, which used to be the only consumer — see openCompTab). Through the till's
       // own read (S809 IMS-HANDOFF-3): a PIN login cannot read `items`, so its rates came back 0.
-      await loadCompCosts(recipeIds)
+      await loadCompCosts()
     }
   }
 
   async function openCompTab() {
     setBillingTab('writeoff'); setCloseMsg('')
-    const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
-    await loadCompCosts(recipeIds)
+    await loadCompCosts()
+  }
+
+  // How the till costs a comp (posLineCosts): with its choices where the outlet has Crest IMS, and a
+  // build-your-own dish by its build while Customization is on. The mark is read with the lines, not
+  // taken from the menu's option catalog: a reprint from Recent Bills can run before any menu load.
+  function compCostOpts(lines) {
+    return {
+      inventory: tillPostsToIms,
+      buildYourOwn: tillPostsToIms && customizationEnabled ? buildYourOwnAmong(scopedFrom, lines.map(i => i.recipe_id)) : [],
+    }
   }
 
   // S834 (S809.4, 2f): a failed food-cost read left every comp figure at NPR 0 with nothing saying so
   // (the read threw past both callers). Bounded; a failure shows "—" and a line where the figure goes,
   // never a made-up zero. The Complimentary Slip reads its own costs (slipCosts) and refuses to print.
-  async function loadCompCosts(recipeIds) {
+  async function loadCompCosts() {
     try {
-      const map = await withTimeout(posFoodCosts(supabase, clientId, recipeIds), CLOSE_STEP_MS, 'Reading food costs')
-      setCompCostMap(map)
+      const costing = await withTimeout(readCompCosting(orderId, orderItems), CLOSE_STEP_MS, 'Reading food costs')
+      setCompCosting(costing)
       setCompCostFailed(false)
     } catch (e) {
       console.error('food cost read failed, so no comp figure is shown:', e)
-      setCompCostMap({})
+      setCompCosting(null)
       setCompCostFailed(true)
+    }
+  }
+
+  // The cart's lines costed from the bill as STORED: a dish's choices' stock lines are the server's
+  // snapshot of the line, which a line added on this screen does not carry even once saved (the save
+  // moves only its price fields back). A cart line is matched to its stored line by lineKeyOf, which is
+  // unique on an open bill; a line not saved yet is costed from the cart, and unsaved() names it.
+  async function readCompCosting(oid, cart) {
+    const { data, error } = oid
+      ? await scopedFrom('pos_order_items', `recipe_id, selection_key, ${LINE_CHOICE_STOCK}`).eq('order_id', oid)
+      : { data: [], error: null }
+    if (error) throw error
+    const stored = new Map((data || []).map(r => [lineKeyOf(r), r]))
+    const lines = [...stored.values(), ...cart.filter(i => !stored.has(lineKeyOf(i)))]
+    const costing = await posLineCosts(supabase, clientId, lines, compCostOpts(lines))
+    return {
+      costOf: line => costing.costOf(stored.get(lineKeyOf(line)) || line),
+      unsaved: line => tillPostsToIms && lineOptionIds(line).length > 0 && !stored.has(lineKeyOf(line)),
     }
   }
 
@@ -4795,7 +4830,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // is null when its read failed — never the cart in its place.
   async function readStoredBill(row) {
     const [itemsRes, legsRes] = await Promise.all([
-      bounded(scopedFrom('pos_order_items', '*').eq('order_id', row.id), 'Reading the bill'),
+      // With each line's choices' stock lines, which a Complimentary Slip is costed from.
+      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_STOCK}`).eq('order_id', row.id), 'Reading the bill'),
       row.payment_method === 'Split'
         ? bounded(scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', row.id), 'Reading the payments')
         : Promise.resolve({ data: [], error: null }),
@@ -5064,7 +5100,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         }
         compNo = newCompNo
         const { data, error: compRowsErr } = await bounded(
-          scopedFrom('pos_order_items', '*').eq('order_id', orderId).eq('comp_no', compNo), 'Reading the comped items')
+          scopedFrom('pos_order_items', `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderId).eq('comp_no', compNo), 'Reading the comped items')
         // The comps are already applied by the RPC above, so this cannot abort the close. But an
         // empty read prints a Complimentary Slip with no lines on it, and a blank NC document is
         // worse than none — the number is assigned, so it can be reprinted from Recent Bills.
@@ -5384,7 +5420,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     // be read back — never the cart in their place. In the background it does not print (see above).
     const canPrint = !background && !(stored && !stored.items)
     if (canPrint && closeType === 'paid') printed.push(await printBill(updated, stored ? stored.items.filter(i => !i.comped) : payableOrderItems))
-    if (canPrint && closeType === 'writeoff') printed.push(await printCompSlip(updated, stored ? stored.items : orderItems))
+    // A Complimentary Slip prints the bill's STORED lines: a dish's choices' stock lines, which its food
+    // cost includes, are the server's snapshot and never the cart's. Read back here on an ordinary close;
+    // a failed read prints nothing rather than a slip costed without them.
+    if (canPrint && closeType === 'writeoff') {
+      const lines = stored ? stored.items : (await readStoredBill(updated)).items
+      if (lines) printed.push(await printCompSlip(updated, lines))
+      else warnWrite(`The Complimentary Slip for ${where} was not printed — its items could not be read back. Reprint it from Recent Bills.`)
+    }
     // compedItemRows is null only when the read above failed — skip rather than print a slip
     // with no lines; the operator has already been told to reprint it.
     if (canPrint && closeType === 'paid' && compNo != null && compedItemRows) printed.push(await printItemCompSlip(updated, compedItemRows))
@@ -5617,9 +5660,10 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   // A Complimentary Slip is valued at food cost, so a slip printed without its costs would be a wrong
   // document, not a partial one. Bounded (S776); null means not printed, and the floor banner says so.
-  async function slipCosts(recipeIds) {
+  // `lines` are the bill's STORED lines (with LINE_CHOICE_STOCK), so each dish is costed with its choices.
+  async function slipCosts(lines) {
     try {
-      return await withTimeout(posFoodCosts(supabase, clientId, recipeIds), CLOSE_STEP_MS, 'Reading food costs')
+      return await withTimeout(posLineCosts(supabase, clientId, lines, compCostOpts(lines)), CLOSE_STEP_MS, 'Reading food costs')
     } catch (e) {
       warnWrite('A Complimentary Slip was not printed — its food cost could not be read in time. Reprint it from Recent Bills.', e)
       return null
@@ -5640,11 +5684,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     void bounded(scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id), 'Counting the print').then(({ error: pcErr }) => {
       if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
     })
-    const recipeIds = items.map(i => i.recipe_id).filter(Boolean)
-    const costMap = await slipCosts(recipeIds)
-    if (!costMap) return null
+    const costing = await slipCosts(items)
+    if (!costing) return null
     return printHtml(buildCompSlipHtml({
-      order, items, costMap, copyLabel: COPY_LABEL(newCount),
+      order, items, plateCostOf: costing.costOf, copyLabel: COPY_LABEL(newCount),
       outletName,
       tableName: order.table_name || activeTable?.name || 'Takeaway', // S836: stored first
       // A reprint names who comped the bill, not who reprinted it (S809 CHECKOUT-11).
@@ -5664,12 +5707,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     void bounded(scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id), 'Counting the print').then(({ error: pcErr }) => {
       if (pcErr) warnWrite('A complimentary-slip reprint count did not save — the next reprint will carry the same copy number as this one.', pcErr)
     })
-    const recipeIds = compedItems.map(i => i.recipe_id).filter(Boolean)
-    const costMap = await slipCosts(recipeIds)
-    if (!costMap) return null
+    const costing = await slipCosts(compedItems)
+    if (!costing) return null
     return printHtml(buildCompSlipHtml({
       order: { ...order, invoice_no: compedItems[0]?.comp_no ?? null, close_reason: compedItems[0]?.comp_reason || itemCompReason, bill_remarks: '' },
-      items: compedItems, costMap, copyLabel: COPY_LABEL(newCount),
+      items: compedItems, plateCostOf: costing.costOf, copyLabel: COPY_LABEL(newCount),
       outletName,
       tableName: order.table_name || activeTable?.name || 'Takeaway', // S836: stored first
       authorizedBy: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
@@ -5685,7 +5727,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // not on anything the first returns, so serialising them just made the counter wait twice.
     const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
       bounded(scopedFrom('pos_orders').eq('id', orderRow.id).single(), 'Reading the bill'),
-      bounded(scopedFrom('pos_order_items', '*').eq('order_id', orderRow.id).eq('comped', true), 'Reading the bill lines'),
+      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderRow.id).eq('comped', true), 'Reading the bill lines'),
     ])
     // Both errors used to be dropped, so a failed read printed nothing and said nothing (S809.4).
     if (orderErr || itemsErr || !order || !items || items.length === 0) {
@@ -5768,7 +5810,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // two with a customer standing at the counter.
     const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
       bounded(scopedFrom('pos_orders').eq('id', orderRow.id).single(), 'Reading the bill'),
-      bounded(scopedFrom('pos_order_items').eq('order_id', orderRow.id), 'Reading the bill lines'),
+      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderRow.id), 'Reading the bill lines'),
     ])
     // `if (!order) return` alone let a failed ITEMS read straight through: items came back null,
     // `|| []` turned it into an empty array, and the reprint went out as a Tax Invoice carrying
@@ -6903,7 +6945,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               </h3>
               <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', textAlign: 'right' }}>
                 {billingTab === 'writeoff' && compCostFailed ? '—' : fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
-                {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>{compCostFailed ? '(food cost could not be read — open the tab again to retry)' : '(food cost, not menu price)'}</span>}
+                {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>{compCostFailed ? '(food cost could not be read — open the tab again to retry)' : compChoicesUnsaved ? '(food cost, not menu price; the slip adds the choices of a dish not saved yet)' : '(food cost, not menu price)'}</span>}
                 {billingTab === 'pay' && discountAmt > 0 && (
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
                     ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
@@ -7123,6 +7165,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   <div>
                     <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
                       {compCostFailed ? 'Food cost could not be read' : `${fmtNpr(itemCompFoodCost)} in food cost`} across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
+                      {!compCostFailed && itemCompChoicesUnsaved && ' The slip adds the choices of a dish not saved yet.'}
                     </p>
                     <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-comp-reason">Comp Reason</label>
                     <select id="pos-orders-comp-reason" className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>

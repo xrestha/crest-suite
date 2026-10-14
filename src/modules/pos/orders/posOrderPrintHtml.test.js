@@ -1,6 +1,6 @@
 // S809 CHECKOUT-13: a PAN bill's own figures add up to its Net Amount (Round Off prints on every
 // bill), and a Credit bill says what is owed instead of printing a Tender as if the guest had paid.
-import { buildBillHtml, billOptionRow, buildVoidSlipHtml, buildMoveSlipHtml, buildShareSlipsHtml } from './posOrderPrintHtml'
+import { buildBillHtml, billOptionRow, buildVoidSlipHtml, buildMoveSlipHtml, buildShareSlipsHtml, buildCompSlipHtml } from './posOrderPrintHtml'
 import { equalShares } from './shareSplit'
 
 const SETTINGS = { is_vat_registered: false, invoice_prefix: '', vat_number: '123456789', property_address: '', property_phone: '' }
@@ -240,5 +240,51 @@ describe('buildShareSlipsHtml', () => {
 
   test('dates the slips from when the split was printed, in Nepal', () => {
     expect(count(slips, '08:05 PM')).toBe(3)
+  })
+})
+
+// A Complimentary Slip values each line at its PLATE cost × qty: the recipe plus that line's choices
+// (posRecipeBook.posLineCosts). It used to read costMap[recipe_id], so "Momo + extra cheese" printed
+// at plain momo's cost and a build-your-own bowl at its typed Cost Price.
+describe('buildCompSlipHtml — each line at its own plate cost', () => {
+  const PLAIN = { recipe_id: 'momo', name: 'Chicken Momo', qty: 2 }
+  const CHEESE = { recipe_id: 'momo', name: 'Chicken Momo', qty: 1, option_summary: 'Extra cheese', id: 'line-cheese' }
+  const BOWL = { recipe_id: 'bowl', name: 'Acai Bowl', qty: 1, option_summary: 'Large · Granola · Banana', id: 'line-bowl' }
+  // Per plate: momo 62.42; the cheese line 62.42 + 75 of cheese; the bowl 0 fixed + 118.50 of toppings.
+  const PLATE = { momo: 62.42, 'line-cheese': 137.42, 'line-bowl': 118.5 }
+  const plateCostOf = i => PLATE[i.id] ?? PLATE[i.recipe_id]
+  const slip = items => buildCompSlipHtml({
+    order: { invoice_no: 4, order_no: 51, closed_at: '2026-10-10T08:00:00Z', close_reason: 'Regular guest' },
+    items, plateCostOf, copyLabel: 'ORIGINAL', outletName: 'Bloom Cafe', tableName: 'Table 2', authorizedBy: 'Sita',
+  })
+  // Each line's Cost cell: the row's last two cells are its qty and its cost.
+  const cells = html => [...html.matchAll(/<td>\d+<\/td><td>([^<]*)<\/td><\/tr>/g)].map(m => m[1])
+
+  test('two lines of one dish print two figures: the one with a choice carries its stock', () => {
+    const html = slip([PLAIN, CHEESE])
+    expect(cells(html)).toEqual(['124.84', '137.42'])
+    expect(rowValue(html, 'Total Qty')).toBe('3')
+    expect(html).toContain('<div class="row tot"><span>Total Food Cost:</span><span>NPR 262.26</span></div>')
+    expect(html).toContain('<div style="font-size:10px">Extra cheese</div>')
+  })
+
+  test('a build-your-own bowl prints what its build cost, not a typed Cost Price', () => {
+    const html = slip([BOWL])
+    expect(cells(html)).toEqual(['118.50'])
+    expect(html).toContain('<span>Total Food Cost:</span><span>NPR 118.50</span>')
+  })
+
+  test('a line with no known cost prints 0.00, as before, never NaN', () => {
+    const html = buildCompSlipHtml({ order: { invoice_no: 5 }, items: [{ recipe_id: 'gone', name: 'Old dish', qty: 1 }], plateCostOf: () => undefined, tableName: 'T1' })
+    expect(cells(html)).toEqual(['0.00'])
+    expect(html).toContain('<span>Total Food Cost:</span><span>NPR 0.00</span>')
+    expect(html).not.toContain('NaN')
+  })
+
+  test('the slip keeps its number, heading and layout', () => {
+    const html = slip([PLAIN])
+    expect(html).toContain('COMPLIMENTARY SLIP')
+    expect(html).toContain('<span>No:</span><span class="b">NC-04</span>')
+    expect(html).toContain('<thead><tr><th>Item</th><th>Qty</th><th>Cost</th></tr></thead>')
   })
 })

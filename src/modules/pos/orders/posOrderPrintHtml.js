@@ -259,7 +259,10 @@ ${list.map((amount, i) => `<div class="slip">
 // Invoice or PAN Bill: no VAT/PAN, own NC-prefixed sequence (separate from TI/PB), and line
 // amounts are valued at food cost (not menu price) so the P&L impact isn't distorted by
 // retail pricing. Standard practice per restaurant accounting for comps.
-export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName, tableName, authorizedBy }) {
+// `plateCostOf(line)` is one plate's food cost: the dish's recipe cost plus that line's choices
+// (posRecipeBook.posLineCosts), so "Momo + extra cheese" is costed with its cheese and a
+// build-your-own bowl with its toppings. It used to be costMap[recipe_id], the recipe alone.
+export function buildCompSlipHtml({ order, items, plateCostOf, copyLabel, outletName, tableName, authorizedBy }) {
   const ncNo      = order.invoice_no != null ? `NC-${String(order.invoice_no).padStart(2, '0')}` : 'NC-(on confirm)'
   // The slip's OWN moment, not the moment it was reprinted — see buildBillHtml above. The
   // fallback is load-bearing, not padding: the in-modal preview renders before the order is
@@ -271,7 +274,8 @@ export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
-  const totalCost = items.reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)
+  const lineCost  = i => i.qty * (Number(plateCostOf?.(i)) || 0)
+  const totalCost = items.reduce((s, i) => s + lineCost(i), 0)
 
   return `<!DOCTYPE html>
 <html><head><title>Complimentary Slip</title>
@@ -307,7 +311,7 @@ export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName
   <table>
     <thead><tr><th>Item</th><th>Qty</th><th>Cost</th></tr></thead>
     <tbody>
-      ${items.map(i => `<tr><td>${esc(i.name)}${i.option_summary ? `<div style="font-size:10px">${esc(i.option_summary)}</div>` : ''}</td><td>${i.qty}</td><td>${npr2(i.qty * (costMap[i.recipe_id] || 0))}</td></tr>`).join('')}
+      ${items.map(i => `<tr><td>${esc(i.name)}${i.option_summary ? `<div style="font-size:10px">${esc(i.option_summary)}</div>` : ''}</td><td>${i.qty}</td><td>${npr2(lineCost(i))}</td></tr>`).join('')}
     </tbody>
   </table>
   <hr>

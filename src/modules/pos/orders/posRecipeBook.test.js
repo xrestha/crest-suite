@@ -1,4 +1,7 @@
-import { bookFromPosRead, deltaIdsOf, loadPosRecipeBook, posDeltaCosting, posFoodCosts } from './posRecipeBook'
+import {
+  bookFromPosRead, deltaIdsOf, loadPosRecipeBook, posDeltaCosting, posFoodCosts,
+  posLineCosts, lineChoiceDeltas, buildYourOwnAmong,
+} from './posRecipeBook'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 
@@ -156,5 +159,137 @@ describe('posFoodCosts / loadPosRecipeBook', () => {
   it('deltaIdsOf lists each item and sub-recipe once', () => {
     expect(deltaIdsOf([[{ item_id: CHEESE, qty: 1 }, { sub_recipe_id: SAUCE, qty: 2 }], [{ item_id: CHEESE, qty: 3 }], null]))
       .toEqual({ itemIds: [CHEESE], subRecipeIds: [SAUCE] })
+  })
+})
+
+// A comped dish's food cost WITH its choices (posLineCosts). The comp figures were recipe cost × qty,
+// keyed by recipe, so a customized plate cost what the plain dish costs and a build-your-own bowl with
+// no ingredient rows cost its typed Cost Price, while Inventory took the choices' stock off.
+describe('posLineCosts: a comped line is its recipe plus its choices', () => {
+  const BOWL = '00000000-0000-0000-0000-00000000d004'   // build-your-own: no ingredient rows, typed Cost Price 25
+  const READ_BYO = { items: READ.items, recipes: [...READ.recipes, { id: BOWL, yield_qty: 1, cost_price: 25, recipe_ingredients: [] }] }
+  const MOMO_COST = (100 / 0.85) * 0.5 + 16 * 0.2 + 4 * 0.1          // NPR 62.42, as posFoodCosts gives it
+  const CHEESE_30 = 30 / 0.8 * 2                                     // 37.5 g at 80% yield, NPR 2 a gram: NPR 75
+  const SAUCE_20 = 16 * 0.2 + 4 * 0.1                                // 20 g of sauce: NPR 3.60
+  // As a stored line reads with LINE_CHOICE_STOCK: one snapshot row per choice, its stock lines on it.
+  const snap = (...deltas) => deltas.map(d => ({ ingredient_deltas: d }))
+  const CHEESE_MOMO = { recipe_id: MOMO, pos_order_item_options: snap([{ item_id: CHEESE, qty: 30 }], [{ sub_recipe_id: SAUCE, qty: 20 }]) }
+  const PLAIN_MOMO = { recipe_id: MOMO, pos_order_item_options: [] }
+  const COKE_LINE = { recipe_id: COKE }
+  const bowl = deltas => ({ recipe_id: BOWL, pos_order_item_options: deltas ? snap(deltas) : [] })
+
+  it('reads the book once, for the dishes and the choices\' sub-recipes and items, and prices each line', async () => {
+    const sb = rpcStub()
+    const { costOf } = await posLineCosts(sb, CLIENT, [CHEESE_MOMO, PLAIN_MOMO, COKE_LINE])
+    expect(sb.calls).toEqual([['pos_recipe_book', { p_client_id: CLIENT, p_recipe_ids: [MOMO, COKE, SAUCE], p_item_ids: [CHEESE] }]])
+    expect(costOf(CHEESE_MOMO)).toBeCloseTo(MOMO_COST + CHEESE_30 + SAUCE_20, 9)
+    expect(costOf(PLAIN_MOMO)).toBeCloseTo(MOMO_COST, 9)
+    expect(costOf(COKE_LINE)).toBe(40)
+  })
+
+  it('a plain line costs exactly what posFoodCosts gives it', async () => {
+    const costs = await posFoodCosts(rpcStub(), CLIENT, [MOMO, COKE])
+    const { costOf } = await posLineCosts(rpcStub(), CLIENT, [PLAIN_MOMO, COKE_LINE])
+    expect(costOf(PLAIN_MOMO)).toBe(costs[MOMO])
+    expect(costOf(COKE_LINE)).toBe(costs[COKE])
+  })
+
+  it('a choice that takes stock OFF the plate makes it cheaper; nothing is clamped', async () => {
+    const half = { recipe_id: MOMO, pos_order_item_options: snap([{ item_id: CHEESE, qty: -8 }]) }
+    const { costOf } = await posLineCosts(rpcStub(), CLIENT, [half])
+    expect(costOf(half)).toBeCloseTo(MOMO_COST - 8 / 0.8 * 2, 9)
+  })
+
+  it('a build-your-own bowl is its fixed part plus its choices: its typed Cost Price is set aside', async () => {
+    const sb = rpcStub({ data: READ_BYO, error: null })
+    const built = bowl([{ item_id: CHEESE, qty: 30 }])
+    const { costOf } = await posLineCosts(sb, CLIENT, [built, bowl(null)], { buildYourOwn: [BOWL] })
+    expect(costOf(built)).toBeCloseTo(CHEESE_30, 9)   // 0 fixed + 75, never 25 + 75
+    expect(costOf(bowl(null))).toBe(0)
+  })
+
+  it('the same bowl NOT marked (Customization off) keeps its typed Cost Price under its choices', async () => {
+    const built = bowl([{ item_id: CHEESE, qty: 30 }])
+    const { costOf } = await posLineCosts(rpcStub({ data: READ_BYO, error: null }), CLIENT, [built])
+    expect(costOf(built)).toBeCloseTo(25 + CHEESE_30, 9)
+  })
+
+  it('takes the marks as a promise, read beside the book', async () => {
+    const built = bowl([{ item_id: CHEESE, qty: 30 }])
+    const { costOf } = await posLineCosts(rpcStub({ data: READ_BYO, error: null }), CLIENT, [built], { buildYourOwn: Promise.resolve([BOWL]) })
+    expect(costOf(built)).toBeCloseTo(CHEESE_30, 9)
+  })
+
+  it('without Inventory a comp is costed exactly as before: the recipe or its typed Cost Price, no choices', async () => {
+    const sb = rpcStub({ data: READ_BYO, error: null })
+    const built = bowl([{ item_id: CHEESE, qty: 30 }])
+    const { costOf } = await posLineCosts(sb, CLIENT, [CHEESE_MOMO, built], { inventory: false, buildYourOwn: [BOWL] })
+    expect(sb.calls).toEqual([['pos_recipe_book', { p_client_id: CLIENT, p_recipe_ids: [MOMO, BOWL], p_item_ids: [] }]])
+    expect(costOf(CHEESE_MOMO)).toBeCloseTo(MOMO_COST, 9)
+    expect(costOf(built)).toBe(25)
+  })
+
+  it('choices picked on the till and never read back carry no stock lines; a reopened line\'s snapshot does', async () => {
+    const cartBuilt = { recipe_id: MOMO, options: [{ option_id: 'o1', option_name: 'Extra cheese', price_delta: 50 }] }
+    const reopened = { recipe_id: MOMO, options: [{ option_id: 'o1', ingredient_deltas: [{ item_id: CHEESE, qty: 30 }] }] }
+    expect(lineChoiceDeltas(cartBuilt)).toBeNull()
+    expect(lineChoiceDeltas(reopened)).toEqual([{ item_id: CHEESE, qty: 30 }])
+    const { costOf } = await posLineCosts(rpcStub(), CLIENT, [cartBuilt, reopened])
+    expect(costOf(cartBuilt)).toBeCloseTo(MOMO_COST, 9)
+    expect(costOf(reopened)).toBeCloseTo(MOMO_COST + CHEESE_30, 9)
+  })
+
+  it('asks nothing for no lines, and a refused read throws, never a slip at NPR 0', async () => {
+    const sb = rpcStub()
+    const none = await posLineCosts(sb, CLIENT, [])
+    expect(none.costOf({ recipe_id: MOMO })).toBe(0)
+    expect(sb.calls).toHaveLength(0)
+    const refused = rpcStub({ data: null, error: { code: '42501', hint: 'rank_required', message: 'pos_recipe_book: refused' } })
+    await expect(posLineCosts(refused, CLIENT, [CHEESE_MOMO])).rejects.toMatchObject({ hint: 'rank_required' })
+  })
+
+  it('a failed mark read fails the costing rather than costing the bowl at its typed Cost Price', async () => {
+    const failing = Promise.reject(Object.assign(new Error('network'), { code: 'x' }))
+    await expect(posLineCosts(rpcStub({ data: READ_BYO, error: null }), CLIENT, [bowl(null)], { buildYourOwn: failing })).rejects.toThrow('network')
+  })
+})
+
+describe('buildYourOwnAmong: which comped dishes are costed by their build', () => {
+  const BOWL = '00000000-0000-0000-0000-00000000d004'
+  function recipesStub(answer) {
+    const calls = []
+    const scopedFrom = (table, cols) => {
+      const q = { table, cols, filters: [] }
+      const b = {
+        eq(c, v) { q.filters.push(['eq', c, v]); return b },
+        in(c, ids) { q.filters.push(['in', c, ids]); return b },
+        order() { return b },
+        range() { calls.push(q); return Promise.resolve(answer) },
+      }
+      return b
+    }
+    return { calls, scopedFrom }
+  }
+
+  it('reads the mark for these dishes only, each once', async () => {
+    const st = recipesStub({ data: [{ id: BOWL }], error: null })
+    expect(await buildYourOwnAmong(st.scopedFrom, [MOMO, BOWL, MOMO, null])).toEqual([BOWL])
+    expect(st.calls).toEqual([{ table: 'recipes', cols: 'id', filters: [['eq', 'is_build_your_own', true], ['in', 'id', [MOMO, BOWL]]] }])
+  })
+
+  it('asks nothing for no dishes', async () => {
+    const st = recipesStub({ data: [], error: null })
+    expect(await buildYourOwnAmong(st.scopedFrom, [])).toEqual([])
+    expect(st.calls).toHaveLength(0)
+  })
+
+  it('a database without the column marks none, as loadOptionCatalog reads it', async () => {
+    const st = recipesStub({ data: null, error: { code: '42703', message: 'column recipes.is_build_your_own does not exist' } })
+    expect(await buildYourOwnAmong(st.scopedFrom, [BOWL])).toEqual([])
+  })
+
+  it('any other failed read throws, keeping its code', async () => {
+    const st = recipesStub({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } })
+    await expect(buildYourOwnAmong(st.scopedFrom, [BOWL])).rejects.toMatchObject({ code: '57014', message: 'canceling statement due to statement timeout' })
   })
 })

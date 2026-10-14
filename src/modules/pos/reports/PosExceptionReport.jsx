@@ -15,7 +15,8 @@ import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
-import { posFoodCosts } from '../orders/posRecipeBook'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../orders/posRecipeBook'
+import { outletHasIms } from '../orders/posImsWaiting'
 import { forgoneMenuValue } from './salesReportMath'
 import { billVatRegistered } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
@@ -41,8 +42,11 @@ function invoiceLabel(order, vatReg, current) {
 }
 
 export default function PosExceptionReport() {
-  const { clientId, hasPosAccess } = useAuth()
+  const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules, customizationEnabled } = useAuth()
   const { scopedFrom } = useScopedDb()
+  // How a comp is costed (posLineCosts): with its choices where the outlet has Crest IMS, a
+  // build-your-own dish by its build while Customization is on — as on its Complimentary Slip.
+  const inventory = outletHasIms({ isAdmin, imsEnabled, clientModules })
 
   const biz = useBizInfo()
   // Nepal's today, not the viewer's (S754) — see reportRange.js.
@@ -93,7 +97,7 @@ export default function PosExceptionReport() {
       // bill, and a long range on a busy outlet can still cross the silent 1000-row cap — at
       // which point the exception report would under-report exactly the exceptions it exists to
       // surface, with no error to say so (S529).
-      fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, qty, unit_price, comped_by, comped_at, comp_reason, comp_no')
+      fetchAllRows(() => scopedFrom('pos_order_items', `order_id, recipe_id, qty, unit_price, comped_by, comped_at, comp_reason, comp_no, ${LINE_CHOICE_STOCK}`)
         .eq('comped', true).gte('comped_at', fromTs).lte('comped_at', toTs).order('id')),
     ])
     if (!loadReq.isCurrent(reqKey)) return
@@ -116,11 +120,12 @@ export default function PosExceptionReport() {
     // revenue, so counting it made a void look ~13% larger than a discount of the same food.
     const needItems = (orders || []).filter(o => o.close_type === 'void' || o.close_type === 'writeoff')
     let itemsByOrder = {}
-    let costMap = {}
+    let writeoffLines = []
     if (needItems.length > 0) {
-      // Chunked (S754): every void and comp in the range, spelled out as uuids in one URL.
+      // Chunked (S754): every void and comp in the range, spelled out as uuids in one URL. With each
+      // line's choices' stock lines, which a comp's food cost includes.
       const { data: items, error: itemsError } = await fetchAllRowsChunked(needItems.map(o => o.id),
-        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, recipe_id').in('order_id', ids).order('id'))
+        ids => scopedFrom('pos_order_items', `order_id, qty, unit_price, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).order('id'))
       if (!loadReq.isCurrent(reqKey)) return
       // S612: without the lines, every void/comp values at a believable NPR 0.
       if (itemsError) { setLoadError(itemsError.message || String(itemsError)); setRows([]); setLoading(false); return }
@@ -128,23 +133,30 @@ export default function PosExceptionReport() {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
       }, {})
-      const compRecipeIds = [...new Set((items || [])
-        .filter(i => needItems.find(o => o.id === i.order_id)?.close_type === 'writeoff')
-        .map(i => i.recipe_id).filter(Boolean))]
-      // Food cost through the till's recipe book (S814 4d, `pos_recipe_book`), the read the Z-report
-      // and the comp slips use, so a comp is costed the same here as on the slip it printed. It
-      // THROWS on a failed or refused read (S695). Unwrapped, the rejection escaped load() and
-      // `loading` never went false — the page sat on "Loading…" for good (S754).
-      if (compRecipeIds.length > 0) {
-        try {
-          costMap = await posFoodCosts(supabase, clientId, compRecipeIds)
-        } catch (err) {
-          if (!loadReq.isCurrent(reqKey)) return
-          setLoadError(err); setRows([]); setLoading(false); return
-        }
-        if (!loadReq.isCurrent(reqKey)) return
-      }
+      const writeoffIds = new Set(needItems.filter(o => o.close_type === 'writeoff').map(o => o.id))
+      writeoffLines = (items || []).filter(i => writeoffIds.has(i.order_id))
     }
+
+    // Food cost through the till's recipe book (S814 4d, `pos_recipe_book`), the read the Z-report
+    // and the comp slips use, so a comp is costed the same here as on the slip it printed: each dish
+    // with its choices (posLineCosts). One read for the whole bills and the item comps together. It
+    // THROWS on a failed or refused read (S695). Unwrapped, the rejection escaped load() and
+    // `loading` never went false — the page sat on "Loading…" for good (S754).
+    let costing = null
+    const compLines = [...writeoffLines, ...(itemComps || [])]
+    if (compLines.length > 0) {
+      try {
+        costing = await posLineCosts(supabase, clientId, compLines, {
+          inventory,
+          buildYourOwn: inventory && customizationEnabled ? buildYourOwnAmong(scopedFrom, compLines.map(i => i.recipe_id)) : [],
+        })
+      } catch (err) {
+        if (!loadReq.isCurrent(reqKey)) return
+        setLoadError(err); setRows([]); setLoading(false); return
+      }
+      if (!loadReq.isCurrent(reqKey)) return
+    }
+    const plateCost = i => (costing ? costing.costOf(i) : 0)
 
     const baseRows = (orders || []).map(o => {
       const type = o.close_type === 'void' ? 'void' : o.close_type === 'writeoff' ? 'writeoff' : 'discount'
@@ -153,7 +165,7 @@ export default function PosExceptionReport() {
       if (type === 'discount') amount = o.discount_amount || 0
       if (type === 'void')     amount = forgoneMenuValue(itemsByOrder[o.id])
       if (type === 'writeoff') {
-        amount = (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)
+        amount = (itemsByOrder[o.id] || []).reduce((s, i) => s + i.qty * plateCost(i), 0)
         // What this would have sold for at menu price, ex-VAT, had it been a normal sale — same
         // formula as Void's forgone value, just for the Comp bucket instead.
         potentialValue = forgoneMenuValue(itemsByOrder[o.id])
@@ -177,18 +189,6 @@ export default function PosExceptionReport() {
       // S612: a dropped error here would strip every item-comp of its parent bill reference.
       if (parentsError) { setLoadError(parentsError.message); setRows([]); setLoading(false); return }
       const parentById = Object.fromEntries((parentOrders || []).map(o => [o.id, o]))
-      const recipeIds = [...new Set(itemComps.map(i => i.recipe_id).filter(Boolean))]
-      // Same throw as above, same wrap (S754).
-      let itemCostMap = {}
-      if (recipeIds.length > 0) {
-        try {
-          itemCostMap = await posFoodCosts(supabase, clientId, recipeIds)
-        } catch (err) {
-          if (!loadReq.isCurrent(reqKey)) return
-          setLoadError(err); setRows([]); setLoading(false); return
-        }
-        if (!loadReq.isCurrent(reqKey)) return
-      }
 
       const groups = {}
       for (const i of itemComps) {
@@ -209,7 +209,7 @@ export default function PosExceptionReport() {
           parentInvoicePrefix: parentById[i.order_id]?.invoice_prefix,
           parentVatRegistered: parentById[i.order_id]?.vat_registered, // S809 2c: TI or PB as issued
         }
-        g.amount += i.qty * (itemCostMap[i.recipe_id] || 0)
+        g.amount += i.qty * plateCost(i)
         g.potentialValue += forgoneMenuValue([i])
       }
       itemCompRows = Object.values(groups)
@@ -217,7 +217,7 @@ export default function PosExceptionReport() {
 
     setRows([...baseRows, ...itemCompRows].sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)))
     setLoading(false)
-  }, [clientId, fromIso, toIso, scopedFrom, loadReq])
+  }, [clientId, fromIso, toIso, scopedFrom, loadReq, inventory, customizationEnabled])
 
   useEffect(() => { if (clientId) load() }, [clientId, load])
 
