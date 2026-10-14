@@ -66,6 +66,17 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     .is('revoked_at', null)
     .select('id, client_id, name, created_by, created_at, last_used_at, revoked_at, revoked_by')
   if (devErr) throw new Error(`Failed to revoke this client's POS tablet keys: ${devErr.message}`)
+  // S837: the printer computers hold keys of their own (pos_print_devices, the same model, migration
+  // 20261014140000), so an archived or wiped outlet's counter PC stops collecting kitchen tickets too.
+  // The same write as remove_pos_print_device, which refuses a caller with no session for the same
+  // reason revoke_pos_device does.
+  const { data: printRevoked, error: printErr } = await admin
+    .from('pos_print_devices')
+    .update({ revoked_at: now, revoked_by: actorId, pair_code_hash: null, pair_code_expires_at: null })
+    .eq('client_id', clientId)
+    .is('revoked_at', null)
+    .select('id, client_id, name, kind, stations, created_by, created_at, paired_at, last_seen_at, revoked_at, revoked_by')
+  if (printErr) throw new Error(`Failed to switch off this client's printer computers: ${printErr.message}`)
   // S809 3h (owner decision Q18 a): revoking a tablet ends the sessions opened on it. A till lock now
   // ends only its own tablet's session, so the till logins still signed in are ended here, as the
   // counting tablets' are below (pos_revoke_till_sessions, migration 20261010180000, service role only).
@@ -90,7 +101,8 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
   const imsTabletsSignedOut = (imsRotated || []).length > 0
 
   const devices = (revoked || []) as Array<Record<string, unknown>>
-  if (devices.length > 0 || imsTabletsSignedOut) {
+  const printers = (printRevoked || []) as Array<Record<string, unknown>>
+  if (devices.length > 0 || printers.length > 0 || imsTabletsSignedOut) {
     const { data: cl } = await admin.from('clients').select('name').eq('id', clientId).maybeSingle()
     let userName: string | null = null
     if (actorId) {
@@ -101,6 +113,12 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     const rows = [
       ...devices.map((d) => ({
         ...base, table_name: 'pos_devices', action: 'UPDATE', record_id: d.id,
+        old_data: { ...d, revoked_at: null, revoked_by: null },
+        new_data: d,
+      })),
+      // Never either hash (pos_print_devices_audit's shape).
+      ...printers.map((d) => ({
+        ...base, table_name: 'pos_print_devices', action: 'UPDATE', record_id: d.id,
         old_data: { ...d, revoked_at: null, revoked_by: null },
         new_data: d,
       })),
@@ -116,7 +134,7 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     if (auditErr) console.error('[admin-user-ops] tablet revocation audit insert failed:', auditErr.message)
   }
 
-  return { tablets_revoked: devices.length, ims_tablets_signed_out: imsTabletsSignedOut }
+  return { tablets_revoked: devices.length, printers_revoked: printers.length, ims_tablets_signed_out: imsTabletsSignedOut }
 }
 
 // How long a settled leaver's login is banned for when a restore puts the block back (S798). Final
@@ -164,6 +182,8 @@ const POS_RECORD_WORDS: Record<string, [string, string]> = {
   'pos_table_joins.joined_by':          ['joined 1 table to a bill', 'joined {n} tables to bills'],
   'pos_devices.created_by':             ['activated 1 till', 'activated {n} tills'],
   'pos_devices.revoked_by':             ['switched off 1 till', 'switched off {n} tills'],
+  'pos_print_devices.created_by':       ['added 1 printer computer', 'added {n} printer computers'],
+  'pos_print_devices.revoked_by':       ['removed 1 printer computer', 'removed {n} printer computers'],
   'profiles.pos_blocked_by':            ['blocked 1 login', 'blocked {n} logins'],
 }
 
@@ -303,6 +323,9 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
   await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
   await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
+  // S837: the kitchen and bar print queue. It holds no key to an order, so its place is free; the
+  // printer computers themselves are revoked above (revokeClientTablets) and cascade with the client.
+  await del(admin.from('pos_print_jobs').delete().eq('client_id', clientId), 'pos_print_jobs')
   // Move, join and split tables (S836), before the orders and tables. A join cascades from both its
   // table and its bill, and the record's bill links are SET NULL, so neither is load-bearing here: both
   // are named so the sequence lists every table it clears (the S382 lesson). The service role passes
@@ -2619,6 +2642,8 @@ Deno.serve(async (req) => {
         await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
         await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
         await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
+        // S837: the print queue is a POS transaction; the printer computers are setup and stay.
+        await del(admin.from('pos_print_jobs').delete().eq('client_id', clientId), 'pos_print_jobs')
         // S836: the joins and the record of moves are POS transactions; the tables themselves stay
         // (see deleteClientDataFor). Before the orders, though both would follow them anyway.
         await del(admin.from('pos_table_joins').delete().eq('client_id', clientId), 'pos_table_joins')

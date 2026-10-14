@@ -1,0 +1,163 @@
+/* The print station page (S837): a no-login screen left open all day on the counter computer, read
+   from across the room. It renders straight into the body, so it is its own scrollport (sticky and
+   scrolling in the body flow are dead app-wide, design-system.md S604). Layout only: every control
+   on it is a global class (.btn, .form-field, .card, .data-table, .badge-*), so the touch tier and
+   the focus ring reach it unchanged. */
+
+.ps-root {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--theme-bg);
+  color: var(--theme-text1);
+}
+
+.ps-main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+}
+
+@media screen and (max-width: 600px) {
+  .ps-main { padding: 20px 16px 40px; }
+}
+
+.ps-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.ps-brand {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--theme-text2);
+}
+
+.ps-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--theme-text1);
+}
+
+.ps-device {
+  margin: 4px 0 0;
+  font-size: 15px;
+  color: var(--theme-text2);
+}
+
+.ps-device strong { color: var(--theme-text1); }
+
+.ps-card { margin-bottom: 20px; }
+
+.ps-card h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--theme-text1);
+}
+
+/* The status: the one thing on the page read from a distance. The square carries the tone as a
+   fill; the words always say the same thing, so nothing rides on the colour alone. */
+.ps-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 32px;
+}
+
+@media screen and (max-width: 600px) {
+  .ps-status { padding: 20px; gap: 14px; }
+}
+
+.ps-dot {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 0.45em;
+  background: var(--theme-text3);
+}
+
+.ps-status--ok .ps-dot { background: var(--theme-green); }
+.ps-status--busy .ps-dot { background: var(--theme-accent); }
+.ps-status--warn .ps-dot { background: var(--theme-amber); }
+
+.ps-status__title {
+  margin: 0;
+  font-size: clamp(24px, 4.5vw, 48px);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--theme-text1);
+  overflow-wrap: anywhere;
+}
+
+.ps-status__detail {
+  margin: 12px 0 0;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--theme-text2);
+}
+
+.ps-status__meta {
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--theme-text2);
+}
+
+/* The amber banner (PayrollRun's shape): something this computer cannot fix by itself. */
+.ps-warn {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent);
+  background: color-mix(in srgb, var(--theme-amber) 8%, transparent);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--theme-text1);
+}
+
+.ps-warn strong { color: var(--theme-amber-text); }
+
+.ps-list {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--theme-text1);
+}
+
+.ps-list li { margin-bottom: 8px; }
+
+.ps-link {
+  color: var(--theme-text2);
+  text-decoration: underline;
+}
+
+.form-field .ps-code-input {
+  max-width: 360px;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.ps-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ps-test-ok { margin: 12px 0 0; font-size: 14px; color: var(--theme-green-text); }
+.ps-test-fail { margin: 12px 0 0; font-size: 14px; color: var(--theme-red-text); }
+
+.ps-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}

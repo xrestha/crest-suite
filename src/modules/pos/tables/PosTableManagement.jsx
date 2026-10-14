@@ -24,6 +24,7 @@ import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { settleWithin } from '../../../utils/withTimeout'
 import GuestMenuSetup from './GuestMenuSetup'
+import PosPrintersPanel from '../printing/PosPrintersPanel'
 import WeatherCityPicker from '../../dashboard/WeatherCityPicker'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
@@ -47,7 +48,7 @@ export default function PosTableManagement() {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
 
-  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes' | 'hsc' | 'discounts'
+  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes' | 'hsc' | 'discounts' | 'delivery' | 'reservations' | 'guestmenu' | 'printers' | 'weather'
 
   const [tables,    setTables]    = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -942,6 +943,12 @@ export default function PosTableManagement() {
             onClick={() => setMainTab('guestmenu')}
           >Guest Menu</button>
         </Tip>
+        <Tip text="The computers at the restaurant that print kitchen and bar tickets on their own printer, instead of each till opening a print window — pair one, test it, and see what it printed. When none is online, the tills print as before">
+          <button
+            className={`tab-btn${mainTab === 'printers' ? ' tab-btn--active' : ''}`}
+            onClick={() => setMainTab('printers')}
+          >Printers</button>
+        </Tip>
         {hasWeather && (
           <Tip text="The town the outlet's weather is read for. Today's and the next three days' weather then show at the top of the Dashboard">
             <button
@@ -973,6 +980,13 @@ export default function PosTableManagement() {
           name or logo into the next one's Save. */}
       {mainTab === 'guestmenu' && (
         <GuestMenuSetup key={clientId || 'none'} clientId={clientId} tables={tables} />
+      )}
+
+      {/* ══ PRINTERS TAB (S837) ══ — kitchen and bar printer computers. Its own component, keyed by
+          client like Guest Menu, so an outlet switch cannot carry one outlet's computers or pairing
+          codes into the next. It polls only while this tab is open. */}
+      {mainTab === 'printers' && (
+        <PosPrintersPanel key={clientId || 'none'} clientId={clientId} />
       )}
 
       {/* ══ TICKET ROUTING TAB ══ */}

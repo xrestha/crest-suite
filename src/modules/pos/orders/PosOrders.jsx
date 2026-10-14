@@ -40,7 +40,10 @@ import {
   clearCachedPosOrderForTable, enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
   settlePosOrderUpload, markQueuedSendsLogged, queuedSendKey, enqueuePosTickets,
 } from '../../../utils/offlineQueue'
-import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildVoidSlipHtml, buildMoveSlipHtml, buildShareSlipsHtml } from './posOrderPrintHtml'
+import { buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildShareSlipsHtml } from './posOrderPrintHtml'
+import { kotBotDoc, voidSlipDoc, moveSlipDoc } from '../printing/ticketDoc'
+import { useStationPrinting } from '../printing/useStationPrinting'
+import StationPrintAlerts from '../printing/StationPrintAlerts'
 import BillingStation from './BillingStation'
 import MoveTableModal from './MoveTableModal'
 import MoveDishesModal from './MoveDishesModal'
@@ -484,6 +487,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   const noteLinkDown = () => { linkDownUntilRef.current = Date.now() + LINK_DOWN_MS; setLinkDown(true) }
   const noteLinkUp = () => { linkDownUntilRef.current = 0; setLinkDown(false) }
   const tillOffline = () => !navigator.onLine || Date.now() < linkDownUntilRef.current
+  // S837, kitchen and bar printers: a station slip goes to that station's print device when one is
+  // online (docs/kitchen-printers.md), and through this till's print window otherwise, as before.
+  const stationPrint = useStationPrinting({ clientId, isOffline: tillOffline, printHtml })
   // S833: and while it is marked down, a small read every LINK_PROBE_MS asks whether it is back, rather
   // than every send waiting out the whole LINK_DOWN_MS. Any answer ends it and uploads what waits.
   useEffect(() => {
@@ -2533,8 +2539,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     const movedBy = printedStaffName(profile, isAdmin)
     let printed = true
     for (const st of stations) {
-      const html = buildMoveSlipHtml({ station: st, outletName, fromTable: fromName, toTable: toName, orderNo: noticeOrderNo, items: byStation[st], movedBy, movedAt })
-      if (!printHtml(html)) printed = false
+      const doc = moveSlipDoc({ station: st, outletName, fromTable: fromName, toTable: toName, orderNo: noticeOrderNo, items: byStation[st], movedBy, movedAt })
+      const res = stationPrint.deliver({ station: st, kind: 'move', doc, label: `Moved to ${toName}${noticeOrderNo != null ? ` · #${noticeOrderNo}` : ''}` })
+      if (!(res.via === 'device' || res.printed)) printed = false
     }
     const sends = stations.map(st => ({
       id: randomUUID(), order_id: noticeOrderId, order_no: noticeOrderNo, table_name: toName, station: st,
@@ -4033,8 +4040,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       const { oid, oNo } = saved
 
       if (screen.here()) markLinesSent(unsentItems)
-      const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo) : true
-      const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo) : true
+      const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo, { local: saved.keptOnTill }) : true
+      const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo, { local: saved.keptOnTill }) : true
       logKotSend('KOT', kotItems, oid, oNo)
       logKotSend('BOT', botItems, oid, oNo)
       screen.say(saved.keptOnTill ? queuedSendText({ printed: kotPrinted && botPrinted }) : kotPrinted && botPrinted
@@ -4080,8 +4087,8 @@ export default function PosOrders({ billingStation = false } = {}) {
         const kotItems = orderItems.filter(i => !botCategories.has(i.category || 'Other'))
         const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
         if (screen.here()) markLinesSent(orderItems)
-        const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo) : true
-        const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo) : true
+        const kotPrinted = kotItems.length > 0 ? printTicket('KOT', kotItems, oNo, { local: saved.keptOnTill }) : true
+        const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo, { local: saved.keptOnTill }) : true
         logKotSend('KOT', kotItems, oid, oNo)
         logKotSend('BOT', botItems, oid, oNo)
         // A blocked pop-up used to be overwritten by "Order sent!" one line later (S754), so the
@@ -4142,7 +4149,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // tapped in while the save was awaiting — and not at all once the waiter has left this order.
       if (screen.here()) markLinesSent(unsentItems)
 
-      const printed = printTicket(station, unsentItems, oNo)
+      const printed = printTicket(station, unsentItems, oNo, { local: saved.keptOnTill })
       logKotSend(station, unsentItems, oid, oNo)
       // Same as saveOrder: the send landed, only the paper did not (S754).
       screen.say(saved.keptOnTill ? queuedSendText({ printed }) : printed
@@ -4252,16 +4259,22 @@ export default function PosOrders({ billingStation = false } = {}) {
     warnWrite(`The ${station} for ${tableName} printed, but it could not be added to the Kitchen Display or the KOT reports — make sure the ${station === 'BOT' ? 'bar' : 'kitchen'} has the paper ticket.`, res.error)
   }
 
-  // Returns printHtml's answer — false when the pop-up was blocked and nothing printed (S754).
-  // `tableName` and `covers` are given for an order the screen no longer shows (S809 3e).
-  function printTicket(station, items, ticketNo, { reprint = false, tableName = screenTableName, covers: ticketCovers = covers } = {}) {
-    const html = buildKotBotHtml({
+  // True when the ticket went to the station's print device or printed here; false when this till's
+  // pop-up was blocked and nothing printed (S754). Since S837 a station whose print device is online
+  // gets the ticket there (useStationPrinting); `local` keeps it on this till, for a send kept on the
+  // till. `tableName` and `covers` are given for an order the screen no longer shows (S809 3e).
+  function printTicket(station, items, ticketNo, { reprint = false, tableName = screenTableName, covers: ticketCovers = covers, local = false } = {}) {
+    const doc = kotBotDoc({
       station, items, ticketNo, outletName,
       tableName,
       takenBy: printedStaffName(profile, isAdmin),
       covers: ticketCovers, reprint,
     })
-    return printHtml(html)
+    const res = stationPrint.deliver({
+      station, kind: reprint ? 'reprint' : 'ticket', doc, local,
+      label: `${reprint ? 'Reprint · ' : ''}${tableName}${ticketNo ? ` · #${ticketNo}` : ''}`,
+    })
+    return res.via === 'device' || res.printed
   }
 
   // Reprint the most recent KOT and/or BOT for the order on screen (S754), for a ticket that went
@@ -5404,10 +5417,18 @@ export default function PosOrders({ billingStation = false } = {}) {
       } else {
         const byStation = {}
         for (const r of stopped || []) (byStation[r.station] ||= []).push(...(r.items || []))
-        const voidPrinted = ['KOT', 'BOT'].filter(st => byStation[st]?.length).map(st => printHtml(buildVoidSlipHtml({
-          station: st, items: byStation[st], ticketNo: updated.order_no ?? (background ? null : orderNo), outletName,
-          tableName: updated.table_name || (background ? null : activeTable?.name) || 'Takeaway', voidedBy: printedStaffName(profile, isAdmin), voidedAt: updated.closed_at,
-        })))
+        const voidTable = updated.table_name || (background ? null : activeTable?.name) || 'Takeaway'
+        const voidNo = updated.order_no ?? (background ? null : orderNo)
+        const voidPrinted = ['KOT', 'BOT'].filter(st => byStation[st]?.length).map(st => {
+          const res = stationPrint.deliver({
+            station: st, kind: 'void', label: `VOID · ${voidTable}${voidNo ? ` · #${voidNo}` : ''}`,
+            doc: voidSlipDoc({
+              station: st, items: byStation[st], ticketNo: voidNo, outletName,
+              tableName: voidTable, voidedBy: printedStaffName(profile, isAdmin), voidedAt: updated.closed_at,
+            }),
+          })
+          return res.via === 'device' || res.printed
+        })
         if (voidPrinted.some(p => p === false)) {
           warnWrite(`The bill for ${where} was voided, but the VOID slip did not print — allow pop-ups for this site, and tell the kitchen and bar to stop ${where}'s order.`)
         }
@@ -6137,6 +6158,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     </>
   )
 
+  // S837: the "hasn't printed" banner for a kitchen or bar slip its print device has not put on paper.
+  // Rendered in all three views (S578): a slip sent from the order screen can still be waiting when
+  // the waiter is back on the floor or at the Billing station.
+  const printAlertsEl = (
+    <StationPrintAlerts alerts={stationPrint.alerts} notice={stationPrint.notice} busyId={stationPrint.busyId}
+      onPrintHere={id => { void stationPrint.printHere(id) }} onDismiss={stationPrint.dismiss} />
+  )
+
   if (view === 'bills') {
     const billRows = [
       ...tables
@@ -6191,6 +6220,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         />
         {recentBillsModal}
         {confirmEl}
+        {printAlertsEl}
       </>
     )
   }
@@ -7572,6 +7602,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       {/* The order-screen asks (discard recorded payments, discard unsaved items — S754). Rendered
           here, not only in the floor return: their handlers run on this screen (S578). */}
       {confirmEl}
+      {printAlertsEl}
     </div>
   )
 
@@ -8104,6 +8135,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     {/* The floor return's copy, for the admin clear-all tool above it. The order screen renders
         the same element for its own asks — only one tree is ever mounted (S578). */}
     {confirmEl}
+    {printAlertsEl}
     </>
   )
 }

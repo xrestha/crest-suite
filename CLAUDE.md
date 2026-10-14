@@ -123,6 +123,7 @@ Each file loads on its own when you open a matching path. Read it first when pla
 | Monthly Owner Report snapshot | `.claude/rules/owner-report.md` |
 | POS billing, shifts, IMS handoff, offline queue | `.claude/rules/pos-billing.md` |
 | POS reservations, booking, arrival alert | `.claude/rules/pos-reservations-alerts.md` |
+| Kitchen and bar printers, print devices, Print Helper | `.claude/rules/pos-printing.md` |
 | HR payroll, settlement, approvals | `.claude/rules/hr-payroll.md` |
 | Crest Staff (Self-Service PWA), web push | `.claude/rules/staff-app.md` |
 | Settings row | `.claude/rules/settings-row.md` |

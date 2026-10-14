@@ -115,10 +115,10 @@ describe('buildVoidSlipHtml', () => {
   })
 
   test('strikes each dish with its quantity and choices, and a change line as CHANGE', () => {
-    expect(slip).toContain('<s>Mixed Grill</s></span><span class="qty">×1</span>')
+    expect(slip).toContain('<s>Mixed Grill</s></span><span class="b md">×1</span>')
     expect(slip).toContain('NO onion')
     expect(slip).toContain('+ Extra sauce')
-    expect(slip).toContain('<s>Veg Momo</s></span><span class="qty">CHANGE</span>')
+    expect(slip).toContain('<s>Veg Momo</s></span><span class="b md">CHANGE</span>')
   })
 
   test('escapes what a person typed', () => {
@@ -148,16 +148,16 @@ describe('buildMoveSlipHtml', () => {
   })
 
   test('says MOVED, not a new order, for the right station', () => {
-    expect(slip).toContain('<div class="c b" style="font-size:15px">KITCHEN</div>')
+    expect(slip).toContain('<div class="t c b md">KITCHEN</div>')
     expect(slip).toContain('*** MOVED ***')
     expect(slip).toContain('NOT A NEW ORDER')
     expect(slip).not.toContain('ORDER TICKET')
     expect(buildMoveSlipHtml({ station: 'BOT', fromTable: 'T3', toTable: 'T5', items: [] }))
-      .toContain('<div class="c b" style="font-size:15px">BAR</div>')
+      .toContain('<div class="t c b md">BAR</div>')
   })
 
   test('prints the arrow line from the old table to the new one, and the bill number', () => {
-    expect(slip).toContain('<div class="c b mv">T3 → T5</div>')
+    expect(slip).toContain('<div class="t c b xl">T3 → T5</div>')
     expect(slip).toContain('#57')
     expect(slip).toContain('serve it at T5')
     // A takeaway moved onto a table has no old table.
@@ -165,10 +165,10 @@ describe('buildMoveSlipHtml', () => {
   })
 
   test('lists the dishes still with the station, with their quantity and choices as the KOT showed them', () => {
-    expect(slip).toContain('<span class="b">Mixed Grill</span><span class="qty">×2</span>')
+    expect(slip).toContain('<span class="b">Mixed Grill</span><span class="b md">×2</span>')
     expect(slip).toContain('NO onion')
     expect(slip).toContain('+ Extra sauce')
-    expect(slip).toContain('<span class="qty">×1</span>')
+    expect(slip).toContain('<span class="b md">×1</span>')
   })
 
   test('escapes what a person typed', () => {

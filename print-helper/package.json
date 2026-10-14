@@ -1,0 +1,25 @@
+{
+  "name": "crest-print-helper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Crest Print Helper: prints Crest Suite kitchen and bar tickets on network ESC/POS printers.",
+  "type": "commonjs",
+  "main": "src/cli.js",
+  "engines": {
+    "node": ">=22.12 <23"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test test/*.test.js",
+    "preview": "node tools/preview.js",
+    "build": "node --env-file=../.env.local build/build.mjs",
+    "build:linux": "node --env-file=../.env.local build/build.mjs --linux"
+  },
+  "dependencies": {
+    "harfbuzzjs": "1.6.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "postject": "1.0.0-alpha.6"
+  }
+}

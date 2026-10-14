@@ -13,7 +13,7 @@ const setQty = (item, qty, pullSaved = false) => ({
 })
 const label = line => {
   const html = buildKotBotHtml({ station: 'KOT', items: [line], ticketNo: 12, tableName: 'Table 4', covers: 2 })
-  return html.includes('CHANGE ONLY') ? 'CHANGE ONLY' : (html.match(/class="qty">([^<]+)</) || [])[1]
+  return html.includes('CHANGE ONLY') ? 'CHANGE ONLY' : (html.match(/class="b md">([^<]+)</) || [])[1]
 }
 
 describe('sentQtyAfterQtyChange — the count a ticket prints against', () => {

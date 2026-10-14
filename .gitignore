@@ -42,3 +42,8 @@ __pycache__/
 # The design handoff bundle keeps its unpacked folder (the CHANGELOG cites that path); the
 # zip is a byte-identical archive of it and would double the repo cost for nothing.
 Claude Design/*.zip
+
+# Crest Print Helper (print-helper/): its own dependencies, build output and the cached Node.js zip.
+/print-helper/node_modules/
+/print-helper/dist/
+/print-helper/.cache/

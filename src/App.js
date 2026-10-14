@@ -115,6 +115,7 @@ const PosLogin = lazy(() => import('./modules/pos/login/PosLogin'))
 const ImsCountLogin = lazy(() => import('./modules/ims/count/ImsCountLogin'))
 const GuestMenu = lazy(() => import('./modules/pos/guestmenu/GuestMenu'))
 const KitchenDisplay = lazy(() => import('./modules/pos/kds/KitchenDisplay'))
+const PrintStation = lazy(() => import('./modules/pos/printing/PrintStation'))
 const Legal = lazy(() => import('./pages/Legal'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 const SubscriptionAgreement = lazy(() => import('./pages/SubscriptionAgreement'))
@@ -164,6 +165,10 @@ export default function App() {
                 credential, as the table UUID is for the guest menu; the RPCs gate on pos_enabled
                 and the outlet's own online-booking toggle. */}
             <Route path="/pos/book/:clientId" element={<GuestBooking />} />
+            {/* The counter computer that prints kitchen and bar tickets (S837). No login and no Layout:
+                it is left open all day, and its own device id and secret (from a pairing code made in
+                POS Setup → Printers) are the credential; the device functions check them. */}
+            <Route path="/print-station" element={<PrintStation />} />
             <Route path="/hr/self-service/login/:clientId" element={<SelfServiceLogin />} />
             <Route path="/hr/self-service" element={<SelfServiceHome />} />
             <Route path="/" element={<RootRedirect />} />

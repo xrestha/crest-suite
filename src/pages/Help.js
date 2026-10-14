@@ -569,6 +569,21 @@ const POS_FEATURES = [
                   ],
                 },
                 {
+                  icon: '🧾', name: 'Kitchen and bar printers', path: '/pos/tables',
+                  desc: 'Kitchen and bar tickets can print on a printer in the kitchen or at the bar instead of on the till that sent them. A computer at the restaurant (usually the counter PC) does the printing: the waiter presses Send, and the ticket comes out at the station within about two seconds, with no print window on the till. Set it up in POS Setup → Printers (Owner or POS manager). VOID and MOVE slips and Reprint KOT/BOT go to the same printer.',
+                  tips: [
+                    'Two ways to connect, both from POS Setup → Printers → Add a printer computer. The print station page is for a printer plugged into the computer by USB, or any printer Windows already has installed. The Crest Print Helper is a small Windows program for printers plugged into the restaurant\'s router, found by their address; one helper can drive the kitchen and bar printers together',
+                    'Each printer computer pairs with an 8-letter code shown in POS Setup. The code works once, for 15 minutes. Pairing again (for example on a new computer) stops the old one printing. Remove takes it off for good',
+                    'Print station page: on the counter computer, set the kitchen printer as the Windows default printer, start Chrome from a shortcut with `--kiosk-printing` after chrome.exe (see Silent Printing Setup above), open your Crest address followed by /print-station, and type the code. Leave that window open all day, and set Windows never to sleep. Without the silent-printing shortcut, every ticket opens a print window on that computer',
+                    'Two printers on one computer with the print station page: make two Chrome profiles, each with its own shortcut and its own default printer, pair one for Kitchen and one for Bar. The Crest Print Helper does this on its own, which is why it suits two network printers better',
+                    'Crest Print Helper: download it from POS Setup → Printers, unzip it, run CrestPrintHelper.exe and type the code. Windows may say "Windows protected your PC" the first time: click More info, then Run anyway. Say yes when it offers to start with Windows',
+                    'A network printer\'s address: switch the printer off, hold the paper-feed button and switch it on again. It prints a self-test page showing its IP address (like 192.168.1.50). Most receipt printers listen on port 9100. Ask whoever set up the router to fix that address, so it does not change',
+                    'If the printer computer is switched off, or the internet is down on the till, the till prints the ticket itself, exactly as before. If a ticket has not printed after 20 seconds (out of paper, printer unplugged), the till shows "has not printed" with the reason and a Print here button. A ticket cannot print twice: whichever prints first wins',
+                    'A ticket that waited more than two minutes for the printer computer prints with "PRINTED LATE — sent" and the time, so the kitchen knows the guest did not just order. Nothing prints by itself once it is 15 minutes old: the till offers Print here instead',
+                    'POS Setup → Printers shows whether each printer computer is online, its printers\' last problem, and the last 20 tickets with who printed them. Test print sends a sample ticket, with a Nepali dish name, to check the printer end to end',
+                  ],
+                },
+                {
                   icon: '₨', name: 'Menu Pricing', path: '/menu-pricing',
                   desc: 'Build your menu directly here — no Item Master or IMS setup needed on a POS-only plan. + Add Item takes a name, category, VAT status, menu price, and an optional Cost Price (what you pay to buy/produce it). Use the On POS toggle to control what shows on the order screen without deleting the item.',
                   tips: [

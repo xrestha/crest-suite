@@ -304,7 +304,7 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/tables',
         plan: 'Manager only',
         summary:
-          'All POS floor configuration in nine tabs: Tables (the grid itself, plus each table\'s guest-menu QR), Ticket Routing (which menu categories print as BOT vs KOT), Quick Notes (kitchen note presets), HSC Codes (per-item codes printed on the tax invoice), Discount Reasons, Delivery Partners, Reservations (sitting length per party size, the late/seat windows, the WhatsApp confirmation text, and the outlet\'s booking link and QR), Guest Menu (the name, logo and section order guests see), and Weather (S786: the town the outlet\'s weather is read for — the city only; the rainy-day sales figure is Inventory\'s).',
+          'All POS floor configuration in ten tabs: Tables (the grid itself, plus each table\'s guest-menu QR), Ticket Routing (which menu categories print as BOT vs KOT), Quick Notes (kitchen note presets), HSC Codes (per-item codes printed on the tax invoice), Discount Reasons, Delivery Partners, Reservations (sitting length per party size, the late/seat windows, the WhatsApp confirmation text, and the outlet\'s booking link and QR), Guest Menu (the name, logo and section order guests see), Printers (S837: the computers that print kitchen and bar tickets — see Kitchen and bar printers), and Weather (S786: the town the outlet\'s weather is read for — the city only; the rainy-day sales figure is Inventory\'s).',
         workflow: [
           'Tables: add one by one or Quick Setup bulk-creates a numbered batch, starting one past the highest number already used with that prefix (S817 4i: its defaults used to recreate Table 1–10 on a floor that had them); set capacity (feeds the Covers report\'s seat count and the Reservations capacity strip); pick a status (Available, Reserved, Occupied, Inactive); print each table\'s QR for the guest menu. Guest Menu tab: the restaurant name and logo guests see (Owner only) and the order of the menu\'s sections (S767).',
           'Reservations: expected sitting length per party size, with the outlet\'s own MEASURED average beside each field and a one-tap "Use measured"; the WhatsApp template; the online-booking toggle, largest party and minimum notice; Copy link / Print QR for the booking page.',
@@ -326,6 +326,33 @@ export const POS_GUIDE_GROUPS = [
           'Two tables in service never share a name, capitals and spaces aside (S817 4i): two tickets both saying "Table 3" cannot be told apart. POS Setup names the clash before saving and the database refuses it too. A retired (Inactive) table\'s name can be used again — retiring a table and adding a new one under its name is how a table gets a new QR code.',
         ],
         connections: 'Tables/capacity → Orders floor + Covers report. QR → Guest Menu. Routing → ticket printing, KDS, Sales Report\'s Product Type tab. Partners → Orders\' Credit buyers + Customers\' settlement commission.',
+      },
+      {
+        id: 'printers',
+        title: 'Kitchen and bar printers',
+        route: '/pos/tables',
+        plan: 'Manager only (setup)',
+        summary:
+          'Since S837 a kitchen or bar ticket prints at the station instead of on the till that sent it, whenever a printer computer for that station is online. A computer at the restaurant does the printing, in one of two ways: the print station page (Chrome on the counter PC with --kiosk-printing, printing to a USB printer or any printer Windows has installed) or the Crest Print Helper (a Windows program that sends tickets straight to network printers by address, and can drive several). VOID and MOVE slips and Reprint KOT/BOT follow the same route. Every POS client has it, with no flag of its own, like the Kitchen Display.',
+        workflow: [
+          'POS Setup → Printers → Add a printer computer: name it, choose the print station page or the Crest Print Helper, tick Kitchen, Bar or both, and for the helper give each station\'s printer address (a private IPv4 like 192.168.1.50), port (usually 9100) and paper width (80 or 58 mm). It shows an 8-letter pairing code, good once for 15 minutes.',
+          'Print station page: on the counter PC, Chrome from a --kiosk-printing shortcut with the kitchen printer as the Windows default, open /print-station and type the code. Leave the window open; set Windows never to sleep. Two printers on one PC means two Chrome profiles, one per station.',
+          'Crest Print Helper: download the zip from the Printers tab, run CrestPrintHelper.exe (Windows warns once: More info → Run anyway), type the code, and let it start with Windows.',
+          'Service: Send on the till queues the ticket; the printer computer collects it within about 2 seconds and prints it. The Printers tab shows each computer online or offline, its printers\' last problem, and the last 20 tickets with who printed them. Test print sends a sample with a Nepali dish name.',
+        ],
+        fields: [
+          { label: 'Pairing code', desc: 'One use, 15 minutes. Pairing again (a new computer) stops the old one; Remove takes a computer off for good. A computer that was removed or re-paired elsewhere says so and asks for a new code.' },
+          { label: 'Online', desc: 'The printer computer checked in within the last 20 seconds. A station whose computer is offline prints on the tills, at once.' },
+        ],
+        formulas: [],
+        gotchas: [
+          'The till prints a ticket itself when no printer computer for the station is online, when the till is offline, or for a send kept on the till. A queued ticket not printed in 20 seconds, or one the printer computer gave up on, shows "has not printed" on the till with the reason and Print here. Whoever prints first wins: Print here asks Crest first, so a ticket cannot come out twice — except when Crest cannot be reached at that moment, when the till prints anyway and says the station may get a second copy.',
+          'A ticket collected more than two minutes after it was sent prints "PRINTED LATE — sent" and the time. Nothing prints by itself once it is 15 minutes old.',
+          'The printer computer prints exactly what the till would have: the ticket is built on the till (ticketDoc.js) and only drawn by the printer computer, so "+1", "↓1 (now 2)", CHANGE lines and Nepali dish names all come out the same. The helper draws it as an image, so a cheap printer with no Nepali font still prints it.',
+          'A printer computer\'s key can do three things only: collect its own stations\' tickets, say they printed, and say why one failed. Archive switches every printer computer off; a backup never includes them; a restored client pairs them again.',
+          'Not covered: a printer\'s own paper-out state (a printer that takes the ticket with no paper counts it as printed); a till on an older release prints its own tickets until it reloads.',
+        ],
+        connections: 'Ticket Routing → which station a dish prints at. Till Devices → the tablets that send. Kitchen Display → unaffected; it shows every ticket as before. Help → Kitchen and bar printers.',
       },
       {
         id: 'customers',

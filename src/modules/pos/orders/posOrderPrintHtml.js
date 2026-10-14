@@ -4,166 +4,27 @@ import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { npr2, nprPaisa } from '../../../shared/nepalMoney'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
-import { changedOnSentUnits, changeNoteText } from '../kitchenNotes'
+import { kotBotDoc, voidSlipDoc, moveSlipDoc, renderTicketDocHtml } from '../printing/ticketDoc'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
-
-// A line's Crest Customization choices (S758), in either shape a caller holds them: the cart/server
-// snapshot ({ option_name, kitchen_name, is_removal }) or a logged ticket's ({ kitchen, is_removal }).
-// The kitchen reads its own short name where the owner set one; the bill reads the guest-facing name.
-const ticketOptionName = o => o.kitchen || o.kitchen_name || o.option_name || ''
-export function kotOptionLines(options) {
-  return (options || []).map(o => (o.is_removal
-    ? `<div class="opt b">NO ${esc(ticketOptionName(o).replace(/^no\s+/i, ''))}</div>`
-    : `<div class="opt">+ ${esc(ticketOptionName(o))}</div>`)).join('')
-}
 
 // Pure 80mm-thermal HTML builders for PosOrders.jsx — no React, no Supabase, no component state.
 // Everything they need (outlet/billing settings, table name, cashier name, HSC codes) is passed
 // in explicitly so the same functions back both the real print (printBill/printCompSlip) and the
 // live in-modal preview, and so they can be unit-tested independently of the component.
 
-export function buildKotBotHtml({ station, items, ticketNo, outletName, tableName, takenBy, covers, reprint = false }) {
-  const stamp        = new Date()
-  const now          = nepalTime(stamp)
-  // nepalBs pins the day to Nepal before the converter reads its local getters, so a ticket sent
-  // just after midnight Kathmandu cannot print yesterday's date for a station whose tablet is set
-  // to another zone. nepalBs is exactly adToBsSafe(nepalCivilDate(stamp)) — a display site, so the
-  // range-guarded converter (docs/CROSS-REPO.md adToBs audit), even though today is always in range.
-  const bs           = nepalBs(stamp)
-  const date         = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
-  const stationLabel = station === 'BOT' ? 'BAR ORDER TICKET' : 'KITCHEN ORDER TICKET'
-
-  return `<!DOCTYPE html>
-<html><head><title>${station}</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  .lg  { font-size:17px; letter-spacing:1px; }
-  hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
-  .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
-  .note { font-size:11px; font-style:italic; color:#000; padding:0 0 3px 10px; }
-  .opt  { font-size:13px; color:#000; padding:0 0 1px 10px; }
-</style>
-</head><body>
-  ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
-  <div class="c b lg">${stationLabel}</div>
-  ${reprint ? `<div class="c b" style="font-size:15px;margin-top:3px">*** REPRINT — NOT A NEW ORDER ***</div>` : ''}
-  <hr>
-  <div class="row"><span class="b" style="font-size:15px">${esc(tableName)}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
-  <div class="row"><span>${takenBy ? `Taken by: ${esc(takenBy)}` : ''}</span><span>Covers: ${covers}</span></div>
-  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${now}</span></div>
-  <hr>
-  ${items.map(i => {
-      const delta = (i.sent_qty || 0) > 0 ? i.qty - i.sent_qty : 0
-      const note  = kotOptionLines(i.options) + (i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : '')
-      // Already sent, quantity unchanged — only the note moved (S754). This used to fall through to
-      // "×qty", which a station reads as a fresh order and cooks again. It prints no quantity at all.
-      // `change` is a logged CHANGE ticket's line being reprinted (S809 3a), whose quantity is 0.
-      if (i.change || ((i.sent_qty || 0) > 0 && delta === 0)) {
-        return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">CHANGE</span></div><div class="note b">CHANGE ONLY — not a new order</div>${note}`
-      }
-      // A negative delta (qty reduced since the last send, then resent) needs its own label —
-      // falling back to a plain "×qty" here would read as a fresh full order rather than a cut,
-      // and the kitchen has no other way to tell "this is 3 now" from "make 3 more".
-      const label = delta > 0 ? `+${delta}` : delta < 0 ? `↓${Math.abs(delta)} (now ${i.qty})` : `×${i.qty}`
-      // S833: the note changed on the units the station already has as well, so they are told apart
-      // from the "+N" (changedOnSentUnits).
-      const sentChange = changedOnSentUnits(i)
-        ? `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">CHANGE</span></div><div class="note b">CHANGE — the ${i.sent_qty} already sent, now: ${esc(changeNoteText(i))}</div>`
-        : ''
-      return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">${label}</span></div>${note}${sentChange}`
-    }).join('')}
-  <hr>
-</body></html>`
+// The three station slips are documents since S837 (kitchen and bar printers): ticketDoc.js
+// describes each one once, and the till's print window, the print station page and the Crest Print
+// Helper render that description, so the paper is the same whoever prints it.
+export function buildKotBotHtml(args) {
+  return renderTicketDocHtml(kotBotDoc(args))
 }
 
-// A VOID slip for a station (S817 4i, FLOOR-KITCHEN-4): printed by the void for each station whose
-// ticket for this order was still being made, so the paper rail gets the stop the Kitchen Display
-// shows. `items` are the cancelled tickets' own lines, exactly as sent, so the cook can match them to
-// the KOT on the rail. Same 80mm shape and header as buildKotBotHtml, with the VOID line where a
-// reprint says REPRINT.
-export function buildVoidSlipHtml({ station, items, ticketNo, outletName, tableName, voidedBy, voidedAt }) {
-  const stamp        = voidedAt ? new Date(voidedAt) : new Date()
-  const bs           = nepalBs(stamp)
-  const date         = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
-  const stationLabel = station === 'BOT' ? 'BAR' : 'KITCHEN'
-
-  return `<!DOCTYPE html>
-<html><head><title>VOID ${station}</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  .lg  { font-size:20px; letter-spacing:2px; }
-  hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
-  .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
-  .opt { font-size:13px; color:#000; padding:0 0 1px 10px; }
-  s    { text-decoration:line-through; }
-</style>
-</head><body>
-  ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
-  <div class="c b lg">*** VOID — ${stationLabel} ***</div>
-  <div class="c b" style="font-size:15px;margin-top:3px">STOP — DO NOT MAKE</div>
-  <hr>
-  <div class="row"><span class="b" style="font-size:15px">${esc(tableName || 'Takeaway')}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
-  <div class="row"><span>${voidedBy ? `Voided by: ${esc(voidedBy)}` : ''}</span><span></span></div>
-  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${nepalTime(stamp)}</span></div>
-  <hr>
-  ${(items || []).map(i => (i.change
-      ? `<div class="row"><span class="b"><s>${esc(i.name)}</s></span><span class="qty">CHANGE</span></div>`
-      : `<div class="row"><span class="b"><s>${esc(i.name)}</s></span><span class="qty">×${esc(String(i.qty ?? ''))}</span></div>${kotOptionLines(i.options)}`)).join('')}
-  <hr>
-  <div class="c" style="font-size:11px">This order was voided. Nothing above is wanted.</div>
-</body></html>`
+export function buildVoidSlipHtml(args) {
+  return renderTicketDocHtml(voidSlipDoc(args))
 }
 
-// A MOVE slip for a station (S836): printed when a running bill, or some of its dishes, moves to
-// another table while that station still has food for it, so the paper rail follows the food to its
-// new table. `items` are the dishes still with that station (name, qty, the choices the KOT showed),
-// so the cook can match them to the KOT already on the rail. Same 80mm shape as the VOID slip; it
-// says it is not a new order, because a slip the kitchen reads as one is a dish cooked twice.
-export function buildMoveSlipHtml({ station, outletName, fromTable, toTable, orderNo, items, movedBy, movedAt }) {
-  const stamp        = movedAt ? new Date(movedAt) : new Date()
-  const bs           = nepalBs(stamp)
-  const date         = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
-  const stationLabel = station === 'BOT' ? 'BAR' : 'KITCHEN'
-  const to           = esc(toTable || 'Takeaway')
-
-  return `<!DOCTYPE html>
-<html><head><title>MOVED ${station === 'BOT' ? 'BOT' : 'KOT'}</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  .lg  { font-size:24px; letter-spacing:3px; }
-  .mv  { font-size:20px; letter-spacing:1px; padding:3px 0; }
-  hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
-  .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
-  .note { font-size:11px; font-style:italic; color:#000; padding:0 0 3px 10px; }
-  .opt { font-size:13px; color:#000; padding:0 0 1px 10px; }
-</style>
-</head><body>
-  ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
-  <div class="c b" style="font-size:15px">${stationLabel}</div>
-  <div class="c b lg">*** MOVED ***</div>
-  <div class="c b" style="font-size:13px;margin-top:3px">NOT A NEW ORDER</div>
-  <hr>
-  <div class="c b mv">${esc(fromTable || 'Takeaway')} → ${to}</div>
-  <div class="row"><span>Bill</span><span class="b" style="font-size:15px">${orderNo != null ? `#${esc(String(orderNo))}` : ''}</span></div>
-  <div class="row"><span>${movedBy ? `Moved by: ${esc(movedBy)}` : ''}</span><span></span></div>
-  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${nepalTime(stamp)}</span></div>
-  <hr>
-  ${(items || []).map(i => `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">×${esc(String(i.qty ?? ''))}</span></div>${kotOptionLines(i.options)}${i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : ''}`).join('')}
-  <hr>
-  <div class="c" style="font-size:11px">Already ordered — serve it at ${to}.</div>
-</body></html>`
+export function buildMoveSlipHtml(args) {
+  return renderTicketDocHtml(moveSlipDoc(args))
 }
 
 // One bill line per dish at its combined price, with the choices listed underneath (owner decision,
