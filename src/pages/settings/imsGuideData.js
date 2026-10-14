@@ -1311,7 +1311,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Only items toggled On POS in Menu Pricing are eligible as anchors or pairing suggestions at all.',
-          'This tool never writes anything back to the menu — the "Create as Menu Item" link only opens Menu Pricing; the bundle has to be created there manually.',
+          'This tool never writes anything back to the menu. With Crest Customization the link reads "Create as combo" and opens Customization → Combos with the anchor and its pairing as two picks and the suggested price filled in (S839), saved only when the owner presses Save; without Customization it opens Menu Pricing, where a bundle is made by hand.',
           'It reads POS bills and nothing else, so a client without the Crest POS module can never get a row here no matter how long they wait. The page says so rather than blaming the sales history.',
           'The window is measured on when the bill was CLOSED, in real (AD) days — not BS periods like every other IMS report.',
         ],
