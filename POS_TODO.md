@@ -519,12 +519,12 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     the TI/PB label from `v_order.vat_registered`); no note column needed (2c).~~ Fixed in 5d (S828),
     the Miti from `bs_months`; the label keeps today's prefix, as the page does (the prefix is not
     stored on a bill).
-  - `PosCustomers.jsx`' settings comment says `is_vat_registered` moves the delivery commission base by
-    about 13 points. It does not: taxable + non-taxable is ex-VAT under either flag (2c).
+  - ~~`PosCustomers.jsx`' settings comment says `is_vat_registered` moves the delivery commission base by
+    about 13 points. It does not: taxable + non-taxable is ex-VAT under either flag (2c).~~ Fixed in S834 (comment corrected).
   - Do not switch an outlet's VAT status before every till has reloaded to crest-v420: an older till
     prints under its old setting while the bill is stamped with the new one (2c).
-  - `openBilling` and `openCompTab` never catch a failed cost read, so the comp cost silently shows
-    NPR 0 (S695 says callers must) (2f).
+  - ~~`openBilling` and `openCompTab` never catch a failed cost read, so the comp cost silently shows
+    NPR 0 (S695 says callers must) (2f).~~ Fixed in S834: bounded, and a failure shows "—" with a line, never NPR 0.
   - ~~`imsPostWarning` is a local counter that never goes down: a timed-out post that later lands (now
     marked by the database) still shows "1 not posted" until the page reloads (2f).~~ Fixed in 4e
     (`noteImsMiss` / `pruneImsMisses`).
@@ -561,7 +561,7 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     does nothing (cosmetic, 2g).~~ Fixed in 3k: the row reads "Delivery partner — earns no points".
   - Menu Pricing (both branches) lets a manager tick On POS on a dish with no price, and IMS recipes
     default to `pos_enabled = true`; such a dish now just stays off the till, so Menu Pricing should say
-    "not on the till until it has a price" (2h).
+    "not on the till until it has a price" (2h). Fixed in S834 for the Menu Pricing note (both branches); the IMS default and the push preview stand.
   - `push_master_data`'s preview for a dish matched by name on the first push never says its price is
     overwritten when Selling prices is ticked; its plan table has no `DROP … IF EXISTS`, so two calls in
     one transaction fail with 42P07 (tests only) (2h).
@@ -586,11 +586,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     `pos_blocked_at` and `settlement_blocked_by` in its staff lookup, or give its own answer (3i).~~
     Fixed in 3h: its own 403 (`switched_off`, "This login is switched off"), not counted.
   - Deleting an IMS or HR staff login (`delete_ims_staff` / `delete_hr_staff`) also SET NULLs its name
-    on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i).
+    on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i). Deferred by the owner (S834, D36) to the shared HR job: it needs a switch-off for IMS and HR logins.
   - ~~Live `pos_parking_slips_guard` still lets any operator INSERT through unchanged; its comment says 1l
     narrowed it to a restore, the body does not (3i).~~ Fixed in 4k (S819): the restore only.
-  - Clear IMS also deletes the Fixed Assets register and categories, which neither its confirm nor the
-    "setup kept" heading mentions (3i).
+  - ~~Clear IMS also deletes the Fixed Assets register and categories, which neither its confirm nor the
+    "setup kept" heading mentions (3i).~~ Fixed in S834: the confirm, the Tip, the Danger Zone line and the success message name the Fixed Assets register.
   - After Clear POS, a manual Sales Entry day whose depletion was skipped because the till covered it
     stays un-depleted until that day is re-saved (3i).
   - ~~The retired shared-key picker `get_pos_staff` still lists blocked logins (nothing calls it since 3h;
@@ -677,8 +677,8 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - ~~Ticket Routing lists only categories with a dish on the till, so a bar category with no dish (the
     default Beverage where the drinks are "Drinks") cannot be moved to KOT there, and that till keeps a
     greyed BOT (3m).~~ Fixed in 4i: listed, marked "no dishes on the till".
-  - The 1L+ year's line read fires every 150-bill chunk at once (about 730 requests for a 1,09,500-bill
-    year) (3m).
+  - ~~The 1L+ year's line read fires every 150-bill chunk at once (about 730 requests for a 1,09,500-bill
+    year) (3m).~~ Fixed in S834: six chunks at a time (`fetchAllRowsChunked` concurrency).
   - ~~The KOT button's Tip still says "food items"; Avg Bill Value on the Owner Report has no Tip~~ (both
     fixed in 4l); a no-bar till shows BOT for a moment on load (3m).
   - The stock-count tablet's lock still signs out on every device (`scope: 'local'` would be safe there:
@@ -711,7 +711,7 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     a settle's Cash In once-only across devices (live duplicates: 0) (3l).~~ Fixed in 5c (S823),
     `pos_cash_movements_one_credit_settlement`.
   - ~~PosCustomers' settings read, `loadCustomers` and `toggleHistory` have no time limit (3l).~~ Fixed in
-    S833, with `loadCredit`. LoyaltyTab's own load is still unbounded (found S833, not fixed).
+    S833, with `loadCredit`. LoyaltyTab's own load (found S833): fixed in S834.
   - `handleSaveRefusal` says "The menu has been reloaded." before the reload runs, and even when it
     fails; the server's `option_count` counts picks of hidden options (harmless while
     `option_not_on_menu` fires first) (3o).
@@ -764,8 +764,8 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - `guard_pos_order_insert` does not refuse an order on an inactive table. A till whose floor read is up
     to 15 s old can still open one on a table retired a moment ago; its seat write then leaves the table
     Inactive, and the floor opens that bill from the tile. Stage 5 if it shows up.
-  - A guest QR order on a table that never gets a bill is still answered by nothing and rings on
-    (`get_pos_device_guest_alerts` has no age limit); 4i answers it only when a bill on that table closes.
+  - ~~A guest QR order on a table that never gets a bill is still answered by nothing and rings on
+    (`get_pos_device_guest_alerts` has no age limit); 4i answers it only when a bill on that table closes.~~ Fixed in S834 (D34): turned away after 30 minutes unanswered (`pos_turn_away_stale_guest_orders`).
   - A guest order accepted into the cart whose "accepted" mark failed to save before the close is turned
     away by the close although its dishes were billed (the save marks it first; a failed mark is rare).
   - A bill voided outside a till (REST) prints no VOID slip: only the Kitchen Display card tells the
@@ -773,10 +773,10 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - The 12 live tickets of voided orders (all from before S817) stay cancelled, Served ones included.
 
 - **Found while building stage 4, slice 4j (2026-10-12, not fixed):**
-  - An unanswered request whose time has passed expires only when the same number asks again; other
+  - ~~An unanswered request whose time has passed expires only when the same number asks again; other
     stale requests wait for staff (marked "time passed") and still count on the nav chip. A sweep that
     answers every passed request (on the staff page's load, or a schedule) would clear the chip too.
-    0 requests waiting live.
+    0 requests waiting live.~~ Fixed in S834: counted nowhere once passed, and closed when Reservations opens (`requestExpiry.js`).
   - The Seat dialog's busy marks come from the page's last read (frozen while the dialog is open); the
     till now refuses a taken table, but the dialog still shows it free until then.
   - A Seat prompt on the floor (a due booking's table tapped) that meets the one-open-order index on its
@@ -792,13 +792,13 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
 - **Found while building stage 4, slice 4k (2026-10-12, not fixed):**
   - `pos_orders.table_id` still has no FK (FLOOR-KITCHEN's offline-delete note): a table deleted while a
     till holds an offline order for it leaves that order on neither the floor nor Billing. A FK has to
-    decide what deleting a table with bill history means (refuse, or SET NULL and keep `table_name`).
+    decide what deleting a table with bill history means (refuse, or SET NULL and keep `table_name`). The open order itself is fixed in S834: the floor and Billing show it as its own card, named after the old table; the FK question stands.
   - The new client FKs make a client delete with POS rows left behind cascade only as far as the guards
     allow: `guard_pos_order_delete` refuses a billed bill in that cascade from the operator's browser
     session, so Delete Client stops at its last step and says to run it again. Safe (deleteClientDataFor
     clears POS first), but the message names no table.
-  - `fetchViewModules` (AuthContext) still drops its read error; on a failed read `clientModulesKnown`
-    stays false and the D30 till notice never shows for support (it fails open, as every UI gate does).
+  - ~~`fetchViewModules` (AuthContext) still drops its read error; on a failed read `clientModulesKnown`
+    stays false and the D30 till notice never shows for support (it fails open, as every UI gate does).~~ Fixed in S834: logged, and a failed read keeps the last good list.
   - `get_client_profile_names` now returns every Crest operator login's id (as "Crest support") to any
     client's caller. One login today; ids only, no name.
   - Live today: 0 bills closed and 0 tickets sent by support (BLOOM CAFE was rebuilt in S810), so the
@@ -810,11 +810,11 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
   - The Customization report admits an IMS manager (`canView`), but `no_ims_staff` hides till bills from
     IMS logins, so the report reads no bills and shows nothing for them. Owner question: keep the page
     for them (then the server must give them the choice counts) or take it away.
-  - A credit note's original-invoice label uses today's invoice prefix, as the page always did, because
+  - ~~A credit note's original-invoice label uses today's invoice prefix, as the page always did, because
     a bill does not store its prefix; a prefix change relabels a later note's reference to an earlier
-    bill. Storing it means a `guard_pos_order_close` change (a later slice).
-  - `hr-selfservice-login` and `ims-staff-login` carry the same dead pre-S791 fallback as
-    `pos-staff-login` (5e removed only the POS one, S829). `check_pos_pin_lock` now has no caller.
+    bill. Storing it means a `guard_pos_order_close` change (a later slice).~~ Fixed in S834 (D35): bills and notes keep their own code (`invoice_prefix`, stamped at close and issue).
+  - ~~`hr-selfservice-login` and `ims-staff-login` carry the same dead pre-S791 fallback as
+    `pos-staff-login` (5e removed only the POS one, S829). `check_pos_pin_lock` now has no caller.~~ Fixed in S834: both fallbacks removed (fail closed).
   - ~~A2's "Remove the legacy shared device key" (🔵) is already done: the code and functions went in 3h
     and S812 (`04ebdb0e`); close it when 5e drops the columns.~~ Closed in 5e (S829).
 - **Found while building stage 5, slice 5e (2026-10-13, not fixed):**
@@ -823,12 +823,12 @@ history), refusing an order on an inactive table (4i, "if it shows up"), and
     hss-suite is set up on this machine). `hr_is_manager_rank()` and the HR
     rank policies test the raw `hr_role`, so a settled HR manager keeps manager reach on payroll,
     attendance and the rest for the hour their token lives. 5e closed only the settings screen.
-  - `register_trial`'s two rate-limit counts drop their read error (`ipCount ?? 0`), so a failed count
-    lets a signup through the limit (CLAUDE.md's vacuous-guard rule).
-  - `check_pos_pin_lock` is now dead (no caller since `pos-staff-login` v11); drop it with a later
-    migration, keeping its HR and IMS twins while their fallbacks remain.
-  - `canEditWeatherCity()` still tests raw roles, so a settled or POS-blocked manager is offered the city
-    picker and refused by the server (advisory only; the guard is right).
+  - ~~`register_trial`'s two rate-limit counts drop their read error (`ipCount ?? 0`), so a failed count
+    lets a signup through the limit (CLAUDE.md's vacuous-guard rule).~~ Fixed in S834: a failed count refuses (503); admin-user-ops deployed with migration `20261014100000`.
+  - ~~`check_pos_pin_lock` is now dead (no caller since `pos-staff-login` v11); drop it with a later
+    migration, keeping its HR and IMS twins while their fallbacks remain.~~ Fixed in S834: dropped by `20261014100000`.
+  - ~~`canEditWeatherCity()` still tests raw roles, so a settled or POS-blocked manager is offered the city
+    picker and refused by the server (advisory only; the guard is right).~~ Fixed in S834: effective ranks, both columns in AuthContext's profile select.
   - `log_audit()` still strips a `pos_device_secret` key from `clients` snapshots; dead since S531 and
     harmless. Drop it the next time that function is rebuilt for another reason.
 

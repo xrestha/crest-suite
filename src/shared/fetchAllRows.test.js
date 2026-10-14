@@ -122,6 +122,108 @@ test('the chunked form fails the whole read when any chunk runs past the ceiling
   expect(whole.data).toHaveLength(30)
 })
 
+// S834 (S809.4 3m): the 1L+ tab's year of lines is ~730 chunks, which all started at once.
+// A fake whose chunks resolve out of order, counting how many requests are in flight.
+function makeTrackedSource({ parents = 40, delayOf = () => 0, failOn = () => null } = {}) {
+  const table = rows(parents * 2).map(r => ({ ...r, parent: r.id % parents }))
+  const started = []
+  let inFlight = 0
+  let maxInFlight = 0
+  const makeQuery = ids => ({
+    range: (from, to) => {
+      started.push(ids[0])
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      return new Promise(resolve => setTimeout(() => {
+        inFlight--
+        const error = failOn(ids)
+        resolve(error ? { data: null, error } : { data: table.filter(r => ids.includes(r.parent)).slice(from, to + 1), error: null })
+      }, delayOf(ids)))
+    },
+  })
+  // What the old all-at-once read returned: each chunk's rows, in chunk order.
+  const expected = chunkSize => {
+    const out = []
+    for (let p = 0; p < parents; p += chunkSize) {
+      const ids = Array.from({ length: Math.min(chunkSize, parents - p) }, (_, k) => p + k)
+      out.push(...table.filter(r => ids.includes(r.parent)))
+    }
+    return out
+  }
+  return { makeQuery, started, stats: () => ({ inFlight, maxInFlight }), expected }
+}
+const parentIds = n => Array.from({ length: n }, (_, i) => i)
+// Chunk k (chunkSize 2) is parents 2k and 2k+1; resolve them out of order.
+const shuffledDelay = ids => (ids[0] * 7) % 5
+
+test('by default every chunk starts at once, as before', async () => {
+  const src = makeTrackedSource({ delayOf: shuffledDelay })
+  const p = fetchAllRowsChunked(parentIds(40), src.makeQuery, { chunkSize: 2 })
+  expect(src.started).toHaveLength(20)
+  const { data, error } = await p
+  expect(error).toBeNull()
+  expect(src.stats().maxInFlight).toBe(20)
+  expect(data).toEqual(src.expected(2))
+})
+
+test('concurrency caps the chunks in flight, and the rows still come back in chunk order', async () => {
+  const src = makeTrackedSource({ delayOf: shuffledDelay })
+  const p = fetchAllRowsChunked(parentIds(40), src.makeQuery, { chunkSize: 2, concurrency: 6 })
+  expect(src.started).toHaveLength(6)
+  const { data, error } = await p
+  expect(error).toBeNull()
+  expect(src.stats().maxInFlight).toBe(6)
+  expect(src.stats().inFlight).toBe(0)
+  // Every chunk was read once, started in order.
+  expect(src.started).toEqual(parentIds(20).map(k => k * 2))
+  // Byte-identical to the all-at-once read.
+  const all = makeTrackedSource({ delayOf: shuffledDelay })
+  const unbounded = await fetchAllRowsChunked(parentIds(40), all.makeQuery, { chunkSize: 2 })
+  expect(data).toEqual(unbounded.data)
+  expect(data).toEqual(src.expected(2))
+})
+
+test('a cap above the chunk count, or a nonsense one, is the old behaviour', async () => {
+  for (const concurrency of [50, 0, -1, NaN, null]) {
+    const src = makeTrackedSource({ parents: 10 })
+    const p = fetchAllRowsChunked(parentIds(10), src.makeQuery, { chunkSize: 2, concurrency })
+    expect(src.started).toHaveLength(5)
+    expect((await p).data).toEqual(src.expected(2))
+  }
+})
+
+test('bounded: once a chunk fails no new chunk starts', async () => {
+  const src = makeTrackedSource({ failOn: ids => (ids.includes(4) ? { message: 'chunk 2 died' } : null) })
+  const { data, error } = await fetchAllRowsChunked(parentIds(40), src.makeQuery, { chunkSize: 2, concurrency: 1 })
+  expect(data).toBeNull()
+  expect(error.message).toBe('chunk 2 died')
+  expect(src.started).toEqual([0, 2, 4])
+})
+
+test('bounded: the lowest-numbered failing chunk wins, even when a later one fails first', async () => {
+  const failOn = ids => (ids.includes(10) ? { message: 'chunk 5 died' } : ids.includes(16) ? { message: 'chunk 8 died' } : null)
+  // Chunk 5 is slow, so chunk 8 starts and fails while it is still in flight.
+  const delayOf = ids => (ids.includes(10) ? 30 : 1)
+  const src = makeTrackedSource({ failOn, delayOf })
+  const bounded = await fetchAllRowsChunked(parentIds(40), src.makeQuery, { chunkSize: 2, concurrency: 3 })
+  expect(bounded.data).toBeNull()
+  expect(bounded.error.message).toBe('chunk 5 died')
+  expect(src.started).toContain(16)
+  expect(src.started.length).toBeLessThan(20)
+  // The same error the all-at-once read reports.
+  const all = makeTrackedSource({ failOn, delayOf })
+  const unbounded = await fetchAllRowsChunked(parentIds(40), all.makeQuery, { chunkSize: 2 })
+  expect(unbounded.error.message).toBe('chunk 5 died')
+})
+
+test('bounded: a chunk that runs past the ceiling still fails the whole read with the row-cap error', async () => {
+  const src = makeTrackedSource({ parents: 6 })
+  // Each chunk of 3 parents owns 6 rows; a ceiling of 4 per read is breached.
+  const capped = await fetchAllRowsChunked(parentIds(6), src.makeQuery, { chunkSize: 3, pageSize: 4, maxRows: 4, concurrency: 1 })
+  expect(capped.data).toBeNull()
+  expect(capped.error.code).toBe(ROW_CAP_CODE)
+})
+
 test('rowCapError is a supabase-shaped error with a stable code', () => {
   const e = rowCapError(100000)
   expect(e.code).toBe(ROW_CAP_CODE)

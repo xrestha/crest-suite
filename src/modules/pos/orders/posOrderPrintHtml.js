@@ -5,6 +5,7 @@ import { npr2 } from '../../../shared/nepalMoney'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { changedOnSentUnits, changeNoteText } from '../kitchenNotes'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 // A line's Crest Customization choices (S758), in either shape a caller holds them: the cart/server
 // snapshot ({ option_name, kitchen_name, is_removal }) or a logged ticket's ({ kitchen, is_removal }).
@@ -140,7 +141,8 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   // reprint after the outlet's VAT registration changed keeps its heading, its VAT and its total.
   // Today's setting decides only an order with no stamp (the live preview of an open order).
   const vatReg      = billVatRegistered(order, billingSettings.is_vat_registered)
-  const prefix      = esc(billingSettings.invoice_prefix || '')
+  // S834 (D35): the code the bill was printed under; today's only for one closed before bills kept theirs.
+  const prefix      = esc(invoiceCodeOf(order, billingSettings.invoice_prefix))
   const invoiceNo   = order.invoice_no != null
     ? `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${esc(order.invoice_fy || '')}`
     : `${vatReg ? 'TI' : 'PB'}-(on confirm)`

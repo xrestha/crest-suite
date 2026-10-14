@@ -21,6 +21,7 @@ import {
 // The page's structure, the order tracker, the choice sheet and the touch tier. Colour comes from the
 // app theme, which ThemeContext pins to the default preset on this route (S767) — see the header
 // of guestMenu.css.
+import { turnedAwayUnanswered } from '../../../shared/guestOrderStale'
 import './guestMenu.css'
 
 const fmtNpr = npr
@@ -676,6 +677,9 @@ export default function GuestMenu() {
     setJustPlaced(false)
     const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, ...(l.option_ids.length ? { options: l.option_ids } : {}) }))
     const itemsSnapshot = cartLines.map(l => ({ name: l.summary ? `${l.name} (${l.summary})` : l.name, qty: l.qty }))
+    // When the guest sent it, by this phone's clock: how the tracker tells an order nobody answered
+    // in time from one staff turned away (S834, D34).
+    const sentAt = new Date().toISOString()
     const linesSnapshot = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, option_ids: l.option_ids }))
     // GUEST-2 (S809 3b): the same order sent again carries the key of the send whose answer never
     // came back, so the server hands back that order if it landed. An order changed since then first
@@ -725,7 +729,7 @@ export default function GuestMenu() {
       // An unknown outcome keeps the key for the resend. A refusal stored nothing under this key; an
       // earlier unanswered send stays kept, because its own outcome is still not known.
       if (refusal.resetKey) clearStoredAttempt(tableId)
-      else if (refusal.unknown && key && !attempt) saveStoredAttempt(tableId, { key, sig, items: itemsSnapshot, lines: linesSnapshot, covers, note: guestNote })
+      else if (refusal.unknown && key && !attempt) saveStoredAttempt(tableId, { key, sig, items: itemsSnapshot, lines: linesSnapshot, covers, note: guestNote, sentAt })
       setSubmitError(refusal.text)
       // The menu on screen offered a dish the server no longer has. Re-read it in place — not via
       // retryLoadMenu, which blanks the page to its loading state and would close the sheet the
@@ -763,10 +767,10 @@ export default function GuestMenu() {
     }
     clearStoredAttempt(tableId)
     try {
-      sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, lines: linesSnapshot, covers }))
+      sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, lines: linesSnapshot, covers, sentAt }))
     } catch { /* the tracker still works for this session */ }
     setRequestId(data)
-    setRequestSnapshot({ items: itemsSnapshot, lines: linesSnapshot, covers })
+    setRequestSnapshot({ items: itemsSnapshot, lines: linesSnapshot, covers, sentAt })
     setCart({})
     setGuestNote('')
     // Covers are kept: a second round is the same table of people, and resetting to 2 recorded a
@@ -797,10 +801,10 @@ export default function GuestMenu() {
   function adoptEarlierOrder(attempt) {
     clearStoredAttempt(tableId)
     try {
-      sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: attempt.key, items: attempt.items, lines: attempt.lines, covers: attempt.covers }))
+      sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: attempt.key, items: attempt.items, lines: attempt.lines, covers: attempt.covers, sentAt: attempt.sentAt || null }))
     } catch { /* the tracker still works for this session */ }
     setRequestId(attempt.key)
-    setRequestSnapshot({ items: attempt.items || [], lines: attempt.lines || [], covers: attempt.covers || 1 })
+    setRequestSnapshot({ items: attempt.items || [], lines: attempt.lines || [], covers: attempt.covers || 1, sentAt: attempt.sentAt || null })
     setCart(prev => cartWithout(prev, attempt.lines, cartKey))
     if ((guestNote || '').trim() === (attempt.note || '').trim()) setGuestNote('')
     setReviewOpen(false)
@@ -872,7 +876,7 @@ export default function GuestMenu() {
           <div ref={statusCardRef} className={`gm-status-wrap${justPlaced ? ' guest-order-glow' : ''}`}>
             <OrderStatusCard
               stage={stage || 'placed'} progress={progress}
-              items={requestSnapshot.items} covers={requestSnapshot.covers}
+              items={requestSnapshot.items} covers={requestSnapshot.covers} sentAt={requestSnapshot.sentAt}
               tableName={tableName} statusStale={statusStale}
               onRestore={restoreRefusedOrder} onClear={clearTracker}
             />
@@ -1155,7 +1159,7 @@ function SheetHeader({ title, onClose }) {
   )
 }
 
-function OrderStatusCard({ stage, progress, items, covers, tableName, statusStale, onRestore, onClear }) {
+function OrderStatusCard({ stage, progress, items, covers, sentAt, tableName, statusStale, onRestore, onClear }) {
   const list = items?.length > 0 && (
     <ul className="gm-status-items">
       {items.map((it, i) => <li key={i}>{it.qty} × {tidyName(it.name)}</li>)}
@@ -1166,10 +1170,12 @@ function OrderStatusCard({ stage, progress, items, covers, tableName, statusStal
   )
 
   if (stage === 'dismissed') {
+    // S834 (D34): an order nobody answered for 30 minutes is turned away by itself, and says so.
+    const unanswered = turnedAwayUnanswered(sentAt, Date.now())
     return (
       <section className="gm-status gm-status--refused" aria-labelledby="gm-status-title">
-        <h2 id="gm-status-title" className="gm-status-title">Staff couldn’t take this order</h2>
-        <p className="gm-status-text">Please ask a member of staff. You can send it again from your order.</p>
+        <h2 id="gm-status-title" className="gm-status-title">{unanswered ? 'No one answered this order in time' : 'Staff couldn’t take this order'}</h2>
+        <p className="gm-status-text">{unanswered ? 'It waited 30 minutes without an answer, so it was cancelled. ' : ''}Please ask a member of staff. You can send it again from your order.</p>
         {list}
         <div className="gm-status-actions">
           <button type="button" className="btn btn-primary" onClick={onRestore}>Put it back in my order</button>

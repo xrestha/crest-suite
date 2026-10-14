@@ -100,8 +100,9 @@ are load-bearing, each with the reason it exists:
 - **An unanswered request expires only when its own phone asks again (S818, `20261012130000`).**
   `submit_reservation_request` cancels that number's passed requests ('Not answered in time',
   `EXPIRED_REQUEST_REASON`) before its insert, so the one-request-per-phone index no longer blocks it
-  for good. Other stale requests wait for staff (marked "time passed"); the guest card words a passed
-  one itself. A table held by a live booking is named before a delete or Inactive (D26), and the
+  for good. Since S834 a passed request is counted nowhere (one predicate, `waitingRequests` in
+  `reservationSeen.js`: nav chip, band, floor, dashboard) and opening Reservations closes the outlet's
+  passed ones the same way (`requestExpiry.js`); the guest card words a passed one itself. A table held by a live booking is named before a delete or Inactive (D26), and the
   booking form shows a held inactive table as a removable chip.
 - **Nothing self-confirms.** A public request lands as `requested` and waits for a staff Accept;
   there is no phone verification because there is no SMS rail (POS_TODO C). The staff WhatsApp or
@@ -138,7 +139,7 @@ are load-bearing, each with the reason it exists:
   when they next look, or a person who is waiting now. The rail's amber dot on the HR/POS icon and
   the per-route `navCounts` chip in `Layout.js` are the badge half; a count shown only on the page
   the item lands on, or on a dashboard tile's second line, was reported as "no notification" by an
-  owner on the IMS dashboard. `posRequests` (reservations `status = 'requested'`) is the first POS
+  owner on the IMS dashboard. `posRequests` (reservations still `requested` and not yet passed) is the first POS
   entry; keep a failed count at its last value rather than zero.
 - **The Reservations page opens on the whole future book, and Activity is the only view that
   says what changed (S687).** Upcoming = `reserved_for >= today`, unpaged, under day headers;

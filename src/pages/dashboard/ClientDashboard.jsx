@@ -64,6 +64,7 @@ import { KDS_LATE_MS } from '../../modules/pos/posSignals'
 import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 import { summariseBills, returnsOf } from '../../modules/pos/dashboard/posDashboardMath'
 import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUnavailable } from './homePosStats'
+import { waitingRequests } from '../../shared/reservationSeen'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -1121,7 +1122,8 @@ export default function ClientDashboard({ scope = 'home' }) {
         scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
           .in('status', ['booked', 'confirmed', 'arrived', 'seated'])
           .gte('reserved_for', carryOverFrom(dayStart)).lte('reserved_for', dayEnd),
-        scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
+        // S834: a request whose time has passed is not counted (reservationSeen.js, as the nav chip).
+        waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true })),
       ])
       const dayStartMs = new Date(dayStart).getTime()
       bookings = (b.data || []).filter(x => stillInPlay(x, dayStartMs, Date.now())); bookingsErr = b.error

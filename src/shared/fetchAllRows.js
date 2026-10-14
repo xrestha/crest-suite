@@ -70,13 +70,42 @@ export async function fetchAllRows(makeQuery, { pageSize = 1000, maxRows = 10000
 //
 // `makeQuery` takes the id slice and returns a fresh builder for it, and must carry the same
 // unique tiebreaker fetchAllRows requires. Chunks are independent reads, so they run together.
-export async function fetchAllRowsChunked(ids, makeQuery, { chunkSize = 150, ...pageOpts } = {}) {
+//
+// `concurrency` caps how many chunks are in flight at once (S834, S809.4 3m). The default is every
+// chunk at once, as before. A whole fiscal year's lines (Sales Report's 1L+ tab) is ~730 chunks for
+// a 1,09,500-bill year, and firing them all together queued hundreds of requests in the browser.
+// Bounded, the chunks start in order as lanes free up; once one fails no new chunk starts, and the
+// ones already running finish. The answer does not change: rows in chunk order, and the error of
+// the LOWEST-numbered failing chunk wins (every chunk before it was started, and is awaited), so a
+// row-cap error still surfaces exactly as it did.
+export async function fetchAllRowsChunked(ids, makeQuery, { chunkSize = 150, concurrency = Infinity, ...pageOpts } = {}) {
   const unique = [...new Set((ids || []).filter(id => id != null))]
   if (unique.length === 0) return { data: [], error: null }
   const chunks = []
   for (let i = 0; i < unique.length; i += chunkSize) chunks.push(unique.slice(i, i + chunkSize))
-  const results = await Promise.all(chunks.map(c => fetchAllRows(() => makeQuery(c), pageOpts)))
-  const failed = results.find(r => r.error)
+  const results = new Array(chunks.length)
+  let next = 0
+  let stopped = false
+  // Each lane takes the next chunk synchronously, so with the default every chunk is started in the
+  // same tick, exactly as the old Promise.all over every chunk did.
+  const lane = async () => {
+    while (!stopped && next < chunks.length) {
+      const i = next++
+      let r
+      try {
+        r = await fetchAllRows(() => makeQuery(chunks[i]), pageOpts)
+      } catch (e) {
+        stopped = true
+        throw e
+      }
+      results[i] = r
+      if (r.error) stopped = true
+    }
+  }
+  const cap = Math.floor(concurrency)
+  const lanes = cap > 0 ? Math.min(cap, chunks.length) : chunks.length
+  await Promise.all(Array.from({ length: lanes }, lane))
+  const failed = results.find(r => r && r.error)
   if (failed) return { data: null, error: failed.error }
   return { data: results.flatMap(r => r.data), error: null }
 }

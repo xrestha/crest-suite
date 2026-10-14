@@ -28,7 +28,8 @@ import {
 import { describeHoldRefusal } from './reservationConflicts'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from './reservationSettings'
 import { activityEvent, activityBy, agoLabel, isNewSince, groupByDay } from './reservationActivity'
-import { readSeenStamp, writeSeenStamp } from '../../../shared/reservationSeen'
+import { readSeenStamp, writeSeenStamp, requestTimePassed } from '../../../shared/reservationSeen'
+import { closePassedRequests } from './requestExpiry'
 import { bookedCoversByHour, overSeatsHours } from './reservationCapacity'
 import { fillTemplate, openWhatsApp } from './whatsappLink'
 import ReservationModal from './ReservationModal'
@@ -86,6 +87,7 @@ const VERB = { confirmed: 'confirmed', arrived: 'marked arrived', completed: 'ma
  */
 export default function PosReservations() {
   const { clientId, hasPosAccess } = useAuth()
+  const canOpen = hasPosAccess('staff') // the route guard below; the sweep waits on it too
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const biz = useBizInfo()
@@ -191,6 +193,26 @@ export default function PosReservations() {
   }, [clientId, dayIso, filter, seenStamp, scopedFrom, commitRequests]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
+  const loadRef = useRef(load)
+  useEffect(() => { loadRef.current = load }, [load])
+
+  // S834 (S809.4 4j): on opening, this outlet's requests whose time has passed are closed as the
+  // server closes them when the same phone asks again (requestExpiry.js), so a stale request no longer
+  // waits for staff. Once per outlet per visit, beside the first load rather than in front of it. Any
+  // login that opens this page may make that write: the table's policy is same-outlet FOR ALL, its
+  // restrictive trio fences out only HR Self-Service, IMS and HR-role logins (none of which can read
+  // this page either), and no rank trigger guards a status move. A failed sweep is logged and changes
+  // nothing on screen; one that closed something reloads quietly, so the band and Activity show it.
+  useEffect(() => {
+    if (!clientId || !canOpen) return
+    let cancelled = false
+    closePassedRequests(scopedUpdate).then(({ ids, error }) => {
+      if (cancelled) return
+      if (error) { console.error('closing booking requests whose time passed failed, left for staff:', error); return }
+      if (ids.length > 0) loadRef.current({ quiet: true })
+    })
+    return () => { cancelled = true }
+  }, [clientId, canOpen, scopedUpdate])
 
   // The seen stamp: read for this client on arrival, written when the page is left or the tab
   // hidden. Written on leaving rather than on every poll so that what is "new" stays marked for
@@ -243,6 +265,9 @@ export default function PosReservations() {
   // Upcoming and Unconfirmed read under day headers; Day is one day and needs none.
   const dayGroups = useMemo(() => (filter === 'upcoming' || filter === 'unconfirmed' ? groupByDay(visibleRows, rowDayIso) : null), [visibleRows, filter])
   const tableById = useMemo(() => Object.fromEntries(tables.map(t => [t.id, t])), [tables])
+  // S834 (S809.4 4j): the band counts only requests still to come, with the sidebar chip's own test
+  // (reservationSeen.js). A passed one stays listed and marked until it is declined or closed.
+  const waitingCount = useMemo(() => requests.filter(r => !requestTimePassed(r, now)).length, [requests, now])
   const totalSeats = useMemo(() => tables.filter(t => t.status !== 'inactive').reduce((s, t) => s + (Number(t.capacity) || 0), 0), [tables])
 
   const stats = useMemo(() => ({
@@ -278,7 +303,7 @@ export default function PosReservations() {
     return out
   }, [liveRows, totalSeats, filter])
 
-  if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
+  if (!canOpen) return <Navigate to="/pos" replace />
 
   // Every status move goes through here. The `.eq('status', row.status)` guard means a stale
   // screen cannot overwrite a newer decision made on another device: zero rows updated is
@@ -486,7 +511,11 @@ export default function PosReservations() {
       {requests.length > 0 && (
         <div className="card" style={{ padding: 16, marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-            <span className="badge badge-amber">🔔 {requests.length} booking request{requests.length === 1 ? '' : 's'}</span>
+            <span className="badge badge-amber">
+              {waitingCount > 0
+                ? `🔔 ${waitingCount} booking request${waitingCount === 1 ? '' : 's'}`
+                : `△ ${requests.length} request${requests.length === 1 ? '' : 's'} past ${requests.length === 1 ? 'its' : 'their'} time`}
+            </span>
             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
               Sent from the booking link. Accept or decline — the guest's phone updates either way.
             </span>
@@ -499,8 +528,9 @@ export default function PosReservations() {
               <tbody>
                 {requests.map(r => {
                   const bs = nepalBs(r.reserved_for)
-                  // S818 RESERVATIONS-9: a request whose time has gone can only be declined now.
-                  const passed = new Date(r.reserved_for).getTime() < now
+                  // S818 RESERVATIONS-9: a request whose time has gone can only be declined now. S834: the
+                  // test the counts use too.
+                  const passed = requestTimePassed(r, now)
                   return (
                     <tr key={r.id}>
                       <td style={{ whiteSpace: 'nowrap' }}>

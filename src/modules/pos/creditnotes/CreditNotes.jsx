@@ -19,6 +19,7 @@ import IssueCreditNoteModal from './IssueCreditNoteModal'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 const fmtNpr = npr
 
@@ -105,7 +106,7 @@ export default function CreditNotes() {
     // A FUNCTION returning a fresh builder, not one builder reused: a supabase-js builder is a
     // one-shot thenable, so paging a shared one silently returns the first page every time.
     const makeQuery = () => {
-      const q = scopedFrom('pos_orders', 'id, table_name, order_no, invoice_no, invoice_fy, close_type, paid_amount, closed_at, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount, credit_note_id')
+      const q = scopedFrom('pos_orders', 'id, table_name, order_no, invoice_no, invoice_fy, invoice_prefix, close_type, paid_amount, closed_at, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount, credit_note_id')
         .eq('status', 'billed').eq('close_type', 'paid')
         .is('credit_note_id', null)
       return (byInvoiceNo
@@ -208,7 +209,7 @@ export default function CreditNotes() {
     const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(notes.map(n => {
       return {
-        'CN No': `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`,
+        'CN No': `CN${n.credit_note_no}-${invoiceCodeOf(n, billingSettings.invoice_prefix)}${invoiceCodeOf(n, billingSettings.invoice_prefix) ? '-' : ''}${n.invoice_fy}`,
         'Ref Invoice No': n.original_invoice_label,
         'Date (BS)': bsDayMonthYear(n.created_at),
         'Buyer': n.buyer_name || 'CASH SALES',
@@ -353,7 +354,7 @@ export default function CreditNotes() {
                 </thead>
                 <tbody>
                   {notes.map(n => {
-                    const cnNo = `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`
+                    const cnNo = `CN${n.credit_note_no}-${invoiceCodeOf(n, billingSettings.invoice_prefix)}${invoiceCodeOf(n, billingSettings.invoice_prefix) ? '-' : ''}${n.invoice_fy}`
                     return (
                       <tr key={n.id}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>

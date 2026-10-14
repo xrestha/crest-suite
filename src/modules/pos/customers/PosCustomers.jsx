@@ -20,6 +20,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { settleWithin } from '../../../utils/withTimeout'
 import { settleCreditBill, SETTLE_READ_MS } from './settleCredit'
 import { customerBookAfterRead } from './customerBook'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -33,7 +34,8 @@ const LIST_READ_MS = 20000
 const ROW_READ_MS = SETTLE_READ_MS
 
 // TI or PB as the bill was issued (S809 2c): its own stamp, today's flag only for a bill with none.
-function invoiceLabel(order, vatReg, prefix) {
+function invoiceLabel(order, vatReg, current) {
+  const prefix = invoiceCodeOf(order, current) // S834 (D35): the bill's own code
   if (order.invoice_no == null) return `#${order.order_no ?? ''}`
   if (order.close_type === 'writeoff') return `NC-${String(order.invoice_no).padStart(2, '0')}`
   return `${billVatRegistered(order, vatReg) ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
@@ -107,10 +109,12 @@ export default function PosCustomers() {
   const [billingSettings, setBillingSettings] = useState({
     is_vat_registered: true, invoice_prefix: '', delivery_partners: [],
   })
-  // S754: whether the settings row above was actually read. The defaults are a guess —
-  // `is_vat_registered: true` in particular changes the commission base openSettle computes (ex-VAT
-  // vs VAT-inclusive, ~13 points on every partner bill) — so settling waits on a real read, and a
-  // failed one blocks it. null = still loading, true = read, an error object = the read failed.
+  // S754: whether the settings row above was actually read. The defaults are a guess — the partners'
+  // contracted rates pre-fill the commission, and the flag says TI or PB on a bill with no stamp of
+  // its own — so settling waits on a real read, and a failed one blocks it. S834 (S809.4 2c): the flag
+  // does NOT move the commission base. openSettle's taxable + non-taxable is ex-VAT and post-discount
+  // under either flag; only the split between the two changes. null = still loading, true = read, an
+  // error object = the read failed.
   const [settingsRead, setSettingsRead] = useState(null)
 
   useEffect(() => {
@@ -238,7 +242,7 @@ export default function PosCustomers() {
     // S833: bounded like the reads beside it, so a hung one is the error card, not "Loading…" for ever.
     // Names beside it (S809 CUSTOMERS-PARKING-6): bounded, and a failure only marks the By column.
     const [{ data, error }, names] = await Promise.all([
-      settleWithin(fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_by, credit_settled_method, credit_note_id, vat_registered')
+      settleWithin(fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, invoice_prefix, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_by, credit_settled_method, credit_note_id, vat_registered')
         .eq('payment_method', 'Credit').eq('status', 'billed')
         .order('closed_at', { ascending: false }).order('id')), LIST_READ_MS, 'Reading the Credit bills'),
       settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), SETTLE_READ_MS, 'Reading staff names'),
@@ -273,7 +277,7 @@ export default function PosCustomers() {
     // "Loading order history…" for ever. Two reads for one row cannot overlap: while this one runs the
     // row holds 'loading', which the check above returns on, and a late answer past the limit is dropped.
     const { data, error } = await settleWithin(
-      scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id, vat_registered')
+      scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, invoice_prefix, close_type, payment_method, paid_amount, closed_at, credit_settled_at, credit_note_id, vat_registered')
         .eq('status', 'billed').in('buyer_phone', phones)
         .order('closed_at', { ascending: false }).limit(50),
       ROW_READ_MS, "Reading this customer's bills",

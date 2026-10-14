@@ -22,6 +22,7 @@ import { viewPosBill } from '../../../utils/viewPosBill'
 import { CLOSE_TYPE_BADGE } from '../posSignals'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 const fmtNpr = npr
 
@@ -32,7 +33,8 @@ const TYPE_META = {
 }
 
 // TI or PB as the bill was issued (S809 2c): its own stamp, today's flag only for a bill with none.
-function invoiceLabel(order, vatReg, prefix) {
+function invoiceLabel(order, vatReg, current) {
+  const prefix = invoiceCodeOf(order, current) // S834 (D35): the bill's own code
   if (order.invoice_no == null) return `#${order.order_no ?? ''}`
   if (order.close_type === 'writeoff') return `NC-${String(order.invoice_no).padStart(2, '0')}`
   return `${billVatRegistered(order, vatReg) ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
@@ -74,7 +76,7 @@ export default function PosExceptionReport() {
     const results = await Promise.all([
       // Paged: this is the fraud/exception audit trail, so a truncated read hides exactly the
       // rows someone would be looking for — and reports a smaller total as if it were complete.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, close_reason, discount_amount, discount_reason, paid_amount, table_name, closed_at, closed_by, vat_registered')
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, invoice_prefix, close_type, close_reason, discount_amount, discount_reason, paid_amount, table_name, closed_at, closed_by, vat_registered')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .or('close_type.in.(void,writeoff),discount_amount.gt.0')
         .order('closed_at', { ascending: false }).order('id')),
@@ -170,7 +172,7 @@ export default function PosExceptionReport() {
       const orderIds = [...new Set(itemComps.map(i => i.order_id))]
       // Chunked and paged (S754): one parent per comped bill in the range, as a `.in()` URL.
       const { data: parentOrders, error: parentsError } = await fetchAllRowsChunked(orderIds,
-        ids => scopedFrom('pos_orders', 'id, order_no, table_name, invoice_no, invoice_fy, vat_registered').in('id', ids).order('id'))
+        ids => scopedFrom('pos_orders', 'id, order_no, table_name, invoice_no, invoice_fy, invoice_prefix, vat_registered').in('id', ids).order('id'))
       if (!loadReq.isCurrent(reqKey)) return
       // S612: a dropped error here would strip every item-comp of its parent bill reference.
       if (parentsError) { setLoadError(parentsError.message); setRows([]); setLoading(false); return }
@@ -204,6 +206,7 @@ export default function PosExceptionReport() {
           // (bill ↔ comp cross-reference) needs this on both sides, not just the comp side.
           parentInvoiceNo: parentById[i.order_id]?.invoice_no,
           parentInvoiceFy: parentById[i.order_id]?.invoice_fy,
+          parentInvoicePrefix: parentById[i.order_id]?.invoice_prefix,
           parentVatRegistered: parentById[i.order_id]?.vat_registered, // S809 2c: TI or PB as issued
         }
         g.amount += i.qty * (itemCostMap[i.recipe_id] || 0)
@@ -275,7 +278,7 @@ export default function PosExceptionReport() {
         'Time':       nepalTime24(r.closed_at),
         'Bill No':    invoiceLabel(r, vatReg, prefix),
         'On Bill':    r.isItemComp && r.parentInvoiceNo != null
-          ? invoiceLabel({ invoice_no: r.parentInvoiceNo, invoice_fy: r.parentInvoiceFy, close_type: 'paid', order_no: r.order_no, vat_registered: r.parentVatRegistered }, vatReg, prefix)
+          ? invoiceLabel({ invoice_no: r.parentInvoiceNo, invoice_fy: r.parentInvoiceFy, invoice_prefix: r.parentInvoicePrefix, close_type: 'paid', order_no: r.order_no, vat_registered: r.parentVatRegistered }, vatReg, prefix)
           : '',
         'Table':      r.table_name || 'Takeaway',
         'Type':       TYPE_META[r.type].label,
@@ -486,7 +489,7 @@ export default function PosExceptionReport() {
                           </button>
                           {r.isItemComp && r.parentInvoiceNo != null && (
                             <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)' }}>
-                              on {invoiceLabel({ invoice_no: r.parentInvoiceNo, invoice_fy: r.parentInvoiceFy, close_type: 'paid', order_no: r.order_no, vat_registered: r.parentVatRegistered }, vatReg, prefix)}
+                              on {invoiceLabel({ invoice_no: r.parentInvoiceNo, invoice_fy: r.parentInvoiceFy, invoice_prefix: r.parentInvoicePrefix, close_type: 'paid', order_no: r.order_no, vat_registered: r.parentVatRegistered }, vatReg, prefix)}
                             </div>
                           )}
                         </td>

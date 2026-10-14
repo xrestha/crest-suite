@@ -588,17 +588,28 @@ Deno.serve(async (req) => {
       const userAgent = (req.headers.get('user-agent') || '').slice(0, 400) || null
       const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
-      const { count: ipCount } = await admin
+      // A count that failed to read is no count (S834): `?? 0` let a signup through the very limit it
+      // could not check (CLAUDE.md's vacuous-guard rule), so a failed read refuses instead.
+      const limitUnread = () => json({ error: 'Signups could not be checked just now. Please try again in a minute.' }, 503)
+      const { count: ipCount, error: ipCountErr } = await admin
         .from('trial_signup_attempts').select('id', { count: 'exact', head: true })
         .eq('ip', ip).gte('created_at', since)
-      if ((ipCount ?? 0) >= 3) {
+      if (ipCountErr || ipCount == null) {
+        console.error('register_trial: per-network signup count failed', ipCountErr)
+        return limitUnread()
+      }
+      if (ipCount >= 3) {
         return json({ error: 'Too many signup attempts from this network. Please try again in an hour.' }, 429)
       }
 
-      const { count: globalCount } = await admin
+      const { count: globalCount, error: globalCountErr } = await admin
         .from('trial_signup_attempts').select('id', { count: 'exact', head: true })
         .gte('created_at', since)
-      if ((globalCount ?? 0) >= 30) {
+      if (globalCountErr || globalCount == null) {
+        console.error('register_trial: overall signup count failed', globalCountErr)
+        return limitUnread()
+      }
+      if (globalCount >= 30) {
         return json({ error: 'Signups are temporarily paused. Please try again shortly.' }, 429)
       }
 

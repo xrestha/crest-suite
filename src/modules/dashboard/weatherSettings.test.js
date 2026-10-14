@@ -14,7 +14,8 @@ describe('cityPatch', () => {
   })
 })
 
-// The browser's copy of settings_guard_staff_roles' weather_city_rank (20260923130000).
+// The browser's copy of settings_guard_staff_roles' weather_city_rank (20260923130000, effective
+// ranks since S829's 20261013150000).
 describe('canEditWeatherCity', () => {
   const who = (profile, extra = {}) => canEditWeatherCity({ isAdmin: false, isOwner: false, profile, ...extra })
 
@@ -33,6 +34,26 @@ describe('canEditWeatherCity', () => {
     expect(who({ pos_role: 'staff' })).toBe(false)
     expect(who({})).toBe(false)
     expect(who(null)).toBe(false)
+  })
+  // S834: the guard's effective ranks since S829 (20261013150000).
+  test('a settled login holds no manager rank on any axis', () => {
+    const settled = { settlement_blocked_by: 'owner-id' }
+    expect(who({ ...settled, pos_role: 'manager' })).toBe(false)
+    expect(who({ ...settled, hr_role: 'manager' })).toBe(false)
+    expect(who({ ...settled, ims_role: 'manager', ims_email: null })).toBe(false)
+    expect(who({ ...settled, pos_role: 'manager', ims_role: 'manager', hr_role: 'manager' })).toBe(false)
+  })
+  test('a POS-blocked login loses only its POS rank', () => {
+    const blocked = { pos_blocked_at: '2026-10-10T08:00:00Z' }
+    expect(who({ ...blocked, pos_role: 'manager' })).toBe(false)
+    expect(who({ ...blocked, pos_role: 'manager', hr_role: 'manager' })).toBe(true)
+    expect(who({ ...blocked, pos_role: 'manager', ims_role: 'manager', ims_email: null })).toBe(true)
+  })
+  test('cleared blocks (NULL) leave the rank as it was', () => {
+    expect(who({ pos_role: 'manager', settlement_blocked_by: null, pos_blocked_at: null })).toBe(true)
+  })
+  test('the Owner and admin are exempt whatever the profile row says, as in the guard', () => {
+    expect(canEditWeatherCity({ isAdmin: false, isOwner: true, profile: { settlement_blocked_by: 'x' } })).toBe(true)
   })
 })
 

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import LoyaltyTab from './LoyaltyTab'
 
 // S833 (S809.4 3k): with no scheme the members still show with their points, and "+ Add scheme" with no
@@ -7,20 +7,23 @@ import LoyaltyTab from './LoyaltyTab'
 // jest.mock factories may only reach variables named mock*; they are read at call time, not hoisting time.
 // Plain functions, not jest.fn: CRA resets every mock's implementation before each test.
 const mockData = { schemes: [], members: [], balances: [] }
-function mockBuilder(rows) {
-  const answer = () => Promise.resolve({ data: rows, error: null })
+// S834: a read answers with the rows above unless a test sets mockAnswer[kind] to a function returning
+// the answer's promise instead: a failure, a read that never answers, or one the test settles itself.
+const mockAnswer = {}
+function mockBuilder(kind) {
+  const answer = () => (mockAnswer[kind] ? mockAnswer[kind]() : Promise.resolve({ data: mockData[kind] || [], error: null }))
   const b = { order: () => b, range: answer, then: (ok, bad) => answer().then(ok, bad) }
   return b
 }
 const mockScoped = {
   clientId: 'c1',
-  scopedFrom: table => mockBuilder(table === 'pos_loyalty_schemes' ? mockData.schemes : mockData.members),
+  scopedFrom: table => mockBuilder(table === 'pos_loyalty_schemes' ? 'schemes' : 'members'),
   scopedInsert: jest.fn(),
   scopedUpdate: jest.fn(),
   scopedDelete: jest.fn(),
 }
 jest.mock('../../../supabaseClient', () => ({
-  supabase: { rpc: () => mockBuilder(mockData.balances), from: () => mockBuilder([]), auth: {} },
+  supabase: { rpc: () => mockBuilder('balances'), from: () => mockBuilder('none'), auth: {} },
 }))
 jest.mock('../../../shared/hooks/useScopedDb', () => ({ useScopedDb: () => mockScoped }))
 
@@ -32,6 +35,8 @@ beforeEach(() => {
   mockData.members = [sita, ram]
   mockData.balances = [{ customer_id: 'm1', balance: 120, held: 0 }]
   mockScoped.scopedInsert.mockReset()
+  for (const k of Object.keys(mockAnswer)) delete mockAnswer[k]
+  jest.spyOn(console, 'error').mockImplementation(() => {}) // the failed reads below log on purpose
 })
 
 describe('LoyaltyTab with no scheme', () => {
@@ -87,5 +92,78 @@ describe('+ Add scheme with no name', () => {
     expect(screen.queryByText('Type a scheme name first.')).not.toBeInTheDocument()
     expect(name).not.toHaveAttribute('aria-invalid')
     expect(add).not.toHaveAttribute('aria-disabled')
+  })
+})
+
+// S834 (found S833): the tab's reads are bounded, a failed reload keeps what is on screen, and of two
+// overlapping reloads only the newer one lands.
+const scheme = (id, name) => ({ id, name, points_per_100: 1, min_spend_to_earn: 0, is_active: true })
+const refused = () => Promise.resolve({ data: null, error: { code: '42501', message: 'permission denied for table pos_customers' } })
+
+async function addScheme(name) {
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: name } })
+  fireEvent.click(screen.getByRole('button', { name: '+ Add scheme' }))
+}
+
+describe('LoyaltyTab reads', () => {
+  test('a failed first read is the error card, with no member or points on screen', async () => {
+    mockAnswer.balances = refused
+    render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+    expect(await screen.findByText('Could not load this report')).toBeInTheDocument()
+    expect(screen.queryByText('Sita')).not.toBeInTheDocument()
+    expect(screen.queryByText('120')).not.toBeInTheDocument()
+  })
+
+  test('a read that never answers becomes the error card, not "Loading loyalty…" for ever', async () => {
+    jest.useFakeTimers()
+    try {
+      mockAnswer.members = () => new Promise(() => {})
+      render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+      expect(screen.getByText('Loading loyalty…')).toBeInTheDocument()
+      await act(async () => { jest.advanceTimersByTime(19000) })
+      expect(screen.getByText('Loading loyalty…')).toBeInTheDocument()
+      await act(async () => { jest.advanceTimersByTime(1500) })
+      expect(await screen.findByText('Could not load this report')).toBeInTheDocument()
+      expect(screen.queryByText('Loading loyalty…')).not.toBeInTheDocument()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test('a reload that fails after an add keeps the list on screen and says it is as last read', async () => {
+    mockScoped.scopedInsert.mockResolvedValue({ error: null })
+    render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+    await screen.findByText('Sita')
+    mockAnswer.members = refused
+    await addScheme('Regulars')
+    expect(await screen.findByText(/Loyalty could not be read again/)).toBeInTheDocument()
+    expect(screen.getByText('Sita')).toBeInTheDocument()
+    expect(screen.getByText('120')).toBeInTheDocument()
+    expect(screen.queryByText('Could not load this report')).not.toBeInTheDocument()
+
+    // The next good read clears the line.
+    delete mockAnswer.members
+    mockData.schemes = [scheme('s1', 'Regulars')]
+    await addScheme('Family')
+    expect(await screen.findByRole('cell', { name: 'Regulars' })).toBeInTheDocument()
+    expect(screen.queryByText(/Loyalty could not be read again/)).not.toBeInTheDocument()
+  })
+
+  test('of two overlapping reloads, the newer one wins whatever order they answer in', async () => {
+    mockScoped.scopedInsert.mockResolvedValue({ error: null })
+    render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+    await screen.findByText('Sita')
+    const pending = []
+    mockAnswer.schemes = () => new Promise(resolve => pending.push(resolve))
+    await addScheme('Older')
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await addScheme('Newer')
+    await waitFor(() => expect(pending).toHaveLength(2))
+
+    await act(async () => { pending[1]({ data: [scheme('s2', 'Newer')], error: null }) })
+    expect(await screen.findByRole('cell', { name: 'Newer' })).toBeInTheDocument()
+    await act(async () => { pending[0]({ data: [scheme('s1', 'Older')], error: null }) })
+    expect(screen.queryByRole('cell', { name: 'Older' })).not.toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: 'Newer' })).toBeInTheDocument()
   })
 })

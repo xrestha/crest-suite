@@ -621,6 +621,18 @@ export default function MenuPricing() {
     </Tip>
   ) : null
   const panCaption = <Tip text="This outlet gives PAN bills, so the till adds no VAT: the price shown is what the guest pays, and FC% is food cost ÷ that price." width={260}> · PAN bill (no VAT)</Tip>
+  // S834: the till's menu read and the guest menu both leave off a dish with no price above zero
+  // (S809 2h), so a ticked On POS on such a row put nothing on the order screen and nothing here
+  // said why. A note, never a block: the tick still saves, and the dish appears once it is priced.
+  // Rendered in BOTH returns below, like panMark.
+  const noPriceNote = r => r.pos_enabled && !(r.exVat > 0) ? (
+    <>
+      {' · '}
+      <Tip text="The till and the guest menu list only items priced above zero, so this one stays off both until it has a price. Its On POS tick is kept." width={260}>
+        <span>Not on the till until it has a price</span>
+      </Tip>
+    </>
+  ) : null
 
   /* ── POS-only view (no IMS) ─────────────────────────────────────────────── */
   if (!clientModules?.ims) return (
@@ -720,6 +732,7 @@ export default function MenuPricing() {
                       {pan ? panCaption : r.vat > 0
                         ? <Tip text={`Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT.`} width={200}> · {vatLabel(r.vat)}</Tip>
                         : <Tip text="No VAT on this item." width={160}> · No VAT</Tip>}
+                      {noPriceNote(r)}
                       {' · '}
                       <button onClick={() => openEditModal(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'underline' }}>
                         Edit
@@ -1158,6 +1171,7 @@ export default function MenuPricing() {
                           ? <Tip text={`VAT-registered item. Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT. FC% is calculated on the ex-VAT portion.`} width={260}> · {vatLabel(r.vat)}</Tip>
                           : <Tip text="No VAT on this item. Menu price = ex-VAT price. FC% = food cost ÷ full selling price." width={240}> · No VAT</Tip>
                         }
+                        {noPriceNote(r)}
                         {customizationOn && (
                           <>
                             {' · '}

@@ -14,6 +14,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { errorLine, errorText, isNetworkError } from '../../../shared/errorText'
 import { creditNoteInInventory } from './creditNotePosting'
 import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 // "Was money returned to the customer?" (S754, owner decision). Asked on every note, because a
 // Credit Note corrects the VAT register and says nothing about the drawer: a cash refund handed
@@ -48,7 +49,8 @@ const REASON_CHIPS = ['Wrong customer', 'Tax correction', 'Duplicate bill']
 
 const fmtNpr = npr
 
-function invoiceLabel(order, vatReg, prefix) {
+function invoiceLabel(order, vatReg, current) {
+  const prefix = invoiceCodeOf(order, current) // S834 (D35): the bill's own code
   return `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
 }
 

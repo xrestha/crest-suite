@@ -21,6 +21,7 @@ import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import SalesPivot from '../../dashboard/SalesPivot'
+import { staleGuestOrderCutoffIso } from '../../../shared/guestOrderStale'
 import {
   summariseBills, compareToLastWeek, hourlySales, paymentMix, channelMix, topItems,
   openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf,
@@ -144,7 +145,8 @@ export default function PosDashboard() {
         // Open bills are a handful at most, so no paging; the items ride along for the value.
         scopedFrom('pos_orders', 'id, table_id, opened_at, pos_order_items(qty, unit_price, comped)').eq('status', 'open'),
         scopedFrom('pos_tables', 'status').neq('status', 'inactive'),
-        scopedFrom('pos_guest_order_requests', 'id, created_at').eq('status', 'pending'),
+        // S834 (D34): one waiting past 30 minutes is turned away, so it is not counted.
+        scopedFrom('pos_guest_order_requests', 'id, created_at').eq('status', 'pending').gt('created_at', staleGuestOrderCutoffIso(nowMs)),
         // The Kitchen Display's own window (S814 4d, REPORTS-11): this service, from midnight and
         // rolling over at 6 AM, so a ticket sent at 11:50 PM is still here at 12:30 AM. A CHANGE
         // ticket (S809 3a) is an instruction for the kitchen to read, not food being made.

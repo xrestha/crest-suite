@@ -307,7 +307,9 @@ export function AuthProvider({ children }) {
         // ims_email likewise (S756): imsCountOnly below keys on it, and without it in this list the
         // count-PIN fence was false for every session since S737 — a store-room tablet PIN reached
         // every page an IMS staff login does.
-        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_email, ims_job_title, hr_role, hr_job_title')
+        // settlement_blocked_by and pos_blocked_at (S834): canEditWeatherCity matches the server's
+        // effective-rank rule (S829) on them, and read nothing until they were in this list.
+        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_email, ims_job_title, hr_role, hr_job_title, settlement_blocked_by, pos_blocked_at')
         .eq('id', userId)
         .single()
 
@@ -748,15 +750,24 @@ export function AuthProvider({ children }) {
   const modulesOf = data => (data
     ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled, customization: !!data.pos_enabled && !!data.customization_enabled, imsSince: data.ims_since || null }
     : null)
+  // S834 (S809.4 4k): both reads below used to drop their error. A failed read still fails open
+  // (clientModulesKnown false, the default module set), but it says so in the console, and a failed
+  // refresh keeps the last good list for the same client rather than blanking it.
   async function fetchViewModules(id) {
-    const { data } = await supabase.from('clients').select(MODULE_COLS).eq('id', id).single()
+    const { data, error } = await supabase.from('clients').select(MODULE_COLS).eq('id', id).single()
+    if (error) { console.error('[AuthContext] view-as module refresh failed:', error); return }
     setViewModules(modulesOf(data))
   }
   useEffect(() => {
     if (!isAdmin || !adminViewClientId) { setViewModules(null); return }
     let cancelled = false
+    // On a failure this one still writes null ("not known"): the list it holds may be the client
+    // viewed before, which is never this client's.
     supabase.from('clients').select(MODULE_COLS).eq('id', adminViewClientId).single()
-      .then(({ data }) => { if (!cancelled) setViewModules(modulesOf(data)) })
+      .then(({ data, error }) => {
+        if (error) console.error('[AuthContext] view-as module read failed:', error)
+        if (!cancelled) setViewModules(error ? null : modulesOf(data))
+      })
     return () => { cancelled = true }
   // MODULE_COLS/modulesOf are module-level-stable helpers declared inline for locality.
   // eslint-disable-next-line react-hooks/exhaustive-deps

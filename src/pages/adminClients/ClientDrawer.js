@@ -932,7 +932,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   async function handleClearModule(module) {
     const labels = {
-      ims: 'IMS transactions (purchases, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, overheads)\n\nKEPT: items, vendors, categories, recipes, par levels, periods, and everything the till posted to Inventory (its sales and stock movements stay with its bills)',
+      // Clear IMS also wipes Fixed Assets, setup included (S834): the register and its categories
+      // go with their depreciation, tax-pool and repair rows — admin-user-ops clearModuleData.
+      ims: 'IMS transactions (purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs)\n\nALSO DELETED: the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs and openings, and repair expenses\n\nKEPT: items, vendors, categories, recipes, par levels, periods, and everything the till posted to Inventory (its sales and stock movements stay with its bills)',
       hr:  'HR transactions (attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster)\n\nKEPT: employees, salary components, leave types, holiday calendar, shift types',
       pos: 'POS transactions (orders, order items, shifts, customers, and what the till posted to Inventory: its sales entries and stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs, and hand-entered sales with their stock movements. Occupied tables are freed.',
     }
@@ -946,7 +948,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     try {
       if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
       await adminOp('clearModuleData', { clientId: client.id, module })
-      setDeleteMsg(`ok:${module.toUpperCase()} transactions cleared. Setup data was kept.`)
+      setDeleteMsg(module === 'ims'
+        ? 'ok:IMS transactions and the Fixed Assets register cleared. Other setup data was kept.'
+        : `ok:${module.toUpperCase()} transactions cleared. Setup data was kept.`)
     } catch (err) {
       setDeleteMsg('error:' + err.message)
     }
@@ -2144,7 +2148,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.65 }}>
                   Destructive actions for{' '}
                   <strong style={{ color: 'var(--theme-text1)' }}>{client.name}</strong>.{' '}
-                  Per-module buttons clear only that module's transactions and keep its setup (items, employees, tables…).
+                  Per-module buttons clear only that module's transactions and keep its setup (items, employees, tables…),
+                  except that Clear IMS also deletes the Fixed Assets register and its asset categories.
                   "Clear Client Data" wipes all operational data across IMS, HR and POS; the client record, user accounts,
                   feature flags, and settings are kept intact.
                   <br /><strong style={{ color: 'var(--theme-red-text)' }}>None of these can be undone.</strong>
@@ -2159,10 +2164,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               )}
 
               <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-                Clear one module — transactions only, setup kept
+                Clear one module — transactions only, setup kept (IMS also clears Fixed Assets)
               </p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-                <Tip text="Deletes IMS activity: purchases, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, overheads, demand forecast runs. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll), and what the till posted to Inventory. Cannot be undone.">
+                <Tip text="Deletes IMS activity: purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs. Also deletes the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs and openings, and repair expenses. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll), and what the till posted to Inventory. Cannot be undone.">
                   <button onClick={() => handleClearModule('ims')} disabled={deleting}
                     className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'ims' ? 'Working…' : 'Clear IMS Transactions'}

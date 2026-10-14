@@ -103,9 +103,11 @@ by branching on `isAdmin`:
 `pos_orders` stores only `invoice_no` and `invoice_fy`. The printed document number and the bill
 TYPE are both assembled when a bill is printed, from the settings row current at that moment
 (`posOrderPrintHtml.js`: `${vatReg ? 'TI' : 'PB'}${invoice_no}-${prefix}-${fy}`). So two ordinary
-fields on the Property tab were retroactive, and the first still is:
+fields on the Property tab were retroactive:
 
-- **`invoice_prefix`** — change CAC to CASA and every past invoice reprints as `TI2238-CASA-82/83`.
+- **`invoice_prefix`** — change CAC to CASA and every past invoice reprinted as `TI2238-CASA-82/83`.
+  Since S834 (D35) the close stamps `pos_orders.invoice_prefix` and the issue `pos_credit_notes.invoice_prefix`,
+  and prints and reports read `invoiceCodeOf(row, today's)`; only a row from before still follows today's.
 - **`is_vat_registered`** — until S809 2c, switching it off reprinted past Tax Invoices as PAN bills.
   Since 2c each bill stores the status it was charged under (`pos_orders.vat_registered`), so the
   switch reaches new bills, open tills and menu prices only.
@@ -153,9 +155,9 @@ sees the city at once. POS Setup's other tabs write through raw `supabase.from('
 save that did would leave the context stale until a reload. **`settings_guard_staff_roles` fences
 them since `20260923130000`**: the city to the Owner, admin or a manager of any module
 (`weather_city_rank`, never an IMS count PIN), `rain_sales_pct` to the Owner or admin
-(`weather_rain_rank`). `canEditWeatherCity()` is the browser's copy of the city rule and tests the RAW
-role columns; since S829 the guard tests effective ranks, so a settled or POS-blocked manager is
-offered the picker and refused. S784 had left all four unguarded; anyone except HR Self-Service could
+(`weather_rain_rank`). `canEditWeatherCity()` is the browser's copy of the city rule, and since S834 it
+tests effective ranks as the guard has since S829 (`settlement_blocked_by`, `pos_blocked_at`, both in
+AuthContext's profile select). S784 had left all four unguarded; anyone except HR Self-Service could
 PATCH them.
 
 ## The second editor for the same columns is where the fix did not reach (S739)

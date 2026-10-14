@@ -20,6 +20,7 @@ import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 import { npr2 } from '../../../shared/nepalMoney'
 // The bill's own choices row (S758), so a customized line reads on the note as it did on the bill.
 import { billOptionRow } from '../orders/posOrderPrintHtml'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 export { COPY_LABEL }
 
 // A line's choices as the bill printed them (S809 4c, CREDIT-NOTES-8): two "Chicken Momo" lines at
@@ -61,7 +62,8 @@ export function nextCreditNoteCopy(...counts) {
 // answers only when the bill has no stamp (null).
 export function buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, copyLabel, billVat = null) {
   const vatReg = typeof billVat === 'boolean' ? billVat : settings.is_vat_registered
-  const prefix = esc(settings.invoice_prefix || '')
+  // S834 (D35): the code the note was printed under; today's only for one issued before notes kept theirs.
+  const prefix = esc(invoiceCodeOf(creditNote, settings.invoice_prefix))
   const cnNo   = `CN${creditNote.credit_note_no}-${prefix}${prefix ? '-' : ''}${esc(creditNote.invoice_fy || '')}`
   const now       = new Date(creditNote.created_at || Date.now())
   const nowStr    = nepalTime(now)

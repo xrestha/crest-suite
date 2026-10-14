@@ -20,15 +20,19 @@ export const weatherEntitled = ({ growthWeather, posEnabled, hrEnabled }) =>
   !!(growthWeather || posEnabled || hrEnabled)
 
 // Who may change the city: the Owner, admin, or a MANAGER of any module (owner decision, S786).
-// This is the browser's copy of settings_guard_staff_roles' weather_city_rank (migration
-// 20260923130000) and must say exactly what it says: the RAW role columns, never the resolved
-// hasXAccess ranks (which also need the module on, and resolve the Owner to manager), and an IMS
-// count PIN (ims_email) is never a manager. The rainy-day figure is the Owner's alone and is not
-// asked here.
+// This is the browser's copy of settings_guard_staff_roles' weather_city_rank and must say exactly
+// what it says: the role columns, never the resolved hasXAccess ranks (which also need the module
+// on, and resolve the Owner to manager), and an IMS count PIN (ims_email) is never a manager. The
+// rainy-day figure is the Owner's alone and is not asked here.
+// S834: since S829 (20261013150000) the guard asks each axis's EFFECTIVE rank — pos_caller_has_rank,
+// ims_caller_has_rank and the inline HR test — so a settled login (settlement_blocked_by) holds no
+// manager rank on any axis, and a login POS Staff blocked (pos_blocked_at) none on POS. Testing the
+// raw roles offered such a manager the picker and then the database refused the save.
 export function canEditWeatherCity({ isAdmin, isOwner, profile }) {
   if (isAdmin || isOwner) return true
   if (!profile) return false
-  return profile.pos_role === 'manager'
+  if (profile.settlement_blocked_by) return false
+  return (profile.pos_role === 'manager' && !profile.pos_blocked_at)
     || (profile.ims_role === 'manager' && !profile.ims_email)
     || profile.hr_role === 'manager'
 }

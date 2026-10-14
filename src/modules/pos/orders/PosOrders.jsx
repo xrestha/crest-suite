@@ -62,6 +62,8 @@ import {
   storedDiscountRatio, legsToRecord, customerRowFromBill, latestCompRows,
 } from './closeAttempt'
 import { keepOwnCloseAttempts, dropKeptCloseAttempt, restoreCloseAttempts, foreignCloseText } from './closeAttemptStore'
+import { isStaleGuestOrder } from '../../../shared/guestOrderStale'
+import { waitingRequests } from '../../../shared/reservationSeen'
 import {
   SEND_STEP_MS, SEND_READ_MS, noAnswer, newSendAttempt, stopWaiting, sendLinesOf, firesTickets, stationsOf,
   judgeSendAttempts, unknownSendText,
@@ -123,6 +125,10 @@ const posUpload = { run: null }
 // How long an idle floor waits, untouched, before it reloads for a new release (S809 1b).
 const RELEASE_IDLE_MS = 60 * 1000
 
+// A takeaway card's name, or (S834) an order whose table is gone from the floor plan, named after it.
+const takeawayCardLabel = t => (t.removedTable
+  ? `${t.removedTable} (table removed)${t.orderNo ? ` #${t.orderNo}` : ''}`
+  : t.orderNo ? `Takeaway #${t.orderNo}` : 'Takeaway (not synced)')
 // What a kept cart's lines were "not sent before": a lock, a reload for a new release, or (S833) a
 // sign-in that ended by itself.
 const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated'
@@ -344,6 +350,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [closing,     setClosing]     = useState(false)
   const [closeMsg,    setCloseMsg]    = useState('')
   const [compCostMap, setCompCostMap] = useState({}) // { recipeId: foodCostPerPortion } — fetched when Complimentary tab opens
+  const [compCostFailed, setCompCostFailed] = useState(false) // S834: that read failed, so no comp figure is shown
   // Item-level comp (Pay tab, Supervisor+) — { [recipe_id]: qty comped }, excluded from this bill
   // and printed on a separate mini Complimentary Slip instead, while the rest (the remaining qty
   // on that same line, if any) bills normally. Distinct from the whole-order Complimentary tab.
@@ -1302,7 +1309,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // re-render the whole floor (setIfChanged). Every field a tile or takeaway card renders is here.
   const tablesSig    = list => rowsSignature(list, ['id', 'name', 'section', 'status', 'capacity'])
   const floorOrdSig  = m => mapSignature(m, o => [o.orderId, o.itemCount, o.total, o.covers, o.pending, o.openedAt || '', o.offlinePending ? 1 : 0].join(':'))
-  const takeawaysSig = list => rowsSignature(list, ['orderId', 'orderNo', 'itemCount', 'total', 'pending', 'openedAt', 'offlinePending'])
+  const takeawaysSig = list => rowsSignature(list, ['orderId', 'orderNo', 'itemCount', 'total', 'pending', 'openedAt', 'offlinePending', 'removedTable'])
 
   // A queued entry that was surfaced as a conflict belongs to a bill another device closed — never
   // an open order to paint or reopen (S754). S809 3f: nor is one taken for another outlet
@@ -1334,10 +1341,13 @@ export default function PosOrders({ billingStation = false } = {}) {
       // No cached list is "never loaded on this device", not "no tables" — keep what is on screen.
       if (cachedTables) setIfChanged(setTables, cachedTables, tablesSig)
       const map = {}
-      for (const q of queue) { if (q.table_id) map[q.table_id] = queuedOrderToOverlay(q) }
+      // S834: an order whose table is gone from the floor plan shows as a card of its own (removedTable).
+      const onFloor = q => q.table_id && (!cachedTables || cachedTables.some(t => t.id === q.table_id))
+      for (const q of queue) { if (onFloor(q)) map[q.table_id] = queuedOrderToOverlay(q) }
       setTableOrders(map)
       // Takeaways already on screen from the last online read stay; queued ones are layered on.
-      const queuedTakeaways = queue.filter(q => !q.table_id).map(q => ({ ...queuedOrderToOverlay(q), orderNo: null }))
+      const queuedTakeaways = queue.filter(q => !onFloor(q))
+        .map(q => ({ ...queuedOrderToOverlay(q), orderNo: null, removedTable: q.table_id ? (q.table_name || 'A removed table') : null }))
       setTakeawayOrders(prev => [
         ...prev.filter(t => !queuedTakeaways.some(q => q.orderId === t.orderId)),
         ...queuedTakeaways,
@@ -1359,7 +1369,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const [tblRes, ordRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
-      scopedFrom('pos_orders', 'id, order_no, table_id, covers, opened_at, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
+      scopedFrom('pos_orders', 'id, order_no, table_id, table_name, covers, opened_at, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
         .eq('status', 'open'),
       // head:true — a count, not rows, so the 1000-row cap cannot apply. Backed by the partial
       // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
@@ -1403,6 +1413,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     cachePosTables(clientId, tbls)
     const map = {}
     const takeaways = []
+    const tableIds = new Set(tbls.map(t => t.id))
     for (const o of (ordRes.data || [])) {
       const items = o.pos_order_items || []
       const overlay = {
@@ -1413,8 +1424,11 @@ export default function PosOrders({ billingStation = false } = {}) {
         covers:    o.covers,
         pending:   items.filter(i => !i.sent_to_kot).length,
       }
-      if (o.table_id) map[o.table_id] = overlay
-      else takeaways.push({ ...overlay, orderNo: o.order_no || null })
+      // S834 (S809.4, 4k): an open order whose table was deleted (a till held it offline while the table
+      // was removed; pos_orders.table_id has no foreign key) was drawn on no tile and on no Billing row,
+      // so it could be neither billed nor found. It shows as a card of its own, named after the old table.
+      if (o.table_id && tableIds.has(o.table_id)) map[o.table_id] = overlay
+      else takeaways.push({ ...overlay, orderNo: o.order_no || null, removedTable: o.table_id ? (o.table_name || 'A removed table') : null })
     }
     // Layer any still-queued (not-yet-synced) local edits on top of server truth, so a table
     // doesn't briefly look wrong while a reconnect flush is still in flight.
@@ -1422,10 +1436,13 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (seq !== floorReqSeq.current) return
     const queue = liveQueue(rawQueue)
     for (const q of queue) {
-      if (q.table_id) map[q.table_id] = queuedOrderToOverlay(q)
+      if (q.table_id && tableIds.has(q.table_id)) map[q.table_id] = queuedOrderToOverlay(q)
       else {
         const i = takeaways.findIndex(t => t.orderId === q.order_id)
-        const ov = { ...queuedOrderToOverlay(q), orderNo: i >= 0 ? takeaways[i].orderNo : null }
+        const ov = {
+          ...queuedOrderToOverlay(q), orderNo: i >= 0 ? takeaways[i].orderNo : null,
+          removedTable: q.table_id ? (q.table_name || 'A removed table') : null,
+        }
         if (i >= 0) takeaways[i] = ov; else takeaways.push(ov)
       }
     }
@@ -1461,7 +1478,8 @@ export default function PosOrders({ billingStation = false } = {}) {
         .in('status', FLOOR_STATUSES)
         .gte('reserved_for', carryOverFrom(start)).lte('reserved_for', end)
         .order('reserved_for'),
-      scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
+      // S834: a request whose time has passed is not counted (reservationSeen.js, as the nav chip).
+      waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true })),
     ])
     // A failed poll keeps last-good — an emptied strip reads as "no bookings tonight".
     if (error) console.error('loadFloorReservations failed, keeping last known:', error)
@@ -1484,7 +1502,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A failed read here would empty the floor's guest-order banner AND clear seenGuestRequestIds,
     // so the next successful poll re-chimes for requests already seen. Keep both as they were.
     if (error) { console.error('loadPendingGuestOrders failed, keeping last known requests:', error); return }
-    const rows = data || []
+    // S834 (D34): one nobody answered for 30 minutes is turned away; until the server has, it is left
+    // out here and this till asks for it.
+    const rows = (data || []).filter(r => !isStaleGuestOrder(r.created_at))
+    if (rows.length < (data || []).length) {
+      void supabase.rpc('turn_away_stale_guest_orders').then(
+        ({ error: turnErr }) => { if (turnErr) console.error('turning away guest orders past 30 minutes failed:', turnErr) },
+        err => console.error('turning away guest orders past 30 minutes failed:', err))
+    }
 
     // Chime once per genuinely new request — skipped on the very first load (that's just
     // whatever was already pending when this screen opened, not a fresh arrival).
@@ -3913,7 +3938,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
     setCloseMsg('')
-    setCompCostMap({})
+    setCompCostMap({}); setCompCostFailed(false)
     setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
@@ -3941,16 +3966,29 @@ export default function PosOrders({ billingStation = false } = {}) {
       // Food-cost map, needed up front for item-level comp in the Pay tab (not just the
       // Complimentary tab, which used to be the only consumer — see openCompTab). Through the till's
       // own read (S809 IMS-HANDOFF-3): a PIN login cannot read `items`, so its rates came back 0.
-      const costMap = await posFoodCosts(supabase, clientId, recipeIds)
-      setCompCostMap(costMap)
+      await loadCompCosts(recipeIds)
     }
   }
 
   async function openCompTab() {
     setBillingTab('writeoff'); setCloseMsg('')
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
-    const map = await posFoodCosts(supabase, clientId, recipeIds)
-    setCompCostMap(map)
+    await loadCompCosts(recipeIds)
+  }
+
+  // S834 (S809.4, 2f): a failed food-cost read left every comp figure at NPR 0 with nothing saying so
+  // (the read threw past both callers). Bounded; a failure shows "—" and a line where the figure goes,
+  // never a made-up zero. The Complimentary Slip reads its own costs (slipCosts) and refuses to print.
+  async function loadCompCosts(recipeIds) {
+    try {
+      const map = await withTimeout(posFoodCosts(supabase, clientId, recipeIds), CLOSE_STEP_MS, 'Reading food costs')
+      setCompCostMap(map)
+      setCompCostFailed(false)
+    } catch (e) {
+      console.error('food cost read failed, so no comp figure is shown:', e)
+      setCompCostMap({})
+      setCompCostFailed(true)
+    }
   }
 
   // Split payment — adds one tender against the running `remaining` balance. Non-cash methods are
@@ -5655,7 +5693,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         }),
       ...takeawayOrders.map(t => ({
         key: `takeaway:${t.orderId}`, kind: 'takeaway', tableId: null, orderId: t.orderId,
-        label: t.orderNo ? `Takeaway #${t.orderNo}` : 'Takeaway (not synced)', section: '',
+        label: takeawayCardLabel(t), section: '',
         covers: t.covers || 1, itemCount: t.itemCount, total: t.total,
         pending: t.pending, openedAt: t.openedAt || null, offlinePending: !!t.offlinePending,
       })),
@@ -6355,8 +6393,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {activeTable ? activeTable.name : 'Takeaway'}
               </h3>
               <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', textAlign: 'right' }}>
-                {fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
-                {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>(food cost, not menu price)</span>}
+                {billingTab === 'writeoff' && compCostFailed ? '—' : fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
+                {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>{compCostFailed ? '(food cost could not be read — open the tab again to retry)' : '(food cost, not menu price)'}</span>}
                 {billingTab === 'pay' && discountAmt > 0 && (
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
                     ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
@@ -6570,7 +6608,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {hasItemComp && (
                   <div>
                     <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
-                      {fmtNpr(itemCompFoodCost)} in food cost across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
+                      {compCostFailed ? 'Food cost could not be read' : `${fmtNpr(itemCompFoodCost)} in food cost`} across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
                     </p>
                     <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-comp-reason">Comp Reason</label>
                     <select id="pos-orders-comp-reason" className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>
@@ -7344,7 +7382,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             {takeawayOrders.map(t => {
               const kot = kotStatusByTable[`takeaway:${t.orderId}`]
               const kotChip = ticketSummaryChip(kot)
-              const label = t.orderNo ? `Takeaway #${t.orderNo}` : 'Takeaway (not synced)'
+              const label = takeawayCardLabel(t)
               return (
                 <div
                   key={t.orderId}

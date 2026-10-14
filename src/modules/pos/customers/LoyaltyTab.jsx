@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -14,6 +14,10 @@ import {
 import { errorLine } from '../../../shared/errorText'
 import { phoneMatchesSearch } from '../../../utils/phone'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { settleWithin } from '../../../utils/withTimeout'
+import { SETTLE_READ_MS } from './settleCredit'
+import { customerBookAfterRead } from './customerBook'
 import AdjustPointsModal from './AdjustPointsModal'
 import PointsHistoryModal from './PointsHistoryModal'
 import MovePointsModal from './MovePointsModal'
@@ -59,16 +63,36 @@ import MovePointsModal from './MovePointsModal'
 // outlive the scheme they were earned under, and the list used to hide, so a balance left after every
 // scheme was deleted could not be seen or corrected. None of pos_loyalty_balances, adjust_loyalty_points
 // or move_loyalty_points asks for a scheme, and redeem at the till does not either.
+//
+// S834 (found S833): the tab's reads are bounded and its reloads cannot overlap (`book` below). History's
+// one-tap award reloads through the same load; it used to read the balances alone, unguarded.
+
+// How long this tab's reads wait before they count as failed: PosCustomers.jsx's two limits,
+// mirrored because that page renders this one and cannot be imported back. The customer book and the
+// balances are paged, so they get the list limit; the schemes are one short read.
+const LIST_READ_MS = 20000
+const ROW_READ_MS = SETTLE_READ_MS
+
+// pos_loyalty_balances rows → each customer's balance and the part held on unpaid Credit bills.
+function balancesOf(rows) {
+  const balances = {}
+  const held = {}
+  for (const r of rows || []) { balances[r.customer_id] = Number(r.balance) || 0; held[r.customer_id] = Number(r.held) || 0 }
+  return { balances, held }
+}
+
 export default function LoyaltyTab({ pointValue, pointValueError = null, onPointValueSaved, canManage = false, deliveryPartners = [] }) {
   const { clientId, scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
 
-  const [schemes, setSchemes] = useState([])
-  const [members, setMembers] = useState([])
-  const [balances, setBalances] = useState({})
-  const [held, setHeld] = useState({})          // S815 4g: points on unpaid Credit bills, by customer
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(null)
+  // S834 (found S833): the tab as last read, and for which outlet, in customerBook.js' shape: `rows` is
+  // { schemes, members, balances, held } once a read has landed (held, S815 4g: points on unpaid
+  // Credit bills, by customer). A failed first read is the error card, never figures from it; a reload
+  // that fails (after an add, an edit, a move or a History award) keeps what is on screen and says so.
+  // A load is keyed on its outlet plus a counter, so only the newest one lands.
+  const [book, setBook] = useState({ clientId: null, rows: null, error: null, stale: null })
+  const loadReq = useLatestRequest()
+  const loadSeq = useRef(0)
   const [msg, setMsg] = useState('')
   const [search, setSearch] = useState('')
   const [adjusting, setAdjusting] = useState(null) // the member whose points are being adjusted
@@ -83,45 +107,39 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   const [valueStr, setValueStr] = useState(pointValue == null ? '' : String(pointValue))
   const [savingValue, setSavingValue] = useState(false)
 
-  // S815 4g: summed by the server, one row per customer with points history, with the part held on
-  // unpaid Credit bills. Paged: a set-returning call stops at 1,000 rows like any read, and the id is
-  // unique per row. Returns the error, or null.
-  const loadBalances = useCallback(async () => {
-    const { data: rows, error } = await fetchAllRows(() =>
-      supabase.rpc('pos_loyalty_balances', { p_client_id: clientId }).order('customer_id'))
-    if (error) return error
-    const b = {}
-    const h = {}
-    for (const r of rows || []) { b[r.customer_id] = Number(r.balance) || 0; h[r.customer_id] = Number(r.held) || 0 }
-    setBalances(b)
-    setHeld(h)
-    return null
-  }, [clientId])
+  // Still loading until a read has landed for this outlet: a reload leaves the tab on screen.
+  const loading = !clientId || book.clientId !== clientId
+  const loadError = book.error
+  const { schemes = [], members = [], balances = {}, held = {} } = book.rows || {}
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
-    const [schemeRes, custRes] = await Promise.all([
-      scopedFrom('pos_loyalty_schemes', 'id, name, points_per_100, min_spend_to_earn, is_active').order('name'),
+    if (!clientId) return
+    const forClient = clientId
+    const key = loadReq.begin(`${forClient}#${++loadSeq.current}`) // before any await
+    // The three reads go together (the balances used to wait for the other two), each bounded, so a
+    // hung one is a failed read rather than "Loading loyalty…" for ever.
+    const [schemeRes, custRes, balRes] = await Promise.all([
+      settleWithin(scopedFrom('pos_loyalty_schemes', 'id, name, points_per_100, min_spend_to_earn, is_active').order('name'),
+        ROW_READ_MS, 'Reading the loyalty schemes'),
       // S809 3k (CUSTOMERS-PARKING-8): paged. A bare select stopped at 1,000 customers with no error, so
       // anyone past "R" could not be enrolled and every count read low. The id breaks ties between
       // customers of the same name, so no one is skipped or repeated across pages.
-      fetchAllRows(() => scopedFrom('pos_customers', 'id, name, phone, loyalty_scheme_id, loyalty_enrolled_at').order('name').order('id')),
+      settleWithin(fetchAllRows(() => scopedFrom('pos_customers', 'id, name, phone, loyalty_scheme_id, loyalty_enrolled_at').order('name').order('id')),
+        LIST_READ_MS, 'Reading the customer book'),
+      // S815 4g: summed by the server, one row per customer with points history, with the part held on
+      // unpaid Credit bills. Paged: a set-returning call stops at 1,000 rows like any read, and the id
+      // is unique per row.
+      settleWithin(fetchAllRows(() => supabase.rpc('pos_loyalty_balances', { p_client_id: forClient }).order('customer_id')),
+        LIST_READ_MS, 'Reading the points balances'),
     ])
+    if (!loadReq.isCurrent(key)) return // a newer load owns the tab
     // A failed read must not render as "no schemes yet" — that reads as a correct empty state and
     // would have someone re-create schemes that already exist (S594).
-    if (schemeRes.error || custRes.error) {
-      setLoadError(schemeRes.error || custRes.error)
-      setSchemes([]); setMembers([]); setLoading(false)
-      return
-    }
-    setSchemes(schemeRes.data || [])
-    setMembers(custRes.data || [])
-
-    const balErr = await loadBalances()
-    if (balErr) { setLoadError(balErr); setLoading(false); return }
-    setLoading(false)
-  }, [scopedFrom, loadBalances])
+    const error = schemeRes.error || custRes.error || balRes.error
+    if (error) console.error('loyalty read failed:', error)
+    const data = error ? null : { schemes: schemeRes.data || [], members: custRes.data || [], ...balancesOf(balRes.data) }
+    setBook(prev => customerBookAfterRead(prev, forClient, { data, error }))
+  }, [clientId, scopedFrom, loadReq]) // loadReq is the same object every render
 
   useEffect(() => { load() }, [load])
   useEffect(() => { setValueStr(pointValue == null ? '' : String(pointValue)) }, [pointValue])
@@ -215,7 +233,9 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
       .select('loyalty_scheme_id, loyalty_enrolled_at')
     if (error) { setMsg(`error:The enrolment was not changed. ${errorLine(error)}`); return }
     if (!data?.length) { setMsg('error:The enrolment was not changed — this customer is not in the book any more. Reload the page.'); return }
-    setMembers(prev => prev.map(m => m.id === customerId ? { ...m, ...data[0] } : m))
+    setBook(prev => (prev.rows
+      ? { ...prev, rows: { ...prev.rows, members: prev.rows.members.map(m => m.id === customerId ? { ...m, ...data[0] } : m) } }
+      : prev))
   }
 
   // A scheme's rate box: a rate that gives back half a bill or more asks first (CUSTOMERS-PARKING-10).
@@ -284,7 +304,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   // A hand correction landed: the balance is the one the server returned, never a sum worked out here.
   function onAdjusted(member, newBalance, change) {
     setAdjusting(null)
-    setBalances(prev => ({ ...prev, [member.id]: newBalance }))
+    setBook(prev => (prev.rows ? { ...prev, rows: { ...prev.rows, balances: { ...prev.rows.balances, [member.id]: newBalance } } } : prev))
     const n = Math.abs(change).toLocaleString('en-IN')
     setMsg(`ok:${change > 0 ? `${n} points added for` : `${n} points taken off`} ${member.name}. New balance: ${Number(newBalance).toLocaleString('en-IN')} points.`)
   }
@@ -345,6 +365,12 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
         <ReportLoadError error={loadError} />
       ) : (
         <>
+          {/* S834: a reload that failed keeps what was on screen, and says so. */}
+          {book.stale && (() => {
+            const why = asActionError(book.stale, 'operator')
+            return <ActionError error={{ text: `Loyalty could not be read again, so the schemes, members and points below are as they were last read. Reload the page to try again. ${why.text}`, detail: why.detail }} />
+          })()}
+
           {/* ── Schemes ── */}
           <div className="card" style={{ marginBottom: 20 }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Schemes</h3>
@@ -587,7 +613,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
           pointValue={pointValue}
           canManage={canManage}
           onClose={() => setViewing(null)}
-          onChanged={loadBalances}
+          onChanged={load}
         />
       )}
       {moving && (

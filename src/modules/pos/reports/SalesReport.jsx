@@ -31,6 +31,7 @@ import { viewPosBill } from '../../../utils/viewPosBill'
 import { posFoodCosts } from '../orders/posRecipeBook'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
+import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
@@ -157,10 +158,13 @@ const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
 // `vat_registered` (S809 2c, REPORTS-1): the tax status each bill was issued under. The figures read
 // it per bill (salesReportMath.js), so a past Tax Invoice keeps its VAT after a deregistration.
 const ORDER_COLUMNS = 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, opened_at, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name, vat_registered'
-const CREDIT_NOTE_COLUMNS = 'id, order_id, credit_note_no, invoice_fy, reason, gross_amount, discount_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount, buyer_name, buyer_pan, issued_by, created_at'
+const CREDIT_NOTE_COLUMNS = 'id, order_id, credit_note_no, invoice_fy, invoice_prefix, reason, gross_amount, discount_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount, buyer_name, buyer_pan, issued_by, created_at'
 // The 1L+ tab's ceiling on one fiscal year's bills, as PurchaseOneLakhAboveReport.js has for
 // purchases (S809 3m, REPORTS-2). Reaching it is a row-cap failure, never a short year.
 const ONE_LAKH_READ_MAX_ROWS = 200000
+// How many 150-bill chunks of the year's line read are in flight at once (S834, S809.4 3m). A
+// 1,09,500-bill year is ~730 chunks, which all used to start together.
+const ONE_LAKH_CHUNK_CONCURRENCY = 6
 
 export default function SalesReport() {
   const { clientId, hasPosAccess } = useAuth()
@@ -427,7 +431,7 @@ export default function SalesReport() {
     [orders, creditNotes, orderById, itemsByOrder, vatReg])
 
   const cnLabel = useCallback(n => (
-    `CN${n.credit_note_no ?? ''}-${invoicePrefix}${invoicePrefix ? '-' : ''}${n.invoice_fy || ''}`
+    `CN${n.credit_note_no ?? ''}-${invoiceCodeOf(n, invoicePrefix)}${invoiceCodeOf(n, invoicePrefix) ? '-' : ''}${n.invoice_fy || ''}`
   ), [invoicePrefix])
 
   const dailyRows = useMemo(() => {
@@ -826,9 +830,11 @@ export default function SalesReport() {
       // Chunked (S754): the id list is every paid bill in a fiscal year — thousands of uuids, far
       // past any URL limit, so this read could not succeed at all on a real client's year.
       fetchAllRowsChunked(list.map(o => o.id),
-        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id')),
+        ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id'),
+        { concurrency: ONE_LAKH_CHUNK_CONCURRENCY }),
       fetchAllRowsChunked(outsideIds,
-        ids => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan').in('id', ids).order('id')),
+        ids => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan').in('id', ids).order('id'),
+        { concurrency: ONE_LAKH_CHUNK_CONCURRENCY }),
     ])
     if (!oneLakhReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: lines missing means every party's net reads zero — below threshold;

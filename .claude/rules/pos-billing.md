@@ -230,7 +230,7 @@ floor-view check.
 (`isChangeOnlyLine`, `src/modules/pos/kitchenNotes.js`) as a separate `pos_kot_log` row of
 `{qty: 0, change: true}` lines, in the same insert as the food; the KDS shows a CHANGE card whose Seen
 moves it new → served. **Every count of kitchen tickets adds `.not('items', 'cs', KOT_CHANGE_ITEMS)`**,
-and a change line is never mixed into a food ticket, or that filter hides the food. A note changed on a partly sent line (2 sent, now 3) sends a change line for the sent units beside the +1 (`sendsChangeLine`, S833; the sent note is held in memory only). A guest's order note
+and a change line is never mixed into a food ticket, or that filter hides the food. A note changed on a partly sent line also sends a change line for its sent units (`sendsChangeLine`, S833). A guest's order note
 goes onto each of their dishes (`guestDishNote`, Q11 a): "Guest ×N: …" on a line already holding the
 table's food.
 
@@ -286,7 +286,7 @@ table's food.
   `decided_by`/`decided_at` are the server's and the bill must be the request's outlet's. The till
   answers with `.eq('status','pending').select('id')` and never puts a saved-but-unmarked request back
   on the banner. Guest stage reads leave CHANGE and cancelled tickets out. Closing a table's bill turns
-  its waiting ones away (S817, D21).
+  its waiting ones away (S817, D21), as do 30 minutes unanswered (S834, `guestOrderStale.js`).
 
 ### A size scales the picks after it (S760, build-your-own dishes)
 
@@ -671,7 +671,7 @@ Three shapes are worth copying:
   above `is_admin()`, not after it.
 - **The invoice columns are resolved at PRINT time** (`settings-row.md`), so a waiter changing the
   payment QR would redirect every guest's payment into their own wallet, and a prefix change
-  renumbers bills already issued. Those are the Owner's, not a POS manager's.
+  renumbered bills already issued (until S834, `invoiceCodeOf`). Those are the Owner's, not a POS manager's.
 
 **The frontend does not decide these ranks; it mirrors them.** `MenuPricing.js`' `canSetMenuPrice`
 tests the RAW `pos_role`/`ims_role` columns because `caller_can_set_menu_price()` does. Using
@@ -901,7 +901,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 
 - **Every await on the close path is bounded** (`bounded()` / `CLOSE_STEP_MS` in `PosOrders.jsx`). Cancel stays disabled while a close is in flight, so an unbounded await was a till with no way out.
 - **A timeout, a dropped connection or a gateway 5xx on the close write is not a failure** (`noAnswer`, S833 for the 5xx). `closeAttemptRef` is set just before the write; `settleUnknownClose()` reads the bill: closed by this login with this close type → `finishClosedBill()` (legs, print, the rest); open straight after the timeout → keep the mark, the write can still land; unreadable → say it is unknown. The next press AND Cancel settle it first. Without this a retry was refused "already closed" and blamed on another till, and the bill never printed.
-- **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`, a Map, kept on the tablet since S833 by `closeAttemptStore.js`: the same login gets them back after a reload or lock; another login sees the bill locked, naming who pressed, until a read settles it, owner 2026-10-13; since 2g the lock hands back points only when no try at that bill is unsettled, never on an outlet move, and the close returns forgotten points itself). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print, no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
+- **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`; kept on the tablet since S833, `closeAttemptStore.js`, another login's locking the bill until read; since 2g the lock hands back points only when no try at that bill is unsettled, never on an outlet move, and the close returns forgotten points itself). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print, no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
 - **Order after the close is an owner decision: Split legs → print → table, booking, IMS, customer, loyalty.** Legs first because of their 10-minute window and because `printBill` reads them. Print counters are not awaited. Don't move bookkeeping back in front of the paper.
 - Verified live by letting the PATCH reach the server and aborting its response (`route.fetch()` then `route.abort()`), and again with the read-back also aborted.
 - **The close buttons are never `disabled` for a missing input, only `aria-disabled`.** `closeBlocker()` is the one list: closeOrder refuses with its `text`, the button shows its `label`, and `pressClose()` opens the folded section and focuses its `field`. A new close precondition goes into `closeBlocker`, never into a button's `disabled` expression. Void asks first (`confirmVoid`). `closeStartRefusal` (`tillBillChecks.js`) runs first: unread till settings, then an emptied cart (Void exempt, owner Q8 a); `fullInvoiceRefusal` follows the buyer-ID check (a VAT bill above `ABBREVIATED_INVOICE_LIMIT`, measured on what the guest pays, needs name and address, Q9 a).

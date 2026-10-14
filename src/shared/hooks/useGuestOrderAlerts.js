@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useScopedDb } from './useScopedDb'
 import { supabase } from '../../supabaseClient'
 import { GUEST_ALERT_MUTE_MS, useGuestAlertMute } from '../guestAlertBridge'
+import { isStaleGuestOrder } from '../guestOrderStale'
 
 // How often the whole app asks whether a guest has ordered. 15 s, not the 60 s the rail badges use
 // and not the 5 s PosOrders runs on its own floor: this poll runs from EVERY page for every signed-in
@@ -107,7 +108,15 @@ export function useGuestOrderAlerts(enabled, { heldIds = null, device = null } =
         console.error('useGuestOrderAlerts poll failed, keeping the last known requests:', error)
         return
       }
-      const rows = (data || []).map(r => (viaDevice
+      // S834 (D34): an order nobody answered for 30 minutes is turned away by the server; one that
+      // has not been yet is left out here, and a till asks for it (the PIN screen's read already does).
+      const fresh = (data || []).filter(r => !isStaleGuestOrder(viaDevice ? r.waiting_since : r.created_at))
+      if (!viaDevice && fresh.length < (data || []).length) {
+        void supabase.rpc('turn_away_stale_guest_orders').then(
+          ({ error: turnErr }) => { if (turnErr) console.error('turning away guest orders past 30 minutes failed:', turnErr) },
+          err => console.error('turning away guest orders past 30 minutes failed:', err))
+      }
+      const rows = fresh.map(r => (viaDevice
         // No request id reaches the PIN screen (it is the guest's tracker key); the table and the
         // time it was sent are the row's identity here, one waiting order per table being the rule.
         ? { id: `${r.table_name || ''}|${r.waiting_since}`, tableId: null, tableName: r.table_name || 'a table', createdAt: r.waiting_since }

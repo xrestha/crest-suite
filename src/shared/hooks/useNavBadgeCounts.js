@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useScopedDb } from './useScopedDb'
-import { readSeenStamp } from '../reservationSeen'
+import { readSeenStamp, waitingRequests } from '../reservationSeen'
 
 const POLL_MS = 60000
 
@@ -16,7 +16,8 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
   // Online booking requests waiting for a staff Accept. Counted separately from posPending so the
   // Reservations nav row can carry its own number: a request that only showed on the Reservations
   // page (amber band + chime) and the dashboard tile was reported as "no notification" by an
-  // owner sitting on the IMS dashboard (S686).
+  // owner sitting on the IMS dashboard (S686). S834 (S809.4 4j): only requests whose time has not
+  // passed, with the Reservations band's own test (reservationSeen.js), so the chip and the band agree.
   const [posRequests, setPosRequests] = useState(0)
   // Bookings changed since this device last opened the Reservations page (S687) — the same count
   // that page's Activity tab shows, from the same per-device stamp. No stamp = nothing counted.
@@ -54,7 +55,7 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
       const stamp = readSeenStamp(clientId)
       const [{ data, error: ordersErr }, { count, error: reqErr }, { count: changed, error: newErr }] = await Promise.all([
         scopedFrom('pos_orders', 'id, pos_order_items(sent_to_kot)').eq('status', 'open'),
-        scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
+        waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }), Date.now()),
         stamp
           ? scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).neq('status', 'requested').gt('updated_at', stamp)
           : Promise.resolve({ count: 0, error: null }),
