@@ -18,8 +18,9 @@ import { settleWithin } from '../../../utils/withTimeout'
 import { COPY_LABEL } from '../orders/posOrdersConstants'
 import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 import { npr2 } from '../../../shared/nepalMoney'
-// The bill's own choices row (S758), so a customized line reads on the note as it did on the bill.
-import { billOptionRow } from '../orders/posOrderPrintHtml'
+// The bill's own choices row (S758) and item rows (S839: a combo is one row with its dishes under it),
+// so the note's lines read as they did on the bill.
+import { billOptionRow, billItemRowsHtml } from '../orders/posOrderPrintHtml'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 export { COPY_LABEL }
 
@@ -120,7 +121,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>${billOptionRow(withChoices(i))}`).join('')}
+      ${billItemRowsHtml(items, hscMap, (i, opts) => billOptionRow(withChoices(i), opts))}
     </tbody>
   </table>
   <hr>

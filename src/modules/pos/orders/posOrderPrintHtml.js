@@ -6,6 +6,7 @@ import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillin
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { kotBotDoc, voidSlipDoc, moveSlipDoc, renderTicketDocHtml } from '../printing/ticketDoc'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
+import { groupComboLines } from './comboBillRows'
 
 // Pure 80mm-thermal HTML builders for PosOrders.jsx — no React, no Supabase, no component state.
 // Everything they need (outlet/billing settings, table name, cashier name, HSC codes) is passed
@@ -30,7 +31,8 @@ export function buildMoveSlipHtml(args) {
 // One bill line per dish at its combined price, with the choices listed underneath (owner decision,
 // S758): a paid choice with what it added, a free one by name. The Rate column is still unit_price,
 // so nothing in the bill's arithmetic changes. Exported for the credit note's copy of the lines.
-export function billOptionRow(i) {
+// `indent` (px) sets the row in under a combo's dish (S839); left out, the row prints as it always has.
+export function billOptionRow(i, { indent = 0 } = {}) {
   if (!i.options?.length && !i.option_summary) return ''
   const text = i.options?.length
     ? i.options.map(o => {
@@ -38,7 +40,25 @@ export function billOptionRow(i) {
         return esc(o.option_name || '') + (d ? ` ${d > 0 ? '+' : '−'}${Math.abs(d)}` : '')
       }).join(', ')
     : esc(i.option_summary)
-  return `<tr><td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0">${text}</td></tr>`
+  return `<tr><td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0${indent ? `;padding-left:${indent}px` : ''}">${text}</td></tr>`
+}
+
+// Combos (S839, docs/pos-combos.md): how far a combo's dishes, and their choices, sit in under it.
+const COMBO_DISH_INDENT = 10
+const COMBO_CHOICE_INDENT = 18
+
+// The item rows of a bill or a credit note. An ordinary line prints as it always has: S.N., HSC, name,
+// qty, rate, amount, and its choices under it. The dishes of one combo (groupComboLines) print as ONE
+// row at the place of its first dish: the combo's name, no HSC, its quantity, amount = the sum of its
+// dishes' qty × unit_price and rate = amount ÷ qty; each dish is listed under it by name, unpriced,
+// with its own choices (whose charges are inside the combo's amount). S.N. counts printed rows.
+// `optionRowOf(line, opts)` prints a line's choices: the credit note passes its reader of the stored ones.
+export function billItemRowsHtml(items, hscMap, optionRowOf = billOptionRow) {
+  return groupComboLines(items).map((r, idx) => (r.combo
+    ? `<tr><td>${idx + 1}</td><td></td><td>${esc(r.name)}</td><td>${r.qty}</td><td>${npr2(r.rate)}</td><td>${npr2(r.amount)}</td></tr>` +
+      r.dishes.map(d => `<tr><td></td><td></td><td colspan="4" style="padding-top:0;padding-left:${COMBO_DISH_INDENT}px">${esc(d.name)}</td></tr>${optionRowOf(d, { indent: COMBO_CHOICE_INDENT })}`).join('')
+    : `<tr><td>${idx + 1}</td><td>${esc(hscMap[r.item.recipe_id] || '')}</td><td>${esc(r.item.name)}</td><td>${r.item.qty}</td><td>${npr2(r.item.unit_price)}</td><td>${npr2(r.item.qty * r.item.unit_price)}</td></tr>${optionRowOf(r.item)}`
+  )).join('')
 }
 
 export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmount, outletName, billingSettings, hscMap, tableName, cashierName }) {
@@ -122,7 +142,7 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>${billOptionRow(i)}`).join('')}
+      ${billItemRowsHtml(items, hscMap)}
     </tbody>
   </table>
   <hr>
@@ -276,6 +296,11 @@ export function buildCompSlipHtml({ order, items, plateCostOf, copyLabel, outlet
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
   const lineCost  = i => i.qty * (Number(plateCostOf?.(i)) || 0)
   const totalCost = items.reduce((s, i) => s + lineCost(i), 0)
+  // A combo is one row here too (S839, groupComboLines): its name, its quantity, and the food cost of
+  // all its dishes, which are listed under it by name. Every other line prints as it always has.
+  const itemRow = i => `<tr><td>${esc(i.name)}${i.option_summary ? `<div style="font-size:10px">${esc(i.option_summary)}</div>` : ''}</td><td>${i.qty}</td><td>${npr2(lineCost(i))}</td></tr>`
+  const comboRow = r => `<tr><td>${esc(r.name)}${r.dishes.map(d =>
+    `<div style="font-size:10px;padding-left:${COMBO_DISH_INDENT}px">${esc(d.name)}</div>${d.option_summary ? `<div style="font-size:10px;padding-left:${COMBO_CHOICE_INDENT}px">${esc(d.option_summary)}</div>` : ''}`).join('')}</td><td>${r.qty}</td><td>${npr2(r.lines.reduce((s, l) => s + lineCost(l), 0))}</td></tr>`
 
   return `<!DOCTYPE html>
 <html><head><title>Complimentary Slip</title>
@@ -311,7 +336,7 @@ export function buildCompSlipHtml({ order, items, plateCostOf, copyLabel, outlet
   <table>
     <thead><tr><th>Item</th><th>Qty</th><th>Cost</th></tr></thead>
     <tbody>
-      ${items.map(i => `<tr><td>${esc(i.name)}${i.option_summary ? `<div style="font-size:10px">${esc(i.option_summary)}</div>` : ''}</td><td>${i.qty}</td><td>${npr2(lineCost(i))}</td></tr>`).join('')}
+      ${groupComboLines(items).map(r => (r.combo ? comboRow(r) : itemRow(r.item))).join('')}
     </tbody>
   </table>
   <hr>

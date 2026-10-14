@@ -61,6 +61,48 @@ describe('the VOID and MOVE slips', () => {
   })
 })
 
+// S839 (docs/pos-combos.md): a combo's dish goes to its own station like any dish, with its combo under
+// it in an existing line style, so no renderer changes. The doc only prints; the logged ticket items keep
+// their recipe_id and full selection_key (with the '@' tail) for the Clear rule and the KDS pulls.
+describe('combos on the station slips', () => {
+  const KEY = '@7f0c2c1e-0000-4000-8000-000000000001/aaaaaaaa-0000-4000-8000-00000000000a'
+  const MOMO = { recipe_id: 'r-momo', name: 'Chicken Momo', qty: 1, sent_qty: 0, selection_key: `opt1${KEY}`, combo_name: 'Momo Combo', options: [{ kitchen: 'Extra cheese' }], notes: 'less spicy' }
+  const tagOf = doc => doc.lines.filter(l => l.k === 'text' && l.t.startsWith('↳ Momo'))
+  const after = (doc, name) => doc.lines[doc.lines.findIndex(l => l.k === 'row' && l.l === name) + 1]
+
+  test('the KOT prints ↳ <combo> right under the dish, small and indented, not italic like a note', () => {
+    const doc = kotBotDoc({ station: 'KOT', items: [MOMO, { name: 'Tea', qty: 1, sent_qty: 0 }], at: AT })
+    expect(tagOf(doc)).toEqual([{ k: 'text', t: '↳ Momo Combo', indent: 1, size: 'xs' }])
+    expect(after(doc, 'Chicken Momo')).toEqual({ k: 'text', t: '↳ Momo Combo', indent: 1, size: 'xs' })
+    expect(after(doc, 'Tea')).not.toMatchObject({ t: expect.stringMatching(/^↳/) })
+    expect(doc.lines.every(l => ['text', 'row', 'hr'].includes(l.k))).toBe(true)
+    // The renderer needs nothing new: it is an ordinary indented line.
+    expect(toHtml(doc)).toContain('<div class="t in xs">↳ Momo Combo</div>')
+  })
+
+  test('a CHANGE line and a cart line holding its combo as an object are tagged too; a dish with none is not', () => {
+    const change = kotBotDoc({ station: 'KOT', items: [{ ...MOMO, change: true, qty: 0 }], at: AT })
+    expect(after(change, 'Chicken Momo')).toMatchObject({ t: '↳ Momo Combo' })
+    const cart = kotBotDoc({ station: 'KOT', items: [{ name: 'Coke', qty: 1, combo: { name: 'Momo Combo' } }], at: AT })
+    expect(after(cart, 'Coke')).toMatchObject({ t: '↳ Momo Combo' })
+    const plain = kotBotDoc({ station: 'KOT', items: [{ name: 'Coke', qty: 1, combo_name: '  ' }], at: AT })
+    expect(plain.lines.some(l => l.k === 'text' && l.t.startsWith('↳'))).toBe(false)
+  })
+
+  test('the VOID and MOVE slips tag the dish the same way', () => {
+    const v = voidSlipDoc({ station: 'KOT', items: [MOMO], voidedAt: AT })
+    expect(after(v, 'Chicken Momo')).toEqual({ k: 'text', t: '↳ Momo Combo', indent: 1, size: 'xs' })
+    const m = moveSlipDoc({ station: 'KOT', fromTable: 'T3', toTable: 'T5', items: [MOMO], movedAt: AT })
+    expect(after(m, 'Chicken Momo')).toEqual({ k: 'text', t: '↳ Momo Combo', indent: 1, size: 'xs' })
+  })
+
+  test('a combo name a person typed is escaped by the renderer', () => {
+    const doc = kotBotDoc({ station: 'KOT', items: [{ ...MOMO, combo_name: '<img src=x>' }], at: AT })
+    expect(toHtml(doc)).toContain('↳ &lt;img src=x&gt;')
+    expect(toHtml(doc)).not.toContain('<img')
+  })
+})
+
 describe('withLateLine', () => {
   test('puts the late line under the title, in Nepal time, without changing the original', () => {
     const doc = kotBotDoc({ station: 'KOT', outletName: 'Bloom', items: [], at: AT })

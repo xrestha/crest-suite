@@ -35,6 +35,12 @@ const optionLines = options => (options || []).map(o => (o.is_removal
   : text(`+ ${ticketOptionName(o)}`, { indent: 1 })))
 const noteLine = t => text(t, { indent: 1, size: 'xs', italic: true })
 const qtyRow = (name, label, o = {}) => row(name, label, { lBold: true, rBold: true, rSize: 'md', ...o })
+// Combos (S839, docs/pos-combos.md): a combo's dish goes to its own station like any dish, with the
+// combo it belongs to under it, so the pass can put the plate together. An existing line kind and
+// style (a small indented text line, not italic, so it does not read as the waiter's note), so no
+// renderer changes. A logged ticket item carries `combo_name`; a cart line may hold it as `combo.name`.
+const comboNameOf = i => String(i?.combo_name ?? i?.combo?.name ?? '').trim()
+const comboLines = i => (comboNameOf(i) ? [text(`↳ ${comboNameOf(i)}`, { indent: 1, size: 'xs' })] : [])
 
 export function kotBotDoc({ station, items, ticketNo, outletName, tableName, takenBy, covers, reprint = false, at }) {
   const stamp = stampOf(at)
@@ -54,14 +60,14 @@ export function kotBotDoc({ station, items, ticketNo, outletName, tableName, tak
     // "×qty", which a station reads as a fresh order and cooks again. It prints no quantity at all.
     // `change` is a logged CHANGE ticket's line being reprinted (S809 3a), whose quantity is 0.
     if (i.change || ((i.sent_qty || 0) > 0 && delta === 0)) {
-      lines.push(qtyRow(i.name, 'CHANGE'), text('CHANGE ONLY — not a new order', { indent: 1, size: 'xs', italic: true, bold: true }), ...notes)
+      lines.push(qtyRow(i.name, 'CHANGE'), ...comboLines(i), text('CHANGE ONLY — not a new order', { indent: 1, size: 'xs', italic: true, bold: true }), ...notes)
       continue
     }
     // A negative delta (qty reduced since the last send, then resent) needs its own label — a plain
     // "×qty" would read as a fresh full order rather than a cut, and the kitchen has no other way to
     // tell "this is 3 now" from "make 3 more".
     const label = delta > 0 ? `+${delta}` : delta < 0 ? `↓${Math.abs(delta)} (now ${i.qty})` : `×${i.qty}`
-    lines.push(qtyRow(i.name, label), ...notes)
+    lines.push(qtyRow(i.name, label), ...comboLines(i), ...notes)
     // S833: the note changed on the units the station already has as well, so they are told apart
     // from the "+N" (changedOnSentUnits).
     if (changedOnSentUnits(i)) {
@@ -90,8 +96,8 @@ export function voidSlipDoc({ station, items, ticketNo, outletName, tableName, v
     row(bsDateText(stamp), nepalTime(stamp), { size: 'xs' }),
     HR)
   for (const i of items || []) {
-    if (i.change) lines.push(qtyRow(i.name, 'CHANGE', { strike: true }))
-    else lines.push(qtyRow(i.name, `×${i.qty ?? ''}`, { strike: true }), ...optionLines(i.options))
+    if (i.change) lines.push(qtyRow(i.name, 'CHANGE', { strike: true }), ...comboLines(i))
+    else lines.push(qtyRow(i.name, `×${i.qty ?? ''}`, { strike: true }), ...comboLines(i), ...optionLines(i.options))
   }
   lines.push(HR, text('This order was voided. Nothing above is wanted.', { align: 'center', size: 'xs' }))
   return { v: TICKET_DOC_VERSION, title: `VOID ${station === 'BOT' ? 'BOT' : 'KOT'}`, lines }
@@ -117,7 +123,7 @@ export function moveSlipDoc({ station, outletName, fromTable, toTable, orderNo, 
     row(bsDateText(stamp), nepalTime(stamp), { size: 'xs' }),
     HR)
   for (const i of items || []) {
-    lines.push(qtyRow(i.name, `×${i.qty ?? ''}`), ...optionLines(i.options), ...(i.notes ? [noteLine(`↳ ${i.notes}`)] : []))
+    lines.push(qtyRow(i.name, `×${i.qty ?? ''}`), ...comboLines(i), ...optionLines(i.options), ...(i.notes ? [noteLine(`↳ ${i.notes}`)] : []))
   }
   lines.push(HR, text(`Already ordered — serve it at ${to}.`, { align: 'center', size: 'xs' }))
   return { v: TICKET_DOC_VERSION, title: `MOVED ${station === 'BOT' ? 'BOT' : 'KOT'}`, lines }

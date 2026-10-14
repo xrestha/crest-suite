@@ -46,6 +46,14 @@ const POLL_MS = 4000
 function itemNote(i) {
   return typeof i?.notes === 'string' ? i.notes.trim() : ''
 }
+// Combos (S839, docs/pos-combos.md): a combo's dish comes to its own station like any dish, with the
+// combo it belongs to under it, small and quiet, so the pass can put the plate together. The till logs
+// it on the ticket item as `combo_name`; a ticket written before combos, or any other dish, has none.
+function ItemCombo({ item }) {
+  const name = typeof item?.combo_name === 'string' ? item.combo_name.trim() : ''
+  if (!name) return null
+  return <div style={{ paddingLeft: 16, fontSize: 16, lineHeight: 1.35, color: 'var(--theme-text3)' }}>↳ {name}</div>
+}
 // A line's choices as the kitchen reads them (S758): "+ Extra cheese", "NO onion" in red.
 function ItemOptions({ options }) {
   if (!options?.length) return null
@@ -862,6 +870,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
             return (
               <div key={idx} style={{ fontSize: 20, color: 'var(--theme-text2)' }}>
                 {i.name}
+                <ItemCombo item={i} />
                 <ItemOptions options={i.options} />
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)', paddingLeft: 16 }}>Now: {changeNoteText(i)}</div>
               </div>
@@ -882,6 +891,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
                 ) : (
                   <span><s style={{ color: 'var(--theme-text3)' }}>{i.qty}</s> → {nowQty} × {i.name}</span>
                 )}
+                <ItemCombo item={i} />
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--theme-red-text)', paddingLeft: 16 }}>
                   {nowQty === 0 ? 'Cancelled' : `${removedQty} cancelled`} {nepalTime(last.removed_at)} · {reasons || 'no reason given'}
                 </div>
@@ -893,6 +903,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
           return (
             <div key={idx} style={{ fontSize: 20, color: 'var(--theme-text2)' }}>
               {i.qty} × {i.name}
+              <ItemCombo item={i} />
               <ItemOptions options={i.options} />
               {note && <div style={{ fontSize: 18, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
             </div>

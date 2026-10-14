@@ -52,6 +52,35 @@ describe('buildCreditNoteHtml — the choices row', () => {
   })
 })
 
+// S839 (docs/pos-combos.md): the note lists the bill's lines as the bill printed them, so a combo is one
+// row with its dishes under it, each with its stored choices.
+describe('buildCreditNoteHtml — combos', () => {
+  const LINE = '7f0c2c1e-0000-4000-8000-000000000001'
+  const dish = (name, group, sort, extra = {}) => ({
+    recipe_id: `r-${name}`, name, qty: 1, unit_price: 100, vat_rate: 0.13,
+    combo_line_id: LINE, combo_name: 'Momo Combo', combo_group_id: group, combo_sort: sort,
+    selection_key: `@${LINE}/${group}`, ...extra,
+  })
+  test('a combo prints as one row at its first dish, its dishes and their choices under it', () => {
+    const items = [
+      dish('Coke', 'g-drink', 1, { unit_price: 78.32 }),
+      { recipe_id: 'r-tea', name: 'Tea', qty: 1, unit_price: 40 },
+      dish('Chicken Momo', 'g-momo', 0, { unit_price: 256.64, pos_order_item_options: [{ option_name: 'Extra cheese', price_delta: 35.4, sort: 0 }] }),
+    ]
+    const h = html(note({ gross_amount: 374.96, taxable_amount: 374.96, vat_amount: 48.74, net_amount: 424 }), items, true)
+    const rows = [...h.match(/<tbody>([\s\S]*?)<\/tbody>/)[1].matchAll(/<tr>(.*?)<\/tr>/g)].map(m => m[1])
+    expect(rows).toEqual([
+      '<td>1</td><td></td><td>Momo Combo</td><td>1</td><td>334.96</td><td>334.96</td>',
+      '<td></td><td></td><td colspan="4" style="padding-top:0;padding-left:10px">Chicken Momo</td>',
+      '<td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0;padding-left:18px">Extra cheese +35</td>',
+      '<td></td><td></td><td colspan="4" style="padding-top:0;padding-left:10px">Coke</td>',
+      '<td>2</td><td></td><td>Tea</td><td>1</td><td>40.00</td><td>40.00</td>',
+    ])
+    // The note's own stored figures, untouched.
+    expect(rowValue(h, 'Gross Amount')).toBe('374.96')
+  })
+})
+
 describe('buildCreditNoteHtml — Round Off', () => {
   test('the review\'s VAT note: Taxable 1,327.44 + VAT 172.57 = 1,500.01 prints Round Off -0.01 above Net 1,500.00', () => {
     // Three dishes at 442.48: VAT 172.5672 is stored unrounded and prints 172.57.

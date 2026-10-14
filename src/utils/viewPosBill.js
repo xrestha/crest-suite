@@ -76,6 +76,9 @@ export async function viewPosBill(clientId, row) {
   const tableName = order.table_name || 'Takeaway'
 
   // With each line's choices' stock lines, which a Complimentary Slip is costed from (posLineCosts).
+  // `*` carries the combo columns (S839): the bill, its discount maths and both slips print a combo's
+  // dishes as one row by combo_line_id, so a narrowed select must keep combo_line_id, combo_name,
+  // combo_sort and selection_key.
   const { data: allItems, error: itemsErr } = await within(scopedFrom('pos_order_items', clientId, `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderId), 'Reading the bill lines')
   if (itemsErr) { writeLoadFailure(w); return }
   const items = allItems || []
