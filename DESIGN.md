@@ -1086,6 +1086,17 @@ maximum is capped at the choices offered ("Pick 2 to 3", never "Pick 2 to 10" ov
 The till does NOT step (owner decision, S760): a cashier mid-queue needs one screen, and the one-tap
 default stays for every dish that is not build-your-own.
 
+### Combos (S839)
+
+A combo is walked like a build-your-own dish on the guest sheet (`GuestComboSheet.jsx`): one pick per
+step, then Review with a Change per pick. A pick with one dish asks nothing and reads **Included**; a
+set meal (every pick one dish) opens straight on Review. On the till a combo is a **block**, not a
+line: its name, quantity and total with Remove on the header, its dishes indented under it, each with
+its own sent marks and a Swap, because a combo is sold, comped and moved as one but each dish still
+goes to its own station. On the bill it is **one row** at its price with the dishes listed unpriced
+beneath it, and on a kitchen or bar ticket each dish carries `↳ Momo Combo` as an indented `xs` line,
+deliberately not italic, so it never reads as a waiter's note. The contract is `docs/pos-combos.md`.
+
 ### Badges / Status Chips
 
 - **Shape:** square, `2px 8px`, 11px/500, capitalized.

@@ -42,6 +42,9 @@ same whoever prints it.
   it; the page's iframe is `sandbox="allow-same-origin allow-modals"` (no scripts). Any Unicode can
   appear: Nepali dish names, `×`, `↓`, `↳`, `—`.
 - Limits the database enforces: the doc is a JSON object of at most 32 KB with at most 300 `lines`.
+- A combo's dish (S839, `docs/pos-combos.md`) is printed under its own station like any dish, with
+  an indented `xs` text line `↳ <combo name>` under it, from the logged ticket item's `combo_name`. No
+  new line kind: every renderer already draws it.
 - A device adds one line of its own when it prints a job flagged `late` (claimed more than 2 minutes
   after it was queued): a bold centred `PRINTED LATE — sent HH:MM` (Nepal time) under the title.
 
