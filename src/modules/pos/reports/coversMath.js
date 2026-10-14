@@ -27,6 +27,8 @@ export const MAX_SITTING_MINUTES = 720
 
 /**
  * One bill's sitting: `{ mins }`, or `{ reason }` when it cannot be one —
+ *   'partBill'  a part bill (S836, isPartBill): split off a table's bill so one guest could pay, so
+ *               it opened mid-meal and the sitting is the table's own bill;
  *   'untimed'   no opened_at or closed_at;
  *   'negative'  closed before it was opened (a till clock behind the server's);
  *   'overCap'   open longer than MAX_SITTING_MINUTES.
@@ -34,6 +36,7 @@ export const MAX_SITTING_MINUTES = 720
  * names what it left out cannot disagree.
  */
 function classifySitting(o) {
+  if (isPartBill(o)) return { reason: 'partBill' }
   if (!o.opened_at || !o.closed_at) return { reason: 'untimed' }
   const mins = (new Date(o.closed_at) - new Date(o.opened_at)) / 60000
   if (mins < 0) return { reason: 'negative' }
@@ -49,8 +52,9 @@ function classifySitting(o) {
  * inline — coversMath.test.js holds a verbatim copy and asserts equality on sittings under the cap,
  * so any drift here fails the build rather than the report.
  *
- * Skipped rows (classifySitting): no opened_at/closed_at, a negative dwell, or one over
- * MAX_SITTING_MINUTES. turnoverExclusions counts them, and the report says how many (POS_TODO B4).
+ * Skipped rows (classifySitting): a part bill (S836), no opened_at/closed_at, a negative dwell, or
+ * one over MAX_SITTING_MINUTES. turnoverExclusions counts them, and the report says how many
+ * (POS_TODO B4).
  */
 export function turnoverByBand(orders, netOf = () => 0) {
   const buckets = PARTY_BANDS.map(b => ({ ...b, orders: 0, totalMinutes: 0, covers: 0, net: 0 }))
@@ -66,9 +70,9 @@ export function turnoverByBand(orders, netOf = () => 0) {
   return buckets.map(b => ({ ...b, avgMinutes: b.orders > 0 ? b.totalMinutes / b.orders : 0 }))
 }
 
-/** The bills turnoverByBand leaves out, by reason: { untimed, negative, overCap }. */
+/** The bills turnoverByBand leaves out, by reason: { partBill, untimed, negative, overCap }. */
 export function turnoverExclusions(orders) {
-  const out = { untimed: 0, negative: 0, overCap: 0 }
+  const out = { partBill: 0, untimed: 0, negative: 0, overCap: 0 }
   for (const o of orders || []) {
     const sitting = classifySitting(o)
     if (sitting.reason) out[sitting.reason] += 1
@@ -81,9 +85,10 @@ export function turnoverExclusions(orders) {
  * the reasons that happened are named.
  */
 export function turnoverExclusionNote(ex) {
-  const total = (ex?.untimed || 0) + (ex?.negative || 0) + (ex?.overCap || 0)
+  const total = (ex?.partBill || 0) + (ex?.untimed || 0) + (ex?.negative || 0) + (ex?.overCap || 0)
   if (total === 0) return null
   const parts = []
+  if (ex.partBill > 0) parts.push(`${ex.partBill} part bill${ex.partBill === 1 ? '' : 's'} (a guest paying separately; the sitting is the table's own bill)`)
   if (ex.negative > 0) parts.push(`${ex.negative} closed before ${ex.negative === 1 ? 'it was' : 'they were'} opened (a till clock behind)`)
   if (ex.overCap > 0) parts.push(`${ex.overCap} open over 12 hours (left open past closing)`)
   if (ex.untimed > 0) parts.push(`${ex.untimed} with no opening or closing time`)
@@ -97,10 +102,22 @@ export function turnoverExclusionNote(ex) {
  * defaulted to, and counting it made a takeaway-heavy outlet's average party look like 1.1 and its
  * table turnover look like four minutes.
  *
- * `table_id` must be in the query's select list — a row read without it counts as takeaway.
+ * A part bill (S836, isPartBill) is dine-in too, though it has no table of its own: it was split off
+ * a table's bill so one guest could pay separately, and its covers are guests who sat at that table
+ * (the split moves them off the table's bill, so nobody is counted twice). It is not a sitting of
+ * its own, so turnover leaves it out (classifySitting above).
+ *
+ * `table_id` AND `part_of_order_id` must be in the query's select list — a row read without them
+ * counts as takeaway. The Group Console's SQL (get_group_summary, S836) carries this rule separately and
+ * must follow it; the POS Dashboard's channelOf, the Owner Report and Close Shift call this one.
  */
 export function isDineIn(order) {
-  return order != null && order.table_id != null
+  return order != null && (order.table_id != null || isPartBill(order))
+}
+
+/** A part bill: its own bill and invoice, split off an open table bill (pos_orders.part_of_order_id, S836). */
+export function isPartBill(order) {
+  return order != null && order.part_of_order_id != null
 }
 
 export function dineInOnly(orders) {
@@ -112,7 +129,8 @@ export function dineInOnly(orders) {
  * included (a credit note corrects billing, it does not un-seat the guests). The one count behind the
  * Covers Report's headline (coversTotals below), the POS Dashboard's Covers tile and Home's Covers
  * Served, so none of them can drift from the report they link to (S809 3n, REPORTS-3). The Group
- * Console's SQL, get_group_summary, carries the same rule: close_type 'paid' AND table_id IS NOT NULL.
+ * Console's SQL, get_group_summary, carries the same rule: close_type 'paid' AND table_id IS NOT NULL
+ * (and, since S836, a part bill: part_of_order_id IS NOT NULL — see isDineIn).
  *
  * The caller passes paid bills only: a void or a complimentary bill counts no guests on any of them.
  */
@@ -158,12 +176,13 @@ export function coversTotals(orders, netOf = () => 0, returns = []) {
 /**
  * Adds dine-in returns into turnoverByBand's rows by the party band of the bill each one credits,
  * so a band's Net Sales is net of returns like every other revenue figure on the page. Orders,
- * covers and minutes are untouched — a return is not a sitting. Returns a new array.
+ * covers and minutes are untouched — a return is not a sitting. A part bill's return is left out
+ * (S836), as its sales are: it is in no band. Returns a new array.
  */
 export function addReturnsByBand(rows, returns) {
   const out = rows.map(r => ({ ...r }))
   for (const ret of returns || []) {
-    if (!isDineIn(ret.order)) continue
+    if (!isDineIn(ret.order) || isPartBill(ret.order)) continue
     const band = bandFor(ret.order.covers)
     const row = band && out.find(r => r.key === band.key)
     if (row) row.net += ret.net || 0

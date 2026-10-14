@@ -84,6 +84,18 @@ describe('covers are guests seated at tables (owner decision 2026-10-10)', () =>
     expect(f.covers.totalCovers).toBe(0)
     expect(f.covers.avgCheckPerCover).toBeNull()
   })
+  // S836, schema v17: a part bill, split off T1's bill so one guest could pay, has no table of its
+  // own (table_id NULL, the table's name) but was served at one, so it is dine-in (coversMath.isDineIn).
+  test('a part bill is dine-in: its guest is seated, and it is no takeaway', () => {
+    const P = { id: 'P', table_id: null, table_name: 'Table 1', part_of_order_id: 'T1', covers: 1, payment_method: 'Cash', discount_amount: 0, vat_registered: false }
+    const f = posSalesFigures({
+      orders: [T1, P, TA], creditNotes: [], orderById: { T1, P, TA },
+      itemsByOrder: { ...itemsByOrder, P: [line('P', 'Food', 1, 400)] }, paymentsByOrder, vatReg: false,
+    })
+    expect(f.covers).toMatchObject({ totalCovers: 4 + 1, dineInBills: 2, takeawayBills: 1 })
+    // T1's 1,000 and the part bill's 400 over 5 seated guests; the takeaway's 300 is in neither.
+    expect(f.covers.avgCheckPerCover).toBeCloseTo(1400 / 5, 6)
+  })
 })
 
 describe("the Sales Report's other two rules come with it", () => {
@@ -118,6 +130,11 @@ describe('the reads behind it', () => {
   test('the bill read carries what seated covers and as-issued VAT need', () => {
     expect(flat).toMatch(/const POS_ORDER_COLUMNS = '[^']*\btable_id\b[^']*'/)
     expect(flat).toMatch(/const POS_ORDER_COLUMNS = '[^']*\bvat_registered\b[^']*'/)
+    // S836: without it a part bill reads as takeaway and its guests go uncounted.
+    expect(flat).toMatch(/const POS_ORDER_COLUMNS = '[^']*\bpart_of_order_id\b[^']*'/)
+  })
+  test('a part bill counting as dine-in moved the schema version (S836, v17)', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(17)
   })
   test('the schema version moved with the meaning', () => {
     expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(15)

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import Modal from '../../../components/Modal'
+import { ticketTableLabel } from './ticketStage'
 
 const KEYS = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['C', '0', '⌫']]
 const PRESETS = [5, 10, 15, 20]
@@ -22,6 +23,8 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
 
   const minutes = parseInt(value, 10) || 0
   const canConfirm = minutes > 0
+  // S836: the table the bill is at now, as the card above it says it (ticketTableLabel).
+  const table = ticketTableLabel(ticket)
 
   useEffect(() => {
     function onKey(e) {
@@ -38,7 +41,7 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
     <Modal onClose={onClose} title="Estimated Prep Time" maxWidth={360}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 2 }}>
-          {ticket.table_name || 'Takeaway'} <span style={{ color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
+          {table.name || 'Takeaway'}{table.was ? ` (was ${table.was})` : ''} <span style={{ color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
         </div>
         {/* One line per item so a kitchen note can sit under the dish it belongs to (S754) — the cook
             estimates prep time for "no onion, extra spicy", not just the dish name. Tickets

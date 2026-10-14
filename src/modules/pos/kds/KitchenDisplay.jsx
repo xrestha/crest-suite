@@ -20,6 +20,7 @@ import { useReleaseReload } from '../../../shared/releaseWatch'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { settleWithin } from '../../../utils/withTimeout'
 import { tapMiss } from './tapAnswer'
+import { ticketTableLabel } from './ticketStage'
 
 const KDS_RELEASE_IDLE_MS = 60 * 1000
 
@@ -122,6 +123,16 @@ function attachRemovals(tickets, removals) {
     // `removals`, so `removalSig` already repaints it.
     return { ...t, removals: lines, removalSig: sig, allPulled: ticketAllPulled(t.items, lines) }
   })
+}
+
+// S836: a bill can move to another table, and a join hands the joined table's tickets to the bill that
+// stays, while each ticket row keeps the table it was printed for. The board's reads embed the bill's
+// table now (`pos_orders(table_name)`), and this puts it on the ticket flat (ticketTableLabel,
+// ticketStage.js) so the poll signatures can see it: a move changes the bill, not the ticket row, and a
+// signature without these would leave the card on the old table until something else changed.
+function withTableLabel(t) {
+  const { name, was } = ticketTableLabel(t)
+  return { ...t, tableNow: name, tableWas: was }
 }
 
 // A ticket sitting in Ready for longer than this drops off the board (still in the DB, still
@@ -275,8 +286,10 @@ export default function KitchenDisplay() {
     // cross the 1000-row cap inside a single day — and this query is sorted OLDEST first, so a
     // truncated read drops the newest tickets: precisely the ones the kitchen is waiting on, with
     // no error to say anything was dropped. `.order('id')` is the unique tiebreaker paging needs.
+    // S836: the bill's table now, for a bill moved or joined since the ticket printed. Not !inner: a
+    // ticket whose bill this login cannot read still shows, under the table it was printed for.
     const [{ data, error }, removalsRes, voidsRes] = await Promise.all([
-      settleWithin(fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
+      settleWithin(fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes, pos_orders(table_name)')
         .eq('station', station)
         .in('status', BOARD_STATUSES)
         .gte('sent_at', serviceDayStart)
@@ -291,7 +304,7 @@ export default function KitchenDisplay() {
       // minutes (the server cancels them in the void and stamps cancelled_at). A ticket the kitchen
       // cleared itself, or one cancelled for any other reason, belongs to an order that is not voided
       // and is left out. A handful of rows at most, so no paging.
-      settleWithin(scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, started_at, ready_at, cancelled_at, pos_orders!inner(status)')
+      settleWithin(scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, started_at, ready_at, cancelled_at, pos_orders!inner(status, table_name)')
         .eq('station', station)
         .eq('status', 'cancelled')
         .eq('pos_orders.status', 'voided')
@@ -314,7 +327,7 @@ export default function KitchenDisplay() {
     if (voidsRes.error) {
       console.error('KDS could not read voided orders, keeping the cards already shown:', voidsRes.error)
     } else {
-      const vrows = voidsRes.data || []
+      const vrows = (voidsRes.data || []).map(withTableLabel)
       const seenAt = Date.now()
       let arrived = false
       for (const t of vrows) {
@@ -322,7 +335,8 @@ export default function KitchenDisplay() {
       }
       if (arrived && voidsLoadedOnce.current) { playNewTicketChime(); chimed = true }
       voidsLoadedOnce.current = true
-      setIfChanged(setVoids, vrows, rs => rowsSignature(rs, ['id', 'cancelled_at']))
+      // A voided bill no longer moves, but the card draws its table, so the signature carries it (S836).
+      setIfChanged(setVoids, vrows, rs => rowsSignature(rs, ['id', 'cancelled_at', 'tableNow', 'tableWas']))
     }
     setSoundOff(soundBlocked())
     if (error) {
@@ -347,7 +361,7 @@ export default function KitchenDisplay() {
         ...(m.status === 'ready' && !t.ready_at ? { ready_at: m.at } : {}),
       } : t
     }).filter(t => BOARD_STATUSES.includes(t.status))
-    const rows = attachRemovals(read, lastRemovals.current)
+    const rows = attachRemovals(read, lastRemovals.current).map(withTableLabel)
     const newTickets = rows.filter(t => t.status === 'new')
     if (!chimed && loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
       playNewTicketChime()
@@ -361,8 +375,10 @@ export default function KitchenDisplay() {
     // per-line `notes` (S754): they are written with the row at insert, never patched afterwards.
     // The cancellations ARE drawn and DO change without the ticket changing, so their derived
     // `removalSig` is in the signature — without it a pulled line would never repaint (S754).
+    // The table is drawn and changes without the ticket changing too (a move or a join, S836), so
+    // `tableNow` and `tableWas` are in it as well.
     setIfChanged(setTickets, rows,
-      rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes', 'removalSig']))
+      rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes', 'removalSig', 'tableNow', 'tableWas']))
     setLoading(false)
 
     // FLOOR-KITCHEN-5 (S809 3d): a ticket left in Ready for 10 minutes (when the board stops showing it)
@@ -484,7 +500,7 @@ export default function KitchenDisplay() {
     // timeout, a dropped connection, a gateway error). With no answer the move may have landed, so the
     // card goes back to the stage the server last confirmed and the board reads itself again at once,
     // which shows where the ticket really is; only a refusal says it is back where it was.
-    const miss = tapMiss(res, { tableName: ticket.table_name, nextStatus })
+    const miss = tapMiss(res, { tableName: ticket.tableNow, nextStatus })
     if (miss) {
       localMoves.current.delete(ticket.id)
       setTickets(prev => prev.map(t => t.id === ticket.id
@@ -593,7 +609,7 @@ export default function KitchenDisplay() {
           muted={alertMuted}
           onMute={() => setAlertMutedUntil(Date.now() + MUTE_MS)}
           title={newTickets.length === 1
-            ? `${newChanges ? 'Changed instruction' : newPulled ? 'Dishes taken off' : 'New ticket'} — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
+            ? `${newChanges ? 'Changed instruction' : newPulled ? 'Dishes taken off' : 'New ticket'} — #${newTickets[0].order_no}${newTickets[0].tableNow ? ` · ${newTickets[0].tableNow}` : ''}`
             : `${newTickets.length} tickets waiting${newChanges ? ` — ${newChanges} with a changed instruction` : newPulled ? ` — ${newPulled} with every dish taken off` : ' to start'}`}
           detail={(oldestNewMs < 30000
             ? `Just in. ${takeHint}`
@@ -734,6 +750,25 @@ export default function KitchenDisplay() {
   )
 }
 
+// A card's top line: the table the food goes to, and the order number. S836: the table is the bill's
+// table now (withTableLabel); when the ticket printed for another, that one follows small, in the order
+// number's type, so a cook can match the card to the paper without reading it as where to walk.
+function TicketHead({ ticket }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+      <span>
+        <span style={{ fontWeight: 700, fontSize: 22, color: 'var(--theme-text1)' }}>{ticket.tableNow || 'Takeaway'}</span>
+        {ticket.tableWas && (
+          <Tip text={`This ticket was printed for ${ticket.tableWas}. Its food is on the bill at ${ticket.tableNow} now (the bill moved table, or the two tables were joined), so it goes to ${ticket.tableNow}.`}>
+            <span style={{ marginLeft: 8, fontSize: 14, color: 'var(--theme-text3)' }}>was {ticket.tableWas}</span>
+          </Tip>
+        )}
+      </span>
+      <span style={{ fontSize: 14, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
+    </div>
+  )
+}
+
 // S817 4i (FLOOR-KITCHEN-4, D18): a ticket whose order was voided, kept up in the column it was in so
 // a cook mid-cook sees the stop rather than an empty column. Dressed like a ticket whose dishes were all
 // taken off (red-text label, struck lines, quiet strip): the same instruction, "do not make this".
@@ -742,10 +777,7 @@ function VoidedCard({ ticket, onDismiss }) {
   return (
     <div className="card" style={{ padding: 16, overflow: 'hidden' }}>
       <div style={{ margin: '-16px -16px 12px', height: 7, background: ticketStripColor({ status: null, isLate: false, isWarn: false }) }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-        <span style={{ fontWeight: 700, fontSize: 22, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
-        <span style={{ fontSize: 14, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
-      </div>
+      <TicketHead ticket={ticket} />
       <div style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-red-text)', marginBottom: 6 }}>
         <Tip text="This order's bill was voided on the till, so nothing on this ticket is wanted any more. A VOID slip printed with the dishes to stop. OK takes the card off this screen; it also leaves by itself after ten minutes.">
           <span>Voided{ticket.cancelled_at ? ` ${nepalTime(ticket.cancelled_at)}` : ''} — stop, do not make</span>
@@ -760,7 +792,7 @@ function VoidedCard({ ticket, onDismiss }) {
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-ghost" style={{ fontSize: 16, padding: '10px 20px' }} onClick={() => onDismiss(ticket.id)}
-          aria-label={`OK, take the voided ticket for ${ticket.table_name || 'Takeaway'} #${ticket.order_no} off this screen`}>
+          aria-label={`OK, take the voided ticket for ${ticket.tableNow || 'Takeaway'} #${ticket.order_no} off this screen`}>
           OK
         </button>
       </div>
@@ -810,10 +842,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
   return (
     <div className="card" style={{ padding: 16, borderColor, borderWidth: isLate || isWarn ? 2 : 1, overflow: 'hidden' }}>
       <div style={{ margin: '-16px -16px 12px', height: 7, background: stripColor }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-        <span style={{ fontWeight: 700, fontSize: 22, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
-        <span style={{ fontSize: 14, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
-      </div>
+      <TicketHead ticket={ticket} />
       {change && (
         <div style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text1)', marginBottom: 6 }}>
           Changed instruction — nothing new to cook

@@ -63,6 +63,16 @@ describe('summariseBills', () => {
     expect(s).toMatchObject({ sales: 27000, bills: 32, covers: 30, avgCover: 600 })
   })
 
+  // S836: a part bill (split off a table's bill so one guest could pay) has no table of its own but
+  // was served at one, so its guests are seated guests and its sale is dine-in (coversMath.isDineIn).
+  test('a part bill is dine-in: its guests count and its sale is in Avg per cover', () => {
+    const table = bill({ id: 'a', paid_amount: 2000, covers: 3 })
+    const part = bill({ id: 'p', paid_amount: 1000, covers: 1, table_id: null, part_of_order_id: 'a' })
+    const bag = bill({ id: 'b', paid_amount: 500, covers: 1, table_id: null })
+    const s = summariseBills([table, part, bag])
+    expect(s).toMatchObject({ sales: 3500, bills: 3, covers: 4, dineInBills: 2, avgCover: 750 })
+  })
+
   test('a takeaway-only day has no guests and no average per cover', () => {
     const s = summariseBills([bill({ table_id: null, covers: 1 }), bill({ table_id: null, covers: 2, delivery_partner: 'Pathao' })])
     expect(s).toMatchObject({ bills: 2, sales: 2000, covers: 0, avgCover: null })
@@ -157,6 +167,19 @@ describe('channels', () => {
     expect(channelOf({ table_id: 't3' })).toBe('Dine-in')
     expect(channelMix([bill({}), bill({ table_id: null, paid_amount: 250 })])).toEqual([
       { channel: 'Dine-in', bills: 1, returns: 0, amount: 1000 },
+      { channel: 'Takeaway', bills: 1, returns: 0, amount: 250 },
+    ])
+  })
+
+  // S836: a part bill has no table of its own (the table's one open bill keeps it), but it was served
+  // at a table, so it is dine-in, and so is a credit note against it.
+  test('a part bill split off a table\'s bill is dine-in, though it has no table', () => {
+    expect(channelOf({ table_id: null, part_of_order_id: 'parent' })).toBe('Dine-in')
+    expect(channelOf({ table_id: null, part_of_order_id: null })).toBe('Takeaway')
+    expect(channelOf(null)).toBe('Takeaway')
+    const part = bill({ id: 'p', paid_amount: 600, table_id: null, part_of_order_id: 'a' })
+    expect(channelMix([bill({ id: 'a' }), part, bill({ id: 't', table_id: null, paid_amount: 250 })], returnsOf([note(part)]))).toEqual([
+      { channel: 'Dine-in', bills: 2, returns: 1, amount: 1000 },
       { channel: 'Takeaway', bills: 1, returns: 0, amount: 250 },
     ])
   })

@@ -45,6 +45,9 @@ export const CLIENT_SCOPED_TABLES = [
   'pos_guest_order_requests', 'pos_parking_slips',
   'pos_loyalty_schemes', 'pos_loyalty_ledger',
   'pos_reservations', 'pos_reservation_tables',
+  // Move, join and split tables (S836): a table joined to another table's open bill, and the record of
+  // every move. Both client_id NOT NULL; client sessions only read them (the move functions write).
+  'pos_table_joins', 'pos_table_moves',
   // Crest Customization (S758) — every one carries client_id NOT NULL, and the child tables pin
   // it to their parent's with a composite (id, client_id) foreign key.
   'pos_option_groups', 'pos_options', 'pos_option_ingredients', 'pos_recipe_option_groups',

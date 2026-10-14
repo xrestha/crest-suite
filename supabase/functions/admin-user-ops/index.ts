@@ -160,6 +160,8 @@ const POS_RECORD_WORDS: Record<string, [string, string]> = {
   'pos_reservations.created_by':        ['took 1 booking', 'took {n} bookings'],
   'pos_loyalty_ledger.created_by':      ['recorded 1 points entry', 'recorded {n} points entries'],
   'pos_guest_order_requests.decided_by': ['answered 1 guest QR order', 'answered {n} guest QR orders'],
+  'pos_table_moves.moved_by':           ['made 1 table move, join or split', 'made {n} table moves, joins or splits'],
+  'pos_table_joins.joined_by':          ['joined 1 table to a bill', 'joined {n} tables to bills'],
   'pos_devices.created_by':             ['activated 1 till', 'activated {n} tills'],
   'pos_devices.revoked_by':             ['switched off 1 till', 'switched off {n} tills'],
   'profiles.pos_blocked_by':            ['blocked 1 login', 'blocked {n} logins'],
@@ -301,6 +303,13 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
   await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
   await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
+  // Move, join and split tables (S836), before the orders and tables. A join cascades from both its
+  // table and its bill, and the record's bill links are SET NULL, so neither is load-bearing here: both
+  // are named so the sequence lists every table it clears (the S382 lesson). The service role passes
+  // both tables' write guards. A part bill's link to its bill (pos_orders.part_of_order_id) is SET
+  // NULL inside pos_orders, so the one delete below takes both.
+  await del(admin.from('pos_table_joins').delete().eq('client_id', clientId), 'pos_table_joins')
+  await del(admin.from('pos_table_moves').delete().eq('client_id', clientId), 'pos_table_moves')
   await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
   await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
   await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
@@ -2610,6 +2619,10 @@ Deno.serve(async (req) => {
         await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
         await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
         await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
+        // S836: the joins and the record of moves are POS transactions; the tables themselves stay
+        // (see deleteClientDataFor). Before the orders, though both would follow them anyway.
+        await del(admin.from('pos_table_joins').delete().eq('client_id', clientId), 'pos_table_joins')
+        await del(admin.from('pos_table_moves').delete().eq('client_id', clientId), 'pos_table_moves')
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
         await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')

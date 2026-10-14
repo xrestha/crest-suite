@@ -778,7 +778,9 @@ export default function PosTableManagement() {
       supabase.from('settings').select('pos_reservation_settings').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).maybeSingle(),
       // 90 days of paid bills crosses 1000 rows on a busy outlet — paged, unique tiebreaker.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, covers, opened_at, closed_at').eq('close_type', 'paid').gte('closed_at', since).order('id')),
+      // `part_of_order_id` (S836) is read so dineInOnly sees a part bill as dine-in, as the Covers
+      // Report does; turnoverByBand then leaves it out, because it is not a sitting of its own.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, part_of_order_id, covers, opened_at, closed_at').eq('close_type', 'paid').gte('closed_at', since).order('id')),
     ])
     // S754: on a failed settings read the form still holds DEFAULT_RESERVATION_SETTINGS, and Save
     // writes the whole object — so one routine Save replaced the outlet's real hours, closures and

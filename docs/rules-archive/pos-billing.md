@@ -290,3 +290,47 @@ supabase-js **resolves** with `{ data, error }` — it does not throw on a datab
 rule is in root CLAUDE.md; what follows is what that cost specifically here, because `PosOrders.jsx`
 carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destructuring nothing) and
 **three `try/catch` blocks whose `console.error` had never once run.**
+
+## Table moves design
+
+Moved from `.claude/rules/pos-billing.md` (S836) to keep its load under the check:docs ceiling; the rule there is the summary.
+
+- **The server moves what is STORED, in one transaction** (`20261014120000`): `move_pos_order_table`,
+  `join_pos_tables`, `release_joined_table`, `move_pos_order_lines`, `split_pos_part_bill`,
+  `put_back_part_bill`, DEFINER, any POS rank. Each locks bills (id order) before tables, refuses a stale
+  view (`stale_order`), moves lines with price, choices snapshot and sent count (sent units first), and
+  bumps `items_version` on every bill it touches, so a till holding the old view is refused at its next
+  save or close. A line landing on a bill that has one of the same key becomes one line at the LOWER
+  price (`pos_merge_line`; owner default): `save_pos_order_items` keys stored prices by line, so a bill
+  must never hold two uncomped rows of one key. Every action writes `pos_table_moves` (KOT Log → Moves).
+  A client PATCH of an open order's `table_id`/`table_name`/`part_of_order_id` is ignored.
+- **A join takes the other bill over and deletes it**: lines, tickets (`guard_pos_kot_log` lets
+  `order_id` alone change under `crest.pos_table_join_rpc`), pulled-item records, guest orders, seated
+  bookings, part bills, its joins and its moves; covers add. Refused while it holds loyalty points. A
+  joined table is a `pos_table_joins` row: taken, no bill of its own (`pos_table_joined`), "With T3".
+- **A part bill** has no table (`table_id` NULL, the table's `table_name`, `part_of_order_id`), so one
+  open bill per table stands. It is dine-in everywhere covers are counted (`coversMath.isDineIn`, and
+  `get_group_summary`) and out of turn time. It opens into Payment through `billOnOpenRef`; Cancel offers
+  `put_back_part_bill`. An equal split is ONE bill and share slips (`equalShares`), never part-dish invoices.
+- **The database frees tables** at a close or an open bill's delete (`pos_orders_release_tables`: its own
+  and joined tables, Occupied only, while no other open bill or join holds them). The till frees none: it
+  used to free the table on its screen, which after a move elsewhere was another party's.
+- **Food sent and then moved stays on its tickets' bill.** `pos_moved_out_sent` (SQL) and
+  `kotMoves.netMovedOutSent` are a pair: the Kitchen Display's Clear rule and KOT Reconciliation add it.
+  A join needs none (its tickets move), and `move` keeps the bill's id.
+- **The screen trusts the stored table**: `OPEN_ORDER_SELECT` reads it, `showLoadedOrder({ stored })`
+  keeps it in `screenOrder`, every ticket and slip prints `screenTableName`, `reloadAfterStale` follows a
+  moved bill, and a bill gone from the server is looked up in `pos_table_moves` (`openWhereBillWent`).
+  The kitchen hears a move twice: a MOVED slip per station with food still live and a CHANGE ticket on the
+  bill that has the food (`tableMoves.js`), and the KDS shows a ticket under its bill's table now.
+
+## Idle lock stories
+
+Moved from `.claude/rules/pos-billing.md` (S836) to make room under the check:docs ceiling.
+
+- **The exemption keyed off the resolved rank once (S575→S583).** Any admin or Owner on a machine that had
+  ever completed POS device binding was silently signed out after 3 idle minutes, reported as "why does
+  the app sign me out when I leave for a while". The rule: key the exemption off the RAW `profile.pos_role`.
+- **Returning to the tab used to reset the timer (before S754).** Timers do not run while a tablet sleeps,
+  so a tablet that slept for an hour handed whoever woke it three more minutes of the absent waiter's
+  session, under that waiter's name on every bill.

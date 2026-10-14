@@ -48,10 +48,12 @@ const TODAY_HEX = CHART_COLORS[0]
 const LAST_WEEK_HEX = CHART_COLORS[2]
 const MUTED = '#6b7280' // chart-tick, for Recharts SVG props only; the page's text takes the tokens
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
-const ORDER_SELECT = 'id, covers, paid_amount, discount_amount, payment_method, table_id, delivery_partner, credit_note_id, close_type, closed_at'
+// `part_of_order_id` (S836): a part bill has no table but is dine-in (coversMath.isDineIn), so both
+// reads carry it beside `table_id`, or its sale and guests would land on the takeaway side.
+const ORDER_SELECT = 'id, covers, paid_amount, discount_amount, payment_method, table_id, part_of_order_id, delivery_partner, credit_note_id, close_type, closed_at'
 // A credit note with the bill it credits, which may have closed on an earlier day: the bill's table,
 // method and partner decide which channel, payment line and cover figure the note comes off.
-const NOTE_SELECT = 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, payment_method, delivery_partner)'
+const NOTE_SELECT = 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, part_of_order_id, payment_method, delivery_partner)'
 
 function weekdayOf(adIso) {
   const [y, m, d] = adIso.split('-').map(Number)
@@ -392,7 +394,7 @@ export default function PosDashboard() {
                 </div>
                 <div className="card card--compact">
                   <h3 className="dash-card-title">
-                    <Tip text="Dine-in is a bill opened at a table, takeaway one with no table, delivery one billed to a delivery partner. A credit note issued today comes off its bill's line." width={260}>Where today's sales came from</Tip>
+                    <Tip text="Dine-in is a bill opened at a table, or the part of a table's bill one guest paid on its own; takeaway is any other bill with no table; delivery one billed to a delivery partner. A credit note issued today comes off its bill's line." width={260}>Where today's sales came from</Tip>
                   </h3>
                   <ShareRows rows={sales.channels}
                     labelOf={r => `${r.channel} · ${r.bills} bill${r.bills === 1 ? '' : 's'}${r.returns > 0 ? ` · ${r.returns} credit note${r.returns === 1 ? '' : 's'}` : ''}`}

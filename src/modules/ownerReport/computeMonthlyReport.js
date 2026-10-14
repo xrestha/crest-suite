@@ -435,9 +435,11 @@ async function computeHrSection(clientId, period) {
 // and its note never subtracted, so a bill credited in a later month left both months' Net Sales,
 // and the bill count, covers, average check and payment mix left the bill out where Sales Report
 // keeps it. Covers are the guests SEATED at tables (coversMath.seatedCovers via coversTotals, owner
-// decision 2026-10-10), as on the Covers Report, the POS Dashboard and Home. This is a summary
-// artifact — aggregated rollups only, not a bill ledger.
-const POS_ORDER_COLUMNS = 'id, discount_amount, closed_at, payment_method, covers, table_id, vat_registered'
+// decision 2026-10-10), as on the Covers Report, the POS Dashboard and Home. Since v17 (S836) a part
+// bill, split off a table's bill so one guest could pay, is dine-in though it has no table of its
+// own, so the read carries `part_of_order_id` beside `table_id` (coversMath.isDineIn needs both).
+// This is a summary artifact — aggregated rollups only, not a bill ledger.
+const POS_ORDER_COLUMNS = 'id, discount_amount, closed_at, payment_method, covers, table_id, part_of_order_id, vat_registered'
 const POS_NOTE_COLUMNS = 'id, order_id, gross_amount, discount_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount, created_at'
 
 // The section's sales figures from rows already read, so the rules above can be asserted without a
@@ -870,7 +872,14 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   `pos.compedBillsTotal.basis: 'ex_vat'` marks it; the page and the workbook label an older
 //   report's figure "incl. VAT". Food cost and the voids figure are unchanged (voids were already
 //   ex-VAT). No Trend marker: Trend does not compare comps.
-export const CURRENT_SCHEMA_VERSION = 16
+// 17 (S836): a part bill (pos_orders.part_of_order_id, split off a table's open bill so one guest
+//   could pay for their own dishes) is DINE-IN, though it has no table of its own (coversMath.isDineIn).
+//   Its guests are in `pos.covers.totalCovers`, it is one of `dineInBills` and not of
+//   `takeawayBills`, and its sales are in Avg Check / Cover. v16 read no `part_of_order_id`, so a
+//   part bill there was a takeaway and its guests went uncounted. A month before S836 has no part
+//   bills and the same figures either way. No Trend marker: Trend compares POS Net Sales only, which
+//   a part bill does not move.
+export const CURRENT_SCHEMA_VERSION = 17
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

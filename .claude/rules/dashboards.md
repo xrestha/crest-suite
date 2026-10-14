@@ -292,7 +292,7 @@ History: docs/rules-archive/dashboards.md#s734-kpi-tile-re-analysis
 - Each names its basis in the subtext (`Sales entries, excl. VAT` / `billed, incl. VAT`), and each tip points at the other.
 - Two tiles on one page that share a label must differ in their subtext, not only in their source code.
 - Kitchen ticket counts on the POS Dashboard, Home's Needs attention and the kitchen card read the Kitchen Display's own window, `serviceDayStartIso()` (from midnight, rolling over at 6 AM), never the Nepal calendar day (S814, REPORTS-11; `kitchenWindow.test.js`).
-- Covers on every surface are guests SEATED: `coversMath.seatedCovers` (paid bills with a table; a credit-noted bill keeps its guests) on the Covers Report, POS Dashboard and Home, and `close_type='paid' AND table_id IS NOT NULL` in `get_group_summary`. A per-cover figure divides dine-in money only. Never another copy (S809 3n).
+- Covers on every surface are guests SEATED: `coversMath.seatedCovers` (paid bills with a table, or a part bill split off one, S836; a credit-noted bill keeps its guests) on the Covers Report, POS Dashboard and Home, and `close_type='paid' AND (table_id IS NOT NULL OR part_of_order_id IS NOT NULL)` in `get_group_summary`. A per-cover figure divides dine-in money only. Never another copy (S809 3n).
 
 Why: a reader comparing two numbers assumes the label is the definition.
 

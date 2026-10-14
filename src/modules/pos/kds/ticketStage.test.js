@@ -1,5 +1,5 @@
 // S833 (POS_TODO S809.4 3d): the KOT Log tells a ticket the kitchen cleared from one a void cancelled.
-import { kotStage } from './ticketStage'
+import { kotStage, ticketTableLabel } from './ticketStage'
 import { CLOSE_TYPE_BADGE } from '../posSignals'
 
 describe('kotStage', () => {
@@ -29,5 +29,41 @@ describe('kotStage', () => {
     expect(kotStage({ status: 'weird' })).toEqual({ label: 'weird', badge: 'badge-gray' })
     expect(kotStage({})).toEqual({ label: '—', badge: 'badge-gray' })
     expect(kotStage(null)).toEqual({ label: '—', badge: 'badge-gray' })
+  })
+})
+
+// S836: a ticket shows the table its bill is at NOW, and the table it was printed for when they differ.
+describe('ticketTableLabel', () => {
+  test('a bill still at the table the ticket was printed for shows that table alone', () => {
+    expect(ticketTableLabel({ table_name: 'T3', pos_orders: { table_name: 'T3' } })).toEqual({ name: 'T3', was: '' })
+  })
+
+  test('a bill moved since shows its new table, and the printed one as was', () => {
+    expect(ticketTableLabel({ table_name: 'T3', pos_orders: { table_name: 'T5' } })).toEqual({ name: 'T5', was: 'T3' })
+  })
+
+  test('a ticket a join brought over shows the bill that stays', () => {
+    expect(ticketTableLabel({ table_name: 'Garden 2', pos_orders: { table_name: 'Garden 1' } })).toEqual({ name: 'Garden 1', was: 'Garden 2' })
+  })
+
+  test('a takeaway moved to a table reads was Takeaway', () => {
+    expect(ticketTableLabel({ table_name: 'Takeaway', pos_orders: { table_name: 'T2' } })).toEqual({ name: 'T2', was: 'Takeaway' })
+    expect(ticketTableLabel({ table_name: null, pos_orders: { table_name: 'T2' } })).toEqual({ name: 'T2', was: 'Takeaway' })
+  })
+
+  test('with no embed, or a bill with no table name, the printed table stands', () => {
+    expect(ticketTableLabel({ table_name: 'T3' })).toEqual({ name: 'T3', was: '' })
+    expect(ticketTableLabel({ table_name: 'T3', pos_orders: null })).toEqual({ name: 'T3', was: '' })
+    expect(ticketTableLabel({ table_name: 'Takeaway', pos_orders: { table_name: null } })).toEqual({ name: 'Takeaway', was: '' })
+    expect(ticketTableLabel({ table_name: null, pos_orders: { table_name: '  ' } })).toEqual({ name: '', was: '' })
+  })
+
+  test('stray spaces are not a move', () => {
+    expect(ticketTableLabel({ table_name: 'T3 ', pos_orders: { table_name: 'T3' } })).toEqual({ name: 'T3', was: '' })
+  })
+
+  test('a missing ticket is no table, never a throw', () => {
+    expect(ticketTableLabel(null)).toEqual({ name: '', was: '' })
+    expect(ticketTableLabel(undefined)).toEqual({ name: '', was: '' })
   })
 })

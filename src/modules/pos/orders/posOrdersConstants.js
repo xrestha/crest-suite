@@ -46,8 +46,11 @@ export const lineOptionIds = i => {
 // (table tile, takeaway card, offline-conflict recovery) and the stale-order reload cannot drift on
 // what an order carries. items_version and sent_qty need migration 20260916100000. `comped` is read
 // so foldCompedSplits (below) can put a comp left by a cancelled close back into its line (S809 2b).
+// S836 (20261014120000): the bill's table as STORED, and whether it is a part bill. Another till may
+// have moved or split the bill since this one opened it, so the screen adopts these on every load.
 export const OPEN_ORDER_SELECT =
-  'id, order_no, covers, status, items_version, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, comped, ' +
+  'id, order_no, covers, status, items_version, table_id, table_name, part_of_order_id, ' +
+  'pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, comped, ' +
   // Crest Customization (S758, migration 20260919130000): the line's selection and its frozen choices.
   'selection_key, base_unit_price, options_delta, option_summary, ' +
   'pos_order_item_options(option_id, group_id, group_name, group_kind, option_name, kitchen_name, is_removal, price_delta, included, ingredient_deltas, sort))'

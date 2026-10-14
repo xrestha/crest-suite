@@ -29,3 +29,18 @@ export function kotStage(ticket) {
   }
   return KOT_STAGE[status] || { label: status || '—', badge: 'badge-gray' }
 }
+
+// S836: which table a ticket's food goes to. A ticket row keeps the table it was PRINTED for
+// (pos_kot_log.table_name, a snapshot like its order_no), but a bill can move to another table, and a
+// join hands the joined table's tickets to the bill that stays. The bill's table NOW is
+// pos_orders.table_name, read through the embed `pos_orders(table_name)`. `name` is the table to
+// show; `was` is the printed one when the two differ, so the cook can match the paper, else ''. With
+// no embed (the read did not ask, or RLS hid the bill) or a bill with no table name (a takeaway), the
+// snapshot stands, so a card never says less than its paper did. A takeaway ticket's snapshot is
+// 'Takeaway' (logKotSend), so a takeaway moved to a table reads "was Takeaway".
+export function ticketTableLabel(ticket) {
+  const printed = String(ticket?.table_name ?? '').trim()
+  const current = String(ticket?.pos_orders?.table_name ?? '').trim()
+  if (!current || current === printed) return { name: printed, was: '' }
+  return { name: current, was: printed || 'Takeaway' }
+}

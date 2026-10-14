@@ -15,7 +15,7 @@
 import { foreignKeysFromMigrations, MIGRATIONS_DIR } from '../../../shared/migrationForeignKeys'
 import {
   RESTORE_ORDER, RESTORE_LEFT_OUT, RESTORED_ELSEWHERE, DEFERRED_LINKS,
-  isAttributionColumn, restoreCoverage, lostRowsLine,
+  isAttributionColumn, restoreCoverage, lostRowsLine, partBillsAfterParents,
 } from './restoreClientData'
 import { PERIOD_SCOPED_TABLES, PARENT_SCOPED_TABLES } from './exportClientData'
 import { CLIENT_SCOPED_TABLES } from '../../../shared/scopedDb'
@@ -33,6 +33,11 @@ describe('the migration reader', () => {
     expect(has('pos_cash_movements', 'pos_credit_note_id', 'pos_credit_notes')).toBe(true)
     // Declared inside a DO block (S737), the shape a plain statement scan misses.
     expect(has('closing_stock', 'counted_by', 'profiles')).toBe(true)
+    // S836: inline in a CREATE TABLE IF NOT EXISTS, and an ADD COLUMN IF NOT EXISTS self-reference.
+    expect(has('pos_table_joins', 'table_id', 'pos_tables')).toBe(true)
+    expect(has('pos_table_joins', 'order_id', 'pos_orders')).toBe(true)
+    expect(has('pos_table_moves', 'to_order_id', 'pos_orders')).toBe(true)
+    expect(has('pos_orders', 'part_of_order_id', 'pos_orders')).toBe(true)
   })
 })
 
@@ -58,6 +63,20 @@ describe('RESTORE_ORDER', () => {
     expect(at('pos_cash_movements')).toBeGreaterThan(at('pos_credit_notes'))
     expect(at('pos_cash_movements')).toBeGreaterThan(at('pos_shifts'))
     expect(at('pos_credit_notes')).toBeGreaterThan(at('pos_orders'))
+  })
+
+  it('restores the joined tables and the record of moves after the tables and bills they name (S836)', () => {
+    const at = t => RESTORE_ORDER.indexOf(t)
+    for (const t of ['pos_table_joins', 'pos_table_moves']) {
+      expect(at(t)).toBeGreaterThan(at('pos_orders'))
+      expect(at(t)).toBeGreaterThan(at('pos_tables'))
+    }
+    // Who joined or moved is attribution: restored empty, the name kept in the file.
+    expect(isAttributionColumn('joined_by')).toBe(true)
+    expect(isAttributionColumn('moved_by')).toBe(true)
+    // A part bill's link goes in with its row (partBillsAfterParents), never by a second pass the
+    // bill guards would refuse.
+    expect(DEFERRED_LINKS.pos_orders).not.toContain('part_of_order_id')
   })
 
   it('leaves out the live-only guest QR tables, with a reason, instead of reporting them failed', () => {
@@ -97,6 +116,29 @@ describe('restoreCoverage', () => {
   it('is empty for a backup of restored tables only', () => {
     expect(restoreCoverage({ items: [{ id: 1 }], settings: [{ id: 1 }] })).toEqual({ leftOut: [], unknown: [] })
     expect(restoreCoverage(undefined)).toEqual({ leftOut: [], unknown: [] })
+  })
+})
+
+describe('partBillsAfterParents', () => {
+  it('puts every part bill after the bill it was split off, keeping the order otherwise', () => {
+    const rows = [
+      { id: 'p1', part_of_order_id: 'b2' },
+      { id: 'b1', part_of_order_id: null },
+      { id: 'p2', part_of_order_id: 'b1' },
+      { id: 'b2' },
+    ]
+    expect(partBillsAfterParents(rows).map(r => r.id)).toEqual(['b1', 'b2', 'p1', 'p2'])
+  })
+
+  it('empties a link to a bill the backup does not hold, as the key would have, and keeps the row', () => {
+    const out = partBillsAfterParents([{ id: 'p1', part_of_order_id: 'gone', total: 5 }, { id: 'b1' }])
+    expect(out).toEqual([{ id: 'p1', part_of_order_id: null, total: 5 }, { id: 'b1' }])
+  })
+
+  it('leaves a backup with no part bills as it was', () => {
+    const rows = [{ id: 'a' }, { id: 'b', part_of_order_id: null }]
+    expect(partBillsAfterParents(rows)).toEqual(rows)
+    expect(partBillsAfterParents([])).toEqual([])
   })
 })
 

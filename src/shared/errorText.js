@@ -499,8 +499,9 @@ const rules = [
   // before the insert, so no order was opened. The till says it in its own words first (S817).
   {
     test: e => hasCode(e, 'pos_table_inactive_new_order'),
-    staff: 'That table was taken out of service a moment ago, so no order was opened on it. Pick another table.',
-    operator: 'That table was taken out of service (perhaps on another device a moment ago), so no order was opened on it. Pick another table, or bring this one back in POS Setup first.',
+    // S836: the table moves raise it too, so it says nothing was opened OR moved there.
+    staff: 'That table is out of service, so nothing was opened or moved onto it. Pick another table.',
+    operator: 'That table is out of service (perhaps taken out on another device a moment ago), so nothing was opened or moved onto it. Pick another table, or bring this one back in POS Setup first.',
   },
   // S817 4i (migration 20261012120000): pos_tables_guard_open_bill, a BEFORE trigger, so nothing changed.
   {
@@ -519,6 +520,142 @@ const rules = [
     test: e => /pos_tables_client_name_live_key/i.test(e.message || ''),
     staff: 'Another table already has that name. Nothing was saved.',
     operator: 'Another table in service already has that name (capitals and spaces aside), so nothing was saved — two tables with one name cannot be told apart on a kitchen ticket or a bill. Give this one another name, or take the other out of service first.',
+  },
+  // ── Table move, join and split (S836, migration 20261014120000) ──────────────────────────────
+  // Each is raised inside one of the six SECURITY DEFINER move functions before it returns, or by a
+  // BEFORE trigger (the two _direct guards, and pos_table_joined from guard_pos_order_insert), so the
+  // call rolled back whole and each may say nothing moved. pos_move_rank and the _direct guards carry
+  // 42501 and pos_table_joined 23514, so this block stays above the generic rules for both. The move
+  // functions also raise stale_order, order_not_open and pos_table_inactive_new_order, worded above.
+  {
+    test: e => hasCode(e, 'pos_move_rank'),
+    staff: 'This login cannot move, join or split tables at this outlet, so nothing was moved. Sign in with your own POS PIN for this outlet, or ask a manager.',
+    operator: 'Moving, joining or splitting a table needs the Owner or a POS login of this outlet (any rank). This login is neither, or its POS access is blocked, so nothing was moved. Sign in with a POS PIN of this outlet, or check the login under POS Staff.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_order_missing'),
+    staff: 'A bill in this move is no longer open — it was closed or cleared on another device — so nothing was moved. Go back to the floor to see where it stands.',
+    operator: 'One of the bills in this move is no longer open (the detail below says which): it was closed or cleared on another device, so nothing was moved. Reload the floor to see where it stands.',
+  },
+  {
+    test: e => hasCode(e, 'pos_part_bill_locked'),
+    staff: 'This is a part bill: it can only be paid, or put back on its table\'s bill. Nothing was moved.',
+    operator: 'A part bill (dishes split off a table\'s bill to be paid now) is either paid or put back on its table\'s bill. It does not move, no table joins it, none of its dishes move and it is not split again, so nothing was changed. Take payment on it, or put it back.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_table_missing'),
+    staff: 'That table is not on the floor plan any more, so nothing was moved. Go back to the floor and pick another table.',
+    operator: 'That table is no longer on this outlet\'s floor plan (it may have been deleted on another device a moment ago), so nothing was moved. Reload the floor and pick another table.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_same_table'),
+    staff: 'This bill is already on that table, so nothing was moved. Pick a different table.',
+    operator: 'This bill is already on that table, so nothing was moved. Pick another table to move it to; to bring another table onto this bill, join it instead.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_table_busy'),
+    staff: 'That table already has a bill. Join the two bills instead. Nothing was moved.',
+    operator: 'That table already has an open bill, and a table holds one open bill, so this bill was not moved there and nothing was changed. To put both parties on one bill, join the two tables instead; or move this bill to a free table.',
+  },
+  {
+    test: e => hasCode(e, 'pos_table_joined'),
+    staff: 'That table is joined to another table\'s bill, so nothing was put on it. Open that bill, or release the table from it first.',
+    operator: 'That table is joined to another table\'s bill (its guests are on that bill), so no new bill was opened on it and nothing was moved onto it. Open the bill it is joined to, pick another table, or release the table from that bill first.',
+  },
+  {
+    test: e => hasCode(e, 'pos_join_needs_table'),
+    staff: 'A takeaway has no table for another table to join, so nothing was joined. Move it to a table first, then join.',
+    operator: 'A takeaway has no table, so there is nothing for another table to join, and nothing was changed. Move the takeaway to a table first, then join the other table to it.',
+  },
+  {
+    test: e => hasCode(e, 'pos_join_already'),
+    staff: 'That table is already on this bill. Nothing was changed.',
+    operator: 'That table is already on this bill (it is the bill\'s own table, or already joined to it), so nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_join_points_held'),
+    staff: 'The other table\'s bill has loyalty points taken off it, so nothing was joined. Hand the points back on that bill first, then join.',
+    operator: 'The bill on the table being joined has loyalty points redeemed on it, so the tables were not joined and nothing was moved: those points were redeemed for that bill alone. Open that bill and hand the points back, join the tables, then redeem again when the joined bill is paid.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_points_held'),
+    staff: 'This bill has loyalty points taken off it, so nothing was moved. Hand the points back first, then try again.',
+    operator: 'This bill has loyalty points redeemed on it, so its dishes were not moved or split and nothing was changed: the points were redeemed against the whole bill. Hand the points back on this bill, make the move or the split, then redeem again when it is paid.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_nothing'),
+    staff: 'Pick at least one dish to move, each once, with how many of it. Nothing was moved.',
+    operator: 'No dish was picked, or one was picked twice, so nothing was moved. Pick each dish to move once, with how many of it to move.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_line_missing'),
+    staff: 'A dish you picked is no longer on this bill — it changed on another device. Nothing was moved: reload the bill and try again.',
+    operator: 'A dish picked to move is no longer on this bill: the bill changed on another device, so nothing was moved. Reload the bill and pick the dishes again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_line_comped'),
+    staff: 'A complimentary dish stays on its own bill, so nothing was moved. Leave it out and move the rest.',
+    operator: 'A complimentary dish stays on the bill it was given on, so nothing was moved (the detail below names the dish). Leave it out of the move and move the rest.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_qty_invalid'),
+    staff: 'You can move from 1 up to as many of a dish as the bill has. Nothing was moved — check how many and try again.',
+    operator: 'A dish can be moved from 1 up to as many as the bill holds (the detail below names the dish and the most), so nothing was moved. Correct the number and move it again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_all_lines'),
+    staff: 'That is every dish on this bill, so nothing was moved. Use Move to move the whole bill.',
+    operator: 'Those are all the dishes on this bill (a complimentary dish left behind does not count), so nothing was moved. Use Move to move the whole bill: it keeps its number and its kitchen tickets together.',
+  },
+  {
+    test: e => hasCode(e, 'pos_part_all_lines'),
+    staff: 'That is the whole bill, so nothing was split off. Take payment on the bill itself.',
+    operator: 'Those are all the dishes on this bill (a complimentary dish left behind does not count), so no part bill was made and nothing was changed. Take payment on the bill itself.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_same_bill'),
+    staff: 'That table is on this same bill, so nothing was moved. Pick a free table, or one with another bill.',
+    operator: 'That table is on this same bill (it is the bill\'s own table, or joined to it), so nothing was moved. Pick a free table, or one with another bill.',
+  },
+  {
+    test: e => hasCode(e, 'pos_move_retry'),
+    staff: 'A table in this move changed on another device just now, so nothing was moved. Try again.',
+    operator: 'A table or bill in this move changed on another device at the same moment, so nothing was moved rather than act on the old picture. Try again; if it is refused again, reload the floor first.',
+  },
+  {
+    test: e => hasCode(e, 'pos_part_delivery'),
+    staff: 'A delivery platform\'s order is paid as one bill, so it cannot be split. Nothing was changed.',
+    operator: 'A delivery platform\'s order is paid, and settled with the platform, as one bill, so it cannot be split into part bills and nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_part_parent_closed'),
+    staff: 'The table\'s bill is already closed, so this part bill cannot go back on it. Nothing was moved — take payment on this part bill instead.',
+    operator: 'The bill this part bill was split from is already closed, so there is nothing to put it back on, and nothing was moved. Take payment on the part bill itself.',
+  },
+  {
+    test: e => hasCode(e, 'pos_part_bill_has_tickets'),
+    staff: 'This part bill sent food of its own to the kitchen, so it cannot be put back. Nothing was moved — take payment on it instead.',
+    operator: 'This part bill sent food of its own to the kitchen or bar, so it has kitchen tickets of its own and is paid on its own; nothing was moved. Take payment on it.',
+  },
+  {
+    test: e => hasCode(e, 'pos_part_not_part'),
+    staff: 'This bill was not split off another bill, so there is nothing to put it back on. Nothing was changed.',
+    operator: 'This bill was not split off another bill, so putting it back does not apply and nothing was changed. Reload the bill to see where it stands.',
+  },
+  {
+    test: e => hasCode(e, 'pos_release_not_joined'),
+    staff: 'That table is not joined to a bill any more — it may have been released on another device. Nothing was changed: go back to the floor.',
+    operator: 'That table is no longer joined to a bill (it was released, or its bill closed, on another device a moment ago), so nothing was changed. Reload the floor to see where it stands.',
+  },
+  {
+    test: e => hasCode(e, 'pos_table_move_direct'),
+    staff: 'A table move is recorded by the move itself, so it cannot be written, changed or deleted here. Nothing was changed.',
+    operator: 'The record of table moves (which bill or dish moved, between which tables, who moved it and when) is written only by the move itself, so it cannot be added, edited or deleted directly. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_table_join_direct'),
+    staff: 'Tables are joined and released from the order screen. Nothing was changed.',
+    operator: 'A join is written only by joining or releasing a table on the order screen, so it cannot be added, edited or deleted directly. Nothing was changed.',
   },
   // S755 (migration 20260917100000). Both are raised by a trigger in the statement that wrote, so
   // the statement rolled back and each may say this write did not land.

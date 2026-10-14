@@ -40,8 +40,13 @@ import {
   clearCachedPosOrderForTable, enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
   settlePosOrderUpload, markQueuedSendsLogged, queuedSendKey, enqueuePosTickets,
 } from '../../../utils/offlineQueue'
-import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildVoidSlipHtml } from './posOrderPrintHtml'
+import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildVoidSlipHtml, buildMoveSlipHtml, buildShareSlipsHtml } from './posOrderPrintHtml'
 import BillingStation from './BillingStation'
+import MoveTableModal from './MoveTableModal'
+import MoveDishesModal from './MoveDishesModal'
+import RowMenu from '../../../components/RowMenu'
+import { mainTableOfJoin, joinedTablesOf, moveSlipItems, movedSentByKey, moveNoticeItems, partBillLabel } from './tableMoves'
+import { equalShares, MIN_SHARES, MAX_SHARES } from './shareSplit'
 import PosImsPostingBanner from './PosImsPostingBanner'
 import {
   TILL_SETTINGS_READ_MS, TILL_SETTINGS_RETRY_MS, tillSettingsReadOutcome, cacheCarriesRouting, tillSettingsNotice,
@@ -125,10 +130,13 @@ const posUpload = { run: null }
 // How long an idle floor waits, untouched, before it reloads for a new release (S809 1b).
 const RELEASE_IDLE_MS = 60 * 1000
 
-// A takeaway card's name, or (S834) an order whose table is gone from the floor plan, named after it.
-const takeawayCardLabel = t => (t.removedTable
-  ? `${t.removedTable} (table removed)${t.orderNo ? ` #${t.orderNo}` : ''}`
-  : t.orderNo ? `Takeaway #${t.orderNo}` : 'Takeaway (not synced)')
+// A takeaway card's name, or (S834) an order whose table is gone from the floor plan, named after it,
+// or (S836) a part bill waiting for its payment, named after its table.
+const takeawayCardLabel = t => (t.partOf
+  ? partBillLabel(t.partTableName, t.orderNo)
+  : t.removedTable
+    ? `${t.removedTable} (table removed)${t.orderNo ? ` #${t.orderNo}` : ''}`
+    : t.orderNo ? `Takeaway #${t.orderNo}` : 'Takeaway (not synced)')
 // What a kept cart's lines were "not sent before": a lock, a reload for a new release, or (S833) a
 // sign-in that ended by itself.
 const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated'
@@ -195,6 +203,19 @@ export default function PosOrders({ billingStation = false } = {}) {
   // always starts a NEW order — so a saved takeaway could never be reopened, added to or billed.
   // [{ orderId, orderNo, itemCount, total, pending, offlinePending? }]
   const [takeawayOrders, setTakeawayOrders] = useState([])
+  // S836: tables joined to another table's open bill (pos_table_joins), joined table id → that bill's
+  // id. A joined tile reads "with T3" and opens T3's bill; it has no bill of its own.
+  const [tableJoins, setTableJoins] = useState({})
+  // S836: the bill on the order screen as STORED — its table (it may have been moved since this screen
+  // opened it) and, for a part bill, the bill it was split off. Set by showLoadedOrder only.
+  const [screenOrder, setScreenOrder] = useState(null)
+  // S836: the Table menu's dialogs ('move' | 'dishes' | 'part'), the stored lines the dish dialogs pick
+  // from (read when they open), and the one action in flight.
+  const [tableDialog, setTableDialog] = useState(null)
+  const [tableDialogLines, setTableDialogLines] = useState([])
+  const [tableBusy, setTableBusy] = useState(false)
+  // S836: the payment window's equal share slips — how many guests, or null while closed.
+  const [shareCount, setShareCount] = useState(null)
   // A failed floor read, kept separate from the data so last-good tables/orders stay on screen
   // (S754). Before this a dropped error painted "No tables set up yet" and cached the empty list.
   const [floorLoadError, setFloorLoadError] = useState('')
@@ -263,6 +284,9 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   /* ── order screen ── */
   const [activeTable, setActiveTable] = useState(null)
+  // S836: the table the order screen names — the tile it was opened from, else the bill's stored table
+  // (a part bill, or a bill whose table left the floor plan). Every ticket, slip and message uses it.
+  const screenTableName = activeTable?.name || screenOrder?.tableName || 'Takeaway'
   const [orderId,     setOrderId]     = useState(null)
   const [orderNo,     setOrderNo]     = useState(null) // per-client sequential, assigned by DB trigger on insert
   // orderItems: { id?, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot }
@@ -1225,20 +1249,20 @@ export default function PosOrders({ billingStation = false } = {}) {
     buyer_name: buyerName, buyer_address: buyerAddress, buyer_pan: buyerPan, buyer_phone: phoneForRecord(buyerPhone),
     bill_remarks: billRemarks, close_reason: closeReason,
     discount_amount: discountAmt,
-    table_name: activeTable?.name, order_no: orderNo, print_count: 0,
+    table_name: screenTableName, order_no: orderNo, print_count: 0,
   }
   const previewHtml = !billingOpen ? null
     : billingTab === 'pay' ? buildBillHtml({
         order: previewDraftOrder, items: payableOrderItems, copyLabel: 'PREVIEW', qrUrl: billQrUrl, payments: tenders,
         qrAmount: splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal,
         outletName, billingSettings, hscMap,
-        tableName: activeTable?.name || 'Takeaway',
+        tableName: screenTableName,
         cashierName: printedStaffName(profile, isAdmin),
       })
     : billingTab === 'writeoff' ? buildCompSlipHtml({
         order: previewDraftOrder, items: orderItems, costMap: compCostMap, copyLabel: 'PREVIEW',
         outletName,
-        tableName: activeTable?.name || 'Takeaway',
+        tableName: screenTableName,
         authorizedBy: printedStaffName(profile, isAdmin),
       })
     : null
@@ -1329,7 +1353,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // re-render the whole floor (setIfChanged). Every field a tile or takeaway card renders is here.
   const tablesSig    = list => rowsSignature(list, ['id', 'name', 'section', 'status', 'capacity'])
   const floorOrdSig  = m => mapSignature(m, o => [o.orderId, o.itemCount, o.total, o.covers, o.pending, o.openedAt || '', o.offlinePending ? 1 : 0].join(':'))
-  const takeawaysSig = list => rowsSignature(list, ['orderId', 'orderNo', 'itemCount', 'total', 'pending', 'openedAt', 'offlinePending', 'removedTable'])
+  const takeawaysSig = list => rowsSignature(list, ['orderId', 'orderNo', 'itemCount', 'total', 'pending', 'openedAt', 'offlinePending', 'removedTable', 'partOf', 'partTableName'])
+  const joinsSig     = m => mapSignature(m, id => id)
 
   // A queued entry that was surfaced as a conflict belongs to a bill another device closed — never
   // an open order to paint or reopen (S754). S809 3f: nor is one taken for another outlet
@@ -1386,11 +1411,13 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A bill closed before the outlet's Inventory began, and a note on one, never go to Inventory, so
     // neither waits (S831 5f-3, Q31 a). No stamp (Inventory from the start): the counts as before.
     const imsSinceIso = clientModules?.imsSince ? new Date(clientModules.imsSince).toISOString() : null
-    const [tblRes, ordRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
+    const [tblRes, ordRes, joinRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
-      scopedFrom('pos_orders', 'id, order_no, table_id, table_name, covers, opened_at, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
+      scopedFrom('pos_orders', 'id, order_no, table_id, table_name, covers, opened_at, part_of_order_id, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
         .eq('status', 'open'),
+      // S836: tables joined to another table's bill. A handful of rows, one per joined table.
+      scopedFrom('pos_table_joins', 'table_id, order_id'),
       // head:true — a count, not rows, so the 1000-row cap cannot apply. Backed by the partial
       // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
       !tillPostsToIms ? noCount
@@ -1418,7 +1445,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // S754: both reads used to drop their error, so a failed read painted "No tables set up yet",
     // freed every tile, and wrote the EMPTY list into the offline cache the till falls back on.
     // Now a failure keeps last-good on screen, leaves the cache alone, and says so with a Retry.
-    const readErr = tblRes.error || ordRes.error
+    const readErr = tblRes.error || ordRes.error || joinRes.error
     if (readErr) {
       if (isNetworkError(readErr)) noteLinkDown() // S809 3f: the floor poll is also what notices the internet is down
       console.error('loadFloor failed, keeping the last floor shown:', readErr)
@@ -1448,8 +1475,13 @@ export default function PosOrders({ billingStation = false } = {}) {
       // was removed; pos_orders.table_id has no foreign key) was drawn on no tile and on no Billing row,
       // so it could be neither billed nor found. It shows as a card of its own, named after the old table.
       if (o.table_id && tableIds.has(o.table_id)) map[o.table_id] = overlay
+      // S836: a part bill (pay part now) has no table of its own; its card is named after the table's.
+      else if (o.part_of_order_id) takeaways.push({ ...overlay, orderNo: o.order_no || null, removedTable: null, partOf: o.part_of_order_id, partTableName: o.table_name || null })
       else takeaways.push({ ...overlay, orderNo: o.order_no || null, removedTable: o.table_id ? (o.table_name || 'A removed table') : null })
     }
+    const joins = {}
+    for (const j of (joinRes.data || [])) if (tableIds.has(j.table_id)) joins[j.table_id] = j.order_id
+    setIfChanged(setTableJoins, joins, joinsSig)
     // Layer any still-queued (not-yet-synced) local edits on top of server truth, so a table
     // doesn't briefly look wrong while a reconnect flush is still in flight.
     const rawQueue = await getPosOrderQueue()
@@ -1462,6 +1494,8 @@ export default function PosOrders({ billingStation = false } = {}) {
         const ov = {
           ...queuedOrderToOverlay(q), orderNo: i >= 0 ? takeaways[i].orderNo : null,
           removedTable: q.table_id ? (q.table_name || 'A removed table') : null,
+          // S836: a part bill keeps its name while an edit of it waits to upload.
+          ...(i >= 0 && takeaways[i].partOf ? { partOf: takeaways[i].partOf, partTableName: takeaways[i].partTableName } : {}),
         }
         if (i >= 0) takeaways[i] = ov; else takeaways.push(ov)
       }
@@ -2120,7 +2154,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         }
         if (same && same.status === 'open') {
           seatReservationRef.current = null
-          const lines = showLoadedOrder(null, { id: same.id, orderNo: same.order_no, covers: same.covers, items: same.pos_order_items, itemsVersion: same.items_version })
+          const lines = showLoadedOrder(null, { id: same.id, orderNo: same.order_no, covers: same.covers, items: same.pos_order_items, itemsVersion: same.items_version, stored: same })
           // The same order (owner Q2): what this till already printed comes back as sent.
           const back = printedBackAsSent(c, toPutBack(same.pos_order_items))
           setOrderItems(mergeRecoveredLines(lines, back))
@@ -2162,7 +2196,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       const heldTarget = existing.id !== c.order_id ? await heldEntry(existing.id) : null
       const lines = heldTarget
         ? showLoadedOrder(table, { ...queuedOnScreen(heldTarget), orderNo: existing.order_no ?? null })
-        : showLoadedOrder(table, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
+        : showLoadedOrder(table, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version, stored: existing })
       // One line per recipe on an order (sent flags are matched by recipe_id), so a recipe already
       // on it gains the quantity as an unsent change; its sent count stays, so only the added part
       // goes to the station. Only the difference when it is the same order (see toPutBack).
@@ -2347,6 +2381,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Lines a till lock kept for this login, for a table whose order was never saved or has since
     // closed (S776): straight onto a new order with the covers they had, no numpad to re-answer.
     const kept = keptCartFor(table, null)
+    setScreenOrder(null)
     if (kept) {
       setActiveTable(table)
       setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); itemsVersionRef.current = null
@@ -2379,6 +2414,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   function seatReservation(table, res) {
     seatReservationRef.current = res
     setSeatPrompt(null)
+    setScreenOrder(null)
     setActiveTable(table)
     setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); itemsVersionRef.current = null
     setCovers(Math.max(1, parseInt(res.party_size, 10) || 1))
@@ -2405,12 +2441,308 @@ export default function PosOrders({ billingStation = false } = {}) {
     return n
   }
 
+  // S836: the floor's row for a bill's STORED table, so a screen follows a bill another till moved.
+  // `synthetic` stands in a row the floor list does not hold yet (a table added since the last poll);
+  // a bill whose table left the floor plan (S834) otherwise opens on no table, as it always has.
+  function tableOfStored(o, fallback = null, { synthetic = true } = {}) {
+    if (!o?.table_id) return null
+    const row = tables.find(t => t.id === o.table_id) || (fallback?.id === o.table_id ? fallback : null)
+    return row || (synthetic ? { id: o.table_id, name: o.table_name || 'Table' } : null)
+  }
+
+  // S836: a bill that is gone rather than closed went somewhere: a join took it into another table's
+  // bill, or a part bill went back onto its table's. The record says where (pos_table_moves), and the
+  // screen opens that bill, offering back anything this till had not saved. False when not found.
+  async function openWhereBillWent(oNo, where, snapshot = []) {
+    if (!oNo) return false
+    const { data, error } = await bounded(scopedFrom('pos_table_moves', 'kind, to_order_id, to_table_name')
+      .in('kind', ['join', 'part_back']).eq('from_order_no', oNo)
+      .order('moved_at', { ascending: false }).limit(1), 'Finding the bill', SEND_READ_MS)
+    const row = !error && data?.[0]
+    if (!row?.to_order_id) return false
+    setStaleRecovery(null)
+    const lines = await openOrderById(row.to_order_id)
+    if (!Array.isArray(lines)) return true // openOrderById said why on the floor
+    const missing = missingFromServer(snapshot, lines)
+    if (missing.length > 0) setStaleRecovery({ where, missing, guestReqs: [] })
+    setMsg(`error:${where} was ${row.kind === 'join' ? 'joined into' : 'put back on'} ${row.to_table_name || 'another table'}'s bill on another device — this is that bill now.${missing.length > 0 ? ' Add your items again.' : ' Check it before you send or take payment.'}`)
+    return true
+  }
+
+  // ── S836: move, join and split a table (owner decisions 2026-10-14) ──
+  // The server moves what is STORED, in one transaction, and bumps the version of every bill it
+  // touches, so a till holding the old view is refused its next save or close and reloads. These only
+  // ask it, then put the result on screen and tell the kitchen.
+
+  // What stops a table action before it starts: the bill must be on the server as this screen shows it.
+  function tableActionRefusal() {
+    if (tillOffline()) return 'Moving, joining or splitting needs a connection — the server moves the bill.'
+    if (!orderId || !orderNo) return 'Send or save the order first — a bill not on the server yet cannot be moved.'
+    if (screenQueueRef.current === orderId) return 'This order is still waiting on this till to upload. Try again once it has.'
+    if (saving) return 'Wait for the save to finish, then try again.'
+    if (unsavedChangeCount(orderItems) > 0) return 'Send or save the new items first (or take them off), then try again.'
+    if (sendAttemptsFor(orderId).length > 0) return 'This till is still checking whether its last send landed. Try again in a moment.'
+    if (closeAttemptFor(orderId)) return 'A payment try on this bill has not settled yet. Try again once it has.'
+    return null
+  }
+
+  // Re-reads the bill on screen and puts it back, on its stored table (it may have moved).
+  async function reopenScreenBill(oid = orderId) {
+    const { data: fresh, error } = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Loading the bill', SEND_READ_MS)
+    if (error || !fresh || fresh.status !== 'open') return { error, gone: !error && !fresh, closed: fresh && fresh.status !== 'open' }
+    const table = tableOfStored(fresh, activeTable)
+    const lines = showLoadedOrder(table, { id: fresh.id, orderNo: fresh.order_no, covers: fresh.covers, items: fresh.pos_order_items, itemsVersion: fresh.items_version, stored: fresh })
+    if (table?.id) cachePosOrderForTable(table.id, { orderId: fresh.id, orderNo: fresh.order_no || null, covers: fresh.covers || 1, items: lines, itemsVersion: itemsVersionRef.current })
+    return { fresh, table }
+  }
+
+  // A refused or unanswered table action. Nothing moved on a refusal (each is one transaction); with no
+  // answer it may have, so the bill is read back and shown as it now stands.
+  async function tableActionFailed(res, what) {
+    setTableDialog(null)
+    const err = res.error
+    if (noAnswer(res)) {
+      const back = await reopenScreenBill()
+      loadFloor({ quiet: true })
+      setMsg(`error:No answer from the server, so it is not known whether the ${what} went through. ${back.fresh ? 'The bill as it stands now is on screen — check it before trying again.' : 'Go back to the floor and check the table.'}`)
+      return
+    }
+    if (err?.hint === 'stale_order') { await reloadAfterStale(orderId, orderItems); return }
+    if (err?.hint === 'pos_move_order_missing') {
+      if (await openWhereBillWent(orderNo, orderLabel(), orderItems)) return
+      showClosedElsewhere(); return
+    }
+    if (err?.hint === 'order_not_open') { showClosedElsewhere(); return }
+    loadFloor({ quiet: true }) // the tables have changed under this till: the next dialog shows them as they are
+    setMsg(`error:Nothing moved — ${errorText(err, 'staff')}`)
+  }
+
+  // The kitchen's half of a move (owner decision: a slip AND the screen). Each station still making food
+  // for the bill gets a printed move slip, and a CHANGE ticket on the Kitchen Display under the table the
+  // food now goes to (Seen clears it; no count of tickets includes it, kitchenNotes.js). Best-effort like
+  // every ticket log: the move has landed, so a failure is said, never undone. Returns the sentence.
+  async function sendMoveNotice({ ticketOrderId, onlyKeys = null, noticeOrderId, noticeOrderNo, toName, fromName }) {
+    const { data, error } = await bounded(scopedFrom('pos_kot_log', 'station, items, status')
+      .eq('order_id', ticketOrderId).in('status', ['new', 'in_progress', 'ready'])
+      .order('sent_at').order('id'), 'Reading the kitchen tickets', SEND_READ_MS)
+    if (error) return ` The kitchen tickets could not be read, so no move slip printed — tell the kitchen and bar the food now goes to ${toName}.`
+    const byStation = moveSlipItems(data || [], onlyKeys)
+    const stations = Object.keys(byStation)
+    if (stations.length === 0) return ''
+    const movedAt = new Date().toISOString()
+    const movedBy = printedStaffName(profile, isAdmin)
+    let printed = true
+    for (const st of stations) {
+      const html = buildMoveSlipHtml({ station: st, outletName, fromTable: fromName, toTable: toName, orderNo: noticeOrderNo, items: byStation[st], movedBy, movedAt })
+      if (!printHtml(html)) printed = false
+    }
+    const sends = stations.map(st => ({
+      id: randomUUID(), order_id: noticeOrderId, order_no: noticeOrderNo, table_name: toName, station: st,
+      items: moveNoticeItems(byStation[st], fromName), sent_by: profile?.id || null,
+    }))
+    const res = await bounded(scopedInsert('pos_kot_log', sends), 'Telling the kitchen', SEND_STEP_MS)
+    const shown = !res.error || res.error.code === '23505'
+    if (!shown) console.error('move notice for the Kitchen Display failed:', res.error)
+    const where = stations.map(st => (st === 'BOT' ? 'bar' : 'kitchen')).join(' and ')
+    if (!printed && !shown) return ` Tell the ${where} the food now goes to ${toName}: the move slip did not print (allow pop-ups) and the Kitchen Display could not be told.`
+    if (!printed) return ` The move slip did not print (allow pop-ups for this site); the Kitchen Display shows the move.`
+    if (!shown) return ` The ${where} got a move slip; the Kitchen Display could not be told.`
+    return ` The ${where} got a move slip.`
+  }
+
+  // Opens a Table menu dialog. The dish dialogs pick from the bill AS STORED: its line ids are what the
+  // server moves, so it is read fresh, and a bill another device changed is reloaded instead.
+  async function openTableDialog(kind) {
+    const why = tableActionRefusal()
+    if (why) { setMsg(`error:${why}`); return }
+    if (kind === 'move') { loadFloor({ quiet: true }); setTableDialog('move'); return }
+    if (kind === 'part' && !billingSettingsLoaded) { setMsg(`error:${tillSettingsBlockText(!!settingsFailure)}`); loadTillSettings(); return }
+    setTableBusy(true)
+    const { data, error } = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', orderId).maybeSingle(), 'Reading the bill', SEND_READ_MS)
+    setTableBusy(false)
+    if (error) { setMsg(`error:Could not read this bill to pick dishes from. ${errorText(error, 'staff')}`); return }
+    if (!data) { if (!(await openWhereBillWent(orderNo, orderLabel(), orderItems))) showClosedElsewhere(); return }
+    if (data.status !== 'open') { showClosedElsewhere(); return }
+    if (data.items_version !== itemsVersionRef.current) { await reloadAfterStale(orderId, orderItems, { data, error: null }); return }
+    setTableDialogLines((data.pos_order_items || []).map(cartLineFromStored))
+    if (kind === 'dishes') loadFloor({ quiet: true })
+    setTableDialog(kind)
+  }
+
+  async function moveBillToTable(t) {
+    const why = tableActionRefusal()
+    if (why) { setTableDialog(null); setMsg(`error:${why}`); return }
+    const fromName = screenTableName
+    const fromId = activeTable?.id || null
+    setTableBusy(true)
+    const res = await bounded(supabase.rpc('move_pos_order_table', {
+      p_order_id: orderId, p_to_table_id: t.id, p_expected_version: itemsVersionRef.current,
+    }), 'Moving the bill', SEND_STEP_MS)
+    setTableBusy(false)
+    // Another till sat a party there first: the join is the answer, asked as one.
+    if (res.error?.hint === 'pos_move_table_busy') { setTableDialog(null); loadFloor({ quiet: true }); askJoinBill(t); return }
+    if (res.error) { await tableActionFailed(res, 'move'); return }
+    setTableDialog(null)
+    if (fromId) clearCachedPosOrderForTable(fromId).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
+    const oid = orderId
+    const oNo = orderNo
+    await reopenScreenBill(oid)
+    loadFloor({ quiet: true })
+    const slip = await sendMoveNotice({ ticketOrderId: oid, noticeOrderId: oid, noticeOrderNo: oNo, toName: t.name, fromName })
+    const released = (res.data?.released_table_ids || []).length
+    const booking = res.data?.warning === 'booking_table_kept' ? ' The booking still shows the old table in Reservations.' : ''
+    setMsg(`ok:Moved to ${t.name}.${released ? ` ${released === 1 ? 'Its extra table is' : 'Its extra tables are'} free again — join ${released === 1 ? 'it' : 'them'} here if the group still needs ${released === 1 ? 'it' : 'them'}.` : ''}${slip}${booking}`)
+  }
+
+  // A table with a bill of its own joins only after a yes: its bill goes into this one for good.
+  function askJoinBill(t) {
+    askConfirm({
+      title: `Join ${t.name}'s bill into this one?`,
+      confirmLabel: 'Join the bills',
+      cancelLabel: 'Keep them apart',
+      zIndex: 1200,
+      body: (
+        <p style={{ margin: 0 }}>
+          {t.name}&rsquo;s dishes, guests and kitchen tickets come onto this bill, and its own bill number goes.
+          Both tables stay taken until this bill is paid. If the same dish is on both at different prices,
+          the lower price is kept.
+        </p>
+      ),
+      run: () => joinTableToBill(t),
+    })
+  }
+
+  async function joinTableToBill(t) {
+    const why = tableActionRefusal()
+    if (why) { setTableDialog(null); setMsg(`error:${why}`); return }
+    setTableBusy(true)
+    // The other bill is taken as it stands (no version of it is held here): a till with it open is
+    // refused its next save and lands on this bill (openWhereBillWent).
+    const res = await bounded(supabase.rpc('join_pos_tables', {
+      p_order_id: orderId, p_table_id: t.id, p_expected_version: itemsVersionRef.current, p_other_expected_version: null,
+    }), 'Joining the table', SEND_STEP_MS)
+    setTableBusy(false)
+    if (res.error) { await tableActionFailed(res, 'join'); return }
+    setTableDialog(null)
+    clearCachedPosOrderForTable(t.id).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
+    const d = res.data || {}
+    await reopenScreenBill()
+    loadFloor({ quiet: true })
+    const n = (d.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0)
+    setMsg(`ok:${t.name} is on this bill now${d.absorbed_order_no ? `, with its ${n} item${n === 1 ? '' : 's'} (bill #${d.absorbed_order_no})` : ''}. Both tables stay taken until it is paid.`)
+  }
+
+  async function releaseJoinedTable(t) {
+    if (tillOffline()) { setMsg('error:Releasing a table needs a connection.'); return }
+    setTableBusy(true)
+    const res = await bounded(supabase.rpc('release_joined_table', { p_table_id: t.id }), 'Releasing the table', SEND_STEP_MS)
+    setTableBusy(false)
+    loadFloor({ quiet: true })
+    if (res.error) {
+      setMsg(`error:${noAnswer(res) ? `No answer from the server — check the floor to see whether ${t.name} was released.` : errorText(res.error, 'staff')}`)
+      return
+    }
+    setTableJoins(prev => { const next = { ...prev }; delete next[t.id]; return next })
+    setMsg(`ok:${t.name} is free again. Nothing came off this bill.`)
+  }
+
+  async function moveDishesToTable({ picks, tableId, covers: guests }) {
+    const why = tableActionRefusal()
+    if (why) { setTableDialog(null); setMsg(`error:${why}`); return }
+    const t = tables.find(x => x.id === tableId)
+    if (!t) return
+    const fromName = screenTableName
+    const srcId = orderId
+    setTableBusy(true)
+    const res = await bounded(supabase.rpc('move_pos_order_lines', {
+      p_from_order_id: orderId, p_to_table_id: tableId, p_lines: picks,
+      p_expected_version: itemsVersionRef.current, p_to_expected_version: null, p_covers: guests,
+    }), 'Moving the dishes', SEND_STEP_MS)
+    setTableBusy(false)
+    if (res.error) { await tableActionFailed(res, 'move'); return }
+    setTableDialog(null)
+    const d = res.data || {}
+    clearCachedPosOrderForTable(tableId).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
+    await reopenScreenBill(srcId)
+    loadFloor({ quiet: true })
+    // The tickets that carried the food are this bill's; the notice goes on the bill that has it now.
+    const slip = await sendMoveNotice({ ticketOrderId: srcId, onlyKeys: movedSentByKey(d.lines), noticeOrderId: d.to_order_id, noticeOrderNo: d.to_order_no, toName: t.name, fromName })
+    const n = picks.reduce((s, p) => s + p.qty, 0)
+    const onto = d.new_bill ? ` — a new bill #${d.to_order_no} is open there`
+      : d.to_bill_table_name && d.to_bill_table_name !== t.name ? ` (onto ${d.to_bill_table_name}'s bill)` : ''
+    setMsg(`ok:${n} item${n === 1 ? '' : 's'} moved to ${t.name}${onto}.${slip}`)
+  }
+
+  async function makePartBill({ picks, covers: guests }) {
+    const why = tableActionRefusal()
+    if (why) { setTableDialog(null); setMsg(`error:${why}`); return }
+    setTableBusy(true)
+    const res = await bounded(supabase.rpc('split_pos_part_bill', {
+      p_from_order_id: orderId, p_lines: picks, p_expected_version: itemsVersionRef.current, p_covers: guests,
+    }), 'Making the part bill', SEND_STEP_MS)
+    setTableBusy(false)
+    if (res.error) { await tableActionFailed(res, 'split'); return }
+    setTableDialog(null)
+    const d = res.data || {}
+    if (activeTable?.id) clearCachedPosOrderForTable(activeTable.id).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
+    loadFloor({ quiet: true })
+    // Straight into Payment, through the one funnel that bills an opened order (billOnOpenRef →
+    // showLoadedOrder), as the Billing station does.
+    billOnOpenRef.current = true
+    try { await openOrderById(d.part_order_id) } finally { billOnOpenRef.current = false }
+    setMsg(`ok:Part bill #${d.part_order_no} is open for payment. The rest stays on ${d.table_name || 'the table'}.`)
+  }
+
+  // A part bill whose payment was cancelled goes back on its table's bill if the waiter says so;
+  // otherwise it waits as its own card on the floor and the Billing list, to be paid later or put back
+  // from the Table menu.
+  function offerPutBackPart() {
+    if (!screenOrder?.partOf || !orderId) return
+    const where = screenTableName
+    askConfirm({
+      title: `Put these dishes back on ${where}?`,
+      confirmLabel: `Put back on ${where}`,
+      cancelLabel: 'Keep the part bill',
+      zIndex: 1200,
+      body: (
+        <p style={{ margin: 0 }}>
+          No payment was taken. Putting the dishes back moves them onto {where}&rsquo;s bill again, and this part
+          bill goes. Keep it to take the payment later: it waits on the floor as its own bill.
+        </p>
+      ),
+      run: putBackPartBill,
+    })
+  }
+
+  async function putBackPartBill() {
+    if (tillOffline()) { setMsg('error:Putting a part bill back needs a connection.'); return }
+    if (closeAttemptFor(orderId)) { setMsg('error:A payment try on this part bill has not settled yet — check Recent Bills before putting it back.'); return }
+    if (unsavedChangeCount(orderItems) > 0) { setMsg('error:Send or save the new items first (or take them off), then put the part bill back.'); return }
+    const partNo = orderNo
+    setTableBusy(true)
+    const res = await bounded(supabase.rpc('put_back_part_bill', {
+      p_part_order_id: orderId, p_expected_version: itemsVersionRef.current, p_parent_expected_version: null,
+    }), 'Putting the dishes back', SEND_STEP_MS)
+    setTableBusy(false)
+    if (res.error) { await tableActionFailed(res, 'put-back'); return }
+    const d = res.data || {}
+    const table = d.table_id ? (tables.find(t => t.id === d.table_id) || { id: d.table_id, name: d.table_name || 'Table' }) : null
+    if (table) await openTable(table)
+    else await openOrderById(d.order_id)
+    loadFloor({ quiet: true })
+    setMsg(`ok:Part bill #${partNo} is back on ${d.table_name || 'the table'}'s bill.`)
+  }
+
   // Puts a loaded order on the order screen. Shared by the table tile, the offline queue/snapshot
   // paths and the takeaway card (S754), so the three cannot drift on what "open an order" sets.
   // sent_qty comes from the stored/queued line (it used to be re-derived from sent_to_kot alone, which
   // lost a "2 of 3 sent" line's count on every reload); itemsVersion is what the next save expects.
-  function showLoadedOrder(table, { id, orderNo: no, covers: cv, items, itemsVersion, fromQueue = false }) {
+  function showLoadedOrder(table, { id, orderNo: no, covers: cv, items, itemsVersion, fromQueue = false, stored = null }) {
     screenQueueRef.current = fromQueue ? id : null // S809 3f: whether this cart is this till's queued copy
+    // S836: the bill as stored (a server read passes its row). A queued copy keeps what the screen knew.
+    setScreenOrder(prev => (stored
+      ? { id, tableId: stored.table_id || null, tableName: stored.table_name || null, partOf: stored.part_of_order_id || null }
+      : prev?.id === id ? prev : { id, tableId: table?.id || null, tableName: table?.name || null, partOf: null }))
     // S809 2b (CHECKOUT-10): a comp a cancelled close left behind folds back into its line.
     const lines = foldCompedSplits(items).map(cartLineFromStored)
     itemsVersionRef.current = Number.isInteger(itemsVersion) ? itemsVersion : null
@@ -2568,7 +2900,9 @@ export default function PosOrders({ billingStation = false } = {}) {
       loadFloor({ quiet: true })
       return 'closed'
     }
-    showLoadedOrder(null, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
+    // S836: a bill that is on a table of the floor (opened by id after a join or a put-back) opens on
+    // it; the lines it shows come back for a caller that compares against them.
+    return showLoadedOrder(tableOfStored(existing, null, { synthetic: false }), { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version, stored: existing })
   }
 
   async function openTable(table, { existingOnly = false } = {}) {
@@ -2580,6 +2914,19 @@ export default function PosOrders({ billingStation = false } = {}) {
     const refuseSeat = why => {
       seatReservationRef.current = null
       setFloorMsg(`error:${seatRefusedText(table.name, handoff, why)}`)
+    }
+
+    // S836: a table joined to another table's bill has none of its own; it opens that bill. The server
+    // refuses a new bill on it too (pos_table_joined).
+    const joinedTo = tableJoins[table.id]
+    if (joinedTo) {
+      const mainId = mainTableOfJoin(joinedTo, tableOrders)
+      const main = mainId ? tables.find(t => t.id === mainId) : null
+      if (handoff?.id) { refuseSeat(`is joined to ${main?.name || 'another table'}'s bill`); return }
+      if (main) return openTable(main, { existingOnly })
+      if (!tillOffline()) { await openOrderById(joinedTo); return }
+      setFloorMsg(`error:${table.name} is joined to another table's bill, which has not been loaded on this device — reconnect to open it.`)
+      return
     }
 
     if (tillOffline()) {
@@ -2662,7 +3009,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // Seat dialog showed the table free, so the host would ring the booked party onto it.
       if (handoff?.id) { refuseSeat('already has an open order'); loadFloor({ quiet: true }); return }
       seatReservationRef.current = null
-      const items = showLoadedOrder(table, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
+      const items = showLoadedOrder(table, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version, stored: existing })
       cachePosOrderForTable(table.id, { orderId: existing.id, orderNo: existing.order_no || null, covers: existing.covers || 1, items, itemsVersion: Number.isInteger(existing.items_version) ? existing.items_version : null })
     } else if (existingOnly) {
       // Came from the Billing list, where this table was listed as having an open bill. It does
@@ -2758,6 +3105,7 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   function openTakeaway() {
     setActiveTable(null); setOrderId(null); setOrderNo(null); setCovers(1); setOrderItems([]); markCartSaved([]); itemsVersionRef.current = null
+    setScreenOrder(null)
     setMsg(''); setView('order'); loadMenu()
   }
 
@@ -3178,8 +3526,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     const sendLines = snapshot.filter(isSent)
     const toBar = i => botCategories.has(i.category || 'Other')
     const attempt = newSendAttempt({
-      orderId: oid, orderNo: oNo, where: activeTable?.name || (oNo ? `Takeaway #${oNo}` : 'This takeaway'),
-      tableName: activeTable?.name || 'Takeaway', covers, expectedVersion, payload: itemsPayload, snapshot,
+      orderId: oid, orderNo: oNo, where: activeTable?.name || (screenOrder?.partOf ? partBillLabel(screenOrder.tableName, oNo) : oNo ? `Takeaway #${oNo}` : 'This takeaway'),
+      tableName: screenTableName, covers, expectedVersion, payload: itemsPayload, snapshot,
       kot: sendLines.filter(i => !toBar(i)), bot: sendLines.filter(toBar),
       guestReqIds: Array.from(pendingAcceptedGuestReqIds), knownTicketIds: orderKotTickets.map(t => t.id),
       screenToken: screenTokenRef.current,
@@ -3347,7 +3695,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       created_offline: createdOffline,
       client_id:  clientId, // ORDER-FLOW-15: the outlet it was taken for
       table_id:   activeTable?.id   || null,
-      table_name: activeTable?.name || 'Takeaway',
+      table_name: screenTableName,
       covers,
       covers_set: coversSet,
       opened_by:  profile?.id || null,
@@ -3377,7 +3725,9 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   // The order on screen, named the way the waiter knows it.
   function orderLabel() {
-    return activeTable?.name || (orderNo ? `Takeaway #${orderNo}` : 'This takeaway')
+    if (activeTable?.name) return activeTable.name
+    if (screenOrder?.partOf) return partBillLabel(screenOrder.tableName, orderNo) // S836
+    return orderNo ? `Takeaway #${orderNo}` : 'This takeaway'
   }
 
   // A save_pos_order_items refusal, by its HINT code (S754). Anything without a known code is returned
@@ -3426,13 +3776,21 @@ export default function PosOrders({ billingStation = false } = {}) {
         : `error:${where} was changed on another device, and the latest version could not be loaded — nothing was saved. Go back to the floor and open it again.`)
       return
     }
-    if (!fresh || fresh.status !== 'open') { showClosedElsewhere(); return }
+    if (!fresh) {
+      // S836: gone, not closed: a join took it into another table's bill, or a part bill went back.
+      if (await openWhereBillWent(orderNo, where, snapshot)) return
+      showClosedElsewhere(); return
+    }
+    if (fresh.status !== 'open') { showClosedElsewhere(); return }
     setKotPullReason('')
-    const lines = showLoadedOrder(activeTable, {
-      id: fresh.id, orderNo: fresh.order_no, covers: fresh.covers, items: fresh.pos_order_items, itemsVersion: fresh.items_version,
+    // S836: another till may have moved the bill to another table; the screen follows it there.
+    const freshTable = tableOfStored(fresh, activeTable)
+    if (activeTable?.id && freshTable?.id !== activeTable.id) clearCachedPosOrderForTable(activeTable.id).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
+    const lines = showLoadedOrder(freshTable, {
+      id: fresh.id, orderNo: fresh.order_no, covers: fresh.covers, items: fresh.pos_order_items, itemsVersion: fresh.items_version, stored: fresh,
     })
-    if (activeTable?.id) {
-      cachePosOrderForTable(activeTable.id, { orderId: fresh.id, orderNo: fresh.order_no || null, covers: fresh.covers || 1, items: lines, itemsVersion: itemsVersionRef.current })
+    if (freshTable?.id) {
+      cachePosOrderForTable(freshTable.id, { orderId: fresh.id, orderNo: fresh.order_no || null, covers: fresh.covers || 1, items: lines, itemsVersion: itemsVersionRef.current })
     }
     const missing = missingFromServer(snapshot, fresh.pos_order_items)
     // ORDER-FLOW-18 (S809 3b): an accepted guest order whose dishes the reload left off is no longer
@@ -3489,7 +3847,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       return
     }
     const lines = showLoadedOrder(table, {
-      id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version,
+      id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version, stored: existing,
     })
     setOrderItems(mergeUnsentLines(lines, snapshot.map(i => ({ ...i, sent_to_kot: false, sent_qty: 0 }))))
     setMsg(`ok:${table.name} was opened on another device first — your items were added to that order, unsent. Review them, then Update Order.`)
@@ -3819,7 +4177,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // exactly what was printed on the ticket (delta-aware qty) so the KOT Register/Reconciliation
   // reports reflect the real kitchen/bar send history, not just the current live order state.
   // `tableName` is given when the ticket is for an order the screen no longer shows (S809 3e).
-  async function logKotSend(station, items, oid, oNo, tableName = activeTable?.name || 'Takeaway') {
+  async function logKotSend(station, items, oid, oNo, tableName = screenTableName) {
     if (items.length === 0) return
     const payload = {
       order_id: oid,
@@ -3896,7 +4254,7 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   // Returns printHtml's answer — false when the pop-up was blocked and nothing printed (S754).
   // `tableName` and `covers` are given for an order the screen no longer shows (S809 3e).
-  function printTicket(station, items, ticketNo, { reprint = false, tableName = activeTable?.name || 'Takeaway', covers: ticketCovers = covers } = {}) {
+  function printTicket(station, items, ticketNo, { reprint = false, tableName = screenTableName, covers: ticketCovers = covers } = {}) {
     const html = buildKotBotHtml({
       station, items, ticketNo, outletName,
       tableName,
@@ -3968,9 +4326,30 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   /* ── Billing / Charge ── */
 
+  // S836: the share slips' line beside the guest count ("3 × NPR 1,180" or "2 × NPR 1,181 · 1 × NPR 1,180").
+  function shareSummary(shares) {
+    const groups = []
+    for (const v of shares) {
+      const g = groups.find(x => x.v === v)
+      if (g) g.n += 1; else groups.push({ v, n: 1 })
+    }
+    return groups.map(g => `${g.n} × ${fmtNpr(g.v)}`).join(' · ')
+  }
+
+  function printShareSlips() {
+    const shares = equalShares(payTotal, shareCount)
+    if (shares.length === 0) return
+    const html = buildShareSlipsHtml({
+      outletName, tableName: screenOrder?.partOf ? partBillLabel(screenTableName, null) : screenTableName,
+      orderNo, total: payTotal, shares, printedAt: new Date().toISOString(),
+    })
+    if (!printHtml(html)) setCloseMsg('error:The share slips did not print — allow pop-ups for this site, then try again.')
+  }
+
   async function openBilling() {
     setBillingTab('pay')
     setPayMethod('Cash')
+    setShareCount(null) // S836
     setTenderedStr('')
     setCloseReason('')
     setBuyerName(''); setBuyerAddress(''); setBuyerPan(''); setBuyerPhone(''); setBillRemarks('')
@@ -4148,7 +4527,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       }
     }
     // No tenders on screen: close at once (handing back any redemption a failed attempt left standing).
-    if (tenders.length === 0) { dismissBillingAfterRefusal(); return }
+    // A part bill (S836) then asks whether its dishes go back on the table's bill.
+    if (tenders.length === 0) { dismissBillingAfterRefusal(); offerPutBackPart(); return }
     const n = tenders.length
     askConfirm({
       title: `Discard ${n} recorded payment${n === 1 ? '' : 's'}?`,
@@ -4177,6 +4557,7 @@ export default function PosOrders({ billingStation = false } = {}) {
           }
         }
         setBillingOpen(false)
+        offerPutBackPart() // S836
       },
     })
   }
@@ -4934,7 +5315,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // it is this bill's tender now. (A redemption standing on another bill stays tracked.)
     if (liveRedemptionRef.current?.orderId === updated.id) liveRedemptionRef.current = null
     if (refusedTendersRef.current?.orderId === updated.id) refusedTendersRef.current = null
-    const where = (background && attempt?.where) || activeTable?.name || (orderNo ? `Takeaway #${orderNo}` : 'this takeaway')
+    const where = (background && attempt?.where) || orderLabel()
     const step = background ? () => {} : setCloseStep
 
     // Split legs FIRST, straight after the close: the server admits them only from the login that
@@ -5039,18 +5420,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     // trips. Each is bounded and resolves `{ error }`, so none can surface as an unhandled rejection
     // in the gap before it is awaited.
 
-    // Freeing the table. Awaited before loadFloor() reads the floor back, so a tile can never
-    // repaint as still occupied. In the background (S809) only if nobody has opened a new order on
-    // it since — a read that fails leaves it occupied, the safe way round.
-    const tableId = background ? attempt?.tableId : activeTable?.id
-    const tableFree = tableId
-      ? (background ? bounded(scopedFrom('pos_orders', 'id').eq('status', 'open').eq('table_id', tableId).limit(1), 'Checking the table') : Promise.resolve({ data: [] }))
-          .then(({ data, error }) => ((error || data?.length) ? { error: null }
-            // S817 4i (FLOOR-KITCHEN-7): only a table the till marked Occupied goes back to Available, so a
-            // table a manager took out of service, or held as Reserved by hand, keeps that status.
-            : bounded(scopedUpdate('pos_tables', { status: 'available' }).eq('id', tableId).eq('status', 'occupied'), 'Freeing the table')))
-          .then(({ error }) => { if (error) console.error('pos_tables release failed (non-fatal):', error) })
-      : null
+    // The table is freed by the database in the close's own transaction (S836,
+    // pos_orders_release_tables): the bill's STORED table and its joined tables, Occupied → Available
+    // only, and only while no other open bill holds them. The till used to free the table on its
+    // screen, which after a move made on another till was another party's.
+    const tableId = updated.table_id || (background ? attempt?.tableId : activeTable?.id) || null
 
     // A booking seated from the floor completes when its bill closes — every close type, since
     // the visit is over as far as the book is concerned (the bill's own outcome is read through
@@ -5131,7 +5505,6 @@ export default function PosOrders({ billingStation = false } = {}) {
       }
     }
 
-    if (tableFree) await tableFree
     await reservationDone
     // The per-table snapshot described the order that just closed (S754) — left behind, an
     // offline open of this table reloaded a paid bill's lines. Best-effort: the offline path now
@@ -5216,7 +5589,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     return printHtml(buildBillHtml({
       order, items, copyLabel: COPY_LABEL(newCount), qrUrl, payments,
       outletName, billingSettings, hscMap: reprint ? reprint.hscMap : hscMap,
-      tableName: activeTable?.name || order.table_name || 'Takeaway',
+      tableName: order.table_name || activeTable?.name || 'Takeaway', // S836: stored first
       cashierName: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
     }))
   }
@@ -5252,7 +5625,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     return printHtml(buildCompSlipHtml({
       order, items, costMap, copyLabel: COPY_LABEL(newCount),
       outletName,
-      tableName: activeTable?.name || order.table_name || 'Takeaway',
+      tableName: order.table_name || activeTable?.name || 'Takeaway', // S836: stored first
       // A reprint names who comped the bill, not who reprinted it (S809 CHECKOUT-11).
       authorizedBy: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
     }))
@@ -5277,7 +5650,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       order: { ...order, invoice_no: compedItems[0]?.comp_no ?? null, close_reason: compedItems[0]?.comp_reason || itemCompReason, bill_remarks: '' },
       items: compedItems, costMap, copyLabel: COPY_LABEL(newCount),
       outletName,
-      tableName: activeTable?.name || order.table_name || 'Takeaway',
+      tableName: order.table_name || activeTable?.name || 'Takeaway', // S836: stored first
       authorizedBy: reprint ? reprint.staffName : printedStaffName(profile, isAdmin),
     }))
   }
@@ -5532,6 +5905,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     // S809 ORDER-FLOW-5 (3e): a send still in flight finishes for its own order and leaves the next one alone.
     screenTokenRef.current += 1
     setView(billingStation ? 'bills' : 'floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); setMsg('')
+    setScreenOrder(null); setTableDialog(null); setShareCount(null) // S836
     setCartOpen(false)
     setSuggestions([])
     setMenuLoaded(false)
@@ -5554,6 +5928,20 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
   }
 
   const kotCount = orderItems.filter(i => !i.sent_to_kot && !botCategories.has(i.category || 'Other')).length
+  // S836: the tables joined to the bill on screen, the guest QR orders waiting at any of its tables, and
+  // the Table menu (a part bill's is only "put back").
+  const joinedHere = orderId ? joinedTablesOf(orderId, tableJoins, tables) : []
+  const screenGuestReqs = activeTable ? [activeTable.id, ...joinedHere.map(t => t.id)].flatMap(id => pendingGuestOrders[id] || []) : []
+  const tableMenuItems = !orderId ? [] : screenOrder?.partOf
+    ? [{ key: 'putback', label: `Put back on ${screenTableName}`, onSelect: offerPutBackPart }]
+    : [
+        { key: 'move', label: 'Move or join…', onSelect: () => openTableDialog('move') },
+        { key: 'dishes', label: 'Move dishes…', onSelect: () => openTableDialog('dishes') },
+        { key: 'part', label: 'Pay part now…', onSelect: () => openTableDialog('part'),
+          disabled: !hasPosAccess('supervisor'), hint: 'Taking a payment needs a POS Supervisor login or above.' },
+        joinedHere.length > 0 && '-',
+        ...joinedHere.map(t => ({ key: `release:${t.id}`, label: `Release ${t.name}`, onSelect: () => releaseJoinedTable(t) })),
+      ]
   const botCount = orderItems.filter(i => !i.sent_to_kot && botCategories.has(i.category || 'Other')).length
 
   const pendingTables    = Object.values(tableOrders).filter(o => o.pending > 0)
@@ -5757,7 +6145,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           const o = tableOrders[t.id]
           return {
             key: `table:${t.id}`, kind: 'table', tableId: t.id, orderId: o.orderId,
-            label: t.name, section: t.section || '',
+            // S836: a bill with joined tables is listed under all of them ("T3 + T5").
+            label: [t.name, ...joinedTablesOf(o.orderId, tableJoins, tables).map(x => x.name)].join(' + '), section: t.section || '',
             covers: o.covers || 1, itemCount: o.itemCount, total: o.total,
             pending: o.pending, openedAt: o.openedAt || null, offlinePending: !!o.offlinePending,
           }
@@ -5837,11 +6226,25 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           borderRadius: 'var(--radius-sm)', padding: '6px 14px',
           color: 'var(--theme-text2)', cursor: 'pointer', fontSize: 14,
         }}>
-          ← {activeTable ? activeTable.name : 'Takeaway'}
+          ← {screenOrder?.partOf ? partBillLabel(screenTableName, null) : screenTableName}
         </button>
 
         {activeTable?.section && !narrowTill && (
           <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{activeTable.section}</span>
+        )}
+
+        {/* S836: the tables joined to this bill, and a part bill's mark. */}
+        {joinedHere.length > 0 && (
+          <Tip text="Tables joined to this bill. They stay taken until it is paid. Release one from the Table menu once nobody sits there.">
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', cursor: 'default' }}>
+              + {joinedHere.map(t => t.name).join(', ')}
+            </span>
+          </Tip>
+        )}
+        {screenOrder?.partOf && (
+          <Tip text="A part bill: dishes split off this table's bill so a guest can pay for them on their own, with their own invoice number. Cancel its payment to put them back.">
+            <span className="badge badge-yellow" style={{ fontSize: 11, cursor: 'default' }}>Part bill</span>
+          </Tip>
         )}
 
         {/* This layer covers the top bar that names the outlet, so in a group it says it here (S809
@@ -5899,6 +6302,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         {/* The order screen's message line moved from here to directly above Send (S776): at 12px in the
             top bar's far corner, a failed send was the one thing on the screen nobody looked at. */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* S836: move, join and split. Above the order screen's own layer (1000). */}
+          {orderId && (
+            <RowMenu label="Table: move, join or split this bill" triggerLabel={narrowTill ? '⇄ Table' : '⇄ Table…'}
+              items={tableMenuItems} zIndex={1100} busy={tableBusy} disabled={tableBusy} />
+          )}
           {orderId && isOnline && orderKotTickets.some(t => t.status === 'ready') && (() => {
             const readyCount = orderKotTickets.filter(t => t.status === 'ready').length
             return (
@@ -5921,12 +6329,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         </div>
       </div>
 
-      {activeTable && (pendingGuestOrders[activeTable.id]?.length > 0) && (
+      {screenGuestReqs.length > 0 && (
         <div style={{
           flexShrink: 0, padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8,
           background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', borderBottom: '1px solid var(--theme-border)',
         }}>
-          {pendingGuestOrders[activeTable.id].map(req => (
+          {screenGuestReqs.map(req => (
             <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13 }}>
                 🔔 Guest ordered: {(req.items || []).map(it => `${it.qty}× ${it.name}${it.option_summary ? ` (${it.option_summary})` : ''}`).join(', ')}
@@ -6461,7 +6869,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 14 }}>
               <h3 style={{ margin: 0, fontSize: 18, color: 'var(--theme-text1)' }}>
-                {activeTable ? activeTable.name : 'Takeaway'}
+                {screenOrder?.partOf ? partBillLabel(screenTableName, null) : screenTableName}
               </h3>
               <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', textAlign: 'right' }}>
                 {billingTab === 'writeoff' && compCostFailed ? '—' : fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
@@ -6483,7 +6891,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 still waiting for the table (pos_orders_close_turns_away_guest_orders), so it can never
                 ring on into the next party's sitting. Said here, before the press. The list already
                 leaves out an order accepted into this cart: the save marks it before the close. */}
-            {activeTable && pendingGuestOrders[activeTable.id]?.length > 0 && (
+            {screenGuestReqs.length > 0 && (
               <p role="status" style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                 ⚠ A guest QR order for this table is still waiting. Closing the bill turns it away — if they still want it, close this window and Accept it onto the bill first.
               </p>
@@ -6721,6 +7129,26 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   </Tip>
                 </div>
 
+                {/* S836 (owner, 2026-10-14): an equal split is ONE tax invoice and a printed share slip per
+                    guest; each share is then taken with Split Payment. Printing writes nothing. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {shareCount == null ? (
+                    <Tip text="Print a slip for each guest with their equal share of this bill, in whole rupees (any leftover rupee goes on the first slips). Not a tax invoice: the one tax invoice prints when the bill is paid. Take each share with Split Payment.">
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareCount(MIN_SHARES)} disabled={payTotal <= 0}>÷ Share slips</button>
+                    </Tip>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Share between</span>
+                      <button type="button" className="btn btn-ghost till-hit" aria-label="One guest fewer" onClick={() => setShareCount(n => Math.max(MIN_SHARES, n - 1))} disabled={shareCount <= MIN_SHARES}>−</button>
+                      <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{shareCount}</span>
+                      <button type="button" className="btn btn-ghost till-hit" aria-label="One guest more" onClick={() => setShareCount(n => Math.min(MAX_SHARES, n + 1))} disabled={shareCount >= MAX_SHARES}>+</button>
+                      <span style={{ fontSize: 13, color: 'var(--theme-text1)' }}>{shareSummary(equalShares(payTotal, shareCount))}</span>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={printShareSlips}>Print {shareCount} slips</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareCount(null)}>Close</button>
+                    </>
+                  )}
+                </div>
+
                 {!splitMode && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                     {PAYMENT_METHODS.map(m => (
@@ -6866,7 +7294,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                             <Tip text="Prints a small courtesy slip for this payment only — not the Tax Invoice/PAN Bill, which still prints once at the end.">
                               <button onClick={() => printHtml(buildTenderSlipHtml({
                                   tender: t, remainingAfter: payTotal - tenders.slice(0, i + 1).reduce((s, x) => s + x.amount, 0),
-                                  outletName, tableName: activeTable?.name || 'Takeaway',
+                                  outletName, tableName: screenTableName,
                                 }))}
                                 style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                                 🖨
@@ -7023,6 +7451,27 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
 
       {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input
           is the entire point — a yes/no dialog would add friction and record nothing. */}
+      {/* S836: the Table menu's dialogs. In THIS return because the menu is on the order screen (S578). */}
+      {tableDialog === 'move' && (
+        <MoveTableModal
+          tables={tables} tableOrders={tableOrders} tableJoins={tableJoins}
+          currentTableId={activeTable?.id || null} currentOrderId={orderId} busy={tableBusy}
+          onMove={moveBillToTable}
+          onJoin={(t, { hasBill }) => { if (hasBill) { setTableDialog(null); askJoinBill(t) } else joinTableToBill(t) }}
+          onClose={() => setTableDialog(null)}
+        />
+      )}
+      {(tableDialog === 'dishes' || tableDialog === 'part') && (
+        <MoveDishesModal
+          mode={tableDialog} lines={tableDialogLines}
+          tables={tables} tableOrders={tableOrders} tableJoins={tableJoins}
+          currentTableId={activeTable?.id || null} currentOrderId={orderId} covers={covers}
+          lineTotal={(l, q) => q * (Number(l.unit_price) || 0) * (1 + (vatReg ? (l.vat_rate ?? 0) : 0))}
+          busy={tableBusy}
+          onSubmit={tableDialog === 'part' ? makePartBill : moveDishesToTable}
+          onClose={() => setTableDialog(null)}
+        />
+      )}
       {pullPrompt && (
         <Modal onClose={() => setPullPrompt(null)} title="Remove an item the kitchen already has" maxWidth={440}>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 14px', lineHeight: 1.5 }}>
@@ -7521,9 +7970,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             const ord      = tableOrders[t.id]
             const inactive = t.status === 'inactive'
             const hasPendingGuest = pendingGuestOrders[t.id]?.length > 0
+            // S836: joined to another table's bill — taken, with no bill of its own; a tap opens that bill.
+            const joinedTo   = tableJoins[t.id] || null
+            const joinedMain = joinedTo ? tables.find(x => x.id === mainTableOfJoin(joinedTo, tableOrders)) : null
             // S817 4i (FLOOR-KITCHEN-7): a table taken out of service with its bill still open opens that
             // bill; one with no bill says why it takes no order, instead of ignoring the tap.
-            const openTile = () => (inactive && !ord ? setFloorMsg(`error:${inactiveTableText(t.name)}`) : openTable(t))
+            const openTile = () => (inactive && !ord && !joinedTo ? setFloorMsg(`error:${inactiveTableText(t.name)}`) : openTable(t))
             return (
               <div
                 key={t.id}
@@ -7531,13 +7983,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 onClick={openTile}
                 style={{
                   padding: '16px 18px',
-                  cursor: inactive && !ord ? 'default' : 'pointer',
+                  cursor: inactive && !ord && !joinedTo ? 'default' : 'pointer',
                   // Muted by a dashed edge and the badge, not opacity (S776): 0.4 took the name and
                   // seat count below AA, so an inactive table was also an unreadable one.
                   ...(inactive ? { borderStyle: 'dashed', background: 'transparent' } : {}),
                   display: 'flex', flexDirection: 'column', gap: 8,
                   overflow: 'hidden',
-                  ...(ord ? { borderColor: 'var(--theme-accent)' } : {}),
+                  ...(ord || joinedTo ? { borderColor: 'var(--theme-accent)' } : {}),
                 }}
                 role="button"
                 tabIndex={0}
@@ -7634,6 +8086,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       {fmtNpr(ord.total)}
                     </div>
                   </div>
+                ) : joinedTo ? (
+                  <Tip text={`Joined to ${joinedMain?.name || 'another table'}'s bill — tap to open it. It stays taken until that bill is paid.`}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)' }}>⇄ With {joinedMain?.name || 'another table'}</div>
+                  </Tip>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>👥 {t.capacity} seats</div>
                 )}

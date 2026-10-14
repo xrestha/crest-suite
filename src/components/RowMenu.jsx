@@ -22,7 +22,9 @@ import { Ellipsis } from 'lucide-react'
  * Falsy entries are skipped so a caller can write `cond && { ... }`. Renders nothing at all when no
  * item survives, so a row with no secondary moves has no dead control.
  */
-export default function RowMenu({ label, items, disabled = false, busy = false }) {
+// `triggerLabel` (S836) shows a text button instead of the ⋯ glyph, for a menu that is a screen's
+// control rather than a row's; `zIndex` lifts the panel above a full-screen layer (the till is 1000).
+export default function RowMenu({ label, items, disabled = false, busy = false, triggerLabel = null, zIndex = null }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
   const btnRef = useRef(null)
@@ -98,7 +100,7 @@ export default function RowMenu({ label, items, disabled = false, busy = false }
       <button
         ref={btnRef}
         type="button"
-        className="btn btn-ghost btn-sm btn-icon"
+        className={triggerLabel ? 'btn btn-ghost btn-sm' : 'btn btn-ghost btn-sm btn-icon'}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -108,11 +110,11 @@ export default function RowMenu({ label, items, disabled = false, busy = false }
         disabled={disabled}
         onClick={() => (open ? close() : openMenu())}
       >
-        <Ellipsis aria-hidden="true" />
+        {triggerLabel || <Ellipsis aria-hidden="true" />}
       </button>
       {open && pos && createPortal(
         <div ref={menuRef} id={menuId} role="menu" aria-label={label} className="row-menu"
-          style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}>
+          style={{ top: pos.top, bottom: pos.bottom, right: pos.right, ...(zIndex ? { zIndex } : {}) }}>
           {entries.map((it, i) => it === '-'
             ? <div key={`sep-${i}`} role="separator" className="row-menu-sep" />
             : (

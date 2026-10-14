@@ -1081,14 +1081,16 @@ export default function ClientDashboard({ scope = 'home' }) {
       // month counts in full, a since-credit-noted one included, and every credit note ISSUED in the
       // month comes off (the notes are paged too: their window is the same month). The note brings
       // the bill it credits, which may have closed last month, for the dine-in side of Avg per cover.
+      // Both carry `part_of_order_id` beside `table_id` (S836): a part bill has no table but is
+      // dine-in (coversMath.isDineIn), so without it its guests would fall out of Covers Served.
       const [bills, notes] = await Promise.all([
         fetchAllRows(() =>
-          scopedFrom('pos_orders', 'id, table_id, covers, paid_amount, discount_amount, close_type, closed_at')
+          scopedFrom('pos_orders', 'id, table_id, part_of_order_id, covers, paid_amount, discount_amount, close_type, closed_at')
             .eq('close_type', 'paid')
             .gte('closed_at', fromTs).lte('closed_at', toTs)
             .order('id')),
         fetchAllRows(() =>
-          scopedFrom('pos_credit_notes', 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, covers)')
+          scopedFrom('pos_credit_notes', 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, part_of_order_id, covers)')
             .gte('created_at', fromTs).lte('created_at', toTs)
             .order('id')),
       ])

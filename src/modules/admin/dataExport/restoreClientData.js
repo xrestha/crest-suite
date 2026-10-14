@@ -77,6 +77,12 @@ export const RESTORE_ORDER = [
   'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts',
   // pos_order_item_options (S758) right after the lines it snapshots — FKs to the order and the line.
   'pos_orders', 'pos_order_items', 'pos_order_item_options', 'pos_order_payments', 'pos_kot_log', 'pos_kot_removals',
+  // Move, join and split tables (S836), after pos_tables and pos_orders, which both name. A join names
+  // its table and the open bill it joined; the record of a move names the bills it moved between (SET
+  // NULL, so one a join or put-back deleted is already empty in the file). joined_by and moved_by are
+  // attribution, restored empty with their names kept in the file. Both tables' guards let the
+  // operator's restore insert rows dated before it, and refuse every other client write.
+  'pos_table_joins', 'pos_table_moves',
   // A slip names the bill it was stamped against (order_id), so after the orders (S809 DATABASE-3).
   // pos_parking_slips_guard keeps a restored slip's number, issuer and times as they were.
   'pos_parking_slips',
@@ -117,6 +123,30 @@ const GENERATED_COLUMNS = {
 // hr_employees.supervisor_id -> hr_employees.id (S798 DATABASE-4) is the self-referencing case: a
 // supervisor in a later 500-row chunk than their team would fail the FK, so it goes in afterwards too.
 export const DEFERRED_LINKS = { pos_orders: ['credit_note_id'], hr_employees: ['supervisor_id'] }
+
+// pos_orders.part_of_order_id -> pos_orders.id (S836): a part bill names the bill it was split off. It
+// is the other self-reference, and deliberately NOT a DEFERRED_LINKS second pass: guard_pos_order_close
+// keeps an open bill's part_of_order_id as it was and refuses any change to a closed bill outside its
+// short allow-list, so the second-pass UPDATE would do nothing on the one and fail bill_locked on the
+// other. So the link goes in with its row, and the rows go in parents first, so no chunk holds a part
+// bill whose parent waits in a later one (inside one INSERT the order does not matter: the key is
+// checked at the end of the statement). One level is the whole of it: split_pos_part_bill refuses a
+// part bill, and a join keeps the bill that is not one. A link to a bill the backup does not hold is
+// emptied, which is what the key's ON DELETE SET NULL does when that bill goes; left in, it would
+// refuse its chunk and, this loop breaking a table there, every bill after it. An OPEN part bill keeps
+// its link too: guard_pos_order_insert empties part_of_order_id on an open order a client session
+// inserts, except the operator's (20261014120000), which is the restore.
+export function partBillsAfterParents(rows) {
+  const ids = new Set(rows.map(r => r.id))
+  const parents = []
+  const parts = []
+  for (const r of rows) {
+    if (!r.part_of_order_id) parents.push(r)
+    else if (ids.has(r.part_of_order_id)) parts.push(r)
+    else parents.push({ ...r, part_of_order_id: null })
+  }
+  return [...parents, ...parts]
+}
 
 // Tables a backup carries that the loop below deliberately does not insert, each with the reason
 // the operator is shown when the backup holds rows of it (header). A table in neither list is
@@ -321,6 +351,7 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
       rows = deduped.rows
       renamed.push(...deduped.renamed)
     }
+    if (table === 'pos_orders') rows = partBillsAfterParents(rows)
 
     let tableFailed = false
     let tableRestored = 0

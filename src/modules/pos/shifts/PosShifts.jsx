@@ -24,6 +24,7 @@ import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 import {
   shiftDates, historyRowLabel, asOfLabel, isNoAnswer, openUnknownText, closeUnknownText,
   cashUnknownText, detailSuffix, slipNotPrintedText, shiftReadFailLead, SHIFT_ALREADY_CLOSED_TEXT, SHIFT_ALREADY_OPEN_TEXT,
+  openOrdersLabel,
 } from './shiftText'
 
 const fmtNpr = npr
@@ -203,19 +204,6 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
 function throwIfFailed(results) {
   const bad = (results || []).find(r => r && r.error)
   if (bad) throw bad.error
-}
-
-// "Table 3, Table 7 and 2 takeaways (#41, #42)" — what a supervisor needs to find the open orders
-// on the floor before deciding to close over them (S754).
-function openOrdersLabel(orders) {
-  const tables = orders.filter(o => o.table_id && o.table_name).map(o => o.table_name)
-  const takeaways = orders.filter(o => !(o.table_id && o.table_name))
-  const parts = [...tables]
-  if (takeaways.length > 0) {
-    const nos = takeaways.map(o => (o.order_no != null ? `#${o.order_no}` : null)).filter(Boolean)
-    parts.push(`${takeaways.length} takeaway${takeaways.length === 1 ? '' : 's'}${nos.length ? ` (${nos.join(', ')})` : ''}`)
-  }
-  return parts.length <= 1 ? (parts[0] || '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
 
 // Shared X/Z-report totals from a shift's closed orders — used for the live Current Shift view
@@ -785,8 +773,9 @@ export default function PosShifts() {
     // refusal could not fire. Every open order for the client is read instead. Carry-over needs no
     // write: an order billed after this close is stamped with the shift open at that moment, so its
     // cash reconciles on the next shift. A failed read refuses the close — a check that could not
-    // run has not passed.
-    const { data: openOrders, error: openErr } = await settleWithin(scopedFrom('pos_orders', 'id, order_no, table_id, table_name')
+    // run has not passed. `part_of_order_id` (S836): an open part bill is named by its table in the
+    // warning (openOrdersLabel), not counted as a takeaway.
+    const { data: openOrders, error: openErr } = await settleWithin(scopedFrom('pos_orders', 'id, order_no, table_id, part_of_order_id, table_name')
       .eq('status', 'open').order('order_no'), SHIFT_READ_MS, 'Checking for open orders')
     if (openErr) {
       setSaving(false)

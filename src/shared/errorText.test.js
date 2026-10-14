@@ -817,3 +817,105 @@ describe('errorText — bonus paid with salary (S824)', () => {
     expect(errorText({ message: 'bonus_payroll_finalized: x' }, 'operator')).not.toBe(errorText({ message: 'bonus_finalized: x' }, 'operator'))
   })
 })
+
+// S836 (migration 20261014120000): moving, joining and splitting tables. Every refusal is raised
+// inside one of the move functions or by a BEFORE trigger, so each may say nothing moved.
+describe('table move, join and split refusals (S836)', () => {
+  const raised = {
+    pos_move_rank: { code: '42501', message: 'pos_move_rank: only a POS login of this outlet can move, join or split a table' },
+    pos_move_order_missing: { code: 'P0001', message: "pos_move_order_missing: T5's bill is no longer open — it was closed or cleared on another device" },
+    pos_part_bill_locked: { code: 'P0001', message: 'pos_part_bill_locked: a part bill is paid, or put back on its table — it does not move' },
+    pos_move_table_missing: { code: 'P0001', message: "pos_move_table_missing: that table is not on this outlet's floor plan any more" },
+    pos_move_same_table: { code: 'P0001', message: 'pos_move_same_table: this bill is already on T3' },
+    pos_move_table_busy: { code: 'P0001', message: 'pos_move_table_busy: T5 already has a bill — join the two instead' },
+    pos_table_joined: { code: '23514', message: "pos_table_joined: T2 is joined to T1's bill — pick another table, or release it first" },
+    pos_join_needs_table: { code: 'P0001', message: 'pos_join_needs_table: a takeaway has no table for another to join — move it to a table first' },
+    pos_join_already: { code: 'P0001', message: 'pos_join_already: T2 is already on this bill' },
+    pos_join_points_held: { code: 'P0001', message: "pos_join_points_held: T2's bill has loyalty points taken off it — hand them back on that bill first, then join" },
+    pos_move_points_held: { code: 'P0001', message: 'pos_move_points_held: this bill has loyalty points taken off it — hand them back first, then move its dishes' },
+    pos_move_nothing: { code: 'P0001', message: 'pos_move_nothing: pick at least one dish to move' },
+    pos_move_line_missing: { code: 'P0001', message: 'pos_move_line_missing: a dish you picked is no longer on this bill — it changed on another device; reload it and try again' },
+    pos_move_line_comped: { code: 'P0001', message: 'pos_move_line_comped: Veg Momo is complimentary on this bill, so it stays here' },
+    pos_move_qty_invalid: { code: 'P0001', message: 'pos_move_qty_invalid: Veg Momo can be moved 1 to 3 at a time' },
+    pos_move_all_lines: { code: 'P0001', message: 'pos_move_all_lines: that is every dish on this bill — use Move to move the whole bill' },
+    pos_part_all_lines: { code: 'P0001', message: 'pos_part_all_lines: that is the whole bill — take payment on it instead' },
+    pos_move_same_bill: { code: 'P0001', message: 'pos_move_same_bill: T2 is on this same bill' },
+    pos_move_retry: { code: 'P0001', message: 'pos_move_retry: T5 changed on another device just now — try again' },
+    pos_part_delivery: { code: 'P0001', message: "pos_part_delivery: a delivery platform's order is paid as one bill" },
+    pos_part_parent_closed: { code: 'P0001', message: "pos_part_parent_closed: the table's bill is closed already — take payment on this part bill instead" },
+    pos_part_bill_has_tickets: { code: 'P0001', message: 'pos_part_bill_has_tickets: this part bill sent food of its own to the kitchen — take payment on it instead' },
+    pos_part_not_part: { code: 'P0001', message: 'pos_part_not_part: this bill was not split off another, so there is nothing to put it back on' },
+    pos_release_not_joined: { code: 'P0001', message: 'pos_release_not_joined: T2 is not joined to a bill any more' },
+    pos_table_move_direct: { code: '42501', message: 'pos_table_move_direct: the record of a table move is written by the move itself — it cannot be written, changed or deleted directly' },
+    pos_table_join_direct: { code: '42501', message: 'pos_table_join_direct: tables are joined and released from the order screen — a join cannot be written, changed or deleted directly' },
+  }
+  const hinted = Object.fromEntries(Object.entries(raised).map(([c, e]) => [c, { ...e, hint: c }]))
+
+  it('every code has its own sentence in both audiences, ahead of the generic ones', () => {
+    const seen = new Set()
+    for (const [c, err] of Object.entries(hinted)) {
+      for (const aud of ['staff', 'operator']) {
+        const text = errorText(err, aud)
+        expect([c, text]).not.toEqual([c, errorText({ code: err.code, message: 'x' }, aud)])
+        expect([c, text]).not.toEqual([c, errorText({ message: 'x' }, aud)])
+        // Raised before the move function returned, or by a BEFORE trigger: each may say so.
+        expect([c, text]).toEqual([c, expect.stringMatching(/[Nn]othing was (moved|changed|joined|put|split)/)])
+        seen.add(text)
+      }
+    }
+    expect(seen.size).toBe(Object.keys(hinted).length * 2)
+  })
+
+  it('matches on the message alone, where the hint was lost', () => {
+    for (const [c, err] of Object.entries(raised)) {
+      for (const aud of ['staff', 'operator']) {
+        expect([c, errorText(err, aud)]).toEqual([c, errorText(hinted[c], aud)])
+      }
+    }
+  })
+
+  it('tells the till what to do next', () => {
+    const next = {
+      pos_move_table_busy: /Join the two bills instead/,
+      pos_table_joined: /release the table/,
+      pos_join_needs_table: /Move it to a table first/,
+      pos_join_points_held: /Hand the points back on that bill/,
+      pos_move_points_held: /Hand the points back first/,
+      pos_move_all_lines: /Use Move to move the whole bill/,
+      pos_part_all_lines: /Take payment on the bill itself/,
+      pos_part_parent_closed: /take payment on this part bill/,
+      pos_part_bill_has_tickets: /take payment on it/,
+      pos_move_line_comped: /Leave it out and move the rest/,
+      pos_move_line_missing: /reload the bill/,
+      pos_move_table_missing: /pick another table/,
+      pos_part_bill_locked: /paid, or put back/,
+    }
+    for (const [c, re] of Object.entries(next)) {
+      expect([c, errorText(hinted[c], 'staff')]).toEqual([c, expect.stringMatching(re)])
+    }
+  })
+
+  it('offers a retry only where one can work', () => {
+    expect(errorText(hinted.pos_move_retry, 'staff')).toMatch(/Try again/)
+    const final = ['pos_move_rank', 'pos_part_bill_locked', 'pos_move_same_table', 'pos_move_table_busy', 'pos_join_needs_table',
+      'pos_join_already', 'pos_move_line_comped', 'pos_move_all_lines', 'pos_part_all_lines', 'pos_part_delivery',
+      'pos_part_not_part', 'pos_table_move_direct', 'pos_table_join_direct']
+    for (const c of final) {
+      for (const aud of ['staff', 'operator']) {
+        expect([c, errorText(hinted[c], aud)]).not.toEqual([c, expect.stringMatching(/try (it )?again/i)])
+      }
+    }
+  })
+
+  it('a 42501 refusal is not "not allowed", and a joined table is not the generic CHECK sentence', () => {
+    for (const c of ['pos_move_rank', 'pos_table_move_direct', 'pos_table_join_direct']) {
+      expect(errorText(hinted[c], 'staff')).not.toMatch(/not allowed/)
+    }
+    expect(errorText(hinted.pos_table_joined, 'staff')).not.toBe(errorText({ code: '23514' }, 'staff'))
+  })
+
+  it('keeps the technical detail, which names the dish or the table', () => {
+    expect(errorInfo(hinted.pos_move_qty_invalid, 'operator').detail).toMatch(/Veg Momo can be moved 1 to 3/)
+    expect(errorInfo(hinted.pos_move_order_missing, 'operator').detail).toMatch(/T5's bill/)
+  })
+})

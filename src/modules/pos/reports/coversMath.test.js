@@ -1,5 +1,5 @@
 import {
-  PARTY_BANDS, bandFor, turnoverByBand, isDineIn, dineInOnly, seatedCovers, coversTotals, addReturnsByBand,
+  PARTY_BANDS, bandFor, turnoverByBand, isDineIn, isPartBill, dineInOnly, seatedCovers, coversTotals, addReturnsByBand,
   MAX_SITTING_MINUTES, turnoverExclusions, turnoverExclusionNote,
 } from './coversMath'
 
@@ -150,8 +150,8 @@ describe('the 12-hour sitting cap', () => {
   })
 
   test('the excluded bills are counted by reason, from the same classifier', () => {
-    expect(turnoverExclusions([...ORDERS, thirteenHours, twelveExactly])).toEqual({ untimed: 1, negative: 1, overCap: 1 })
-    expect(turnoverExclusions(ORDERS.slice(0, 4))).toEqual({ untimed: 0, negative: 0, overCap: 0 })
+    expect(turnoverExclusions([...ORDERS, thirteenHours, twelveExactly])).toEqual({ partBill: 0, untimed: 1, negative: 1, overCap: 1 })
+    expect(turnoverExclusions(ORDERS.slice(0, 4))).toEqual({ partBill: 0, untimed: 0, negative: 0, overCap: 0 })
   })
 
   test('the note names only the reasons that happened, and nothing when none did', () => {
@@ -160,5 +160,72 @@ describe('the 12-hour sitting cap', () => {
       '3 dine-in bills are not in this table: 2 closed before they were opened (a till clock behind), 1 open over 12 hours (left open past closing). Their sales are still in the Overview.')
     expect(turnoverExclusionNote({ untimed: 0, negative: 0, overCap: 1 })).toBe(
       '1 dine-in bill is not in this table: 1 open over 12 hours (left open past closing). Their sales are still in the Overview.')
+  })
+})
+
+// S836: a part bill is split off a table's bill so one guest can pay separately. It has no table of
+// its own (table_id null, the table's name), but its guests sat at that table.
+describe('a part bill', () => {
+  // Table T1 seated 4; one guest paid separately on a part bill, so the split moved 1 cover over.
+  const parent = { id: 'p', table_id: 't1', part_of_order_id: null, covers: 3, opened_at: at(19, 0), closed_at: at(20, 30), net: 3000 }
+  const part = { id: 'q', table_id: null, part_of_order_id: 'p', covers: 1, opened_at: at(20, 10), closed_at: at(20, 12), net: 800 }
+  const takeaway = { id: 'k', table_id: null, part_of_order_id: null, covers: 1, opened_at: at(19, 0), closed_at: at(19, 10), net: 500 }
+  const BILLS = [parent, part, takeaway]
+  const netOf = o => o.net
+
+  test('is dine-in, though it has no table; a plain takeaway still is not', () => {
+    expect(isPartBill(part)).toBe(true)
+    expect(isPartBill(parent)).toBe(false)
+    expect(isPartBill(null)).toBe(false)
+    expect(isDineIn(part)).toBe(true)
+    expect(isDineIn(takeaway)).toBe(false)
+    expect(dineInOnly(BILLS).map(o => o.id)).toEqual(['p', 'q'])
+  })
+
+  test('its guests count once: the split moved them off the table\'s bill', () => {
+    expect(seatedCovers(BILLS)).toBe(4)
+    const t = coversTotals(BILLS, netOf)
+    expect(t.bills).toBe(2)
+    expect(t.covers).toBe(4)
+    expect(t.net).toBe(3800)
+    expect(t.takeaway).toEqual({ bills: 1, net: 500, returns: 0 })
+  })
+
+  test('a part bill with no guests of its own (one paid and stayed) adds sales, not covers', () => {
+    const stayed = { ...part, covers: 0 }
+    expect(seatedCovers([{ ...parent, covers: 4 }, stayed])).toBe(4)
+  })
+
+  test('is not a sitting: turnover leaves it out, and the note says so', () => {
+    const rows = turnoverByBand(dineInOnly(BILLS), netOf)
+    expect(rows.reduce((s, r) => s + r.orders, 0)).toBe(1)          // the table's own bill only
+    expect(rows.find(r => r.key === '3-4').avgMinutes).toBe(90)
+    expect(rows.find(r => r.key === '1-2').orders).toBe(0)           // not a two-minute 1-cover sitting
+    const ex = turnoverExclusions(dineInOnly(BILLS))
+    expect(ex).toEqual({ partBill: 1, untimed: 0, negative: 0, overCap: 0 })
+    expect(turnoverExclusionNote(ex)).toBe(
+      "1 dine-in bill is not in this table: 1 part bill (a guest paying separately; the sitting is the table's own bill). Their sales are still in the Overview.")
+    expect(turnoverExclusionNote({ partBill: 2, untimed: 1, negative: 0, overCap: 0 })).toBe(
+      "3 dine-in bills are not in this table: 2 part bills (a guest paying separately; the sitting is the table's own bill), 1 with no opening or closing time. Their sales are still in the Overview.")
+  })
+
+  test('a part bill is classified before its times: an untimed one is still a part bill', () => {
+    expect(turnoverExclusions([{ ...part, opened_at: null }])).toEqual({ partBill: 1, untimed: 0, negative: 0, overCap: 0 })
+  })
+
+  test('its return comes off dine-in revenue, and off no band', () => {
+    const t = coversTotals(BILLS, netOf, [{ order: part, net: -800 }])
+    expect(t.net).toBe(3000)
+    expect(t.returns).toBe(1)
+    expect(t.takeaway.net).toBe(500)
+    const rows = addReturnsByBand(turnoverByBand(dineInOnly(BILLS), netOf), [{ order: part, net: -800 }])
+    expect(rows.find(r => r.key === '1-2').net).toBe(0)
+    expect(rows.find(r => r.key === '3-4').net).toBe(3000)
+  })
+
+  test('read without part_of_order_id it falls back to takeaway, which is why the select needs it', () => {
+    const { part_of_order_id, ...unread } = part
+    expect(part_of_order_id).toBe('p')
+    expect(isDineIn(unread)).toBe(false)
   })
 })

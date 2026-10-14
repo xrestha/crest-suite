@@ -1,7 +1,7 @@
 import {
   bsDayLabel, shiftDates, historyRowLabel, asOfLabel, noAnswerLead, isNoAnswer,
   openUnknownText, closeUnknownText, slipNotPrintedText, shiftReadFailLead, cashUnknownText,
-  SHIFT_ALREADY_CLOSED_TEXT, SHIFT_ALREADY_OPEN_TEXT,
+  SHIFT_ALREADY_CLOSED_TEXT, SHIFT_ALREADY_OPEN_TEXT, openOrdersLabel,
 } from './shiftText'
 
 const timeout = Object.assign(new Error('Opening the shift timed out after 20s'), { name: 'TimeoutError' })
@@ -105,5 +105,26 @@ describe('page-level sentences (SHIFTS-10, SHIFTS-11)', () => {
   it('only claims a last known state when there is one', () => {
     expect(shiftReadFailLead(true)).toBe('Could not check whether a shift is open.')
     expect(shiftReadFailLead(false)).toMatch(/shows the last state it read/)
+  })
+})
+
+describe('the open-orders warning at Close Shift (S754)', () => {
+  const table = (name, no) => ({ id: `o${no}`, order_no: no, table_id: `t-${name}`, part_of_order_id: null, table_name: name })
+  const takeaway = no => ({ id: `o${no}`, order_no: no, table_id: null, part_of_order_id: null, table_name: 'Takeaway' })
+
+  it('names tables, then counts takeaways with their numbers', () => {
+    expect(openOrdersLabel([table('Table 3', 40), table('Table 7', 43), takeaway(41), takeaway(42)]))
+      .toBe('Table 3, Table 7 and 2 takeaways (#41, #42)')
+    expect(openOrdersLabel([takeaway(41)])).toBe('1 takeaway (#41)')
+    expect(openOrdersLabel([])).toBe('')
+  })
+
+  // S836: a part bill has no table of its own but was split off one, so it is found at its table on
+  // the floor, never among the takeaways.
+  it('names an open part bill by its table, the way the floor does, and never as a takeaway', () => {
+    const part = { id: 'o44', order_no: 44, table_id: null, part_of_order_id: 'o40', table_name: 'Table 3' }
+    expect(openOrdersLabel([table('Table 3', 40), part, takeaway(41)]))
+      .toBe('Table 3, Table 3 · part bill #44 and 1 takeaway (#41)')
+    expect(openOrdersLabel([part])).toBe('Table 3 · part bill #44')
   })
 })

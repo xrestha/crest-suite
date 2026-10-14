@@ -329,15 +329,11 @@ table's food.
   `posIdleLockApplies()`). A touch after the full period locks rather than renews. Don't add a second lock per page. **The exemption must key off the RAW
   `profile.pos_role` column (`isPinStaff` in Layout.js), never the resolved `posRole` rank** —
   that rank is 'manager' for every admin and Owner, so gating on it enables the lock for
-  exactly the people it must exempt. This shipped broken (S575→S583): any admin or Owner on a
-  machine that had ever completed POS device binding was silently signed out after 3 idle
-  minutes, reported as "why does the app sign me out when I leave for a while". The same raw
+  exactly the people it must exempt (S575→S583). The same raw
   test drives the Lock-POS-vs-Sign-out label (account menu on desktop, drawer rail on a phone)
   and the sign-out routing to
-  `/pos/login` vs `/login`. **Returning to the tab is not activity (S754).** It used to reset the
-  timer, and timers do not run while a tablet sleeps. So a tablet that slept for an hour handed
-  whoever woke it three more minutes of the absent waiter's session, under that waiter's name on
-  every bill. Idle time is measured from the last real input: past the lock period it locks at
+  `/pos/login` vs `/login`. **Returning to the tab is not activity (S754)**, since timers do not run
+  while a tablet sleeps. Idle time is measured from the last real input: past the lock period it locks at
   once, otherwise only what is left of the period is re-armed. Since S809 3h it survives a page load
   (`crest_idle_last_input` per session id, written even while the lock is off), a lock is `scope:
   'local'`, and a session ending by itself on an activated tablet goes to `/pos/login`.
@@ -507,6 +503,13 @@ repaints.
 Note also that neither branch needs an explicit `zIndex` on a child dialog: the order screen is
 `position: fixed` at 1000 and therefore its own stacking context, so a nested overlay at the default
 100 already paints above it. The billing modal's 1100 is belt-and-braces, not a requirement.
+
+## Move, join and split a table (S836)
+
+Only the six DEFINER functions of `20261014120000` move a bill, table or line (logged, versions bumped,
+merged at the lower price); the database frees tables at a close, the till none; a part bill is dine-in;
+`pos_moved_out_sent` pairs with `kotMoves.netMovedOutSent`.
+History: docs/rules-archive/pos-billing.md#table-moves-design, #idle-lock-stories
 
 ## How to smoke-test any of these guards
 

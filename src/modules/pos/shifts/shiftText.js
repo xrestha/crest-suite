@@ -2,6 +2,8 @@ import { formatBsDay } from '../../../utils/bsCalendar'
 import { nepalBs, nepalDateAd, nepalTime } from '../../../shared/nepalTime'
 import { errorInfo, isNetworkError } from '../../../shared/errorText'
 import { isTimeout } from '../../../utils/withTimeout'
+import { isDineIn, isPartBill } from '../reports/coversMath'
+import { partBillLabel } from '../orders/tableMoves'
 
 /**
  * The Shifts page's wording and dates (S809 slice 4a: SHIFTS-8 to SHIFTS-11), kept out of the page so
@@ -117,4 +119,21 @@ export function shiftReadFailLead(firstRead) {
 // A failed cash entry with no answer (S754's wording, now for a timeout too).
 export function cashUnknownText(err) {
   return `${noAnswerLead(err)}, so it is not known whether this was recorded. Reopen Cash In / Out and check the list before recording it again.`
+}
+
+// "Table 3, Table 7 and 2 takeaways (#41, #42)" — what a supervisor needs to find the open orders
+// on the floor before deciding to close over them (S754). A part bill (S836) has no table of its own
+// but was split off one, so it is a table bill here (coversMath.isDineIn), named the way the floor
+// names it ("Table 3 · part bill #44", partBillLabel), never counted among the takeaways. Each order
+// must carry `table_id`, `part_of_order_id`, `table_name` and `order_no`.
+export function openOrdersLabel(orders) {
+  const atTable = o => isDineIn(o) && !!o.table_name
+  const tables = orders.filter(atTable).map(o => (isPartBill(o) ? partBillLabel(o.table_name, o.order_no) : o.table_name))
+  const takeaways = orders.filter(o => !atTable(o))
+  const parts = [...tables]
+  if (takeaways.length > 0) {
+    const nos = takeaways.map(o => (o.order_no != null ? `#${o.order_no}` : null)).filter(Boolean)
+    parts.push(`${takeaways.length} takeaway${takeaways.length === 1 ? '' : 's'}${nos.length ? ` (${nos.join(', ')})` : ''}`)
+  }
+  return parts.length <= 1 ? (parts[0] || '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }

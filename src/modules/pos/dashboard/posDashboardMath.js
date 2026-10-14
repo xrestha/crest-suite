@@ -6,7 +6,7 @@
 // their home screens; comparing a part-day against a whole prior day would read every lunchtime as
 // a collapse, so the earlier day is cut off at this moment's time of day before it is summed.
 import { paymentSharesOf } from '../reports/salesReportMath'
-import { coversTotals } from '../reports/coversMath'
+import { coversTotals, isDineIn } from '../reports/coversMath'
 import { nepalHour } from '../../../shared/nepalTime'
 import { compareFigures } from '../../../shared/compareFigures'
 
@@ -121,11 +121,13 @@ export function paymentMix(orders, legsByOrder, returns = []) {
   return GROUP_ORDER.filter(g => by.has(g)).map(g => ({ method: g, amount: by.get(g), share: total > 0 ? by.get(g) / total : 0 }))
 }
 
-/** Where a bill came from. There is no channel column: a delivery bill names its partner, a
- *  takeaway has no table, and everything else was served at a table (coversMath.js's isDineIn). */
+/** Where a bill came from. There is no channel column: a delivery bill names its partner, a bill
+ *  served at a table is dine-in (coversMath.js's isDineIn: it has a table, or it is a part bill split
+ *  off a table's bill, S836, which has none of its own), and everything else is takeaway. The row
+ *  must carry `table_id` AND `part_of_order_id`, or a part bill reads as takeaway. */
 export function channelOf(order) {
   if (order?.delivery_partner) return 'Delivery'
-  if (order?.table_id == null) return 'Takeaway'
+  if (!isDineIn(order)) return 'Takeaway'
   return 'Dine-in'
 }
 

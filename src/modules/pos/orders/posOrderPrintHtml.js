@@ -1,7 +1,7 @@
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalTime, nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
-import { npr2 } from '../../../shared/nepalMoney'
+import { npr2, nprPaisa } from '../../../shared/nepalMoney'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { changedOnSentUnits, changeNoteText } from '../kitchenNotes'
@@ -119,6 +119,50 @@ export function buildVoidSlipHtml({ station, items, ticketNo, outletName, tableN
       : `<div class="row"><span class="b"><s>${esc(i.name)}</s></span><span class="qty">×${esc(String(i.qty ?? ''))}</span></div>${kotOptionLines(i.options)}`)).join('')}
   <hr>
   <div class="c" style="font-size:11px">This order was voided. Nothing above is wanted.</div>
+</body></html>`
+}
+
+// A MOVE slip for a station (S836): printed when a running bill, or some of its dishes, moves to
+// another table while that station still has food for it, so the paper rail follows the food to its
+// new table. `items` are the dishes still with that station (name, qty, the choices the KOT showed),
+// so the cook can match them to the KOT already on the rail. Same 80mm shape as the VOID slip; it
+// says it is not a new order, because a slip the kitchen reads as one is a dish cooked twice.
+export function buildMoveSlipHtml({ station, outletName, fromTable, toTable, orderNo, items, movedBy, movedAt }) {
+  const stamp        = movedAt ? new Date(movedAt) : new Date()
+  const bs           = nepalBs(stamp)
+  const date         = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
+  const stationLabel = station === 'BOT' ? 'BAR' : 'KITCHEN'
+  const to           = esc(toTable || 'Takeaway')
+
+  return `<!DOCTYPE html>
+<html><head><title>MOVED ${station === 'BOT' ? 'BOT' : 'KOT'}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
+  .c   { text-align:center; }
+  .b   { font-weight:bold; }
+  .lg  { font-size:24px; letter-spacing:3px; }
+  .mv  { font-size:20px; letter-spacing:1px; padding:3px 0; }
+  hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
+  .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
+  .note { font-size:11px; font-style:italic; color:#000; padding:0 0 3px 10px; }
+  .opt { font-size:13px; color:#000; padding:0 0 1px 10px; }
+</style>
+</head><body>
+  ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
+  <div class="c b" style="font-size:15px">${stationLabel}</div>
+  <div class="c b lg">*** MOVED ***</div>
+  <div class="c b" style="font-size:13px;margin-top:3px">NOT A NEW ORDER</div>
+  <hr>
+  <div class="c b mv">${esc(fromTable || 'Takeaway')} → ${to}</div>
+  <div class="row"><span>Bill</span><span class="b" style="font-size:15px">${orderNo != null ? `#${esc(String(orderNo))}` : ''}</span></div>
+  <div class="row"><span>${movedBy ? `Moved by: ${esc(movedBy)}` : ''}</span><span></span></div>
+  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${nepalTime(stamp)}</span></div>
+  <hr>
+  ${(items || []).map(i => `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">×${esc(String(i.qty ?? ''))}</span></div>${kotOptionLines(i.options)}${i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : ''}`).join('')}
+  <hr>
+  <div class="c" style="font-size:11px">Already ordered — serve it at ${to}.</div>
 </body></html>`
 }
 
@@ -298,6 +342,55 @@ export function buildTenderSlipHtml({ tender, remainingAfter, outletName, tableN
   <div class="row" style="font-size:10px; margin-top:6px"><span>Not a Tax Invoice / PAN Bill</span><span>${nowStr}</span></div>
   <hr>
   <div class="c" style="font-size:11px">Thank you for stopping by! We hope to see you again soon.</div>
+</body></html>`
+}
+
+// Equal split (S836, owner decision): the table keeps ONE tax invoice, printed when the bill is paid,
+// and each guest is handed a slip saying what their share is. Not a Tax Invoice or PAN Bill, and the
+// slip says so at the top and again at the foot, because the guest walks away with it. One slip per
+// share, each on its own page so the printer cuts between them. `shares` comes from equalShares
+// (shareSplit.js); this prints what it is given and does no arithmetic of its own. Stamped with the
+// moment the split was printed (`printedAt`); there is no bill moment yet, the bill is still open.
+export function buildShareSlipsHtml({ outletName, tableName, orderNo, total, shares, printedAt }) {
+  const stamp  = printedAt ? new Date(printedAt) : new Date()
+  const bs     = nepalBs(stamp)
+  const date   = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
+  const nowStr = nepalTime(stamp)
+  const list   = shares || []
+  const n      = list.length
+  const billNo = orderNo != null ? `#${esc(String(orderNo))}` : ''
+
+  return `<!DOCTYPE html>
+<html><head><title>Share Slips</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; margin:0 auto; color:#000; }
+  .slip { padding:8px 10px; }
+  .slip + .slip { break-before:page; page-break-before:always; }
+  .c   { text-align:center; }
+  .b   { font-weight:bold; }
+  .lg  { font-size:15px; letter-spacing:1px; }
+  .amt { font-size:24px; letter-spacing:1px; padding:4px 0; }
+  hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
+</style>
+</head><body>
+${list.map((amount, i) => `<div class="slip">
+  ${outletName ? `<div class="c b" style="font-size:13px">${esc(outletName)}</div>` : ''}
+  <div class="c b lg" style="margin-top:4px">SHARE ${i + 1} OF ${n}</div>
+  <div class="c" style="font-size:11px">Not a tax invoice</div>
+  <hr>
+  <div class="row"><span>Table:</span><span class="b">${esc(tableName || 'Takeaway')}</span></div>
+  <div class="row"><span>Bill:</span><span class="b">${billNo}</span></div>
+  <div class="row"><span>Bill total:</span><span>NPR ${nprPaisa(total)}</span></div>
+  <div class="row"><span>Split:</span><span>${n} equal shares</span></div>
+  <hr>
+  <div class="c">Share ${i + 1} of ${n}</div>
+  <div class="c b amt">NPR ${nprPaisa(amount)}</div>
+  <hr>
+  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${nowStr}</span></div>
+  <div class="c" style="font-size:11px;margin-top:4px">Not a tax invoice — the tax invoice prints when the bill is paid.</div>
+</div>`).join('\n')}
 </body></html>`
 }
 

@@ -21,6 +21,12 @@ import { kotStage } from '../kds/ticketStage'
 import { kotItemText } from '../kitchenNotes'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
+// Sent vs held, moves included (S836): the arithmetic Reconciliation and Bill Trail share.
+import {
+  KOT_MOVE_KINDS, MOVE_KIND_LABEL, sumSentQtyByOrderItem, sumCurrentQtyByOrderItem, mergeMovesById,
+  netMovedOutSent, expectedHeldByOrderItem, flagOrderDiscrepancies, sentFoodMovedIn, movedText, moveDishesText,
+  moveSideText,
+} from './kotMoves'
 
 // The BS day a timestamp fell on IN NEPAL (S754). This was adToBsSafe(new Date(ts)) — the runtime's
 // day — beside a nepalTime() clock, so a ticket sent at 00:15 Kathmandu read as the previous BS day
@@ -32,19 +38,19 @@ function nepalDayLabel(ts, withYear) {
   return civil ? `${formatAd(civil)} (AD)` : '—'
 }
 
-// Total ever sent, per (order_id, recipe_id) — summing every log row's printed qty gives the true
-// cumulative quantity sent to the kitchen for that item across the order's lifetime. Shared by
-// Reconciliation and Bill Trail so both tabs can never disagree about what counts as a discrepancy.
-function sumSentQtyByOrderItem(logs) {
-  const sentByOrderItem = {}
-  for (const log of logs || []) {
-    for (const i of (log.items || [])) {
-      const key = `${log.order_id}::${i.recipe_id}`
-      sentByOrderItem[key] = sentByOrderItem[key] || { orderId: log.order_id, recipeId: i.recipe_id, name: i.name, qty: 0 }
-      sentByOrderItem[key].qty += i.qty
-    }
-  }
-  return sentByOrderItem
+// The record of sent food that changed bills, for the range's bills (S836). Two reads, FROM side
+// and TO side, because PostgREST cannot OR two `.in()` lists without spelling every id twice in one
+// filter; mergeMovesById drops the rows both return. Chunked and paged like the ticket reads beside
+// them, and only the three kinds that leave the ticket behind (kotMoves.js). Returned as two promises
+// for the caller's own Promise.all, so a failed read fails the tab through its firstError batch
+// rather than letting every moved dish read as removed.
+function readSentMoves(scopedFrom, orderIds) {
+  // The order numbers, names and time are for Bill Trail's expanded row; the arithmetic needs the rest.
+  const cols = 'id, kind, from_order_id, to_order_id, from_order_no, to_order_no, from_table_name, to_table_name, lines, moved_at'
+  return [
+    fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_table_moves', cols).in('kind', KOT_MOVE_KINDS).in('from_order_id', ids).order('id')),
+    fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_table_moves', cols).in('kind', KOT_MOVE_KINDS).in('to_order_id', ids).order('id')),
+  ]
 }
 
 // Actual prep minutes for a pos_kot_log row — null until the ticket has both been started and
@@ -64,30 +70,11 @@ function statusBadge(order) {
   return { label: 'Billed', className: CLOSE_TYPE_BADGE.billed }
 }
 
-function flagOrderDiscrepancies(orderById, sentByOrderItem, currentByOrderItem) {
-  const rows = []
-  for (const entry of Object.values(sentByOrderItem)) {
-    const order = orderById[entry.orderId]
-    if (!order) continue
-    const currentQty = currentByOrderItem[`${entry.orderId}::${entry.recipeId}`] || 0
-    const discrepancy = entry.qty - currentQty
-    const voided = order.status === 'voided'
-    if (discrepancy > 0 || voided) {
-      rows.push({
-        key: `${entry.orderId}::${entry.recipeId}`,
-        order, name: entry.name, sentQty: entry.qty, currentQty, discrepancy,
-        reason: voided ? 'Order voided — food was sent' : 'Reduced/removed after sending',
-      })
-    }
-  }
-  return rows
-}
-
 export default function KotLog() {
   const { clientId, hasPosAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
 
-  const [tab, setTab] = useState('register') // 'register' | 'reconciliation' | 'trail' | 'pulled'
+  const [tab, setTab] = useState('register') // 'register' | 'reconciliation' | 'trail' | 'pulled' | 'moves'
   const biz = useBizInfo()
   // Nepal's today, not the viewer's (S754) — see reportRange.js.
   const [fromIso, setFromIso] = useState(todayNepalAdIso)
@@ -101,7 +88,7 @@ export default function KotLog() {
   // tab whose load had succeeded, and the Reconciliation loader's clear could wipe a Register
   // failure still in flight. A shared error slot with concurrent writers is a guard that switches
   // itself off (report-pages.md, S699).
-  const [loadErrors, setLoadErrors] = useState({ register: null, reconciliation: null, trail: null, pulled: null })
+  const [loadErrors, setLoadErrors] = useState({ register: null, reconciliation: null, trail: null, pulled: null, moves: null })
   const setTabError = useCallback((key, err) => setLoadErrors(prev => (prev[key] === err ? prev : { ...prev, [key]: err })), [])
 
   /* ── Register ── */
@@ -187,25 +174,21 @@ export default function KotLog() {
     const reconResults = await Promise.all([
       fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_kot_log', 'order_id, items').in('order_id', ids).order('id')),
       fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', ids).order('id')),
+      // S836: sent food moved to another bill keeps its ticket here, so it is moved, not removed.
+      ...readSentMoves(scopedFrom, orderIds),
     ])
     if (!reconReq.isCurrent(reqKey)) return
     // S612: worse than a zero here — a failed pos_order_items read would flag EVERY sent line as
-    // a discrepancy, and a failed pos_kot_log read would clear the report entirely.
+    // a discrepancy, and a failed pos_kot_log read would clear the report entirely. A failed moves
+    // read would flag every dish moved to another table as removed after sending (S836).
     const reconFailed = firstError(reconResults)
     if (reconFailed) { setTabError('reconciliation', reconFailed); setDiscrepancies([]); setReconLoading(false); return }
-    const [{ data: logs }, { data: currentItems }] = reconResults
+    const [{ data: logs }, { data: currentItems }, { data: movesFrom }, { data: movesTo }] = reconResults
 
-    const sentByOrderItem = sumSentQtyByOrderItem(logs)
-    // Sum, not assign — a partially-comped line (apply_pos_item_comps splits it into two
-    // pos_order_items rows sharing the same order_id+recipe_id: the shrunk paid remainder and a
-    // new comped row) would otherwise have one row silently overwrite the other, understating the
-    // true current qty and falsely flagging a legitimate comp as a shrinkage discrepancy.
-    const currentByOrderItem = {}
-    for (const i of (currentItems || [])) {
-      const key = `${i.order_id}::${i.recipe_id}`
-      currentByOrderItem[key] = (currentByOrderItem[key] || 0) + i.qty
-    }
-    const rows = flagOrderDiscrepancies(orderById, sentByOrderItem, currentByOrderItem)
+    // What each bill should still hold (tickets sent − sent food moved to another bill) against what
+    // it holds now. A partly comped line is two rows of one dish, summed (kotMoves.js).
+    const held = expectedHeldByOrderItem(sumSentQtyByOrderItem(logs), netMovedOutSent(mergeMovesById(movesFrom, movesTo)))
+    const rows = flagOrderDiscrepancies(orderById, held, sumCurrentQtyByOrderItem(currentItems))
     setDiscrepancies(rows.sort((a, b) => new Date(b.order.closed_at) - new Date(a.order.closed_at)))
     setReconLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom, reconReq, setTabError])
@@ -255,32 +238,41 @@ export default function KotLog() {
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      // S836, as in loadReconciliation: a dish moved to another table is moved, not removed.
+      ...readSentMoves(scopedFrom, orderIds),
     ])
     if (!trailReq.isCurrent(reqKey)) return
-    // S612: a failed ticket-log read would badge every bill "No KOT" — the alarming direction.
+    // S612: a failed ticket-log read would badge every bill "No KOT" — the alarming direction. A
+    // failed moves read would badge every bill a dish moved off "Discrepancy" (S836).
     const trailFailed = firstError(trailResults)
     if (trailFailed) { setTabError('trail', trailFailed); setBillTrailRows([]); setBillTrailLoading(false); return }
-    const [{ data: logs }, { data: currentItems }, { data: profs }] = trailResults
+    const [{ data: logs }, { data: currentItems }, { data: profs }, { data: movesFrom }, { data: movesTo }] = trailResults
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
 
     const logsByOrder = {}
     for (const log of logs || []) {
       ;(logsByOrder[log.order_id] = logsByOrder[log.order_id] || []).push(log)
     }
-    const sentByOrderItem = sumSentQtyByOrderItem(logs)
-    // Sum, not assign — see loadReconciliation's identical comment above.
-    const currentByOrderItem = {}
-    for (const i of (currentItems || [])) {
-      const key = `${i.order_id}::${i.recipe_id}`
-      currentByOrderItem[key] = (currentByOrderItem[key] || 0) + i.qty
-    }
+    // The same arithmetic as loadReconciliation's, so the two tabs flag the same bills (kotMoves.js).
+    const moves = mergeMovesById(movesFrom, movesTo)
+    const held = expectedHeldByOrderItem(sumSentQtyByOrderItem(logs), netMovedOutSent(moves))
     const flagsByOrder = {}
-    for (const f of flagOrderDiscrepancies(orderById, sentByOrderItem, currentByOrderItem)) {
+    for (const f of flagOrderDiscrepancies(orderById, held, sumCurrentQtyByOrderItem(currentItems))) {
       ;(flagsByOrder[f.order.id] = flagsByOrder[f.order.id] || []).push(f.reason)
+    }
+    // Each bill's moves of sent food, oldest first, for its expanded trail (S836).
+    const movesByOrder = {}
+    for (const m of [...moves].sort((a, b) => new Date(a.moved_at) - new Date(b.moved_at))) {
+      for (const id of new Set([m.from_order_id, m.to_order_id])) {
+        if (id && orderById[id]) (movesByOrder[id] = movesByOrder[id] || []).push(m)
+      }
     }
 
     const rows = orderList
-      .map(o => ({ order: o, logs: logsByOrder[o.id] || [], reasons: [...new Set(flagsByOrder[o.id] || [])] }))
+      .map(o => ({
+        order: o, logs: logsByOrder[o.id] || [], reasons: [...new Set(flagsByOrder[o.id] || [])],
+        moves: movesByOrder[o.id] || [], movedIn: sentFoodMovedIn(moves, o.id),
+      }))
       .sort((a, b) => new Date(b.order.closed_at) - new Date(a.order.closed_at))
     setBillTrailRows(rows)
     setBillTrailLoading(false)
@@ -330,9 +322,46 @@ export default function KotLog() {
 
   useEffect(() => { if (tab === 'pulled') loadPulled() }, [tab, loadPulled])
 
+  /* ── Moves ──
+     Every table move, join, release, dish move, part bill and put-back (pos_table_moves, S836), with
+     who did it and when. The record is written only by the move functions, so it is the named answer
+     to "where did table 3's momo go" that Reconciliation now accounts for silently. */
+  const [moveRows, setMoveRows] = useState([])
+  const [movesLoading, setMovesLoading] = useState(true)
+  const movesReq = useLatestRequest()
+
+  const loadMoves = useCallback(async () => {
+    if (!clientId) return
+    const reqKey = movesReq.begin(`${clientId}:${fromIso}:${toIso}`)
+    setMovesLoading(true)
+    setTabError('moves', null)
+    // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
+    const fromTs = nepalDayStartTs(fromIso)
+    const toTs   = nepalDayEndTs(toIso)
+    const movesResults = await Promise.all([
+      // Paged like every other tab here, oldest first: a move reads as a sequence (split, then put
+      // back), and `id` is the unique tiebreaker for moves made in one second.
+      fetchAllRows(() => scopedFrom('pos_table_moves',
+        'id, kind, from_order_no, to_order_no, from_table_name, to_table_name, lines, covers_moved, moved_by, moved_at')
+        .gte('moved_at', fromTs).lte('moved_at', toTs)
+        .order('moved_at').order('id')),
+      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+    ])
+    if (!movesReq.isCurrent(reqKey)) return
+    // S612 silent-zero rule: a failed read is not "nothing was moved in this range".
+    const movesFailed = firstError(movesResults)
+    if (movesFailed) { setTabError('moves', movesFailed); setMoveRows([]); setMovesLoading(false); return }
+    const [{ data: rows }, { data: profs }] = movesResults
+    setStaffNames(prev => ({ ...prev, ...Object.fromEntries((profs || []).map(p => [p.id, p.full_name])) }))
+    setMoveRows(rows || [])
+    setMovesLoading(false)
+  }, [clientId, fromIso, toIso, scopedFrom, movesReq, setTabError])
+
+  useEffect(() => { if (tab === 'moves') loadMoves() }, [tab, loadMoves])
+
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
-  const TAB_LABEL = { register: 'Register', reconciliation: 'Reconciliation', trail: 'Bill Trail', pulled: 'Pulled Items' }
+  const TAB_LABEL = { register: 'Register', reconciliation: 'Reconciliation', trail: 'Bill Trail', pulled: 'Pulled Items', moves: 'Moves' }
   // Every sheet states what it covers (S594/S754): these were bare json_to_sheet exports with no
   // client name, no date range and nothing saying which clock the times are on.
   const scopeLine = `@Date Range : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @View : ${TAB_LABEL[tab]}  @Times : Nepal time (UTC+05:45), 24-hour`
@@ -380,11 +409,27 @@ export default function KotLog() {
     } else if (tab === 'reconciliation') {
       const ws = letterhead(XLSX, 'KOT Log - Reconciliation', discrepancies.map(d => ({
         'Order#': d.order.order_no, 'Table': d.order.table_name || 'Takeaway', 'Status': statusBadge(d.order).label,
-        'Item': d.name, 'Sent Qty': d.sentQty, 'Current Qty': d.currentQty, 'Discrepancy': d.discrepancy, 'Reason': d.reason,
+        'Item': d.name, 'Sent Qty': d.sentQty,
+        // S836: sent food that changed bills, net. Negative is food moved IN from another bill's ticket.
+        'Moved Out (net; minus = in)': d.movedOut,
+        'Current Qty': d.currentQty, 'Discrepancy': d.discrepancy, 'Reason': d.reason,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'KOT Reconciliation')
       XLSX.writeFile(wb, `kot-reconciliation-${fromIso}-to-${toIso}.xlsx`)
-    } else {
+    } else if (tab === 'moves') {
+      const ws = letterhead(XLSX, 'KOT Log - Moves', moveRows.map(r => ({
+        'Date (BS)': nepalDayLabel(r.moved_at, true),
+        'Time': nepalTime24(r.moved_at),
+        'What': MOVE_KIND_LABEL[r.kind] || r.kind,
+        'From': moveSideText(r.from_table_name, r.from_order_no),
+        'To': moveSideText(r.to_table_name, r.to_order_no),
+        'Dishes': moveDishesText(r.lines),
+        'Guests': r.covers_moved ?? '',
+        'By': staffNames[r.moved_by] || '—',
+      })))
+      XLSX.utils.book_append_sheet(wb, ws, 'Moves')
+      XLSX.writeFile(wb, `kot-moves-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'trail') {
       const rows = []
       for (const row of billTrailRows) {
         const o = row.order
@@ -392,7 +437,8 @@ export default function KotLog() {
         const flag = row.reasons.length > 0 ? `Discrepancy: ${row.reasons.join('; ')}` : ''
         const base = { 'Date (BS)': dateBs, 'Order#': o.order_no, 'Invoice#': o.invoice_no || '', 'Table': o.table_name || 'Takeaway', 'Status': statusBadge(o).label }
         if (row.logs.length === 0) {
-          rows.push({ ...base, 'Station': '', 'Time': '', 'Items': '', 'Sent By': '', 'Flag': flag || 'No KOT Sent' })
+          // S836: a part bill's food can reach the kitchen on the table bill's ticket before the split.
+          rows.push({ ...base, 'Station': '', 'Time': '', 'Items': '', 'Sent By': '', 'Flag': flag || (row.movedIn ? "No KOT Sent (food sent on another bill's ticket, moved here)" : 'No KOT Sent') })
         } else {
           for (const log of row.logs) {
             rows.push({
@@ -410,20 +456,29 @@ export default function KotLog() {
     }
   }
 
-  const loading = tab === 'register' ? registerLoading : tab === 'reconciliation' ? reconLoading : tab === 'pulled' ? pulledLoading : billTrailLoading
+  // One entry per tab, no default arm (S836): a fifth tab added to a `? :` chain ending in Bill
+  // Trail's flags inherited Bill Trail's loading and emptiness (component-library.md, S737c).
+  const TAB_STATE = {
+    register:       { loading: registerLoading,  empty: logRows.length === 0 },
+    reconciliation: { loading: reconLoading,     empty: discrepancies.length === 0 },
+    trail:          { loading: billTrailLoading, empty: billTrailRows.length === 0 },
+    pulled:         { loading: pulledLoading,    empty: pulledRows.length === 0 },
+    moves:          { loading: movesLoading,     empty: moveRows.length === 0 },
+  }
+  const loading = TAB_STATE[tab]?.loading ?? true
   // The ACTIVE tab's own failure only — another tab's stale error must not paint over this one.
   const loadError = loadErrors[tab] || null
-  const isEmpty = tab === 'register' ? logRows.length === 0 : tab === 'reconciliation' ? discrepancies.length === 0 : tab === 'pulled' ? pulledRows.length === 0 : billTrailRows.length === 0
+  const isEmpty = TAB_STATE[tab]?.empty ?? true
 
   return (
     <div>
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">
-            KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all. Pulled Items is the named record: who took an already-cooked line off a bill, when, and why — Reconciliation can only infer that it happened." width={360}>ⓘ</Tip>
+            KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all. Pulled Items is the named record: who took an already-cooked line off a bill, when, and why — Reconciliation can only infer that it happened. Moves lists every table moved, joined or released and every dish moved or split off to a part bill, with who did it; food the kitchen already had that moved to another bill counts in Reconciliation as moved, not removed." width={360}>ⓘ</Tip>
           </h1>
           <p className="page-subtitle">
-            Every ticket sent to the kitchen, whether it matches what was actually billed, and who pulled anything that no longer does.
+            Every ticket sent to the kitchen, whether it matches what was actually billed, who pulled anything that no longer does, and every table moved, joined or split.
           </p>
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -439,6 +494,7 @@ export default function KotLog() {
           { key: 'reconciliation', label: 'Reconciliation' },
           { key: 'trail', label: 'Bill Trail' },
           { key: 'pulled', label: 'Pulled Items' },
+          { key: 'moves', label: 'Moves' },
         ]} />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
@@ -469,6 +525,7 @@ export default function KotLog() {
           {tab === 'register' ? 'No KOT/BOT tickets sent in this range.'
             : tab === 'reconciliation' ? 'No discrepancies — a quiet report is a healthy one. 🎉'
             : tab === 'pulled' ? 'Nothing already sent to the kitchen was taken off a bill in this range. 🎉'
+            : tab === 'moves' ? 'No table was moved, joined or split in this range.'
             : 'No paid or voided bills in this range.'}
         </div>
       ) : tab === 'register' ? (
@@ -556,6 +613,41 @@ export default function KotLog() {
             </tbody>
           </table>
         </div>
+      ) : tab === 'moves' ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th><Tip text="Moved bill: the whole bill went to another table. Joined table: another table joined this bill, bringing its own bill's dishes if it had one. Released table: a joined table came off the bill and is free again. Moved dishes: some dishes went to another table's bill. Part bill: some dishes went onto a bill of their own so one guest could pay separately. Put back: a part bill's dishes went back onto the table's bill." width={360}>What</Tip></th>
+                <th>From</th>
+                <th><Tip text="The table and bill the move went to, as they were named at the time. A part bill has no table of its own: it carries its table's name and its own bill number." width={300}>To</Tip></th>
+                <th><Tip text="The dishes that changed bills. Food the kitchen already had keeps its ticket on the bill it was sent from, so Reconciliation counts it as moved, not removed." width={300}>Dishes</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Guests who went with the move: the whole party for a moved bill, the joining table's party for a join, and for moved dishes or a part bill the guests who went with them (0 when only the food moved, or one guest pays and stays at the table). They come off the bill they left." width={320}>Guests</Tip></th>
+                <th>By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {moveRows.map(r => (
+                <tr key={r.id}>
+                  <td>
+                    {nepalDayLabel(r.moved_at, false)}
+                    <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
+                      {nepalTime(r.moved_at)}
+                    </span>
+                  </td>
+                  <td>{MOVE_KIND_LABEL[r.kind] || r.kind}</td>
+                  <td>{moveSideText(r.from_table_name, r.from_order_no)}</td>
+                  <td>{moveSideText(r.to_table_name, r.to_order_no)}</td>
+                  <td>{moveDishesText(r.lines)}</td>
+                  <td style={{ textAlign: 'right' }}>{r.covers_moved ?? '—'}</td>
+                  {/* A name or a dash, never a raw id: the record keeps the login's id only. */}
+                  <td>{staffNames[r.moved_by] || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : tab === 'trail' ? (
         <div className="table-wrap">
           <table className="data-table">
@@ -583,9 +675,18 @@ export default function KotLog() {
                       <td>{o.table_name || 'Takeaway'}</td>
                       <td><span className={statusBadge(o).className} style={{ fontSize: 11 }}>{statusBadge(o).label}</span></td>
                       <td>
-                        {noKot
-                          ? <span className="badge-amber" style={{ fontSize: 11 }}>No KOT</span>
-                          : <span className="badge-gray" style={{ fontSize: 11 }}>{row.logs.length} ticket{row.logs.length > 1 ? 's' : ''}</span>}
+                        {/* S836: no ticket of its own, but its food was sent on another bill's and moved
+                            here (a part bill split off after sending) — a fact, not the "No KOT" warning. */}
+                        {noKot && row.movedIn
+                          ? (
+                            <Tip width={300} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}
+                              text="No ticket was sent from this bill: its food reached the kitchen on another bill's ticket and was moved here afterwards. Open the trail to see the move.">
+                              <span className="badge-gray" style={{ fontSize: 11 }}>Sent on another bill</span>
+                            </Tip>
+                          )
+                          : noKot
+                            ? <span className="badge-amber" style={{ fontSize: 11 }}>No KOT</span>
+                            : <span className="badge-gray" style={{ fontSize: 11 }}>{row.logs.length} ticket{row.logs.length > 1 ? 's' : ''}</span>}
                       </td>
                       <td>{flagged && <span className="badge-red" style={{ fontSize: 11 }}>Discrepancy</span>}</td>
                       {/* Mouse affordance only — the RowDisclosure carries aria-expanded, so this
@@ -596,7 +697,9 @@ export default function KotLog() {
                       <tr>
                         <td colSpan={6} style={{ background: 'var(--theme-bg)', padding: '16px 18px' }}>
                           {row.logs.length === 0 ? (
-                            <span style={{ fontSize: 12, color: 'var(--theme-text3)', fontStyle: 'italic' }}>No kitchen/bar tickets were ever sent for this bill.</span>
+                            <span style={{ fontSize: 12, color: 'var(--theme-text3)', fontStyle: 'italic' }}>
+                              {row.movedIn ? 'No kitchen/bar tickets were sent from this bill; its food was sent on another bill\'s ticket (below).' : 'No kitchen/bar tickets were ever sent for this bill.'}
+                            </span>
                           ) : (
                             <table className="data-table">
                               <thead><tr><th>Time</th><th>Station</th><th>Items</th><th>Sent By</th></tr></thead>
@@ -613,6 +716,23 @@ export default function KotLog() {
                               </tbody>
                             </table>
                           )}
+                          {/* S836: sent food that changed bills. Its ticket stays above, on the bill it was
+                              sent from, so these lines are what make the tickets and the bill agree. */}
+                          {row.moves.length > 0 && (
+                            <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--theme-text2)' }}>
+                              {row.moves.map(m => {
+                                const out = m.from_order_id === o.id
+                                return (
+                                  <li key={m.id}>
+                                    {nepalTime(m.moved_at)} · {MOVE_KIND_LABEL[m.kind] || m.kind}: {moveDishesText(m.lines)}{' '}
+                                    {out
+                                      ? `to ${moveSideText(m.to_table_name, m.to_order_no)}`
+                                      : `from ${moveSideText(m.from_table_name, m.from_order_no)}`}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          )}
                           {flagged && (
                             <div style={{ marginTop: 10, fontSize: 12, color: 'var(--theme-red-text)' }}>
                               ⚠ {row.reasons.join('; ')}
@@ -627,13 +747,16 @@ export default function KotLog() {
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : tab === 'reconciliation' ? (
         <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Order#</th><th>Table</th><th>Status</th><th>Item</th>
-                <th style={{ textAlign: 'right' }}>Sent Qty</th><th style={{ textAlign: 'right' }}>Current Qty</th>
+                <th style={{ textAlign: 'right' }}>Sent Qty</th>
+                {/* S836: without this column a row whose dish partly moved would not add up. */}
+                <th style={{ textAlign: 'right' }}><Tip text="Food the kitchen already had that changed bills afterwards (see Moves). 'Out' went from this bill to another; 'in' came here on another bill's ticket. The bill should still hold Sent − out + in, and Discrepancy is how much less than that it holds." width={320}>Moved</Tip></th>
+                <th style={{ textAlign: 'right' }}>Current Qty</th>
                 <th style={{ textAlign: 'right' }}>Discrepancy</th><th>Reason</th>
               </tr>
             </thead>
@@ -645,6 +768,7 @@ export default function KotLog() {
                   <td><span className={statusBadge(d.order).className} style={{ fontSize: 11 }}>{statusBadge(d.order).label}</span></td>
                   <td>{d.name}</td>
                   <td style={{ textAlign: 'right' }}>{d.sentQty}</td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{movedText(d.movedOut)}</td>
                   <td style={{ textAlign: 'right' }}>{d.currentQty}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{d.discrepancy}</td>
                   <td>{d.reason}</td>
@@ -653,7 +777,7 @@ export default function KotLog() {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

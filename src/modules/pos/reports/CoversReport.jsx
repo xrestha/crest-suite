@@ -122,7 +122,9 @@ export default function CoversReport() {
     const results = await Promise.all([
       // Paged: every figure on this page (covers, RevPASH, turnover) divides by a count taken
       // from this read, so a truncation doesn't just shrink a total — it skews the averages.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id, vat_registered')
+      // `part_of_order_id` (S836): a part bill has no table but is dine-in (coversMath.isDineIn),
+      // and is not a sitting of its own, so turnover leaves it out.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, part_of_order_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id, vat_registered')
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .order('id')),
@@ -179,9 +181,9 @@ export default function CoversReport() {
       fetchAllRowsChunked(orderList.map(o => o.id),
         ids => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', ids).order('id')),
       // The bills this range's credit notes credit that closed before it: a return needs its bill's
-      // table (dine-in or takeaway), party size (turnover band) and server.
+      // table (dine-in or takeaway, a part bill dine-in since S836), party size (turnover band) and server.
       fetchAllRowsChunked(outsideIds,
-        ids => scopedFrom('pos_orders', 'id, table_id, covers, opened_by').in('id', ids).order('id')),
+        ids => scopedFrom('pos_orders', 'id, table_id, part_of_order_id, covers, opened_by').in('id', ids).order('id')),
     ])
     if (!rangeReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: with orders loaded but their lines dropped, every Net/RevPASH figure

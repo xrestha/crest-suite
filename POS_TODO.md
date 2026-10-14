@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
+Last updated: 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
 
 ---
 
@@ -369,8 +369,8 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   `placeOrder` re-read); 30 s queue after one no-answer; note change on a partly sent line; B3 live clicks.
   Polish found in 4c: the credit note prints its figures with `toFixed` (no comma grouping) where the
   bill uses `npr2`; the Credit Note Book's Date cell shows day and month only, with no year.
-- **Stage 7, new builds (owner ranking, section A):** table move/merge/split; Customization follow-ups;
-  kitchen and bar printers.
+- **Stage 7, new builds (owner ranking, section A):** ~~table move/merge/split~~ (shipped S836, see
+  `POS_DECISIONS.md` A); Customization follow-ups; kitchen and bar printers.
 - **Later:** section C, section D, the ⚪ questions.
 
 **Stage 5 slices (owner approved 2026-10-12; Q28 (a), Q29 (b)).** Every slice is a migration, and no
@@ -838,10 +838,6 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
 
 In this order. Service charge was offered and **not** chosen.
 
-- [ ] 🔴 **Table move / merge / split.** Moving a running order to another table, joining two
-  tables onto one bill, and splitting one table's order across bills. S754 added a unique index
-  allowing one open order per table (`pos_orders_one_open_per_table`), so a merge has to close or
-  re-point the second order in the same transaction rather than leave two open.
 - [ ] 🟡 **Crest Customization — release 1 SHIPPED (S758, critique pass S759); open follow-ups
   only.** The shipped entry, with its migrations and the browser smoke test, is in
   [POS_DECISIONS.md](POS_DECISIONS.md) → Shipped. Still open:
