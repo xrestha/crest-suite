@@ -40,6 +40,7 @@ import { isCostedByBuild, BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
 import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
 import PanPriceBanner from './PanPriceBanner'
 import { findRecipeCycle, isRecipeCycleError, recipeCycleText } from './recipeCycle'
+import { CHOICE_LINE_COLS, recipeNamesOf, choiceNamesOf, subRecipeInUseText } from './subRecipeInUse'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -861,23 +862,36 @@ export default function Recipes() {
       //
       // Checked BEFORE the recipe row is updated: a refusal after the update would leave the
       // category changed and the mirror half-dealt-with.
+      //
+      // A Customization choice's stock line is the same link from Option Groups, which offers only
+      // Sub-Recipe recipes as stock lines: converted away, the choice kept taking it off stock
+      // through a line nobody could see. Read beside the ingredient lines and named in one sentence.
       const wasSubRecipe = !!(selectedRecipe && (selectedRecipe.linked_item_id || selectedRecipe.category === 'Sub-Recipe'))
       if (wasSubRecipe && !isSubRecipe) {
-        const refRes = await withTimeout(
-          supabase.from('recipe_ingredients')
-            .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
-            .eq('sub_recipe_id', selectedRecipe.id),
-          SAVE_TIMEOUT_MS, 'Save'
-        )
+        const [refRes, choiceRes] = await Promise.all([
+          withTimeout(
+            supabase.from('recipe_ingredients')
+              .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
+              .eq('sub_recipe_id', selectedRecipe.id),
+            SAVE_TIMEOUT_MS, 'Save'
+          ),
+          withTimeout(scopedFrom('pos_option_ingredients', CHOICE_LINE_COLS).eq('sub_recipe_id', selectedRecipe.id), SAVE_TIMEOUT_MS, 'Save'),
+        ])
         // A check that could not run has not passed (S682).
         if (refRes.error) {
           const a = asActionError(refRes.error)
           throw new SaveRefusal(`Couldn't check whether "${selectedRecipe.name}" is used as an ingredient by other recipes, so nothing was changed. Try again. ${a.text}`, a.detail)
         }
-        const usedBy = [...new Set((refRes.data || []).map(x => x.recipes?.name).filter(Boolean))]
-        if (usedBy.length > 0) {
-          throw new SaveRefusal(`"${selectedRecipe.name}" is an ingredient in ${usedBy.join(', ')}, so it can't stop being a Sub-Recipe — those recipes would keep consuming it while it disappeared from their ingredient pickers. Remove it from them first, or use Hide if you just want it off the menu.`)
+        if (choiceRes.error) {
+          const a = asActionError(choiceRes.error)
+          throw new SaveRefusal(`Couldn't check whether "${selectedRecipe.name}" is a stock line on any Customization choice, so nothing was changed. Try again. ${a.text}`, a.detail)
         }
+        const inUse = subRecipeInUseText({
+          action: 'recategorise', name: selectedRecipe.name,
+          recipeNames: recipeNamesOf(refRes.data), choiceNames: choiceNamesOf(choiceRes.data),
+          customizationLive: !!customizationEnabled, isAdmin, canEditChoices: canSetMenuPrice,
+        })
+        if (inUse) throw new SaveRefusal(inUse)
       }
 
       const payload = {
@@ -1229,20 +1243,37 @@ Check the recipe list before saving again — if it timed out after the recipe w
     // resolves ri.sub_recipe to null for them, and calcRecipeCost/calcSubRecipeCostPerUnit
     // silently skip any ingredient row where sub_recipe_id is set but sub_recipe isn't — the
     // parent recipe's food cost quietly dropped with no warning. Block the delete instead.
-    const { data: referencing, error: refErr } = await supabase
-      .from('recipe_ingredients')
-      .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
-      .eq('sub_recipe_id', recipe.id)
-    // A check that could not run has not passed (S682): on a failed read `referencing` was null,
-    // the guard passed, and a sub-recipe other dishes depend on was deleted anyway.
-    if (refErr) {
-      const { text, detail } = asActionError(refErr)
+    //
+    // A Customization choice can hold it too, as a stock line (pos_option_ingredients.sub_recipe_id,
+    // a plain FK). The database refused that delete, but the reader got deleteRecipeNow's generic
+    // "still used by other records … use Hide", and Hide does nothing for a choice. Both links are
+    // read here and named in one sentence (subRecipeInUse.js).
+    const [refRes, choiceRes] = await Promise.all([
+      supabase
+        .from('recipe_ingredients')
+        .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
+        .eq('sub_recipe_id', recipe.id),
+      scopedFrom('pos_option_ingredients', CHOICE_LINE_COLS).eq('sub_recipe_id', recipe.id),
+    ])
+    // A check that could not run has not passed (S682): on a failed read the rows were null, the
+    // guard passed, and a sub-recipe other dishes depend on was deleted anyway.
+    if (refRes.error) {
+      const { text, detail } = asActionError(refRes.error)
       setError({ text: `Couldn't check whether "${recipe.name}" is used by other recipes, so it was not deleted. Try again. ${text}`, detail })
       return
     }
-    const usedByNames = [...new Set((referencing || []).map(r => r.recipes?.name).filter(Boolean))]
-    if (usedByNames.length > 0) {
-      setError(`Can't delete "${recipe.name}" — it's used as an ingredient in: ${usedByNames.join(', ')}. Remove it from those recipes first.`)
+    if (choiceRes.error) {
+      const { text, detail } = asActionError(choiceRes.error)
+      setError({ text: `Couldn't check whether "${recipe.name}" is a stock line on any Customization choice, so it was not deleted. Try again. ${text}`, detail })
+      return
+    }
+    const inUse = subRecipeInUseText({
+      action: 'delete', name: recipe.name,
+      recipeNames: recipeNamesOf(refRes.data), choiceNames: choiceNamesOf(choiceRes.data),
+      customizationLive: !!customizationEnabled, isAdmin, canEditChoices: canSetMenuPrice,
+    })
+    if (inUse) {
+      setError(inUse)
       return
     }
 

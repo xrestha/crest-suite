@@ -172,9 +172,10 @@ subject matter:
   card, share, FC pills and export: listed with its sales, out of every verdict, ranking and cost total.
 
 A sub-recipe can be a choice's stock line, so deleting one is refused by
-`pos_option_ingredients.sub_recipe_id` as well — `deleteRecipe`'s pre-check still only looks at
-`recipe_ingredients.sub_recipe_id`, so that refusal arrives with a generic message (open in
-POS_TODO.md).
+`pos_option_ingredients.sub_recipe_id` as well. `deleteRecipe` and the move out of the Sub-Recipe
+category read both links and name them in one sentence (`subRecipeInUse.js`, S838): Hide frees
+neither, and Option Groups offers only Sub-Recipe recipes, so a moved one would keep taking stock
+through a line nobody can see.
 
 ## The walk can be FED a pre-loaded book, and that is still one engine (S793)
 
