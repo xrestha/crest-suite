@@ -31,6 +31,14 @@ import { disabledStyle } from '../../../shared/inlineFieldState'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import OptionPickerModal from '../../customization/OptionPickerModal'
+import ComboPickerModal from '../../customization/ComboPickerModal'
+import { ComboTiles, ComboCartBlock } from './ComboTill'
+import {
+  COMBO_TAB, COMBO_TAB_LABEL, loadComboCatalog, comboAddsInOneTap, defaultComboPicks, buildComboLines, comboDishLine,
+  comboIdOf, comboGroupOf, groupComboBlocks, cartRows, addComboLinesToCart, setComboQtyIn, comboUnitsPulled,
+  swapComboDish, picksOfCombo, collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, comboSharesOf,
+} from './comboCart'
+import { computeOrderAmounts, discountableSubtotal, isComboItem } from '../../../utils/posBillingMath'
 import { loadOptionCatalog } from '../../customization/customizationData'
 import { groupsForDish, describeSelection, defaultSelection, selectionProblems } from '../../../shared/optionPricing'
 import { lineChoiceTrouble, choiceRefusalText, savedLineGoneNote } from './choiceRefusal'
@@ -86,6 +94,7 @@ import {
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
   storedLinesMatchPayload, storedLinesContainPayload, lineKeyOf, lineOptionIds, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
+  isComboLine, comboFieldsOf, comboSuffixOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
   keptLinesToRestore, mergeRecoveredLines,
@@ -110,6 +119,11 @@ const HINT = {
   optionsOff: 'order_options_off',
   // S809 4h (CUSTOMIZATION-6): a new line whose choices would price it below zero.
   optionBelowZero: 'option_price_below_zero',
+  // Combos (S839, docs/pos-combos.md): a combo not whole on the save; a dish its pick no longer offers,
+  // or the combo off the menu (the last two mean the combos on screen are stale).
+  comboIncomplete: 'combo_incomplete',
+  comboDishOff:    'combo_dish_not_offered',
+  comboOff:        'combo_unavailable',
   rank:       'rank_required',     // the login's POS rank is too low for this write
 }
 // Postgres prefixes a RAISE message with the code word the function chose; the reader wants the
@@ -304,6 +318,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
   // { recipe, dishGroups, replaceIdx?, initialIds? } while the choice window is open.
   const [optionPicker, setOptionPicker] = useState(null)
+  // Combos (S839): { combo } while a combo's picks are being chosen, or { combo, swap: { lineId,
+  // groupId }, initialPicks } while one dish of a combo on the cart is being swapped.
+  const [comboPicker, setComboPicker] = useState(null)
   // The cart as last loaded or saved — { recipe_id|name: 'qty|notes' } — so ← can tell an unsaved
   // edit from an untouched order (S754). A ref: only the back handler reads it.
   const savedItemsRef = useRef(new Map())
@@ -952,7 +969,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     .filter(i => i.qty > 0)
   const itemCompFoodCost  = compedOrderItems.reduce((s, i) => s + i.qty * compPlateCost(i), 0)
   const itemCompChoicesUnsaved = !!compCosting && compedOrderItems.some(i => compCosting.unsaved(i))
-  const itemCompCount     = compedOrderItems.length
+  // A comped combo counts once, however many dishes it has (S839).
+  const itemCompCount     = cartRows(compedOrderItems).length
   const hasItemComp       = itemCompCount > 0
   // Every item comped out — nothing left to actually bill. Confirm Payment gets blocked for this
   // (see closeOrder's guard) rather than issuing a real ₨0 Tax Invoice/PAN Bill with zero line
@@ -960,29 +978,37 @@ export default function PosOrders({ billingStation = false } = {}) {
   // whole-order Complimentary tab already exists for exactly this case.
   const allItemsComped    = orderItems.length > 0 && payableOrderItems.length === 0
   const paySubEx     = payableOrderItems.reduce((s, i) => s + i.qty * i.unit_price, 0)
-  const payVatAmtRaw = vatReg ? payableOrderItems.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
 
   // Discount reduces the pre-VAT taxable base, then VAT is recalculated on the discounted amount
   // (same rule as purchase_entries.discount_amount in Purchases.js) — not a flat subtraction off total.
   // Non-admin/owner logins with a manager-set discount cap (`profile.pos_discount_limit`, a %,
   // null = unlimited) can never exceed it here regardless of whether they typed a flat ₨ amount or
   // a %, so the two entry modes stay consistent.
+  //
+  // S839 (owner decision): a bill discount never touches a combo, which is already a deal. The percent,
+  // the amount cap and the cashier's limit are all of the DISCOUNTABLE subtotal (the payable lines less
+  // combo dishes) — the base guard_pos_order_close measures the cap against, and refuses a discount above
+  // (discount_on_combo). On a bill with no combo it is paySubEx, exactly as before.
   const discountCapPct = (!isAdmin && !isOwner) ? profile?.pos_discount_limit : null
+  const discountBase = discountableSubtotal(payableOrderItems)
+  const comboOnlyBill = paySubEx > 0 && discountBase <= 0 && payableOrderItems.some(isComboItem)
   const discountAmt = (() => {
     const v = parseFloat(discountStr) || 0
-    if (v <= 0 || paySubEx <= 0) return 0
-    const raw = discountMode === 'percent' ? Math.min(paySubEx, paySubEx * v / 100) : Math.min(paySubEx, v)
+    if (v <= 0 || discountBase <= 0) return 0
+    const raw = discountMode === 'percent' ? Math.min(discountBase, discountBase * v / 100) : Math.min(discountBase, v)
     if (discountCapPct == null) return raw
-    return Math.min(raw, paySubEx * (discountCapPct / 100))
+    return Math.min(raw, discountBase * (discountCapPct / 100))
   })()
-  const discountClamped = discountCapPct != null && paySubEx > 0 && (() => {
+  const discountClamped = discountCapPct != null && discountBase > 0 && (() => {
     const v = parseFloat(discountStr) || 0
-    const effectivePct = discountMode === 'percent' ? v : (v / paySubEx * 100)
+    const effectivePct = discountMode === 'percent' ? v : (v / discountBase * 100)
     return effectivePct > discountCapPct
   })()
-  const discRatio = paySubEx > 0 ? discountAmt / paySubEx : 0
-  const payVatAmt = payVatAmtRaw * (1 - discRatio)
-  const payTotal  = Math.round(paySubEx - discountAmt + payVatAmt)
+  // The bill's figures through the one bill-math primitive (S580), so the paid_amount stored here is
+  // computeOrderAmounts' net — what the printed bill, the credit-note guard and every report compute.
+  // With no combo it is the same arithmetic this screen always ran (subtotal − discount + VAT on the
+  // discounted base, to the rupee); with one, each line keeps its own share of the discount (0 for a combo dish).
+  const payTotal  = computeOrderAmounts({ discount_amount: discountAmt }, payableOrderItems, vatReg).net
   // Buyer Name + Phone become compulsory (not just optional) whenever a discount is applied, or
   // when the bill is going on Credit — both cases need an identifiable, audited record.
   const requireBuyerId = discountAmt > 0 || payMethod === 'Credit'
@@ -1320,6 +1346,27 @@ export default function PosOrders({ billingStation = false } = {}) {
     return out
   }, [optionCatalog, customizationEnabled])
 
+  // Combos (S839, docs/pos-combos.md): the outlet's active combos, and the recipe row of each dish they
+  // offer (read with them, since a combo dish need not be On POS); the till menu fills any gap.
+  const combos = customizationEnabled ? (optionCatalog.combos || []) : []
+  const comboRecipeOf = useMemo(() => {
+    const own = optionCatalog.comboRecipes || {}
+    const onMenu = new Map(menu.map(r => [r.id, r]))
+    return id => own[id] || onMenu.get(id)
+  }, [optionCatalog, menu])
+  // A dish's choices, priced and described as the choice window does (S758).
+  const describeDishChoices = (recipeId, ids) => {
+    const dg = dishGroupsByRecipe[recipeId] || []
+    return describeSelection(ids, { ...optionMaps, attachByGroup: Object.fromEntries(dg.map(d => [d.group.id, d.attachment])) })
+  }
+  // A combo dish that cannot go on with its defaults: a build-your-own dish, or a required group with no default.
+  const comboDishNeedsChoice = recipeId => {
+    const dg = dishGroupsByRecipe[recipeId]
+    if (!dg) return false
+    if ((optionCatalog?.buildYourOwn || []).includes(recipeId)) return true
+    return selectionProblems(dg, defaultSelection(dg)).length > 0
+  }
+
   // A reload or a closed tab ends this screen without a word (S809.4): ← asks before it drops unsaved
   // lines, and Cancel before it drops recorded payments, but the browser asked nothing. While either is
   // on screen the browser asks first. Tenders count only while the payment window is up, because they
@@ -1620,7 +1667,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   // GUEST-1 (S809 3a, owner decision Q11 a): the guest's order-wide note (`orderNote`) goes onto each
   // of their dishes beside the dish's own note, so it prints under every dish on the KOT/BOT and shows
   // on the Kitchen Display. Accept used to drop it: it reached nobody but the waiter's banner.
-  function mergeGuestItem(it, orderNote) {
+  //
+  // S839: a request's combo dish (it carries `combo`) comes in as a combo dish of the request's own
+  // line_id, so the dishes of that combo stay one combo on the cart and on the save.
+  function mergeGuestItem(requested, orderNote) {
+    const it = guestLineOf(requested)
     setOrderItems(prev => {
       const key = lineKeyOf(it)
       const idx = prev.findIndex(i => lineKeyOf(i) === key)
@@ -1654,10 +1705,11 @@ export default function PosOrders({ billingStation = false } = {}) {
         // A guest's customized dish (S758 stage 6) keeps its choices; the server re-prices it from
         // the option ids on save, so the snapshot's price is display only.
         ...(it.selection_key ? {
-          selection_key: it.selection_key, option_ids: it.option_ids || String(it.selection_key).split('+'),
+          selection_key: it.selection_key, option_ids: lineOptionIds(it),
           base_unit_price: it.base_unit_price, options_delta: it.options_delta,
           option_summary: it.option_summary, options: it.options,
         } : {}),
+        ...(isComboLine(it) ? comboFieldsOf(it) : {}),
       }]
     })
   }
@@ -2066,6 +2118,7 @@ export default function PosOrders({ billingStation = false } = {}) {
           const reason = {
             [HINT.stale]: 'stale', [HINT.notOpen]: 'closed', [HINT.locked]: 'closed', [HINT.offMenu]: 'off_menu',
             [HINT.optionOff]: 'off_menu', [HINT.optionCount]: 'off_menu', [HINT.optionsOff]: 'off_menu',
+            [HINT.comboDishOff]: 'off_menu', [HINT.comboOff]: 'off_menu',
           }[res.error.hint]
           // Any other refusal is the server's answer too, and no retry changes it (S731): a conflict with
           // its sentence, rather than an entry tried every 15 s for ever.
@@ -2276,7 +2329,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       return false
     }
 
-    const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog] = await Promise.all([
+    const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog, comboCatalog] = await Promise.all([
       scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
         .eq('is_active', true)
         .eq('pos_enabled', true)
@@ -2293,6 +2346,11 @@ export default function PosOrders({ billingStation = false } = {}) {
       customizationEnabled
         ? loadOptionCatalog(scopedFrom)
         : Promise.resolve({ error: null, groups: [], options: [], attachments: [], buildYourOwn: [] }),
+      // Combos (S839): the outlet's active combos, their picks and dishes, and every combo dish's recipe
+      // (a side sold only in combos is not On POS, so the menu read above does not have it).
+      customizationEnabled
+        ? loadComboCatalog(scopedFrom)
+        : Promise.resolve({ error: null, combos: [], recipes: {} }),
     ])
     // S754: a dropped error here rendered "No POS-enabled items" over a menu the client has, AND
     // cached that empty menu as the offline fallback. Keep last-good, leave menuLoaded false so a
@@ -2309,8 +2367,18 @@ export default function PosOrders({ billingStation = false } = {}) {
       setMenuLoadError(`The dish choices could not be read, so a dish that needs a size or choice cannot be added yet. (${catalog.error})`)
       return false
     }
+    // A failed combo read is a failed menu read too: the Combos tab would otherwise read as none.
+    if (comboCatalog.error) {
+      console.error('combo read failed, keeping the last menu:', comboCatalog.error)
+      setMenuLoadError(`The combos could not be read, so a combo cannot be added yet. ${errorText(comboCatalog.error, 'staff')}`)
+      return false
+    }
     setMenuLoadError('')
-    const nextCatalog = { groups: catalog.groups, options: catalog.options, attachments: catalog.attachments, buildYourOwn: catalog.buildYourOwn || [] }
+    // The combos ride in the option catalog, so the offline copy of the menu carries them too.
+    const nextCatalog = {
+      groups: catalog.groups, options: catalog.options, attachments: catalog.attachments, buildYourOwn: catalog.buildYourOwn || [],
+      combos: comboCatalog.combos || [], comboRecipes: comboCatalog.recipes || {},
+    }
     setOptionCatalog(nextCatalog)
     setMenu(data || [])
     let suggMap = {}
@@ -2579,7 +2647,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (!data) { if (!(await openWhereBillWent(orderNo, orderLabel(), orderItems))) showClosedElsewhere(); return }
     if (data.status !== 'open') { showClosedElsewhere(); return }
     if (data.items_version !== itemsVersionRef.current) { await reloadAfterStale(orderId, orderItems, { data, error: null }); return }
-    setTableDialogLines((data.pos_order_items || []).map(cartLineFromStored))
+    // S839: a combo is offered as one row, so it can only move (or be paid for) whole.
+    setTableDialogLines(collapseCombosForMove((data.pos_order_items || []).map(cartLineFromStored)))
     if (kind === 'dishes') loadFloor({ quiet: true })
     setTableDialog(kind)
   }
@@ -3213,6 +3282,81 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (replaceIdx == null) computeSuggestions(recipe)
   }
 
+  /* ── combos (S839, docs/pos-combos.md) ── */
+
+  // A combo tile: a set meal whose dishes need no choice goes on in one tap; anything else asks its picks.
+  function tapCombo(combo) {
+    if (comboAddsInOneTap(combo, comboDishNeedsChoice)) {
+      addComboToCart(combo, defaultComboPicks(combo, rid => (dishGroupsByRecipe[rid] ? defaultSelection(dishGroupsByRecipe[rid]) : [])), 1)
+      return
+    }
+    setComboPicker({ combo })
+  }
+
+  // One cart line per pick, a new combo_line_id, the same quantity on each — or more of an identical
+  // combo not sent yet. The prices are the display twin until the save answers (withServerLineFields).
+  function addComboToCart(combo, picks, qty) {
+    const lines = buildComboLines({
+      combo, picks, recipeOf: comboRecipeOf, vatReg, qty: Math.max(1, Number(qty) || 1),
+      lineId: randomUUID().toLowerCase(), describe: describeDishChoices,
+    })
+    if (!lines) { setMsg(`error:${combo.name} could not be put together — a pick has no dish on the menu now. Ask a manager to check the combo.`); return }
+    setOrderItems(prev => addComboLinesToCart(prev, lines))
+    setMsg('')
+  }
+
+  // One quantity for every dish of a combo. Cutting below what the kitchen already has asks for the
+  // reason first, exactly as a plain line does (setQty): the save records the pull.
+  function setComboQty(lineId, qty) {
+    const pulled = comboUnitsPulled(orderItems, lineId, qty)
+    if (pulled > 0) {
+      const name = orderItems.find(i => comboIdOf(i) === lineId)?.combo_name || 'This combo'
+      setPullPrompt({ combo: { lineId, qty }, name, pulled })
+      setPullReason('')
+      return
+    }
+    applyComboQty(lineId, qty)
+  }
+  function applyComboQty(lineId, qty) {
+    setOrderItems(prev => setComboQtyIn(prev, lineId, qty, pullIsSaved))
+  }
+
+  // Swap (or change the choices of) one dish of a combo on the cart: the picker for that pick alone.
+  function openComboSwap(lineId, item) {
+    const combo = combos.find(c => c.id === item.combo_id)
+    if (!combo) { setMsg(`error:${item.combo_name || 'This combo'} is not on the till menu any more, so its dishes cannot be changed. Remove the combo, or keep it as it is.`); return }
+    const groupId = item.combo_group_id || comboGroupOf(item)
+    if (!combo.groups.some(g => String(g.id).toLowerCase() === String(groupId).toLowerCase())) {
+      setMsg(`error:${item.combo_name || 'This combo'} no longer has that pick, so ${item.name} cannot be changed. Remove the combo to change it.`)
+      return
+    }
+    setComboPicker({ combo, swap: { lineId, groupId }, initialPicks: picksOfCombo(orderItems, lineId) })
+  }
+
+  // The swap's answer: the new dish takes the old one's place in the same combo and pick. A dish the
+  // kitchen already has is pulled with a reason (the save records it) and the new one goes on the next ticket.
+  function confirmComboSwap(combo, swap, picks) {
+    const pick = picks.find(p => String(p.group_id).toLowerCase() === String(swap.groupId).toLowerCase())
+    const group = combo.groups.find(g => g.id === pick?.group_id)
+    const item = group?.items.find(i => i.recipe_id === pick.recipe_id)
+    const recipe = item && comboRecipeOf(item.recipe_id)
+    const old = orderItems.find(i => comboIdOf(i) === swap.lineId && comboGroupOf(i) === String(swap.groupId).toLowerCase())
+    if (!recipe || !old) return
+    const share = comboSharesOf(combo, comboRecipeOf, vatReg)[group.id]
+    const newLine = comboDishLine({
+      combo, group, item, recipe, vatReg, share, qty: old.qty, lineId: swap.lineId, optionIds: pick.option_ids, describe: describeDishChoices,
+    })
+    if (lineKeyOf(newLine) === lineKeyOf(old)) return
+    const kitchenQty = Math.min(kitchenQtyOf(old), Number(old.qty) || 0)
+    if (kitchenQty > 0) {
+      setPullPrompt({ swap: { lineId: swap.lineId, groupId: swap.groupId, newLine }, name: old.name, pulled: kitchenQty })
+      setPullReason('')
+      return
+    }
+    setOrderItems(prev => swapComboDish(prev, swap.lineId, swap.groupId, newLine))
+    setMsg('')
+  }
+
   // Fallback for when there is nothing data-driven to rank on — a POS-only client (no IMS, so no
   // me_class and no co-occurrence) with no manual pairing on this item. rank() below filters to
   // _score > 0, so without this the panel would come back empty for them. Was previously reached
@@ -3302,6 +3446,11 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   // What a station needs to know about a line's choices (S758): the kitchen's own name when the
   // owner set one, and whether it takes something off. Prices never go to the kitchen.
+  // A line's full selection key as the server stores it — its choices, then a combo dish's
+  // '@<combo_line_id>/<pick>' tail (S839) — for a ticket item; '' for a plain line.
+  const ticketKeyOf = item => item.selection_key
+    || ((Array.isArray(item.option_ids) ? selectionKeyOf(item.option_ids) : '') + comboSuffixOf(item))
+
   const ticketOptions = item => (item.options || []).map(o => ({
     kitchen: o.kitchen_name || o.option_name, is_removal: !!o.is_removal, group_kind: o.group_kind || '',
   }))
@@ -3766,6 +3915,18 @@ export default function PosOrders({ billingStation = false } = {}) {
       refuseAndReloadMenu(named || `Not saved — ${errorText(err, 'staff')}`)
       return { ok: false, handled: true, error: err }
     }
+    if (err?.hint === HINT.comboDishOff || err?.hint === HINT.comboOff) {
+      // S839: a combo or one of its dishes is off the menu since the till read it. Nothing was saved; the
+      // menu and its combos are re-read, as for a dish off the menu.
+      refuseAndReloadMenu(`Not saved — ${errorText(err, 'staff')}`)
+      return { ok: false, handled: true, error: err }
+    }
+    if (err?.hint === HINT.comboIncomplete) {
+      // S839: a combo missing a dish, or its dishes at different quantities. Pressing again changes
+      // nothing, so the sentence says what to fix instead of "try again".
+      setMsg(`error:Not saved — ${errorText(err, 'staff')}`)
+      return { ok: false, handled: true, error: err }
+    }
     if (err?.hint === HINT.offMenu) {
       // The server's sentence names the dish ("Chicken Momo is not on the menu any more — remove it
       // from the order and save again"). Nothing was saved, and the menu on screen is what is out of
@@ -4202,7 +4363,10 @@ export default function PosOrders({ billingStation = false } = {}) {
       items: items.map(i => ({
         recipe_id: i.recipe_id, name: i.name, category: i.category,
         // A customized line (S758) carries its choices, so the Kitchen Display shows what to make.
-        ...(i.selection_key ? { selection_key: i.selection_key, options: ticketOptions(i) } : {}),
+        ...(ticketKeyOf(i) ? { selection_key: ticketKeyOf(i), options: ticketOptions(i) } : {}),
+        // S839: a combo's dish names its combo ("↳ Momo Combo" on the ticket and the Kitchen Display);
+        // its key above keeps the combo's '@' tail, which the Clear rule and the KDS pull match on.
+        ...(isComboLine(i) ? { combo_name: i.combo_name ?? i.combo?.name ?? null } : {}),
         // The printed KOT always carried the note ("no onion — allergy"); the logged ticket did
         // not, so the Kitchen Display never showed it (S754). items is jsonb — no migration. The
         // offline queue stores this same payload, so a replayed send carries it too.
@@ -5322,6 +5486,12 @@ export default function PosOrders({ billingStation = false } = {}) {
           await reloadAfterStale(orderId, orderItems, null, { duringClose: true })
           return false
         }
+        // S839: a discount above what the bill's non-combo dishes come to (the bill changed under the
+        // payment window, or an older screen). Nothing was charged.
+        if (error.hint === 'discount_on_combo') {
+          setCloseMsg(`error:${errorText(error, 'staff')}`)
+          return false
+        }
         // guard_pos_order_close() (migration 20260819120000) refuses an over-cap discount or a void
         // from an account without Allow Void, and phrases the refusal for the person holding the
         // till. Its messages are prefixed with the table name the way every Postgres error is;
@@ -6015,9 +6185,109 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
   const visTables = secFilter === 'All' ? tables : tables.filter(t => t.section === secFilter)
   const menuCats  = ['All', ...Array.from(new Set(menu.map(r => r.category))).sort()]
   const menuQuery = menuSearch.trim().toLowerCase()
-  const visMenu   = (catTab === 'All' ? menu : menu.filter(r => r.category === catTab))
+  // S839: the Combos tab (first, when the outlet has any). With none left it shows the whole menu.
+  const onCombosTab = catTab === COMBO_TAB && combos.length > 0
+  const menuTab   = catTab === COMBO_TAB ? 'All' : catTab
+  const visCombos = onCombosTab ? combos.filter(c => c.name.toLowerCase().includes(menuQuery)) : []
+  const cartCombos = groupComboBlocks(orderItems)
+  const comboCountOf = comboId => [...cartCombos.values()].reduce((n, b) => n + (b.combo_id === comboId ? b.qty : 0), 0)
+  const visMenu   = (menuTab === 'All' ? menu : menu.filter(r => r.category === menuTab))
     // Match on name OR Product Code so staff can ring an item by its code (e.g. "MOM-03").
     .filter(r => r.name.toLowerCase().includes(menuQuery) || (r.recipe_code || '').toLowerCase().includes(menuQuery))
+
+  // A cart line's marks (sent to which station, the kitchen's timer, the +N added since), its kitchen
+  // note with the presets, and its amount: one definition for a plain line and a combo's dish (S839).
+  const cartLineTotal = item => item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
+  const cartLineMarks = item => {
+    const kotTimer = item.sent_to_kot ? kotTimerLabel(ticketForLine(orderKotTickets, item), kotNow) : null
+    return (<>
+      {item.sent_to_kot && (
+        <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
+          <span style={{
+            fontSize: 10, fontWeight: 700, flexShrink: 0,
+            background: 'color-mix(in srgb, var(--theme-accent) 18%, transparent)',
+            color: 'var(--theme-accent-ink)',
+            borderRadius: 0, padding: '1px 5px', cursor: 'default',
+          }}>
+            ✓ {!routingShown ? 'Sent' : botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
+          </span>
+        </Tip>
+      )}
+      {kotTimer && (
+        <Tip text="Live kitchen/bar status for this item's ticket — Sent (not yet started) / a countdown once Started, using the kitchen's own estimate / Ready once done">
+          <span style={{ fontSize: 10, fontWeight: 600, flexShrink: 0, color: kotTimer.color }}>
+            {kotTimer.text}
+          </span>
+        </Tip>
+      )}
+      {!item.sent_to_kot && (item.sent_qty || 0) > 0 && item.qty > item.sent_qty && (
+        <Tip text={`${item.qty - item.sent_qty} extra added since last ticket — press KOT or BOT to send the addition to the station`}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, flexShrink: 0,
+            background: 'var(--theme-amber)', color: amberBadgeText,
+            borderRadius: 0, padding: '1px 5px', cursor: 'default',
+          }}>
+            +{item.qty - item.sent_qty}
+          </span>
+        </Tip>
+      )}
+    </>)
+  }
+  const cartNoteEditor = (item, idx) => (<>
+      <input
+        type="text"
+        aria-label={`Note for ${item.name}`}
+        value={item.notes || ''}
+        onChange={e => updateItemNote(idx, e.target.value)}
+        onFocus={() => setNoteFocusIdx(idx)}
+        // Keep the presets while focus moves INTO them (S776): Tab from the note used to blur
+        // it, hide the presets and move focus to whatever came after them.
+        onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
+        placeholder="+ Kitchen note (e.g. serve after starters)"
+        className="till-hit--row"
+        // S833: a written note is an instruction (often an allergy), so it reads in the body ink;
+        // only the empty box's prompt stays quiet. Every note was grey italic before.
+        style={{
+          background: 'none', border: 'none', outline: 'none',
+          fontSize: item.notes ? 12 : 11, fontStyle: item.notes ? 'normal' : 'italic',
+          fontWeight: item.notes ? 600 : 400, color: item.notes ? 'var(--theme-text1)' : 'var(--theme-text3)',
+          padding: '0 0 0 2px', width: '100%',
+        }}
+      />
+      {noteFocusIdx === idx && notePresets.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '2px 0 0 2px' }}>
+          {notePresets.map(p => (
+            <button
+              key={p}
+              onMouseDown={e => e.preventDefault()}
+              onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
+              onClick={() => addPresetToNote(idx, p)}
+              className="till-hit--row"
+              style={{
+                fontSize: 12, padding: '2px 10px', borderRadius: 'var(--radius-full)',
+                border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
+                color: 'var(--theme-text2)', cursor: 'pointer',
+              }}
+            >{p}</button>
+          ))}
+        </div>
+      )}
+  </>)
+  // A combo dish's change control: Swap when its pick offers another dish, Change when the dish has
+  // choices of its own and nothing to swap to, else none.
+  const comboSwapLabel = item => {
+    const combo = combos.find(c => c.id === item.combo_id)
+    const group = combo?.groups.find(g => String(g.id).toLowerCase() === comboGroupOf(item))
+    if (!group) return null
+    if (group.items.length > 1) return 'Swap'
+    return dishGroupsByRecipe[item.recipe_id] ? 'Change' : null
+  }
+  // S809 3o for a combo's dish: choices the next save would refuse, on a dish not yet on the saved order.
+  const comboDishTrouble = item => {
+    if (item.sent_to_kot || (item.sent_qty || 0) > 0 || !menuLoaded || savedItemsRef.current.has(lineKeyOf(item))) return null
+    const t = lineChoiceTrouble(item, dishGroupsByRecipe[item.recipe_id], optionMaps.optionsById)
+    return t ? t.text.replace(/Tap (Change|Choices)/, `Tap ${comboSwapLabel(item) || 'Swap'}`) : null
+  }
 
   // Recent Bills' number search (S754). A day's bills — cheap to filter per keystroke.
   const recentBillsQuery = recentBillsSearch.trim().replace(/^#/, '').toLowerCase()
@@ -6409,7 +6679,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           {screenGuestReqs.map(req => (
             <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13 }}>
-                🔔 Guest ordered: {(req.items || []).map(it => `${it.qty}× ${it.name}${it.option_summary ? ` (${it.option_summary})` : ''}`).join(', ')}
+                {/* S839: a combo's dishes are named under the combo. */}
+                🔔 Guest ordered: {guestRequestText(req.items)}
                 {/* GUEST-1 (S809 3a): at full contrast, and it says where Accept puts it. */}
                 {req.guest_notes && <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}> — Note for the kitchen: "{req.guest_notes}" (goes on each of their dishes)</span>}
               </span>
@@ -6442,8 +6713,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'thin' }}>
+              {combos.length > 0 && (
+                <button key={COMBO_TAB} className={`tab-btn till-hit${catTab === COMBO_TAB ? ' tab-btn--active' : ''}`}
+                  onClick={() => setCatTab(COMBO_TAB)} style={{ flexShrink: 0 }}>{COMBO_TAB_LABEL}</button>
+              )}
               {menuCats.map(c => (
-                <button key={c} className={`tab-btn till-hit${catTab === c ? ' tab-btn--active' : ''}`}
+                <button key={c} className={`tab-btn till-hit${!onCombosTab && menuTab === c ? ' tab-btn--active' : ''}`}
                   onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
               ))}
             </div>
@@ -6472,6 +6747,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             )}
             {!menuLoaded && !(menuLoadError && menu.length > 0) ? (
               menuLoadError ? null : <p style={{ color: 'var(--theme-text3)', margin: 0 }}>Loading menu…</p>
+            ) : onCombosTab ? (
+              visCombos.length === 0
+                ? <p style={{ color: 'var(--theme-text3)', margin: 0 }}>{`No combos match "${menuSearch.trim()}".`}</p>
+                : <ComboTiles combos={visCombos} countOf={comboCountOf} onPick={tapCombo} />
             ) : visMenu.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', margin: 0 }}>
                 {menu.length === 0
@@ -6489,9 +6768,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {visMenu.map(r => {
                   const vat   = vatReg ? vatOf(r) : 0
                   const price = Math.round((parseFloat(r.selling_price) || 0) * (1 + vat))
-                  const inOrd = orderItems.find(i => i.recipe_id === r.id)
+                  // A combo's dish counts on its combo's tile, not here (S839).
+                  const inOrd = orderItems.find(i => i.recipe_id === r.id && !isComboLine(i))
                   // Every line of this dish, customized ones included (S758) — one tile, one count.
-                  const inOrdQty = orderItems.reduce((n, i) => n + (i.recipe_id === r.id ? i.qty : 0), 0)
+                  const inOrdQty = orderItems.reduce((n, i) => n + (i.recipe_id === r.id && !isComboLine(i) ? i.qty : 0), 0)
                   const hasOptions = !!dishGroupsByRecipe[r.id]
                   const kotTimer = inOrd?.sent_to_kot ? kotTimerLabel(ticketForRecipe(r.id), kotNow) : null
                   return (
@@ -6567,8 +6847,18 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {narrowTill ? 'Nothing on this order yet — tap a dish on the menu to add it' : 'Tap items on the left to add them'}
               </p>
             ) : orderItems.map((item, idx) => {
-              const lineTotal = item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
-              const kotTimer = item.sent_to_kot ? kotTimerLabel(ticketForLine(orderKotTickets, item), kotNow) : null
+              // S839: a combo's dishes are one block, drawn where its first dish sits.
+              if (isComboLine(item) && comboIdOf(item)) {
+                const block = cartCombos.get(comboIdOf(item))
+                if (!block || block.firstIdx !== idx) return null
+                return (
+                  <ComboCartBlock key={`combo:${block.id}`} block={block}
+                    lineTotalOf={cartLineTotal} renderMarks={cartLineMarks} renderNote={cartNoteEditor}
+                    swapLabelOf={comboSwapLabel} troubleOf={comboDishTrouble}
+                    onQty={setComboQty} onRemove={id => setComboQty(id, 0)} onSwap={openComboSwap} />
+                )
+              }
+              const lineTotal = cartLineTotal(item)
               return (
                 <div key={idx} data-cart-line style={{
                   display: 'flex', flexDirection: 'column', gap: 4,
@@ -6580,36 +6870,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.3 }}>
                         {item.name}
                       </span>
-                      {item.sent_to_kot && (
-                        <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
-                          <span style={{
-                            fontSize: 10, fontWeight: 700, flexShrink: 0,
-                            background: 'color-mix(in srgb, var(--theme-accent) 18%, transparent)',
-                            color: 'var(--theme-accent-ink)',
-                            borderRadius: 0, padding: '1px 5px', cursor: 'default',
-                          }}>
-                            ✓ {!routingShown ? 'Sent' : botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
-                          </span>
-                        </Tip>
-                      )}
-                      {kotTimer && (
-                        <Tip text="Live kitchen/bar status for this item's ticket — Sent (not yet started) / a countdown once Started, using the kitchen's own estimate / Ready once done">
-                          <span style={{ fontSize: 10, fontWeight: 600, flexShrink: 0, color: kotTimer.color }}>
-                            {kotTimer.text}
-                          </span>
-                        </Tip>
-                      )}
-                      {!item.sent_to_kot && (item.sent_qty || 0) > 0 && item.qty > item.sent_qty && (
-                        <Tip text={`${item.qty - item.sent_qty} extra added since last ticket — press KOT or BOT to send the addition to the station`}>
-                          <span style={{
-                            fontSize: 10, fontWeight: 700, flexShrink: 0,
-                            background: 'var(--theme-amber)', color: amberBadgeText,
-                            borderRadius: 0, padding: '1px 5px', cursor: 'default',
-                          }}>
-                            +{item.qty - item.sent_qty}
-                          </span>
-                        </Tip>
-                      )}
+                      {cartLineMarks(item)}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
@@ -6663,10 +6924,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                                 const recipe = menu.find(m => m.id === item.recipe_id)
                                 if (!recipe) { setMsg('error:This dish is not on the till menu any more.'); return }
                                 const initialIds = item.option_ids
-                                  || (item.selection_key ? String(item.selection_key).split('+') : defaultSelection(lineGroups))
+                                  || (item.selection_key ? lineOptionIds(item) : defaultSelection(lineGroups))
                                 setOptionPicker({ recipe, dishGroups: lineGroups || [], replaceIdx: idx, initialIds, lineOptions: item.options || null })
                               }}
-                            >{item.selection_key ? 'Change' : 'Choices'}</button>
+                            >{lineOptionIds(item).length ? 'Change' : 'Choices'}</button>
                           </Tip>
                         )}
                       </div>
@@ -6678,44 +6939,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       )}
                     </>)
                   })()}
-                  <input
-                    type="text"
-                    aria-label={`Note for ${item.name}`}
-                    value={item.notes || ''}
-                    onChange={e => updateItemNote(idx, e.target.value)}
-                    onFocus={() => setNoteFocusIdx(idx)}
-                    // Keep the presets while focus moves INTO them (S776): Tab from the note used to blur
-                    // it, hide the presets and move focus to whatever came after them.
-                    onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
-                    placeholder="+ Kitchen note (e.g. serve after starters)"
-                    className="till-hit--row"
-                    // S833: a written note is an instruction (often an allergy), so it reads in the body ink;
-                    // only the empty box's prompt stays quiet. Every note was grey italic before.
-                    style={{
-                      background: 'none', border: 'none', outline: 'none',
-                      fontSize: item.notes ? 12 : 11, fontStyle: item.notes ? 'normal' : 'italic',
-                      fontWeight: item.notes ? 600 : 400, color: item.notes ? 'var(--theme-text1)' : 'var(--theme-text3)',
-                      padding: '0 0 0 2px', width: '100%',
-                    }}
-                  />
-                  {noteFocusIdx === idx && notePresets.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '2px 0 0 2px' }}>
-                      {notePresets.map(p => (
-                        <button
-                          key={p}
-                          onMouseDown={e => e.preventDefault()}
-                          onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
-                          onClick={() => addPresetToNote(idx, p)}
-                          className="till-hit--row"
-                          style={{
-                            fontSize: 12, padding: '2px 10px', borderRadius: 'var(--radius-full)',
-                            border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
-                            color: 'var(--theme-text2)', cursor: 'pointer',
-                          }}
-                        >{p}</button>
-                      ))}
-                    </div>
-                  )}
+                  {cartNoteEditor(item, idx)}
                 </div>
               )
             })}
@@ -7131,11 +7355,22 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {itemsExpanded && (
                 <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: hasItemComp ? 10 : 0 }}>
-                  {orderItems.map(i => {
-                    const lk = lineKeyOf(i)
-                    const compQty = Math.min(compQtyByLine[lk] || 0, i.qty)
+                  {cartRows(orderItems).map(row => {
+                    // S839: a combo is ONE row, and comping n of it comps n of every one of its dishes
+                    // (apply_pos_item_comps refuses part of a combo, combo_comp_whole).
+                    const dishes = row.kind === 'combo' ? row.block.dishes.map(d => d.item) : [row.item]
+                    const i = row.kind === 'combo'
+                      ? { name: row.block.name, qty: row.block.qty, unit_price: dishes.reduce((s, d) => s + d.unit_price, 0) }
+                      : row.item
+                    const keys = dishes.map(lineKeyOf)
+                    const lk = row.kind === 'combo' ? `combo:${row.block.id}` : keys[0]
+                    const compQty = Math.min(...keys.map(k => Math.min(compQtyByLine[k] || 0, i.qty)))
                     const comped = compQty > 0
-                    const setQty = next => setCompQtyByLine(prev => ({ ...prev, [lk]: Math.max(0, Math.min(i.qty, next)) }))
+                    const setQty = next => setCompQtyByLine(prev => {
+                      const out = { ...prev }
+                      for (const k of keys) out[k] = Math.max(0, Math.min(i.qty, next))
+                      return out
+                    })
                     return (
                       <div key={lk} style={{
                         display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
@@ -7290,15 +7525,28 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   }}>%</button>
                   <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}
                     aria-label={discountMode === 'percent' ? 'Discount percent' : 'Discount amount in rupees'}
-                    placeholder="0" value={discountStr} onChange={e => setDiscountStr(e.target.value)}
+                    placeholder="0" value={comboOnlyBill ? '' : discountStr} onChange={e => { if (!comboOnlyBill) setDiscountStr(e.target.value) }}
+                    // S839: a bill of combos only has nothing a discount may touch. Read-only rather than
+                    // disabled, with the sentence below tied to it, so a press says why.
+                    readOnly={comboOnlyBill} aria-disabled={comboOnlyBill || undefined}
+                    aria-describedby={comboOnlyBill ? 'pos-orders-discount-combo' : undefined}
                     disabled={tendersLocked} title={tendersLocked ? tendersLockHint : undefined}
-                    style={disabledStyle({ ...billInput, flex: 1 }, tendersLocked)} />
+                    style={disabledStyle({ ...billInput, flex: 1 }, tendersLocked || comboOnlyBill)} />
                   {discountMode === 'percent' && discountAmt > 0 && (
                     <span style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>≈ {fmtNpr(discountAmt)}</span>
                   )}
                 </div>
                 {tendersLocked && (
                   <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '2px 0 8px' }}>{tendersLockHint}</p>
+                )}
+                {comboOnlyBill ? (
+                  <p id="pos-orders-discount-combo" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '2px 0 8px' }}>
+                    A combo is already a deal, so a bill discount does not apply to it.
+                  </p>
+                ) : payableOrderItems.some(isComboItem) && (
+                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '2px 0 8px' }}>
+                    The discount comes off the other dishes only ({fmtNpr(discountBase)} before VAT): a combo is already a deal.
+                  </p>
                 )}
                 {discountClamped && (
                   <p style={{ fontSize: 11, color: 'var(--theme-amber-text)', margin: '2px 0 8px' }}>
@@ -7521,6 +7769,28 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           }}
         />
       )}
+      {/* S839: a combo's picks, or a Swap of one of its dishes. In the order screen's return, beside the
+          choice window, because the menu tile and the cart that open it are here (S578). */}
+      {comboPicker && (
+        <ComboPickerModal
+          combo={comboPicker.combo}
+          recipeOf={comboRecipeOf}
+          vatReg={vatReg}
+          dishGroupsOf={rid => dishGroupsByRecipe[rid]}
+          catalog={optionMaps}
+          initialPicks={comboPicker.initialPicks || null}
+          onlyGroupId={comboPicker.swap?.groupId || null}
+          showQty={!comboPicker.swap}
+          confirmLabel={comboPicker.swap ? 'Swap dish' : 'Add to order'}
+          onClose={() => setComboPicker(null)}
+          onConfirm={({ picks, qty }) => {
+            const { combo, swap } = comboPicker
+            setComboPicker(null)
+            if (swap) confirmComboSwap(combo, swap, picks)
+            else addComboToCart(combo, picks, qty)
+          }}
+        />
+      )}
 
       {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input
           is the entire point — a yes/no dialog would add friction and record nothing. */}
@@ -7539,9 +7809,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           mode={tableDialog} lines={tableDialogLines}
           tables={tables} tableOrders={tableOrders} tableJoins={tableJoins}
           currentTableId={activeTable?.id || null} currentOrderId={orderId} covers={covers}
-          lineTotal={(l, q) => q * (Number(l.unit_price) || 0) * (1 + (vatReg ? (l.vat_rate ?? 0) : 0))}
+          lineTotal={(l, q) => (l.combo_dishes || [l]).reduce((s, d) => s + q * (Number(d.unit_price) || 0) * (1 + (vatReg ? (d.vat_rate ?? 0) : 0)), 0)}
           busy={tableBusy}
-          onSubmit={tableDialog === 'part' ? makePartBill : moveDishesToTable}
+          // A combo row's pick moves every one of its dishes at that quantity (pos_move_lines refuses part
+          // of a combo, combo_move_whole).
+          onSubmit={args => (tableDialog === 'part' ? makePartBill : moveDishesToTable)({ ...args, picks: expandComboPicks(args.picks, tableDialogLines) })}
           onClose={() => setTableDialog(null)}
         />
       )}
@@ -7552,6 +7824,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             {pullPrompt.pulled === 1 ? 'has' : 'have'} already been sent to the kitchen or bar. Taking{' '}
             {pullPrompt.pulled === 1 ? 'it' : 'them'} off this bill is recorded against your login with the
             reason you give here, and shows on POS Reports → KOT Log → Pulled Items.
+            {pullPrompt.swap && ` ${pullPrompt.swap.newLine.name} takes its place in the combo and goes on the next ticket.`}
           </p>
           <div className="form-field" style={{ marginBottom: 12 }}>
             <label htmlFor="kot-pull-reason">Reason</label>
@@ -7568,7 +7841,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               disabled={!pullReason}
               onClick={() => {
                 setKotPullReason(pullReason)
-                applyQty(pullPrompt.idx, pullPrompt.qty)
+                // S839: a combo's quantity moves every dish; a swap replaces one dish of a combo.
+                if (pullPrompt.combo) applyComboQty(pullPrompt.combo.lineId, pullPrompt.combo.qty)
+                else if (pullPrompt.swap) setOrderItems(prev => swapComboDish(prev, pullPrompt.swap.lineId, pullPrompt.swap.groupId, pullPrompt.swap.newLine))
+                else applyQty(pullPrompt.idx, pullPrompt.qty)
                 setPullPrompt(null)
                 setMsg('ok:Removed — save the order to record it.')
               }}

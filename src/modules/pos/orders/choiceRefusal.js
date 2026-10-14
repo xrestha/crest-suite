@@ -28,7 +28,8 @@ export function lineChoiceTrouble(line, dishGroups, optionsById) {
   }
   const problem = selectionProblems(dishGroups || [], kept)[0]
   if (!problem) return null
-  const button = line?.selection_key ? 'Change' : 'Choices'
+  // By the line's OWN choices: a combo's dish (S839) carries a selection key with none of its own.
+  const button = lineOptionIds(line || {}).length ? 'Change' : 'Choices'
   const short = problem.count < (Number(problem.rule?.min) || 0)
   return {
     gone: [],

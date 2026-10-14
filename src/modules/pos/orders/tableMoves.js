@@ -100,7 +100,7 @@ export function moveSlipItems(tickets, onlyKeys = null) {
       const k = moveLineKey(i)
       const m = byStation[t.station]
       const prev = m.get(k)
-      m.set(k, prev ? { ...prev, qty: prev.qty + qty } : { name: i.name, qty, notes: i.notes || '', options: i.options || null, recipe_id: i.recipe_id || null, selection_key: i.selection_key || '' })
+      m.set(k, prev ? { ...prev, qty: prev.qty + qty } : { name: i.name, qty, notes: i.notes || '', options: i.options || null, recipe_id: i.recipe_id || null, selection_key: i.selection_key || '', combo_name: i.combo_name || null })  // S839: the MOVE slip names a combo dish's combo
     }
   }
   const out = {}
@@ -140,6 +140,7 @@ export function moveNoticeItems(slipLines, fromName) {
     recipe_id: l.recipe_id || null,
     name: l.name,
     ...(l.selection_key ? { selection_key: l.selection_key, options: l.options || null } : {}),
+    ...(l.combo_name ? { combo_name: l.combo_name } : {}),   // S839: the KDS names a combo dish's combo
     notes: `Moved from ${fromName} (×${l.qty})`,
     qty: 0,
     change: true,
