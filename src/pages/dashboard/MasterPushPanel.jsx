@@ -32,7 +32,16 @@ const ENTITY_CHOICES = [
     key: 'prices',
     keys: ['prices'],
     label: 'Selling prices',
-    tip: 'Also overwrite each branch’s menu prices with HQ’s. Leave this off if branches price differently — the recipe itself still gets standardised either way. A dish HQ has not priced keeps the branch’s price.',
+    tip: 'Also overwrite each branch’s menu prices with HQ’s, and the extra charge on each Crest Customization choice when Choices is ticked. Leave this off if branches price differently — the recipe itself still gets standardised either way. A dish HQ has not priced keeps the branch’s price.',
+    requires: 'recipes',
+  },
+  // S838: Crest Customization. Needs Recipes, because the groups sit on dishes and a choice's
+  // stock lines name sub-recipes.
+  {
+    key: 'options',
+    keys: ['options'],
+    label: 'Choices (sizes, add-ons, build-your-own)',
+    tip: 'Crest Customization’s choice groups and choices, what each one takes from stock, the groups on each dish and the build-your-own mark. A new choice arrives at HQ’s price; after that its price follows Selling prices, and whether it is switched on stays the branch’s own. A choice HQ deletes is switched off at the branch, never deleted, so past bills keep its name. A group the branch made itself is left alone.',
     requires: 'recipes',
   },
 ]
@@ -43,12 +52,15 @@ const ACTION_STYLE = {
   update: 'badge-gray',
   replaced: 'badge-gray',
   partial: 'badge-amber',
+  conflict: 'badge-red',
+  hide: 'badge-amber',
+  warning: 'badge-amber',
 }
 
 export default function MasterPushPanel({ outlets, groupId }) {
   const [hq, setHq] = useState(null)
   const [hqLoading, setHqLoading] = useState(true)
-  const [picked, setPicked] = useState({ items: true, recipes: false, prices: false })
+  const [picked, setPicked] = useState({ items: true, recipes: false, prices: false, options: false })
   const [targets, setTargets] = useState([])
   const [plan, setPlan] = useState(null)
   const [planError, setPlanError] = useState(null)
@@ -234,6 +246,8 @@ export default function MasterPushPanel({ outlets, groupId }) {
             {counts.create || 0} record(s) will be created, {counts.adopt || 0} existing record(s)
             will be taken over by HQ, and {counts.update || 0} will be overwritten with HQ’s
             version across {targets.length} branch{targets.length === 1 ? '' : 'es'}.
+            {counts.hide ? ` ${counts.hide} choice(s) or group(s) HQ no longer has will be switched off.` : ''}
+            {counts.conflict ? ` ${counts.conflict} record(s) in conflict will be skipped.` : ''}
           </p>
           <p style={{ margin: '10px 0 0', color: 'var(--theme-text2)' }}>
             Branch purchase rates are not touched. This cannot be undone from here — a branch would
