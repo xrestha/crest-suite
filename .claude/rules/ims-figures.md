@@ -531,7 +531,7 @@ plus a count excluded prep items from a menu list. So an uncategorised dish sile
 Sales Entry, from the POS till's menu (**unorderable**, with no error and nothing to say a row had
 been filtered), from HSC code assignment, from Best Sellers, Recipe Margin, Menu Engineering, Combo
 Builder, the Dashboard's recipe count, the guest-menu readiness counts, and — permanently — from the
-frozen Monthly Owner Report's menu matrix. `recipes.is_active` is the same shape and
+frozen Monthly Owner Report's menu matrix. `recipes.is_active` was the same shape until S835 made it NOT NULL, and
 `.neq('is_active', false)` appeared on two of those; `.not('is_active', 'is', false)` is the
 NULL-safe form (`IS NOT FALSE`), while a category needs
 `.or('category.is.null,category.neq.Sub-Recipe')`.
@@ -1001,7 +1001,7 @@ the tile and the report agree to the rupee.
 It renders "N of M" — underpriced of costed-and-priced — and an uncosted dish landed in the
 **denominator** while being mathematically unable to reach the numerator. It also filtered
 `is_active === false` in JS while the report it mirrors used `.eq('is_active', true)`, and
-`recipes.is_active` is nullable (`DEFAULT true`, no `NOT NULL`) — so the tile and the page it links
+`recipes.is_active` was nullable then (NOT NULL since S835, with `pos_enabled`) — so the tile and the page it links
 to were measured over different populations. **One NULL-safe form, not two dialects of it**: both
 test in JS now. Same trap as `category`, one column over.
 
