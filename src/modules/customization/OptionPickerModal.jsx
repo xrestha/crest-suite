@@ -26,6 +26,10 @@ import { DIET_LABEL } from './customizationData'
 // the starting selection a one-tap "Same as last" restores it. `initialQty` seeds the quantity
 // stepper (a Change call passes the line's qty). `onConfirm(selected, qty)`.
 //
+// `showQty={false}` (S840) hides the stepper and prices one unit, for a caller whose quantity is
+// decided elsewhere: the combo window opens a combo dish's own choices here, and that dish's
+// quantity is the combo's, so a stepper would be buttons that do nothing.
+//
 // S809 3o (CUSTOMIZATION-2): the window starts from, and "Same as last" restores, only the picks
 // the dish still offers (`offeredPicks`). A pick hidden as sold out, deleted, or in a group hidden
 // or taken off the dish used to ride along unseen — the window lists offered options only, so it
@@ -44,7 +48,7 @@ function sameIds(a, b) {
 
 export default function OptionPickerModal({
   recipe, dishGroups, catalog, vatRate = 0, initialIds, initialQty, lastIds = null, lineOptions = null,
-  confirmLabel = 'Add to order', onConfirm, onClose, zIndex = 1100,
+  confirmLabel = 'Add to order', showQty = true, onConfirm, onClose, zIndex = 1100,
 }) {
   const [start] = useState(() => offeredPicks(initialIds ?? defaultSelection(dishGroups), dishGroups))
   const [selected, setSelected] = useState(start.kept)
@@ -65,6 +69,7 @@ export default function OptionPickerModal({
   // The picks that fall under a group's first-N-free allowance, as the server would price them.
   const freeIds = useMemo(() => new Set(desc.options.filter(o => o.included).map(o => String(o.option_id))), [desc])
   const showSameAsLast = lastDesc && !sameIds(lastOffered, selected)
+  const shownQty = showQty ? qty : 1
 
   function toggle(group, rule, optionId) {
     setSelected(prev => {
@@ -213,22 +218,24 @@ export default function OptionPickerModal({
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--theme-border)', paddingTop: 12, marginTop: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 160 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>
-            NPR {nprInt(incl(unit) * qty)}
-            {qty > 1 && (
+            NPR {nprInt(incl(unit) * shownQty)}
+            {shownQty > 1 && (
               <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--theme-text3)', marginLeft: 6 }}>
-                NPR {nprInt(incl(unit))} × {qty}
+                NPR {nprInt(incl(unit))} × {shownQty}
               </span>
             )}
           </div>
           {desc.summary && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{desc.summary}</div>}
         </div>
-        <div role="group" aria-label="Quantity" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button type="button" className="btn btn-ghost" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }}
-            onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty <= 1} aria-label="One fewer">−</button>
-          <span aria-live="polite" style={{ minWidth: 28, textAlign: 'center', fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{qty}</span>
-          <button type="button" className="btn btn-ghost" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }}
-            onClick={() => setQty(q => q + 1)} aria-label="One more">+</button>
-        </div>
+        {showQty && (
+          <div role="group" aria-label="Quantity" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button type="button" className="btn btn-ghost" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }}
+              onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty <= 1} aria-label="One fewer">−</button>
+            <span aria-live="polite" style={{ minWidth: 28, textAlign: 'center', fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{qty}</span>
+            <button type="button" className="btn btn-ghost" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }}
+              onClick={() => setQty(q => q + 1)} aria-label="One more">+</button>
+          </div>
+        )}
         <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button type="button" className="btn btn-primary" onClick={confirm} aria-disabled={problems.length > 0}>
           {confirmLabel}

@@ -221,7 +221,8 @@ export default function ComboPickerModal({
       </Modal>
 
       {/* The picked dish's own choices, in the ordinary choice window, above this one. Its price line
-          reads the choices' charge alone (the dish is priced by the combo); its quantity is the combo's. */}
+          reads the choices' charge alone (the dish is priced by the combo); its quantity is the combo's,
+          so it shows no stepper of its own. */}
       {choicesGroup && choicesRecipe && (
         <OptionPickerModal
           recipe={{ ...choicesRecipe, name: `${choicesRecipe.name} (in ${combo.name})`, selling_price: 0 }}
@@ -230,6 +231,7 @@ export default function ComboPickerModal({
           vatRate={vatOfDish(choicesPick.recipe_id)}
           initialIds={choicesPick.option_ids}
           confirmLabel="Use these choices"
+          showQty={false}
           zIndex={zIndex + 100}
           onClose={() => setChoicesFor(null)}
           onConfirm={ids => {

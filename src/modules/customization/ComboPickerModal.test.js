@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import ComboPickerModal from './ComboPickerModal'
+import OptionPickerModal from './OptionPickerModal'
 import { comboAddsInOneTap, defaultComboPicks, buildComboLines } from '../pos/orders/comboCart'
 
 // Combos (S839, docs/pos-combos.md): the till's window for a combo's picks, and the one-tap set meal.
@@ -96,6 +97,45 @@ describe('ComboPickerModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to order' }))
     expect(onConfirm).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('Choose 1 more from Size for Veg Momo.')
+
+    // The dish's own choices open with no quantity of their own (S840): the dish's quantity is the
+    // combo's, so a stepper there would be buttons that do nothing. Scoped to the inner window,
+    // since the combo window behind it keeps its own Quantity group.
+    fireEvent.click(screen.getByRole('button', { name: 'Choices for Veg Momo' }))
+    const inner = screen.getByRole('dialog', { name: /Veg Momo \(in Momo Combo\)/ })
+    expect(within(inner).queryByRole('group', { name: 'Quantity' })).not.toBeInTheDocument()
+    expect(within(inner).queryByRole('button', { name: 'One more' })).not.toBeInTheDocument()
+    fireEvent.click(within(inner).getByRole('radio', { name: /Full/ }))
+    fireEvent.click(within(inner).getByRole('button', { name: 'Use these choices' }))
+    expect(screen.queryByRole('dialog', { name: /Veg Momo \(in Momo Combo\)/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add to order' }))
+    expect(onConfirm).toHaveBeenCalledWith({
+      qty: 1,
+      picks: [
+        { group_id: 'g-momo', recipe_id: 'r-momo-v', option_ids: ['o-full'] },
+        { group_id: 'g-drink', recipe_id: 'r-tea', option_ids: [] },
+      ],
+    })
+  })
+})
+
+describe('OptionPickerModal quantity', () => {
+  const size = { id: 'grp-size', name: 'Size', kind: 'size', sort: 0, included_count: 0 }
+  const dishGroups = [{
+    group: size, attachment: { group_id: 'grp-size', sort: 0 }, rule: { min: 1, max: 1, included: 0 },
+    options: [{ id: 'o-half', group_id: 'grp-size', name: 'Half', price_delta: 0, sort: 0 }],
+  }]
+  const catalog = { optionsById: { 'o-half': dishGroups[0].options[0] }, groupsById: { 'grp-size': size } }
+
+  test('a plain dish still shows its stepper, and the total and Add follow it', () => {
+    const onConfirm = jest.fn()
+    render(<OptionPickerModal recipe={{ id: 'r-momo-v', name: 'Veg Momo', selling_price: 200 }}
+      dishGroups={dishGroups} catalog={catalog} initialIds={['o-half']} onConfirm={onConfirm} onClose={jest.fn()} />)
+    const qty = screen.getByRole('group', { name: 'Quantity' })
+    fireEvent.click(within(qty).getByRole('button', { name: 'One more' }))
+    expect(screen.getByText(/× 2/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add to order' }))
+    expect(onConfirm).toHaveBeenCalledWith(['o-half'], 2)
   })
 })
 
