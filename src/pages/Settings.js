@@ -1063,7 +1063,7 @@ export default function Settings() {
         <div className="card" style={{ marginBottom: 20, display: 'flex', gap: 18, alignItems: 'center' }}>
           {settings.logo_url
             ? <img src={settings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 0, flexShrink: 0 }} />
-            : <span style={{ fontSize: 36, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>⬢</span>
+            : <span style={{ fontSize: 32, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>⬢</span>
           }
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{settings.app_name || '—'}</div>
@@ -1162,7 +1162,7 @@ export default function Settings() {
               <div style={{ width: 64, height: 64, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {form.logo_url
                   ? <img src={form.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 0 }} />
-                  : <span style={{ fontSize: 26, color: 'var(--theme-accent-ink)' }}>⬢</span>
+                  : <span style={{ fontSize: 24, color: 'var(--theme-accent-ink)' }}>⬢</span>
                 }
               </div>
               <div>

@@ -6,7 +6,7 @@
 import { renderHook, act } from '@testing-library/react'
 import {
   usePosIdleLock, posIdleLockApplies, POS_IDLE_LOCK_MS,
-  sessionIdFromToken, readLastInput, writeLastInput, IDLE_INPUT_KEY,
+  sessionIdFromToken, readLastInput, writeLastInput, IDLE_INPUT_KEY, IDLE_WRITE_THROTTLE_MS,
 } from './usePosIdleLock'
 
 describe('who the lock applies to (S809 ACCESS-2, owner decision Q4 a)', () => {
@@ -166,5 +166,64 @@ describe('a page load inside a session (S809 ACCESS-6)', () => {
     renderHook(() => usePosIdleLock(true, noWarn, onLock))
     tap()
     expect(window.localStorage.getItem(IDLE_INPUT_KEY)).toBeNull()
+  })
+})
+
+// 2026-10-15 audit: every input wrote localStorage synchronously (a wheel fires dozens a second). The
+// stored copy is now written at most once a second; the lock itself still runs from the last input.
+describe('the stored last input is throttled (2026-10-15 audit)', () => {
+  beforeEach(() => { window.localStorage.clear() })
+  afterEach(() => { jest.restoreAllMocks() })
+
+  const writesOfIdleKey = spy => spy.mock.calls.filter(([key]) => key === IDLE_INPUT_KEY).length
+
+  it('writes at most once a second, and the last tap of a burst still lands', () => {
+    const setItem = jest.spyOn(Storage.prototype, 'setItem')
+    renderHook(() => usePosIdleLock(false, noWarn, jest.fn(), LOCK, 'sid-1'))
+    tap()
+    const firstTap = Date.now()
+    expect(readLastInput('sid-1')).toBe(firstTap)
+    for (let i = 0; i < 9; i++) { act(() => { jest.advanceTimersByTime(50) }); tap() }
+    const lastTap = Date.now()
+    expect(writesOfIdleKey(setItem)).toBe(1)
+    expect(readLastInput('sid-1')).toBe(firstTap)
+    act(() => { jest.advanceTimersByTime(IDLE_WRITE_THROTTLE_MS) })
+    expect(writesOfIdleKey(setItem)).toBe(2)
+    expect(readLastInput('sid-1')).toBe(lastTap)
+  })
+
+  it('a write still pending is kept when the page goes away', () => {
+    renderHook(() => usePosIdleLock(false, noWarn, jest.fn(), LOCK, 'sid-1'))
+    tap()
+    act(() => { jest.advanceTimersByTime(100) })
+    tap()
+    const lastTap = Date.now()
+    act(() => { window.dispatchEvent(new Event('pagehide')) })
+    expect(readLastInput('sid-1')).toBe(lastTap)
+  })
+
+  it('the lock still runs from the last tap, not from the last write', () => {
+    const onLock = jest.fn()
+    renderHook(() => usePosIdleLock(true, noWarn, onLock, LOCK, 'sid-1'))
+    tap()
+    act(() => { jest.advanceTimersByTime(300) })
+    tap() // inside the throttle window: not written yet
+    act(() => { jest.advanceTimersByTime(LOCK - 1) })
+    expect(onLock).not.toHaveBeenCalled()
+    act(() => { jest.advanceTimersByTime(1) })
+    expect(onLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a lock that starts mid-burst (leaving the Kitchen Display) measures from the last tap', () => {
+    const onLock = jest.fn()
+    const { rerender } = renderHook(({ on }) => usePosIdleLock(on, noWarn, onLock, LOCK, 'sid-1'), { initialProps: { on: false } })
+    tap()
+    act(() => { jest.advanceTimersByTime(600) })
+    tap() // not yet written: the stored copy still holds the first tap
+    rerender({ on: true })
+    act(() => { jest.advanceTimersByTime(LOCK - 1) })
+    expect(onLock).not.toHaveBeenCalled()
+    act(() => { jest.advanceTimersByTime(1) })
+    expect(onLock).toHaveBeenCalledTimes(1)
   })
 })

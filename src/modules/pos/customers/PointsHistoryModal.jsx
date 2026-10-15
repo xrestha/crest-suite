@@ -148,11 +148,11 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
       {/* ── Bills with no points (the one-tap add) ── */}
       {scheme && scheme.is_active !== false && (
         <section style={{ marginBottom: 18 }}>
-          <h3 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+          <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
             <Tip text="Bills closed since this customer joined their scheme that should have earned points and have none — usually because the till could not add them as the bill closed. The points are worked out from the bill's stored dishes and discount at the scheme's rate. A Credit Note on the bill later takes them back, like any other points it earned." width={340}>
               Bills with no points
             </Tip>
-          </h3>
+          </h4>
           {missing.error ? (
             <ActionError error={{ text: `Could not check this customer's bills for missing points, so none are listed. ${asActionError(missing.error, 'operator').text}`, detail: asActionError(missing.error, 'operator').detail }} />
           ) : missing.loading && missing.rows.length === 0 ? (
@@ -198,14 +198,14 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
       )}
 
       {/* ── Every row ── */}
-      <h3 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
         <Tip text="Every change to this customer's points, newest first: points earned and spent on bills, points handed back from an unfinished payment, credit-note reversals, hand corrections and moves between numbers, with who made each." width={320}>
           All points
         </Tip>
         {!history.error && history.rows.length > 0 && (
           <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · {fmt(history.rows.length)} entr{history.rows.length === 1 ? 'y' : 'ies'}</span>
         )}
-      </h3>
+      </h4>
       {history.error && (
         <ActionError error={{ text: `The points history could not be read, so it is not shown. ${asActionError(history.error, 'operator').text}`, detail: asActionError(history.error, 'operator').detail }} />
       )}

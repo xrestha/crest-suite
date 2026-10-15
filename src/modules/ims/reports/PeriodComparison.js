@@ -731,7 +731,7 @@ export default function PeriodComparison() {
       {loadError ? null : loading ? (
         <div className="loading-state">Loading...</div>
       ) : shown.length === 0 ? (
-        <div className="empty-state">No periods found.</div>
+        <div className="empty-state"><p className="empty-state-text">No periods found.</p></div>
       ) : (
         <div className="table-wrap">
           <table className="data-table">

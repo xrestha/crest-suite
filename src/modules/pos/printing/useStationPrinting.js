@@ -13,6 +13,13 @@ function openPrintWindow() {
   if (w) w.opener = null
   return w
 }
+// Two status rows from get_pos_print_job_status say the same thing (each read builds new objects).
+// A handful of short fields, so comparing them whole is cheaper than a re-render.
+function sameRow(a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
 function printInto(w, html) {
   w.document.write(html)
   w.document.close()
@@ -99,11 +106,22 @@ export function useStationPrinting({ clientId, isOffline, printHtml }) {
       if (!live) return
       if (res.error) console.error('get_pos_print_job_status failed:', res.error)
       const now = Date.now()
-      updateWatch(prev => prev.flatMap(e => {
-        const row = res.rows ? res.rows.find(r => r.id === e.job.id) : e.row
-        const v = watchVerdict(e, row, now)
-        return v.done ? [] : [{ ...e, row, needsAction: v.needsAction, reason: v.reason }]
-      }))
+      // Polled every WATCH_POLL_MS while a slip is watched, and the answer is usually "still waiting":
+      // keep the same array when no entry changed, or every tick re-renders the whole till
+      // (2026-10-15 audit; setIfChanged's rule). An entry is unchanged when its verdict and its row's
+      // contents are; the row is the next tick's verdict input, so a new device state still lands.
+      updateWatch(prev => {
+        let changed = false
+        const next = prev.flatMap(e => {
+          const row = res.rows ? res.rows.find(r => r.id === e.job.id) : e.row
+          const v = watchVerdict(e, row, now)
+          if (v.done) { changed = true; return [] }
+          if (v.needsAction === e.needsAction && v.reason === e.reason && sameRow(row, e.row)) return [e]
+          changed = true
+          return [{ ...e, row, needsAction: v.needsAction, reason: v.reason }]
+        })
+        return changed ? next : prev
+      })
     }
     const timer = setInterval(tick, WATCH_POLL_MS)
     return () => { live = false; clearInterval(timer) }

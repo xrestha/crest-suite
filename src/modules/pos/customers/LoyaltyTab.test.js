@@ -105,6 +105,26 @@ async function addScheme(name) {
   fireEvent.click(screen.getByRole('button', { name: '+ Add scheme' }))
 }
 
+describe('LoyaltyTab messages (2026-10-15 audit)', () => {
+  test('a refused add is an ActionError: the sentence, with the code and message as fine print', async () => {
+    mockScoped.scopedInsert.mockResolvedValue({ error: { code: '42501', message: 'permission denied for table pos_loyalty_schemes' } })
+    render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+    await screen.findByText('Sita')
+    await addScheme('Regulars')
+    const text = await screen.findByText(/^The scheme was not added\./)
+    expect(text).toHaveClass('action-error-text')
+    expect(within(screen.getByRole('alert')).getByText('42501 · permission denied for table pos_loyalty_schemes')).toHaveClass('action-error-detail')
+  })
+
+  test('a bad point value is a plain ActionError sentence', async () => {
+    render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+    await screen.findByText('Sita')
+    fireEvent.change(screen.getByLabelText(/Value of one point/), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.getByText('A point has to be worth more than zero.')).toHaveClass('action-error-text')
+  })
+})
+
 describe('LoyaltyTab reads', () => {
   test('a failed first read is the error card, with no member or points on screen', async () => {
     mockAnswer.balances = refused

@@ -7,7 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
@@ -178,6 +178,11 @@ export default function PaymentReport() {
   })
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
+  // A month that LOADED and holds no bill and no return. It is the only state that may say "nothing
+  // was recorded": while loading, after a failed read, or with no period chosen the figures are not
+  // known, and each of those has its own state above. It used to fall through to six NPR 0 cards and
+  // a Total row of zeros, a finished report of nothing that read like a real one.
+  const periodEmpty = !loading && !loadError && !!selectedPeriod && bills.length === 0 && pricedReturns.length === 0
   const scopeLine = `Period : ${periodLabel}${selectedPeriod?.status === 'open'
     ? ' (PROVISIONAL — period still open, figures can change)'
     : ' (period closed)'}`
@@ -290,7 +295,7 @@ export default function PaymentReport() {
 
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           is NPR 0 wearing the confidence of a real figure (S594 rule). */}
-      {!loadError && !loading && (
+      {!loadError && !loading && !periodEmpty && (
       <div className="stat-grid stat-grid--pair">
         <div className="stat-card">
           <div className="stat-label">
@@ -354,8 +359,21 @@ export default function PaymentReport() {
         </div>
       )}
 
+      {periodEmpty && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="empty-state">
+            <div className="empty-state-icon">₨</div>
+            <p className="empty-state-text">
+              No purchase bills or supplier returns recorded for {periodLabel}. Bills entered
+              in <Link to={`/purchases?period=${selectedPeriod.id}`} style={{ color: 'var(--theme-accent-ink)' }}>Purchases</Link> appear
+              here, split by how each one was paid.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
-      {!loadError && (
+      {!loadError && !periodEmpty && (
       <>
       <div className="panel-tab-bar" role="tablist" aria-label="Payment report views">
         {['summary', 'daily'].map(m => (

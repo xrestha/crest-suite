@@ -135,3 +135,25 @@ test('a row\'s bill link, actions and actions header are built from the shared c
   expect(exit.parentElement).toHaveClass('parking-row-actions') // eslint-disable-line testing-library/no-node-access
   expect(exit.closest('td')).not.toHaveStyle('display: flex') // eslint-disable-line testing-library/no-node-access
 })
+
+// 2026-10-15 audit: Open / All is a filter on one list, so the shared FilterChips row: a named group,
+// the chip that is on says so with aria-pressed, the row is one Tab stop, and the arrow keys move along it.
+test('Open and All are a FilterChips group: named, pressed state, one Tab stop, arrow keys', async () => {
+  render(<PosParkingSlips />)
+  await screen.findByText('BA 2 PA')
+  const group = screen.getByRole('group', { name: 'Which slips' })
+  const open = within(group).getByRole('button', { name: 'Open' })
+  const all = within(group).getByRole('button', { name: 'All' })
+  expect(open).toHaveAttribute('aria-pressed', 'true')
+  expect(all).toHaveAttribute('aria-pressed', 'false')
+  expect(open).toHaveAttribute('tabindex', '0')
+  expect(all).toHaveAttribute('tabindex', '-1')
+  open.focus()
+  fireEvent.keyDown(open, { key: 'ArrowRight' })
+  expect(all).toHaveFocus()
+  fireEvent.click(all)
+  expect(all).toHaveAttribute('aria-pressed', 'true')
+  expect(open).toHaveAttribute('aria-pressed', 'false')
+  await waitFor(() => expect(mockReads.some(q => q.filters.some(f => f[0] === 'gte'))).toBe(true))
+  expect(await screen.findByText('BA 2 PA')).toBeInTheDocument() // the All read has landed
+})

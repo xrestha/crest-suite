@@ -22,7 +22,7 @@ import { getAccessState, GRACE_DAYS } from '../utils/subscription'
 // The same shape as HR's amber banner (LeaveManagement.jsx, from PayrollRun's stale-draft card) —
 // one banner form for a state someone has to act on, never a second one invented here.
 const amberBanner = {
-  marginBottom: 14, padding: '12px 16px', fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.6,
+  marginBottom: 14, padding: '12px 16px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6,
   borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
   background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
 }
@@ -270,7 +270,7 @@ export default function AdminGuestMenu() {
       {/* S767: a menu opening with the account name and no logo looks finished from inside the
           frame, so say where the owner changes it. */}
       {brand && (!brand.name || !brand.logo) && (
-        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-text1)' }}>
             {!brand.name && !brand.logo ? 'The menu opens with the account name and no logo.' : !brand.name ? 'The menu opens with the account name.' : 'The menu has no logo.'}
           </strong>{' '}
@@ -284,7 +284,7 @@ export default function AdminGuestMenu() {
           descriptions looks like a finished page rather than an unfinished one. Only shown when
           there is a real gap — a fully-populated menu gets no nag. */}
       {coverage && coverage.total > 0 && (coverage.images < coverage.total || coverage.descriptions < coverage.total) && (
-        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-text1)' }}>This menu is mostly names and prices.</strong>{' '}
           {coverage.images} of {coverage.total} dishes on it have a photo, {coverage.descriptions} have a description
           {coverage.vegMarks < coverage.total ? `, ${coverage.vegMarks} are marked veg or non-veg` : ''}.
@@ -315,7 +315,7 @@ export default function AdminGuestMenu() {
           />
         </div>
       </div>
-      <p style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
+      <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
         Shown at 390px — a phone. Use “Open in New Tab” to see it at any other size.
       </p>
     </div>

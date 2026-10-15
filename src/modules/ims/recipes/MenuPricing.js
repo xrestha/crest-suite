@@ -718,9 +718,11 @@ export default function MenuPricing() {
         <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
         <div className="empty-state">
-          {recipes.length > 0
-            ? <>No items match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}{catTab !== 'All' ? <> in <strong>{catTab}</strong></> : null}.</>
-            : <>No menu items yet. Use <strong>+ Add Item</strong> above to add your first item.</>}
+          <p className="empty-state-text">
+            {recipes.length > 0
+              ? <>No items match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}{catTab !== 'All' ? <> in <strong>{catTab}</strong></> : null}.</>
+              : <>No menu items yet. Use <strong>+ Add Item</strong> above to add your first item.</>}
+          </p>
         </div>
       ) : (
         <div className="table-wrap">
@@ -1118,9 +1120,11 @@ export default function MenuPricing() {
         <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
         <div className="empty-state">
-          {recipes.length > 0
-            ? <>No items match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}{catTab !== 'All' ? <> in <strong>{catTab}</strong></> : null}.</>
-            : <>No menu items found. Use <strong>+ Add Item</strong> above to add your first item.</>}
+          <p className="empty-state-text">
+            {recipes.length > 0
+              ? <>No items match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}{catTab !== 'All' ? <> in <strong>{catTab}</strong></> : null}.</>
+              : <>No menu items found. Use <strong>+ Add Item</strong> above to add your first item.</>}
+          </p>
         </div>
       ) : (
         <div className="table-wrap">

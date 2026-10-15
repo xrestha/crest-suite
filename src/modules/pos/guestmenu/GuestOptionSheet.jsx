@@ -1,12 +1,12 @@
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { X, Check } from 'lucide-react'
+import { X } from 'lucide-react'
 import Modal from '../../../components/Modal'
 import { npr } from '../../../shared/nepalMoney'
 import {
   describeSelection, selectionProblems, defaultSelection, inclFromEx, scaledDelta,
 } from '../../../shared/optionPricing'
-import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
-import { tidyName, guestRuleText } from './guestMenuHelpers'
+import { tidyName } from './guestMenuHelpers'
+import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
 
 // Crest Customization on the QR menu (S758 stage 6): the sheet a guest picks a dish's choices in.
 // Same rules as the till's OptionPickerModal — describeSelection is the twin of the server's pricer
@@ -46,32 +46,15 @@ import { tidyName, guestRuleText } from './guestMenuHelpers'
 // history guard now asks `backRef.current.back()` first: a stepped sheet goes back one screen, and on
 // the screen it opened on, picks the guest would lose bring an inline "Leave without adding?" with
 // Keep choosing focused (LeaveConfirm). Nothing picked, it closes as before.
-
-// The same mark the menu row draws beside a dish: an outlined square with a dot, green for veg, red
-// for non-veg. Egg is the market's third convention and takes amber. The word is the accessible name.
-const DIET_MARK = {
-  veg: { label: 'Vegetarian', title: 'Veg', modifier: 'gm-diet--veg' },
-  egg: { label: 'Contains egg', title: 'Egg', modifier: 'gm-diet--egg' },
-  non_veg: { label: 'Non-vegetarian', title: 'Non-veg', modifier: 'gm-diet--nonveg' },
-}
-
-function DietMark({ diet }) {
-  const m = DIET_MARK[diet]
-  if (!m) return null
-  return (
-    <span role="img" aria-label={m.label} title={m.title} className={`gm-diet ${m.modifier}`}>
-      <span aria-hidden="true" />
-    </span>
-  )
-}
+//
+// S844: each group's chips are GuestOptionGroup and the veg / egg mark is DietMark, one copy each,
+// shared with the combo sheet.
 
 const sameIds = (a, b) => {
   if (a.length !== b.length) return false
   const x = [...a].sort(), y = [...b].sort()
   return x.every((id, i) => id === y[i])
 }
-
-const FOCUSABLE_CHIP = '[role="radio"]:not([disabled]), [role="checkbox"]:not([disabled])'
 
 export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, onConfirm, onClose, backRef }) {
   // Captured once: what the sheet opened with, so a backdrop tap can tell "looked" from "picked".
@@ -115,6 +98,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
   }, [stepped, step])
   const visibleGroups = stepped ? (onReview ? [] : [steps[step]]) : dishGroups
   const stepProblem = stepped && !onReview ? problems.find(p => p.group.id === steps[step].group.id) : null
+  // S760: a choice's price at the size picked so far.
   const priceAt = (o, group) => Math.round(inclFromEx(scaledDelta(o, group, desc.portion_factor), vat))
   // A size is priced as the whole dish at that size.
   const sizePrice = o => Math.round(inclFromEx(base + (Number(o.price_delta) || 0), vat))
@@ -239,7 +223,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
                       <span key={o.id} className="gm-review-pick">
                         <span style={{ minWidth: 0 }}>{tidyName(o.name)}</span>
                         <span className="gm-review-price">
-                          {group.kind === 'size' ? npr(sizePrice(o)) : o.is_removal || d === 0 ? '' : free ? 'Included' : `${d > 0 ? '+' : '−'}${npr(Math.abs(d))}`}
+                          {group.kind === 'size' ? npr(sizePrice(o)) : o.is_removal || d === 0 ? '' : free ? 'Included' : signedNpr(d)}
                         </span>
                       </span>
                     )
@@ -255,86 +239,16 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
       )}
 
       <div className="gm-groups">
-        {visibleGroups.map(({ group, rule, options }) => {
-          const single = rule.max === 1
-          const isSize = group.kind === 'size'
-          const picked = options.filter(o => selected.includes(o.id))
-          const count = picked.length
-          const realCount = picked.filter(o => !o.is_removal).length
-          const short = tried && problems.some(p => p.group.id === group.id)
-          const labelId = `g-opt-${group.id}`
-          const usedFree = picked.filter(o => freeIds.has(o.id)).length
-          const pricedLeft = options.some(o => !selected.includes(o.id) && !o.is_removal && priceAt(o, group) !== 0)
-          const anyChecked = count > 0
-          return (
-            <div
-              key={group.id}
-              ref={el => { groupRefs.current[group.id] = el }}
-              tabIndex={-1}
-              role={single ? 'radiogroup' : 'group'} aria-labelledby={labelId}
-              onKeyDown={e => moveRovingFocus(e, single ? '[role="radio"]' : '[role="checkbox"]')}
-              className="gm-group"
-            >
-              <div className="gm-group-head">
-                <span id={labelId} className="gm-group-name">{tidyName(group.name)}</span>
-                <span className={`gm-group-rule${short ? ' is-short' : ''}`}>
-                  {rule.min > 0 && <span className="gm-required">Required</span>}
-                  {guestRuleText(rule, options.length)}
-                </span>
-              </div>
-              {rule.included > 0 && (
-                <p className={`gm-group-free${usedFree > 0 ? ' is-used' : ''}`}>
-                  {usedFree} of {rule.included} free {rule.included === 1 ? 'pick' : 'picks'} used{pricedLeft ? ' · then each adds its price' : ''}
-                </p>
-              )}
-              <div className="gm-options">
-                {options.map((o, i) => {
-                  const on = selected.includes(o.id)
-                  const full = !on && !o.is_removal && rule.max != null && !single && realCount >= rule.max
-                  // S760: at the size picked so far.
-                  const d = priceAt(o, group)
-                  const free = on && freeIds.has(o.id) && d !== 0
-                  const allergens = Array.isArray(o.allergens) ? o.allergens : []
-                  const priceText = `${d > 0 ? '+' : '−'}${npr(Math.abs(d))}`
-                  return (
-                    <button
-                      key={o.id} type="button"
-                      role={single ? 'radio' : 'checkbox'} aria-checked={on}
-                      disabled={full} aria-disabled={full || undefined}
-                      tabIndex={single ? rovingTabIndex(on || (!anyChecked && i === 0)) : 0}
-                      onClick={() => toggle(group.id, rule, o.id)}
-                      className="gm-chip gm-option"
-                    >
-                      <span aria-hidden="true" className={`gm-option-mark ${single ? 'gm-option-mark--radio' : 'gm-option-mark--check'}`}>
-                        {!single && on && <Check size={14} strokeWidth={3} />}
-                      </span>
-                      <span className="gm-option-body">
-                        <span className={`gm-option-name${on ? ' is-on' : ''}`}>{tidyName(o.name)}</span>
-                        {(o.diet || allergens.length > 0) && (
-                          <span className="gm-option-meta">
-                            {o.diet && <DietMark diet={o.diet} />}
-                            {allergens.length > 0 && `Contains ${allergens.join(', ')}`}
-                          </span>
-                        )}
-                      </span>
-                      {full ? (
-                        <span className="gm-option-price">Max {rule.max}</span>
-                      ) : isSize ? (
-                        <span className="gm-option-price is-strong">{npr(sizePrice(o))}</span>
-                      ) : free ? (
-                        <span className="gm-option-price">
-                          Included <s>{priceText}</s>
-                        </span>
-                      ) : (!o.is_removal && d !== 0) ? (
-                        <span className="gm-option-price">{priceText}</span>
-                      ) : null}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
+        {visibleGroups.map(({ group, rule, options }) => (
+          <GuestOptionGroup
+            key={group.id} group={group} rule={rule} options={options}
+            label={tidyName(group.name)} labelId={`g-opt-${group.id}`}
+            groupRef={el => { groupRefs.current[group.id] = el }}
+            selectedIds={selected} freeIds={freeIds} priceAt={priceAt} sizePrice={sizePrice}
+            short={tried && problems.some(p => p.group.id === group.id)}
+            onToggle={toggle}
+          />
+        ))}
       </div>
 
       <div className="gm-sheet-foot">

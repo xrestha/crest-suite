@@ -1,9 +1,11 @@
 /* The till's "hasn't printed" banner (S837). Above the order screen (z 1000), under every till
-   dialog (1100+). Bottom of the screen, clear of the cart's own action bar on a phone. */
+   dialog (1100+). Bottom of the screen, clear of the cart's own action bar on a phone, and of an
+   installed iPhone's home indicator, where Print here and Dismiss sat (env() is 0 in a browser tab;
+   POS audit 2026-10-15). */
 .station-print-alerts {
   position: fixed;
   left: 50%;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 1050;
   width: min(560px, calc(100vw - 32px));

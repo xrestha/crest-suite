@@ -19,6 +19,9 @@ import ShowMoreRows from './ShowMoreRows'
 import { useRowWindow } from './useRowWindow'
 import { settleAll, rangeReadMs, REPORT_READ_MS, YEAR_READ_MS } from './reportTimeout'
 import ChartCard from '../../../components/ChartCard'
+import LetterheadError from './LetterheadError'
+import { CHART_COLORS } from '../../../shared/chartColors'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, todayNepalBs, bsSlash } from './reportRange'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate, nepalHour } from '../../../shared/nepalTime'
@@ -43,10 +46,10 @@ const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
 const THRESHOLD = 100000
 // SVG presentation attributes only (tick fills, Bar fill) — var() does not resolve there. Never
-// as HTML text: as 11px caption text MUTED measured 3.9:1 on the dark card, and GOLD is a chart
-// hue rather than a theme token. Text takes the tokens. (This pair was a silent copy of
-// CoversReport.jsx's, carrying neither the comment nor the reason — restored S689.)
-const GOLD  = '#c9a84c'
+// as HTML text: as 11px caption text MUTED measured 3.9:1 on the dark card, and the bar colour is a
+// chart hue rather than a theme token. Text takes the tokens. The bar is the product's first chart
+// slot (chartColors.js), never a private copy of its hex.
+const BAR_HEX = CHART_COLORS[0]
 const MUTED = '#6b7280'
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
 // The date cell shared by the three row-level tabs (Bill Register, Comped Bills, Delivery Bills).
@@ -64,7 +67,9 @@ const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 P
 // saying so, rather than flagging every three-second negative into meaninglessness.
 const CLOCK_SKEW_TOLERANCE_MS = 60_000
 
-function BillDateTimeCell({ openedAt, closedAt }) {
+// The date and the two clock times a register row shows, worked out once for the table cell and
+// the Bill Register's phone card, so the two cannot date a bill differently.
+function billTimes(openedAt, closedAt) {
   const bs = nepalBs(closedAt)
   const civil = nepalCivilDate(closedAt)
   const opened = nepalTime(openedAt)
@@ -89,27 +94,114 @@ function BillDateTimeCell({ openedAt, closedAt }) {
   // dated: the row's own date already says it, and repeating it on every ordinary bill is noise.
   const openedLabel = openedElsewhere ? `${formatBsDay(openedBs.day, openedBs.month)} ${opened}` : opened
   const closedLabel = openedElsewhere && bs ? `${formatBsDay(bs.day, bs.month)} ${closed}` : closed
+  const date = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : (civil ? formatAd(civil) : '—')
+  return { date, opened, closed, openedLabel, closedLabel, skewed }
+}
+
+function BillDateTimeCell({ openedAt, closedAt }) {
+  const { date, opened, closed, openedLabel, closedLabel, skewed } = billTimes(openedAt, closedAt)
   return (
     // nowrap sits on each date+time ATOM, not on the cell — a cell-wide nowrap in a 15-column table
     // can only overflow, and this line is long in the cross-day case. Breaking at the arrow is the
     // one break that costs nothing.
     <td>
-      <span style={{ whiteSpace: 'nowrap' }}>
-        {bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : (civil ? formatAd(civil) : '—')}
-      </span>
+      <span style={{ whiteSpace: 'nowrap' }}>{date}</span>
       {closed && (
         <span className="cell-sub">
           {opened
             ? <><span style={{ whiteSpace: 'nowrap' }}>{openedLabel}</span> <span aria-hidden="true">→</span> <span style={{ whiteSpace: 'nowrap' }}>{closedLabel}</span></>
             : closed}
-          {skewed && (
-            <Tip text="This bill records a close before its open. The opened time comes from the server and the closed time from the till, so a till whose clock is wrong will produce this. Both are shown exactly as recorded — check the till's date and time." width={300}>
-              <span style={{ color: 'var(--theme-amber-text)', marginLeft: 5 }}>⚠</span>
-            </Tip>
-          )}
+          {skewed && <SkewMark />}
         </span>
       )}
     </td>
+  )
+}
+
+function SkewMark() {
+  return (
+    <Tip text="This bill records a close before its open. The opened time comes from the server and the closed time from the till, so a till whose clock is wrong will produce this. Both are shown exactly as recorded — check the till's date and time." width={300}>
+      <span style={{ color: 'var(--theme-amber-text)', marginLeft: 5 }}>⚠</span>
+    </Tip>
+  )
+}
+
+const compLabel = compNos => `Comped (${compNos.map(n => `NC-${String(n).padStart(2, '0')}`).join(', ')})`
+
+// A register card's other figures, one tap away. Rendered only once opened: a page of 200 cards
+// would otherwise mount some 4,000 nodes of closed breakdowns nobody asked for.
+function BillCardFigures({ v }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details className="phone-card__lines" onToggle={e => setOpen(e.currentTarget.open)}>
+      <summary>Show the figures</summary>
+      {open && (
+        <ul>
+          <li><span>Gross</span><span>{fmtNpr(v.gross)}</span></li>
+          <li><span>Discount</span><span>{fmtNpr(v.discount)}</span></li>
+          <li><span>Non-Taxable</span><span>{fmtNpr(v.nonTaxable)}</span></li>
+          <li><span>Taxable</span><span>{fmtNpr(v.taxable)}</span></li>
+          <li><span>VAT</span><span>{fmtNpr(v.vat)}</span></li>
+          {v.remarks && <li><span>Remarks</span><span style={{ whiteSpace: 'normal', textAlign: 'right' }}>{v.remarks}</span></li>}
+          <li><span>Entered by</span><span>{v.enteredBy}</span></li>
+        </ul>
+      )}
+    </details>
+  )
+}
+
+// The Bill Register on a phone (2026-10-15 audit; PurchaseBillCards.jsx is the pattern). The table is
+// ~15 columns, so in a phone's width the Net sat past the edge behind a sideways scroll. Each row is
+// one card here: the voucher and its Net on the first line, then the date and clock times, who and
+// where, how it was paid, and what happened to it in words; the rest of the row's figures one tap
+// away, and the row's own View bill last. It takes the SAME window of rows the table renders, so the
+// two page together (ShowMoreRows under both) and filter together, and the TOTAL line is the table's
+// TOTAL row. `.phone-only` (Layout.css) shows it below 600px, where the table hides; it never prints.
+// `.phone-cards--no-fab`: the list's 88px bottom clearance is for a floating Add, and this page has none.
+function BillRegisterCards({ rows, total, totalNet, onView }) {
+  return (
+    <ul className="phone-cards phone-cards--no-fab phone-only" aria-label="Bill Register">
+      {rows.map(v => {
+        const t = billTimes(v.openedAt, v.closedAt)
+        const status = [
+          v.isCreditNote && `Credit note against ${v.invoiceNo != null ? `invoice #${v.invoiceNo}` : 'the bill'}`,
+          v.credited && 'Credit noted',
+          v.compNos.length > 0 && compLabel(v.compNos),
+        ].filter(Boolean)
+        return (
+          <li key={v.id} className="phone-card">
+            <div className="phone-card__top">
+              <span className="phone-card__title">
+                {v.isCreditNote ? `− Credit Note ${v.creditNoteLabel}` : `#${v.orderNo}`}
+                {!v.isCreditNote && v.invoiceNo ? ` · Invoice ${v.invoiceNo}` : ''}
+              </span>
+              <span className="phone-card__figure">{fmtNpr(v.net)}</span>
+            </div>
+            <div className="phone-card__meta">
+              {t.date}
+              {t.closed && (t.opened
+                ? <> · {t.openedLabel} <span aria-hidden="true">→</span> {t.closedLabel}</>
+                : <> · {t.closed}</>)}
+              {t.skewed && <SkewMark />}
+            </div>
+            <div className="phone-card__meta">{v.customer} · {v.orderMode} · {v.payMethod}</div>
+            {status.length > 0 && <div className="phone-card__meta">{status.join(' · ')}</div>}
+            <BillCardFigures v={v} />
+            {v.billId && (
+              <div className="phone-card__actions">
+                <button type="button" className="btn btn-ghost" onClick={() => onView(v)}
+                  aria-label={v.isCreditNote ? `View original bill of credit note ${v.creditNoteLabel}` : `View bill #${v.orderNo}`}>
+                  {v.isCreditNote ? 'View original bill' : 'View bill'}
+                </button>
+              </div>
+            )}
+          </li>
+        )
+      })}
+      <li className="phone-card__meta" style={{ padding: '6px 2px' }}>
+        TOTAL of all {total.toLocaleString('en-IN')} rows: <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(totalNet)}</strong> net
+      </li>
+    </ul>
   )
 }
 
@@ -987,7 +1079,7 @@ export default function SalesReport() {
   const productTypeTotals = totalsOf(productTypeRows)
   const customerTotals = customerRows.reduce((s, c) => ({ bills: s.bills + c.bills, returns: s.returns + c.returns, gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat, net: s.net + c.net }), { bills: 0, returns: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const compedBillTotals = compedBillRows.reduce((s, c) => ({ foodCost: s.foodCost + c.foodCost, potentialValue: s.potentialValue + c.potentialValue }), { foodCost: 0, potentialValue: 0 })
-  const oneLakhTotals = parties.reduce((s, p) => ({ gross: s.gross + p.gross, vat: s.vat + p.vat, net: s.net + p.net }), { gross: 0, vat: 0, net: 0 })
+  const oneLakhTotals = parties.reduce((s, p) => ({ gross: s.gross + p.gross, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net }), { gross: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
 
   const hourlyChartData = hourlyRows.map(h => ({ name: hourLabel(h.hour), value: h.net }))
   const hourlyTotalNet = hourlyRows.reduce((s, h) => s + h.net, 0)
@@ -995,19 +1087,11 @@ export default function SalesReport() {
 
   // Printable-statutory-document look (Company Name/VAT/Address letterhead + date-range line baked
   // into the sheet itself), matching the format competitor ERP exports use — see [[pos_reports_gap_list]].
+  // The shared letterhead (excelLetterhead.js) since the 2026-10-15 audit: this page kept a private
+  // copy of it, row for row the same. `vatReg` is always a boolean here, so its VATNO / PAN No line
+  // reads exactly as the copy's did.
   function withLetterhead(XLSX, title, rangeLine, dataRows) {
-    const aoa = [
-      [title],
-      [`CompanyName : ${bizInfo.name}`],
-      [`${vatReg ? 'VATNO' : 'PAN No'} : ${bizInfo.vat}`],
-      [`ADDRESS : ${bizInfo.address}`],
-      [],
-      [rangeLine],
-      [],
-    ]
-    const ws = XLSX.utils.aoa_to_sheet(aoa)
-    XLSX.utils.sheet_add_json(ws, dataRows, { origin: -1 })
-    return ws
+    return sheetWithLetterhead(XLSX, { title, biz: { ...bizInfo, vatReg }, scopeLine: rangeLine, rows: dataRows })
   }
   // The letterhead line every sheet in the workbook carries. It now states the timezone too: a
   // sheet that leaves the building with bare clock times has to say which clock (S594 — a sheet
@@ -1193,7 +1277,6 @@ export default function SalesReport() {
   const loading = tab === 'onelakh' ? oneLakhLoading : rangeLoading
   // Same per-pipeline split as `loading`: the tab decides which pipeline's failure it must report.
   const loadError = tab === 'onelakh' ? oneLakhError : rangeError
-  const bizErrorInfo = bizError ? errorInfo(bizError, 'operator') : null
   const isEmpty =
     (tab === 'daily' && dailyRows.length === 0) ||
     (tab === 'hourly' && hourlyTotals.bills + hourlyTotals.returns === 0) ||
@@ -1264,18 +1347,11 @@ export default function SalesReport() {
 
       {/* S754: the letterhead + master-data read fails independently of either pipeline, so it has
           its own notice on every tab rather than borrowing rangeError (which loadRange clears). */}
-      {bizErrorInfo && (
-        <div className="card report-error" role="alert" style={{ marginBottom: 16 }}>
-          <div className="report-error-title">Could not load this outlet's details</div>
-          <p className="report-error-body">{bizErrorInfo.text}</p>
-          <p className="report-error-hint">
-            The company name, VAT number and address for the Excel letterhead, the agreed commission
-            rates on Delivery Partners, and the product codes and veg flags did not load — so Excel is
-            switched off and those columns are blank rather than real. Reload the page to try again.
-          </p>
-          {bizErrorInfo.detail && <p className="action-error-detail">{bizErrorInfo.detail}</p>}
-        </div>
-      )}
+      <LetterheadError error={bizError} title="Could not load this outlet's details">
+        The company name, VAT number and address for the Excel letterhead, the agreed commission
+        rates on Delivery Partners, and the product codes and veg flags did not load — so Excel is
+        switched off and those columns are blank rather than real. Reload the page to try again.
+      </LetterheadError>
       {/* S809 3m (REPORTS-2): the fiscal-year list has its own notice, so the tab's own load cannot
           clear it, and a failed list never replaces a year's parties that did load. */}
       {fyListErrorInfo && (
@@ -1349,6 +1425,7 @@ export default function SalesReport() {
         <>
           <ChartCard
             title="Net Sales by Hour"
+            headingLevel={2}
             cardStyle={{ marginBottom: 24 }}
             // MUTED is the documented `chart-tick` token: correct inside the SVG, a chart colour
             // worn as UI chrome out here (the S540 role mismatch), so the footer takes text2.
@@ -1372,7 +1449,7 @@ export default function SalesReport() {
                     labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={v => [fmtNpr(v), 'Net Sales']}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={BAR_HEX} {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1425,7 +1502,12 @@ export default function SalesReport() {
             so this total is larger than the {paymentFilter} line on Payment Summary, which counts only its share.
           </p>
         )}
-        <div className="table-wrap">
+        {/* Below 600px the cards show and this table hides (.phone-only/.phone-hide; print keeps
+            the table). Both take the same window of rows, so ShowMoreRows below pages the two
+            together, and the same payment filter. */}
+        <BillRegisterCards rows={shownVoucherRows} total={filteredVoucherRows.length} totalNet={voucherTotals.net}
+          onView={v => viewPosBill(clientId, { id: v.billId })} />
+        <div className="table-wrap phone-hide">
           <table className="data-table">
             <thead>
               <tr>
@@ -1475,7 +1557,7 @@ export default function SalesReport() {
                       {v.compNos.length > 0 && (
                         <Tip text="This bill had one or more items comped out of it — see the Comped Bills tab for detail. Excluded from the Gross/Net figures shown here.">
                           <span className={CLOSE_TYPE_BADGE.writeoff} style={{ fontSize: 10, marginLeft: 6 }}>
-                            Comped ({v.compNos.map(n => `NC-${String(n).padStart(2, '0')}`).join(', ')})
+                            {compLabel(v.compNos)}
                           </span>
                         </Tip>
                       )}
@@ -1680,9 +1762,9 @@ export default function SalesReport() {
           </div>
         </div>
 
-        <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-          By partner
-        </p>
+        {/* Real section headings under the page h1 (2026-10-15 audit), in the shell's section-heading
+            class rather than a styled <p> a screen reader cannot jump to. */}
+        <h2 className="dash-heading">By partner</h2>
         <div className="table-wrap" style={{ marginBottom: 26 }}>
           <table className="data-table">
             <thead>
@@ -1765,9 +1847,7 @@ export default function SalesReport() {
           </table>
         </div>
 
-        <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-          {partnerFilter === 'all' ? 'Bills' : `${partnerFilter} bills`}
-        </p>
+        <h2 className="dash-heading">{partnerFilter === 'all' ? 'Bills' : `${partnerFilter} bills`}</h2>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -2108,7 +2188,8 @@ export default function SalesReport() {
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={3}>TOTAL</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(oneLakhTotals.gross)}</td>
-                <td></td><td></td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(oneLakhTotals.taxable)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(oneLakhTotals.nonTaxable)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(oneLakhTotals.vat)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(oneLakhTotals.net)}</td>
                 <td></td>

@@ -11,6 +11,7 @@ import { nepalBs, nepalDateAd, serviceDayStartIso } from '../../../shared/nepalT
 import { settleWithin } from '../../../utils/withTimeout'
 import { nprInt } from '../../../shared/nepalMoney'
 import { openSlipWindow, printParkingSlip } from './parkingSlipHtml'
+import './parking.css'
 import { noAnswer, parkingSlipNotice } from './parkingSlipList'
 
 const VEHICLE_TYPES = ['Two Wheeler', 'Four Wheeler']
@@ -53,6 +54,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   const [todaysBills, setTodaysBills] = useState([])
   const [billsLoading, setBillsLoading] = useState(true)
   const [billsError, setBillsError] = useState(false) // a failed read is not "no bills today"
+  const [billsTry, setBillsTry] = useState(0) // Try again re-runs the read below
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
   // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
@@ -71,7 +73,9 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
     let live = true
     // S754: the service day (6 AM Nepal rollover), not the device's midnight — see serviceDayStartIso.
     // S842: time-limited, so a stalled read ends in the failed-read placeholder instead of "Loading…"
-    // in the bill picker for as long as the dialog is open.
+    // in the bill picker for as long as the dialog is open. A failed read offers Try again, which
+    // bumps billsTry and runs this again, rather than asking the cashier to close the dialog.
+    setBillsLoading(true); setBillsError(false)
     settleWithin(scopedFrom('pos_orders', 'id, order_no, invoice_no, table_name, buyer_name, paid_amount')
       .eq('status', 'billed')
       .not('invoice_no', 'is', null)
@@ -82,7 +86,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
         setBillsError(!!error); setTodaysBills(error ? [] : data || []); setBillsLoading(false)
       })
     return () => { live = false }
-  }, [scopedFrom])
+  }, [scopedFrom, billsTry])
 
   if (!hasPosAccess('supervisor')) {
     return (
@@ -196,8 +200,14 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
             value={billOrderId}
             onChange={setBillOrderId}
             options={billOptions}
-            placeholder={billsLoading ? 'Loading…' : billsError ? 'Could not load today\'s bills — close and reopen to retry' : todaysBills.length === 0 ? 'No bills issued today yet' : '— None —'}
+            placeholder={billsLoading ? 'Loading…' : billsError ? 'Could not load today\'s bills' : todaysBills.length === 0 ? 'No bills issued today yet' : '— None —'}
           />
+          {billsError && !billsLoading && (
+            <div className="parking-bills-retry">
+              <span role="alert">Today&apos;s bills could not be loaded. The slip can still be issued without one.</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBillsTry(n => n + 1)} disabled={saving}>Try again</button>
+            </div>
+          )}
         </div>
         <div className="form-field">
           <label htmlFor="park-notes">Notes</label>

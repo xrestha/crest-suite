@@ -1,6 +1,6 @@
 import {
   PARTY_BANDS, bandFor, turnoverByBand, isDineIn, isPartBill, dineInOnly, seatedCovers, coversTotals, addReturnsByBand,
-  MAX_SITTING_MINUTES, turnoverExclusions, turnoverExclusionNote,
+  MAX_SITTING_MINUTES, turnoverExclusions, turnoverExclusionNote, coverRowsTotal,
 } from './coversMath'
 
 // Verbatim copy of the loop CoversReport.jsx carried before S677 lifted it out. The helper must
@@ -227,5 +227,32 @@ describe('a part bill', () => {
     const { part_of_order_id, ...unread } = part
     expect(part_of_order_id).toBe('p')
     expect(isDineIn(unread)).toBe(false)
+  })
+})
+
+// The TOTAL row under Daily Trend, Peak Hours and By Server (2026-10-15 audit).
+describe('coverRowsTotal', () => {
+  test('sums bills, covers and net, and takes revenue per cover from the sums, not the rows\' averages', () => {
+    const rows = [
+      { bills: 1, covers: 2, net: 1000, revPerCover: 500 },
+      { bills: 3, covers: 40, net: 4000, revPerCover: 100 },
+    ]
+    const t = coverRowsTotal(rows)
+    expect(t).toEqual({ bills: 4, covers: 42, net: 5000, revPerCover: 5000 / 42 })
+    expect(t.revPerCover).not.toBe(300) // the average of 500 and 100
+  })
+
+  test('a credit note that takes a day below zero comes off the total too', () => {
+    expect(coverRowsTotal([{ bills: 2, covers: 4, net: 2000 }, { bills: 0, covers: 0, net: -500 }]).net).toBe(1500)
+  })
+
+  test('rows with no net (Peak Hours) add bills and covers only', () => {
+    expect(coverRowsTotal([{ hour: 13, bills: 2, covers: 5 }, { hour: 19, bills: 4, covers: 11 }]))
+      .toEqual({ bills: 6, covers: 16, net: 0, revPerCover: 0 })
+  })
+
+  test('no covers is no average, not an average of 0', () => {
+    expect(coverRowsTotal([]).revPerCover).toBeNull()
+    expect(coverRowsTotal([{ bills: 1, covers: 0, net: 300 }]).revPerCover).toBeNull()
   })
 })

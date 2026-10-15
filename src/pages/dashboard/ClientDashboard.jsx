@@ -2953,7 +2953,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                         const amount = salesMixBuckets[cat]
                         const pct = (amount / salesMixTotal) * 100
                         return (
-                          <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5 }}>
+                          <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--theme-text1)' }}>
                               <span style={{ width: 8, height: 8, borderRadius: 0, background: salesMixColorOf(cat), flexShrink: 0 }} />
                               {cat}

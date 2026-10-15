@@ -304,18 +304,63 @@ describe('focus after a control goes away (S842)', () => {
 
 describe('dish photos load the thumbnail when there is one (S842)', () => {
   const PHOTO = 'https://abcd.supabase.co/storage/v1/object/public/dish-photos/c1/r-momo-100.jpg?v=100'
+  // S844: the photo has an empty alt, so it is found by its role as decoration, not by the dish name.
+  const photo = () => screen.getByRole('presentation')
   it('loads the marked thumb, and the full photo if the thumb will not load', async () => {
     mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], image_url: `${PHOTO}&thumb=1` }], error: null }
     renderMenu()
-    const img = await screen.findByRole('img', { name: 'Veg Momo' })
-    expect(img.getAttribute('src')).toBe('https://abcd.supabase.co/storage/v1/object/public/dish-photos/c1/r-momo-100.thumb.jpg?v=100&thumb=1')
-    fireEvent.error(img)
-    expect(screen.getByRole('img', { name: 'Veg Momo' }).getAttribute('src')).toBe(`${PHOTO}&thumb=1`)
+    await screen.findByText('Veg Momo')
+    expect(photo().getAttribute('src')).toBe('https://abcd.supabase.co/storage/v1/object/public/dish-photos/c1/r-momo-100.thumb.jpg?v=100&thumb=1')
+    fireEvent.error(photo())
+    expect(photo().getAttribute('src')).toBe(`${PHOTO}&thumb=1`)
   })
   it('a photo without the mark loads in full, with no request for a thumb', async () => {
     mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], image_url: PHOTO }], error: null }
     renderMenu()
-    expect((await screen.findByRole('img', { name: 'Veg Momo' })).getAttribute('src')).toBe(PHOTO)
+    await screen.findByText('Veg Momo')
+    expect(photo().getAttribute('src')).toBe(PHOTO)
+  })
+  it('does not read the dish name twice: the photo beside it has an empty alt (S844)', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], image_url: PHOTO }], error: null }
+    renderMenu()
+    await screen.findByText('Veg Momo')
+    expect(photo().getAttribute('alt')).toBe('')
+    expect(screen.queryByRole('img', { name: 'Veg Momo' })).toBeNull()
+  })
+})
+
+describe('the filter sheet counts what it will show (S844)', () => {
+  const VEG = { recipe_id: 'r-veg', name: 'Veg Momo', is_veg: true }
+  const MEAT = { recipe_id: 'r-meat', name: 'Chicken Momo', is_veg: false }
+  const COMBO = {
+    id: 'c1', name: 'Momo Combo', guest_price: 350, sort: 0,
+    groups: [{ id: 'g1', name: 'Pick a momo', sort: 0, items: [{ ...MEAT, extra_price: 0, sort: 0 }] }],
+  }
+  beforeEach(() => {
+    mockAnswers.get_guest_menu = {
+      data: [{ ...ROWS[0], ...VEG }, { ...ROWS[0], ...MEAT }, { ...ROWS[0], recipe_id: 'r-lassi', name: 'Lassi', is_veg: true }],
+      error: null,
+    }
+    mockAnswers.get_guest_menu_options = { data: { groups: [], options: [], attachments: [], combos: [COMBO] }, error: null }
+  })
+  it('names the combos beside the dishes, and follows the filters', async () => {
+    renderMenu()
+    // Each dish row carries its mark (DietMark, shared with the choice sheets since S844).
+    expect(await screen.findAllByRole('img', { name: 'Vegetarian' })).toHaveLength(2)
+    expect(screen.getAllByRole('img', { name: 'Non-vegetarian' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
+    expect(screen.getByRole('button', { name: 'Show 3 dishes and 1 combo' })).toBeTruthy()
+    // Vegetarian only hides the chicken momo and the combo whose one pick is chicken.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Vegetarian dishes only' }))
+    expect(screen.getByRole('button', { name: 'Show 2 dishes' })).toBeTruthy()
+  })
+  it('says nothing matches rather than offering to show none', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], ...MEAT }], error: null }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Filters' }))
+    expect(screen.getByRole('button', { name: 'Show 1 dish and 1 combo' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Vegetarian dishes only' }))
+    expect(screen.getByRole('button', { name: 'No dish matches · Close' })).toBeTruthy()
   })
 })
 

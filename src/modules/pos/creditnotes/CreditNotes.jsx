@@ -2,6 +2,7 @@ import { npr } from '../../../shared/nepalMoney'
 import { outletHasIms } from '../orders/posImsWaiting'
 import { billCountsForIms } from '../orders/inventorySince'
 import { useState, useEffect, useCallback } from 'react'
+import { Download } from 'lucide-react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -244,9 +245,13 @@ export default function CreditNotes() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">
-          Credit Notes <Tip text="Formal Credit Notes for correcting an already-billed order — required by Nepal VAT Rules 2053, Rule 20, whenever the value of billed goods/services changes.">ⓘ</Tip>
-        </h1>
+        {/* The Tip sits beside the heading, not in it, so the heading's name is only its text. */}
+        <div className="page-title-row">
+          <h1 className="page-title">Credit Notes</h1>
+          <Tip text="Formal Credit Notes for correcting an already-billed order — required by Nepal VAT Rules 2053, Rule 20, whenever the value of billed goods/services changes.">
+            <span aria-hidden="true">ⓘ</span><span className="sr-only">About Credit Notes</span>
+          </Tip>
+        </div>
         <p className="page-subtitle">
           Issue a Credit Note against a past bill, or review the monthly Credit Note register.
         </p>
@@ -331,7 +336,7 @@ export default function CreditNotes() {
             {/* Gated on loading and the error too (S754): the workbook is named for the pickers'
                 range, so exporting mid-load or after a failed read wrote an empty or stale
                 register under the new range's filename. */}
-            <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={notesLoading || !!notesError || notes.length === 0}>⬇ Excel</button>
+            <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={notesLoading || !!notesError || notes.length === 0}><Download size={16} aria-hidden="true" /> Excel</button>
           </div>
 
           <ActionError error={bookMsg} className="action-error--top" />

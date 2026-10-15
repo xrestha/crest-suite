@@ -1,5 +1,5 @@
 import {
-  tidyName, orderCategories, reorderCategoryList, matchesSearch,
+  tidyName, orderCategories, reorderCategoryList, matchesSearch, filterShowText,
   stageFromProgress, laterStage, guestRuleText,
   newRequestKey, orderSignature, cartWithout,
 } from './guestMenuHelpers'
@@ -117,6 +117,16 @@ describe('matchesSearch', () => {
     expect(matchesSearch({ name: 'Crème brûlée' }, 'creme')).toBe(true)
     expect(matchesSearch(momo, 'thukpa')).toBe(false)
     expect(matchesSearch(momo, '  ')).toBe(true)
+  })
+})
+
+describe('filterShowText (S844: the filter button counts the combos it will show too)', () => {
+  it('names dishes and combos in plain words, and says so when nothing is left', () => {
+    expect(filterShowText(12, 2)).toBe('Show 12 dishes and 2 combos')
+    expect(filterShowText(1, 1)).toBe('Show 1 dish and 1 combo')
+    expect(filterShowText(1, 0)).toBe('Show 1 dish')
+    expect(filterShowText(0, 3)).toBe('Show 3 combos')
+    expect(filterShowText(0, 0)).toBe('No dish matches · Close')
   })
 })
 

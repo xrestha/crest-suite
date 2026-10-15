@@ -11,6 +11,7 @@ import ArrivalAlert from '../../../components/ArrivalAlert'
 import { useGuestOrderAlerts, REPEAT_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { guestAlertTitle, guestAlertDetail } from '../../../shared/guestAlertBridge'
 import { playGuestAlert, soundBlocked, unlockAudio } from '../posChime'
+import './posLogin.css'
 
 // The PIN screen is every till's resting state, so it is where a new release is picked up (S809 1b).
 // A few quiet seconds first, so a reload never lands under a waiter typing a PIN. Locked carts are in
@@ -338,16 +339,9 @@ const pinDots = Math.max(4, pin.length)
   }
 
   return (
-    <main style={{
-      minHeight: '100vh',
-      background: 'var(--theme-bg)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      // The guest-order banner is fixed at the top and publishes its measured height; 0 without it.
-      padding: 'calc(24px + var(--arrival-alert-h, 0px)) 24px 24px',
-    }}>
+    // posLogin.css: the padding clears the guest-order banner when it is up (it publishes its measured
+    // height) and an installed iPhone's status bar and home indicator when it is not.
+    <main className="pos-login">
     {guestWaiting && (
       <ArrivalAlert
         reserveSpace
@@ -365,9 +359,10 @@ const pinDots = Math.max(4, pin.length)
     }}>
 
       {/* Header — Georgia serif is reserved for exactly two places in this product: the
-          sidebar wordmark and this login screen (DESIGN.md §3, The One Serif Rule). */}
+          sidebar wordmark and this login screen (DESIGN.md §3, The One Serif Rule). 24px, on the
+          type scale (POS audit 2026-10-15; it was an off-scale 26). */}
       <div style={{ marginBottom: 36, textAlign: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
           {clientName}
         </h1>
         <div style={{ fontSize: selected ? 18 : 14, fontWeight: selected ? 600 : 400, color: selected ? 'var(--theme-text1)' : 'var(--theme-text3)', marginTop: 10, letterSpacing: 0.2 }}>
@@ -414,24 +409,13 @@ const pinDots = Math.max(4, pin.length)
               {staff.map(s => {
                 const avatar = avatarColorFor(s.id, isDark)
                 return (
+                  // posLogin.css: the press is :active and the hover only for a pointer that can hover,
+                  // so a tap shows while the finger is down and leaves nothing lit (POS audit 2026-10-15).
                   <button
                     key={s.id}
+                    type="button"
+                    className="pos-staff-tile"
                     onClick={() => pickStaff(s)}
-                    style={{
-                      width: 130, minHeight: 128,
-                      display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      background: 'var(--theme-card)',
-                      border: '1px solid var(--theme-border)',
-                      borderRadius: 0,
-                      color: 'var(--theme-text1)',
-                      fontSize: 14, fontWeight: 600,
-                      cursor: 'pointer',
-                      padding: '12px 8px 10px',
-                      lineHeight: 1.3,
-                      transition: 'border-color 0.15s, background 0.15s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--theme-accent)'; e.currentTarget.style.background = 'var(--theme-table-hover)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--theme-border)'; e.currentTarget.style.background = 'var(--theme-card)' }}
                   >
                     <div style={{
                       width: 52, height: 52, borderRadius: 0,
@@ -459,15 +443,7 @@ const pinDots = Math.max(4, pin.length)
           )}
 
           <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button
-              onClick={() => navigate('/login')}
-              style={{
-                padding: '10px 24px', fontSize: 14,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-                borderRadius: 0, color: 'var(--theme-text2)', cursor: 'pointer',
-              }}
-            >
+            <button type="button" className="btn btn-ghost" onClick={() => navigate('/login')}>
               ← Back
             </button>
           </div>
@@ -498,32 +474,18 @@ const pinDots = Math.max(4, pin.length)
             ))}
           </div>
 
-          {/* Numpad */}
+          {/* Numpad. The press and hover are posLogin.css's (:active, and hover only where a pointer
+              can hover), not mouse events: on a tablet those fired after the finger lifted and left
+              the last key tapped tinted (POS audit 2026-10-15). */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 72px)', gap: 12 }}>
-            {KEYS.flat().map((k, i) => (
+            {KEYS.flat().map(k => (
               <button
-                key={i}
+                key={k}
+                type="button"
+                className={`pos-pin-key${k === 'C' ? ' pos-pin-key--clear' : k === '⌫' ? ' pos-pin-key--delete' : ''}`}
                 onClick={() => pressKey(k)}
-                disabled={!k || signingIn}
+                disabled={signingIn}
                 aria-label={k === 'C' ? 'Clear PIN' : k === '⌫' ? 'Delete last digit' : undefined}
-                style={{
-                  width: 72, height: 72,
-                  background: k ? 'var(--theme-card)' : 'transparent',
-                  border: k ? '1px solid var(--theme-border)' : 'none',
-                  borderRadius: 0,
-                  color: k === 'C' ? 'var(--theme-text3)' : 'var(--theme-text1)',
-                  fontSize: k === '⌫' ? 20 : k === 'C' ? 15 : 22,
-                  fontWeight: k === 'C' ? 600 : 500,
-                  letterSpacing: k === 'C' ? '0.04em' : 'normal',
-                  cursor: k ? 'pointer' : 'default',
-                  transition: 'background 0.12s, transform 0.08s, box-shadow 0.12s',
-                  boxShadow: 'none',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-                onMouseEnter={e => { if (k) e.currentTarget.style.background = 'var(--theme-table-hover)' }}
-                onMouseLeave={e => { if (k) { e.currentTarget.style.background = k ? 'var(--theme-card)' : 'transparent'; e.currentTarget.style.boxShadow = 'none' } }}
-                onMouseDown={e => { if (k) { e.currentTarget.style.transform = 'scale(0.92)'; e.currentTarget.style.boxShadow = '0 0 0 4px var(--theme-focus-ring), 0 0 14px var(--theme-accent)' } }}
-                onMouseUp={e => { if (k) { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' } }}
               >
                 {k}
               </button>
@@ -543,14 +505,12 @@ const pinDots = Math.max(4, pin.length)
 
           {/* Back + Login row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+            {/* The ghost button, sized as the Login button beside it is. */}
             <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ width: 108, padding: '13px 0', justifyContent: 'center' }}
               onClick={back}
-              style={{
-                width: 108, padding: '13px 0', fontSize: 14,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-                borderRadius: 0, color: 'var(--theme-text2)', cursor: 'pointer',
-              }}
             >
               ← Back
             </button>

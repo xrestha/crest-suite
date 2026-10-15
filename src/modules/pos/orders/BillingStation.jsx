@@ -189,7 +189,7 @@ export default function BillingStation({
                   </div>
                 </div>
 
-                <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>
                   {fmtNpr(r.total)}
                 </div>
 

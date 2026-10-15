@@ -261,10 +261,14 @@ export default function ComboBuilder() {
       ) : pairsLoading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading pairings…</p>
       ) : rows.length === 0 ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {posEnabled
-            ? <>No co-occurrence data yet for {anchor?.name || 'this item'} in the last {days} days — needs more paid bills with this item on them.</>
-            : <>Nothing to show — pairings come from paid POS bills, and this client has no POS module.</>}
+        <div className="card">
+          <div className="empty-state">
+            <p className="empty-state-text">
+              {posEnabled
+                ? <>No co-occurrence data yet for {anchor?.name || 'this item'} in the last {days} days — needs more paid bills with this item on them.</>
+                : <>Nothing to show — pairings come from paid POS bills, and this client has no POS module.</>}
+            </p>
+          </div>
         </div>
       ) : (
         <>

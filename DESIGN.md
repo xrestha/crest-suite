@@ -638,10 +638,12 @@ its controls. `optgroup` is in that selector list because Firefox styles it sepa
 **Numbers are tabular.** The body font's default figures are proportional, so a right-aligned currency
 column does not line up digit for digit and a page of money reads ragged. Every
 `.data-table` cell, every `tfoot` cell and `.stat-value` carry `font-variant-numeric: tabular-nums`
-from one rule. Only digits are affected; text cells are unchanged.
+from one rule. Only digits are affected; text cells are unchanged. Since S844 the rule is every
+`table td`/`th`, not the class alone: thirteen hand-rolled tables, the purchase bill's line table
+among them, had been rendering money in proportional figures.
 
-**No interactive control below 12px.** Chips and buttons in dense list rows sit at 12–12.5px with
-5–7px of vertical padding. 10px is for genuinely non-interactive micro-labels.
+**No interactive control below 12px.** Chips and buttons in dense list rows sit at 12px with
+5–7px of vertical padding (12.5px was off the ramp and is gone, S844). 10px is for genuinely non-interactive micro-labels.
 
 ## Layout
 

@@ -95,6 +95,17 @@ export function matchesSearch(item, query) {
   return [item?.name, item?.description, item?.category].some(v => normaliseForSearch(v).includes(q))
 }
 
+// The filter sheet's button names what closing it will show (S844). The filters narrow combos as well
+// as dishes (comboMatches), and it used to count dishes only: "Show 12 dishes" over a menu showing 12
+// dishes and 2 combos. Nothing left reads as the menu's own empty state does.
+export function filterShowText(dishes, combos) {
+  const parts = [
+    dishes > 0 ? `${dishes} ${dishes === 1 ? 'dish' : 'dishes'}` : null,
+    combos > 0 ? `${combos} ${combos === 1 ? 'combo' : 'combos'}` : null,
+  ].filter(Boolean)
+  return parts.length ? `Show ${parts.join(' and ')}` : 'No dish matches · Close'
+}
+
 // ── The order tracker ────────────────────────────────────────────────────────────────────────────
 // Five stages a guest can watch, then one of two endings.
 export const STAGES = ['placed', 'confirmed', 'kot_sent', 'preparing', 'ready']

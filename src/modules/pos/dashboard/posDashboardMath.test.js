@@ -1,6 +1,6 @@
 import {
   summariseBills, compareToLastWeek, hourlySales, paymentMix, channelOf, channelMix,
-  topItems, openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf, countsAsSale,
+  topItems, openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf, countsAsSale, hourlyPeaks,
 } from './posDashboardMath'
 
 const bill = (over) => ({ close_type: 'paid', credit_note_id: null, paid_amount: 1000, covers: 2, discount_amount: 0, table_id: 't1', ...over })
@@ -237,4 +237,22 @@ describe('the floor band', () => {
 test('same weekday last week crosses a month and a year cleanly', () => {
   expect(sameWeekdayLastWeek('2026-10-02')).toBe('2026-09-25')
   expect(sameWeekdayLastWeek('2026-01-03')).toBe('2025-12-27')
+})
+
+// The hourly chart's text summary (2026-10-15 audit): each day's busiest hour, said in words.
+describe('hourlyPeaks', () => {
+  test('the busiest hour of each day, the earlier hour on a tie', () => {
+    const rows = [
+      { hour: 12, today: 900, lastWeek: 1500 },
+      { hour: 13, today: 1200, lastWeek: 1500 },
+      { hour: 14, today: 1200, lastWeek: 400 },
+    ]
+    expect(hourlyPeaks(rows)).toEqual({ today: { hour: 13, amount: 1200 }, lastWeek: { hour: 12, amount: 1500 } })
+  })
+
+  test('a day with nothing above zero has no peak, never an hour of NPR 0', () => {
+    expect(hourlyPeaks([{ hour: 11, today: 0, lastWeek: 0 }])).toEqual({ today: null, lastWeek: null })
+    expect(hourlyPeaks([{ hour: 15, today: -300, lastWeek: 200 }])).toEqual({ today: null, lastWeek: { hour: 15, amount: 200 } })
+    expect(hourlyPeaks(undefined)).toEqual({ today: null, lastWeek: null })
+  })
 })

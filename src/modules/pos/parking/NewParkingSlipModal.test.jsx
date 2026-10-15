@@ -1,11 +1,12 @@
 /**
  * The Bill Number picker's read of today's bills has a time limit (S842). A read that never answered
  * left "Loading…" in the picker for as long as the dialog stayed open; after 20 seconds it now says
- * the bills could not be loaded, the same as a refused read.
+ * the bills could not be loaded, the same as a refused read. Since the 2026-10-15 audit leftovers a
+ * failed read offers Try again, which reads once more, instead of "close and reopen to retry".
  */
 
 import React from 'react'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, fireEvent } from '@testing-library/react'
 
 // The bills read's answer: a promise the test controls (one that never settles, by default).
 let mockBillsAnswer = () => new Promise(() => {})
@@ -25,7 +26,7 @@ jest.mock('../../../context/AuthContext', () => ({
 // eslint-disable-next-line import/first
 import NewParkingSlipModal from './NewParkingSlipModal'
 
-const FAILED = "Could not load today's bills — close and reopen to retry"
+const FAILED = "Could not load today's bills"
 const renderModal = () => render(<NewParkingSlipModal outletName="Casa Acai" propertyAddress="Thamel" onClose={() => {}} onIssued={() => {}} />)
 
 beforeEach(() => { mockBillsAnswer = () => new Promise(() => {}) })
@@ -52,4 +53,29 @@ test('no bills yet is not a failure', async () => {
   mockBillsAnswer = () => Promise.resolve({ data: [], error: null })
   renderModal()
   expect(await screen.findByText('No bills issued today yet')).toBeTruthy()
+})
+
+test('a failed read offers Try again, which reads the bills once more', async () => {
+  let calls = 0
+  mockBillsAnswer = () => {
+    calls += 1
+    return calls === 1
+      ? Promise.resolve({ data: null, error: { message: 'Failed to fetch' } })
+      : Promise.resolve({ data: [{ id: 'o1', order_no: 7, invoice_no: 'INV-7', table_name: 'T1', paid_amount: 1250 }], error: null })
+  }
+  renderModal()
+  expect(await screen.findByText(FAILED)).toBeTruthy()
+  expect(screen.getByRole('alert').textContent).toMatch(/could not be loaded/)
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByText('— None —')).toBeTruthy()
+  expect(calls).toBe(2)
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+})
+
+test('no Try again while the read is still out or after it answered', async () => {
+  mockBillsAnswer = () => Promise.resolve({ data: [], error: null })
+  renderModal()
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  expect(await screen.findByText('No bills issued today yet')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
 })

@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { X, Check } from 'lucide-react'
+import { X } from 'lucide-react'
 import Modal from '../../../components/Modal'
 import { npr } from '../../../shared/nepalMoney'
 import {
@@ -8,8 +8,10 @@ import {
 import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
 import { comboGuestTotal } from '../../customization/comboPricing'
-import { tidyName, guestRuleText, matchesSearch } from './guestMenuHelpers'
+import { tidyName, matchesSearch } from './guestMenuHelpers'
 import { useLeaveConfirm, LeaveConfirm } from './GuestOptionSheet'
+import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
+import DietMark, { dietOfDish } from './DietMark'
 
 // Combos on the QR menu (S839, docs/pos-combos.md): the sheet a guest builds one combo in. A combo is
 // sold at one price ("Momo Combo, NPR 350") and made of picks ("Pick a momo", "Pick a drink"), each
@@ -28,6 +30,8 @@ import { useLeaveConfirm, LeaveConfirm } from './GuestOptionSheet'
 //
 // The phone's Back (S842, owner decision) walks back one step and asks before picks are lost, exactly
 // as the dish sheet does (GuestOptionSheet's useLeaveConfirm / LeaveConfirm, through `backRef`).
+//
+// A picked dish's own choices are drawn by GuestOptionGroup, the dish sheet's own component (S844).
 
 const bySortThenName = (a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0)
   || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id || a.recipe_id || '').localeCompare(String(b.id || b.recipe_id || ''))
@@ -171,27 +175,6 @@ export function comboMatches(combo, { query = '', vegOnly = false, excludedAller
   return matchesSearch({ name: tidyName(combo.name), description: combo.description, category: 'Combos' }, query)
     || picks.some(g => g.items.some(it => matchesSearch({ name: tidyName(it.name) }, query)))
 }
-
-// The market's veg / non-veg mark (an outlined square with a dot), as the menu row draws it, and the
-// choice sheet's egg mark for an option's `diet`. The word is the accessible name.
-const DIET = {
-  veg: { label: 'Vegetarian', title: 'Veg', modifier: 'gm-diet--veg' },
-  egg: { label: 'Contains egg', title: 'Egg', modifier: 'gm-diet--egg' },
-  non_veg: { label: 'Non-vegetarian', title: 'Non-veg', modifier: 'gm-diet--nonveg' },
-}
-function DietMark({ diet }) {
-  const m = DIET[diet]
-  if (!m) return null
-  return (
-    <span role="img" aria-label={m.label} title={m.title} className={`gm-diet ${m.modifier}`}>
-      <span aria-hidden="true" />
-    </span>
-  )
-}
-const dietOfDish = isVeg => (isVeg === true ? 'veg' : isVeg === false ? 'non_veg' : null)
-
-const signedNpr = n => `${n > 0 ? '+' : '−'}${npr(Math.abs(n))}`
-const FOCUSABLE_CHIP = '[role="radio"]:not([disabled]), [role="checkbox"]:not([disabled])'
 
 /**
  * @param {object} props
@@ -531,78 +514,16 @@ function PickStep({ pick, chosenId, optionIds, dishGroups, catalog, vat, tried, 
         </div>
       )}
 
-      {dish && dishGroups.map(({ group, rule, options }) => {
-        const singleChoice = rule.max === 1
-        const picked = options.filter(o => optionIds.includes(o.id))
-        const realCount = picked.filter(o => !o.is_removal).length
-        const short = tried && problems.some(p => p.group.id === group.id)
-        const groupLabelId = `gc-opt-${pick.id}-${group.id}`
-        const usedFree = picked.filter(o => freeIds.has(o.id)).length
-        const pricedLeft = options.some(o => !optionIds.includes(o.id) && !o.is_removal && priceAt(o, group) !== 0)
-        const anyChecked = picked.length > 0
-        return (
-          <div
-            key={group.id}
-            ref={el => { groupRefs.current[`${pick.id}|${group.id}`] = el }}
-            tabIndex={-1}
-            role={singleChoice ? 'radiogroup' : 'group'} aria-labelledby={groupLabelId}
-            onKeyDown={e => moveRovingFocus(e, singleChoice ? '[role="radio"]' : '[role="checkbox"]')}
-            className="gm-group"
-          >
-            <div className="gm-group-head">
-              <span id={groupLabelId} className="gm-group-name">{tidyName(dish.name)}: {tidyName(group.name)}</span>
-              <span className={`gm-group-rule${short ? ' is-short' : ''}`}>
-                {rule.min > 0 && <span className="gm-required">Required</span>}
-                {guestRuleText(rule, options.length)}
-              </span>
-            </div>
-            {rule.included > 0 && (
-              <p className={`gm-group-free${usedFree > 0 ? ' is-used' : ''}`}>
-                {usedFree} of {rule.included} free {rule.included === 1 ? 'pick' : 'picks'} used{pricedLeft ? ' · then each adds its price' : ''}
-              </p>
-            )}
-            <div className="gm-options">
-              {options.map((o, i) => {
-                const on = optionIds.includes(o.id)
-                const full = !on && !o.is_removal && rule.max != null && !singleChoice && realCount >= rule.max
-                const d = priceAt(o, group)
-                const free = on && freeIds.has(o.id) && d !== 0
-                const allergens = Array.isArray(o.allergens) ? o.allergens : []
-                return (
-                  <button
-                    key={o.id} type="button"
-                    role={singleChoice ? 'radio' : 'checkbox'} aria-checked={on}
-                    disabled={full} aria-disabled={full || undefined}
-                    tabIndex={singleChoice ? rovingTabIndex(on || (!anyChecked && i === 0)) : 0}
-                    onClick={() => onToggle(group.id, rule, o.id)}
-                    className="gm-chip gm-option"
-                  >
-                    <span aria-hidden="true" className={`gm-option-mark ${singleChoice ? 'gm-option-mark--radio' : 'gm-option-mark--check'}`}>
-                      {!singleChoice && on && <Check size={14} strokeWidth={3} />}
-                    </span>
-                    <span className="gm-option-body">
-                      <span className={`gm-option-name${on ? ' is-on' : ''}`}>{tidyName(o.name)}</span>
-                      {(o.diet || allergens.length > 0) && (
-                        <span className="gm-option-meta">
-                          {o.diet && <DietMark diet={o.diet} />}
-                          {allergens.length > 0 && `Contains ${allergens.join(', ')}`}
-                        </span>
-                      )}
-                    </span>
-                    {full ? (
-                      <span className="gm-option-price">Max {rule.max}</span>
-                    ) : free ? (
-                      <span className="gm-option-price">Included <s>{signedNpr(d)}</s></span>
-                    ) : (!o.is_removal && d !== 0) ? (
-                      <span className="gm-option-price">{signedNpr(d)}</span>
-                    ) : null}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
+      {dish && dishGroups.map(({ group, rule, options }) => (
+        <GuestOptionGroup
+          key={group.id} group={group} rule={rule} options={options}
+          label={`${tidyName(dish.name)}: ${tidyName(group.name)}`} labelId={`gc-opt-${pick.id}-${group.id}`}
+          groupRef={el => { groupRefs.current[`${pick.id}|${group.id}`] = el }}
+          selectedIds={optionIds} freeIds={freeIds} priceAt={priceAt}
+          short={tried && problems.some(p => p.group.id === group.id)}
+          onToggle={onToggle}
+        />
+      ))}
     </div>
   )
 }

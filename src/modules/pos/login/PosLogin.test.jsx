@@ -7,6 +7,8 @@
  */
 
 import React from 'react'
+import fs from 'fs'
+import path from 'path'
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { keepLockedCart } from '../posLockedCart'
@@ -307,5 +309,76 @@ describe('a staff list that does not come', () => {
     await act(async () => { answerFirst({ data: STAFF, error: null }) })
     expect(screen.queryByRole('button', { name: /Ram/ })).toBeNull()
     expect(screen.getByRole('button', { name: /Gita/ })).toBeTruthy()
+  })
+})
+
+// POS audit 2026-10-15. A tablet is the PIN screen's real device: the press and hover move from mouse
+// events into posLogin.css, the two Back buttons wear the product's button, and the page clears an
+// installed iPhone's status bar and home indicator.
+describe('the PIN screen on a touch screen', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'posLogin.css'), 'utf8')
+  const rule = sel => {
+    const at = css.indexOf(`${sel} {`)
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+  }
+
+  it('lights a staff tile and a PIN key from the stylesheet, never from mouse events', async () => {
+    renderPin()
+    const tile = await screen.findByRole('button', { name: /Ram/ })
+    expect(tile.className).toBe('pos-staff-tile')
+    expect(tile.getAttribute('style')).toBeNull()
+    fireEvent.mouseEnter(tile)
+    expect(tile.getAttribute('style')).toBeNull() // used to stay tinted after a tap: a touch sends no mouse-leave
+
+    fireEvent.click(tile)
+    const key = screen.getByRole('button', { name: '5' })
+    expect(key.className).toBe('pos-pin-key')
+    expect(screen.getByRole('button', { name: 'Clear PIN' }).className).toBe('pos-pin-key pos-pin-key--clear')
+    expect(screen.getByRole('button', { name: 'Delete last digit' }).className).toBe('pos-pin-key pos-pin-key--delete')
+    fireEvent.mouseEnter(key)
+    fireEvent.mouseDown(key)
+    expect(key.getAttribute('style')).toBeNull() // the scale and glow used to land only after the finger lifted
+    fireEvent.click(key)
+    expect(screen.getByText('1 digit entered')).toBeTruthy()
+  })
+
+  it('presses with :active, hovers only where a pointer can hover, and keeps the focus pair', () => {
+    expect(rule('.pos-pin-key:active:not(:disabled)')).toMatch(/transform: scale\(0\.92\)/)
+    const hover = css.slice(css.indexOf('@media (hover: hover)'))
+    expect(hover).toMatch(/\.pos-staff-tile:hover/)
+    expect(hover).toMatch(/\.pos-pin-key:hover:not\(:disabled\)/)
+    expect(css.indexOf('.pos-staff-tile:hover')).toBeGreaterThan(css.indexOf('@media (hover: hover)'))
+    const focus = css.slice(css.indexOf('.pos-staff-tile:focus-visible'))
+    expect(focus).toMatch(/0 0 0 2px var\(--theme-focus-outline\), 0 0 0 5px var\(--theme-focus-ring\)/)
+    const still = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(still).toMatch(/\.pos-pin-key:active:not\(:disabled\) {\s*transform: none;/)
+  })
+
+  it('clears the status bar and the home indicator, and the guest banner without adding the two', () => {
+    const page = rule('.pos-login')
+    expect(page).toMatch(/max\(var\(--arrival-alert-h, 0px\), env\(safe-area-inset-top, 0px\)\)/)
+    expect(page).toMatch(/calc\(24px \+ env\(safe-area-inset-bottom, 0px\)\)/)
+  })
+
+  it('puts the page on the stylesheet, and the outlet name on the type scale', async () => {
+    renderPin()
+    await screen.findByRole('button', { name: /Ram/ })
+    const main = screen.getByRole('main')
+    expect(main.className).toBe('pos-login')
+    expect(main.getAttribute('style')).toBeNull() // an inline padding would beat the safe-area rule
+    expect(screen.getByRole('heading', { level: 1 }).style.fontSize).toBe('24px')
+  })
+
+  it('gives both Back buttons the product\'s ghost button', async () => {
+    renderPin()
+    const ram = await screen.findByRole('button', { name: /Ram/ })
+    const back = screen.getByRole('button', { name: '← Back' })
+    expect(back.className).toBe('btn btn-ghost')
+    expect(back.getAttribute('style')).toBeNull()
+    fireEvent.click(ram)
+    const padBack = screen.getByRole('button', { name: '← Back' })
+    expect(padBack.className).toBe('btn btn-ghost')
+    expect(padBack.style.background).toBe('') // colour, border and radius come from the classes
+    expect(padBack.style.border).toBe('')
   })
 })

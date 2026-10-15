@@ -188,7 +188,7 @@ export default function Pricing() {
             {TRIAL_DAYS} days free · All three modules · No credit card
           </div>
         )}
-        <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
+        <h1 style={{ fontSize: 'clamp(24px, 3.4vw, 32px)', fontWeight: 800, margin: '0 0 16px', lineHeight: 1.1, letterSpacing: '-0.025em', color: 'var(--theme-text1)' }}>
           Simple, honest pricing
         </h1>
         <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto', maxWidth: 560, lineHeight: 1.7 }}>
@@ -319,7 +319,7 @@ export default function Pricing() {
               </div>
 
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
-                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }} aria-busy={!priceReady || undefined}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }} aria-busy={!priceReady || undefined}>
                   NPR <Amount ready={priceReady} value={price} />
                   <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span>
                 </div>
@@ -368,7 +368,7 @@ export default function Pricing() {
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px', lineHeight: 1.5 }}>{mod.tagline}</p>
 
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
-                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }} aria-busy={!priceReady || undefined}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }} aria-busy={!priceReady || undefined}>
                   NPR <Amount ready={priceReady} value={price} />
                   <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span>
                 </div>
@@ -402,10 +402,10 @@ export default function Pricing() {
         <div style={{ background: CARD, border: `1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)`, borderRadius: 'var(--radius-lg)', padding: '32px 28px', position: 'relative' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 32, alignItems: 'start' }}>
             <div>
-              <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 10 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 10 }}>
                 {suite.label}
               </div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
                 +NPR <Amount ready={priceReady} value={annual ? suite.annual : suite.monthly} />
                 <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month per outlet</span>
               </div>
@@ -471,7 +471,7 @@ export default function Pricing() {
 
       {/* Footer CTA */}
       <div style={{ background: CARD, borderTop: `1px solid ${BORDER}`, padding: '64px 32px', textAlign: 'center' }}>
-        <h2 style={{ fontSize: 28, margin: '0 0 12px', color: 'var(--theme-text1)' }}>
+        <h2 style={{ fontSize: 24, margin: '0 0 12px', color: 'var(--theme-text1)' }}>
           {session ? 'Want to add a module or move up a plan?' : 'Ready to take control of your food costs?'}
         </h2>
         <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: '0 0 36px', lineHeight: 1.6 }}>

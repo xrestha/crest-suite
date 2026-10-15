@@ -357,13 +357,15 @@ export default function MenuRepricing() {
               dish was actually testable. With dishes that have no cost, the honest answer is that
               none of the ones we COULD check are underpriced — and here is what we could not. */}
           {/* A build-your-own dish was not checked either (S792), so it withholds the 🎉 too. */}
-          {!onlyUnderpriced
-            ? 'No priced recipes found for this period.'
-            : notCostedRows.length === 0 && byBuildRows.length === 0
-              ? 'No underpriced dishes — every priced dish is at or below its target food cost. 🎉'
-              : notCostedRows.length === 0
-                ? `None of the rated dishes are underpriced. ${byBuildRows.length} build-your-own ${byBuildRows.length === 1 ? 'dish is' : 'dishes are'} not rated here — costed by build; see ${byBuildRows.length === 1 ? 'its' : 'their'} cost range on Recipe Costing.`
-                : `None of the costed dishes are underpriced — but ${notCostedRows.length} ${notCostedRows.length === 1 ? 'dish has' : 'dishes have'} no food cost recorded and could not be checked at all. Add ingredients in Recipe Costing, or a cost in Menu Pricing, then look again.`}
+          <p className="empty-state-text">
+            {!onlyUnderpriced
+              ? 'No priced recipes found for this period.'
+              : notCostedRows.length === 0 && byBuildRows.length === 0
+                ? 'No underpriced dishes — every priced dish is at or below its target food cost. 🎉'
+                : notCostedRows.length === 0
+                  ? `None of the rated dishes are underpriced. ${byBuildRows.length} build-your-own ${byBuildRows.length === 1 ? 'dish is' : 'dishes are'} not rated here — costed by build; see ${byBuildRows.length === 1 ? 'its' : 'their'} cost range on Recipe Costing.`
+                  : `None of the costed dishes are underpriced — but ${notCostedRows.length} ${notCostedRows.length === 1 ? 'dish has' : 'dishes have'} no food cost recorded and could not be checked at all. Add ingredients in Recipe Costing, or a cost in Menu Pricing, then look again.`}
+          </p>
         </div>
       ) : (
         <div className="table-wrap">

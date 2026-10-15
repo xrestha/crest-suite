@@ -34,7 +34,7 @@ function Section({ title, children }) {
 function Line({ label, value, op, hint, strong, color }) {
   return (
     <div className="calc-line" style={{ padding: '3px 0', borderBottom: '1px dotted var(--theme-border-lt)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
         <span style={{ color: 'var(--theme-text2)' }}>{op ? `${op} ${label}` : label}</span>
         <span style={{ color: color || 'var(--theme-text1)', fontWeight: strong ? 700 : 400, whiteSpace: 'nowrap' }}>{value}</span>
       </div>

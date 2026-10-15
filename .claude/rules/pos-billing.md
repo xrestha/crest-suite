@@ -320,7 +320,7 @@ table's food.
   `/pos/login` vs `/login`. **Returning to the tab is not activity (S754)**, since timers do not run
   while a tablet sleeps. Idle time is measured from the last real input: past the lock period it locks at
   once, otherwise only what is left of the period is re-armed. Since S809 3h it survives a page load
-  (`crest_idle_last_input` per session id, written even while the lock is off), a lock is `scope:
+  (`crest_idle_last_input` per session id, written even while the lock is off, at most once a second and flushed on pagehide, so a reload can only lock sooner), a lock is `scope:
   'local'`, and a session ending by itself on an activated tablet goes to `/pos/login`.
   **A lock keeps the unsent cart (S776, owner decision).** `handleSignOut` runs `runBeforePosLock()`
   for a PIN session; `PosOrders` keeps the unsaved units for that login in `posLockedCart.js`
@@ -448,8 +448,8 @@ History: docs/rules-archive/pos-billing.md#three-returns-story
 `recentBillsModal` are elements built once and rendered by this return AND the floor's, because a
 modal in one return is a button that does nothing in the other (S578). Every refusal the list can
 produce (a bill closed on another till, a table gone from the floor plan, offline, an unsynced order)
-goes through `floorMsg` rather than the floor view's `window.alert`s; a Recent Bills reprint still
-alerts here, because `floorMsg` sits hidden behind that dialog.
+goes through `floorMsg`; a Recent Bills reprint failure is a till notice (`showTillNotice`), which
+shows above that dialog where `floorMsg` would sit hidden behind it.
 
 ## The Billing station is a third VIEW, never a second implementation (S762)
 
@@ -857,7 +857,7 @@ History: docs/rules-archive/pos-billing.md#dropped-write-errors-count, #send-fla
 - **The close buttons are never `disabled` for a missing input, only `aria-disabled`.** `closeBlocker()` is the one list: closeOrder refuses with its `text`, the button shows its `label`, and `pressClose()` opens the folded section and focuses its `field`. A new close precondition goes into `closeBlocker`, never into a button's `disabled` expression. Void asks first (`confirmVoid`). `closeStartRefusal` (`tillBillChecks.js`) runs first: unread till settings, then an emptied cart (Void exempt, owner Q8 a); `fullInvoiceRefusal` follows the buyer-ID check (a VAT bill above `ABBREVIATED_INVOICE_LIMIT`, measured on what the guest pays, needs name and address, Q9 a).
 - **The till's settings come from a read that answered, or billing waits (S809 2a).** `loadTillSettings` bounds the `settings` and `clients` reads, applies and caches only an answer, keeps the offline copy for routing on a failure, and never caches a failure. `billingSettingsLoaded` gates `payBlocker`, `closeBlocker`, `billOrder` and `reprintBill`; a cached copy never opens Payment. Never fall back to defaults in silence: `is_vat_registered ?? true` made every PAN outlet a VAT one on a dropped read.
 - **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar.
-- **Till text is `errorText(err, 'staff')`, never `err.message`** — the floor alerts, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
+- **Till text is `errorText(err, 'staff')`, never `err.message`** — the till notices, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
 - **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager; outlet has Crest IMS, S814); its misses are pruned by every count that answers (`pruneImsMisses`). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till. Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
 - **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. A KDS estimate preset starts the ticket in one tap.
 
@@ -900,14 +900,16 @@ History: docs/rules-archive/pos-billing.md#close-read-back-evidence
   receipt); until the page knows, it blocks another payment from that party (`settleCredit.js`).
 History: docs/rules-archive/pos-billing.md#credit-settle-read-back
 
-## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682, S809 4l)
+## The floor's refusals are a till notice, never `window.alert` (owner decision, S844)
 
-The floor's refusals a waiter must not walk past mid-service use `window.alert`: could not check a
-table for an open order, could not load a bill to reprint, a blocked print window, the clear-all
-failures. An audit called them unstyled and tab-modal (P2); **un-missable is the property chosen**
-(S616), because a missed refusal there is a dish cooked twice or a bill reprinted with no lines.
-The floor HAS a banner (`floorMsg`, three returns: `bills`, `order`, floor), so this is chosen over
-it, not for want of one (re-read S809 4l): a message a waiter may glance past goes in `floorMsg`.
+The refusals a waiter must not walk past mid-service (could not check a table for an open order,
+could not load a takeaway or a bill to reprint, a blocked print window, the clear-all failures) go
+through `showTillNotice(text)` (`TillNotice.jsx`): a red bar fixed at the top, `role="alert"`,
+portalled to `<body>` at z-index 2200 (above every `Modal`, below the Calculator and ArrivalAlert),
+in all three returns (`tillNoticeEl`), until ✕; a newer one replaces the older. Same words as the old
+pop-up. Un-missable is still the property (S616); `window.alert` went because it froze the page, the
+guest-order chime and every poll until OK. `TillNotice.test.jsx` fails on any `window.alert` in
+`PosOrders.jsx`/`BillingStation.jsx`. A message a waiter may glance past still goes in `floorMsg`.
 
 ## Anything that takes money off a bill is a TENDER or a DISCOUNT, and the choice is not cosmetic (S618)
 

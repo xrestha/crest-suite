@@ -628,6 +628,7 @@ const POS_FEATURES = [
                   icon: '◎', name: 'POS Dashboard', path: '/pos/dashboard',
                   desc: 'The page the POS tab opens. The top band is what needs someone right now: open bills, tables in use, QR orders nobody has accepted, kitchen tickets running late and whether a cash drawer shift is open. Below it, for supervisors and managers, is today so far against the same day last week up to the same time — sales, bills, covers, average per guest, discounts, voids — with sales by hour, how bills were paid, dine-in/takeaway/delivery and the five dishes sold most. It refreshes itself every minute.',
                   tips: [
+                    'Under the hourly chart a line says the same thing in words: today so far and its busiest hour, then last week up to this time and its busiest hour',
                     'Today is compared with last week up to the same time of day — at 1 PM you see 1 PM against last week\'s 1 PM, not against last week\'s whole day',
                     '▲ / ▼ show which way a figure moved; green or red says whether that is good — more sales is green, more discount is red. ≈ means about the same',
                     'Every tile has an Open → link to the page that deals with it: the floor, Billing, the Kitchen Display, Shifts or the report behind the figure',
@@ -643,6 +644,7 @@ const POS_FEATURES = [
                   icon: '🍽', name: 'Order Taking', path: '/pos/orders',
                   desc: 'Full-screen order entry. Tap a table from the floor plan to open it — enter covers, browse the menu by category, and tap items to add them. Pressing Send Order saves the order and automatically fires KOT and BOT tickets to their respective stations in one tap. For additions to an existing order, add the item (an amber +N badge shows the new quantity), then press KOT or BOT when ready to send just the additions.',
                   tips: [
+                    'When the till cannot do something you asked (for example, it could not check whether a table already has an open order), a red bar appears at the top of the screen saying what happened and what to do. It stays until you tap ✕, and the till keeps working behind it, so the guest-order chime still sounds',
                     'Send Order (new table) = save + auto-print KOT and BOT in one tap — no extra button presses needed',
                     'Update Order (existing table) saves the order. If you added items that have not gone to the kitchen or bar yet, it asks whether to send them now — say yes unless you are still adding. The KOT/BOT buttons still send additions on their own',
                     '+ Takeaway starts an order with no table. A saved takeaway shows on the floor as its own tile, so you can reopen it, add to it and bill it later',
@@ -790,7 +792,7 @@ const POS_FEATURES = [
                   icon: '🕗', name: 'Reservations', path: '/pos/reservations',
                   desc: 'The booking book. Take a booking by phone, WhatsApp or at the door (name, phone, party size, day and time, optional tables), or let customers request one themselves from the outlet\'s booking QR / link. A booking shows as a chip on its table on the Orders floor; tapping that table when the party sits down opens the order with the covers already filled in, and paying the bill marks the booking completed. Any POS staff rank can use it.',
                   tips: [
-                    'Booked → Confirmed → Arrived → Seated → Completed. Each row shows its one next step; No-show, Cancel and Mark done sit in the ⋯ menu. The 💬 button opens WhatsApp with the confirmation message prefilled — sent from your own phone, nothing goes out automatically',
+                    'Booked → Confirmed → Arrived → Seated → Completed. Each row shows its one next step; No-show, Cancel and Mark done sit in the ⋯ menu. The WhatsApp button opens WhatsApp with the confirmation message prefilled — sent from your own phone, nothing goes out automatically',
                     'Marked someone no-show and they walk in? ⋯ → They turned up puts them back as Arrived and clears the mark from their number. A cancelled booking can be reinstated the same way. Both work until the end of the booking\'s day, so a booking cancelled by mistake days ahead can be put back straight away (if another booking has taken its table meanwhile, Reinstate says which). No-show is offered from the booked time, not before: a guest who calls to say they will not come is a Cancel',
                     'A party booked late in the evening stays on the Orders floor, the dashboard and Upcoming after midnight until its booked time is over, so an 11:30 PM party still waiting at 12:10 AM can be seated from its table',
                     'If the table you pick in Seat was opened on another device a moment ago, the till does not open that bill: it says the party was not seated, and you seat them again from here at another table',
@@ -901,6 +903,7 @@ const POS_FEATURES = [
                   icon: '▤', name: 'Sales Report', path: '/pos/sales-report',
                   desc: 'Eleven views of the same POS sales data, one page: Daily (day-by-day totals), Hourly (revenue by time of day), Bill Register (every individual voucher — payment mode, remarks, who closed it), Comped Bills (every bill that had an item comped out of it, cross-referenced to its NC number), Payment Summary (revenue by Cash/Card/eSewa/Khalti/FonePay/Credit), Delivery Partners (every Foodmandu/Pathao bill from Credit through settlement), Category Wise and Item Wise (what drives revenue), Product Type (the same lines cut by an axis above category — Kitchen vs Bar, taxable vs non-taxable, veg vs non-veg), Customer Wise (who\'s buying and how much), and 1L+ Report (Nepal VAT Annexure 13 — parties whose cumulative transactions exceed NPR 1,00,000 in a fiscal year). Requires Manager role or above.',
                   tips: [
+                    'On a phone the Bill Register shows each bill as a card: the voucher and its total first, then the date and times, customer, table and how it was paid. Tap Show the figures for the breakdown, or View bill. It shows 200 at a time like the table, and printing still gives the full table',
                     'Daily/Hourly/Bill Register/Comped Bills/Payment Summary/Delivery Partners/Category/Product Type/Item/Customer share one BS date-range filter; 1L+ Report uses its own Fiscal Year selector instead, since Annexure 13 is a whole-year compliance check, not an arbitrary range',
                     'Payment Summary groups the same VAT-ready Gross/Discount/Taxable/Net breakdown by how the bill was paid, so it reconciles against Daily and Bill Register totals for the same range — click a row to see just that method\'s bills in Bill Register',
                     'A split bill is shared out across the methods it was really paid with. Example: a NPR 1,000 bill paid NPR 600 cash and NPR 400 eSewa adds NPR 600 to Cash and NPR 400 to eSewa — so the Cash line matches the cash in your shift reports, for a range that covers whole shifts (each opened and closed inside it). A shift is not a day: two shifts can share a day, and a shift left open runs on until it is closed',
@@ -928,6 +931,7 @@ const POS_FEATURES = [
                   icon: '🍽', name: 'Covers Report', path: '/pos/covers-report',
                   desc: 'Guest-traffic analytics built from the covers number entered when a table is opened: average party size, revenue per guest (not per bill), how long tables actually turn over by party size, when covers peak through the day, and each server\'s covers/revenue. Dine-in tables only — takeaway and delivery have no guests seated, so they get their own separate line instead of pulling the per-guest figures around. Requires Manager role or above.',
                   tips: [
+                    'Daily Trend, Peak Hours and By Server end with a Total row. Revenue/Cover on that row is total sales ÷ total guests, not an average of the rows above it',
                     'Revenue/Cover is the standard restaurant "average check per guest" metric — different from Sales Report\'s per-bill averages, since a bill for 6 people should read differently than a bill for 1',
                     'Turnover Time is bucketed by party size (1–2, 3–4, 5–6, 7+) because a 2-top and an 8-top have very different expected dine times — one blended average wouldn\'t mean much',
                     'A bill closed before it was opened (a till clock behind) or left open over 12 hours (past closing) is not a sitting, so Turnover leaves it out and says how many under the table; its sales stay in the Overview',
@@ -1863,7 +1867,7 @@ export default function Help() {
           {/* Neither module active */}
           {!imsEnabled && !hrEnabled && !posEnabled && (
             <div className="card" style={{ textAlign: 'center', padding: '40px 24px', borderColor: 'var(--theme-border)' }}>
-              <div style={{ fontSize: 28, marginBottom: 12 }}>⊘</div>
+              <div style={{ fontSize: 24, marginBottom: 12 }}>⊘</div>
               <div style={{ fontSize: 14, color: 'var(--theme-text2)', marginBottom: 6 }}>No modules are currently active</div>
               <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Contact your Crest consultant to activate your subscription.</div>
             </div>
@@ -1904,7 +1908,7 @@ export default function Help() {
               <span style={{ width: 8, height: 8, borderRadius: 0, background: MODULE_COLORS.hr }} />
               <span style={{ width: 8, height: 8, borderRadius: 0, background: MODULE_COLORS.pos }} />
             </div>
-            <h2 style={{ fontSize: 28, fontWeight: 800, margin: '0 0 8px', fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Plans & Pricing</h2>
+            <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 8px', color: 'var(--theme-text1)' }}>Plans & Pricing</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>One system for IMS, HR, and POS — pick a module or bundle them all</p>
             <div style={{ display: 'inline-flex', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: 3, gap: 2 }}>
               <button onClick={() => setPricingAnnual(false)} style={{ background: !pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border: !pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color: !pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Monthly</button>

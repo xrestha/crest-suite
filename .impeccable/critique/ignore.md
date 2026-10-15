@@ -38,3 +38,8 @@ a crippled product rather than as an invitation. Hiding is the intended behaviou
 actively misleading for a tier (a group named "Costing" whose only surviving member is a price
 list), that is a labelling question and may be raised as such — but the visibility mechanism is
 settled.
+
+**The labelling question is closed too (S844, owner decision):** a group whose gates leave one
+reachable item renders that item as a plain link, with no heading (`src/shared/navSoloGroup.js`,
+both the top bar and the phone drawer). Starter's "Costing" is now just Menu Pricing, and its
+"Stock Reports" just Wastage Report. A PRO-badged upsell group and Pinned keep their heading.

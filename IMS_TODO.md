@@ -452,28 +452,23 @@ tiers shipped in S765; what is listed here is only what did not.
 - ✅ S765 — The `.impeccable/config.json` `26px` ignore carried no `files:` key, so it suppressed that
   size product-wide while its reason named one print template.
 
-**Open after S765:**
+**Open after S765** — all closed in S844 (2026-10-15) unless marked:
 
-- ⚪ **`26px` outside IMS is still off-ramp** — `PosLogin.jsx`, `GuestMenu.jsx`, `Pricing.js` (×3),
-  `Settings.js`, `ClientDrawer.js`, `ArrivalAlert.css`. Left deliberately: these are brand-facing
-  surfaces where a type size is a design decision, not a cleanup, and they were outside the scope of
-  an IMS critique. Note the detector cannot see most of them anyway (next item).
-- ⚪ **The design detector reads only a QUOTED font size.** Probed in S765: `fontSize: '26px'` is
-  flagged, `fontSize: 26` is not — and this codebase is ~3,450 inline style blocks. Measured across
-  1,233 numeric sizes in IMS, exactly one was off-ramp, so IMS is clean behind the blind spot; the
-  rest of the product has not been measured this way.
-- ⚪ **`tabular-nums` does not reach the 13 hand-rolled `<table>`s**, including the purchase-bill line
-  table — the product's most-used money entry form renders in proportional figures. `Layout.css`
-  scopes the rule to `table.data-table td` and `.stat-value`.
-- ⚪ **Three report pages still have no empty branch at all** — `PaymentReport`, `Overheads`,
-  `BudgetVsActual` — and seven more hand-roll one instead of `.empty-state`.
-- ⚪ **Stock Count, Overheads and Requisitions still render no closed-period banner**, which
-  `closed-periods.md` has flagged since S651. `ClosedPeriodBanner` now exists for them. Stock Count's
-  half, and its real consequence, is S792 STOCK-5 (a closed-month correction never reaches next
-  month's opening stock).
-- 🔵 **The Starter tier's nav deletes locked rows rather than upselling** — raised by the critique as
-  an inconsistency with the Crest Suite group, which stays visible with a PRO chip. Settled as
-  deliberate (owner decision, 2026-09-16) and recorded in `.impeccable/critique/ignore.md` so a
-  future critique does not re-raise it. The group-LABEL question is explicitly left open there: a
-  "Costing" group whose only surviving member is a price list is a labelling problem that survives
-  the decision.
+- ✅ S844 — ~~`26px` outside IMS is still off-ramp~~ (`PosLogin.jsx`, `GuestMenu.jsx`, `Pricing.js`,
+  `Settings.js`, `ClientDrawer.js`, `ArrivalAlert.css`). Owner decision: snap to the scale; the
+  Pricing headline took the display role (44 → 32).
+- ✅ S844 — ~~The design detector reads only a QUOTED font size.~~ `src/shared/typeRamp.test.js` reads
+  every px size in `src/` (quoted or not, ternary arms, CSS in JS strings) against DESIGN.md's
+  frontmatter ramp, with `@media print` blocks and three print templates exempt. ~40 sites across
+  18 files were snapped first.
+- ✅ S844 — ~~`tabular-nums` does not reach the 13 hand-rolled `<table>`s~~: the `Layout.css` rule
+  is `table td, table th` now.
+- ✅ S844 — ~~Three report pages still have no empty branch~~: `PaymentReport` and `BudgetVsActual`
+  have one (Overheads had gained it since); seven hand-rolled messages moved to `.empty-state`.
+- ✅ ~~Stock Count, Overheads and Requisitions still render no closed-period banner~~ — all three
+  carry `ClosedPeriodBanner` (S792); the line here was stale.
+- 🔵 **The Starter tier's nav deletes locked rows rather than upselling** — settled as deliberate
+  (owner decision, 2026-09-16) and recorded in `.impeccable/critique/ignore.md`. ✅ S844 closed the
+  group-LABEL question it left open: a nav group left with one reachable item renders that item as
+  a plain link (`src/shared/navSoloGroup.js`, owner decision), so Starter's "Costing" is just
+  Menu Pricing.

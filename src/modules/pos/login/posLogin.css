@@ -1,0 +1,110 @@
+/* The POS PIN screen (POS audit, 2026-10-15). Every till's resting state, and a touch screen first.
+
+   The page clears an installed iPhone's status bar and home indicator: index.html asks for
+   black-translucent, so the app draws under the clock (env() is 0 in a browser tab). A tall staff
+   grid sat under the status bar with only 24px of padding. While the guest-order banner is up it
+   covers the status bar and publishes a height that already includes the inset (ArrivalAlert.css),
+   so the top takes the larger of the two rather than adding them. */
+.pos-login {
+  min-height: 100vh;
+  background: var(--theme-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding:
+    calc(24px + max(var(--arrival-alert-h, 0px), env(safe-area-inset-top, 0px)))
+    calc(24px + env(safe-area-inset-right, 0px))
+    calc(24px + env(safe-area-inset-bottom, 0px))
+    calc(24px + env(safe-area-inset-left, 0px));
+}
+
+/* A name tile and a PIN key. Their hover and press lived in onMouseEnter/Leave/Down/Up, which on a
+   tablet fire only after the finger lifts (so the press showed after the tap was over) and left the
+   last key tapped tinted, since a touch never sends a mouse-leave. Now the press is :active, the hover
+   is only for a pointer that can hover, and a keyboard gets the product's focus pair, as every .btn
+   has it (design-system.md, S574). */
+.pos-staff-tile {
+  width: 130px;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: 0;
+  color: var(--theme-text1);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  padding: 12px 8px 10px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pos-pin-key {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: 0;
+  color: var(--theme-text1);
+  font-size: 22px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.08s, box-shadow 0.12s;
+}
+.pos-pin-key--clear {
+  color: var(--theme-text3);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.pos-pin-key--delete {
+  font-size: 20px;
+}
+.pos-pin-key:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .pos-staff-tile:hover {
+    border-color: var(--theme-accent);
+    background: var(--theme-table-hover);
+  }
+  .pos-pin-key:hover:not(:disabled) {
+    background: var(--theme-table-hover);
+  }
+}
+
+/* The press, while the finger is down. */
+.pos-staff-tile:active {
+  border-color: var(--theme-accent);
+  background: var(--theme-table-hover);
+}
+.pos-pin-key:active:not(:disabled) {
+  background: var(--theme-table-hover);
+  transform: scale(0.92);
+  box-shadow: 0 0 0 4px var(--theme-focus-ring), 0 0 14px var(--theme-accent);
+}
+
+.pos-staff-tile:focus-visible,
+.pos-pin-key:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+  border-color: var(--theme-accent);
+}
+
+/* The press keeps its fill and ring, without the shrink. */
+@media (prefers-reduced-motion: reduce) {
+  .pos-staff-tile,
+  .pos-pin-key {
+    transition: none;
+  }
+  .pos-pin-key:active:not(:disabled) {
+    transform: none;
+  }
+}

@@ -331,7 +331,7 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
     <div className="card" style={{ marginBottom: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <div>
-          <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Card types</h3>
+          <h2 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Card types</h2>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>The kinds of membership card this outlet gives, and the discount each one takes off a bill.</p>
         </div>
         {canManage && Array.isArray(types) && (
@@ -435,7 +435,7 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
           <div className="card" style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Birthdays &amp; anniversaries</h3>
+                <h2 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Birthdays &amp; anniversaries</h2>
                 <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>
                   Only customers who agreed to keep their dates. WhatsApp opens a wish to send from your own phone.
                 </p>
@@ -454,7 +454,7 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
 
           {/* ── Members ── */}
           <div className="card" style={{ marginBottom: 20 }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Members</h3>
+            <h2 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Members</h2>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
               {canManage
                 ? 'Give a card, set a credit limit, or record a birthday or anniversary with Edit. To give someone a card, show Everyone and find them.'

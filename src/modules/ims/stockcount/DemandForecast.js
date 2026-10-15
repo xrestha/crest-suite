@@ -555,10 +555,14 @@ export default function DemandForecast() {
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : forecast.length === 0 ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {stale.dropped > 0
-            ? `Every day in the last forecast for this horizon has already passed${lastRunLabel ? ` — it was run on ${lastRunLabel}` : ''}. Click "Recompute Forecast" to forecast the days ahead.`
-            : 'No forecast yet for this horizon — click "Recompute Forecast" to generate one.'}
+        <div className="card">
+          <div className="empty-state">
+            <p className="empty-state-text">
+              {stale.dropped > 0
+                ? `Every day in the last forecast for this horizon has already passed${lastRunLabel ? ` — it was run on ${lastRunLabel}` : ''}. Click "Recompute Forecast" to forecast the days ahead.`
+                : 'No forecast yet for this horizon — click "Recompute Forecast" to generate one.'}
+            </p>
+          </div>
         </div>
       ) : (
         <>

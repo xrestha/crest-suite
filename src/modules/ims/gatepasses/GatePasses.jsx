@@ -319,8 +319,10 @@ export default function GatePasses() {
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : visible.length === 0 ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {filter === 'open' ? 'No vehicles currently on the premises.' : 'No gate passes issued yet.'}
+        <div className="card">
+          <div className="empty-state">
+            <p className="empty-state-text">{filter === 'open' ? 'No vehicles currently on the premises.' : 'No gate passes issued yet.'}</p>
+          </div>
         </div>
       ) : (
         <div className="table-wrap table-wrap--fab-clear">

@@ -63,3 +63,31 @@ test('a Reconciliation read that never answers ends on the could-not-load card',
   expect(await screen.findByText('Could not load this report')).toBeTruthy()
   expect(screen.queryByText(/No discrepancies/)).toBeNull()
 })
+
+// 2026-10-15 audit: an empty anti-fraud view states the fact in plain words, no celebration, and a
+// failed letterhead read is the same report-error card the Sales and Covers reports show.
+test('an empty Reconciliation and Pulled Items say what was checked, with no celebration emoji', async () => {
+  mockAnswers = {}
+  render(<KotLog />)
+  fireEvent.click(await screen.findByRole('tab', { name: 'Reconciliation' }))
+  const recon = await screen.findByText(/^No discrepancies in this range/)
+  expect(recon.textContent).toBe('No discrepancies in this range: nothing sent to the kitchen was later reduced, removed or voided.')
+  fireEvent.click(screen.getByRole('tab', { name: 'Pulled Items' }))
+  const pulled = await screen.findByText(/^Nothing already sent to the kitchen/)
+  expect(pulled.textContent).toBe('Nothing already sent to the kitchen was taken off a bill in this range.')
+  expect(document.body.textContent).not.toMatch(/🎉/)
+})
+
+test('a failed letterhead read is the report-error card, and Excel is off', async () => {
+  mockBiz.error = { code: 'PGRST301', message: 'JWT expired' }
+  try {
+    render(<KotLog />)
+    const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
+    expect(card.getAttribute('role')).toBe('alert')
+    expect(within(card).getByText(/The log below is unaffected/)).toBeTruthy()
+    expect(within(card).getByText('PGRST301 · JWT expired').className).toBe('action-error-detail')
+    expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+  } finally {
+    mockBiz.error = null
+  }
+})

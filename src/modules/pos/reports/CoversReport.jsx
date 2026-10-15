@@ -1,4 +1,4 @@
-import { npr } from '../../../shared/nepalMoney'
+import { npr, nprOrDash } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
@@ -10,7 +10,6 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
-import { errorInfo, errorLine } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
@@ -18,19 +17,25 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
 import { settleAll, rangeReadMs } from './reportTimeout'
 import ChartCard from '../../../components/ChartCard'
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import LetterheadError from './LetterheadError'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { CHART_COLORS } from '../../../shared/chartColors'
+import { adToBs, BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import { nepalHour, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
-import { turnoverByBand, turnoverExclusions, turnoverExclusionNote, isDineIn, dineInOnly, coversTotals, addReturnsByBand } from './coversMath'
+import { turnoverByBand, turnoverExclusions, turnoverExclusionNote, isDineIn, dineInOnly, coversTotals, addReturnsByBand, coverRowsTotal } from './coversMath'
 import { SOURCE_LABEL } from '../reservations/reservationStatus'
 import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 const fmtNpr = npr
 // SVG presentation attributes only (tick fills, Bar fill) — var() does not resolve there. Never
-// as HTML text: as 11px caption text MUTED measured 3.9:1 on the Dark card and GOLD is the Dark
-// accent on every preset (S682). Text takes the tokens.
-const GOLD  = '#c9a84c'
+// as HTML text: as 11px caption text MUTED measured 3.9:1 on the Dark card, and the bar colour is a
+// chart hue, not a theme token (S682). Text takes the tokens. The bar is the product's first chart
+// slot (chartColors.js), never a private copy of its hex.
+const BAR_HEX = CHART_COLORS[0]
 const MUTED = '#6b7280'
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
 
@@ -77,12 +82,12 @@ export default function CoversReport() {
   const [loading,      setLoading]      = useState(true)
   // S612 silent-zero rule: a failed read must render as a failure, never as an empty range.
   const [loadError,    setLoadError]    = useState(null)
-  const [bizInfo,      setBizInfo]      = useState({ name: '' })
-  // Its own error slot (S754), as SalesReport's bizError. This read reported into `loadError` —
-  // which loadRange clears on its first line, and both effects fire on mount — so a failed
-  // client-name read was wiped by the range load beside it and the export shipped a blank
-  // CompanyName with nothing on the page to say so.
-  const [bizError,     setBizError]     = useState(null)
+  // The Excel letterhead: the outlet's name, VAT/PAN number and address, through useBizInfo() as KOT
+  // Log and Sales Exceptions read it (2026-10-15 audit), so the sheet carries the shared letterhead's
+  // VAT and ADDRESS lines too. Its `error` is its own slot (S754), never `loadError`, which loadRange
+  // clears on its first line: a failed name read was once wiped by the range load beside it and the
+  // export shipped a blank CompanyName with nothing on the page to say so.
+  const biz = useBizInfo()
 
   // Operating hours — used only for RevPASH; NULL/unset just hides that one card rather than
   // blocking the rest of the report.
@@ -90,22 +95,10 @@ export default function CoversReport() {
   const [openTime,  setOpenTime]  = useState('')
   const [closeTime, setCloseTime] = useState('')
   const [hoursSaving, setHoursSaving] = useState(false)
-  const [hoursMsg,     setHoursMsg]    = useState('')
-
-  useEffect(() => {
-    if (!clientId) return
-    let cancelled = false
-    setBizError(null)
-    supabase.from('clients').select('name').eq('id', clientId).single()
-      // S612 silent-zero rule: a dropped error here would just blank the export letterhead.
-      .then(({ data, error }) => {
-        // An admin switching client mid-read must not have the previous client's name land.
-        if (cancelled) return
-        if (error) { setBizError(error); return }
-        setBizInfo({ name: data?.name || '' })
-      })
-    return () => { cancelled = true }
-  }, [clientId])
+  // A failed save is ActionError's (2026-10-15 audit): a sentence that names what happened, with the
+  // code and raw message as fine print. It was a hand-rolled red <p> holding an `error:` string.
+  const [hoursError, setHoursError] = useState(null)
+  const [hoursSaved, setHoursSaved] = useState(false)
 
   // S754 overlapping-load guard: each picker change starts a load, and the slower of two used to
   // win the figures while the pickers — and so the export's scope line and filename — named the
@@ -226,9 +219,16 @@ export default function CoversReport() {
 
   useEffect(() => { loadRange() }, [loadRange])
 
+  // The consequence first, then errorText's sentence for the failure itself; the code and raw
+  // message stay as ActionError's fine print.
+  function hoursFailure(consequence, err) {
+    const { text, detail } = asActionError(err, 'operator')
+    return { text: `${consequence} ${text}`, detail }
+  }
+
   async function saveOperatingHours() {
     if (!clientId) return
-    setHoursSaving(true); setHoursMsg('')
+    setHoursSaving(true); setHoursError(null); setHoursSaved(false)
     const payload = { pos_open_time: openTime || null, pos_close_time: closeTime || null }
     // S776: an UPDATE by id that reads back, and an INSERT only once a read has CONFIRMED there is no
     // row. This inserted whenever `settingsId` was unknown — which is also the state after a failed
@@ -240,7 +240,8 @@ export default function CoversReport() {
       const { data: row, error: readErr } = await supabase.from('settings').select('id').eq('client_id', clientId).maybeSingle()
       if (readErr) {
         setHoursSaving(false)
-        setHoursMsg(`error:The hours were not saved — this outlet's settings could not be read first. ${errorLine(readErr)}`)
+        // Nothing was written: the read came first and failed.
+        setHoursError(hoursFailure("The hours were not saved — this outlet's settings could not be read first.", readErr))
         return
       }
       id = row?.id || null
@@ -249,12 +250,14 @@ export default function CoversReport() {
       ? await supabase.from('settings').update(payload).eq('id', id).select('id')
       : await supabase.from('settings').insert({ client_id: clientId, ...payload }).select('id')
     setHoursSaving(false)
-    if (error) { setHoursMsg(`error:The hours were not saved. ${errorLine(error)}`); return }
+    // A failed write may still have landed (a lost answer), so this one claims nothing either way.
+    if (error) { setHoursError(hoursFailure('The hours could not be confirmed as saved.', error)); return }
+    // Zero rows back IS proof: PostgREST returns what it wrote.
     if (!data?.length) {
-      setHoursMsg('error:The hours were not saved — nothing was updated. Reload the page and try again; if it keeps happening, the settings need a POS manager or the Owner.')
+      setHoursError('The hours were not saved — nothing was updated. Reload the page and try again; if it keeps happening, the settings need a POS manager or the Owner.')
       return
     }
-    setHoursMsg('ok:Saved.')
+    setHoursSaved(true)
     loadRange()
   }
 
@@ -307,7 +310,9 @@ export default function CoversReport() {
   }, [dineInOrders, dineInReturns, netOf])
 
   const trendChartData = trendRows.map(r => ({ name: `${r.day}/${r.month}`, value: r.covers }))
-  const trendTotalCovers = trendRows.reduce((s, r) => s + r.covers, 0)
+  // The TOTAL row's sums, which the chart's footer states too, so the two cannot disagree.
+  const trendTotal = coverRowsTotal(trendRows)
+  const trendTotalCovers = trendTotal.covers
   const trendAvgPerDay = trendRows.length > 0 ? trendTotalCovers / trendRows.length : 0
   const trendBusiestDay = trendRows.length > 0 ? trendRows.reduce((best, r) => r.covers > best.covers ? r : best) : null
 
@@ -326,6 +331,7 @@ export default function CoversReport() {
   const peakChartData = peakRows.map(h => ({ name: hourLabel(h.hour), value: h.covers }))
   const peakTotalCovers = peakRows.reduce((s, h) => s + h.covers, 0)
   const peakBusiestHour = peakRows.reduce((best, h) => h.covers > best.covers ? h : best, peakRows[0])
+  const peakTotal = coverRowsTotal(peakRows.filter(h => h.covers > 0))
 
   // Dine-in only: a takeaway bill's "dwell" is how long the bag took, not how long a table was held.
   const turnoverRows = useMemo(
@@ -392,28 +398,31 @@ export default function CoversReport() {
       .sort((a, b) => b.covers - a.covers)
   }, [dineInOrders, dineInReturns, netOf, staffNames])
 
+  const serverTotal = coverRowsTotal(serverRows)
+
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
-  const dateRangeLine = `@As On Dated : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Division : ${bizInfo.name}  @Basis : dine-in bills only (takeaway/delivery excluded); sales net of credit notes issued in the range`
-  function withLetterhead(XLSX, title, dataRows) {
-    const aoa = [[title], [`CompanyName : ${bizInfo.name}`], [dateRangeLine], []]
-    const ws = XLSX.utils.aoa_to_sheet(aoa)
-    XLSX.utils.sheet_add_json(ws, dataRows, { origin: -1 })
-    return ws
-  }
+  const dateRangeLine = `@As On Dated : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Division : ${biz.name}  @Basis : dine-in bills only (takeaway/delivery excluded); sales net of credit notes issued in the range`
+  // The shared letterhead (excelLetterhead.js), as on the other three POS reports: title, company,
+  // VAT/PAN, address, then the range line.
+  const letterhead = (XLSX, title, rows) => sheetWithLetterhead(XLSX, { title, biz, scopeLine: dateRangeLine, rows })
+  // useBizInfo() has no "loaded" flag, and its name is '' until the read answers, so a name is the
+  // sign the letterhead has landed. A sheet with a blank company name is the thing the gate exists
+  // to stop, so a blank name keeps Excel off too.
+  const letterheadReady = !biz.error && !!biz.name
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     if (tab === 'trend') {
-      const ws = withLetterhead(XLSX, 'Covers Report - Daily Trend', trendRows.map(r => ({
+      const ws = letterhead(XLSX, 'Covers Report - Daily Trend', trendRows.map(r => ({
         'Date (BS)': `${r.day} ${BS_MONTHS[r.month - 1]} ${r.year}`, 'Dine-in Bills': r.bills, 'Covers': r.covers,
         'Dine-in Net Sales, after credit notes (NPR)': Math.round(r.net * 100) / 100, 'Revenue/Cover (NPR)': Math.round(r.revPerCover * 100) / 100,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Daily Trend')
       XLSX.writeFile(wb, `covers-daily-trend-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'turnover') {
-      const ws = withLetterhead(XLSX, 'Covers Report - Turnover Time', turnoverRows.map(r => ({
+      const ws = letterhead(XLSX, 'Covers Report - Turnover Time', turnoverRows.map(r => ({
         'Party Size': r.label, 'Orders': r.orders, 'Covers': r.covers,
         'Avg Turnover (min)': Math.round(r.avgMinutes * 10) / 10, 'Net Sales (NPR)': Math.round(r.net * 100) / 100,
       })))
@@ -421,20 +430,20 @@ export default function CoversReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Turnover Time')
       XLSX.writeFile(wb, `covers-turnover-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'peak') {
-      const ws = withLetterhead(XLSX, 'Covers Report - Peak Hours', peakRows.filter(h => h.covers > 0).map(h => ({
+      const ws = letterhead(XLSX, 'Covers Report - Peak Hours', peakRows.filter(h => h.covers > 0).map(h => ({
         'Hour': hourLabel(h.hour), 'Bills': h.bills, 'Covers': h.covers,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Peak Hours')
       XLSX.writeFile(wb, `covers-peak-hours-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'server') {
-      const ws = withLetterhead(XLSX, 'Covers Report - By Server', serverRows.map(r => ({
+      const ws = letterhead(XLSX, 'Covers Report - By Server', serverRows.map(r => ({
         'Staff': r.name, 'Dine-in Bills': r.bills, 'Covers': r.covers,
         'Dine-in Net Sales, after credit notes (NPR)': Math.round(r.net * 100) / 100, 'Revenue/Cover (NPR)': Math.round(r.revPerCover * 100) / 100,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'By Server')
       XLSX.writeFile(wb, `covers-by-server-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'reservations') {
-      const ws = withLetterhead(XLSX, 'Covers Report - Reservations', resvStats.bySource.map(r => ({
+      const ws = letterhead(XLSX, 'Covers Report - Reservations', resvStats.bySource.map(r => ({
         'Booked via': SOURCE_LABEL[r.source] || r.source, 'Bookings': r.bookings, 'Guests booked': r.covers,
         'Kept': r.kept, 'No-shows': r.noShows, 'Cancelled': r.cancelled,
       })))
@@ -448,7 +457,6 @@ export default function CoversReport() {
   const isEmpty = tab === 'reservations' ? reservations.length === 0
     : tab === 'overview' ? orders.length === 0 && returns.length === 0
     : dineInOrders.length === 0
-  const bizErrorInfo = bizError ? errorInfo(bizError, 'operator') : null
 
   return (
     <div>
@@ -466,8 +474,8 @@ export default function CoversReport() {
           {tab !== 'overview' && (
             // Off while loading or failed, not only when empty (S728/S754): the filename and scope
             // line come from the pickers, which move before the data does.
-            // …and off while the letterhead's client-name read has failed (S754).
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !!bizError}>⬇ Excel</button>
+            // …and off until the letterhead's read has answered, and while it has failed (S754).
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !letterheadReady}>⬇ Excel</button>
           )}
         </div>
       </div>
@@ -488,17 +496,10 @@ export default function CoversReport() {
 
       {/* S754: the letterhead read fails independently of the range load, so it has its own notice
           rather than borrowing loadError (which loadRange clears). */}
-      {bizErrorInfo && (
-        <div className="card report-error" role="alert" style={{ marginBottom: 16 }}>
-          <div className="report-error-title">Could not load this outlet's name</div>
-          <p className="report-error-body">{bizErrorInfo.text}</p>
-          <p className="report-error-hint">
-            Excel is switched off rather than exporting a sheet with a blank company name. The figures
-            below are unaffected. Reload the page to try again.
-          </p>
-          {bizErrorInfo.detail && <p className="action-error-detail">{bizErrorInfo.detail}</p>}
-        </div>
-      )}
+      <LetterheadError error={biz.error}>
+        Excel is switched off rather than exporting a sheet with a blank company name. The figures
+        below are unaffected. Reload the page to try again.
+      </LetterheadError>
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
         <ReportLoadError error={loadError} />
@@ -578,10 +579,9 @@ export default function CoversReport() {
                 {hoursSaving ? 'Saving…' : 'Save'}
               </button>
             </div>
-            {hoursMsg && (
-              <p role="alert" style={{ margin: '10px 0 0', fontSize: 12, color: hoursMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                {hoursMsg.slice(hoursMsg.indexOf(':') + 1)}
-              </p>
+            <ActionError error={hoursError} />
+            {hoursSaved && (
+              <p role="status" style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--theme-green-text)' }}>✓ Saved.</p>
             )}
           </div>
         </>
@@ -589,12 +589,13 @@ export default function CoversReport() {
         <>
           <ChartCard
             title="Covers Served by Day"
+            headingLevel={2}
             cardStyle={{ marginBottom: 24 }}
             footer={trendRows.length > 0 && (
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{trendTotalCovers.toLocaleString('en-IN')}</strong> covers
                 {' '}· avg <strong style={{ color: 'var(--theme-text1)' }}>{trendAvgPerDay.toFixed(1)}</strong>/day
-                {trendBusiestDay && <> · busiest <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{trendBusiestDay.day}/{trendBusiestDay.month}</span> ({trendBusiestDay.covers} covers)</>}
+                {trendBusiestDay && <> · busiest <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{formatBsDay(trendBusiestDay.day, trendBusiestDay.month)}</span> ({trendBusiestDay.covers} covers)</>}
               </div>
             )}
             renderChart={h => (
@@ -607,7 +608,7 @@ export default function CoversReport() {
                     labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={v => [v, 'Covers']}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={BAR_HEX} {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -632,6 +633,16 @@ export default function CoversReport() {
                   </tr>
                 ))}
               </tbody>
+              {/* Revenue/Cover is the total net over the total covers, not an average of the days. */}
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td style={{ textAlign: 'right' }}>{trendTotal.bills}</td>
+                  <td style={{ textAlign: 'right' }}>{trendTotal.covers}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(trendTotal.net)}</td>
+                  <td style={{ textAlign: 'right' }}>{nprOrDash(trendTotal.revPerCover)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </>
@@ -755,6 +766,7 @@ export default function CoversReport() {
         <>
           <ChartCard
             title="Covers by Hour Seated"
+            headingLevel={2}
             cardStyle={{ marginBottom: 24 }}
             footer={peakTotalCovers > 0 && (
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 8 }}>
@@ -772,7 +784,7 @@ export default function CoversReport() {
                     labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={v => [v, 'Covers']}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={BAR_HEX} {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -789,6 +801,14 @@ export default function CoversReport() {
                   </tr>
                 ))}
               </tbody>
+              {/* Over the hours listed: an hour whose bills seated no covers is not a row above. */}
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td style={{ textAlign: 'right' }}>{peakTotal.bills}</td>
+                  <td style={{ textAlign: 'right' }}>{peakTotal.covers}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </>
@@ -813,6 +833,16 @@ export default function CoversReport() {
                 </tr>
               ))}
             </tbody>
+            {/* Revenue/Cover is the total net over the total covers, not an average of the staff. */}
+            <tfoot>
+              <tr>
+                <td>Total</td>
+                <td style={{ textAlign: 'right' }}>{serverTotal.bills}</td>
+                <td style={{ textAlign: 'right' }}>{serverTotal.covers}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(serverTotal.net)}</td>
+                <td style={{ textAlign: 'right' }}>{nprOrDash(serverTotal.revPerCover)}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

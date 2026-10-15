@@ -25,11 +25,14 @@ import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
 import ActionError from '../../../components/ActionError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
-// The floor view's window.alert()s are deliberately NOT converted (S616, re-affirmed S682, S809 4l):
-// each is a refusal a waiter must not be able to walk past mid-service (a table that may already
-// have an order, a bill reprinted without its lines, a clear-all that half ran). The floor DOES
-// have a banner (`floorMsg`, role="alert" for an error), so the choice is un-missable over the
-// banner, not alert-for-lack-of-one; a new floor message that a waiter may glance past goes there.
+// The floor's refusals a waiter must not be able to walk past mid-service (a table that may already
+// have an order, a bill reprinted without its lines, a clear-all that half ran) are a TILL NOTICE
+// (`showTillNotice`, TillNotice.jsx): a red bar at the top that stays until ✕, above any dialog. They
+// were window.alert()s until the 2026-10-15 audit (S616, S682, S809 4l chose un-missable); the owner
+// replaced the pop-up because it froze the page, the guest-order chime and the polls until OK. A
+// message a waiter may glance past still goes in the floor banner (`floorMsg`). Never window.alert here.
+import TillNotice from './TillNotice'
+import { useBillQr } from './useBillQr'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import OptionPickerModal from '../../customization/OptionPickerModal'
@@ -457,7 +460,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [kotPullReason, setKotPullReason] = useState('')
   const [hscMap,      setHscMap]      = useState({}) // { recipeId: hscCode } — fetched once when Billing modal opens
   const [openShiftId, setOpenShiftId] = useState(null) // cached, not queried per-close — see loadOpenShift()
-  const [billQrUrl,   setBillQrUrl]   = useState('')   // per-bill dynamic payment QR (data URL), regenerated as the total changes
+  // The per-bill dynamic payment QR is `billQrUrl`, from useBillQr below the payable figures it encodes.
 
   // Split payment — multiple tenders collected against one order/one invoice (not a split bill;
   // see [[Split Payment (multi-tender) for POS Charge]] plan). tenders: [{ method, amount, tenderedAmount }]
@@ -605,6 +608,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   // { units, lines, where } while the ask is open.
   const [sendPrompt, setSendPrompt] = useState(null)
   const [floorMsg,        setFloorMsg]        = useState('') // transient floor-view banner (e.g. blocked-table message)
+  // The till notice (TillNotice.jsx, 2026-10-15 audit): a refusal that stands until ✕, in every view and
+  // above any dialog. `id` moves with each notice, so the same words raised again are announced again,
+  // and a newer notice replaces the older one.
+  const [tillNotice,      setTillNotice]      = useState(null)
+  const showTillNotice = text => setTillNotice(prev => ({ id: (prev?.id || 0) + 1, text }))
   // Bills closed on this till whose sales did not reach Inventory, as [{ orderId, at }] (noteImsMiss), so
   // the floor banner shows them at once rather than after the next floor load. A floor load whose count
   // answers prunes every miss noted before that count started (pruneImsMisses, S809 4e): the database's
@@ -1165,19 +1173,20 @@ export default function PosOrders({ billingStation = false } = {}) {
     : 0
 
   // Regenerate the dynamic payment QR as the payable amount changes (discount typed, items
-  // edited) — the modal QR and print preview always encode the exact current amount. In split
+  // edited) — the modal QR and print preview encode the current amount once the hand pauses
+  // (useBillQr: the first QR paints at once, a changed amount waits PREVIEW_DEBOUNCE_MS). In split
   // mode this targets whatever the next tender's amount is (defaulting to the remaining balance),
-  // not the full order total. makeBillQr is a hoisted function declaration, so calling it from
+  // not the full order total. makeBillQr is a hoisted function declaration, so handing it over
   // here is safe even though it appears later in the file.
-  useEffect(() => {
-    if (!billingOpen) { setBillQrUrl(''); return }
-    const qrMethod = splitMode ? tenderMethod : payMethod
-    const qrAmount = splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal
-    if (!QR_PAY_METHODS.includes(qrMethod) || !billingSettings.payment_qr_data || !(qrAmount > 0)) { setBillQrUrl(''); return }
-    let cancelled = false
-    makeBillQr(qrAmount, orderNo ? `CR${orderNo}` : null).then(url => { if (!cancelled) setBillQrUrl(url) })
-    return () => { cancelled = true }
-  }, [billingOpen, splitMode, payMethod, tenderMethod, tenderAmtStr, remaining, payTotal, orderNo, billingSettings.payment_qr_data]) // eslint-disable-line
+  const qrMethod = splitMode ? tenderMethod : payMethod
+  const qrAmount = splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal
+  const billQrUrl = useBillQr({
+    active: billingOpen && QR_PAY_METHODS.includes(qrMethod) && !!billingSettings.payment_qr_data && qrAmount > 0,
+    amount: qrAmount,
+    reference: orderNo ? `CR${orderNo}` : null,
+    source: billingSettings.payment_qr_data || '',
+    make: makeBillQr,
+  })
 
   // Always the freshest closeOrder — a new function every render, closing over that render's
   // discountAmt/discountReason/buyerName/payableOrderItems/etc (closeOrder's 'paid' guards read
@@ -1323,24 +1332,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     // for the same order doesn't reset the interval either.
   }, [billingOpen, splitMode, orderId, payMethod, !!billQrUrl]) // eslint-disable-line
 
-  // Escape-to-close for this file's hand-rolled overlays (Billing/Covers/Recent Bills) — none of
-  // them use the shared Modal.js component, so each needs the same listener Modal.js itself gets.
-  // Only one of these is ever open at a time in practice; closing() guards the Billing modal the
-  // same way its own backdrop-click handler already does, so Escape can't abandon an in-flight close.
-  //
-  // The Billing modal is deliberately NOT handled here any more (S754): it is on Modal, whose own
-  // Escape goes through requestCloseBilling() and so through the "discard recorded payments?"
-  // confirm. This document listener ignores Modal's stack, so leaving billing in it closed the
-  // modal — tenders and all — on the very Escape that was meant to dismiss that confirm.
-  useEffect(() => {
-    function onKeyDown(e) {
-      if (e.key !== 'Escape') return
-      if (coversModal) { setCoversModal(false); setPendingTable(null) }
-      else if (recentBillsOpen) setRecentBillsOpen(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [coversModal, recentBillsOpen])
+  // No document Escape listener here (2026-10-15 audit). Billing, Covers and Recent Bills are all on
+  // Modal now, whose own Escape answers only the topmost dialog. The listener this file kept from its
+  // hand-rolled overlays ignored that stack, so one Escape on the Credit Note dialog also closed Recent
+  // Bills beneath it (S754 had already taken Billing out of it for the same reason).
 
   // Look up the customer's points as soon as a phone is on the bill. Debounced because this
   // fires per keystroke on a field a cashier types ten digits into.
@@ -1664,16 +1659,22 @@ export default function PosOrders({ billingStation = false } = {}) {
       // S834: an order whose table is gone from the floor plan shows as a card of its own (removedTable).
       const onFloor = q => q.table_id && (!cachedTables || cachedTables.some(t => t.id === q.table_id))
       for (const q of queue) { if (onFloor(q)) map[q.table_id] = queuedOrderToOverlay(q) }
-      setTableOrders(map)
+      // This branch runs on every poll while the link is down, so each setter keeps what is on screen
+      // when nothing moved (2026-10-15 audit): a new map, array or {} re-rendered the whole floor every tick.
+      setIfChanged(setTableOrders, map, floorOrdSig)
       // Takeaways already on screen from the last online read stay; queued ones are layered on.
       const queuedTakeaways = queue.filter(q => !onFloor(q))
         .map(q => ({ ...queuedOrderToOverlay(q), orderNo: null, removedTable: q.table_id ? (q.table_name || 'A removed table') : null }))
-      setTakeawayOrders(prev => [
-        ...prev.filter(t => !queuedTakeaways.some(q => q.orderId === t.orderId)),
-        ...queuedTakeaways,
-      ])
+      setTakeawayOrders(prev => {
+        const next = [
+          ...prev.filter(t => !queuedTakeaways.some(q => q.orderId === t.orderId)),
+          ...queuedTakeaways,
+        ]
+        return takeawaysSig(next) === takeawaysSig(prev) ? prev : next
+      })
       applyQueueCounts(rawQueue)
-      setKotStatusByTable({}) // pos_kot_log is server-only — no reliable status while offline
+      // pos_kot_log is server-only — no reliable status while offline.
+      setKotStatusByTable(prev => (Object.keys(prev).length ? {} : prev))
       setFloorLoad(false)
       return
     }
@@ -2442,7 +2443,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (sameOrderStillOpen) {
         const { data: same, error: sameErr } = await scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', c.order_id).maybeSingle()
         if (sameErr) {
-          window.alert(`Couldn't load that takeaway order. ${errorText(sameErr, 'staff')}\n\nNothing was changed — try again in a moment.`)
+          showTillNotice(`Couldn't load that takeaway order. ${errorText(sameErr, 'staff')}\n\nNothing was changed — try again in a moment.`)
           return
         }
         if (same && same.status === 'open') {
@@ -2477,7 +2478,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       .maybeSingle()
     // Same refusal as openTable: guessing "empty" here starts a second order on a table that has one.
     if (existingErr) {
-      window.alert(`Couldn't check whether ${table.name} already has an open order. ${errorText(existingErr, 'staff')}\n\nNothing was changed — try again in a moment.`)
+      showTillNotice(`Couldn't check whether ${table.name} already has an open order. ${errorText(existingErr, 'staff')}\n\nNothing was changed — try again in a moment.`)
       return
     }
 
@@ -3188,7 +3189,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         applyLockedCart([], null)
       }
     } finally {
-      // A refusal inside openTable/openOrderById (an alert, a table or takeaway this device never
+      // A refusal inside openTable/openOrderById (a till notice, a table or takeaway this device never
       // loaded offline) never consumed it. It must not attach itself to whatever order is opened next,
       // and it is kept again rather than lost, with the floor saying so (S809 ORDER-FLOW-12: only a
       // failure of the first read used to keep it).
@@ -3220,7 +3221,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       return openOrderById(oid)
     }
     if (error) {
-      window.alert(`Couldn't load that takeaway order. ${errorText(error, 'staff')}\n\nTry again in a moment — don't ring it up as a new takeaway, or the kitchen will get it twice.`)
+      showTillNotice(`Couldn't load that takeaway order. ${errorText(error, 'staff')}\n\nTry again in a moment — don't ring it up as a new takeaway, or the kitchen will get it twice.`)
       return
     }
     // S809 3f: an order this till still holds in its queue opens from the queue, as offline: the server's
@@ -3314,7 +3315,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A dropped error here is the worst swallow in this file: `existing` comes back null, the
     // table reads as EMPTY, and staff start a SECOND order on a table whose items are already
     // with the kitchen — re-firing every KOT and opening a second bill on one guest. Refuse to
-    // guess. window.alert rather than the floor's `floorMsg` banner because this cannot be
+    // guess. A till notice rather than the floor's `floorMsg` banner because this cannot be
     // missable mid-service (S616; see the note at the imports). S809 3f (Q16): no answer at all is the internet, not the table — it opens
     // as offline, by the offline rules (this till's copy, and never a table it has not loaded). S841: so
     // is an answer that has not come within OPEN_READ_MS.
@@ -3324,7 +3325,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       return openTable(table)
     }
     if (existingErr) {
-      window.alert(`Couldn't check whether ${table.name} already has an open order. ${errorText(existingErr, 'staff')}\n\nDon't start a new order on this table until it loads — you may be re-ringing one that is already with the kitchen. Try again in a moment.`)
+      showTillNotice(`Couldn't check whether ${table.name} already has an open order. ${errorText(existingErr, 'staff')}\n\nDon't start a new order on this table until it loads — you may be re-ringing one that is already with the kitchen. Try again in a moment.`)
       return
     }
     // S809 3f: the order this till still holds in its queue for this table opens from the queue, as offline:
@@ -6080,7 +6081,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (order.payment_method === 'Split') {
       const { data, error } = await bounded(scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at'), 'Reading the payments')
       if (error) {
-        window.alert(`Couldn't load this bill's split payment lines — ${errorText(error, 'staff')}\n\nNothing was printed. Reprint it from Recent Bills, so the bill doesn't go out without its payment breakdown.`)
+        showTillNotice(`Couldn't load this bill's split payment lines — ${errorText(error, 'staff')}\n\nNothing was printed. Reprint it from Recent Bills, so the bill doesn't go out without its payment breakdown.`)
         return null // not printed, and already said so — distinct from false (a blocked pop-up)
       }
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
@@ -6178,25 +6179,25 @@ export default function PosOrders({ billingStation = false } = {}) {
     ])
     // Both errors used to be dropped, so a failed read printed nothing and said nothing (S809.4).
     if (orderErr || itemsErr || !order || !items || items.length === 0) {
-      window.alert(`Couldn't load the Complimentary Slip of bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'No comped line was found on it.'}\n\nNothing was printed — try again.`)
+      showTillNotice(`Couldn't load the Complimentary Slip of bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'No comped line was found on it.'}\n\nNothing was printed — try again.`)
       return
     }
     // "Authorized by" is whoever comped these lines, not the reprinter (S809 CHECKOUT-11).
     const { name: staffName, error: staffErr } = await staffNameFor(supabase, clientId, items[0]?.comped_by)
     if (staffErr) {
-      window.alert(`Couldn't read who comped bill ${orderRow.invoice_no || orderRow.order_no || ''}. ${errorText(staffErr, 'staff')}\n\nNothing was printed — try again.`)
+      showTillNotice(`Couldn't read who comped bill ${orderRow.invoice_no || orderRow.order_no || ''}. ${errorText(staffErr, 'staff')}\n\nNothing was printed — try again.`)
       return
     }
-    if ((await printItemCompSlip(order, items, { staffName })) === false) alertPopupBlocked()
+    if ((await printItemCompSlip(order, items, { staffName })) === false) noticePopupBlocked()
   }
 
   // Recent Bills opens over the FLOOR, which has no message line — printHtml's own setMsg renders only
-  // on the order screen, so a blocked reprint did nothing visible (S754). window.alert for the
-  // same reason the floor's other refusals use it (see the import note at the top). The Billing
-  // station opens the same dialog since S809.4, whose floorMsg banner would sit hidden behind it, so
-  // its reprints say so the same way.
-  function alertPopupBlocked() {
-    window.alert('Nothing printed — this browser blocked the print window. Allow pop-ups for this site, then press Reprint again.')
+  // on the order screen, so a blocked reprint did nothing visible (S754). A till notice for the same
+  // reason the floor's other refusals use one (see the import note at the top): it shows above the
+  // Recent Bills dialog, on the floor and on the Billing station alike, where the floorMsg banner
+  // would sit hidden behind that dialog.
+  function noticePopupBlocked() {
+    showTillNotice('Nothing printed — this browser blocked the print window. Allow pop-ups for this site, then press Reprint again.')
   }
 
   async function loadRecentBills() {
@@ -6252,7 +6253,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   async function reprintBill(orderRow) {
     if (!hasPosAccess('supervisor')) return // S754: Recent Bills is Supervisor+ — see loadRecentBills
     // S809 2a (CHECKOUT-9): a reprint takes its heading, VAT/PAN number and address from the settings.
-    if (!billingSettingsLoaded) { window.alert(tillSettingsReprintText(!!settingsFailure)); loadTillSettings(); return }
+    if (!billingSettingsLoaded) { showTillNotice(tillSettingsReprintText(!!settingsFailure)); loadTillSettings(); return }
     // Same reason as reprintItemCompSlip above: independent reads, so one round trip rather than
     // two with a customer standing at the counter.
     const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
@@ -6263,7 +6264,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // `|| []` turned it into an empty array, and the reprint went out as a Tax Invoice carrying
     // a real invoice number and not one line item (S616).
     if (orderErr || itemsErr || !order || !items) {
-      window.alert(`Couldn't load bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'The bill could not be found.'}\n\nNothing was printed — try again.`)
+      showTillNotice(`Couldn't load bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'The bill could not be found.'}\n\nNothing was printed — try again.`)
       return
     }
     // A copy of the original (S809 CHECKOUT-11): the HSC codes of THIS bill's lines, and the login
@@ -6278,15 +6279,15 @@ export default function PosOrders({ billingStation = false } = {}) {
       staffNameFor(supabase, clientId, order.closed_by),
     ])
     if (hsc.error || staff.error) {
-      window.alert(`Couldn't read ${hsc.error ? 'the HSC codes of' : 'who closed'} bill ${orderRow.invoice_no || orderRow.order_no || ''}. ${errorText(hsc.error || staff.error, 'staff')}\n\nNothing was printed — try again.`)
+      showTillNotice(`Couldn't read ${hsc.error ? 'the HSC codes of' : 'who closed'} bill ${orderRow.invoice_no || orderRow.order_no || ''}. ${errorText(hsc.error || staff.error, 'staff')}\n\nNothing was printed — try again.`)
       return
     }
     const reprint = { hscMap: hsc.map, staffName: staff.name }
     const printed = writeoff
       ? await printCompSlip(order, lines, reprint)
       : await printBill(order, lines, reprint)
-    // false = blocked window; null = printBill already alerted about its own failed read.
-    if (printed === false) alertPopupBlocked()
+    // false = blocked window; null = printBill already raised a notice about its own failed read.
+    if (printed === false) noticePopupBlocked()
     setRecentBills(prev => prev.map(o => o.id === orderRow.id ? { ...o, print_count: (o.print_count || 0) + 1 } : o))
   }
 
@@ -6364,7 +6365,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A dropped error gave ids = [], skipped both deletes, and then still flipped every occupied
     // table to 'available' — freeing the floor while every open order survived underneath it.
     if (openErr) {
-      window.alert(`Couldn't read the open orders. ${errorText(openErr, 'staff')}\n\nNothing was cleared — the tables were left as they are rather than freed with their orders still open.`)
+      showTillNotice(`Couldn't read the open orders. ${errorText(openErr, 'staff')}\n\nNothing was cleared — the tables were left as they are rather than freed with their orders still open.`)
       setFloorLoad(false)
       return
     }
@@ -6378,7 +6379,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       const { error: unseatErr } = await scopedUpdate('pos_reservations', { status: 'arrived', order_id: null, seated_at: null })
         .in('order_id', ids).eq('status', 'seated')
       if (unseatErr) {
-        window.alert(`Couldn't take the booked parties off these orders. ${errorText(unseatErr, 'staff')}\n\nNothing was cleared — every order and table is as it was.`)
+        showTillNotice(`Couldn't take the booked parties off these orders. ${errorText(unseatErr, 'staff')}\n\nNothing was cleared — every order and table is as it was.`)
         setFloorLoad(false)
         return
       }
@@ -6391,7 +6392,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (delItemsErr || delOrdersErr) {
         // Two statements, not one: when the second fails the first has landed, and the orders
         // are still open with nothing on them.
-        window.alert(delItemsErr
+        showTillNotice(delItemsErr
           ? `Couldn't delete the open orders. ${errorText(delItemsErr, 'staff')}
 
 Nothing was deleted, and the tables were left occupied rather than freed with their orders still open. Any party seated from a booking is already back to Arrived on the Reservations page.`
@@ -6404,7 +6405,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       }
     }
     const { error: freeErr } = await scopedUpdate('pos_tables', { status: 'available' }).eq('status', 'occupied')
-    if (freeErr) window.alert(`The orders were deleted, but the tables could not be freed — they still show as occupied. ${errorText(freeErr, 'staff')}`)
+    if (freeErr) showTillNotice(`The orders were deleted, but the tables could not be freed — they still show as occupied. ${errorText(freeErr, 'staff')}`)
     await loadFloor()
   }
 
@@ -6758,6 +6759,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     <StationPrintAlerts alerts={stationPrint.alerts} notice={stationPrint.notice} busyId={stationPrint.busyId}
       onPrintHere={id => { void stationPrint.printHere(id) }} onDismiss={stationPrint.dismiss} />
   )
+  // The till notice, in all three views for the same reason (S578): a refusal raised on one screen —
+  // the split-payment read of a bill closed on the order screen, a reprint from Recent Bills on the
+  // floor or the Billing station — must still be standing on whichever screen is up.
+  const tillNoticeEl = <TillNotice notice={tillNotice} onDismiss={() => setTillNotice(null)} />
+
 
   if (view === 'bills') {
     const billRows = [
@@ -6815,6 +6821,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         {recentBillsModal}
         {confirmEl}
         {printAlertsEl}
+        {tillNoticeEl}
       </>
     )
   }
@@ -7635,7 +7642,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     })
                     return (
                       <div key={lk} style={{
-                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
+                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
                         background: comped ? 'var(--theme-input-bg)' : 'transparent',
                         color: comped ? 'var(--theme-amber-text)' : 'var(--theme-text2)',
                         fontWeight: comped ? 600 : 400,
@@ -8229,6 +8236,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           here, not only in the floor return: their handlers run on this screen (S578). */}
       {confirmEl}
       {printAlertsEl}
+      {tillNoticeEl}
     </div>
   )
 
@@ -8406,7 +8414,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             style={{
               display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexWrap: 'wrap',
               background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', border: '1px solid var(--theme-amber)',
-              borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13.5, fontWeight: 700,
+              borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 14, fontWeight: 700,
               color: 'var(--theme-amber-text)',
             }}
           >
@@ -8550,7 +8558,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       )}
 
       {/* S754: a failed floor read keeps the last good floor below and says so here. It is a line,
-          not a window.alert: the 15 s poll would re-raise an alert every time the network blinked. */}
+          not a till notice: the 15 s poll would re-raise it every time the network blinked. */}
       {floorLoadError && (
         <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
           Couldn't refresh the floor. {floorLoadError}{tables.length > 0 ? ' Tables below are as last loaded and may be out of date.' : ''}{' '}
@@ -8783,6 +8791,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         the same element for its own asks — only one tree is ever mounted (S578). */}
     {confirmEl}
     {printAlertsEl}
+    {tillNoticeEl}
     </>
   )
 }

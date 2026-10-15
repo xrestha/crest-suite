@@ -12,6 +12,7 @@ import AppErrorBoundary from './AppErrorBoundary'
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
 import { usePosIdleLock, posIdleLockApplies, sessionIdFromToken, POS_IDLE_LOCK_MS } from '../modules/pos/usePosIdleLock'
+import { isSoloGroup } from '../shared/navSoloGroup'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { prefetchHrPages } from '../shared/prefetchHrPages'
@@ -859,6 +860,9 @@ export default function Layout() {
     // pass options through — which `pinnable` now needs.
     const renderItems = () => items.map(i => renderNavItem(i, { pinnable: group.pinnable !== false }))
     if (!group.label) return <div key={group.key}>{renderItems()}</div> // unlabeled groups render flat, no header
+    // One reachable item is a link, not a group (S844, owner decision): on Starter "Costing" held
+    // only Menu Pricing, so the reader opened a heading to find the one page it named nothing like.
+    if (isSoloGroup(group, items)) return <div key={group.key} style={{ marginTop: 8 }}>{renderItems()}</div>
     const hasActive = items.some(i => navPathActive(location.pathname, i.to))
     const open = groupOpen(group.key) || hasActive
     return (
@@ -924,7 +928,8 @@ export default function Layout() {
     const items = unlockedItems(group.items)
     if (items.length === 0) return null
     // An unlabelled group has no header to hang a disclosure on — flat pills, same as the drawer.
-    if (!group.label) return items.map(i => renderBarPill(i))
+    // So is a group with one reachable item: a menu holding one row is a click that shows nothing new.
+    if (!group.label || isSoloGroup(group, items)) return items.map(i => renderBarPill(i))
     const current = items.some(i => navPathActive(location.pathname, i.to))
     const count = items.reduce((t, i) => t + (navCounts[i.to]?.count || 0), 0)
     const id = `topnav-${group.key}`
@@ -2297,7 +2302,10 @@ export default function Layout() {
           borderRadius: 'var(--radius-md)', padding: '10px 18px', boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
           fontSize: 13, color: 'var(--theme-text1)', maxWidth: 'calc(100vw - 32px)',
         }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>Locking in {idleLockSecs}s</strong>
+          {/* The alert speaks once, on mount: the ticking figure is aria-hidden, because a live
+              region whose text changes every second is re-announced twenty times (S844). */}
+          <span className="sr-only">Locking soon.</span>
+          <strong aria-hidden="true" style={{ color: 'var(--theme-amber-text)' }}>Locking in {idleLockSecs}s</strong>
           {' '}— touch the screen or press any key to stay signed in.{' '}
           {imsCountOnly ? 'Counts already saved stay saved.' : 'Items not sent yet are kept for your PIN.'}
         </div>

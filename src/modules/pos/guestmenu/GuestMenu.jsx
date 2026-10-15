@@ -10,6 +10,7 @@ import Modal from '../../../components/Modal'
 import { useGuestDocumentIdentity } from './guestDocument'
 import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
+import DietMark, { dietOfDish } from './DietMark'
 import GuestComboSheet, {
   comboOrderable, comboMatches, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
   comboLineProblem, comboCartWithout, comboContents, comboPicksOf, pickChoices,
@@ -20,7 +21,7 @@ import { playChime } from '../posChime'
 import { setIfChanged } from '../../../shared/setIfChanged'
 import { photoThumbUrl } from '../../ims/recipes/dishPhoto'
 import {
-  tidyName, orderCategories, matchesSearch, SEARCH_THRESHOLD,
+  tidyName, orderCategories, matchesSearch, filterShowText, SEARCH_THRESHOLD,
   STAGES, STAGE_SHORT, stageFromProgress, laterStage,
   newRequestKey, orderSignature, cartWithout, MENU_UNAVAILABLE, ORDERING_OFF_TEXT, reduceMotion,
 } from './guestMenuHelpers'
@@ -1285,7 +1286,7 @@ export default function GuestMenu() {
             <div className="gm-sheet-actions">
               <button type="button" className="btn btn-ghost" onClick={clearFilters}>Clear</button>
               <button type="button" className="btn btn-primary" onClick={() => setFiltersOpen(false)}>
-                Show {filteredRows.length} {filteredRows.length === 1 ? 'dish' : 'dishes'}
+                {filterShowText(filteredRows.length, visibleCombos.length)}
               </button>
             </div>
           </div>
@@ -1551,18 +1552,6 @@ function Stepper({ qty, onChange, label, plusRef, minusRef }) {
   )
 }
 
-// Veg / non-veg: the market's own labelling symbol — an outlined square with a filled dot, green or
-// red. The dot stays round deliberately: this is a food-labelling mark whose shape IS its meaning,
-// not an interface control, so the Modernist zero-radius rule does not reshape it (DESIGN.md).
-function VegMark({ isVeg }) {
-  return (
-    <span role="img" aria-label={isVeg ? 'Vegetarian' : 'Non-vegetarian'} title={isVeg ? 'Veg' : 'Non-veg'}
-      className={`gm-diet ${isVeg ? 'gm-diet--veg' : 'gm-diet--nonveg'}`}>
-      <span aria-hidden="true" />
-    </span>
-  )
-}
-
 // S839: a combo on the menu. Its price is what the guest pays before any extra charge; the Add opens
 // the combo sheet every time, since even a set meal is worth one look at what comes in it.
 function ComboRow({ combo, orderingEnabled, qty, onChoose }) {
@@ -1614,6 +1603,7 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
   const addRef = useRef(null)
   const focusAfter = useRef(null) // 'plus' | 'add' — where focus goes once the control it needs exists
   const name = tidyName(item.name)
+  const diet = dietOfDish(item.is_veg)
   const priceInc = priceIncVat(item, vatRegistered)
   // A dish with choices shows "From" its cheapest valid version (owner decision, S758).
   const fromPrice = dishGroups
@@ -1637,16 +1627,18 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
 
   return (
     <li className={`gm-row${compact ? ' gm-row--compact' : ''}${hasImage ? ' gm-row--image' : ''}`}>
+      {/* Empty alt (S844), as the logo's: the dish's name is printed right beside the photo, and
+          "Chicken Momo, Chicken Momo" is the same fact read twice. */}
       {hasImage && (
         <img
-          className="gm-thumb" src={thumbUrl && !thumbFailed ? thumbUrl : item.image_url} alt={name}
+          className="gm-thumb" src={thumbUrl && !thumbFailed ? thumbUrl : item.image_url} alt=""
           onError={() => { if (thumbUrl && !thumbFailed) setThumbFailed(true); else setImgFailed(true) }}
           loading="lazy" decoding="async"
         />
       )}
       <div className="gm-row-main">
         <p className="gm-name-line">
-          {item.is_veg != null && <VegMark isVeg={item.is_veg} />}
+          {diet && <DietMark diet={diet} />}
           <span className="gm-dish-name">{name}</span>
         </p>
         {item.description && <p className="gm-desc">{item.description}</p>}

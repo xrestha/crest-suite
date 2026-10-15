@@ -9,6 +9,7 @@ import { settleWithin } from '../../../utils/withTimeout'
 import { profileNamesRpc, namesMapOf, useMissingProfileNames } from '../../../shared/profileNames'
 import Fab from '../../../components/Fab'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from '../reports/RangePresets'
 import { bsMonthRangeIso } from '../reports/reportRange'
@@ -27,6 +28,9 @@ import './parking.css'
 // "Loading…" up for ever, and a hung Mark Exited left the vehicle looking parked with no word.
 const LIST_READ_MS = 20000
 const WRITE_MS = 20000
+// Open is the vehicles still parked; All is every slip in a date range. A filter on one list, so
+// FilterChips (role="group", aria-pressed, arrow keys), not a tab row.
+const SLIP_FILTERS = [{ key: 'open', label: 'Open' }, { key: 'all', label: 'All' }]
 // The columns a close answers with: what Mark Exited and the sweep change, as the server stored them.
 const CLOSE_COLUMNS = 'id, status, time_out, exited_by, auto_closed'
 
@@ -425,10 +429,7 @@ export default function PosParkingSlips() {
         </div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 20 }}>
-        <button type="button" className={`tab-btn${filter === 'open' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'open'} onClick={() => setFilter('open')}>Open</button>
-        <button type="button" className={`tab-btn${filter === 'all' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>All</button>
-      </div>
+      <FilterChips label="Which slips" options={SLIP_FILTERS} active={filter} onChange={setFilter} style={{ marginBottom: 20 }} />
 
       <ActionError error={actionError} className="action-error--top" />
       {body}

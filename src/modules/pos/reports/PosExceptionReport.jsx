@@ -10,6 +10,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import LetterheadError from './LetterheadError'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -141,7 +142,9 @@ export default function PosExceptionReport() {
         readMs, 'Loading the voided and comped lines')
       if (!loadReq.isCurrent(reqKey)) return
       // S612: without the lines, every void/comp values at a believable NPR 0.
-      if (itemsError) { setLoadError(itemsError.message || String(itemsError)); setRows([]); setLoading(false); return }
+      // The error object, not its .message (2026-10-15 audit): ReportLoadError words it and keeps the
+      // code in its fine print, which a bare string loses.
+      if (itemsError) { setLoadError(itemsError); setRows([]); setLoading(false); return }
       itemsByOrder = (items || []).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -202,7 +205,7 @@ export default function PosExceptionReport() {
         readMs, 'Loading the comped bills')
       if (!loadReq.isCurrent(reqKey)) return
       // S612: a dropped error here would strip every item-comp of its parent bill reference.
-      if (parentsError) { setLoadError(parentsError.message); setRows([]); setLoading(false); return }
+      if (parentsError) { setLoadError(parentsError); setRows([]); setLoading(false); return }
       const parentById = Object.fromEntries((parentOrders || []).map(o => [o.id, o]))
 
       const groups = {}
@@ -372,12 +375,10 @@ export default function PosExceptionReport() {
           ]} />
       </div>
 
-      {biz.error && (
-        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
-          with a blank company name. The figures below are unaffected. Reload the page to try again.
-        </p>
-      )}
+      <LetterheadError error={biz.error}>
+        Excel is switched off rather than exporting a sheet with a blank company name. The figures
+        below are unaffected. Reload the page to try again.
+      </LetterheadError>
       {/* S612: a failed read renders as a failure — never as zero stat cards or a quiet report. */}
       {loadError ? (
         <ReportLoadError error={loadError} />
@@ -430,9 +431,10 @@ export default function PosExceptionReport() {
           {/* Per-staff rollup */}
           {staffRows.length > 0 && (
             <>
-              <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+              {/* A real section heading under the page h1 (2026-10-15 audit), not a styled <p>. */}
+              <h2 className="dash-heading">
                 By Staff Member <Tip text="Who is closing the exceptions — one cashier discounting far more than everyone else is worth a conversation. Attribution records whoever was signed in on the till when the bill closed, so on a shared till treat this as a starting point, not proof." width={280}>ⓘ</Tip>
-              </p>
+              </h2>
               <div className="table-wrap" style={{ marginBottom: 24 }}>
                 <table className="data-table">
                   <thead>
@@ -471,11 +473,13 @@ export default function PosExceptionReport() {
           {/* Detail table */}
           {filtered.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-              {/* Two different facts (S754): the celebratory line claims the range is clean, which
-                  is false when the rows exist and a Type/Staff filter is hiding every one of them. */}
+              {/* Two different facts (S754): the empty-range line claims the range is clean, which
+                  is false when the rows exist and a Type/Staff filter is hiding every one of them.
+                  Plain words, no celebration (2026-10-15 audit): an empty anti-fraud view is a
+                  fact to check, not a reward. */}
               {rows.length > 0 && filtersActive
                 ? 'Nothing matches these filters. Set Type to All and Staff to All staff to see every exception in this range.'
-                : 'No exceptions in this range — a quiet report is a healthy one. 🎉'}
+                : 'No discounts, voids or comps in this range.'}
             </div>
           ) : (
             <div className="table-wrap">

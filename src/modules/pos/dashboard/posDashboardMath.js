@@ -95,6 +95,19 @@ export function hourlySales(todayOrders, lastWeekOrders, { currentHour = null, t
   return rows
 }
 
+/** The busiest hour of each day in `hourlySales` rows: `{ today, lastWeek }`, each `{ hour, amount }`
+ *  or null when that day sold nothing above zero in any hour. The chart's text summary (2026-10-15
+ *  audit): a supervisor sees this chart but not the Sales Report's Hourly table, so the peak has to
+ *  be said in words too. A tie goes to the earlier hour. */
+export function hourlyPeaks(rows) {
+  const peakOf = key => {
+    let best = null
+    for (const r of rows || []) if (r[key] > 0 && (!best || r[key] > best.amount)) best = { hour: r.hour, amount: r[key] }
+    return best
+  }
+  return { today: peakOf('today'), lastWeek: peakOf('lastWeek') }
+}
+
 // How Nepal pays, in the order the tiles read: cash, then the wallets and QR, then card, then the
 // bills nobody has paid yet. A Split bill is shared across its legs by amount (paymentSharesOf, the
 // Sales Report's own rule), so the rows always add back to the day's sales.

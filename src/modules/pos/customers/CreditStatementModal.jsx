@@ -153,11 +153,11 @@ export default function CreditStatementModal({ party, vatReg, prefix, outlet, on
               </tfoot>
             </table>
           </div>
-          <h3 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+          <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
             <Tip text="Counted today, by Nepal days since each unpaid bill was closed. It is today's position whatever dates are chosen above." width={300}>
               Still owed today, by age of bill
             </Tip>
-          </h3>
+          </h4>
           <div className="table-wrap">
             <table className="data-table">
               <thead><tr>{AGE_BUCKETS.map(b => <th key={b.key} style={{ textAlign: 'right' }}>{b.label}</th>)}<th style={{ textAlign: 'right' }}>Total</th></tr></thead>

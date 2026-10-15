@@ -78,7 +78,7 @@ are load-bearing, each with the reason it exists:
   decline reason is rendered on the guest's phone — "Guest cancelled" shown to a guest who asked
   and was refused is false. `DECLINE_REASONS` when `status === 'requested'`, `CANCEL_REASONS`
   otherwise; both store into `cancel_reason`.
-- **The row shows ONE next step** (Confirm → Arrived → Seat) plus 💬 plus a `RowMenu`; 💬 only on
+- **The row shows ONE next step** (Confirm → Arrived → Seat) plus the WhatsApp button plus a `RowMenu`; WhatsApp only on
   live rows, because the template is the booking confirmation. Every `transition()` ends in a
   `role="status"` line saying what happened and, when the row belongs to another day, where it
   went — an accepted request is usually for a day other than the one on screen and used to

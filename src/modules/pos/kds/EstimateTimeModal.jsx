@@ -72,7 +72,9 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
           })}
         </div>
 
-        <div style={{ fontSize: 32, fontWeight: 700, color: value ? 'var(--theme-text1)' : 'var(--theme-text3)', marginBottom: 10, fontVariantNumeric: 'tabular-nums' }}>
+        {/* A live region (POS audit 2026-10-15), so a screen reader hears the minutes as the keys fill
+            them, the way the PIN pad announces its digit count. */}
+        <div aria-live="polite" aria-atomic="true" style={{ fontSize: 32, fontWeight: 700, color: value ? 'var(--theme-text1)' : 'var(--theme-text3)', marginBottom: 10, fontVariantNumeric: 'tabular-nums' }}>
           {value || '0'} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--theme-text3)' }}>min</span>
         </div>
 
@@ -97,6 +99,8 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
               key={i}
               onClick={() => pressKey(k)}
               disabled={!k}
+              // Named as the PIN pad names its two (PosLogin.jsx): read aloud, "C" and "⌫" say nothing.
+              aria-label={k === 'C' ? 'Clear minutes' : k === '⌫' ? 'Delete last digit' : undefined}
               style={{
                 width: 58, height: 58, borderRadius: 0,
                 background: k ? 'var(--theme-card)' : 'transparent',

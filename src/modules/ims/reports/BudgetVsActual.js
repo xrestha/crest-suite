@@ -8,7 +8,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -192,6 +192,13 @@ export default function BudgetVsActual() {
   // verdict until the month is closed; the figures themselves still print.
   const provisional = selectedPeriod?.status === 'open'
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
+  // The two ways a loaded month can have nothing to compare. Both are read only inside the loaded
+  // branch below, never while loading or after a failed read, where no budget and no spend are
+  // known facts at all. With no categories there is no row to type a budget into, so the table goes;
+  // with categories but no budget the table IS where one is typed, so it stays under a prompt.
+  const noCategories  = categories.length === 0
+  const hasAnyBudget  = categories.some(c => (parseFloat(budgets[c.id]) || 0) !== 0)
+  const hasAnySpend   = totalActual !== 0 || excluded !== 0
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
@@ -243,8 +250,30 @@ export default function BudgetVsActual() {
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
+      ) : noCategories ? (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="empty-state">
+            <div className="empty-state-icon">◎</div>
+            <p className="empty-state-text">
+              No item categories yet, so there is nothing to set a budget against — a budget is set
+              per category. Add categories in <Link to="/items" style={{ color: 'var(--theme-accent-ink)' }}>Item Master</Link> (Load
+              Default Categories sets up the usual ones), then come back.
+              {totalActual !== 0 && ` ${fmt(totalActual)} of purchases in ${periodLabel} is on items with no category.`}
+            </p>
+          </div>
+        </div>
       ) : (
         <div className="card">
+          {!hasAnyBudget && (
+            <div className="empty-state" style={{ padding: '20px 16px' }}>
+              <p className="empty-state-text">
+                {hasAnySpend
+                  ? `No budget set for ${periodLabel} yet, so the spend below has nothing to be measured against.`
+                  : `No budget set and no purchases recorded for ${periodLabel} yet.`}
+                {' '}Type a figure into a category's Budget box below — it saves when you click out of the box.
+              </p>
+            </div>
+          )}
           <div className="table-wrap">
             <table className="data-table">
               <thead>

@@ -44,3 +44,14 @@
   gap: 8px;
   vertical-align: middle;
 }
+
+/* The New Parking Slip dialog's failed bills read: what happened, and Try again beside it. */
+.parking-bills-retry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--theme-amber-text);
+}

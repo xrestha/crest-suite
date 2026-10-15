@@ -9,10 +9,11 @@ import { getDateStatus, extendedFrom } from '../../utils/subscription'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
+import ConfirmModal from '../../components/ConfirmModal'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from '../../shared/adminOp'
-import { useConfirm } from '../../shared/hooks/useConfirm'
+import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../shared/hooks/useConfirm'
 // Colours only — the PRICES this panel quotes come from useSettings().pricing (S701), so the
 // figure under each module button is the one Settings > Plan Pricing actually charges. It used
 // to import the constants, which meant the screen where an operator picks a client's modules
@@ -167,6 +168,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // The settings row as last read or saved — what a retroactive change is measured against.
   const loadedSettingsRef = useRef(null)
   const { ask: askConfirm, confirmEl } = useConfirm()
+  // A login write the dialog holds busy is bounded (S803): after CONFIRM_TIMEOUT_MS the dialog lets
+  // go and says so. The write is not recalled, and its own late message still lands.
+  const loginWriteBound = { timeoutMs: CONFIRM_TIMEOUT_MS, onTimeout: () => setUserError(CONFIRM_TIMEOUT_TEXT) }
+  // A question asked in the MIDDLE of a running action, which waits for the answer: preflightBackup's
+  // "did both files download?", between the backup and the delete. useConfirm runs a callback on
+  // confirm and has no Cancel callback, so it cannot hand an answer back to code already running;
+  // this resolves a promise with the button pressed. Cancel, Escape and the backdrop all answer no.
+  const [midQuestion, setMidQuestion] = useState(null)
+  const askMidway = q => new Promise(resolve => setMidQuestion({ ...q, resolve }))
+  function answerMidway(yes) {
+    const q = midQuestion
+    setMidQuestion(null)
+    if (q) q.resolve(yes)
+  }
   const [webhookSecret, setWebhookSecret]     = useState('') // client_secrets, not settings — see SETTINGS_DEFAULTS
 
   // QR tab state. Both the parse and the encode are keyed off the payload only — they used to run
@@ -230,8 +245,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // Delete Client). Every destructive path here used to be a single window.confirm OK — the same
   // one keypress for "Clear IMS Transactions" as for deleting the entire client, with no defence
   // against having the wrong drawer open (the drawer opens from a click anywhere on a client
-  // card). Module-level clears keep window.confirm; whole-client blast radius requires typing the
-  // client's name (phase 7, S574).
+  // card). Whole-client blast radius requires typing the client's name (phase 7, S574). Every other
+  // question this drawer asks — the module clears, Clear All Conversions, moving, deleting or
+  // blocking a login, and "did both backup files download?" — goes through the app's own confirm
+  // dialog (useConfirm / askMidway below), never window.confirm: the browser's box names no client,
+  // carries the OS chrome rather than the theme, and offers the same OK for every one of them.
   const [confirmAction, setConfirmAction] = useState(null)  // 'archive' | 'clientData' | 'deleteClient'
   const [confirmName, setConfirmName] = useState('')
   // Admin password reset for a client login — most importantly the OWNER's. The Edge Function's
@@ -429,9 +447,25 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         setUserError('That email is a platform-admin account — use a different email for a client login.')
         setSavingUser(false); return
       }
-      if (!window.confirm(`${email} already has a client login. Move it to "${client.name}"? It loses access to its previous client and arrives as an Owner login — any staff role, POS/Self-Service access or employee link it had there is removed. (Its existing password is kept.)`)) {
-        setSavingUser(false); return
-      }
+      // The dialog has no Cancel callback, so the Create button is released before asking: saying
+      // no leaves the form as typed and nothing written, as it always did.
+      setSavingUser(false)
+      askConfirm({
+        title: `Move ${email} to ${client.name}?`,
+        body: <p style={{ margin: 0 }}>{`${email} already has a client login. Moved to "${client.name}", it loses access to its previous client and arrives as an Owner login — any staff role, POS/Self-Service access or employee link it had there is removed. (Its existing password is kept.)`}</p>,
+        confirmLabel: 'Move login', busyLabel: 'Moving…',
+        ...loginWriteBound,
+        run: () => moveLoginHere(existingId, email, full_name),
+      })
+    } catch (err) {
+      setUserError('Could not reassign user: ' + err.message)
+      setSavingUser(false)
+    }
+  }
+
+  async function moveLoginHere(existingId, email, full_name) {
+    setSavingUser(true)
+    try {
       // upsert (not update): some older auth users have no profiles row, so a
       // plain update would silently match 0 rows. .select() confirms it persisted.
       //
@@ -457,6 +491,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         setUserError('Reassign did not take effect — the profiles table is blocking it (RLS). Run the admin-profiles policy fix, then retry.')
         setSavingUser(false); return
       }
+      setUserError('')
       setUserSuccess(`✓ ${email} reassigned to this client.`)
       setUserForm(EMPTY_USER)
       setSavingUser(false)
@@ -467,8 +502,19 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     }
   }
 
-  async function deleteUser(user) {
-    if (!window.confirm(`Delete "${user.full_name}" (${user.email})? This permanently removes the login and frees the email to be reused.`)) return
+  function deleteUser(user) {
+    const who = user.full_name || user.email || 'this login'
+    const ident = user.full_name ? `"${user.full_name}" (${user.email})` : `(${user.email})`
+    askConfirm({
+      title: `Delete ${who}'s login?`,
+      body: <p style={{ margin: 0 }}>{`This permanently removes the login ${ident} from ${client.name} and frees the email to be reused.`}</p>,
+      confirmLabel: 'Delete login', cancelLabel: 'Keep', danger: true, busyLabel: 'Deleting…',
+      ...loginWriteBound,
+      run: () => runDeleteUser(user),
+    })
+  }
+
+  async function runDeleteUser(user) {
     setUserError('')
     try {
       // A till (PIN) login goes through delete_pos_staff (S809 ACCESS-5): it refuses a login that has
@@ -478,17 +524,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       else await adminOp('deleteUser', { userId: user.id })
     } catch (err) {
       if (err.code === 'pos_login_has_records') {
-        if (!window.confirm(`${err.message}\n\nBlock ${user.full_name || 'this login'} now?`)) {
-          setUserError(`${user.full_name || 'The login'} was not deleted, and their PIN still works.`)
-          return
-        }
-        try {
-          await adminOp('block_pos_staff', { client_id: client.id, userId: user.id })
-          setUserSuccess(`✓ ${user.full_name || 'The login'} is blocked: it can no longer sign in, and its name stays on everything it recorded.`)
-        } catch (blockErr) {
-          // admin-user-ops' refusal is already a sentence naming the person and what happened.
-          setUserError(blockErr.message)
-        }
+        offerBlockInstead(user, err.message)
         return
       }
       const alreadyGone = /not found/i.test(err.message)
@@ -503,6 +539,33 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     await supabase.from('profiles').delete().eq('id', user.id)
     setUserSuccess('✓ User deleted and email freed.')
     loadUsers()
+  }
+
+  // Asked from inside the delete's own run, which useConfirm allows: its cleanup clears only the ask
+  // that just ran, so this follow-up stays on screen. Its Cancel has no callback, so what saying no
+  // means is stated first, behind the dialog, and simply stays when it closes.
+  function offerBlockInstead(user, refusal) {
+    const name = user.full_name || 'this login'
+    setUserError(`${user.full_name || 'The login'} was not deleted, and their PIN still works.`)
+    askConfirm({
+      title: `Block ${name} now?`,
+      body: <>
+        <p style={{ margin: '0 0 8px' }}>{refusal}</p>
+        <p style={{ margin: 0 }}>{`Blocking stops ${name} signing in to ${client.name}, and keeps their name on everything they recorded.`}</p>
+      </>,
+      confirmLabel: 'Block login', busyLabel: 'Blocking…',
+      ...loginWriteBound,
+      run: async () => {
+        try {
+          await adminOp('block_pos_staff', { client_id: client.id, userId: user.id })
+          setUserError('')
+          setUserSuccess(`✓ ${user.full_name || 'The login'} is blocked: it can no longer sign in, and its name stays on everything it recorded.`)
+        } catch (blockErr) {
+          // admin-user-ops' refusal is already a sentence naming the person and what happened.
+          setUserError(blockErr.message)
+        }
+      },
+    })
   }
 
   // ── Client edit ──
@@ -804,12 +867,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     // Before deleting anything on the strength of that backup, make the operator look: the .json
     // (downloaded first) is the only artifact that can restore (S574).
     if (result.method === 'download') {
-      const confirmed = window.confirm(
-        'The backup was DOWNLOADED (no backup folder is set up in this browser).\n\n' +
-        'Check your Downloads folder now: BOTH files must be there — the .json (which can restore) ' +
-        'and the .xlsx (the readable copy). Some browsers block the second download.\n\n' +
-        'Are both files safely downloaded?',
-      )
+      const confirmed = await askMidway({
+        title: 'Are both backup files safely downloaded?',
+        body: <>
+          <p style={{ margin: '0 0 8px' }}>The backup was DOWNLOADED (no backup folder is set up in this browser).</p>
+          <p style={{ margin: '0 0 8px' }}>Check your Downloads folder now: BOTH files must be there — the .json (which can restore) and the .xlsx (the readable copy). Some browsers block the second download.</p>
+          <p style={{ margin: 0 }}>{`Nothing has been deleted from ${client.name} yet. It starts when you continue.`}</p>
+        </>,
+        confirmLabel: 'Both are there, continue', danger: true,
+      })
       if (!confirmed) {
         setDeleteMsg('error:Stopped — nothing was deleted. Set up a backup folder, or retry once both files download.')
         return false
@@ -930,16 +996,32 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   // ── Danger Zone ──
+  // A clear's dialog closes the moment it is confirmed, and the Danger Zone's own "Working…" takes
+  // over, as it did behind window.confirm: the backup in front of every clear can run for minutes and
+  // may stop to ask whether both files downloaded, which a dialog held busy could neither show nor
+  // bound.
+  function startDangerAction(work) {
+    void work().catch(err => { setDeletingAction(null); setDeleteMsg('error:' + (err?.message || String(err))) })
+  }
+
   async function handleClearConversions() {
-    const { data: withConv } = await scopedFrom('items', client.id, 'id, purchase_qty, rate').not('purchase_unit', 'is', null)
+    const { data: withConv, error: convErr } = await scopedFrom('items', client.id, 'id, purchase_qty, rate').not('purchase_unit', 'is', null)
+    // A failed read is not "no conversions" (S654): it used to report exactly that.
+    if (convErr) { setDeleteMsg('error:Nothing was changed — the items with a conversion could not be read. Try again. ' + errorLine(convErr)); return }
     const count = withConv?.length || 0
     if (count === 0) { setDeleteMsg('ok:No items have a conversion set.'); return }
-    if (!window.confirm(
-      `Clear unit conversions on ${count} item${count !== 1 ? 's' : ''} for "${client.name}"?\n\n` +
-      `Purchase Unit, Base Unit, Conversion Factor and Purchase Qty will be reset to 1 for each affected item. ` +
-      `Each item's pack price is rescaled to its price per 1 unit, so per-unit rates — and every stock valuation built on them — are unchanged.\n\n` +
-      `This cannot be undone.`
-    )) return
+    askConfirm({
+      title: `Clear unit conversions on ${count} item${count !== 1 ? 's' : ''} for ${client.name}?`,
+      body: <>
+        <p style={{ margin: '0 0 8px' }}>{`Purchase Unit, Base Unit, Conversion Factor and Purchase Qty will be reset to 1 for each affected item. Each item's pack price is rescaled to its price per 1 unit, so per-unit rates — and every stock valuation built on them — are unchanged.`}</p>
+        <p style={{ margin: 0 }}><strong>This cannot be undone.</strong></p>
+      </>,
+      confirmLabel: 'Clear conversions', cancelLabel: 'Keep', danger: true,
+      run: () => startDangerAction(() => clearConversionsNow(withConv, count)),
+    })
+  }
+
+  async function clearConversionsNow(withConv, count) {
     setDeletingAction('conversions'); setDeleteMsg('')
     if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
 
@@ -968,7 +1050,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       : `ok:Conversions cleared on ${count} item${count !== 1 ? 's' : ''}. Per-unit rates preserved.`)
   }
 
-  async function handleClearModule(module) {
+  function handleClearModule(module) {
     const labels = {
       // Clear IMS also wipes Fixed Assets, setup included (S834): the register and its categories
       // go with their depreciation, tax-pool and repair rows — admin-user-ops clearModuleData.
@@ -976,11 +1058,25 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       hr:  'HR transactions (attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster)\n\nKEPT: employees, salary components, leave types, holiday calendar, shift types',
       pos: 'POS transactions (orders, order items, shifts, customers, and what the till posted to Inventory: its sales entries and stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs, and hand-entered sales with their stock movements. Occupied tables are freed.\n\nAFTERWARDS: the hand-entered sales days the till also covered get their stock re-counted, because it was skipped while the till covered them. Other days are left as they were saved.',
     }
-    if (!window.confirm(
-      `Clear ${module.toUpperCase()} transactions for "${client.name}"?\n\n` +
-      `This deletes: ${labels[module]}\n\n` +
-      `This cannot be undone.`
-    )) return
+    const name = module.toUpperCase()
+    // One paragraph per block; a block that opens with a capitalised heading ("KEPT:") shows it bold.
+    const [deletes, ...rest] = labels[module].split('\n\n')
+    askConfirm({
+      title: `Clear ${name} transactions for ${client.name}?`,
+      body: <>
+        <p style={{ margin: '0 0 8px' }}><strong>This deletes:</strong> {deletes}</p>
+        {rest.map(block => {
+          const [, head, text] = block.match(/^([A-Z ]+:)\s*([\s\S]*)$/) || [null, null, block]
+          return <p key={block} style={{ margin: '0 0 8px' }}>{head ? <><strong>{head}</strong> {text}</> : text}</p>
+        })}
+        <p style={{ margin: 0 }}><strong>This cannot be undone.</strong></p>
+      </>,
+      confirmLabel: `Clear ${name} data`, cancelLabel: 'Keep', danger: true,
+      run: () => startDangerAction(() => clearModuleNow(module)),
+    })
+  }
+
+  async function clearModuleNow(module) {
     setDeletingAction(module)
     setDeleteMsg('')
     try {
@@ -1860,7 +1956,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <div style={{ width: 64, height: 64, borderRadius: 'var(--radius-lg)', border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {clientSettings.logo_url
                         ? <img src={clientSettings.logo_url} alt={`${client.name} logo`} style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 'var(--radius-md)' }} />
-                        : <span aria-hidden="true" style={{ fontSize: 26, color: 'var(--theme-accent-ink)' }}>⬢</span>
+                        : <span aria-hidden="true" style={{ fontSize: 24, color: 'var(--theme-accent-ink)' }}>⬢</span>
                       }
                     </div>
                     <div style={{ flex: 1 }}>
@@ -2442,6 +2538,18 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         )
       })()}
       {confirmEl}
+      {midQuestion && (
+        <ConfirmModal
+          title={midQuestion.title}
+          confirmLabel={midQuestion.confirmLabel}
+          cancelLabel={midQuestion.cancelLabel}
+          danger={!!midQuestion.danger}
+          onConfirm={() => answerMidway(true)}
+          onCancel={() => answerMidway(false)}
+        >
+          {midQuestion.body}
+        </ConfirmModal>
+      )}
     </Modal>
   )
 }

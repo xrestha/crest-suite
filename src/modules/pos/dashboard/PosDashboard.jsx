@@ -25,7 +25,7 @@ import OccasionsCard, { useUpcomingOccasions } from './OccasionsCard'
 import { staleGuestOrderCutoffIso } from '../../../shared/guestOrderStale'
 import {
   summariseBills, compareToLastWeek, hourlySales, paymentMix, channelMix, topItems,
-  openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf,
+  openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf, hourlyPeaks,
 } from './posDashboardMath'
 
 // The POS Dashboard (S800 stage B) — the page the POS tab opens.
@@ -255,6 +255,7 @@ export default function PosDashboard() {
   const weekday = weekdayOf(today)
   const clientName = isAdmin ? adminViewClientName : profile?.clients?.name
   const t = sales?.today, lw = sales?.lastWeek
+  const peaks = hourlyPeaks(sales?.hourly)
   const ready = !!floor && (!canMoney || !!sales)
 
   return (
@@ -367,6 +368,19 @@ export default function PosDashboard() {
                   legend={<span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                     <span style={{ color: TODAY_HEX }}>■</span> Today · <span style={{ color: LAST_WEEK_HEX }}>━</span> Last {weekday}
                   </span>}
+                  // The chart in words (2026-10-15 audit): a supervisor sees this chart but cannot open
+                  // the Sales Report's Hourly table, so the totals and peaks it shows are said here too.
+                  // The totals are the Sales tile's own figures: the same bills and notes as the bars.
+                  footer={sales.hourly.length > 0 && (
+                    <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
+                      Today so far <strong style={{ color: 'var(--theme-text1)' }}>{npr(t.sales)}</strong>
+                      {peaks.today
+                        ? <> · peak hour <strong style={{ color: 'var(--theme-text1)' }}>{hourLabel(peaks.today.hour)}</strong> ({npr(peaks.today.amount)})</>
+                        : ' · no hour above zero yet'}
+                      {' '}· last {weekday} to this time <strong style={{ color: 'var(--theme-text1)' }}>{npr(lw.sales)}</strong>
+                      {peaks.lastWeek && <>, peak {hourLabel(peaks.lastWeek.hour)} ({npr(peaks.lastWeek.amount)})</>}
+                    </p>
+                  )}
                   renderChart={h => sales.hourly.length === 0
                     ? <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No bills closed yet today or by this time last {weekday}.</p>
                     : (

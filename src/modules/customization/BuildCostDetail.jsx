@@ -32,7 +32,7 @@ export default function BuildCostDetail({ range, settings, vatNote = true }) {
   return (
     <div style={{ padding: '4px 0 8px' }}>
       <div className="table-wrap">
-        <table className="data-table" style={{ fontSize: 12.5 }}>
+        <table className="data-table">
           <thead>
             <tr>
               <th>Size</th>
@@ -66,7 +66,7 @@ export default function BuildCostDetail({ range, settings, vatNote = true }) {
           </tbody>
         </table>
       </div>
-      <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
+      <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
         Typical build: {range.typicalSource}. Costs use today’s item rates{vatNote ? '; prices are before VAT' : ''}.
       </p>
     </div>

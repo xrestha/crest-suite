@@ -11,7 +11,6 @@ import {
   pointsValue, isDeliveryPartnerPhone, schemeNumberCommit, spendablePoints, schemeGivesBack, nprPoints,
   GIVE_BACK_CONFIRM_PCT,
 } from './loyaltyPoints'
-import { errorLine } from '../../../shared/errorText'
 import { phoneMatchesSearch } from '../../../utils/phone'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -72,6 +71,16 @@ import MovePointsModal from './MovePointsModal'
 // balances are paged, so they get the list limit; the schemes are one short read.
 const LIST_READ_MS = 20000
 const ROW_READ_MS = SETTLE_READ_MS
+
+// The tab's one status line (2026-10-15 audit): a success sentence, or a failure `<ActionError>` reads
+// (the sentence, with a Supabase error's code and message kept as fine print). It was one coloured
+// <p> for both, told apart by an "error:"/"ok:" prefix.
+const okMsg = text => ({ kind: 'ok', text })
+function failMsg(lead, err) {
+  if (!err) return { kind: 'error', text: lead, detail: '' }
+  const { text, detail } = asActionError(err, 'operator')
+  return { kind: 'error', text: `${lead} ${text}`, detail }
+}
 
 // pos_loyalty_balances rows → each customer's balance and the part held on unpaid Credit bills.
 function balancesOf(rows) {
@@ -185,7 +194,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     // says what is missing and moves to the box.
     if (!name) { setNameMissing(true); document.getElementById('new-scheme-name')?.focus(); return }
     // S809 3k (CUSTOMERS-PARKING-12): a cleared rate box used to add a scheme that earns nothing.
-    if (newRate.trim() === '' || !(Number(newRate) >= 0)) { setMsg('error:Enter how many points a member earns per NPR 100, for example 1.'); return }
+    if (newRate.trim() === '' || !(Number(newRate) >= 0)) { setMsg(failMsg('Enter how many points a member earns per NPR 100, for example 1.')); return }
     if (!askIfGenerous(Number(newRate), name, insertScheme)) return
     await insertScheme()
   }
@@ -200,7 +209,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
       min_spend_to_earn: Number(newMin) || 0,
     })
     setSavingScheme(false)
-    if (error) { setMsg(`error:The scheme was not added. ${errorLine(error)}`); return }
+    if (error) { setMsg(failMsg('The scheme was not added.', error)); return }
     setNewName(''); setNewRate('1'); setNewMin('0')
     await load()
   }
@@ -212,7 +221,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setMsg('')
     const { error } = await scopedUpdate('pos_loyalty_schemes', patch).eq('id', id)
     // An optimistic paint that drops the error shows as saved what the database refused (S613).
-    if (error) { setMsg(`error:That change was not saved — the box shows what is stored again. ${errorLine(error)}`); return false }
+    if (error) { setMsg(failMsg('That change was not saved — the box shows what is stored again.', error)); return false }
     await load()
     return true
   }
@@ -232,7 +241,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
       ),
       run: async () => {
         const { error } = await scopedDelete('pos_loyalty_schemes').eq('id', s.id)
-        if (error) { setMsg(`error:"${s.name}" was not deleted — it is still active. ${errorLine(error)}`); return }
+        if (error) { setMsg(failMsg(`"${s.name}" was not deleted — it is still active.`, error)); return }
         await load()
       },
     })
@@ -246,8 +255,8 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     // customer's History offers only bills since then.
     const { data, error } = await scopedUpdate('pos_customers', { loyalty_scheme_id: schemeId || null }).eq('id', customerId)
       .select('loyalty_scheme_id, loyalty_enrolled_at')
-    if (error) { setMsg(`error:The enrolment was not changed. ${errorLine(error)}`); return }
-    if (!data?.length) { setMsg('error:The enrolment was not changed — this customer is not in the book any more. Reload the page.'); return }
+    if (error) { setMsg(failMsg('The enrolment was not changed.', error)); return }
+    if (!data?.length) { setMsg(failMsg('The enrolment was not changed — this customer is not in the book any more. Reload the page.')); return }
     setBook(prev => (prev.rows
       ? { ...prev, rows: { ...prev.rows, members: prev.rows.members.map(m => m.id === customerId ? { ...m, ...data[0] } : m) } }
       : prev))
@@ -264,7 +273,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   function savePointValue() {
     setMsg('')
     const v = Number(valueStr)
-    if (!Number.isFinite(v) || v <= 0) { setMsg('error:A point has to be worth more than zero.'); return }
+    if (!Number.isFinite(v) || v <= 0) { setMsg(failMsg('A point has to be worth more than zero.')); return }
     if (pointValue != null && v === Number(pointValue)) return
     const total = Object.values(balances).reduce((s, n) => s + Math.max(0, n || 0), 0)
     const active = schemes.filter(s => s.is_active)
@@ -301,7 +310,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     const failure = await onPointValueSaved(v)
     setSavingValue(false)
     // A string is a sentence the page wrote; anything else is a Supabase error to word (S754).
-    if (failure) setMsg(`error:The point value was not changed. ${typeof failure === 'string' ? failure : errorLine(failure)}`)
+    if (failure) setMsg(typeof failure === 'string' ? failMsg(`The point value was not changed. ${failure}`) : failMsg('The point value was not changed.', failure))
   }
 
   // A points move landed (S815 4g). Both numbers' rows changed (enrolment too), so the tab reads again.
@@ -309,10 +318,10 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setMoving(null)
     const n = Number(res?.moved) || 0
     const left = Number(res?.held_left) || 0
-    setMsg(`ok:${n.toLocaleString('en-IN')} points moved from ${member.phone} to ${res?.to_phone}${res?.created ? ' (added to the customer book)' : ''}.`
+    setMsg(okMsg(`${n.toLocaleString('en-IN')} points moved from ${member.phone} to ${res?.to_phone}${res?.created ? ' (added to the customer book)' : ''}.`
       + (res?.enrolled ? ' The new number joined the scheme.' : '')
       + (res?.unenrolled ? ` ${member.phone} left its scheme.` : '')
-      + (left > 0 ? ` ${left.toLocaleString('en-IN')} points from an unpaid Credit bill stay on ${member.phone} until it is paid in full.` : ''))
+      + (left > 0 ? ` ${left.toLocaleString('en-IN')} points from an unpaid Credit bill stay on ${member.phone} until it is paid in full.` : '')))
     await load()
   }
 
@@ -321,7 +330,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setAdjusting(null)
     setBook(prev => (prev.rows ? { ...prev, rows: { ...prev.rows, balances: { ...prev.rows.balances, [member.id]: newBalance } } } : prev))
     const n = Math.abs(change).toLocaleString('en-IN')
-    setMsg(`ok:${change > 0 ? `${n} points added for` : `${n} points taken off`} ${member.name}. New balance: ${Number(newBalance).toLocaleString('en-IN')} points.`)
+    setMsg(okMsg(`${change > 0 ? `${n} points added for` : `${n} points taken off`} ${member.name}. New balance: ${Number(newBalance).toLocaleString('en-IN')} points.`))
   }
 
   const anyPoints = Object.values(balances).some(n => n > 0) // S833: words the no-scheme note
@@ -379,7 +388,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
           )}
         </td>
         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-          {bal > 0 && pointValue != null ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
+          {bal > 0 && pointValue != null ? nprPoints(pointsValue(bal, pointValue)) : '—'}
         </td>
         <td style={{ textAlign: 'right' }}>
           <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -404,9 +413,10 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
 
   return (
     <div>
-      {msg && (
-        <p role="alert" style={{ fontSize: 12, margin: '0 0 12px', color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-          {msg.replace(/^(error|ok):/, '')}
+      {msg?.kind === 'error' && <ActionError error={msg} className="action-error--top" />}
+      {msg?.kind === 'ok' && (
+        <p role="status" style={{ fontSize: 13, margin: '0 0 12px', color: 'var(--theme-green-text)' }}>
+          <span aria-hidden="true">✓ </span>{msg.text}
         </p>
       )}
 
@@ -459,7 +469,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
 
           {/* ── Schemes ── */}
           <div className="card" style={{ marginBottom: 20 }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Schemes</h3>
+            <h2 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Schemes</h2>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
               How fast a member earns. A customer belongs to one scheme at a time.
             </p>
@@ -492,7 +502,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                           <SchemeNumberInput
                             stored={s.points_per_100} step="0.1" width={80}
                             label={`Points per NPR 100 for ${s.name}`} canManage={canManage}
-                            onSave={v => saveRate(s, v)} onInvalid={t => setMsg(`error:${t}`)}
+                            onSave={v => saveRate(s, v)} onInvalid={t => setMsg(failMsg(t))}
                           />
                         </td>
                         {(() => {
@@ -507,7 +517,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                           <SchemeNumberInput
                             stored={s.min_spend_to_earn} step="1" width={90}
                             label={`Minimum spend to earn for ${s.name}`} canManage={canManage}
-                            onSave={v => patchScheme(s.id, { min_spend_to_earn: v })} onInvalid={t => setMsg(`error:${t}`)}
+                            onSave={v => patchScheme(s.id, { min_spend_to_earn: v })} onInvalid={t => setMsg(failMsg(t))}
                           />
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -564,7 +574,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
 
           {/* ── Members ── */}
           <div className="card">
-            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Who is enrolled</h3>
+            <h2 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Who is enrolled</h2>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
               {enrolledCount} of {members.length} customer{members.length === 1 ? '' : 's'} enrolled. Anyone left on “Not enrolled” earns nothing.
             </p>

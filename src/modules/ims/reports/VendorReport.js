@@ -1256,7 +1256,7 @@ export default function VendorReport() {
             )}
           </p>
           {drilldownBills.length === 0 ? (
-            <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No bills recorded for this vendor this period.</p>
+            <div className="empty-state"><p className="empty-state-text">No bills recorded for this vendor this period.</p></div>
           ) : (
             <>
               <div style={{ display: 'flex', gap: 20, marginBottom: 14, fontSize: 12, color: 'var(--theme-text2)' }}>

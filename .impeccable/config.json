@@ -125,6 +125,15 @@
         ],
         "createdAt": "2026-10-08T08:17:27.143Z",
         "reason": "Modernist Light preset border/borderLt (PRESETS.light). Documented in DESIGN.md Neutral prose and in .impeccable/design.json colorMeta lightPreset (ink-border / ink-border-lt); the hook checks only the frontmatter (which carries the Dark default) and tonal ramps, so Light-only values read as undocumented. Surfaced 2026-10-08 when the cancelled S807 re-theme was stashed and the file was rewritten to its committed state. Scoped to this one file."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "*",
+        "files": [
+          "src/shared/typeRamp.test.js"
+        ],
+        "createdAt": "2026-10-15T07:50:14.180Z",
+        "reason": "test fixtures: the type-ramp test's own off-ramp examples (S844)"
       }
     ]
   }

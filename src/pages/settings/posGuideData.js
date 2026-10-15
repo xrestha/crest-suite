@@ -89,6 +89,7 @@ export const POS_GUIDE_GROUPS = [
           'The floor band is for anyone on POS: a waiter sees what is open, waiting and late. The sales band, the cash drawer tile and the money on open bills are for Supervisor and above, the rank that may already take payment; the reports the tiles link to stay Manager-only.',
           'The comparison cuts last week at this moment\'s time of day: at 1 PM today is compared with last week\'s sales up to 1 PM, never with last week\'s whole day, which would read every lunchtime as a collapse.',
           'A failed refresh keeps the last good figures on screen with a line saying when they are from; it never blanks them. A failed FIRST load shows the could-not-load card and no figures.',
+          'S844: the hourly chart says itself in words underneath — today so far and its busiest hour, and last week to this time with its busiest hour (hourlyPeaks in posDashboardMath.js) — because a Supervisor can see this chart but not Sales Report\'s Hourly table.',
         ],
         fields: [
           { label: 'Open bills', desc: 'pos_orders with status open. The oldest one\'s age, and (Supervisor+) the value on them: Σ qty × unit price over non-comped lines, before discount and VAT.' },
@@ -542,6 +543,7 @@ export const POS_GUIDE_GROUPS = [
         workflow: [
           'Pick the date range; every tab except 1L+ is a different slice of the same bills. Payment Summary rows click through to a pre-filtered Bill Register.',
           'The 1L+ tab works on a whole FISCAL YEAR, chosen from its own Fiscal Year dropdown — the date range does not apply to it. It lists buyers whose paid bills in that year cross NPR 1,00,000 — the IRD Annexure 13 disclosure threshold — and flags a buyer over the line with no PAN recorded. That threshold is one reason buyer names are mandatory on credit and discounted bills. Since S754: every bill counts in the year it was sold and returns issued in the year are netted off; a party billed once WITH a PAN and once by name only is treated as one party (owner decision); and the walk-in row (all the unnamed customers added together) is never flagged "Missing PAN". Since S809 3m (REPORTS-2) the year list runs from the first bill\'s fiscal year to this one (one row, read when the tab opens, with its own error), and a year reads up to 2,00,000 bills.',
+          'S844: on a phone the Bill Register is a list of cards — voucher and net first, then the BS date with opened → paid times, customer, table, how it was paid and any credit note or comp in words, a Show the figures disclosure and View bill. It pages 200 at a time like the table and follows the payment filter; printing still gives the full table. The 1L+ totals row fills Taxable and Non-Taxable.',
         ],
         fields: [
           { label: 'By Partner rollup (Delivery Partners tab)', desc: 'One row per delivery platform — outstanding balance, commission taken, net received — plus the effective commission rate measured against the agreed one. A bill with a Credit Note against it is no longer owed, whichever range the note falls in (S814; deliveryOutstanding, the Customers page\'s rule): its row reads "Credited, not owed", and the note\'s minus row comes off Billed only, never off Outstanding. The rate is the point: without it the tab can say how much a platform withheld but never whether that was the agreed amount. Clicking a row filters the bills, the KPIs and the export to that platform.' },
@@ -597,6 +599,7 @@ export const POS_GUIDE_GROUPS = [
         workflow: [
           'Pick the range; the Turnover tab bands sittings by party size (1-2 / 3-4 / 5-6 / 7+) because one blended average dine-duration tells a manager nothing.',
           'Reservations: bookings whose BOOKED time falls in the range. Kept = seated or completed; no-show rate = no-shows ÷ (kept + no-shows), so cancelled and still-open bookings neither help nor hurt it.',
+          'S844: Daily Trend, Peak Hours and By Server end with a Total row (coverRowsTotal in coversMath.js). Revenue / Cover there is total net ÷ total covers, never an average of the rows\' averages, and "—" when there were no covers. The busiest day reads as a BS day ("12th Bhadra").',
         ],
         fields: [
           { label: 'RevPASH', desc: 'Revenue ÷ (total seats × open hours). Needs the opening and closing time set (editable inline on the report); left unset, that one card hides rather than blocking the rest. Total seats = the seats at tables in service today: the capacity sum of POS Setup\'s tables, a table marked inactive left out.' },

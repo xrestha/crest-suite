@@ -73,15 +73,28 @@
 
 /* The two-week calendar. Seven columns aligned to the weekday, so a Saturday sits under "Sat" and
    the fourteen bookable days are all on screen at once — no sideways scroll to discover. Cells
-   shrink with the viewport (minmax(0,1fr)); at 360px that is ~44px each, which is the touch floor. */
+   shrink with the viewport (minmax(0,1fr)) and are at least 56px tall. Their WIDTH is under the
+   44px touch floor on a phone, and that is the price of keeping all fourteen days in view: measured
+   (S844, Archivo, headless Chromium) a cell is 38.6px at 360px and 42.9px at 390px. Under 360px the
+   card gives the grid back 8px of side padding and the columns close to 2px, so a cell is 35.7px at
+   320px rather than 32.9px.
+   The small labels never clip. At 10px "Walk-in" (semibold) needs 36px and "Closed", "22 Aug" and
+   "24 May" 33px, against 2px of border and no side padding in the cell: every label fits on one
+   line from about 336px up, and below that "Walk-in" wraps at its hyphen (the row grows to 69px).
+   Until S844 the cell had 2px side padding and the labels ended in "…", so at 320px every AD date,
+   "Closed" and "Walk-in" was cut. Measure again before adding a longer label or more padding. */
 .gb-cal-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .gb-cal-caption { font-size: 12px; color: var(--theme-text3); white-space: nowrap; }
 .gb-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .gb-cal-head { font-size: 11px; font-weight: 600; text-align: center; color: var(--theme-text3); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 2px; }
+@media (max-width: 359px) {
+  .gb-card { padding-left: 12px; padding-right: 12px; }
+  .gb-cal { column-gap: 2px; }
+}
 .gb-day {
   min-width: 0;
   min-height: 56px;
-  padding: 6px 2px;
+  padding: 6px 0;
   border: 1px solid var(--theme-border);
   background: var(--theme-input-bg);
   color: var(--theme-text1);
@@ -95,7 +108,9 @@
   cursor: pointer;
 }
 .gb-day-bs { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.gb-day small { display: block; font-size: 10px; color: var(--theme-text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* Wraps at a space or a hyphen rather than ending in "…"; a word wider than the cell (none today)
+   breaks rather than being cut off. */
+.gb-day small { display: block; font-size: 10px; color: var(--theme-text3); max-width: 100%; overflow-wrap: anywhere; }
 /* A selected day or time is the accent, filled — the one place this page spends it besides the
    submit button, because "which one did I pick" has to be answered at a glance. The pickers are
    radiogroups since S842, so the state is aria-checked. */

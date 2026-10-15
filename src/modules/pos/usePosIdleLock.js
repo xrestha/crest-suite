@@ -28,6 +28,13 @@ export const IDLE_INPUT_KEY = 'crest_idle_last_input'
 // pointerdown/keydown/touchstart rather than mousemove: see the lock's own listener below.
 const INPUT_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'wheel']
 
+// The stored last input is written at most this often (2026-10-15 audit). Every pointerdown, key and
+// wheel tick used to write localStorage synchronously, and a wheel alone fires dozens a second. The lock
+// itself still measures from the very last input in memory; only the copy kept for a page load lags,
+// by under this much, and always toward an OLDER time, so a reload can only lock sooner, never later.
+// A write still pending is flushed when the page hides or goes away.
+export const IDLE_WRITE_THROTTLE_MS = 1000
+
 /** The session an access token belongs to: its `session_id` claim (auth.sessions.id), or null. */
 export function sessionIdFromToken(accessToken) {
   try {
@@ -102,16 +109,47 @@ export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_M
   // When someone last actually touched the till. Only real input moves it — never a tab becoming
   // visible again (S754).
   const lastActivityRef = useRef(Date.now())
+  // The last input this session noted (memory, every input). The stored copy is throttled, so the lock
+  // starting here (a Kitchen login leaving the KDS) reads the newer of the two and still measures from
+  // the very last touch.
+  const lastInputRef = useRef(null)
   onWarnRef.current = onWarn
   onLockRef.current = onLock
 
   // S809 ACCESS-6: every real input of this session is noted on the device, whether or not the lock is
   // running, so the period a page load resumes is measured from the last time someone was there.
+  // Throttled to IDLE_WRITE_THROTTLE_MS: the first input of a burst is written at once, the last one when
+  // the second is up, and the time written is always that of a real input.
   useEffect(() => {
     if (!sessionKey) return
-    const note = () => writeLastInput(sessionKey, Date.now())
+    let lastWriteAt = 0
+    let pendingAt = null
+    let timer = null
+    const flush = () => {
+      clearTimeout(timer)
+      timer = null
+      if (pendingAt == null) return
+      writeLastInput(sessionKey, pendingAt)
+      lastWriteAt = Date.now()
+      pendingAt = null
+    }
+    const note = () => {
+      pendingAt = Date.now()
+      lastInputRef.current = { session: sessionKey, at: pendingAt }
+      const wait = lastWriteAt + IDLE_WRITE_THROTTLE_MS - pendingAt
+      if (wait <= 0) flush()
+      else if (!timer) timer = setTimeout(flush, wait)
+    }
+    const onHidden = () => { if (document.visibilityState === 'hidden') flush() }
     INPUT_EVENTS.forEach(e => window.addEventListener(e, note, { passive: true }))
-    return () => INPUT_EVENTS.forEach(e => window.removeEventListener(e, note))
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onHidden)
+    return () => {
+      INPUT_EVENTS.forEach(e => window.removeEventListener(e, note))
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onHidden)
+      flush()
+    }
   }, [sessionKey])
 
   useEffect(() => {
@@ -184,8 +222,10 @@ export function usePosIdleLock(enabled, onWarn, onLock, lockMs = POS_IDLE_LOCK_M
     // this one, starts a full period from now.
     const now = Date.now()
     const stored = readLastInput(sessionKey)
-    lastActivityRef.current = stored != null ? Math.min(stored, now) : now
-    if (stored == null) writeLastInput(sessionKey, now)
+    const noted = sessionKey && lastInputRef.current?.session === sessionKey ? lastInputRef.current.at : null
+    const known = stored != null && noted != null ? Math.max(stored, noted) : (stored ?? noted)
+    lastActivityRef.current = known != null ? Math.min(known, now) : now
+    if (stored == null) writeLastInput(sessionKey, lastActivityRef.current)
     const remaining = lockMs - (now - lastActivityRef.current)
     if (remaining <= 0) lock()
     else arm(remaining)

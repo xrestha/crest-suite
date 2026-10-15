@@ -9,6 +9,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import LetterheadError from './LetterheadError'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -538,12 +539,11 @@ export default function KotLog() {
         </div>
       </div>
 
-      {biz.error && (
-        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
-          with a blank company name. The log below is unaffected. Reload the page to try again.
-        </p>
-      )}
+      {/* The same card as the other three POS reports (2026-10-15 audit), not a 12px amber line. */}
+      <LetterheadError error={biz.error}>
+        Excel is switched off rather than exporting a sheet with a blank company name. The log below
+        is unaffected. Reload the page to try again.
+      </LetterheadError>
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
         <ReportLoadError error={loadError} />
@@ -552,8 +552,8 @@ export default function KotLog() {
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
           {tab === 'register' ? 'No KOT/BOT tickets sent in this range.'
-            : tab === 'reconciliation' ? 'No discrepancies — a quiet report is a healthy one. 🎉'
-            : tab === 'pulled' ? 'Nothing already sent to the kitchen was taken off a bill in this range. 🎉'
+            : tab === 'reconciliation' ? 'No discrepancies in this range: nothing sent to the kitchen was later reduced, removed or voided.'
+            : tab === 'pulled' ? 'Nothing already sent to the kitchen was taken off a bill in this range.'
             : tab === 'moves' ? 'No table was moved, joined or split in this range.'
             : 'No paid or voided bills in this range.'}
         </div>

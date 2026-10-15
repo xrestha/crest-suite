@@ -749,6 +749,7 @@ export const IMS_GUIDE_GROUPS = [
         workflow: [
           'Select period. Type a budget amount per category directly into the table — auto-saves on blur (no explicit Save button).',
           'S756: while the month is open, variance colours and the Over/Under badge are withheld ("Within/Above so far").',
+          'S844: a month with no categories shows an empty state that sends you to Item Master (Load Default Categories); a month with categories but no budget shows a prompt above the table, because the Budget boxes are where a budget is typed. Neither shows while loading or after a failed read.',
         ],
         fields: [
           { label: 'Status badge', desc: 'No Budget (grey, budget=0) / Over Budget (red) / Under Budget (green).' },
@@ -1160,6 +1161,7 @@ export const IMS_GUIDE_GROUPS = [
         workflow: [
           'Defaults to the currently open period, falling back to the most recent period when none is open. Method Summary tab (aggregate) and Daily Breakdown tab (per-day, per-method).',
           'S792 stage 3: Export Excel is gated like its siblings (TAX-5) — off while a month loads, after a failed read, or when the letterhead (outlet name) read failed — and only the load that still owns the page may un-gate it (TAX-4). The Daily Breakdown ends in a TOTAL row on screen and in its sheet, equal to the Method Summary (TAX-9). The period chip is provisionalWhenOpen, reading OPEN while the month can still change (TAX-10).',
+          'S844: a month that loaded with no bills and no returns says so in one card ("No purchase bills or supplier returns recorded for Bhadra 2083") with a link to Purchases, instead of six NPR 0 tiles and a table of zeros. A failed read keeps its error card.',
         ],
         fields: [],
         formulas: [

@@ -189,3 +189,20 @@ export function addReturnsByBand(rows, returns) {
   }
   return out
 }
+
+/**
+ * The TOTAL row under a table of cover rows (Daily Trend, Peak Hours, By Server; 2026-10-15 audit):
+ * bills, covers and net sales summed down their columns, and revenue per cover worked out from those
+ * sums, never an average of the rows' own averages, which would weigh a two-cover day the same as a
+ * forty-cover one. `revPerCover` is null when no covers were served: there is nothing to divide by,
+ * which is not a figure of 0. A row with no `net` (Peak Hours) adds nothing to it.
+ */
+export function coverRowsTotal(rows) {
+  let bills = 0, covers = 0, net = 0
+  for (const r of rows || []) {
+    bills += r.bills || 0
+    covers += r.covers || 0
+    net += Number(r.net) || 0
+  }
+  return { bills, covers, net, revPerCover: covers > 0 ? net / covers : null }
+}

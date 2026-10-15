@@ -250,11 +250,13 @@ export default function StockCountSettings({ clientId, categories, uncategorised
         )}
 
         {staff.length === 0 || categories.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-            {staff.length === 0
-              ? 'No IMS staff accounts yet. Add them under IMS → IMS Staff.'
-              : 'No categories yet. Add them in Item Master first.'}
-          </p>
+          <div className="empty-state">
+            <p className="empty-state-text">
+              {staff.length === 0
+                ? 'No IMS staff accounts yet. Add them under IMS → IMS Staff.'
+                : 'No categories yet. Add them in Item Master first.'}
+            </p>
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">

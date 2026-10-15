@@ -8,7 +8,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { isNetworkError } from '../../../shared/errorText'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
-import { pointsAdjustment, pointsValue, describeLedgerRow, MAX_ADJUST_REASON } from './loyaltyPoints'
+import { pointsAdjustment, pointsValue, describeLedgerRow, nprPoints, MAX_ADJUST_REASON } from './loyaltyPoints'
 
 // Add points to a customer's balance, or take them off, by hand (S809 3k, CUSTOMERS-PARKING-5).
 //
@@ -88,7 +88,8 @@ export default function AdjustPointsModal({ customer, balance, held = 0, pointVa
   }
 
   const fmt = n => Number(n).toLocaleString('en-IN')
-  const worth = n => (pointValue != null && n > 0 ? ` (worth NPR ${pointsValue(n, pointValue).toLocaleString('en-IN')})` : '')
+  // Rupees through nprPoints, as Move and History show them (2026-10-15 audit: this was a hand-built NPR string).
+  const worth = n => (pointValue != null && n > 0 ? ` (worth ${nprPoints(pointsValue(n, pointValue))})` : '')
 
   return (
     <Modal title={`Adjust points — ${customer.name}`} onClose={() => { if (!busy) onClose() }} maxWidth={520}
@@ -165,11 +166,12 @@ export default function AdjustPointsModal({ customer, balance, held = 0, pointVa
         </button>
       </div>
 
-      <h3 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+      {/* h4: the dialog's own title is the h3 (Modal), and this section sits under it. */}
+      <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
         <Tip text="The latest 10 changes to this customer's points, newest first: points earned and spent on bills, points handed back from an unfinished payment, credit-note reversals, hand corrections and moves. History on the customer's row shows them all." width={320}>
           Recent points
         </Tip>
-      </h3>
+      </h4>
       {history.error && (
         <ActionError error={{ text: `The points history could not be read, so it is not shown. ${asActionError(history.error, 'operator').text}`, detail: asActionError(history.error, 'operator').detail }} />
       )}

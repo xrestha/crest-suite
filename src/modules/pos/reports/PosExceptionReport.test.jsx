@@ -13,7 +13,10 @@ import { nepalDayStartTs, todayNepalAdIso } from './reportRange'
 const TODAY_START = nepalDayStartTs(todayNepalAdIso())
 
 // Bills per range: today's are Ram's, any other range's are Sita's. `mockHang` holds every bill read.
+// `mockVoidLinesError` makes today's bill a void and fails the read of its lines.
 let mockHang = false
+let mockVoidLinesError = null
+let mockNoBills = false
 const bill = (id, closedBy) => ({
   id, order_no: 7, invoice_no: 41, invoice_fy: '82/83', invoice_prefix: 'CAC', close_type: 'paid',
   close_reason: null, discount_amount: 100, discount_reason: 'Regular guest', paid_amount: 1030,
@@ -28,9 +31,11 @@ function mockBuilder(table) {
   }
   const answer = () => {
     if (table === 'rpc') return { data: [{ id: 'u-ram', full_name: 'Ram Thapa' }, { id: 'u-sita', full_name: 'Sita Rai' }], error: null }
-    if (table !== 'pos_orders') return { data: [], error: null }
+    if (table === 'pos_order_items' && mockVoidLinesError && filters.some(f => f[0] === 'in')) return { data: null, error: mockVoidLinesError }
+    if (table !== 'pos_orders' || mockNoBills) return { data: [], error: null }
     const from = filters.find(f => f[0] === 'gte' && f[1] === 'closed_at')?.[2]
-    return { data: [from === TODAY_START ? bill('b-ram', 'u-ram') : bill('b-sita', 'u-sita')], error: null }
+    const b = from === TODAY_START ? bill('b-ram', 'u-ram') : bill('b-sita', 'u-sita')
+    return { data: [mockVoidLinesError ? { ...b, close_type: 'void', discount_amount: 0 } : b], error: null }
   }
   b.then = (ok, fail) => (table === 'pos_orders' && mockHang
     ? new Promise(() => {})
@@ -52,7 +57,7 @@ jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => mockBiz
 // eslint-disable-next-line import/first
 import PosExceptionReport from './PosExceptionReport'
 
-beforeEach(() => { mockHang = false })
+beforeEach(() => { mockHang = false; mockVoidLinesError = null; mockNoBills = false; mockBiz.error = null })
 afterEach(() => jest.useRealTimers())
 
 const staffSelect = () => screen.getByLabelText('Staff')
@@ -92,5 +97,35 @@ test('a bill read that never answers ends on the could-not-load card, not "Loadi
   await act(async () => { jest.advanceTimersByTime(60000) })
   expect(await screen.findByText('Could not load this report')).toBeTruthy()
   expect(screen.queryByText('Loading…')).toBeNull()
-  expect(screen.queryByText(/a quiet report is a healthy one/)).toBeNull()
+  expect(screen.queryByText('No discounts, voids or comps in this range.')).toBeNull()
+})
+
+// 2026-10-15 audit.
+test('By Staff Member is a real h2 section heading', async () => {
+  render(<PosExceptionReport />)
+  expect(await screen.findByRole('heading', { level: 2, name: /By Staff Member/ })).toBeTruthy()
+})
+
+test('a failed read of the voided lines reaches the could-not-load card with its code, not a bare message', async () => {
+  mockVoidLinesError = { code: '42501', message: 'permission denied for table pos_order_items' }
+  render(<PosExceptionReport />)
+  const card = await screen.findByRole('alert')
+  expect(within(card).getByText('Could not load this report')).toBeTruthy()
+  expect(within(card).getByText('42501 · permission denied for table pos_order_items').className).toBe('action-error-detail')
+})
+
+test('an empty range says so in plain words, with no celebration emoji', async () => {
+  mockNoBills = true
+  render(<PosExceptionReport />)
+  expect(await screen.findByText('No discounts, voids or comps in this range.')).toBeTruthy()
+  expect(screen.queryByText(/🎉/)).toBeNull()
+})
+
+test('a failed letterhead read is the report-error card, and Excel is off', async () => {
+  mockBiz.error = { code: 'PGRST301', message: 'JWT expired' }
+  render(<PosExceptionReport />)
+  const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
+  expect(card.getAttribute('role')).toBe('alert')
+  expect(within(card).getByText(/The figures below are unaffected/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
 })

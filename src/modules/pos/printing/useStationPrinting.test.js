@@ -1,6 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useStationPrinting } from './useStationPrinting'
-import { watchVerdict, onlineRouteFor, PRINT_FALLBACK_MS } from './printQueue'
+import { watchVerdict, onlineRouteFor, PRINT_FALLBACK_MS, WATCH_POLL_MS } from './printQueue'
 import * as printQueue from './printQueue'
 import { kotBotDoc } from './ticketDoc'
 
@@ -50,7 +50,7 @@ describe('useStationPrinting', () => {
     jest.spyOn(printQueue, 'readPrintJobStatus').mockResolvedValue({ rows: [], error: null })
     jest.spyOn(printQueue, 'claimPrintJobForTill').mockResolvedValue({ data: { ok: true }, error: null })
   })
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks() })
 
   async function mount({ offline = false } = {}) {
     const printHtml = jest.fn(() => true)
@@ -108,5 +108,38 @@ describe('useStationPrinting', () => {
     expect(close).toHaveBeenCalled()
     expect(printHtml).not.toHaveBeenCalled()
     expect(result.current.notice).toBe('Counter PC has already printed the kitchen ticket.')
+  })
+
+  // 2026-10-15 audit: the watch poll built a new array every tick, so a slip still waiting on its
+  // printer re-rendered the whole till every WATCH_POLL_MS with nothing changed.
+  test('a watch poll that finds nothing new does not re-render', async () => {
+    let hookRuns = 0
+    const printHtml = jest.fn(() => true)
+    const { result } = renderHook(() => { hookRuns++; return useStationPrinting({ clientId: 'c1', isOffline: () => false, printHtml }) })
+    await waitFor(() => expect(printQueue.readPrintRoutes).toHaveBeenCalled())
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    jest.useFakeTimers()
+    printQueue.readPrintJobStatus.mockImplementation(async (_c, ids) => ({ rows: ids.map(id => ({ id, state: 'waiting', device_name: 'Counter PC' })), error: null }))
+    act(() => { result.current.deliver({ station: 'KOT', kind: 'ticket', doc: DOC, label: 'T4 · #23' }) })
+    const tick = async () => {
+      await act(async () => {
+        jest.advanceTimersByTime(WATCH_POLL_MS)
+        for (let i = 0; i < 5; i++) await Promise.resolve()
+      })
+    }
+    await tick() // the first answer stores the row: one render
+    // React may render once more before it bails out of a state it was handed back unchanged (its
+    // documented bail-out); from then on a quiet tick renders nothing. The old code rendered every tick.
+    await tick()
+    const runsWhenSettled = hookRuns
+    await tick()
+    expect(printQueue.readPrintJobStatus).toHaveBeenCalledTimes(3)
+    expect(hookRuns).toBe(runsWhenSettled)
+    expect(result.current.alerts).toHaveLength(0)
+    // A change still lands: the device gives up, and the banner comes up on the next tick.
+    printQueue.readPrintJobStatus.mockImplementation(async (_c, ids) => ({ rows: ids.map(id => ({ id, state: 'failed', device_name: 'Counter PC', fail_reason: 'Out of paper' })), error: null }))
+    await tick()
+    expect(result.current.alerts).toHaveLength(1)
+    expect(result.current.alerts[0].reason).toBe('Counter PC: Out of paper')
   })
 })

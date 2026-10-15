@@ -11,7 +11,9 @@ import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { errorLine, errorText, isNetworkError } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import FieldError, { fieldAria } from '../../../components/FieldError'
+import { errorLine, isNetworkError } from '../../../shared/errorText'
 import { creditNoteInInventory } from './creditNotePosting'
 import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
@@ -52,6 +54,13 @@ const fmtNpr = npr
 // S842: how long the bill's own reads wait (the cash-taken read's limit). A hung one used to leave
 // "Loading bill…" up for good; a timeout is now the failed load that already says no note can be issued.
 const LOAD_MS = 20000
+
+// A failed step as `<ActionError>` reads it: what happened first, then the error table's sentence,
+// with the raw code and message kept as fine print rather than run into the sentence.
+function failure(lead, err) {
+  const { text, detail } = asActionError(err, 'operator')
+  return { text: lead ? `${lead} ${text}` : text, detail }
+}
 
 function invoiceLabel(order, vatReg, current) {
   const prefix = invoiceCodeOf(order, current) // S834 (D35): the bill's own code
@@ -136,7 +145,10 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   const [buyerPan, setBuyerPan] = useState(order.buyer_pan || '')
   const [buyerPhone, setBuyerPhone] = useState(order.buyer_phone || '')
   const [submitting, setSubmitting] = useState(false)
+  // The form-level message (`<ActionError>`): a plain sentence, or { text, detail } for a failed write.
   const [msg, setMsg] = useState('')
+  // The one field-level message: no reason given (FieldError under the box, aria-invalid on it).
+  const [reasonErr, setReasonErr] = useState('')
   // Set when the note issued but its Inventory reversal could not post (S747).
   const [imsNotice, setImsNotice] = useState(null)
   // S754: how money went back, and the shift a cash refund lands on. `shift` is undefined until
@@ -298,12 +310,12 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 
   async function handleConfirm() {
     if (loading || loadError || !amounts) return
-    if (nothingToCredit) { setMsg('error:This bill has no charged lines to credit, so no Credit Note can be issued against it.'); return }
-    if (!reason.trim()) { setMsg('error:Enter a reason for this Credit Note.'); return }
-    if (askFood && !foodAnswer) { setMsg('error:Say whether the food on this bill was served — Yes or No.'); return }
-    if (!refundMode) { setMsg('error:Say whether money was returned to the customer — Cash, Other or None.'); return }
-    if (refundMode === 'cash' && !(cashOut > 0)) { setMsg('error:No cash was taken for this bill, so none can go back out of the drawer. Choose Other or None.'); return }
-    setSubmitting(true); setMsg('')
+    if (nothingToCredit) { setMsg('This bill has no charged lines to credit, so no Credit Note can be issued against it.'); return }
+    if (!reason.trim()) { setMsg(''); setReasonErr('Enter a reason for this Credit Note.'); return }
+    if (askFood && !foodAnswer) { setMsg('Say whether the food on this bill was served — Yes or No.'); return }
+    if (!refundMode) { setMsg('Say whether money was returned to the customer — Cash, Other or None.'); return }
+    if (refundMode === 'cash' && !(cashOut > 0)) { setMsg('No cash was taken for this bill, so none can go back out of the drawer. Choose Other or None.'); return }
+    setSubmitting(true); setMsg(''); setReasonErr('')
 
     // S754: a cash refund needs an OPEN shift to go on, and that is checked again here rather than
     // trusted from when Cash was picked — the shift can close while the reason is being typed.
@@ -316,11 +328,11 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       const r = await readOpenShift()
       setRefundShift({ loading: false, ...r })
       if (r.error) {
-        setMsg('error:Could not check whether a shift is open, so no Credit Note was issued. Try again, or choose Other or None if the money did not come out of the till. ' + errorLine(r.error))
+        setMsg(failure('Could not check whether a shift is open, so no Credit Note was issued. Try again, or choose Other or None if the money did not come out of the till.', r.error))
         setSubmitting(false); return
       }
       if (!r.shift) {
-        setMsg('error:No shift is open, so a cash refund has nowhere to be recorded and no Credit Note was issued. Open a shift to record a cash refund, or choose Other or None.')
+        setMsg('No shift is open, so a cash refund has nowhere to be recorded and no Credit Note was issued. Open a shift to record a cash refund, or choose Other or None.')
         setSubmitting(false); return
       }
       cashShift = r.shift
@@ -379,10 +391,10 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       // Credit Note Book is the place that can tell them. Any other refusal is raised inside the
       // insert's own transaction, which rolled back whole, so it may say so.
       const text = error.hint === 'credit_note_exists' || /credit_note_exists/.test(error.message || '')
-        ? `error:${errorText(error, 'operator')} (${[error.code, error.message].filter(Boolean).join(' · ')})`
+        ? failure('', error)
         : isNetworkError(error) || isTimeout(error)
-          ? `error:${lostReplyText(cashShift, cashOut)} ` + errorLine(error)
-          : 'error:The credit note was not issued — nothing has changed. ' + errorLine(error)
+          ? failure(lostReplyText(cashShift, cashOut), error)
+          : failure('The credit note was not issued — nothing has changed.', error)
       setMsg(text); setSubmitting(false); return
     }
 
@@ -452,7 +464,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   function issueStopped(err) {
     console.error('Issuing the credit note stopped:', err)
     setSubmitting(false)
-    setMsg('error:Something went wrong on this screen, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again: a note there is complete, and only its printing may be left. A second note for this bill would be refused. ' + errorLine(err))
+    setMsg(failure('Something went wrong on this screen, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again: a note there is complete, and only its printing may be left. A second note for this bill would be refused.', err))
   }
 
   if (imsNotice) {
@@ -517,118 +529,125 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               Net amount to credit: {fmtNpr(amounts.net)}
             </div>
             {nothingToCredit && (
-              <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', margin: '-6px 0 14px' }}>
-                This bill has no charged lines (or every line was complimentary), so there is nothing to credit and no Credit Note can be issued against it.
-              </p>
+              <ActionError className="action-error--top"
+                error="This bill has no charged lines (or every line was complimentary), so there is nothing to credit and no Credit Note can be issued against it." />
             )}
 
-            <label style={labelStyle} htmlFor="icn-reason">Reason <span style={{ color: 'var(--theme-red-text)' }}>*</span></label>
-            <div role="group" aria-label="Common reasons" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-              {REASON_CHIPS.map(r => (
-                <button key={r} type="button" className="tab-btn" onClick={() => setReason(r)}
-                  style={{ fontSize: 11, padding: '4px 10px' }}>{r}</button>
-              ))}
-            </div>
-            <textarea id="icn-reason" value={reason} onChange={e => setReason(e.target.value)} rows={2}
-              placeholder="e.g. Bill raised against the wrong customer"
-              style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 12 }} />
+            {/* Every control below sits in one fieldset that is disabled while Issue runs, so nothing
+                can be typed or picked into a note that is already being written. The fields are on
+                .form-field / .field-grid, which carry the [aria-invalid] and :disabled looks. */}
+            <fieldset disabled={submitting} style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}>
+              <div className="form-field" style={{ marginBottom: 12 }}>
+                <label htmlFor="icn-reason">Reason <span style={{ color: 'var(--theme-red-text)' }}>*</span></label>
+                <div role="group" aria-label="Common reasons" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {REASON_CHIPS.map(r => (
+                    <button key={r} type="button" className="tab-btn" onClick={() => { setReason(r); setReasonErr('') }}
+                      style={{ fontSize: 11, padding: '4px 10px' }}>{r}</button>
+                  ))}
+                </div>
+                <textarea id="icn-reason" value={reason} onChange={e => { setReason(e.target.value); setReasonErr('') }} rows={2}
+                  placeholder="e.g. Bill raised against the wrong customer"
+                  style={{ resize: 'vertical' }} {...fieldAria('icn-reason', reasonErr)} />
+                <FieldError id="icn-reason" message={reasonErr} />
+              </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-buyer-name">Buyer Name</label><input id="issue-credit-note-modal-buyer-name" style={inputStyle} value={buyerName} onChange={e => setBuyerName(e.target.value)} /></div>
-              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-buyer-pan">Buyer PAN</label><input id="issue-credit-note-modal-buyer-pan" style={inputStyle} value={buyerPan} onChange={e => setBuyerPan(e.target.value)} /></div>
-              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-address">Address</label><input id="issue-credit-note-modal-address" style={inputStyle} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} /></div>
-              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-phone">Phone</label><input id="issue-credit-note-modal-phone" style={inputStyle} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} /></div>
-            </div>
+              <div className="field-grid" style={{ gap: 12, marginBottom: 12 }}>
+                <div className="form-field"><label htmlFor="issue-credit-note-modal-buyer-name">Buyer Name</label><input id="issue-credit-note-modal-buyer-name" value={buyerName} onChange={e => setBuyerName(e.target.value)} /></div>
+                <div className="form-field"><label htmlFor="issue-credit-note-modal-buyer-pan">Buyer PAN</label><input id="issue-credit-note-modal-buyer-pan" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} /></div>
+                <div className="form-field"><label htmlFor="issue-credit-note-modal-address">Address</label><input id="issue-credit-note-modal-address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} /></div>
+                <div className="form-field"><label htmlFor="issue-credit-note-modal-phone">Phone</label><input id="issue-credit-note-modal-phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} /></div>
+              </div>
 
-            {/* S809 2e (owner decision Q10 a): required before Issue where Inventory is on. A radio
-                group like the money question below — one answer, readable back as the answer given. */}
-            {askFood && (
+              {/* S809 2e (owner decision Q10 a): required before Issue where Inventory is on. A radio
+                  group like the money question below — one answer, readable back as the answer given. */}
+              {askFood && (
+                <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
+                  <legend style={legendStyle}>
+                    <Tip text="Every bill counts its dishes as used in Inventory. If this bill is being billed again on a new bill, or was a duplicate of another bill, the same food would be counted twice — answer No and this note puts it back, so Stock Report, the Reorder list and this month's Variance stay right. If the guest ate the food, or it was cooked and sent back, answer Yes: it was used, even though the money comes back. Kept with the note in the Credit Note Book; not printed on it." width={340}>
+                      Was the food on this bill served?
+                    </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
+                  </legend>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+                    {FOOD_OPTIONS.map(o => (
+                      <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
+                        <input type="radio" name="icn-food" value={o.value} checked={foodAnswer === o.value}
+                          onChange={() => { setFoodAnswer(o.value); setMsg('') }} />
+                        {o.label}
+                      </label>
+                    ))}
+                  </div>
+                  {foodAnswer && (
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                      {FOOD_OPTIONS.find(o => o.value === foodAnswer)?.hint}
+                    </p>
+                  )}
+                  {foodAnswer === 'not_served' && billFromEarlierMonth && (
+                    <p role="note" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
+                      △ This bill was charged in {BS_MONTHS[billBs.month - 1]} {billBs.year}. If it was a duplicate, that month's stock count has
+                      already settled its food — answer Yes. Answer No only if the food is being billed again on a new bill now.
+                    </p>
+                  )}
+                </fieldset>
+              )}
+
+              {/* S754 (owner decision): required before Issue. A radio group, not chips — exactly one
+                  answer, and it has to be readable back as the answer given. */}
               <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
-                <legend style={{ ...labelStyle, padding: 0 }}>
-                  <Tip text="Every bill counts its dishes as used in Inventory. If this bill is being billed again on a new bill, or was a duplicate of another bill, the same food would be counted twice — answer No and this note puts it back, so Stock Report, the Reorder list and this month's Variance stay right. If the guest ate the food, or it was cooked and sent back, answer Yes: it was used, even though the money comes back. Kept with the note in the Credit Note Book; not printed on it." width={340}>
-                    Was the food on this bill served?
+                <legend style={legendStyle}>
+                  <Tip text="A Credit Note corrects the VAT register; it does not move money by itself. Cash takes back out of the drawer only the cash this bill brought in — the part paid by card or QR goes back that way, and points spent on it return as points — and records it as a Refund on the open shift, so the drawer count expects it. Other and None take nothing off the drawer. The answer is kept with the note in the Credit Note Book and is not printed on it." width={340}>
+                    Was money returned to the customer?
                   </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
                 </legend>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-                  {FOOD_OPTIONS.map(o => (
-                    <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
-                      <input type="radio" name="icn-food" value={o.value} checked={foodAnswer === o.value}
-                        onChange={() => { setFoodAnswer(o.value); setMsg('') }} />
-                      {o.label}
-                    </label>
-                  ))}
+                  {REFUND_OPTIONS.map(o => {
+                    // S809 2e (SHIFTS-3): no cash came in for this bill, so none can go out for it.
+                    const off = o.value === 'cash' && !(cashOut > 0)
+                    return (
+                      <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: off ? 'var(--theme-text3)' : 'var(--theme-text1)', cursor: off ? 'not-allowed' : 'pointer' }}>
+                        <input type="radio" name="icn-refund" value={o.value} checked={refundMode === o.value} disabled={off}
+                          onChange={() => { setRefundMode(o.value); setMsg('') }} />
+                        {o.label}
+                      </label>
+                    )
+                  })}
                 </div>
-                {foodAnswer && (
+                {cashTaken === null ? (
+                  <p role="status" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>Checking how much of this bill was paid in cash…</p>
+                ) : !(cashOut > 0) && (
                   <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
-                    {FOOD_OPTIONS.find(o => o.value === foodAnswer)?.hint}
+                    No cash was taken for this bill (it was paid by card, QR or points, or it is a Credit bill nobody has paid anything on in cash), so Cash is off.
+                    Choose Other if the money went back by card, QR or bank. If you hand cash over anyway, record it in Shifts as a Cash Out.
                   </p>
                 )}
-                {foodAnswer === 'not_served' && billFromEarlierMonth && (
-                  <p role="note" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
-                    △ This bill was charged in {BS_MONTHS[billBs.month - 1]} {billBs.year}. If it was a duplicate, that month's stock count has
-                    already settled its food — answer Yes. Answer No only if the food is being billed again on a new bill now.
+                {creditPaid && <CreditBillPaidLine creditPaid={creditPaid} bill={billStamp} cashOut={cashOut} />}
+                {refundMode && (
+                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                    {REFUND_OPTIONS.find(o => o.value === refundMode)?.hint}
                   </p>
+                )}
+                {refundMode === 'cash' && (
+                  refundShift.loading ? (
+                    <p role="status" style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0' }}>Checking for an open shift…</p>
+                  ) : refundShift.error ? (
+                    <p role="alert" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
+                      Could not check whether a shift is open. Issue will check again; if it still cannot, nothing is issued.
+                    </p>
+                  ) : refundShift.shift === null ? (
+                    <p role="alert" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
+                      △ No shift is open. Open a shift to record a cash refund, or choose Other or None.
+                    </p>
+                  ) : refundShift.shift ? (
+                    <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>
+                      {cashOut < amounts.net
+                        ? `${fmtNpr(cashOut)} of this bill was paid in cash — that much goes out of the drawer`
+                        : `${fmtNpr(cashOut)} goes out of the drawer`} on the open shift{refundShift.shift.label ? ` (${refundShift.shift.label})` : ''}.
+                    </p>
+                  ) : null
                 )}
               </fieldset>
-            )}
-
-            {/* S754 (owner decision): required before Issue. A radio group, not chips — exactly one
-                answer, and it has to be readable back as the answer given. */}
-            <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
-              <legend style={{ ...labelStyle, padding: 0 }}>
-                <Tip text="A Credit Note corrects the VAT register; it does not move money by itself. Cash takes back out of the drawer only the cash this bill brought in — the part paid by card or QR goes back that way, and points spent on it return as points — and records it as a Refund on the open shift, so the drawer count expects it. Other and None take nothing off the drawer. The answer is kept with the note in the Credit Note Book and is not printed on it." width={340}>
-                  Was money returned to the customer?
-                </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
-              </legend>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-                {REFUND_OPTIONS.map(o => {
-                  // S809 2e (SHIFTS-3): no cash came in for this bill, so none can go out for it.
-                  const off = o.value === 'cash' && !(cashOut > 0)
-                  return (
-                    <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: off ? 'var(--theme-text3)' : 'var(--theme-text1)', cursor: off ? 'not-allowed' : 'pointer' }}>
-                      <input type="radio" name="icn-refund" value={o.value} checked={refundMode === o.value} disabled={off}
-                        onChange={() => { setRefundMode(o.value); setMsg('') }} />
-                      {o.label}
-                    </label>
-                  )
-                })}
-              </div>
-              {cashTaken === null ? (
-                <p role="status" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>Checking how much of this bill was paid in cash…</p>
-              ) : !(cashOut > 0) && (
-                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
-                  No cash was taken for this bill (it was paid by card, QR or points, or it is a Credit bill nobody has paid anything on in cash), so Cash is off.
-                  Choose Other if the money went back by card, QR or bank. If you hand cash over anyway, record it in Shifts as a Cash Out.
-                </p>
-              )}
-              {creditPaid && <CreditBillPaidLine creditPaid={creditPaid} bill={billStamp} cashOut={cashOut} />}
-              {refundMode && (
-                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
-                  {REFUND_OPTIONS.find(o => o.value === refundMode)?.hint}
-                </p>
-              )}
-              {refundMode === 'cash' && (
-                refundShift.loading ? (
-                  <p role="status" style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0' }}>Checking for an open shift…</p>
-                ) : refundShift.error ? (
-                  <p role="alert" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
-                    Could not check whether a shift is open. Issue will check again; if it still cannot, nothing is issued.
-                  </p>
-                ) : refundShift.shift === null ? (
-                  <p role="alert" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '6px 0 0' }}>
-                    △ No shift is open. Open a shift to record a cash refund, or choose Other or None.
-                  </p>
-                ) : refundShift.shift ? (
-                  <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>
-                    {cashOut < amounts.net
-                      ? `${fmtNpr(cashOut)} of this bill was paid in cash — that much goes out of the drawer`
-                      : `${fmtNpr(cashOut)} goes out of the drawer`} on the open shift{refundShift.shift.label ? ` (${refundShift.shift.label})` : ''}.
-                  </p>
-                ) : null
-              )}
             </fieldset>
 
-            {msg && <p role="alert" style={{ color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', fontSize: 12, marginBottom: 8 }}>{msg.replace('error:', '')}</p>}
+            <ActionError error={msg} />
 
             {/* The irreversibility warning was previously only inside a Tip on the button — and
                 this page runs on a tablet, where hover does not exist, so it was invisible at the
@@ -667,5 +686,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   )
 }
 
-const labelStyle = { display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }
-const inputStyle = { background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }
+// A radio group's question. `.form-field .field-label` gives a caption this look only inside a
+// .form-field, and that wrapper's `label` rule would restyle each radio's own label, so the legend
+// carries the same three properties itself.
+const legendStyle = { padding: 0, marginBottom: 6, fontSize: 12, fontWeight: 500, color: 'var(--theme-text2)', letterSpacing: '0.04em' }

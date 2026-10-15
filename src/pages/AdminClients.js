@@ -739,14 +739,14 @@ export default function AdminClients() {
                     <SubBadge client={c} />
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 12.5, padding: '7px 13px' }}
+                      style={{ fontSize: 13, padding: '7px 13px' }}
                       onClick={e => { e.stopPropagation(); setFeatureModalClient(c) }}
                     >
                       Features ⊞
                     </button>
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 12.5, padding: '7px 13px' }}
+                      style={{ fontSize: 13, padding: '7px 13px' }}
                       onClick={e => toggleActive(c, e)}
                     >
                       {c.is_active ? 'Deactivate' : 'Activate'}
@@ -770,7 +770,7 @@ export default function AdminClients() {
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={e => e.stopPropagation()}
-                        style={{ fontSize: 12.5, padding: '7px 13px', textDecoration: 'none' }}
+                        style={{ fontSize: 13, padding: '7px 13px', textDecoration: 'none' }}
                       >
                         Staff Login ↗
                       </a>
@@ -781,7 +781,7 @@ export default function AdminClients() {
                       // base accent measured 2.74:1 on Rosé Dawn, and the old border was Dark's
                       // gold rgba(201,168,76,…) hardcoded beside rose/purple/blue accents on the
                       // light presets (phase 7 measured findings, S574).
-                      style={{ fontSize: 12.5, padding: '7px 15px', fontWeight: 600, color: 'var(--theme-accent-ink)', borderColor: 'var(--theme-focus-ring)' }}
+                      style={{ fontSize: 13, padding: '7px 15px', fontWeight: 600, color: 'var(--theme-accent-ink)', borderColor: 'var(--theme-focus-ring)' }}
                       onClick={e => { e.stopPropagation(); setActiveDrawer(c) }}
                     >
                       Manage →

@@ -489,7 +489,7 @@ export default function MonthlyOwnerReport() {
             {execSummary && (
               <div className="owner-report-section">
                 <h3 style={sectionTitleStyle}>Executive Summary</h3>
-                <p style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--theme-text1)', margin: 0 }}>{execSummary}</p>
+                <p style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--theme-text1)', margin: 0 }}>{execSummary}</p>
               </div>
             )}
 
@@ -549,7 +549,7 @@ export default function MonthlyOwnerReport() {
               {/* The count COGS rests on, frozen with it (v9). Printed, not a hover: it qualifies
                   the three figures above on paper too. */}
               {snapshot.ims && cogsBasis && countGap?.uncountedCount > 0 && (
-                <p style={{ fontSize: 11.5, color: 'var(--theme-amber-text)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '8px 0 0', lineHeight: 1.5 }}>
                   △ {gapHeadline(countGap, periodLabel)}.
                   {verdictWithheld && ' Food Cost, Prime Cost and Net Margin are shown without a verdict until the count is complete.'}
                   {countGap.names?.length > 0 && ` Not counted: ${countGap.names.join(', ')}${countGap.uncountedCount > countGap.names.length ? ` and ${countGap.uncountedCount - countGap.names.length} more` : ''}.`}
@@ -776,7 +776,7 @@ export default function MonthlyOwnerReport() {
                   {/* S792 (RECIPES-1, v9): named, so "not rated" is not read as "forgotten". A
                       snapshot from before has no byoItems and rated these dishes on their fixed cost. */}
                   {me.byoItems?.length > 0 && (
-                    <p style={{ fontSize: 11.5, color: 'var(--theme-text2)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                    <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px', lineHeight: 1.5 }}>
                       <strong>Build-your-own, not rated — costed by build:</strong> {me.byoItems.map(i => i.name).join(', ')}.
                       {' '}Each recipe holds only the fixed part (the bowl, the spoon), so one food-cost figure would be near zero; the real cost depends on what each guest picks. Recipe Costing shows the range.
                     </p>
@@ -1064,7 +1064,7 @@ export default function MonthlyOwnerReport() {
                           formulas, so the three ratios containing it carry no change (buildDeltas
                           left them null). Say why, or the dashes read as missing data. */}
                       {t?.available && snapshot.ims && basisOf(snapshot) !== basisOf(t.snapshot) && (
-                        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Food Cost, Prime Cost and Net Margin are not compared: {priorLabel} was generated
                           on {basisOf(t.snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue and this
                           report on {basisOf(snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue.
@@ -1074,7 +1074,7 @@ export default function MonthlyOwnerReport() {
                       {/* S798 2e: across the v11 → v12 line Net Margin gained Tax & Fees, so its
                           change is left blank (buildDeltas). Same reason to say so. */}
                       {t?.available && snapshot.ims && snapshot.hr && basisOf(snapshot) === basisOf(t.snapshot) && taxFeesInNet(snapshot) !== taxFeesInNet(t.snapshot) && (
-                        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Net Margin is not compared: {taxFeesInNet(snapshot) ? 'this report' : priorLabel} subtracts Tax &amp; Fees
                           and {taxFeesInNet(snapshot) ? priorLabel : 'this report'} was made before it did.
                           To compare them, regenerate {priorLabel}'s snapshot and then this one.
@@ -1083,7 +1083,7 @@ export default function MonthlyOwnerReport() {
                       {/* S798 3c: across the v12 → v13 line labour changed meaning (buildDeltas
                           leaves Labor, Prime and Net Margin blank). */}
                       {t?.available && snapshot.hr && earnedLabour(snapshot) !== earnedLabour(t.snapshot) && (
-                        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Labor Cost, Prime Cost and Net Margin are not compared: {earnedLabour(snapshot) ? 'this report' : priorLabel} counts
                           labour as pay earned (unpaid days taken off) plus festival, incentive and final-settlement pay,
                           and {earnedLabour(snapshot) ? priorLabel : 'this report'} was made before it did.

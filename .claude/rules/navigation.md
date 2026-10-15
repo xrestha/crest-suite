@@ -26,6 +26,8 @@ about it once, and have every consumer build from the same array. `SUITE_NAV` is
 — the palette maps it through a `longLabel` swap (it is searched by typing a full name; the sidebar
 has 240px) and re-states **no** visibility condition of its own.
 
+**A group left with one reachable item renders that item alone (S844, owner decision).** `isSoloGroup()` (`src/shared/navSoloGroup.js`) is read by `renderGroup` and `renderBarGroup`, so the drawer and the bar agree; Starter's "Costing" was a heading over Menu Pricing alone. It applies to every client, so IMS's Admin group (IMS Staff) and POS's Menu group (Menu Pricing) are plain links for everyone. A PRO-badged upsell group keeps its heading (the heading is the pitch), and so does Pinned (a flat pill has no unpin star).
+
 Corollary: a group whose members have *different* gates must gate per item, never on the group.
 Gating the Crest Suite group owner-only would have revoked Demand Forecast and Fixed Assets from
 every IMS supervisor who has them; `renderGroup` already returns `null` when nothing inside is

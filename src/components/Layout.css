@@ -81,15 +81,21 @@
    - overscroll-behavior stops a scroll that reaches the end of the sheet from chaining to the
      page behind it, which on a phone drags the backdrop instead of doing nothing.
    - No grab handle, deliberately: the sheet is not drag-dismissible, and a handle would advertise
-     a gesture that does nothing. */
+     a gesture that does nothing.
+   - 88vh first, then 88dvh (S844): a browser without dvh drops the second declaration and keeps
+     the first, where with dvh alone it had no cap and the sheet's top (title, size group) was
+     clipped off screen with no way to scroll to it. The side gutters take the landscape
+     safe-area insets for the same viewport-fit=cover reason as the bottom. */
 .modal-sheet {
+  max-height: 88vh;
   max-height: 88dvh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   border-bottom: none;
-  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  padding: 18px calc(16px + env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom))
+    calc(16px + env(safe-area-inset-left, 0px));
   animation: modal-sheet-in var(--motion-slow) var(--ease-entrance);
 }
 /* A full-width action inside a sheet: .btn has no justify-content of its own, so stretching one
@@ -1275,6 +1281,15 @@ textarea,
   margin: 0 0 4px 0;
 }
 
+/* A page title with its ⓘ Tip BESIDE it (S844). Inside the <h1> the trigger joined the heading's
+   accessible name, so a screen reader announced "Credit Notes ⓘ" as the page's name. */
+.page-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .page-subtitle {
   font-size: 13px;
   color: var(--theme-text2);
@@ -2266,6 +2281,8 @@ tr.interactive-row:focus-visible {
 /* The 88px is the floating Add's clearance (the list only shows on a phone, where the Add floats),
    plus an installed iPhone's home bar (S797; env() is 0 in a browser tab). */
 .phone-cards { list-style: none; margin: 0 0 calc(88px + env(safe-area-inset-bottom, 0px)); padding: 0; }
+/* A page with no floating Add (the Bill Register, S844) reserves nothing below its list. */
+.phone-cards--no-fab { margin-bottom: 0; }
 .phone-cards__day {
   font-size: 12px; font-weight: 700; color: var(--theme-text2);
   text-transform: uppercase; letter-spacing: 0.06em;
@@ -2439,9 +2456,11 @@ table.data-table tfoot tr:hover td {
    digit-for-digit without help: a 1 is narrower than a 7, and a column of money reads ragged. ConsolidatedPnl.jsx found this independently and set it inline on
    its own cells; a repo-wide grep found zero other occurrences, so every other currency column in
    the product had the problem. It belongs here, once, where every table gets it. Only digits are
-   affected, so text cells are unchanged. */
-table.data-table td,
-table.data-table tfoot td,
+   affected, so text cells are unchanged. Every <table>, not only .data-table (S844): thirteen
+   hand-rolled tables, the purchase bill's line table among them, rendered money in proportional
+   figures because the rule was scoped to the class. */
+table td,
+table th,
 .stat-value {
   font-variant-numeric: tabular-nums;
 }
@@ -2684,7 +2703,10 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
   padding-top: 8px;
   padding-bottom: 8px;
 }
-.resv-row--new td { background: color-mix(in srgb, var(--theme-yellow) 6%, transparent); }
+/* It read --theme-yellow, which no preset defines, so the tint never painted (S844). Being a
+   ground under the row's own labels, it re-points text3 the way tr.row-tinted does. */
+.resv-row--new td { background: var(--theme-table-hover); }
+tr.resv-row--new { --theme-text3: var(--theme-text2); }
 
 .resv-notice {
   margin: 0 0 12px;

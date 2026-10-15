@@ -286,7 +286,7 @@ export default function MonthlySummary() {
       {loadError ? null : loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p></div>
       ) : !report ? (
-        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No data for this period yet.</p></div>
+        <div className="card"><div className="empty-state"><p className="empty-state-text">No data for this period yet.</p></div></div>
       ) : (
         <>
           {/* D7 (S756): the open month is the page's default, so the caveat is the first thing on it.

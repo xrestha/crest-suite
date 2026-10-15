@@ -175,6 +175,20 @@ const COLUMNS = [
 // is not fetched, paged and then filtered out every 4 seconds for the rest of the service day.
 const BOARD_STATUSES = COLUMNS.map(c => c.status)
 
+// The board is opened once and reloads only when a release arrives, so an id set it keeps grew all
+// day (POS audit, 2026-10-15). load() forgets an id once a read that answered no longer has it, and
+// this drops those ids from a Set or Map. It hands back the same one when none of them is in it, so a
+// state updater with nothing to drop does not repaint the board.
+export function withoutIds(ids, gone) {
+  let out = null
+  for (const id of gone) {
+    if (!ids.has(id)) continue
+    if (!out) out = ids instanceof Map ? new Map(ids) : new Set(ids)
+    out.delete(id)
+  }
+  return out || ids
+}
+
 // The card's colour strip carries LATENESS, not stage — see ticketStripColor in ../posSignals.js.
 // It used to be a stage colour (new red / in progress amber / ready green), which was the loudest
 // mark on the card and carried nothing: the board already sorts every ticket into a labelled
@@ -287,6 +301,9 @@ export default function KitchenDisplay() {
   const [voids, setVoids] = useState([])
   const [voidDismissed, setVoidDismissed] = useState(() => new Set())
   const voidFirstSeen = useRef(new Map())
+  // The station each of those was read for (id → 'KOT' | 'BOT'), so a read forgets only its own
+  // station's voids: a switch to the other station and back must not show again one a cook tapped OK on.
+  const voidStationOf = useRef(new Map())
   const voidsLoadedOnce = useRef(false)
   // S817 4i (FLOOR-KITCHEN-9): the browser is holding this screen's sound until someone touches it.
   const [soundOff, setSoundOff] = useState(false)
@@ -348,10 +365,23 @@ export default function KitchenDisplay() {
       const seenAt = Date.now()
       let arrived = false
       for (const t of vrows) {
-        if (!voidFirstSeen.current.has(t.id)) { voidFirstSeen.current.set(t.id, seenAt); arrived = true }
+        if (!voidFirstSeen.current.has(t.id)) {
+          voidFirstSeen.current.set(t.id, seenAt); voidStationOf.current.set(t.id, station); arrived = true
+        }
       }
       if (arrived && voidsLoadedOnce.current) { playNewTicketChime(); chimed = true }
       voidsLoadedOnce.current = true
+      // POS audit 2026-10-15: a void this station's read no longer has is past the read window and
+      // does not come back (its cancelled_at is fixed and the window only moves on), so this screen
+      // forgets when it first saw it and whether a cook tapped OK. One still in the read keeps both,
+      // so it is never shown again once dismissed or past its ten minutes.
+      const present = new Set(vrows.map(t => t.id))
+      const gone = [...voidFirstSeen.current.keys()]
+        .filter(id => !present.has(id) && voidStationOf.current.get(id) === station)
+      if (gone.length > 0) {
+        for (const id of gone) { voidFirstSeen.current.delete(id); voidStationOf.current.delete(id) }
+        setVoidDismissed(prev => withoutIds(prev, gone))
+      }
       // A voided bill no longer moves, but the card draws its table, so the signature carries it (S836).
       setIfChanged(setVoids, vrows, rs => rowsSignature(rs, ['id', 'cancelled_at', 'tableNow', 'tableWas']))
     }
@@ -410,6 +440,10 @@ export default function KitchenDisplay() {
     const readyIds = new Set(rows.filter(t => t.status === 'ready').map(t => t.id))
     for (const id of readySince.current.keys()) if (!readyIds.has(id)) readySince.current.delete(id)
     for (const id of readyIds) if (!readySince.current.has(id)) readySince.current.set(id, nowMs)
+    // POS audit 2026-10-15: a ticket asked about is forgotten once it has left Ready (served here or
+    // elsewhere). A ticket only moves forward, so it cannot come back to be asked again; one still in
+    // Ready stays remembered, so a read that left before the serve landed never asks twice.
+    for (const id of autoServing.current) if (!readyIds.has(id)) autoServing.current.delete(id)
     const dropIds = rows
       .filter(t => t.status === 'ready' && t.ready_at && !t.allPulled
         && !autoServing.current.has(t.id) && !localMoves.current.has(t.id)

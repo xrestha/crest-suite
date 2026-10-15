@@ -578,12 +578,14 @@ export default function TheoreticalVariance() {
           {loading ? 'Loading…' : 'Computing variance…'}
         </div>
       ) : noSales ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-          <div style={{ color: 'var(--theme-text1)', fontWeight: 600, marginBottom: 8 }}>No stock or sales activity for this period</div>
-          <div style={{ color: 'var(--theme-text2)', fontSize: 13 }}>
-            No item had opening stock, purchases, use or sales this month.<br />
-            Make sure sales are recorded, recipes have ingredients set up, and the Stock Count is entered.
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">📊</div>
+            <p className="empty-state-text">No stock or sales activity for this period.</p>
+            <p className="empty-state-text">
+              No item had opening stock, purchases, use or sales this month.<br />
+              Make sure sales are recorded, recipes have ingredients set up, and the Stock Count is entered.
+            </p>
           </div>
         </div>
       ) : (

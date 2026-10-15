@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Bell, MessageCircle } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -419,7 +420,9 @@ export default function PosReservations() {
     // booked for…" sent to a guest who has eaten, been turned away or cancelled is nonsense.
     const contact = live ? (
       <Tip key="wa" text="Opens WhatsApp with the confirmation message filled in — sent from this device's WhatsApp." width={240}>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => sendWhatsApp(r)} aria-label={`WhatsApp ${r.customer_name}`}>💬</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => sendWhatsApp(r)} aria-label={`WhatsApp ${r.customer_name}`}>
+          <MessageCircle size={14} aria-hidden="true" /> WhatsApp
+        </button>
       </Tip>
     ) : null
 
@@ -486,9 +489,13 @@ export default function PosReservations() {
     <div>
       <div className="page-header page-header--split">
         <div>
-          <h1 className="page-title">
-            Reservations <Tip text="The booking book. A booking shows on its table's tile on the Orders floor. Seating it opens the order with the party size filled in." width={300}>ⓘ</Tip>
-          </h1>
+          {/* The Tip sits beside the heading, not in it, so the heading's name is only its text. */}
+          <div className="page-title-row">
+            <h1 className="page-title">Reservations</h1>
+            <Tip text="The booking book. A booking shows on its table's tile on the Orders floor. Seating it opens the order with the party size filled in." width={300}>
+              <span aria-hidden="true">ⓘ</span><span className="sr-only">About Reservations</span>
+            </Tip>
+          </div>
           <p className="page-subtitle">{scopeLabel} · Tap a name to edit.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -523,7 +530,7 @@ export default function PosReservations() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <span className="badge badge-amber">
               {waitingCount > 0
-                ? `🔔 ${waitingCount} booking request${waitingCount === 1 ? '' : 's'}`
+                ? <><Bell size={12} aria-hidden="true" style={{ verticalAlign: -2, marginRight: 4 }} />{`${waitingCount} booking request${waitingCount === 1 ? '' : 's'}`}</>
                 : `△ ${requests.length} request${requests.length === 1 ? '' : 's'} past ${requests.length === 1 ? 'its' : 'their'} time`}
             </span>
             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -596,7 +603,7 @@ export default function PosReservations() {
               <div className="stat-sub">{totalSeats > 0 ? `${totalSeats} seats in the room` : <>set table capacity under <Link to="/pos/tables" className="btn-linklike">Tables</Link></>}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Unconfirmed <Tip text="Booked but the guest has not confirmed. The 💬 button sends the confirmation message." width={220}>ⓘ</Tip></div>
+              <div className="stat-label">Unconfirmed <Tip text="Booked but the guest has not confirmed. A booking's WhatsApp button sends the confirmation message." width={220}>ⓘ</Tip></div>
               <div className="stat-value">{stats.unconfirmed}</div>
               <div className="stat-sub">{stats.unconfirmed > 0 ? 'worth a message' : 'all confirmed'}</div>
             </div>

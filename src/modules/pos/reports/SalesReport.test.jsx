@@ -2,8 +2,13 @@
  * The Sales Report's Bill Register (S842): a page of rows at a time over the whole range's TOTAL,
  * three sticky anchors, and a payment filter cleared by a named button.
  */
+/* Node access is deliberate here: a role query walks every node of a 200-row register and its 200
+   phone cards, which put these tests past Jest's timeout, and a card's parts are classes, not roles. */
+/* eslint-disable testing-library/no-node-access, testing-library/no-container */
 import React from 'react'
 import { render, screen, fireEvent, within } from '@testing-library/react'
+import { nepalBs, nepalTime } from '../../../shared/nepalTime'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 let mockAnswers = {}
 function mockBuilder(table) {
@@ -23,9 +28,12 @@ jest.mock('../../../shared/fetchAllRows', () => ({
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: table => mockBuilder(table), rpc: () => mockBuilder('rpc') } }))
 const mockAuth = { clientId: 'c1', hasPosAccess: () => true, isAdmin: false, imsEnabled: false, clientModules: {}, customizationEnabled: false }
 jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
+jest.mock('../../../utils/viewPosBill', () => ({ viewPosBill: jest.fn() }))
 
 // eslint-disable-next-line import/first
 import SalesReport from './SalesReport'
+// eslint-disable-next-line import/first
+import { viewPosBill } from '../../../utils/viewPosBill'
 
 const BILLS = 450
 const at = i => new Date(Date.now() - i * 1000).toISOString()
@@ -122,4 +130,78 @@ test('a part-paid delivery bill counts only what it still owes in Outstanding, a
   const outstanding = [...container.querySelectorAll('.stat-card')].find(c => c.textContent.startsWith('Outstanding'))
   // 1,130 − 600 received − 30 commission = 500 still owed on p1, and all of p2's 500.
   expect(outstanding.querySelector('.stat-value').textContent).toBe('NPR 1,000')
+})
+
+// 2026-10-15 audit: the Bill Register's phone cards. Below 600px the cards show and the table hides
+// (a CSS switch, so jsdom renders both); they must page, filter and drill exactly as the table does.
+// By selector, not by role: a role query walks every node of a 200-row table and 200 cards.
+const cards = () => [...document.querySelectorAll('ul.phone-cards[aria-label="Bill Register"] > li.phone-card')]
+
+test('the phone cards take the same 200-row window as the table, and page with it', async () => {
+  await openRegister()
+  expect(cards()).toHaveLength(200)
+  expect(cards()).toHaveLength(bodyRows().length)
+  fireEvent.click(screen.getByRole('button', { name: 'Show 200 more' }))
+  expect(cards()).toHaveLength(400)
+  expect(screen.getByText(/TOTAL of all 450 rows:/).textContent).toBe('TOTAL of all 450 rows: NPR 45,000 net')
+})
+
+test('a card shows the voucher, its net as the figure, the date and time, who and how it was paid', async () => {
+  await openRegister()
+  const first = cards()[0]
+  expect(first.querySelector('.phone-card__title').textContent).toBe('#1 · Invoice 1')
+  expect(first.querySelector('.phone-card__figure').textContent).toBe('NPR 100')
+  const meta = [...first.querySelectorAll('.phone-card__meta')].map(m => m.textContent)
+  expect(meta[1]).toBe('CASH SALES · Dine-In: T1 · Card')
+  // The BS date the bill was paid, then its opened → paid clock times, as the table's Date/Time cell.
+  const bs = nepalBs(orders[0].closed_at)
+  const time = nepalTime(orders[0].closed_at)
+  expect(meta[0]).toBe(`${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} · ${time} → ${time}`)
+  expect(within(bodyRows()[0]).getAllByRole('cell')[0].textContent).toBe(`${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}${time} → ${time}`)
+})
+
+test('a card\'s View bill opens the same bill the row does, and its figures open one tap away', async () => {
+  await openRegister()
+  viewPosBill.mockClear()
+  fireEvent.click(within(cards()[0]).getByRole('button', { name: 'View bill #1' }))
+  expect(viewPosBill).toHaveBeenCalledWith('c1', { id: 'o0' })
+
+  const details = cards()[0].querySelector('details')
+  expect(details.querySelector('ul')).toBeNull()
+  details.open = true
+  fireEvent(details, new Event('toggle'))
+  expect([...details.querySelectorAll('li')].map(li => li.textContent))
+    .toEqual(['GrossNPR 100', 'DiscountNPR 0', 'Non-TaxableNPR 100', 'TaxableNPR 0', 'VATNPR 0', 'Entered by—'])
+})
+
+test('the payment filter narrows the cards as it narrows the table', async () => {
+  render(<SalesReport />)
+  fireEvent.click(await screen.findByRole('tab', { name: 'Payment Summary' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Cash' }))
+  await screen.findByText('Filtered: paid by Cash')
+  expect(cards()).toHaveLength(200)
+  fireEvent.click(screen.getByRole('button', { name: 'Show all 225' }))
+  expect(cards()).toHaveLength(225)
+  for (const c of cards()) expect(c.textContent).toMatch(/ · Cash/)
+})
+
+test('the hourly chart is an h2 under the page h1', async () => {
+  render(<SalesReport />)
+  fireEvent.click(await screen.findByRole('tab', { name: 'Hourly' }))
+  expect(await screen.findByRole('heading', { level: 2, name: 'Net Sales by Hour' })).toBeTruthy()
+})
+
+test('the 1L+ TOTAL row fills Taxable and Non-Taxable, as every row does', async () => {
+  const party = (id, name, pan) => ({ ...orders[0], id, buyer_name: name, buyer_pan: pan, vat_registered: true })
+  mockAnswers.pos_orders = { data: [party('p1', 'Ram Thapa', '111'), party('p2', null, null)], error: null }
+  mockAnswers.pos_order_items = { data: [
+    { ...lines[0], order_id: 'p1', unit_price: 1000, vat_rate: 0.13 },
+    { ...lines[0], order_id: 'p2', unit_price: 500, vat_rate: 0 },
+  ], error: null }
+  render(<SalesReport />)
+  fireEvent.click(await screen.findByRole('tab', { name: '1L+ Report' }))
+  await screen.findByText('Ram Thapa')
+  const foot = within(screen.getAllByRole('table').at(-1).querySelector('tfoot')).getAllByRole('cell').map(c => c.textContent)
+  // TOTAL, Gross, Taxable, Non-Taxable, VAT, Net, Flag
+  expect(foot).toEqual(['TOTAL', 'NPR 1,500', 'NPR 1,000', 'NPR 500', 'NPR 130', 'NPR 1,630', ''])
 })
