@@ -5,6 +5,8 @@
 // says offline but also (owner decision Q16) when a send got no answer at all: the Wi-Fi can be up with no
 // internet behind it, and the browser then still says online. Its tickets print at once either way, and
 // are logged into pos_kot_log by the upload, with the ids they were queued with.
+import { lineKeyOf, storedLinesMatchPayload, storedLinesContainPayload } from './posOrdersConstants'
+import { recentSaveOf } from './sendAttempt'
 
 /** How long a send, an upload or a floor read that got no answer at all marks the internet as down
  *  (Q16). Meanwhile sends go straight to the queue and tables open from this till's own copy, as when
@@ -70,7 +72,18 @@ export const ownQueuedEntry = (q, clientId) => !!q && (!q.client_id || q.client_
 
 const STATION_WORD = { KOT: 'kitchen', BOT: 'bar' }
 
-/** The dishes a queued entry printed at this till, per dish and station: [{ key, name, qty, station }].
+/** A ticket line's key: the line it was printed for, by lineKeyOf (S840) — "Momo", "Momo, extra cheese"
+ *  and a combo's Momo are three lines, since a ticket line carries its full selection key, combo tail
+ *  included. A ticket line from before keys (no selection_key) keys to its dish, as it always did. */
+const ticketLineKey = i => lineKeyOf({ recipe_id: i.recipe_id, selection_key: i.selection_key, name: i.name })
+
+/** A ticket line as the waiter knows it: the dish, its choices, and its combo when it is in one. */
+function ticketLineName(i) {
+  const choices = (i.options || []).map(o => o?.kitchen).filter(Boolean)
+  return `${i.name || 'Item'}${choices.length ? `, ${choices.join(', ')}` : ''}${i.combo_name ? ` in ${i.combo_name}` : ''}`
+}
+
+/** The dishes a queued entry printed at this till, per line and station: [{ key, name, qty, station }].
  *  A changed-instruction line (qty 0, `change`) is no dish. */
 export function printedWhileQueued(entry) {
   const byKey = new Map()
@@ -78,9 +91,9 @@ export function printedWhileQueued(entry) {
     for (const i of send.items || []) {
       const qty = Number(i.qty) || 0
       if (i.change || qty <= 0) continue
-      const dish = i.recipe_id || `name:${i.name}`
-      const k = `${dish}|${send.station}`
-      const cur = byKey.get(k) || { key: dish, name: i.name || 'Item', qty: 0, station: send.station }
+      const line = ticketLineKey(i)
+      const k = `${line}|${send.station}`
+      const cur = byKey.get(k) || { key: line, name: ticketLineName(i), qty: 0, station: send.station }
       cur.qty += qty
       byKey.set(k, cur)
     }
@@ -108,21 +121,22 @@ export function conflictPrintedNote(c) {
 /** After "Start new order with these": which of the lines put back had already printed, so the waiter
  *  takes off any the kitchen already made before sending again. Starts with a space; '' for none. */
 export function recoveredPrintedNote(c, linesPutBack) {
-  const back = new Set((linesPutBack || []).map(l => l.recipe_id || `name:${l.name}`))
+  const back = new Set((linesPutBack || []).map(lineKeyOf))
   const text = printedText(printedWhileQueued(c).filter(p => back.has(p.key)))
   if (!text) return ''
   return ` Already printed from this till while offline: ${text}. Sending prints them again, so take off any that were already made.`
 }
 
 /** Owner decision Q2 (2026-10-10): lines put back onto the SAME open order after a conflict carry, as
- *  already sent, the units of that dish this till printed while offline, so the next send does not print
- *  them again. Per dish, in line order, never more than a line's quantity; a closed bill or another
- *  party's order keeps them unsent (recoveredPrintedNote). Merge the result with mergeRecoveredLines. */
+ *  already sent, the units of that line this till printed while offline, so the next send does not print
+ *  them again. Per line (S840: the exact line — a plain Momo printed is not a combo's Momo, nor "Momo,
+ *  extra cheese"), in line order, never more than a line's quantity; a closed bill or another party's
+ *  order keeps them unsent (recoveredPrintedNote). Merge the result with mergeRecoveredLines. */
 export function printedBackAsSent(c, lines) {
   const left = new Map()
   for (const p of printedWhileQueued(c)) left.set(p.key, (left.get(p.key) || 0) + p.qty)
   return (lines || []).map(l => {
-    const key = l.recipe_id || `name:${l.name}`
+    const key = lineKeyOf(l)
     const qty = Number(l.qty) || 0
     const sent = Math.min(qty, left.get(key) || 0)
     if (sent <= 0) return { ...l, sent_to_kot: false, sent_qty: 0 }
@@ -137,6 +151,53 @@ export function recoveredSentNote(lines) {
   const sent = (lines || []).filter(l => (Number(l.sent_qty) || 0) > 0).map(l => `${l.sent_qty} × ${l.name || 'Item'}`)
   if (sent.length === 0) return ''
   return ` Already printed from this till while offline, so back as already sent and not printed again: ${sent.join(', ')}.`
+}
+
+/** The floor notice's words for an upload whose dishes another tablet had already sent (S840, owner
+ *  decision 2026-10-15 "Ask staff to check"), after the table's name. */
+export const SENT_ELSEWHERE_TEXT = 'another tablet sent these dishes while this one was offline, and this till had already printed them — check with the kitchen that they are not made twice.'
+
+/** What an upload refused as stale makes of the order as read back (S840). `q` is the queued entry,
+ *  `order` the OPEN_ORDER_SELECT row (open). Returns { verdict, version, saveId }:
+ *   - 'landed'         this entry's lines are on the order — at `version`, the one its own save left when
+ *                      the order lists it (`saveId`, the id they landed under), else the order's;
+ *   - 'replay'         its FIRST queued save landed (a send whose answer was lost) and nothing was saved on
+ *                      top: the rest goes again, at `version`;
+ *   - 'stale'          another device changed the order: a conflict;
+ *   - 'sent_elsewhere' nothing of this till's landed, yet the order holds these dishes and this till
+ *                      printed them: another tablet sent them too. A conflict, never a silent landed.
+ *  By id when the order lists its saves and the entry carries ids (`save_id`, and `first_save_id` beside
+ *  any `first_items`); an entry queued before ids, or a server without the list, keeps the content test. */
+export function judgeQueuedReadBack(q, order) {
+  const stored = order?.pos_order_items || []
+  const current = Number.isInteger(order?.items_version) ? order.items_version : null
+  const saves = Array.isArray(order?.recent_saves) ? order.recent_saves : null
+  const out = (verdict, version = null, saveId = null) => ({ verdict, version, saveId })
+  const holdsAll = () => storedLinesMatchPayload(stored, q?.items)
+  // Every line of this entry on the order at its count or more, and the entry takes nothing off (S835).
+  const contains = () => !q?.removal_reason && storedLinesContainPayload(stored, q?.items, q?.first_items)
+  if (saves && q?.save_id && (q.first_save_id || !Array.isArray(q.first_items))) {
+    const own = recentSaveOf(saves, q.save_id)
+    if (own) return out('landed', Number.isInteger(own.v) ? own.v : current, own.id)
+    const first = q.first_save_id ? recentSaveOf(saves, q.first_save_id) : null
+    if (first && first.v === current) {
+      // Nothing saved on top of the first: what is left goes again — unless it is that save itself.
+      const asFirst = holdsAll() || JSON.stringify(q.items || null) === JSON.stringify(q.first_items || null)
+      return asFirst ? out('landed', current, first.id) : out('replay', current)
+    }
+    if (first) return contains() ? out('landed', current) : out('stale')
+    // None of this till's saves is on the order. Lines that match anyway are another tablet's: had this
+    // till printed them, the kitchen may have them twice, so staff are asked to check.
+    if (holdsAll() || contains()) return printedWhileQueued(q).length > 0 ? out('sent_elsewhere') : out('landed', current)
+    return out('stale')
+  }
+  // The content test (S809 3f, S835): exactly these lines stored → landed; exactly the FIRST queued save's
+  // → that one landed, so the rest goes again on top; every line here on the order → landed, another
+  // tablet saved on top; anything else is another device's change.
+  if (holdsAll()) return out('landed', current)
+  if (Array.isArray(q?.first_items) && storedLinesMatchPayload(stored, q.first_items)) return out('replay', current)
+  if (contains()) return out('landed', current)
+  return out('stale')
 }
 
 /** The till's line after a send it got no answer for was kept on the till and printed (Q16). `fires`

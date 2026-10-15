@@ -79,7 +79,7 @@ export const lineOptionIds = i => {
 // S836 (20261014120000): the bill's table as STORED, and whether it is a part bill. Another till may
 // have moved or split the bill since this one opened it, so the screen adopts these on every load.
 export const OPEN_ORDER_SELECT =
-  'id, order_no, covers, status, items_version, table_id, table_name, part_of_order_id, ' +
+  'id, order_no, covers, status, items_version, recent_saves, table_id, table_name, part_of_order_id, ' +
   'pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, comped, ' +
   // Crest Customization (S758, migration 20260919130000): the line's selection and its frozen choices.
   'selection_key, base_unit_price, options_delta, option_summary, ' +

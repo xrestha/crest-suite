@@ -177,6 +177,37 @@ export async function clearCachedPosOrderForTable(tableId) {
 // has still to land wait in an entry of their own (posTicketsKey, `tickets_for`). `rev` counts the writes
 // to an entry, so an upload can tell whether it changed while it ran (settlePosOrderUpload).
 
+/** An order's queue entry with `patch` merged in (pure; enqueuePosOrder applies it in one transaction). */
+export function mergedOrderEntry(existing, orderId, patch = {}) {
+  const baseVersion = Number.isInteger(existing?.items_version) ? existing.items_version
+    : Number.isInteger(patch.items_version) ? patch.items_version
+    : undefined
+  const merged = {
+    ...(existing || {}),
+    ...patch,
+    order_id: orderId,
+    kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
+    updated_at: Date.now(),
+    rev: (Number(existing?.rev) || 0) + 1,
+  }
+  // S809 3f: the lines of the entry's FIRST queued save, kept like its version. The rest were built on
+  // it, and it may be on the server already (a send whose answer was lost, then queued), so an upload
+  // refused as stale can tell this till's own landed save from another device's change.
+  // S840: each queued save carries the id it is uploaded with (`save_id`, p_save_id; a send whose answer
+  // was lost keeps the id it was sent with), and the first one's is kept beside its lines, so the upload
+  // asks the order which of them landed (pos_orders.recent_saves) rather than judging by its dishes.
+  // A save with no id clears the entry's, so an id never names lines it did not carry.
+  if (Array.isArray(patch.items) && !patch.save_id) delete merged.save_id
+  if (!Array.isArray(existing?.items) && Array.isArray(patch.items)) {
+    merged.first_items = patch.items
+    if (patch.save_id) merged.first_save_id = patch.save_id
+    else delete merged.first_save_id
+  }
+  if (baseVersion === undefined) delete merged.items_version
+  else merged.items_version = baseVersion
+  return merged
+}
+
 export async function enqueuePosOrder(orderId, patch) {
   // The read (get) and the write (put) MUST live in one readwrite transaction. IndexedDB
   // serialises overlapping readwrite transactions on the same store, so a second enqueue for the
@@ -192,24 +223,7 @@ export async function enqueuePosOrder(orderId, patch) {
     const getReq = store.get(orderId)
     let merged
     getReq.onsuccess = () => {
-      const existing = getReq.result
-      const baseVersion = Number.isInteger(existing?.items_version) ? existing.items_version
-        : Number.isInteger(patch.items_version) ? patch.items_version
-        : undefined
-      merged = {
-        ...(existing || {}),
-        ...patch,
-        order_id: orderId,
-        kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
-        updated_at: Date.now(),
-        rev: (Number(existing?.rev) || 0) + 1,
-      }
-      // S809 3f: the lines of the entry's FIRST queued save, kept like its version. The rest were built on
-      // it, and it may be on the server already (a send whose answer was lost, then queued), so an upload
-      // refused as stale can tell this till's own landed save from another device's change.
-      if (!Array.isArray(existing?.items) && Array.isArray(patch.items)) merged.first_items = patch.items
-      if (baseVersion === undefined) delete merged.items_version
-      else merged.items_version = baseVersion
+      merged = mergedOrderEntry(getReq.result, orderId, patch)
       store.put(merged)
     }
     getReq.onerror = e => reject(e.target.error)
@@ -296,14 +310,15 @@ const sameItems = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || nu
 
 /** What is left of a queued entry after an upload (S809 3f) — the pure half of settlePosOrderUpload.
  *  `rev` and `items` are the entry as the upload read it; `lines` is true when those lines are now on the
- *  server at `version`; `doneKeys` are the tickets that need no further try (logged, or refused for good).
+ *  server at `version`, saved under `saveId` (S840); `doneKeys` are the tickets that need no further try
+ *  (logged, or refused for good).
  *  Returns { entry, tickets }: what stays under the entry's key (null: delete it), and the tickets still
  *  to log that move to the order's ticket-only entry (posTicketsKey).
  *   - its lines landed and it is unchanged since it was read: tickets not yet logged move;
  *   - changed meanwhile (a newer offline edit, or a ticket, of the same order): the newer edit stays and
  *     now builds on the lines that landed — the order exists, at `version`. Only tickets were added
  *     when its lines are still the ones that landed, so those move too. */
-export function settledEntry(entry, { rev, items, lines = false, version = null, doneKeys = [] } = {}) {
+export function settledEntry(entry, { rev, items, lines = false, version = null, saveId = null, doneKeys = [] } = {}) {
   if (!entry) return { entry: null, tickets: [] }
   const done = new Set(doneKeys)
   const logged = new Set(entry.logged_ids || [])
@@ -318,6 +333,9 @@ export function settledEntry(entry, { rev, items, lines = false, version = null,
   const next = { ...entry, kot_sends: left, created_offline: false, first_items: items }
   if (Number.isInteger(version)) next.items_version = version
   else delete next.items_version
+  // S840: what landed is now the first save, under its own id (none: the content test decides).
+  if (saveId) next.first_save_id = saveId
+  else delete next.first_save_id
   return { entry: next, tickets: [] }
 }
 

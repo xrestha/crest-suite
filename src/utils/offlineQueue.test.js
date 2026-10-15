@@ -1,7 +1,7 @@
 // S809 3f: what is left of a queued POS order after an upload (settledEntry, the pure half of
 // settlePosOrderUpload), and the ticket-only entry. The IndexedDB halves need a browser; these are the
 // decisions they apply.
-import { settledEntry, queuedSendKey, posTicketsKey, mergedTicketsEntry } from './offlineQueue'
+import { settledEntry, queuedSendKey, posTicketsKey, mergedTicketsEntry, mergedOrderEntry } from './offlineQueue'
 
 const MOMO = { recipe_id: 'r-momo', name: 'Veg Momo', category: 'Food', qty: 2, unit_price: 200, vat_rate: 0, sent_to_kot: true, sent_qty: 2, notes: null }
 const TEA  = { recipe_id: 'r-tea', name: 'Masala Tea', category: 'Beverage', qty: 1, unit_price: 120, vat_rate: 0, sent_to_kot: true, sent_qty: 1, notes: null }
@@ -62,6 +62,50 @@ describe('settledEntry', () => {
 
   test('an entry that is gone stays gone', () => {
     expect(settledEntry(undefined, { rev: 1, lines: true })).toEqual({ entry: null, tickets: [] })
+  })
+
+  test('S840: the newer edit builds on what landed under its id; with no id the lines decide', () => {
+    const newer = entry({ items: [MOMO, TEA], rev: 5, save_id: 's2', first_save_id: 's1' })
+    const byId = settledEntry(newer, { rev: 3, items: [MOMO], lines: true, version: 7, saveId: 's1b', doneKeys: ['k1', 'b1'] })
+    expect(byId.entry.first_save_id).toBe('s1b')
+    expect(byId.entry.save_id).toBe('s2') // the newer edit keeps its own id for its upload
+    const noId = settledEntry(newer, { rev: 3, items: [MOMO], lines: true, version: 7, doneKeys: ['k1', 'b1'] })
+    expect(noId.entry).not.toHaveProperty('first_save_id')
+    expect(noId.entry.first_items).toEqual([MOMO])
+  })
+})
+
+describe('mergedOrderEntry — the queued save and its id (S840)', () => {
+  test('the first save keeps its lines, its id and its version; later saves move only the latest', () => {
+    const first = mergedOrderEntry(undefined, 'o1', { client_id: 'c1', items: [MOMO], save_id: 's1', items_version: 4 })
+    expect(first).toMatchObject({ order_id: 'o1', items: [MOMO], save_id: 's1', first_items: [MOMO], first_save_id: 's1', items_version: 4, rev: 1 })
+    const second = mergedOrderEntry(first, 'o1', { items: [MOMO, TEA], save_id: 's2', items_version: 9 })
+    expect(second).toMatchObject({ items: [MOMO, TEA], save_id: 's2', first_items: [MOMO], first_save_id: 's1', items_version: 4, rev: 2 })
+  })
+
+  test('a save with no id leaves no id naming lines it did not carry', () => {
+    const first = mergedOrderEntry(undefined, 'o1', { items: [MOMO], save_id: 's1' })
+    const noId = mergedOrderEntry(first, 'o1', { items: [MOMO, TEA] })
+    expect(noId).not.toHaveProperty('save_id')
+    expect(noId.first_save_id).toBe('s1')
+    const legacy = mergedOrderEntry(undefined, 'o1', { items: [MOMO] })
+    expect(legacy).not.toHaveProperty('save_id')
+    expect(legacy).not.toHaveProperty('first_save_id')
+    expect(legacy.first_items).toEqual([MOMO])
+  })
+
+  test('an entry from before ids gains one with its next save, but its first save stays unnamed', () => {
+    const old = { order_id: 'o1', items: [MOMO], first_items: [MOMO], items_version: 4, rev: 2 }
+    const next = mergedOrderEntry(old, 'o1', { items: [MOMO, TEA], save_id: 's2' })
+    expect(next.save_id).toBe('s2')
+    expect(next).not.toHaveProperty('first_save_id') // so its upload is judged by its lines
+  })
+
+  test('tickets are appended, never replaced', () => {
+    const a = mergedOrderEntry(undefined, 'o1', { items: [MOMO], save_id: 's1', kot_sends: [ticket('k1')] })
+    const b = mergedOrderEntry(a, 'o1', { kot_sends: [ticket('b1', 'BOT')] })
+    expect(ids(b.kot_sends)).toEqual(['k1', 'b1'])
+    expect(b.save_id).toBe('s1') // a ticket alone is no save
   })
 })
 

@@ -30,12 +30,39 @@ describe('printedBackAsSent', () => {
     expect(back[0]).toMatchObject({ sent_qty: 0, sent_to_kot: false })
   })
 
-  test('never marks more than was printed across two lines of one dish', () => {
+  // S840: a printed dish marks only the exact line it was printed for (lineKeyOf) — a plain Tuborg printed
+  // offline is not "Tuborg, chilled", and a plain Momo is not a combo's Momo.
+  test('a plain print does not mark customized lines of the same dish', () => {
     const back = printedBackAsSent(conflict, [
       { ...tuborg, qty: 1, selection_key: 'a' },
       { ...tuborg, qty: 3, selection_key: 'b' },
     ])
+    expect(back.map(l => l.sent_qty)).toEqual([0, 0])
+  })
+
+  test('a print of one customization marks only that line', () => {
+    const printedA = { kot_sends: [{ station: 'BOT', items: [{ recipe_id: 'r-tuborg', name: 'Tuborg', qty: 2, selection_key: 'a' }] }] }
+    const back = printedBackAsSent(printedA, [
+      { ...tuborg, qty: 1, selection_key: 'a' },
+      { ...tuborg, qty: 3, selection_key: 'b' },
+    ])
+    expect(back.map(l => l.sent_qty)).toEqual([1, 0])
+  })
+
+  test('never marks more than was printed across two lines of one line', () => {
+    const back = printedBackAsSent(conflict, [{ ...tuborg, qty: 1 }, { ...tuborg, qty: 3 }])
     expect(back.map(l => l.sent_qty)).toEqual([1, 1])
+  })
+
+  test('a combo\'s Momo and a plain Momo are two lines', () => {
+    const comboMomo = { ...momo, qty: 1, combo_line_id: 'CL-1', combo_group_id: 'G-1', combo_name: 'Momo Set' }
+    // The plain Momo printed offline marks the plain line only.
+    expect(printedBackAsSent(conflict, [comboMomo, { ...momo, qty: 3 }]).map(l => l.sent_qty)).toEqual([0, 1])
+    // A ticket line carries the combo's tail in its key, so the combo's printed Momo marks the combo line.
+    const printedCombo = { kot_sends: [{ station: 'KOT', items: [{ recipe_id: 'r-momo', name: 'Buff Momo', qty: 1, selection_key: '@cl-1/g-1', combo_name: 'Momo Set' }] }] }
+    const back = printedBackAsSent(printedCombo, [comboMomo, { ...momo, qty: 3 }])
+    expect(back.map(l => l.sent_qty)).toEqual([1, 0])
+    expect(back[0].sent_to_kot).toBe(true)
   })
 
   test('nothing printed: every line unsent', () => {

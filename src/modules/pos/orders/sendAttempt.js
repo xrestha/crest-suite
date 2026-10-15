@@ -16,6 +16,13 @@ import { isNetworkError } from '../../../shared/errorText'
 // this till holds a mark for it can be "this till's own save" (judgeSendAttempts); a refusal with no mark
 // is another device's change and reloads. A mark is memory only: a till lock or reload forgets it, as
 // it forgets an unsettled bill close.
+//
+// S840 (ORDER-FLOW-4's residual): deciding by what the order holds could still be fooled — another tablet
+// on the SAME login (or one whose ticket log failed) saving the identical dishes looked like this till's
+// own save, and its ticket printed twice. Each save now carries an id (`saveId`, sent as p_save_id), and
+// the server lists the ids of the saves that landed on the order (`pos_orders.recent_saves`, newest first,
+// each with the items_version it left). Listed is landed; not listed is not this till's. The content test
+// stays only for an order read without that list (a server before the column).
 
 /** How long one network step of a send waits for an answer (ORDER-FLOW-5: there was no limit). */
 export const SEND_STEP_MS = 20000
@@ -47,14 +54,30 @@ export function noAnswer(res) {
 export function newSendAttempt({
   orderId, orderNo = null, where = '', tableName = 'Takeaway', covers = 1, expectedVersion = null,
   payload = [], snapshot = [], kot = [], bot = [], guestReqIds = [], knownTicketIds = [], screenToken = null,
+  saveId = null,
 }) {
   return {
     orderId, orderNo, where, tableName, covers,
     expectedVersion: Number.isInteger(expectedVersion) ? expectedVersion : null,
     payload, snapshot, kot, bot, guestReqIds, knownTicketIds, screenToken,
+    saveId: saveId ? String(saveId).toLowerCase() : null, // S840: sent as p_save_id
     finalAfter: null, // set when the till stops waiting for this save's answer (stopWaiting)
   }
 }
+
+/** The order's record of a landed save (S840): its `{ id, v }` entry in `recent_saves` — `v` the
+ *  items_version that save left — or null when the save is not listed (or the list was not read). */
+export function recentSaveOf(recentSaves, saveId) {
+  if (!Array.isArray(recentSaves) || !saveId) return null
+  const id = String(saveId).toLowerCase()
+  const hit = recentSaves.find(s => s && String(s.id || '').toLowerCase() === id)
+  return hit ? { id, v: Number(hit.v) } : null
+}
+
+/** Whether an order read can settle these attempts by their ids (S840): it carries `recent_saves`, and
+ *  every attempt was sent with an id. Otherwise the content test decides, as before. */
+export const judgesById = (attempts, stored) =>
+  Array.isArray(stored?.recent_saves) && (attempts || []).every(a => !!a?.saveId)
 
 /** The till stopped waiting for this save's answer at `at`. */
 export function stopWaiting(attempt, at) {
@@ -95,38 +118,58 @@ export function firedElsewhere(attempt, tickets, profileId) {
 
 /** What the order as read back says about this till's unanswered saves of it (`attempts`, oldest
  *  first). `stored` is the OPEN_ORDER_SELECT row (null when it could not be found); `tickets` its
- *  pos_kot_log rows. Returns { verdict, attempt, exact }:
+ *  pos_kot_log rows (read only for the content test). Returns { verdict, attempt, exact }:
  *   - 'closed'    the bill is closed (or gone): nothing more can land on it;
  *   - 'pending'   nothing landed, and an attempt may still land;
  *   - 'lost'      none landed, and none can any more;
  *   - 'landed'    `attempt` landed (`exact`: the stored lines are exactly what it saved);
  *   - 'elsewhere' its dishes are held as sent, but another till fired them meanwhile — not this one's.
- *  At most one attempt lands: they all expected the version the screen held. */
+ *  At most one attempt lands: they all expected the version the screen held.
+ *  S840: with `recent_saves` read, an attempt landed only if its id is listed, and `exact` is whether
+ *  nothing was saved on top of it since. Dishes held as sent by a save not listed are another till's,
+ *  however exactly they match — the same login on two tablets included. */
 export function judgeSendAttempts(attempts, stored, { tickets = [], profileId = null, now = Date.now() } = {}) {
   const list = attempts || []
   if (list.length === 0) return { verdict: 'none', attempt: null, exact: false }
-  if (!stored || stored.status !== 'open') {
-    return { verdict: 'closed', attempt: [...list].reverse().find(firesTickets) || list[list.length - 1], exact: false }
-  }
+  const lastFiring = () => [...list].reverse().find(firesTickets) || list[list.length - 1]
+  if (!stored || stored.status !== 'open') return { verdict: 'closed', attempt: lastFiring(), exact: false }
   const lines = stored.pos_order_items || []
   const mayStillLand = a => a.finalAfter == null || now < a.finalAfter
   const unchanged = a => a.expectedVersion !== null && stored.items_version === a.expectedVersion
-  const open = list.filter(a => !unchanged(a))
-  const exact = [...open].reverse().find(a => storedLinesMatchPayload(lines, a.payload))
-  const held = open
+  // One that has not landed may yet while its version still stands (or it saved without a version
+  // check) and its request may be travelling.
+  const pendingOf = () => list.find(a => (unchanged(a) || a.expectedVersion === null) && mayStillLand(a))
+  const heldOf = candidates => candidates
     .filter(a => firesTickets(a) && sendLinesOf(a).every(l => heldAsSent(lines, l)))
     .map((a, n) => ({ a, n }))
     .sort((x, y) => sendLinesOf(y.a).length - sendLinesOf(x.a).length || y.n - x.n)[0]?.a
+
+  if (judgesById(list, stored)) {
+    const listed = list
+      .map((a, n) => ({ a, n, s: recentSaveOf(stored.recent_saves, a.saveId) }))
+      .filter(x => x.s)
+      .sort((x, y) => y.s.v - x.s.v || y.n - x.n)[0]
+    if (listed) return { verdict: 'landed', attempt: listed.a, exact: listed.s.v === stored.items_version }
+    const pending = pendingOf()
+    if (pending) return { verdict: 'pending', attempt: pending, exact: false }
+    const held = heldOf(list)
+    if (held) return { verdict: 'elsewhere', attempt: held, exact: false }
+    return { verdict: 'lost', attempt: lastFiring(), exact: false }
+  }
+
+  // The content test (an order read without recent_saves).
+  const open = list.filter(a => !unchanged(a))
+  const exact = [...open].reverse().find(a => storedLinesMatchPayload(lines, a.payload))
+  const held = heldOf(open)
   const landed = exact || held
   if (landed) {
     if (firesTickets(landed) && firedElsewhere(landed, tickets, profileId)) return { verdict: 'elsewhere', attempt: landed, exact: landed === exact }
     return { verdict: 'landed', attempt: landed, exact: landed === exact }
   }
-  // Nothing of theirs is on the order. One whose version still stands, or that saved without a version
-  // check, can still land while its request may be travelling.
-  const pending = list.find(a => (unchanged(a) || a.expectedVersion === null) && mayStillLand(a))
+  // Nothing of theirs is on the order.
+  const pending = pendingOf()
   if (pending) return { verdict: 'pending', attempt: pending, exact: false }
-  return { verdict: 'lost', attempt: [...list].reverse().find(firesTickets) || list[list.length - 1], exact: false }
+  return { verdict: 'lost', attempt: lastFiring(), exact: false }
 }
 
 /** The one sentence for a send whose save got no answer. `stage` 'order' means the new order itself was

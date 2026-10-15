@@ -82,18 +82,18 @@ import { isStaleGuestOrder } from '../../../shared/guestOrderStale'
 import { waitingRequests } from '../../../shared/reservationSeen'
 import {
   SEND_STEP_MS, SEND_READ_MS, noAnswer, newSendAttempt, stopWaiting, sendLinesOf, firesTickets, stationsOf,
-  judgeSendAttempts, unknownSendText,
+  judgeSendAttempts, judgesById, recentSaveOf, unknownSendText,
 } from './sendAttempt'
 import {
   LINK_DOWN_MS, UPLOAD_RETRY_MS, LINK_PROBE_MS, UPLOAD_TROUBLE_TRIES, uploadTroubleText, LINK_DOWN_BILL_TEXT, queuedHasLines, queuedOrderId, ownQueuedEntry, conflictPrintedNote,
   recoveredPrintedNote, queuedSendText, queuedRows, replayRows, QUEUED_BILL_TEXT, CONFLICT_HOLDS_TEXT,
-  printedBackAsSent, recoveredSentNote,
+  printedBackAsSent, recoveredSentNote, judgeQueuedReadBack, SENT_ELSEWHERE_TEXT,
 } from './offlineUpload'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, foldCompedSplits, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, storedLinesContainPayload, lineKeyOf, lineOptionIds, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
+  storedLinesMatchPayload, lineKeyOf, lineOptionIds, selectionKeyOf, sentQtyAfterQtyChange, ticketForLine, inactiveTableText, seatRefusedText,
   isComboLine, comboFieldsOf, comboSuffixOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
@@ -2003,8 +2003,10 @@ export default function PosOrders({ billingStation = false } = {}) {
         // Shown once its tickets are on the log: the next try finds the same conflict.
         if (logged.noAnswer) return 'no_answer'
         // A closed bill's party has gone: its tickets are history for the reports, not work for the
-        // Kitchen Display, so they go to served rather than appear there as new orders.
-        if (reason === 'closed') await serveTickets((q.kot_sends || []).map(s => s.id).filter(Boolean))
+        // Kitchen Display, so they go to served rather than appear there as new orders. So do the tickets
+        // of dishes another tablet had sent as well (S840): the order already holds them, on that tablet's
+        // ticket, and a second one new on the Display is how they get made twice.
+        if (reason === 'closed' || reason === 'sent_elsewhere') await serveTickets((q.kot_sends || []).map(s => s.id).filter(Boolean))
       }
       conflictIdsRef.current.add(oid)
       setConflictOrders(prev => prev.some(c => c.order_id === oid) ? prev : [...prev, { ...q, reason, refusal }])
@@ -2012,6 +2014,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
 
     let version = null
+    // S840: the id these lines are on the server under, for an edit queued while this upload ran (settledEntry).
+    let landedId = null
     if (queuedHasLines(q)) {
       if (q.created_offline) {
         // Upsert, not insert: if a previous upload got this far but died before the entry was settled
@@ -2073,9 +2077,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       // S809 3f: the rows go as they were queued — they are the save's payload already. Mapping them
       // through toItemPayload a second time dropped a customized dish's choices (it reads `option_ids` or
       // a selection key, and a payload carries `options`).
+      // S840: under the id the entry's latest save was queued with (an entry queued before ids has none), so
+      // a retry of a save that landed is answered as one (`duplicate`), never saved twice or refused.
       const replay = async expected => {
         const args = { p_order_id: oid, p_rows: replayRows(q.items), p_removal_reason: q.removal_reason || null }
         if (Number.isInteger(expected)) args.p_expected_version = expected
+        if (q.save_id) args.p_save_id = q.save_id
         const abort = new AbortController()
         const out = await bounded(supabase.rpc('save_pos_order_items', args).abortSignal(abort.signal), 'Uploading an order', SEND_STEP_MS)
         if (noAnswer(out)) abort.abort()
@@ -2087,29 +2094,38 @@ export default function PosOrders({ billingStation = false } = {}) {
       let res = await replay(q.created_offline ? 0 : q.items_version)
       if (noAnswer(res)) return 'no_answer'
       let landed = false
-      if (res.error?.hint === HINT.stale) {
+      if (!res.error && res.data?.duplicate) {
+        // S840: this save had landed already — an earlier try whose answer was lost — so the server did not
+        // save it again and answered with the order as it stands. Its lines landed at the version that save
+        // left, which the order lists; the answer's version may carry another tablet's save on top.
+        landed = true
+        landedId = q.save_id || null
+        version = res.data.items_version
+        const own = await bounded(scopedFrom('pos_orders', 'items_version, recent_saves').eq('id', oid).maybeSingle(), 'Checking an order', SEND_READ_MS)
+        if (noAnswer(own)) return 'no_answer'
+        const listed = own.error ? null : recentSaveOf(own.data?.recent_saves, q.save_id)
+        if (own.error) console.error('offline sync: could not read which version this save left, using the order\'s:', own.error)
+        if (listed && Number.isInteger(listed.v)) version = listed.v
+      } else if (res.error?.hint === HINT.stale) {
         // ORDER-FLOW-7, Q16: what this entry holds may be on the order already — an upload that ran
-        // twice, or a send whose answer was lost and which landed after all. Exactly these lines stored
-        // means it landed. Exactly the entry's FIRST queued save stored means that one landed and the
-        // rest of the queue was built on it, so it goes again on top. Anything else is another device's.
+        // twice, or a send whose answer was lost and which landed after all. S840: the order lists the
+        // saves that landed by id, so this entry's own save, or its FIRST (the rest built on it), is found
+        // by its id; lines that match with neither listed are another tablet's, and staff are asked to check
+        // (judgeQueuedReadBack). An entry queued before ids is judged by its lines, as before.
         const back = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', oid).maybeSingle(), 'Checking an order', SEND_READ_MS)
         if (noAnswer(back)) return 'no_answer'
         if (back.error) { console.error('offline sync: read-back refused, will retry:', back.error); keptErrorRef.current = back.error; return 'kept' }
         if (back.data?.status !== 'open') return toConflict('closed')
-        const stored = back.data.pos_order_items || []
-        if (storedLinesMatchPayload(stored, q.items)) {
+        const judged = judgeQueuedReadBack(q, back.data)
+        if (judged.verdict === 'landed') {
           landed = true
-          version = back.data.items_version
-        } else if (Array.isArray(q.first_items) && storedLinesMatchPayload(stored, q.first_items)) {
-          res = await replay(back.data.items_version)
+          landedId = judged.saveId
+          version = judged.version
+        } else if (judged.verdict === 'replay') {
+          res = await replay(judged.version)
           if (noAnswer(res)) return 'no_answer'
-        } else if (!q.removal_reason && storedLinesContainPayload(stored, q.items, q.first_items)) {
-          // S835 (S809.4, 3f; owner 2026-10-14): the lost send landed and another tablet saved on top of
-          // it before this upload. Every dish here is on the order, so it landed; nothing here takes any off.
-          landed = true
-          version = back.data.items_version
         } else {
-          return toConflict('stale')
+          return toConflict(judged.verdict)
         }
       }
       if (!landed) {
@@ -2125,6 +2141,7 @@ export default function PosOrders({ billingStation = false } = {}) {
           return reason ? toConflict(reason) : toConflict('refused', errorText(res.error, 'staff'))
         }
         version = res.data?.items_version
+        landedId = q.save_id || null
       }
     }
 
@@ -2144,7 +2161,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (!st.error && st.data?.status !== 'open') await serveTickets(logged.ids)
     }
     const left = await settlePosOrderUpload(key, {
-      orderId: oid, rev: q.rev, items: q.items, lines: queuedHasLines(q), version: Number.isInteger(version) ? version : null, doneKeys: logged.keys,
+      orderId: oid, rev: q.rev, items: q.items, lines: queuedHasLines(q), version: Number.isInteger(version) ? version : null,
+      saveId: landedId, doneKeys: logged.keys,
     }).catch(err => { console.error('offline queue: an uploaded order could not be settled (the next try finds it landed):', err); return q })
     if (!queuedHasLines(left)) setPendingOrderIds(prev => { const next = new Set(prev); next.delete(oid); return next })
 
@@ -2209,7 +2227,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A 'stale' or 'off_menu' conflict (S754) is an order that is STILL OPEN — another device saved it,
     // or a dish went off the menu — and the queue holds this device's whole cart, most of which that
     // order already carries. Put back only the difference, or every dish already on it doubles.
-    const sameOrderStillOpen = c.reason === 'stale' || c.reason === 'off_menu' || c.reason === 'refused'
+    const sameOrderStillOpen = c.reason === 'stale' || c.reason === 'off_menu' || c.reason === 'refused' || c.reason === 'sent_elsewhere'
     const toPutBack = serverLines => (sameOrderStillOpen ? missingFromServer(queuedLines, serverLines) : incoming)
 
     if (!c.table_id) {
@@ -3543,6 +3561,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     const isSent = sendKeys === 'all' ? () => true : sendKeys ? i => sendKeys.has(lineKeyOf(i)) : () => false
     const savedLines = snapshot.map(i => (isSent(i) ? { ...i, sent_to_kot: true, sent_qty: i.qty, note_at_send: null, note_changed: false } : i))
     const itemsPayload = savedLines.map(toItemPayload)
+    // S840 (ORDER-FLOW-4's residual): this save's own id, sent as p_save_id. The order lists the saves that
+    // landed by it (recent_saves), so a lost answer is settled by asking whether THIS save landed, never by
+    // whether the order holds its dishes — another tablet on the same login can store exactly these. A save
+    // kept in the queue keeps it, so an upload of a save that did land is answered as one, not saved twice.
+    const saveId = randomUUID().toLowerCase()
     // ORDER-FLOW-5 (S809 3e): every wait below is bounded, and a save that answers after the waiter went
     // back to the floor finishes for its own order — its tickets print and log from this call's own
     // values — but leaves the screen now showing alone (watchScreen).
@@ -3583,7 +3606,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     if (viaQueue) {
       const kept = await queueOrderSave({
-        oid: isNewOrder ? randomUUID() : oid, oNo, isNewOrder, itemsPayload, snapshot, version: itemsVersionRef.current, here,
+        oid: isNewOrder ? randomUUID() : oid, oNo, isNewOrder, itemsPayload, snapshot, version: itemsVersionRef.current, here, saveId,
       })
       if (navigator.onLine) void flushPosOrderQueue()
       return kept
@@ -3593,20 +3616,25 @@ export default function PosOrders({ billingStation = false } = {}) {
     // when an answer comes back.
     let expectedVersion = itemsVersionRef.current
     // S809 3f (Q16): a send that gets no answer at all is kept in the queue and prints. Its 3e marks go
-    // first (S809.4): if the lost save did land, the poll would print the same dishes a second time; the
-    // upload finds it landed instead and logs the tickets once. A bill close still hears "not known".
+    // once it is kept (S809.4): if the lost save did land, the poll would print the same dishes a second
+    // time; the upload finds it landed instead (S840: by the same save id) and logs the tickets once. The
+    // poll leaves the order alone meanwhile (savingRef). A bill close still hears "not known".
     const keepUnanswered = async (stage, error, queuedOid, created) => {
       // A conflict's order keeps 3e's unknown-send handling (its marks stay, the poll settles it), so the
       // conflict's copy is not replaced (N1 above).
       if (!queue || (!created && conflictOpen)) return { ok: false, unknown: true, stage, error }
       noteLinkDown()
-      putSendAttempts(queuedOid, [])
       try {
-        return await queueOrderSave({
+        const kept = await queueOrderSave({
           oid: queuedOid, oNo: created ? null : oNo, isNewOrder: created, itemsPayload, snapshot,
-          version: created ? null : expectedVersion, here,
+          version: created ? null : expectedVersion, here, saveId,
         })
+        // S840: only now. Dropped before the queue write, a local store that failed left `unknown` with no
+        // mark, so nothing ever settled the send: if it landed, its ticket never printed.
+        if (kept?.queued) putSendAttempts(queuedOid, [])
+        return kept
       } catch (err) {
+        // The marks stay: the poll and the next press settle the send from the order, as 3e does.
         console.error('A send with no answer could not be kept on this till either:', err)
         return { ok: false, unknown: true, stage, error }
       }
@@ -3694,10 +3722,10 @@ export default function PosOrders({ billingStation = false } = {}) {
       tableName: screenTableName, covers, expectedVersion, payload: itemsPayload, snapshot,
       kot: sendLines.filter(i => !toBar(i)), bot: sendLines.filter(toBar),
       guestReqIds: Array.from(pendingAcceptedGuestReqIds), knownTicketIds: orderKotTickets.map(t => t.id),
-      screenToken: screenTokenRef.current,
+      screenToken: screenTokenRef.current, saveId,
     })
     putSendAttempts(oid, [...sendAttemptsFor(oid), attempt])
-    const saveArgs = { p_order_id: oid, p_rows: itemsPayload, p_removal_reason: kotPullReason || null }
+    const saveArgs = { p_order_id: oid, p_rows: itemsPayload, p_removal_reason: kotPullReason || null, p_save_id: saveId }
     if (Number.isInteger(expectedVersion)) saveArgs.p_expected_version = expectedVersion
     // Cancelled when the till stops waiting, so nothing more of it is sent (the close write's rule).
     const saveAbort = new AbortController()
@@ -3832,8 +3860,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // made while the internet is known to be down. The tickets print as for any send; the upload
   // (uploadPosOrderQueue) saves the lines and logs the tickets later. `version` is the one these edits
   // build on (enqueuePosOrder keeps the first one queued); `here` says whether the screen the save was
-  // pressed on still shows it. Throws when the local store does.
-  async function queueOrderSave({ oid, oNo = null, isNewOrder, itemsPayload, snapshot, version, here }) {
+  // pressed on still shows it; `saveId` the id the upload sends it under (S840). Throws when the local
+  // store does.
+  async function queueOrderSave({ oid, oNo = null, isNewOrder, itemsPayload, snapshot, version, here, saveId = null }) {
     // A conflict's own order saved here again by its RECOVERY starts a fresh entry at the version this
     // screen holds. Merged into the conflict's copy it kept that copy's stale base and was skipped by every
     // upload (review of 3f). The conflict's printed tickets were logged when it was found. Any other save of
@@ -3864,6 +3893,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       covers_set: coversSet,
       opened_by:  profile?.id || null,
       items: queuedRows(itemsPayload, snapshot), // a customized dish keeps its choices for the screen
+      save_id: saveId || randomUUID().toLowerCase(), // S840: the upload's p_save_id for these lines
       // The reason the waiter gave for taking off a dish already sent, for the upload's pulled-item record.
       ...(kotPullReason ? { removal_reason: kotPullReason } : {}),
       ...(Number.isInteger(version) ? { items_version: version } : {}),
@@ -4046,7 +4076,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   async function judgeOrderRead(oid, cur) {
     const attempts = sendAttemptsFor(oid)
     let tickets = []
-    if (cur?.status === 'open' && attempts.some(a => firesTickets(a) && a.expectedVersion !== cur.items_version)) {
+    // S840: an order that lists its saves by id settles them without the tickets.
+    if (cur?.status === 'open' && !judgesById(attempts, cur) && attempts.some(a => firesTickets(a) && a.expectedVersion !== cur.items_version)) {
       const { data, error } = await bounded(scopedFrom('pos_kot_log', 'id, items, sent_by')
         .eq('order_id', oid).neq('status', 'cancelled').not('items', 'cs', KOT_CHANGE_ITEMS), 'Checking the tickets', SEND_READ_MS)
       if (error) return null
@@ -8192,19 +8223,25 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           <span>⚠</span>
           <span>
-            {/* Why the server refused the replay (S754) — each needs different words, the same recovery. */}
-            {c.reason === 'stale' ? (
-              <><strong>{c.table_name}</strong>'s order was changed on another device while you were offline — </>
-            ) : c.reason === 'table_taken' ? (
-              <><strong>{c.table_name}</strong> was opened on another device while you were offline — </>
-            ) : c.reason === 'off_menu' ? (
-              <><strong>{c.table_name}</strong>: a dish in your offline order is no longer on the till menu — </>
-            ) : c.reason === 'refused' ? (
-              <><strong>{c.table_name}</strong>: the server would not take your offline changes{c.refusal ? ` (${c.refusal})` : ''} — </>
-            ) : (
-              <><strong>{c.table_name}</strong>'s bill was closed on another device while you were offline — </>
-            )}
-            your queued changes ({c.items.length} item{c.items.length !== 1 ? 's' : ''}) were NOT applied.
+            {/* Why the server refused the replay (S754) — each needs different words, the same recovery.
+                S840: dishes another tablet had sent too are not a refusal — the order holds them — so that
+                notice says only what staff must check (owner decision 2026-10-15, "Ask staff to check"). */}
+            {c.reason === 'sent_elsewhere' ? (
+              <><strong>{c.table_name || 'An order'}</strong>: {SENT_ELSEWHERE_TEXT}</>
+            ) : (<>
+              {c.reason === 'stale' ? (
+                <><strong>{c.table_name}</strong>'s order was changed on another device while you were offline — </>
+              ) : c.reason === 'table_taken' ? (
+                <><strong>{c.table_name}</strong> was opened on another device while you were offline — </>
+              ) : c.reason === 'off_menu' ? (
+                <><strong>{c.table_name}</strong>: a dish in your offline order is no longer on the till menu — </>
+              ) : c.reason === 'refused' ? (
+                <><strong>{c.table_name}</strong>: the server would not take your offline changes{c.refusal ? ` (${c.refusal})` : ''} — </>
+              ) : (
+                <><strong>{c.table_name}</strong>'s bill was closed on another device while you were offline — </>
+              )}
+              your queued changes ({c.items.length} item{c.items.length !== 1 ? 's' : ''}) were NOT applied.
+            </>)}
             {/* S809 ORDER-FLOW-8: those tickets did print, so Discard is not "nothing happened". */}
             {conflictPrintedNote(c)}
           </span>

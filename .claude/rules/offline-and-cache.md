@@ -189,10 +189,14 @@ Two things make this safe to do, and both are worth checking before copying the 
 - **One upload at a time** (`posUpload`, module-level single flight). Entries carry `client_id`; another
   outlet's are left alone, and `switchAdminClient`/`pendingOfflineChanges` count only this outlet's.
   Each queued ticket carries its `pos_kot_log` id, so a 23505 on the insert means it landed.
-- **A stale refusal reads the order back**: stored lines == the entry's `items` → it landed; ==
-  `first_items` → replay on top; every line of `items` on the order at its count or more, the entry
-  taking nothing off (no removal reason, nothing below `first_items`) → it landed, another tablet saved on
-  top (`storedLinesContainPayload`, S835); anything else → conflict. A created-here order replays at version 0;
+- **A stale refusal reads the order back, by save id first (S840, `judgeQueuedReadBack`)**: the
+  entry's `save_id` on `recent_saves` → it landed; `first_save_id` listed and still the newest → replay
+  on top; listed but saved on top since → the S835 contain check; NEITHER listed but the order holds the
+  lines this till printed → conflict `sent_elsewhere` ("check with the kitchen that they are not made
+  twice", owner decision 2026-10-15). An entry with no `save_id` keeps the content test: stored lines
+  == the entry's `items` → it landed; == `first_items` → replay on top; every line of `items` on the
+  order at its count or more, the entry taking nothing off → it landed (`storedLinesContainPayload`,
+  S835); anything else → conflict. A created-here order replays at version 0;
   covers are skipped when `covers_set` is false (an older entry, which lacks it, still writes them).
 - **A conflict logs its tickets first** (a closed bill's go to served); an unmapped refusal is
   `'refused'`, carrying the server's sentence, never retried.

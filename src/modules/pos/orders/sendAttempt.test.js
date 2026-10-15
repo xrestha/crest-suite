@@ -2,7 +2,7 @@
 // a till that holds an unanswered save of the order can take what is stored for its own.
 import {
   SEND_LAND_GRACE_MS, noAnswer, newSendAttempt, stopWaiting, heldAsSent, firedElsewhere, judgeSendAttempts,
-  stationsOf, firesTickets, unknownSendText,
+  stationsOf, firesTickets, unknownSendText, recentSaveOf, judgesById,
 } from './sendAttempt'
 import { toItemPayload } from './posOrdersConstants'
 
@@ -19,7 +19,7 @@ const stored = (version, lines, status = 'open') => ({
 })
 
 // An attempt as performSave builds it: the cart before, the lines it marks sent, routed KOT/BOT.
-function attemptFor({ cart, sendKeys, version = 4, known = [], finalAfter = null }) {
+function attemptFor({ cart, sendKeys, version = 4, known = [], finalAfter = null, saveId = null }) {
   const isSent = l => sendKeys.includes(l.recipe_id)
   const saved = cart.map(l => (isSent(l) ? sent(l) : l))
   const lines = cart.filter(isSent)
@@ -27,7 +27,7 @@ function attemptFor({ cart, sendKeys, version = 4, known = [], finalAfter = null
     orderId: 'o1', orderNo: 12, where: 'Table 7', tableName: 'Table 7', covers: 2, expectedVersion: version,
     payload: saved.map(toItemPayload), snapshot: cart,
     kot: lines.filter(l => l.category !== 'Beverage'), bot: lines.filter(l => l.category === 'Beverage'),
-    knownTicketIds: known,
+    knownTicketIds: known, saveId,
   })
   a.finalAfter = finalAfter
   return a
@@ -149,6 +149,92 @@ describe('judgeSendAttempts — ORDER-FLOW-4: the same dishes fired from two tab
     const mine = attemptFor({ cart: [before], sendKeys: ['r-momo'], known: [] })
     const tickets = [{ id: 't-mine', sent_by: ME, items: [{ recipe_id: 'r-momo', qty: 2 }] }]
     expect(judgeSendAttempts([mine], stored(5, [sent(before)]), { tickets, profileId: ME }).verdict).toBe('landed')
+  })
+})
+
+// S840: the server lists the saves that landed on the order by the id each was sent with.
+const withSaves = (order, saves) => ({ ...order, recent_saves: saves })
+
+describe('recentSaveOf / judgesById — the order\'s record of the saves that landed (S840)', () => {
+  test('a save is found by its id, whatever its case, with the version it left', () => {
+    const saves = [{ id: 'b2', v: 6 }, { id: 'a1', v: 5 }]
+    expect(recentSaveOf(saves, 'A1')).toEqual({ id: 'a1', v: 5 })
+    expect(recentSaveOf(saves, 'zz')).toBeNull()
+    expect(recentSaveOf(null, 'a1')).toBeNull() // not read: a server before the column
+    expect(recentSaveOf(saves, null)).toBeNull()
+  })
+  test('an attempt keeps its id lowercase, as the server stores it', () => {
+    expect(newSendAttempt({ orderId: 'o1', saveId: 'ABC-1' }).saveId).toBe('abc-1')
+    expect(newSendAttempt({ orderId: 'o1' }).saveId).toBeNull()
+  })
+  test('ids decide only when the list was read and every attempt was sent with one', () => {
+    const a = attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], saveId: 'a1' })
+    const old = attemptFor({ cart: [MOMO], sendKeys: ['r-momo'] })
+    expect(judgesById([a], withSaves(stored(5, [sent(MOMO)]), []))).toBe(true)
+    expect(judgesById([a], stored(5, [sent(MOMO)]))).toBe(false)
+    expect(judgesById([a, old], withSaves(stored(5, [sent(MOMO)]), []))).toBe(false)
+  })
+})
+
+describe('judgeSendAttempts by save id — ORDER-FLOW-4\'s residual (S840)', () => {
+  test('two tablets on the SAME login fire the same dishes: the save not listed is not this till\'s, so no second ticket', () => {
+    // This tablet's KOT (a1) got no answer. The other tablet, signed in as the same waiter, sent the
+    // identical cart (b1) and landed first; a1 was refused as stale. Its ticket names this same login.
+    const mine = stopWaiting(attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], known: [], saveId: 'a1' }), 1000)
+    const theirs = [{ id: 't-other-tablet', sent_by: ME, items: [{ recipe_id: 'r-momo', qty: 2 }] }]
+    const order = stored(5, [sent(MOMO)])
+    // The content test alone took the identical lines for this till's own save, and printed again.
+    expect(judgeSendAttempts([mine], order, { tickets: theirs, profileId: ME, now: 2000 }).verdict).toBe('landed')
+    // By id: not listed, so another till's. Nothing prints, the waiter is told it was already sent.
+    const v = judgeSendAttempts([mine], withSaves(order, [{ id: 'b1', v: 5 }]), { tickets: theirs, profileId: ME, now: 2000 })
+    expect(v.verdict).toBe('elsewhere')
+    expect(v.attempt).toBe(mine)
+  })
+
+  test('listed: it landed — exactly, or with another save on top since', () => {
+    const a = attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], saveId: 'a1' })
+    const exact = judgeSendAttempts([a], withSaves(stored(5, [sent(MOMO)]), [{ id: 'a1', v: 5 }]), { profileId: ME })
+    expect(exact).toEqual({ verdict: 'landed', attempt: a, exact: true })
+    const extra = { ...TEA, sent_to_kot: false }
+    const onTop = judgeSendAttempts([a], withSaves(stored(6, [sent(MOMO), extra]), [{ id: 'b1', v: 6 }, { id: 'a1', v: 5 }]), { profileId: ME })
+    expect(onTop).toEqual({ verdict: 'landed', attempt: a, exact: false })
+  })
+
+  test('listed: it landed even when another login logged a ticket for the same dish since (that ticket is the later save\'s +1)', () => {
+    const a = attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], known: [], saveId: 'a1' })
+    const tickets = [{ id: 't-cashier', sent_by: CASHIER, items: [{ recipe_id: 'r-momo', qty: 1 }] }]
+    const v = judgeSendAttempts([a], withSaves(stored(6, [sent({ ...MOMO, qty: 3 })]), [{ id: 'c1', v: 6 }, { id: 'a1', v: 5 }]), { tickets, profileId: ME })
+    expect(v.verdict).toBe('landed')
+  })
+
+  test('not listed and its version still stands: pending while it may land, then lost', () => {
+    const a = stopWaiting(attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], saveId: 'a1' }), 1000)
+    const order = withSaves(stored(4, [MOMO]), [{ id: 'z9', v: 4 }])
+    expect(judgeSendAttempts([a], order, { now: 1000 + SEND_LAND_GRACE_MS - 1 }).verdict).toBe('pending')
+    expect(judgeSendAttempts([a], order, { now: 1000 + SEND_LAND_GRACE_MS }).verdict).toBe('lost')
+  })
+
+  test('not listed, another save moved the order and its dishes are not sent: lost', () => {
+    const a = stopWaiting(attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], saveId: 'a1' }), 1000)
+    expect(judgeSendAttempts([a], withSaves(stored(5, [MOMO, TEA]), [{ id: 'b1', v: 5 }]), { now: 1001 }).verdict).toBe('lost')
+  })
+
+  test('a save that fires nothing and is not listed is lost, whatever the order holds', () => {
+    const plain = stopWaiting(attemptFor({ cart: [sent(MOMO), TEA], sendKeys: [], saveId: 'a1' }), 0)
+    expect(judgeSendAttempts([plain], withSaves(stored(5, [sent(MOMO), TEA]), [{ id: 'b1', v: 5 }]), { now: SEND_LAND_GRACE_MS }).verdict).toBe('lost')
+  })
+
+  test('KOT lost, then Send for everything also lost: the listed one landed', () => {
+    const kot = attemptFor({ cart: [MOMO, TEA], sendKeys: ['r-momo'], saveId: 'k1' })
+    const all = attemptFor({ cart: [MOMO, TEA], sendKeys: ['r-momo', 'r-tea'], saveId: 's1' })
+    const order = stored(5, [sent(MOMO), sent(TEA)])
+    expect(judgeSendAttempts([kot, all], withSaves(order, [{ id: 's1', v: 5 }]), { profileId: ME }).attempt).toBe(all)
+    expect(judgeSendAttempts([kot, all], withSaves(stored(5, [sent(MOMO), TEA]), [{ id: 'k1', v: 5 }]), { profileId: ME }).attempt).toBe(kot)
+  })
+
+  test('a closed bill still settles it first', () => {
+    const a = attemptFor({ cart: [MOMO], sendKeys: ['r-momo'], saveId: 'a1' })
+    expect(judgeSendAttempts([a], withSaves(stored(5, [sent(MOMO)], 'billed'), [{ id: 'a1', v: 5 }])).verdict).toBe('closed')
   })
 })
 
