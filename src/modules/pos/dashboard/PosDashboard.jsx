@@ -21,6 +21,7 @@ import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import SalesPivot from '../../dashboard/SalesPivot'
+import OccasionsCard, { useUpcomingOccasions } from './OccasionsCard'
 import { staleGuestOrderCutoffIso } from '../../../shared/guestOrderStale'
 import {
   summariseBills, compareToLastWeek, hourlySales, paymentMix, channelMix, topItems,
@@ -130,6 +131,9 @@ export default function PosDashboard() {
   const [pivotKey, setPivotKey] = useState(0)
   const pivotAskedAt = useRef(0)
   const refreshPivot = useCallback(() => { pivotAskedAt.current = Date.now(); setPivotKey(k => k + 1) }, [])
+  // S843: birthdays and anniversaries, their own read (never inside load()), started with the page's
+  // and refreshed on the pivot's key: Refresh, and the minute tick at most every 5 minutes.
+  const occasions = useUpcomingOccasions({ enabled: canMoney, refreshKey: pivotKey })
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -421,6 +425,14 @@ export default function PosDashboard() {
                 </div>
               </div>
             </>
+          )}
+
+          {/* S843: who to wish this week. Customers' dates are a supervisor's records (the Customers
+              page is supervisor and up), so the card has the money cards' gate. */}
+          {canMoney && (
+            <div className="dash-section">
+              <OccasionsCard state={occasions} clientId={clientId} outletName={clientName || ''} />
+            </div>
           )}
 
           {/* The month's POS sales by category — moved here from Home with the rest of POS (S800).

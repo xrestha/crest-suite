@@ -1,14 +1,13 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import PosCustomers from './PosCustomers'
 
-// S842: settling a Credit bill asks first and says what will happen; what the press did is said beside
-// that bill (a status when it settled, ActionError with the server's answer when it did not); and the
-// customer search says how much of the book it shows.
+// S842: the customer search says how much of the book it shows. S843: the Credit tab is CreditTab
+// (CreditTab.test.jsx holds its behaviour); here only that the page mounts it for the outlet on screen.
 //
 // The page's reads and writes are faked per table. jest.mock factories may only reach variables named
 // mock*; they are read at call time. Plain functions, not jest.fn: CRA resets mock implementations.
 const mockState = {}
-const mockCalls = { update: [], insert: [] }
+const mockCalls = { update: [], insert: [], rpc: [] }
 function mockAnswerFor(kind, table) {
   if (kind === 'update') return mockState.updateAnswer
   if (kind === 'insert') return { data: null, error: null }
@@ -27,7 +26,7 @@ function mockBuilder(kind, table, payload) {
     return Promise.resolve(a)
   }
   const b = {}
-  for (const op of ['select', 'eq', 'is', 'in', 'order', 'limit', 'abortSignal']) b[op] = () => b
+  for (const op of ['select', 'eq', 'is', 'in', 'not', 'order', 'limit', 'gte', 'lte', 'abortSignal']) b[op] = () => b
   b.range = answer
   b.maybeSingle = answer
   b.then = (ok, bad) => answer().then(ok, bad)
@@ -41,7 +40,7 @@ const mockDb = {
 }
 jest.mock('../../../shared/hooks/useScopedDb', () => ({ useScopedDb: () => mockDb }))
 jest.mock('../../../supabaseClient', () => ({
-  supabase: { from: table => mockBuilder('select', table), rpc: () => mockBuilder('select', 'rpc'), auth: {} },
+  supabase: { from: table => mockBuilder('select', table), rpc: (name, args) => { mockCalls.rpc.push({ name, args }); return mockBuilder('select', 'rpc') }, auth: {} },
 }))
 const mockAuth = { clientId: 'c1', profile: { id: 'me' }, hasPosAccess: () => true, hasFeature: () => false }
 jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
@@ -66,77 +65,18 @@ beforeEach(() => {
   mockState.updateAnswer = { data: [{ id: 'b1' }], error: null }
   mockCalls.update = []
   mockCalls.insert = []
+  mockCalls.rpc = []
   jest.spyOn(console, 'error').mockImplementation(() => {})
 })
 
-async function openSettle() {
-  render(<PosCustomers />)
-  fireEvent.click(await screen.findByRole('tab', { name: /Outstanding Credit/ }))
-  fireEvent.click(await screen.findByRole('button', { name: 'Settle' }))
-}
-// A browser focuses a clicked button and jsdom does not; the dialog hands focus back to its opener.
-function press(name) {
-  const button = screen.getByRole('button', { name })
-  button.focus()
-  fireEvent.click(button)
-}
-
-describe('Settle on Outstanding Credit (S842)', () => {
-  test('a method press asks first, says what will happen, and Cancel writes nothing', async () => {
-    await openSettle()
-    expect(screen.getByRole('button', { name: 'Cancel settling' })).toBeInTheDocument()
-    press('Cash')
-
-    const dialog = await screen.findByRole('dialog', { name: "Settle Hari's bill by Cash?" })
-    expect(dialog).toHaveTextContent('Bill TI12-CAC-82/83 from Hari, NPR 3,000, is marked as paid by Cash.')
-    expect(dialog).toHaveTextContent("NPR 3,000 goes on the open shift's drawer record as a Cash In")
-    expect(dialog).toHaveTextContent('A settlement cannot be undone')
-    expect(mockCalls.update).toEqual([])
-
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(mockCalls.update).toEqual([])
-    expect(mockCalls.insert).toEqual([])
-  })
-
-  test('another method says nothing goes into the drawer', async () => {
-    await openSettle()
-    press('eSewa')
-    const dialog = await screen.findByRole('dialog', { name: "Settle Hari's bill by eSewa?" })
-    expect(dialog).toHaveTextContent('Nothing goes into the cash drawer count')
-    expect(screen.getByRole('button', { name: 'Settle as eSewa' })).toBeInTheDocument()
-  })
-
-  test('confirmed: settled once, the cash goes on the shift, and the line where the row was says so and takes focus', async () => {
-    await openSettle()
-    press('Cash')
-    fireEvent.click(await screen.findByRole('button', { name: 'Settle as Cash' }))
-
-    const line = await screen.findByText(/NPR 3,000 collected from Hari via Cash\. Added to the open shift's cash count\. It is under Collected now\./)
-    expect(line).toHaveAttribute('role', 'status')
-    expect(mockCalls.update).toHaveLength(1)
-    expect(mockCalls.update[0]).toMatchObject({ credit_settled_by: 'me', credit_settled_method: 'Cash' })
-    expect(mockCalls.insert).toHaveLength(1)
-    expect(mockCalls.insert[0]).toMatchObject({ amount: 3000, kind: 'credit_settlement', shift_id: 'shift-1' })
-    // The bill left Outstanding, so the line stands where its row was.
-    expect(screen.getByText('No outstanding credit — all Credit bills have been collected. 🎉')).toBeInTheDocument()
-    await waitFor(() => expect(line.parentElement).toHaveFocus()) // eslint-disable-line testing-library/no-node-access
-  })
-
-  test('a refusal is an alert beside the bill, with the server answer as fine print', async () => {
-    mockState.updateAnswer = { data: null, status: 403, error: { code: '42501', hint: 'rank_required', message: 'pos_orders: settling a credit bill needs POS Supervisor access or above' } }
-    await openSettle()
-    press('Cash')
-    fireEvent.click(await screen.findByRole('button', { name: 'Settle as Cash' }))
-
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/^The bill was not marked as settled\./)
-    expect(alert).toHaveTextContent('42501 · pos_orders: settling a credit bill needs POS Supervisor access or above')
-    // Under the bill's own row, in the Outstanding table.
-    expect(alert.closest('tr').previousElementSibling).toHaveTextContent('TI12-CAC-82/83') // eslint-disable-line testing-library/no-node-access
-    expect(mockCalls.insert).toEqual([])
-    // The panel stays open, so focus went back to the method pressed.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cash' })).toHaveFocus())
+describe('Credit (S843)', () => {
+  test('the Credit tab is CreditTab: it reads who owes for the outlet on screen, and an empty answer says nobody owes', async () => {
+    render(<PosCustomers />)
+    fireEvent.click(await screen.findByRole('tab', { name: /^Credit/ }))
+    expect(await screen.findByText('Nobody owes anything on Credit now.')).toBeInTheDocument()
+    expect(mockCalls.rpc).toContainEqual({ name: 'pos_credit_open_bills', args: { p_client_id: 'c1' } })
+    // The old whole-bill Settle is gone.
+    expect(screen.queryByRole('button', { name: 'Settle' })).not.toBeInTheDocument()
   })
 })
 

@@ -12,7 +12,9 @@ import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { contrastRatio } from '../../../utils/avatarColor'
 import QRCode from 'qrcode'
-import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { getBsToday, getBsFiscalYear, bsDayBoundaryIso, formatAdAsBs } from '../../../utils/bsCalendar'
+import { memberStatus, isMembershipReason, creditLimitWarning, normalizeCardNo, todayNepalIso, pctText } from './memberDiscount'
+import { creditPartyKey } from '../customers/creditLedger'
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap, carryOverFrom, stillInPlay } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from './posRecipeBook'
@@ -437,6 +439,16 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [discountStr,     setDiscountStr]     = useState('')
   const [discountReason,  setDiscountReason]  = useState('')
   const [discountReasons, setDiscountReasons] = useState(DEFAULT_DISCOUNT_REASONS)
+  // S843: the customer the bill's phone (or a member card number) finds, with their card type — for
+  // the member discount and the credit-limit warning (memberDiscount.js). `memberDismissedFor` is the
+  // customer whose member discount the cashier took off, so it is not filled in again on this bill.
+  const [billCustomer,       setBillCustomer]       = useState(null)
+  const [billCustomerMsg,    setBillCustomerMsg]    = useState('')
+  const [memberCardStr,      setMemberCardStr]      = useState('')
+  const [memberDismissedFor, setMemberDismissedFor] = useState(null)
+  const [outletHasCards,     setOutletHasCards]     = useState(false)
+  const [creditOwedBefore,   setCreditOwedBefore]   = useState(null) // what the customer already owes on Credit
+  const [creditOwedMsg,      setCreditOwedMsg]      = useState('')
   // Pulling an already-fired line: the open prompt, the reason being typed into it, and the reason
   // that then rides along with the NEXT save. One reason covers one save rather than one line —
   // a save is one deliberate act, and asking twice for the same edit reads as a malfunction.
@@ -1089,6 +1101,61 @@ export default function PosOrders({ billingStation = false } = {}) {
   const tendersLockHint = closeLocked ? 'Locked until the till knows whether the first payment try went through.'
     : 'Payments are already recorded against this total — undo them below to change the discount or comps.'
 
+  // S843 (owner decisions): a member's card discount fills in by itself as an ordinary bill discount
+  // the cashier can take off, and the cashier's own discount limit still applies (the clamp above,
+  // and guard_pos_order_close on the server — no exemption). A discount the cashier chose stays
+  // theirs; one filled in for a guest no longer on the bill comes off. Nothing moves while the
+  // payment is locked (tenders taken, or a close try still unsettled).
+  const memberNow = memberStatus(billCustomer, todayNepalIso())
+  useEffect(() => {
+    if (!billingOpen || tendersLocked) return
+    if (memberNow.kind !== 'active') {
+      if (isMembershipReason(discountReason)) { setDiscountStr(''); setDiscountReason('') }
+      return
+    }
+    if (memberDismissedFor && memberDismissedFor === billCustomer?.id) return
+    const pctStr = pctText(memberNow.pct)
+    if (discountReason === memberNow.reason && discountMode === 'percent' && discountStr === pctStr) return
+    if ((parseFloat(discountStr) || 0) > 0 && !isMembershipReason(discountReason)) return
+    setDiscountMode('percent'); setDiscountStr(pctStr); setDiscountReason(memberNow.reason)
+  }, [billingOpen, billCustomer?.id, memberNow.kind, memberNow.reason, memberDismissedFor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function removeMemberDiscount() {
+    if (tendersLocked) return
+    setMemberDismissedFor(billCustomer?.id || null)
+    if (isMembershipReason(discountReason)) { setDiscountStr(''); setDiscountReason('') }
+  }
+  function reapplyMemberDiscount() {
+    if (tendersLocked || memberNow.kind !== 'active') return
+    setMemberDismissedFor(null)
+    setDiscountMode('percent'); setDiscountStr(pctText(memberNow.pct)); setDiscountReason(memberNow.reason)
+  }
+
+  // S843: a credit limit only warns (owner decision). What the customer already owes is read when a
+  // bill for someone with a limit is about to go on Credit; a failed read says it could not check,
+  // never that they owe nothing.
+  const creditLimit = billCustomer?.credit_limit
+  useEffect(() => {
+    if (!billingOpen || splitMode || payMethod !== 'Credit' || deliveryPartner || creditLimit == null || !billCustomer) {
+      setCreditOwedBefore(null); setCreditOwedMsg(''); return
+    }
+    let cancelled = false
+    const key = creditPartyKey({ delivery_partner: null, buyer_phone: billCustomer.phone || buyerPhone, buyer_name: billCustomer.name || buyerName })
+    supabase.rpc('pos_credit_open_bills', { p_party_key: key, p_client_id: clientId }).then(({ data, error }) => {
+      if (cancelled) return
+      if (error) {
+        setCreditOwedBefore(null)
+        setCreditOwedMsg(`Couldn't check what ${billCustomer.name || 'this guest'} already owes against their credit limit. ${errorText(error, 'staff')}`)
+        return
+      }
+      setCreditOwedMsg('')
+      setCreditOwedBefore((data || []).reduce((s, b) => s + (Number(b.owed) || 0), 0))
+    })
+    return () => { cancelled = true }
+  }, [billingOpen, splitMode, payMethod, deliveryPartner, billCustomer?.id, creditLimit]) // eslint-disable-line react-hooks/exhaustive-deps
+  const creditWarning = creditOwedBefore == null ? null
+    : creditLimitWarning({ limit: creditLimit, owed: creditOwedBefore, billTotal: payTotal })
+
   // Single-payment Cash: a tender below the bill total is a short drawer with no cause recorded —
   // the change line clamps to 0, so without this nothing on screen even hints. Block Confirm
   // instead (split mode already guards via `remaining`). '' means "exact cash" (see
@@ -1325,6 +1392,63 @@ export default function PosOrders({ billingStation = false } = {}) {
     }, 400)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [billingOpen, buyerPhone, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── S843: members and credit limits ─────────────────────────────────────────────────────────────
+  // Does this outlet give out member cards at all? Read once per billing window, so the Card no. box
+  // shows only where it means something. A failed read leaves the box hidden and is logged: the
+  // phone still finds a member.
+  useEffect(() => {
+    if (!billingOpen) return
+    let cancelled = false
+    scopedFrom('pos_membership_types', 'id').eq('is_active', true).limit(1).then(({ data, error }) => {
+      if (cancelled) return
+      if (error) { console.error('POS membership: card types not read:', error); return }
+      setOutletHasCards((data || []).length > 0)
+    })
+    return () => { cancelled = true }
+  }, [billingOpen, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The customer the bill's phone finds, with their card and credit limit. Debounced like the points
+  // lookup above, and found by the number however it is typed. Never for a delivery partner: the
+  // partner owes the bill, and is no member. A failed read says so — it is not "not a member", which
+  // would have a cashier tell a regular their card does not count.
+  const BILL_CUSTOMER_COLS = 'id, name, phone, membership_type_id, card_no, card_expires_on, credit_limit, pos_membership_types(name, discount_pct, is_active)'
+  useEffect(() => {
+    const key = customerPhoneKey(buyerPhone)
+    if (!billingOpen || !key || deliveryPartner || isDeliveryPartnerPhone(buyerPhone, billingSettings.delivery_partners)) {
+      setBillCustomer(null); setBillCustomerMsg(''); return
+    }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const { data, error } = await scopedFrom('pos_customers', BILL_CUSTOMER_COLS).eq(key.column, key.value).maybeSingle()
+      if (cancelled) return
+      if (error) { setBillCustomer(null); setBillCustomerMsg(`Couldn't check whether this guest is a member. ${errorText(error, 'staff')}`); return }
+      setBillCustomerMsg('')
+      setBillCustomer(data || null)
+    }, 400)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [billingOpen, buyerPhone, deliveryPartner, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A member card number typed at payment: the card names the guest, so its holder's phone goes on
+  // the bill (the phone lookup above then confirms the same customer) and their name where none was
+  // typed. Card numbers are stored trimmed and upper-cased, and looked up the same way.
+  useEffect(() => {
+    const card = normalizeCardNo(memberCardStr)
+    if (!billingOpen || !card) return
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const { data, error } = await scopedFrom('pos_customers', BILL_CUSTOMER_COLS).eq('card_no', card).maybeSingle()
+      if (cancelled) return
+      if (error) { setBillCustomerMsg(`Couldn't look up card ${card}. ${errorText(error, 'staff')}`); return }
+      if (!data) { setBillCustomerMsg(`No customer holds card ${card}. Check the number, or find the guest by phone.`); return }
+      setBillCustomerMsg('')
+      setBillCustomer(data)
+      setBuyerExpanded(true)
+      setBuyerName(prev => (prev.trim() ? prev : (data.name || '')))
+      if (data.phone) setBuyerPhone(data.phone)
+    }, 500)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [billingOpen, memberCardStr, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live bill/slip preview inside the Billing modal — built from the exact same functions used
   // for the real print, so what the cashier sees always matches what will actually print.
@@ -4703,6 +4827,8 @@ export default function PosOrders({ billingStation = false } = {}) {
         })
     }
     setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
+    setBillCustomer(null); setBillCustomerMsg(''); setMemberCardStr(''); setMemberDismissedFor(null)
+    setCreditOwedBefore(null); setCreditOwedMsg('')
     setCloseMsg('')
     setCompCosting(null); setCompCostFailed(false)
     setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
@@ -7369,6 +7495,17 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       <input id="pos-orders-buyer-phone" placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
                         style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                     </div>
+                    {/* S843: shown only where the outlet gives out member cards. */}
+                    {outletHasCards && !deliveryPartner && (
+                      <div style={{ marginBottom: 8 }}>
+                        <Tip text="Type a member's card number to find them: their phone goes on the bill and their card discount fills in below. Their phone number finds them too.">
+                          <label htmlFor="pos-orders-member-card" style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'inline-block', marginBottom: 4 }}>Member card no.</label>
+                        </Tip>
+                        <input id="pos-orders-member-card" placeholder="Card no." autoComplete="off" value={memberCardStr}
+                          onChange={e => setMemberCardStr(e.target.value)} disabled={tendersLocked}
+                          style={disabledStyle({ ...billInput, width: '100%' }, tendersLocked)} />
+                      </div>
+                    )}
                     <input placeholder="Remarks" aria-label="Bill remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
                   </>
                 )}
@@ -7592,7 +7729,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       </button>
                     ))}
                     {hasPosAccess('supervisor') && (
-                      <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later from Customers → Outstanding Credit.">
+                      <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later, whole or in part, from Customers → Credit.">
                         <button onClick={() => setPayMethod('Credit')}
                           aria-pressed={payMethod === 'Credit'}
                           className={`pay-method-btn pay-method-btn--credit${payMethod === 'Credit' ? ' pay-method-btn--selected' : ''}`}>
@@ -7603,10 +7740,18 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   </div>
                 )}
 
+                {/* S843: a credit limit warns and never blocks (owner decision). */}
+                {!splitMode && payMethod === 'Credit' && !deliveryPartner && (creditWarning || creditOwedMsg) && (
+                  <p role="status" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '0 0 12px', lineHeight: 1.5 }}>
+                    {creditWarning
+                      ? `Over credit limit: ${billCustomer?.name || 'this guest'} already owes ${fmtNpr(creditWarning.before)}; this bill takes it to ${fmtNpr(creditWarning.after)}, ${fmtNpr(creditWarning.over)} over their ${fmtNpr(creditWarning.limit)} limit. You can still put it on Credit.`
+                      : creditOwedMsg}
+                  </p>
+                )}
                 {!splitMode && payMethod === 'Credit' && billingSettings.delivery_partners.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 6px' }}>
-                      <Tip text="Optional — delivery-aggregator orders don't pay at the counter, they remit later minus commission, so they close as Credit like any other unpaid balance. This just marks the buyer as the platform so Outstanding Credit and the Delivery Partners report can track it separately; the actual commission is entered when you settle it later, not now." width={300}>Delivery Partner (optional)</Tip>
+                      <Tip text="Optional — delivery-aggregator orders don't pay at the counter, they remit later minus commission, so they close as Credit like any other unpaid balance. This just marks the buyer as the platform so Customers → Credit and the Delivery Partners report can track it separately; the actual commission is entered when the platform's payment is taken in Customers → Credit, not now." width={300}>Delivery Partner (optional)</Tip>
                     </p>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {billingSettings.delivery_partners.map(dp => (
@@ -7630,6 +7775,34 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     only relevant on some bills), so the fast path doesn't visually run together
                     with the exception-handling path. */}
                 <div style={{ borderTop: '1px solid var(--theme-border-lt)', paddingTop: 14, marginTop: 2 }}>
+                {/* S843: what the guest's member card does on this bill, said in one line, with the
+                    one move the cashier may want (take it off / put it back). */}
+                {(memberNow.kind !== 'none' || billCustomerMsg) && (
+                  <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: 12 }}>
+                    {billCustomerMsg ? (
+                      <span style={{ color: 'var(--theme-amber-text)' }}>{billCustomerMsg}</span>
+                    ) : memberNow.kind === 'active' ? (
+                      <>
+                        <span className="badge badge-yellow" style={{ whiteSpace: 'nowrap' }}>★ {memberNow.typeName} member</span>
+                        {isMembershipReason(discountReason) ? (
+                          <>
+                            <span style={{ color: 'var(--theme-text2)' }}>{pctText(memberNow.pct)}% member discount filled in below.</span>
+                            {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={removeMemberDiscount}>Take it off</button>}
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ color: 'var(--theme-text2)' }}>Member discount ({pctText(memberNow.pct)}%) is not on this bill.</span>
+                            {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={reapplyMemberDiscount}>Give {pctText(memberNow.pct)}%</button>}
+                          </>
+                        )}
+                      </>
+                    ) : memberNow.kind === 'expired' ? (
+                      <span style={{ color: 'var(--theme-amber-text)' }}>{memberNow.typeName} card expired on {formatAdAsBs(memberNow.expiresOn)}, so there is no member discount. A manager can renew it on Customers.</span>
+                    ) : (
+                      <span style={{ color: 'var(--theme-amber-text)' }}>{memberNow.typeName} cards are switched off, so there is no member discount.</span>
+                    )}
+                  </div>
+                )}
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
                   Discount <Tip text="Reduces the pre-VAT taxable amount — VAT is recalculated on the discounted base, matching standard invoice practice. Leave at 0 for no discount.">(optional)</Tip>
                 </p>
@@ -7686,6 +7859,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-discount-reason">Discount Reason</label>
                     <select id="pos-orders-discount-reason" className="form-select" style={{ width: '100%' }} value={discountReason} onChange={e => setDiscountReason(e.target.value)}>
                       <option value="">— Select —</option>
+                      {/* S843: a member discount's reason names the card, and is on no outlet list. */}
+                      {isMembershipReason(discountReason) && !discountReasons.includes(discountReason) && (
+                        <option value={discountReason}>{discountReason}</option>
+                      )}
                       {discountReasons.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
