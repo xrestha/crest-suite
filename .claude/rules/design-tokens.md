@@ -29,7 +29,7 @@ Two rules:
 
 - **Scope to the DIRECTORY with a wildcard** (`src/modules/pos/guestmenu/**`), not to a basename. It
   is immune to the casing the hook happens to print, and it is what the sanctioned exception actually
-  is. (Since S767 that directory's entry is value-specific: `50%` only, for the food mark's dot — the guest pages are square now, so any other corner there is drift.)
+  is. (S767 narrowed that directory's entry to `50%`, for the food mark's dot; S846 removed it, because the mark is an SVG now and no corner there is exempt.)
 - **Never take the per-value form for a file-scoped exception.** `ignore-value design-system-radius
   8px` with no `--file` exempts 8px **product-wide** and quietly defeats the Modernist zero-radius
   rule everywhere. The narrowest ignore is the one scoped to the thing that is genuinely exempt.

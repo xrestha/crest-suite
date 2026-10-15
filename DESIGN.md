@@ -162,7 +162,8 @@ rounded:
   # This repudiates the old Proportional Corner Rule, which sized a corner to its box. There is
   # no longer a corner to size. The Closed-Scale Rule survives and is stricter: 0 is the only
   # value on the scale, so any non-zero radius in the product is drift by definition — except
-  # the two exemptions named in Shapes (print templates, and the veg / non-veg food mark's dot).
+  # the one exemption named in Shapes (print templates). The food mark's dot was the second until
+  # S846 drew the mark as an SVG.
   xs: "0"
   sm: "0"
   md: "0"
@@ -498,8 +499,19 @@ Approved, an Advance being recovered, a Final Settlement finalized but unpaid) i
 keeps it apart from a void grey. Its categories are `badge-gray`, its figures ink, its codes text2,
 and attendance marks follow what the day is (green worked, purple paid but not worked, grey unpaid
 or off, red absent). Staff rank chips (`src/shared/staffLevelBadge.js`) went grey in all three
-modules at the same time, because that file exists so the three cannot disagree. POS keeps the
-accent-for-category vocabulary above for everything else until it is reviewed the same way.
+modules at the same time, because that file exists so the three cannot disagree.
+
+**POS followed in S846, by owner decision ("calm the till's red the same way").** `posSignals.js`
+is the module's vocabulary and now says the same thing as IMS and HR: a figure is ink with tabular
+numbers (tile prices, TOTAL, every bill and floor total), a category or a plain state is
+`badge-gray` (occupied, reserved, a close type, BOT, a member, Part bill, a sent line, the order
+number), and "in progress, not finished" takes HR's ◷ mark in grey (a cooking ticket, an open
+shift). Amber stays "waiting on a person", red "wrong or refused", green "done". The accent is spent
+on Send, the selected payment method, an active tab or toggle, a link, focus and one commit button
+per dialog; a button repeated on every row or card (Bill on the Billing station, every Kitchen
+Display card, Receive payment) is `btn-ghost`. On the floor a taken table no longer wears an accent
+edge: its badge says Occupied and its strip carries what needs a waiter. The KOT station chip keeps
+its purple; BOT went grey, the one S613 colour this reopened.
 
 **Under Modernist the accent slot and the danger slot are the same HUE, which makes the rest of
 this rule load-bearing rather than tidy.** They are still separated — measured, the two `*-text`
@@ -934,13 +946,21 @@ withdrawn. Status dots, toggle knobs, avatars, step markers and PIN dots are all
 signal that is round in a system where nothing else is round reads as a leftover, not as a signal,
 and the dot already carries its meaning in colour and position.
 
-**The two exemptions are both outside the interface itself.** Print templates (`@media print` and
+**The one exemption is outside the interface itself.** Print templates (`@media print` and
 the generated print-HTML strings) keep whatever they had, because `Layout.css`'s print block already
-forces `border-radius: 0` on the classed elements and the rest never sees an app stylesheet. And the
-**veg / non-veg food mark** — an outlined square holding a filled dot, green or red — keeps its
-round dot: it is the market's food-labelling symbol, whose shape IS its meaning, not a status dot
-the system drew (`.gm-diet` in `guestMenu.css`). The guest pages were an exemption too, with their
-own shape language, until S767 moved them onto the default preset; they are square now.
+forces `border-radius: 0` on the classed elements and the rest never sees an app stylesheet. The
+guest pages were an exemption too, with their own shape language, until S767 moved them onto the
+default preset; they are square now.
+
+**The food mark is a shape, not a hue (S846).** It is the market's food-labelling symbol — an
+outlined square holding one filled shape — and the shape now carries the meaning on its own: a
+**dot** for veg (green), a **triangle** for non-veg (red), an **E** for egg (amber; egg, but no meat
+or fish). It used to be the same square and dot for all three, coloured green, red or amber, which
+is the red-green pair roughly one man in twelve cannot separate, on the page a vegetarian guest
+orders from. `DietMark.jsx` draws it as an inline SVG (`dietMark.css`, `currentColor`, `CanvasText`
+under forced colours), so it needs no corner exemption; the guest menu prints a key beside its
+vegetarian filter, the dish sheet prints the word, and the till's menu tiles carry the same mark.
+A dish's diet reads through one rule, `dietOfDish(is_veg, is_egg)`.
 
 **Borders carry structure, and now they carry ALL of it.** With the corner gone, the rule weight is
 the only thing left describing hierarchy, so the two weights matter more than they did and are not
@@ -964,7 +984,7 @@ corner to size.
 
 **The Closed-Scale Rule.** A radius, a type size or a spacing value that is not on its scale is
 drift. The radius scale is now a single value, which makes the rule easier rather than harder: any
-non-zero radius inside `src/` that is not in a print template or the food mark's dot is drift by
+non-zero radius inside `src/` that is not in a print template is drift by
 definition, and the `/impeccable` hook will say so. The rule still runs the other way too — if the
 system is genuinely missing a step, add it here first, then use it.
 

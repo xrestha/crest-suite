@@ -815,7 +815,7 @@ Two POS-specific details from that convergence:
   History: docs/rules-archive/pos-billing.md#report-rows-correction
 - **KOT vs BOT is a category, not a status.** The KOT chip used `badge-green`; success-green for a
   categorical distinction is the one thing the badge set is not for. KOT is `badge-purple`, BOT
-  stays `badge-yellow` (the accent-tinted categorical tag).
+  `badge-gray` since S846 (it was the accent tint).
 
 ## A dropped write error in this file is how a dish gets cooked twice (S654)
 
@@ -859,7 +859,8 @@ History: docs/rules-archive/pos-billing.md#dropped-write-errors-count, #send-fla
 - **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar.
 - **Till text is `errorText(err, 'staff')`, never `err.message`** — the till notices, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
 - **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager; outlet has Crest IMS, S814); its misses are pruned by every count that answers (`pruneImsMisses`). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till. Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
-- **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. A KDS estimate preset starts the ticket in one tap.
+- **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. KDS Start is one tap at `DEFAULT_START_MINUTES` (10, owner decision S846); "Other time" opens the presets and keypad; a second Start within `START_SETTLE_MS` on ANY card is ignored, because the next ticket slides up under the finger.
+- **The payment window's order (S846).** Amount → method → cash received or QR → Confirm, then the `adjustOpen` fold (member card, buyer, discount, points, comps, share slips), then "Other ways to close" (Void, Complimentary; `billingTab` still switches the body). The fold's folded line (`applied`) names every adjustment on the bill, so a new adjustment adds itself there. Buyer details a bill REQUIRES render outside the fold, open. A `closeBlocker` field inside the fold is opened by `pressClose`. A floor or takeaway tile is ONE `button.floor-tile__open` stretched over the card with plain-text chips; never a Tip or a control inside a tile.
 
 History: docs/rules-archive/pos-billing.md#close-read-back-evidence
 
@@ -1033,8 +1034,8 @@ The general rule is in `DESIGN.md` (**Loudness tracks demand for action**) and s
   on the same tile (`⚠ N` / `📵` / `🔔 Guest order` / the Ready badge).
 - **The KDS strip is lateness.** `ticketStripColor()` — late / going late / ready / quiet. Stage is
   the column, its heading, and the action button; the strip must not repeat it. The column header
-  dot keeps the module's grey→brass→green progression (the same one `KOT_STATUS_BADGE` puts on a
-  floor tile) and deliberately does **not** mirror the strip: a legend keyed to a retired encoding
+  dot is grey → ink → green since S846 (Started is grey `◷ Started` on a tile) and deliberately does
+  **not** mirror the strip: a legend keyed to a retired encoding
   is worse than no legend.
 - **`--theme-red` and `--theme-amber` collide under deuteranopia on Light (ΔE 3.1)** — the base
   tokens were never retuned, only `redText`/`amberText` were (S608). Anywhere those two fill
@@ -1042,10 +1043,10 @@ The general rule is in `DESIGN.md` (**Loudness tracks demand for action**) and s
   The KDS elapsed-time line carries `△`/`▲` for exactly this.
 - **Two boundaries this rule does not govern**: a *button* keeps the product-wide control
   vocabulary (so the Void button stays red and the Complimentary button stays amber, while the
-  records they write read as close types in brass), and the **KOT/BOT station chip keeps S613's
-  purple/brass** — a settled decision, on a filterable column, and the two purple meanings in this
-  module (station, loyalty) never share a screen. Considered and kept; re-deciding a settled colour
-  is how a module ends up with three answers.
+  records they write read as close types in grey), and the **KOT station chip keeps S613's purple**
+  — a settled decision, on a filterable column, and the two purple meanings in this module (station,
+  loyalty) never share a screen. BOT went grey in S846 by owner decision, the one S613 colour the
+  calm-the-red pass reopened; the vocabulary is DESIGN.md → POS followed in S846.
 
 **The rank ladder is one value, not three files.** All three staff screens (HR, IMS, POS) read
 `STAFF_LEVEL_BADGE` from `src/shared/staffLevelBadge.js`; a fourth module reads it too.

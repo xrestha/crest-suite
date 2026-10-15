@@ -51,7 +51,7 @@ Shape and type have their own token sets at the top of `Layout.css`: `--radius-x
 
 **The visual system is Modernist as of S689.** Two presets — Modernist Night (`#191817` ground, accent `#ff563c`) and Modernist Light (`#f3f2f2`, accent `#dd2b0f` since S768 — `#ec3013` failed AA under white labels) — plus Archivo, flat surfaces, and structure carried by rule WEIGHT rather than by corners or atmosphere. The four signal colours and Light's four `*Text` variants were carried over byte-identical; the one token a new accent genuinely forced was `accentInk`, on both presets, because a red accent lands next to the danger and warning slots in a way brass never did (Light's specified `#ae1800` measured ΔE **0.5** from `amberText` under deuteranopia). Re-run those pairs before touching either ink. `node scripts/check-design-layers.mjs` asserts `PRESETS`, DESIGN.md's frontmatter and the sidecar still agree.
 
-**Every radius step is 0 (S689, Modernist).** The six names were kept rather than deleted because ~420 sites read them, and a scale with a home can be re-tuned in one edit where 420 hardcoded zeroes cannot — so keep picking the step that describes the element's size class, exactly as before, and it will paint square either way. The practical consequence for the closed-scale rule is that it got *stricter*: any non-zero radius inside `src/` is drift by definition, with two exemptions named in DESIGN.md → Shapes (print templates, and the veg / non-veg food mark's round dot). The guest pages were a third until S767 moved them onto the default preset. Anything below describing the scale as 8/12/18/24/999 is an account of how a past finding was judged at the time, not the current scale.
+**Every radius step is 0 (S689, Modernist).** The six names were kept rather than deleted because ~420 sites read them, and a scale with a home can be re-tuned in one edit where 420 hardcoded zeroes cannot — so keep picking the step that describes the element's size class, exactly as before, and it will paint square either way. The practical consequence for the closed-scale rule is that it got *stricter*: any non-zero radius inside `src/` is drift by definition, with one exemption named in DESIGN.md → Shapes (print templates). The guest pages were another until S767, and the food mark's round dot until S846, when the mark became an SVG (dot, triangle, E) with no CSS radius at all. Anything below describing the scale as 8/12/18/24/999 is an account of how a past finding was judged at the time, not the current scale.
 
 ### Motion, and the two systems that don't talk to each other (S533)
 
@@ -351,8 +351,9 @@ padding and no-`maxWidth` rule stands on its own reasons.
 
 ### A card grid cannot always take the container role (S653)
 
-Order Taking's floor grid puts `role="button" + tabIndex + onKeyDown` on the card, which is right —
-its cards hold no interactive children. Table Management's grid (POS Setup since S776) *looks identical*, had a bare
+Order Taking's floor grid put `role="button" + tabIndex + onKeyDown` on the card, which was right
+while its cards held no interactive children; by S846 they held up to seven Tip triggers, so the
+table's name is now the tile's one `<button>`, stretched over the card by `::after` (`.floor-tile`). Table Management's grid (POS Setup since S776) *looks identical*, had a bare
 `<div onClick>`, and was entirely mouse-only. It could not be fixed by copying the sibling: those
 cards hold three controls (name, status badge, QR), and interactive content inside a `button` role
 is invalid and unfocusable. **The tell is whether the card holds controls**; if it does, the
