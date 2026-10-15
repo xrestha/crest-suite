@@ -29,7 +29,7 @@ paths:
   refused forever by `DUP_MIRROR_MSG`; the mirror-link writes are checked.
 - **Dish photos upload to the `dish-photos` bucket** (D16, `20260918150000`) — never with `upsert`, and
   the bucket carries a scoped SELECT policy because Storage's remove runs `DELETE … RETURNING`
-  (`settings-row.md` has the rule). `image_url` stores the public URL with `?v=`.
+  (`settings-row.md` has the rule). `image_url` stores the public URL with `?v=`, plus `&thumb=1` when a 256px `<name>.thumb.<ext>` copy was stored beside it (S842, `photoThumbUrl`; the guest list shows it and falls back to the full file); releasing a photo removes its thumb too.
 - **Duplicate (S795) seeds a NEW form and never writes.** `openCopy` fills it through `formFromRecipe`
   / `ingredientRowsOf` (shared with `openEdit`) with `selectedRecipe` null, so the copy takes `save()`'s
   insert path and every guard on it. Never make it a bulk copier that inserts rows itself: that is the

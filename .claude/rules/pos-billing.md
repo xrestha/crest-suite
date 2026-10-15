@@ -32,9 +32,8 @@ waits, unmarked, on the floor banner. An outlet without Crest IMS posts nothing 
 notes unmarked (`outletHasIms`). **Inventory starts the day it is switched on (5f-3, Q31 a, reverses
 D6/D7):** `clients.ims_since`, stamped at every switch-on; a bill closed before it, or a note on one, is
 never posted, counted or badged (`billCountsForIms`, SQL `before_inventory`). The till only reads the mark back (`billReachedInventory`,
-5f-2) and notes a miss. The bill still closes either way. A silent return once left 15 bills out of
-Inventory unnoticed.
-History: docs/rules-archive/pos-billing.md#silent-ims-post
+5f-2) and notes a miss. The bill still closes either way.
+History: docs/rules-archive/pos-billing.md#silent-ims-post, #ims-handoff-sentences
 
 **Waiting bills are posted by the server too (5f-2, `20261013170000`).** `post_waiting_pos_bills`
 (DEFINER; the Owner and the operator any month, a POS manager the open month only) runs
@@ -66,10 +65,9 @@ itself.**
 
 **`sales_entries` and `stock_movements` can diverge on a bill posted before S830, so neither is
 evidence of the other.** The browser's post wrote revenue first and depletion second, best-effort,
-so such a bill can have revenue and no movements. A backfill guard that inferred "already posted?"
-from `stock_movements` double-posted two bills' revenue on real data. Both tables carry a link to the
+so such a bill can have revenue and no movements. Both tables carry a link to the
 order (`stock_movements.ref_id`, `sales_entries.pos_order_id`); ask the table you actually mean.
-History: docs/rules-archive/pos-billing.md#two-writes-diverge
+History: docs/rules-archive/pos-billing.md#two-writes-diverge, #ims-handoff-sentences
 
 **`ims_posted_at IS NULL` means "unknown" on any row closed before that column existed**, not
 "unposted". Treating unknown as unposted is what caused the double-post. On a client that predates
@@ -81,8 +79,7 @@ post.
 
 ## Table-scoping traps in this module
 
-**`items` is fenced from a POS PIN login, and a fenced read is `[]`, not an error (S809 2f).** On a
-PIN every yield read 100% and every comp its typed Cost Price. The till's comp costs now read
+**`items` is fenced from a POS PIN login, and a fenced read is `[]`, not an error (S809 2f).** The till's comp costs now read
 through `pos_recipe_book` (DEFINER; the operator, or a POS Supervisor+ or
 the Owner of that outlet; quantities and costs only) via `posRecipeBook.js` (`posFoodCosts`), which feed `recipeCost.js`' `{ book }` walk. Its one SQL copy is the server's post, `pos_bill_stock_lines` (S830, owner Q30 a): a change to either lands in both, with `serverPostTwin.test.js` and a migration probe asserting the same fixture. Comps cost
 through `posLineCosts` (S838: recipe plus the STORED line's choices, never the cart). A Staff PIN opening a comp slip is told only a Supervisor+ sees
@@ -93,12 +90,9 @@ food costs; an IMS login reaches neither (`no_ims_staff` hides till bills).
 `creditNotePosting.js` does. `stock_movements` and `pos_orders` *are* client-scoped and stay on
 `scopedDb`. Getting this wrong fails loudly, which is the point.
 
-**Every period-scoped read here needs `fetchAllRows`.** Six `pos_orders` reads had none and capped
-silently at 1000 rows. The worst fed the **IRD Annexure 13** one-lakh threshold, where truncation
-drops a party below the disclosure line on a statutory filing — and its *child* item read was
-already paged, with a comment explaining why, while the parent was not. Same asymmetry existed on
-Covers (truncation skews averages, not just totals), Exceptions, the KOT Register and Customers'
-unbounded outstanding-credit read.
+**Every period-scoped read here needs `fetchAllRows`**, a parent read as well as its already-paged
+child (an unpaged `pos_orders` read once fed the IRD Annexure 13 one-lakh threshold).
+History: docs/rules-archive/pos-billing.md#table-scoping-stories
 
 **The operational screens need it as much as the reports (S629):** ask rows-per-what of each screen
 (`pos_customers`, slips, shift history, the Kitchen Display's `pos_kot_log`), not of each table.
@@ -107,43 +101,36 @@ History: docs/rules-archive/pos-billing.md#operational-screens-sweep
 **An `.in(column, ids)` list is a URL as well as a row count.** A uuid costs ~37 characters, so a
 few hundred ids is past what proxies accept — that failure is a loud 414, but the row cap still
 applies underneath and one order owns many rows. `fetchAllRowsChunked(ids, makeQuery)` and
-`runChunkedByIds(ids, makeQuery)` in `src/shared/fetchAllRows.js` handle both at once. The
-backfill's already-posted guard, above, is the case that needed them.
+`runChunkedByIds(ids, makeQuery)` in `src/shared/fetchAllRows.js` handle both at once.
 
 ## Shifts
 
-**The Z-report must be captured at close, not at page load, and then frozen.** It used to be
-computed when the page mounted and never persisted: opening at 8pm and closing at 11pm omitted
-three hours of takings from Expected Cash and the Variance, and because Shift History recomputed
-live, a *reprinted* Z-report could show different numbers from the one that was signed. The report
-is now re-read when the close modal opens **and** again immediately before the write (the drawer
-count itself takes minutes), then stored on `pos_shifts.closing_report`. History renders that
-snapshot; only pre-S573 shifts fall back to a recompute.
+**The Z-report must be captured at close, not at page load, and then frozen.** It is re-read when
+the close modal opens **and** again immediately before the write (the drawer count itself takes
+minutes), then stored on `pos_shifts.closing_report`, so a reprint shows what was signed. History
+renders that snapshot; only pre-S573 shifts fall back to a recompute.
 
 **Expected Cash is `opening + cash sales + cash in − cash out`, from one helper
 (`expectedCashOf`)** used by the screen, the close modal and the printed slip. Cash genuinely
 moves without being a sale in this market — supplier payments, staff advances, float drops — and
 most importantly a customer settling an older **Credit** bill in cash: that order's
-`payment_method` stays `'Credit'` forever, so the drawer read as "over" by the settled amount with
-no explanation. `pos_cash_movements` (pay_in / pay_out / credit_settlement) is that ledger, and
+`payment_method` stays `'Credit'` forever. `pos_cash_movements` (pay_in / pay_out / credit_settlement) is that ledger, and
 `PosCustomers`' settle action posts to it automatically.
 
 **Since S754 (`20260916110000`) there is a fourth movement kind, `refund`**: cash handed back
 against a Credit Note, manager-only, one per note, pinned to `direction = 'out'`, so
 `expectedCashOf` needed no change. A movement is never edited or deleted (correct it with a second
 one), and a closed shift is immutable. **A cash settlement of a delivery-partner bill posts
-`paid_amount − commission`**, because that is what the platform remits. Posting the gross left
-every such shift reading short by the commission.
+`paid_amount − commission`**, because that is what the platform remits.
 
 **Three shift rules are owner decisions (S754).**
 - **Charge and Complimentary need an open shift.** `closeOrder` re-reads it itself rather than
   trusting the cached `loadOpenShift`, so every bill lands on a drawer count. A Void does not need
-  one. BHATTI CHOILA had billed all 18 of its recent bills with no shift open, so this changed a
-  real client's routine.
+  one.
 - **Closing a shift over open orders warns and proceeds.** Those bills land on whichever shift is
   open when they are charged. There is no carry-over write.
-- **A failed Z-report read refuses the close.** Both batches used to drop `error`, and the close
-  froze a complete NPR 0 report into `closing_report` and printed it on the signed slip.
+- **A failed Z-report read refuses the close**, rather than freezing an NPR 0 report onto the
+  signed slip.
 
 **The close is checked against the stored rows (S809 1l, `20261009180000`).** `pos_shifts_guard`
 adds up Expected Cash itself over `loadShiftReport`'s rows (float + `paid_amount` of paid Cash bills +
@@ -173,24 +160,22 @@ one-open-shift index (23505). `loadOpenShift` runs under `useLatestRequest`; the
 (`closingShiftRef`): one closed elsewhere writes nothing and the page names Shift History. Messages
 that outlive the dialog go in `shiftReadError`/`pageMsg`, never its `msg`.
 
-**`salesTotal` is "Total Sales", not "Total Collection"** — it includes Credit bills, which are
-billed but not collected. The screen had this right and the signed paper slip had it wrong.
+**`salesTotal` is "Total Sales", not "Total Collection"**, on the screen and the signed slip alike:
+it includes Credit bills, which are billed but not collected.
 
 **`loadShiftReport` is rebuilt on every page load and every expanded history row, so its reads are
-worth keeping flat (S629).** It ran four in a waterfall: the cash-movements read needs nothing from
-the orders read, and the payments and items reads derive their `.in()` lists from `orders` but
-nothing from each other — two waves, not four. Its `pos_orders` read is also paged now, because
-every figure on the report is summed from it and a truncated one understates the drawer with no
-error anywhere; the two `.in()` reads are chunked.
+worth keeping flat (S629):** two waves, not four (orders and cash movements, then payments and items,
+whose `.in()` lists come from `orders`). Its `pos_orders` read is paged, because every figure on the
+report is summed from it; the two `.in()` reads are chunked.
+History: docs/rules-archive/pos-billing.md#shift-close-stories
 
 ## Order lines
 
-**Replacing an order's lines must be atomic.** It was a `DELETE` then a separate `INSERT` from the
-browser, so a failure or stall between them left a live order with **zero lines** on the server —
-the floor tile reads NPR 0 and only the browser's in-memory state can recover it. Same shape that
-cost Sales Entry real data (S456). Use `save_pos_order_items`, which is
+**Replacing an order's lines must be atomic**, never a browser `DELETE` then `INSERT` (a stall
+between them leaves a live order with **zero lines**). Use `save_pos_order_items`, which is
 `SECURITY INVOKER` so all three RESTRICTIVE staff-isolation families on `pos_order_items` stay
 enforced, and derives `client_id` from the order rather than taking it as a parameter.
+History: docs/rules-archive/pos-billing.md#atomic-line-save-story
 
 **Since S754 (`20260916100000`) it is also the only thing that may put a price on a line.** The
 signature is `save_pos_order_items(p_order_id, p_rows, p_removal_reason, p_expected_version)` and
@@ -274,6 +259,7 @@ table's food.
   own lines with their `pos_order_item_options.ingredient_deltas`.
   `src/utils/orderLineIngredients.js` is the only place in the app those lines become raw items; its
   SQL twin is `pos_bill_stock_lines`.
+- **Phone Back on a guest dish or combo sheet steps back one step**, and on its first step with picks asks before leaving (`useLeaveConfirm`, S842); a sheet's `onClose` may return `false` to stay open.
 - **The guest menu calls `get_guest_menu_options` beside `get_guest_menu`**, and a `PGRST202` (the
   function not deployed yet) reads as "no choices", not a warning to every guest.
 - **Every public guest function gates on `pos_enabled` AND `client_access_open()` (S809 1h).** A
@@ -355,9 +341,7 @@ table's food.
 ## Server-side enforcement of the close (S577)
 
 `pos_orders_client` is a plain same-client `FOR ALL` policy, so a Staff-rank till JWT holds UPDATE
-on every one of its own client's orders — and the discount cap and the void permission were both
-React. A single PATCH with `{"close_type":"void"}` or any `discount_amount` walked past them.
-Privilege invariant #3 in its POS form.
+on every one of its own client's orders: the discount cap and the void permission are the table's.
 
 **`guard_pos_order_close()` (migration `20260819120000`) is a BEFORE UPDATE trigger, not the
 `close_pos_order(...)` RPC the phase-6 critique proposed.** An RPC only protects the callers that
@@ -380,35 +364,28 @@ till reloads its settings. **Every reader of a past bill uses `billVatRegistered
 
 Three things to know before touching it:
 
-- **~~It fires only when `close_type`, `status` or `discount_amount` actually change.~~ Superseded
-  S754 — see "A guard on how a bill closes is not a guard on a closed bill" below.** The void and
-  discount-cap checks inside it still fire only on those three columns; the function now also locks
-  every closed bill. **S809 1c:** the void test keys on `status = 'voided'` OR `close_type = 'void'`,
-  and every close must be billed + paid, billed + writeoff or voided + void (HINT
-  `pos_close_mismatch`). The CHECK `pos_orders_status_close_type_check` holds the same pairs,
-  COALESCE'd because a CHECK passes on NULL. Until then `{"status":"voided"}` with no close type
-  skipped Allow Void and dropped the bill out of every report (CHECKOUT-2).
+- **The void and discount-cap checks fire only when `close_type`, `status` or `discount_amount`
+  change; since S754 the function also locks every closed bill** (below). **S809 1c:** the void test
+  keys on `status = 'voided'` OR `close_type = 'void'`, and every close must be billed + paid,
+  billed + writeoff or voided + void (HINT `pos_close_mismatch`). The CHECK
+  `pos_orders_status_close_type_check` holds the same pairs, COALESCE'd because a CHECK passes on
+  NULL.
 - **`paid_amount` is deliberately NOT enforced.** Re-deriving the bill total in SQL means a second
   copy of the VAT-on-discounted-base arithmetic and the round-to-the-rupee rule, i.e. a second
   definition of a figure the product is sold on. A drifted copy would not misreport a number, it
   would REJECT real bills mid-service. The two checks that ARE enforced need no money formula: the
   cap is measured against a plain `SUM(qty * unit_price)` over non-comped lines, which is
   byte-for-byte `paySubEx`.
-- **`closeOrder` now persists the cart through `save_pos_order_items` before billing a paid
+- **`closeOrder` persists the cart through `save_pos_order_items` before billing a paid
   order**, because the trigger can only measure the cap against STORED lines and the Payment
-  button never gated on a dirty cart. That also closed a quieter divergence that predates the
-  trigger: the till posted revenue from the in-memory cart (until S814; the server posts the stored
-  bill since S830), so an unsaved line was already reaching IMS revenue and the printed bill while never
-  existing in `pos_order_items`.
+  button never gated on a dirty cart.
 
-History: docs/rules-archive/pos-billing.md#pos-write-guards-copy
+History: docs/rules-archive/pos-billing.md#pos-write-guards-copy, #close-guard-origin
 
 ## Pulling an already-fired item is now on the record (S577)
 
-`save_pos_order_items` replaces an order's lines wholesale, so a line carrying `sent_to_kot` simply
-ceased to exist on the next save: food cooked, ticket printed, line gone from the bill and from
-every report that reads it. The only surviving trace was `pos_kot_log`, which is why KOT
-Reconciliation could say *that* it happened but never who, when or why. No privilege was needed.
+`save_pos_order_items` replaces an order's lines wholesale, so without a record a pulled fired line
+leaves only `pos_kot_log`, which says *that* it happened but never who, when or why.
 
 **The fix is a record, not a block, and that is deliberate** — pulling a fired item is routine and
 legitimate (kitchen ran out, wrong item fired, customer changed their mind), and rank-gating it
@@ -421,19 +398,18 @@ name against it.
 - The browser contributes **only the reason** (`p_removal_reason`), which the RPC has no way to
   invent. A missing reason renders as `none given` rather than hiding the row — that is what an
   offline sync, or a till on a pre-S577 bundle, honestly looks like.
-- The **offline replay** was moved onto the same RPC. It was still delete-then-insert, which meant
-  going offline was a way to pull a fired item leaving no trace — and it carried S573's
-  non-atomic-save risk besides.
+- The **offline replay** goes through the same RPC, never delete-then-insert, or going offline
+  pulls a fired item with no trace.
 - Surfaced on **KOT Log → Pulled Items**. Keep Reconciliation too: it *infers* a pull from the
   order's current state, so it still catches one made by a path that predates the record.
-- **A delete outside the RPC records too (S755, `20260917100000`).** Clear Occupied and any REST
-  delete of an open order's lines used to take fired food with no record. An AFTER STATEMENT trigger
+- **A delete outside the RPC records too (S755, `20260917100000`)**: Clear Occupied and any REST
+  delete of an open order's lines. An AFTER STATEMENT trigger
   on `pos_order_items` (and a BEFORE DELETE on `pos_orders`) writes the removal with reason
   "Table cleared", using the RPC's own definition of sent, skipped inside the RPC
   (`crest.pos_items_rpc`), for a non-browser request (the JWT role claim, since a cascade changes
-  `current_user`) and when the client itself is being deleted. **`pos_kot_removals.order_id` is now
-  nullable and SET NULL**, with `order_no`/`table_name` snapshotted, because the record has to
-  outlive the order it was pulled from — under CASCADE, Clear Occupied's second statement destroyed it.
+  `current_user`) and when the client itself is being deleted. **`pos_kot_removals.order_id` is
+  nullable and SET NULL, never CASCADE**, with `order_no`/`table_name` snapshotted, because the
+  record has to outlive the order it was pulled from.
 - **The record and the ticket log are write-guarded (S809 1d, `20261009120000`).**
   `guard_pos_kot_removals` (INVOKER, `current_user` seam) admits a client session's insert only inside
   `save_pos_order_items` (`crest.pos_kot_removals_rpc`, on for its one insert) or the operator's
@@ -447,11 +423,12 @@ name against it.
   final. Stage times and the estimate are the server's (`now()` on entering the stage; the estimate
   only at Start; a skipped stage gets no time). **A DEFINER function that writes either table on a
   client's behalf is checked like the client**: give it its own transaction flag.
-- The 2-arg `save_pos_order_items` signature was **dropped**, against the standing keep-the-old-
-  arity rule in `.claude/rules/supabase-sql.md`. PostgREST resolves by argument name, so keeping
-  both would make every 2-arg call ambiguous (`function is not unique`) — dropping it is what lets
-  a stale bundle keep working via the parameter default. **S754 did the same to the 3-arg form**
-  when it added `p_expected_version`, for the same reason.
+- **`save_pos_order_items` keeps one signature**, against the standing keep-the-old-arity rule in
+  `.claude/rules/supabase-sql.md`: PostgREST resolves by argument name, so two overloads make every
+  older call ambiguous (`function is not unique`), and a stale bundle works through the parameter
+  defaults.
+
+History: docs/rules-archive/pos-billing.md#pulled-item-origin
 
 ## PosOrders.jsx has THREE returns, and a modal put in the wrong one is invisible
 
@@ -535,21 +512,15 @@ History: docs/rules-archive/pos-billing.md#smoke-test-results
 
 ## Item-level comp is enforced server-side too (S579)
 
-The last member of the family, and the one with the most to lose: a comp is the single action whose
-purpose is to make revenue disappear on purpose. (S809 2b: the whole-recipe path skips comped lines,
-and an entry that comps nothing refuses the whole call, `pos_comp_line_missing`; a comped row on an
-open order is a cancelled close's leftover, and `foldCompedSplits` folds it into its line on load.)
-Three holes, all in the same act:
-
-- **Nothing guarded the columns.** A till JWT could PATCH `comped = true` onto any of its client's
-  lines — the line leaves the bill (`payableOrderItems`, SalesReport, demandForecastData and both
-  Credit Note files all filter on it) with no NC number, no reason, no attribution, no slip.
-- **The RPC checked client, not rank.** `apply_pos_item_comps`' guard was `is_admin() OR same
-  client`, while the UI gates the comp panel on `hasPosAccess('supervisor')`. A Staff-rank account
-  that never sees the control could call the function directly.
-- **`p_comped_by` was caller-supplied**, and it feeds the column the Sales Exception Report ranks
-  staff by. A caller could comp under a colleague's name. **Attribution the subject can choose is
-  not attribution** — same lesson `save_pos_order_items` already applies to `client_id`.
+A comp is the single action whose purpose is to make revenue disappear on purpose. (S809 2b: the
+whole-recipe path skips comped lines, and an entry that comps nothing refuses the whole call,
+`pos_comp_line_missing`; a comped row on an open order is a cancelled close's leftover, and
+`foldCompedSplits` folds it into its line on load.) Three holes, all in the same act, are closed:
+the comp columns were unguarded (a comped line leaves the bill: `payableOrderItems`, SalesReport,
+demandForecastData and both Credit Note files filter on it), the RPC checked client, not rank, and
+`p_comped_by` was caller-supplied (it feeds the column the Sales Exception Report ranks staff by).
+**Attribution the subject can choose is not attribution** — same lesson `save_pos_order_items`
+already applies to `client_id`.
 
 `guard_pos_item_comp()` (migration `20260819140000`) fences the six comp columns on INSERT and
 UPDATE; `apply_pos_item_comps` stays `SECURITY DEFINER`, so `current_user` inside it is the owner
@@ -567,26 +538,19 @@ Two things to preserve if this is ever touched:
   identity keeps an ordinary line at a few boolean tests.
 - **`COALESCE(..., false)` around every authorisation condition.** `pos_role` is NULL for any
   account with no POS access, `NULL IN ('supervisor','manager')` is NULL, and `IF NOT NULL THEN`
-  never fires — so the unwrapped form falls open for precisely the accounts with no rank. The
-  pre-existing client check had the same shape and was wrapped at the same time.
+  never fires — so the unwrapped form falls open for precisely the accounts with no rank.
+
+History: docs/rules-archive/pos-billing.md#comp-guard-holes
 
 ## A guard on how a bill closes is not a guard on a closed bill (S754)
 
-S577–S579 guarded the moment of the close: the void permission, the discount cap and the comp. The
-S754 re-analysis found that **nothing guarded the bill after it**. `pos_orders_client`,
-`pos_order_items` and `pos_order_payments` are plain same-client policies. So any till login,
-a Staff-rank waiter's PIN included, could do all of this over REST to a printed, numbered
-Tax Invoice:
-
-- PATCH its lines, amount or buyer PAN;
-- insert or delete its payment legs;
-- flip it back to open;
-- delete it outright.
-
+`pos_orders_client`, `pos_order_items` and `pos_order_payments` are plain same-client policies, so
+the close guards (S577–S579) left a printed, numbered Tax Invoice open to any till login over REST.
 A guard that checks the transition protects the transition, and a closed row is a different
 state.
+History: docs/rules-archive/pos-billing.md#closed-bill-open-story
 
-Migration `20260916100000` (applied live 2026-09-14) locks it, and a new money guard must fit
+Migration `20260916100000` locks it, and a new money guard must fit
 the same four rules:
 
 - **An allow-list of what may still change on a closed row**, not a deny-list of what may not.
@@ -628,9 +592,8 @@ keys on `auth.jwt() ->> 'role'`, not `current_user`.
 
 ## A rank the screen requires must be enforced by the table (S754)
 
-Every POS screen already hid its controls by rank. The table behind each one took any login of the
-outlet. **A button that does not render is a statement about the page, not about the data** — the
-same lesson as S636's `/pos` route guard, one layer down. `pos_caller_has_rank(level)` in
+**A button that does not render is a statement about the page, not about the data.**
+`pos_caller_has_rank(level)` in
 `20260916110000` is the one POS rank test: admin, the Owner, or a POS login at that rank whose
 login neither a Final Settlement nor POS Staff (`pos_blocked_at`, S809 3i) has blocked, with every
 operand COALESCE'd. Every trigger below calls
@@ -641,6 +604,7 @@ never from the record (S809 1l, Q26 a)**: outside a restore it meets the same in
 credit notes, cash entries, shifts, payment lines, customers, tickets and slips (S819). The restore is
 an operator INSERT of a row dated before the transaction (`opened_at`/`created_at`/`sent_at` <
 `now()`); no screen sends those columns, nor may a new one.
+History: docs/rules-archive/pos-billing.md#rank-guard-origin
 
 | What | Rank the table now requires |
 | --- | --- |
@@ -714,24 +678,19 @@ Open POS work is tracked in `POS_TODO.md` A2; payment-QR auto-confirm is still b
 
 ## One bill-math primitive, however the report slices it (S580)
 
-`computeCategoryAmounts` and `computeItemAmounts` in `posBillingMath.js` were byte-for-byte the
-same proportional-discount allocation differing only in the grouping key, and the Product Type tab
-would have made a third. Both are now delegates of
-`computeGroupAmounts(order, items, vatReg, keyOf, seedOf)` — signatures unchanged, so no call site
-moved. **A new way to slice a bill is a new `keyOf`, never a new copy of the arithmetic**: this is
-money math on the bill, and the rule that keeps COGS in one place (`imsFormulas.js`, S551) applies
-here for the same reason. The proof the refactor was exact is that the pre-existing reconciliation
-tests passed untouched; the invariant they assert — buckets sum back to `computeOrderAmounts` —
-now covers any key.
+`computeCategoryAmounts` and `computeItemAmounts` in `posBillingMath.js` are delegates of
+`computeGroupAmounts(order, items, vatReg, keyOf, seedOf)`. **A new way to slice a bill is a new
+`keyOf`, never a new copy of the arithmetic**: this is money math on the bill, and the rule that
+keeps COGS in one place (`imsFormulas.js`, S551) applies here for the same reason. The
+reconciliation tests assert that buckets sum back to `computeOrderAmounts`, for any key.
+History: docs/rules-archive/pos-billing.md#bill-math-history
 
 One level up, `SalesReport.jsx`'s `buildGroupedRows(keyOf, labelOf)` is the same consolidation for
 the row builders. Each bill goes through it under its own stamped status (`billVatRegistered`, S809
 2c), never one report-wide flag.
 
-**The credit-note branch changed in S754 (owner decision).** Until then a credit-noted bill
-contributed returned quantity only and never revenue, and simply vanished from Daily. That removed
-it from the day it was really sold on, so that day no longer matched the Z-report or the bill book,
-and the reversal appeared nowhere. Now, on every tab including 1L+:
+**The credit-note branch (S754, owner decision)**, so a day ties to the Z-report and the bill book
+and the reversal shows, on every tab including 1L+:
 
 - **the bill stays at full value on its own day;**
 - **the note is a MINUS row on the day it was ISSUED**, at the note's own stored figures (the
@@ -745,9 +704,8 @@ note corrects billing, it does not un-seat guests), and dine-in returns net off 
 they were issued.
 
 **A SPLIT bill is spread across the methods it was paid with** (S754, owner decision), in
-proportion to its `pos_order_payments` legs. Before, the whole bill sat under 'Split', a method
-nobody pays with, so Payment Summary's Cash could never tie to the Z-report, which always counted
-each leg under its own method. A split bill with no legs recorded shows as
+proportion to its `pos_order_payments` legs, so Payment Summary's Cash ties to the Z-report, which
+counts each leg under its own method. A split bill with no legs recorded shows as
 `SPLIT_NO_BREAKDOWN`, never silently as Cash.
 
 **Covers Report is dine-in only** (S754, owner decision). Every cover figure filters through
@@ -762,7 +720,7 @@ discount of the same food. **1L+ merges a name-only party into the same-name PAN
 carries no Annexure 13 flag. 1L+ lists years from the first bill's (`fiscalYearsSince`), read when
 the tab opens, with its own error slot; a year reads up to 2,00,000 bills (S809 3m).
 
-**The Product Type tab's axes come from data that already existed and nothing was reading:**
+**The Product Type tab's axes:**
 `settings.pos_bot_categories` (Kitchen/Bar — the same set `sendTicket()` routes BOT by, read through
 `barCategoriesOf` (NULL = ['Beverage'], empty = no bar and no BOT button, S809 3m), so the report and
 the tickets cannot disagree), `pos_order_items.vat_rate` (as billed), and `recipes.is_veg`. An axis
@@ -772,15 +730,12 @@ concluding the client simply has no data.
 
 ## A delivery platform is a party, not a tag on a bill (S596)
 
-Sales Report → Delivery Partners listed every Foodmandu/Pathao bill and totalled all of them
-together, and Customers → Outstanding Credit was bill-by-bill too. So **no screen in the product
-could say what one platform owed, or what one platform had taken** — the platform existed only as
-a badge on a row. Both screens now carry a per-partner rollup. Four rules came out of building it:
+Sales Report → Delivery Partners and Customers → Outstanding Credit each carry a per-partner rollup,
+so a screen can say what one platform owed and what it took. Four rules:
 
 **Commission is measured against the ex-VAT, post-discount base with comped lines excluded — never
 `paid_amount`.** That is the base `PosCustomers.jsx` settles on, because it is the base Foodmandu
-and Pathao themselves invoice on (confirmed with the client at S290, and the reason the very first
-version of the settle flow was wrong). An effective rate computed off the VAT-inclusive total reads
+and Pathao themselves invoice on (confirmed with the client at S290). An effective rate computed off the VAT-inclusive total reads
 about 13 percentage points low on **every** bill of a VAT-registered client, so a report built that
 way would accuse every platform of over-charging, every month, in the alarming direction. Recompute
 through `computeOrderAmounts` rather than storing a second copy of the base.
@@ -800,22 +755,21 @@ report that raises a false alarm about a supplier relationship is worse than one
 
 **A rollup must reconcile with the total printed beside it.** Customers' rollup keeps a
 **Direct customers** row for non-partner Credit precisely so its Outstanding column ties to the KPI
-card directly above it (S567's Stock Count lesson, applied before it could bite). Its figures
+card directly above it. Its figures
 legitimately differ from the report's — that page is every Credit bill ever, the report is a date
 range — which is stated in a line under the table, because two screens showing the same words and
 different numbers is a support call.
 
 Effective rate = settled commission ÷ ex-VAT settled base. The contracted rate it is checked
-against is `settings.pos_delivery_partners[].commission_pct`, which existed for a long time as a
-settle-time pre-fill and was read by nothing else.
+against is `settings.pos_delivery_partners[].commission_pct`, also the settle-time pre-fill.
+History: docs/rules-archive/pos-billing.md#delivery-partner-rollup-story
 
 
 ### A printed slip is stamped with the BILL's moment, not the print's (S670)
 
-`buildBillHtml` and `buildCompSlipHtml` derived Date, Miti and time from `new Date()`, so every
-reprint — and every preview opened from the Sales Report's Bill Register, which is exactly what that
-row click does via `viewPosBill()` — put **today** on a month-old Tax Invoice. Both now read
-`order.closed_at`.
+`buildBillHtml` and `buildCompSlipHtml` take Date, Miti and time from `order.closed_at`, never
+`new Date()`, which put **today** on every reprint and Bill Register preview (`viewPosBill()`).
+History: docs/rules-archive/pos-billing.md#slip-date-story
 
 **The `|| new Date()` fallback is load-bearing, not padding.** The live close path builds its order
 object in memory and the in-modal preview renders *before* the order is closed, so `closed_at`
@@ -866,24 +820,20 @@ Two POS-specific details from that convergence:
 ## A dropped write error in this file is how a dish gets cooked twice (S654)
 
 The general rule is in root CLAUDE.md; what follows is what it costs in this file.
-History: docs/rules-archive/pos-billing.md#dropped-write-errors-count
+History: docs/rules-archive/pos-billing.md#dropped-write-errors-count, #send-flag-and-replay-stories
 
 - **Printing a ticket is gated on the `sent_to_kot` write, never the other way round.** That flag is
-  what makes "already sent" true for every other device and for this one after a reload. It was
-  dropped on failure while `setOrderItems(sent)` and `printTicket()` ran unconditionally — so a
-  refused write put food in front of the kitchen that the system still counted as unsent, the KOT
-  badge returned, and the next press cooked the same dish again. Both send paths now print only if
-  the flag landed; the order stays saved and only the send is unwound. **Do not reorder these.**
+  what makes "already sent" true for every other device and for this one after a reload; a ticket
+  printed without it gets the same dish cooked again on the next press. Both send paths print only
+  if the flag landed; the order stays saved and only the send is unwound. **Do not reorder these.**
 - **The offline-replay status check is a guard, so it fails CLOSED.** It reads `pos_orders.status`
-  to avoid overwriting an order another device billed while this one was offline; on a dropped read
-  error `current` was null, the `if` false, and the replay proceeded — the check stopped working
-  exactly when the network did. It now throws to stay queued, with `PGRST116` (row gone) routed to
-  the existing conflict list rather than retrying against a dead id forever.
-- **A failed poll must not write its empty result.** `loadKotStatus` wrote `{}` and blanked every
-  table's kitchen badge, which a waiter reads as "nothing has been started". Same shape in
-  `loadOrderKotTickets`, `loadPendingGuestOrders` (which also cleared `seenGuestRequestIds`, so the
-  next good poll re-chimed for requests already seen) and `loadOpenShift`, whose null would silently
-  unlink every later bill from the open shift and leave the Z-report short. All four keep last-good.
+  to avoid overwriting an order another device billed while this one was offline; a read error
+  throws to stay queued, with `PGRST116` (row gone) routed to the existing conflict list rather
+  than retrying against a dead id forever.
+- **A failed poll must not write its empty result.** `loadKotStatus` (a blank kitchen badge reads
+  "nothing has been started"), `loadOrderKotTickets`, `loadPendingGuestOrders` (and its
+  `seenGuestRequestIds`, or the next good poll re-chimes) and `loadOpenShift` (a null unlinks every
+  later bill from the open shift and leaves the Z-report short) all keep last-good.
 - **After the bill is committed, warn — do not block, and do not swallow.** Once `pos_orders` is
   updated the invoice number is minted and the close cannot be refused, so `warnWrite()` + the floor
   banner carries what failed afterwards: the split-tender breakdown (the Z-report reconciles against
@@ -901,16 +851,17 @@ History: docs/rules-archive/pos-billing.md#dropped-write-errors-count
 ## A close whose answer is lost is read back, never retried blind (S776)
 
 - **Every await on the close path is bounded** (`bounded()` / `CLOSE_STEP_MS` in `PosOrders.jsx`). Cancel stays disabled while a close is in flight, so an unbounded await was a till with no way out.
-- **A timeout, a dropped connection or a gateway 5xx on the close write is not a failure** (`noAnswer`, S833 for the 5xx). `closeAttemptRef` is set just before the write; `settleUnknownClose()` reads the bill: closed by this login with this close type → `finishClosedBill()` (legs, print, the rest); open straight after the timeout → keep the mark, the write can still land; unreadable → say it is unknown. The next press AND Cancel settle it first. Without this a retry was refused "already closed" and blamed on another till, and the bill never printed.
+- **A timeout, a dropped connection or a gateway 5xx on the close write is not a failure** (`noAnswer`, S833 for the 5xx). `closeAttemptRef` is set just before the write; `settleUnknownClose()` reads the bill: closed by this login with this close type → `finishClosedBill()` (legs, print, the rest); open straight after the timeout → keep the mark, the write can still land; unreadable → say it is unknown. The next press AND Cancel settle it first.
 - **An unknown close stays unknown until it can't land (S809 2d, CHECKOUT-7).** Marks are per order (`closeAttemptFor`; kept on the tablet since S833, `closeAttemptStore.js`, another login's locking the bill until read; since 2g the lock hands back points only when no try at that bill is unsettled, never on an outlet move, and the close returns forgotten points itself). `trackCloseWrite` + `.abortSignal()` make "open" final only `CLOSE_LAND_GRACE_MS` (30 s, over the live 8 s statement and lock timeouts) after the last unanswered write; raise the grace if those timeouts rise. While a mark names the bill the payment controls lock (`closeLocked`, fieldset `.pay-lock`), Cancel discards nothing and hands back no points, and `pollUnsettledCloses` reads it every 15 s. A settled close finishes from the STORED bill (`readStoredBill` → `finishClosedBill({ stored, attempt, background })`): stored lines print and post, legs only from that try's own tenders and only if none landed. In the background: no print (but a void's VOID slip, S835), no Inventory (backfill), legs and points still run. A comp, redeem or buyer step refused `bill_locked`/`order_not_open` after an unanswered press goes through `settleIfEarlierClosed`.
 - **Order after the close is an owner decision: Split legs → print → table, booking, IMS, customer, loyalty.** Legs first because of their 10-minute window and because `printBill` reads them. Print counters are not awaited. Don't move bookkeeping back in front of the paper.
-- Verified live by letting the PATCH reach the server and aborting its response (`route.fetch()` then `route.abort()`), and again with the read-back also aborted.
 - **The close buttons are never `disabled` for a missing input, only `aria-disabled`.** `closeBlocker()` is the one list: closeOrder refuses with its `text`, the button shows its `label`, and `pressClose()` opens the folded section and focuses its `field`. A new close precondition goes into `closeBlocker`, never into a button's `disabled` expression. Void asks first (`confirmVoid`). `closeStartRefusal` (`tillBillChecks.js`) runs first: unread till settings, then an emptied cart (Void exempt, owner Q8 a); `fullInvoiceRefusal` follows the buyer-ID check (a VAT bill above `ABBREVIATED_INVOICE_LIMIT`, measured on what the guest pays, needs name and address, Q9 a).
 - **The till's settings come from a read that answered, or billing waits (S809 2a).** `loadTillSettings` bounds the `settings` and `clients` reads, applies and caches only an answer, keeps the offline copy for routing on a failure, and never caches a failure. `billingSettingsLoaded` gates `payBlocker`, `closeBlocker`, `billOrder` and `reprintBill`; a cached copy never opens Payment. Never fall back to defaults in silence: `is_vat_registered ?? true` made every PAN outlet a VAT one on a dropped read.
-- **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar. Measured S776: 0 of 32 controls under 44px at 820px touch (was 24 of 36).
+- **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar.
 - **Till text is `errorText(err, 'staff')`, never `err.message`** — the floor alerts, load-error lines and loyalty lookup included (S776). Three sites keep the server's own sentence on purpose because a guard phrased it for the till: `stripCodeWord` on the close refusal and the off-menu save, and the loyalty award's rank/window refusal. A selected payment method is the accent FILL with `aria-pressed`; hover is only a tint. The order screen's inline controls get the focus pair through `.till-hit`/`.till-hit--row`/`.till-tile`. POS report tab rows are `Tabs`; the Exceptions type row and the KDS station chips are `FilterChips`.
-- **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager; outlet has Crest IMS, S814); its misses are pruned by every count that answers (`pruneImsMisses`). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till (the 9px chips were raised). Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
+- **Floor and order-screen conventions (S776 polish).** The floor's Inventory-posting banner (`PosImsPostingBanner`, S809 3j) renders only for `canSeeImsPosting` (admin, Owner, POS manager; outlet has Crest IMS, S814); its misses are pruned by every count that answers (`pruneImsMisses`). An inactive table is muted by a dashed edge, never opacity. 10px is the floor for text on the till. Prices on the till go through `fmtNpr`. Void is `btn btn-danger btn-danger--strong` and Complimentary `btn amber-action-btn` — tints, not solid fills. Payment is the outlined `btn-ghost` beside Send's fill. The covers numpad and "Cash received" (Enter confirms) take the keyboard. `.table-wrap` is `position: relative` app-wide so an `.sr-only` child cannot widen the page.
 - **Reports, shifts and staff (S776 polish).** A POS report's date range takes `RangePresets` (BS months, shared with the Customization report) beside its pickers. A drawer variance is `varianceSignal()` in `PosShifts.jsx` everywhere it shows — ✓ balanced green, ▲ short red, △ over amber; never a size threshold that turns a shortfall green. A new POS login is created with `pos_discount_limit: 0` from POS Staff (owner decision); `admin-user-ops` still defaults an unspecified limit to NULL for admin/Owner callers, so an API caller must send it. Printed slip dates go through `nepalDateAd`/`nepalBsLong`. A KDS estimate preset starts the ticket in one tap.
+
+History: docs/rules-archive/pos-billing.md#close-read-back-evidence
 
 ## A send whose answer is lost is read back too (S809 3e)
 
@@ -970,8 +921,7 @@ is charged on the full bill, and **IMS revenue needs no change at all** — the 
    nothing on screen saying why, and a manager counts the drawer chasing a shortfall that is only
    a display bug.
 3. **NOT `PAYMENT_METHODS`** in `posOrdersConstants.js`. That is the list a cashier PICKS from, and
-   a redemption is not picked — it is applied when the customer has a balance. S290→S291 already
-   learned this by adding Foodmandu/Pathao there and reverting it.
+   a redemption is not picked — it is applied when the customer has a balance.
 
 **Loyalty is earned and spent only at the close, by the closer (S754, `20260916100000`).**
 - **`pos_loyalty_ledger` takes no client write, except an admin-only INSERT the browser restore needs**
@@ -1019,8 +969,8 @@ is charged on the full bill, and **IMS revenue needs no change at all** — the 
   signed and that is the true position.
 - **`credit_note_id` on the ledger deliberately has no foreign key.** The restore inserts the
   ledger before `pos_credit_notes`, and one refused chunk would drop every customer's balance.
-- **Both older RPCs checked `profiles.client_id`**, the HOME outlet. They moved to `my_client_id()`
-  like everything S750 swept.
+- **Both older RPCs resolve the outlet by `my_client_id()`**, never `profiles.client_id` (the HOME
+  outlet).
 - **Schemes, the point value and enrolment need a POS manager** (`20260916110000`).
 - **The Loyalty line on an open bill is the RPC's (S809 1i, `20261009150000`).**
   `guard_pos_order_payments_closed` refuses every client session's UPDATE or DELETE of a payment
@@ -1036,13 +986,14 @@ is charged on the full bill, and **IMS revenue needs no change at all** — the 
   so a client delete's one-statement cascade still passes. Moving points to a new number is Move
   (S815 4g, above), never two hand corrections.
 
+History: docs/rules-archive/pos-billing.md#tender-and-loyalty-history
+
 ## One colour vocabulary, and loudness tracks demand for action (S661)
 
 `src/modules/pos/posSignals.js` is the module's single colour vocabulary — table status, ticket
 stage, close type, rank, the two strip helpers — and the header comment is the normative statement
-of what each hue means here. It exists because eight distinct meanings had accumulated on amber
-alone, including three categories ("Foodmandu", "supervisor", "reserved") and two states that are
-the *good* outcome.
+of what each hue means here.
+History: docs/rules-archive/pos-billing.md#signal-colour-origin
 
 The general rule is in `DESIGN.md` (**Loudness tracks demand for action**) and summarised in
 `.claude/rules/design-system.md`. What is specific to this module:
@@ -1068,11 +1019,8 @@ The general rule is in `DESIGN.md` (**Loudness tracks demand for action**) and s
   module (station, loyalty) never share a screen. Considered and kept; re-deciding a settled colour
   is how a module ends up with three answers.
 
-**The rank ladder is now one value, not three files.** All three staff screens read
-`STAFF_LEVEL_BADGE` from `src/shared/staffLevelBadge.js`. The identical decision had been made
-independently in HR, IMS and POS, and two of the three had drifted: a Supervisor was amber in IMS
-and POS — the same amber those modules use for "needs attention" — and brass in HR. Adding a fourth
-module now costs nothing.
+**The rank ladder is one value, not three files.** All three staff screens (HR, IMS, POS) read
+`STAFF_LEVEL_BADGE` from `src/shared/staffLevelBadge.js`; a fourth module reads it too.
 
 ## Reservations and the arrival alert
 
@@ -1083,8 +1031,10 @@ Reservations as a promise about a future table (S677), and the repeating arrival
 Migrated from the root `CLAUDE.md` (S663).
 
 - `pos_orders.order_no` is assigned by a **BEFORE INSERT trigger** (per-client sequential) — never set it from the frontend; read it back via `.select('id, order_no')` after insert. Same pattern for `pos_orders.invoice_no` (BEFORE UPDATE, partitioned by `client_id + invoice_fy + close_type`) and `pos_credit_notes.credit_note_no` (BEFORE INSERT, partitioned by `client_id + invoice_fy`) — never set these from the frontend either. Item-level comps (`pos_order_items.comp_no`) share the **same NC-series** as a whole-order Complimentary Slip — `apply_pos_item_comps` reserves the number under the shared advisory lock and writes every comped row in the same transaction (one number per comp event, not per line); `get_next_pos_comp_slip_no` was dropped in S809 1j, since its lock released before the number was used; `assign_pos_invoice_no()`'s `close_type='writeoff'` branch locks on and considers that same pool, so the two paths can never collide.
-- The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes on reconnect, on mount and every 15 s while anything waits. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. This was a real bug (S440): `saveOrder` fires `logKotSend('KOT')` + `logKotSend('BOT')` un-awaited, both routing through `enqueuePosOrder`, which silently dropped one station's queued KOT send offline until the merge was made atomic. POS billing is hard-gated offline (`payBlocker` includes `!isOnline` and unread settings), so the offline surface is order-taking only — no money path is ever reachable without a live server.
-- `settings` was, until S290 (`20260707150000_settings_rls_same_client_write.sql`), the one client-scoped table whose INSERT/UPDATE RLS policies were **admin-only** with no same-client allowance — every settings-writing tab in `PosTableManagement.jsx` (Discounts, Quick Notes, Ticket Routing, Delivery Partners) had been silently no-op'ing for any real (non-admin) client login, since an RLS-blocked write returns zero rows changed with no error rather than throwing. Now follows the standard `is_admin() OR client_id = my_client_id()` pattern like every other table; the `client_id IS NULL` global-defaults row (`app_name`, `app_tagline`, etc.) stays admin-only automatically since a real client's `client_id` can never equal `NULL`. Still stays on raw `supabase.from()` rather than `scopedDb` (see the `scopedDb` note above) — that's about the nullable `client_id`, unrelated to this RLS fix.
+- The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes on reconnect, on mount and every 15 s while anything waits. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. `saveOrder`'s un-awaited KOT and BOT sends both go through `enqueuePosOrder`. POS billing is hard-gated offline (`payBlocker` includes `!isOnline` and unread settings), so the offline surface is order-taking only — no money path is ever reachable without a live server.
+- `settings` INSERT/UPDATE follow the standard `is_admin() OR client_id = my_client_id()` pattern (S290, `20260707150000_settings_rls_same_client_write.sql`); the `client_id IS NULL` global-defaults row (`app_name`, `app_tagline`, etc.) stays admin-only automatically since a real client's `client_id` can never equal `NULL`. An RLS-blocked write returns zero rows changed with no error rather than throwing. It still stays on raw `supabase.from()` rather than `scopedDb` (see the `scopedDb` note above), because of the nullable `client_id`.
+
+History: docs/rules-archive/pos-billing.md#settings-rls-and-offline-queue-history
 
 ## A credit note that cannot reach Inventory is marked and posted later, like a bill (S747)
 
@@ -1099,7 +1049,7 @@ note, one transaction; waiting notes go through `post_waiting_credit_notes` (the
   carries **`sales_entries.pos_credit_note_id`**. The backfill asks the link, never the stamp alone —
   the same reason bills carry `pos_order_id` (above).
 - **The reversal takes back what the bill POSTED**: comped lines skipped, the bill discount spread as
-  the bill posted it, a `writeoff` bill reverses nothing (raw `unit_price` once over-reversed).
+  the bill posted it, a `writeoff` bill reverses nothing.
 - **The note issues whatever happens**, so failure is a notice with one button, not an error with a
   retry. Recovery is the floor banner's Post to Inventory (open month) or Periods → Post POS bills to
   Inventory (the Owner; any month), each posting waiting notes after the bills; the floor counts them (`unpostedNotes`, head-count, keeps last value on a failed poll) and
@@ -1109,15 +1059,14 @@ note, one transaction; waiting notes go through `post_waiting_credit_notes` (the
 
 **S754 gave the note two more side-effects, and both follow the same "the note issues whatever
 happens" rule** (owner decisions).
-- **"Was money returned to the customer?" is asked on every note.** A note corrects the VAT
-  register and says nothing about the drawer, so a cash refund handed over the counter with no
-  record read as a shortfall at the shift close. **Cash** writes a `pos_cash_movements` refund on
+- **"Was money returned to the customer?" is asked on every note**, because a note corrects the VAT
+  register and says nothing about the drawer. **Cash** writes a `pos_cash_movements` refund on
   the open shift. It is checked BEFORE the note is issued, twice (when Cash is picked, and again on
   Issue), because refusing after a permanent numbered note exists is not available. **Other** and
   **None** store nothing in cash. **The answer is `pos_credit_notes.refund_method` (S755)**, shown
-  in the Credit Note Book and never printed. It was appended to the reason, which printed on the tax
-  document as if it were the reason. Notes issued before S755 keep that text: a printed note is not
-  rewritten.
+  in the Credit Note Book and never printed, never appended to the reason. Notes issued before S755
+  keep it in their reason text: a printed note is not rewritten.
+  History: docs/rules-archive/pos-billing.md#credit-note-history
 - **The bill's loyalty is reversed** through `reverse_loyalty_for_credit_note`.
 
 **Since S809 2e (`20261009210000`) the link, the refund and the points are the note's own
