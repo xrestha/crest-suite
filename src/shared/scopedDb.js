@@ -56,6 +56,10 @@ export const CLIENT_SCOPED_TABLES = [
   // Combos (S839, docs/pos-combos.md): a combo, its picks and the dishes in each pick. Read here by any
   // login of the outlet; written only through save_pos_combo / delete_pos_combo.
   'pos_combos', 'pos_combo_groups', 'pos_combo_items',
+  // Customer credit part payments (S843, 20261015120000): a numbered receipt per payment and its split
+  // over bills. Both client_id NOT NULL; client sessions only read them (record_credit_receipt /
+  // cancel_credit_receipt write). Membership types (S843, 20261015130000), the scheme a customer joins.
+  'pos_credit_receipts', 'pos_credit_receipt_lines', 'pos_membership_types',
   // Cross-module
   'monthly_owner_reports',
   // Each person's own checklist choices per outlet (S790): admin view-as reads it here; exported, never restored.

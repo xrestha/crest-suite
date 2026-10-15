@@ -1,263 +1,178 @@
 import { noAnswer } from '../orders/sendAttempt'
-import { errorText } from '../../../shared/errorText'
 import { settleWithin, isTimeout } from '../../../utils/withTimeout'
-import { npr } from '../../../shared/nepalMoney'
+import { npr2 } from '../../../shared/nepalMoney'
+import { errorText } from '../../../shared/errorText'
 import { nepalBsLong, nepalDateAd, nepalTime } from '../../../shared/nepalTime'
-import { randomUUID } from '../../../utils/uuid'
+import { fromPaisa, receiptNoLabel } from './creditLedger'
 
-// Settling a Credit bill on Customers → Outstanding Credit, and the cash it puts in the drawer: the
-// half that can be tested without the page (S809 CUSTOMERS-PARKING-6, SHIFTS-4).
+// Recording and cancelling a customer's credit payment (S843), the half that can be tested without the
+// page. Until S843 a Credit bill was settled whole by one conditional UPDATE from this page, its cash
+// posted by a second write; a lost answer was read back bill by bill (S809 3l). Now a payment is ONE
+// call, record_credit_receipt, which writes the numbered receipt, its lines, the cash entry and each
+// bill's settled stamp in one transaction, so there is no second write to lose.
 //
-// The settle is one conditional write (`.is('credit_settled_at', null)`), so a bill is settled once
-// however often it is pressed. Before S809 a lost answer read "the bill was not marked as settled",
-// the press after it matched nothing and read "this bill had already been settled — no cash was
-// added", and the Collected list named nobody. The cashier took it for a colleague's settlement: the
-// cash went back to the guest (the debt lost) or stayed in the drawer with no Cash In (the shift
-// closed over).
-//
-// Now a press with no answer, or one that matched nothing, reads the bill back. `credit_settled_by`
-// is the guard's `auth.uid()`, so "who" is a fact. Settled from this login, with the method pressed,
-// while this page holds an unanswered press of that method for the bill: it is that press, so carry
-// on to the Cash In. Settled by anyone else: say who and when. Unreadable: say it is not known, and
-// that this cash is not on the drawer record yet. A press is remembered in page memory only (like a
-// till's close marks), for SETTLE_TRY_MS.
-//
-// The Cash In carries an id minted here. A lost answer is sent again once with the same id, and a
-// duplicate-key answer means the first landed, so the drawer is never paid in twice. Since S823 (5c)
-// the database also holds one settlement entry per bill (pos_cash_movements_one_credit_settlement),
-// so an entry another screen already made answers a duplicate key too, and is not added again.
+// What is left of S809 3l is the lost answer itself. Each press mints a request id (p_request_id) and
+// a retry sends the SAME id: the server answers a repeat with the first receipt (`replayed: true`), so
+// a payment is never recorded twice however often its answer goes missing. A retry that is refused
+// after a lost first answer may be refused BECAUSE the first landed meanwhile (the bills it cleared are
+// no longer unpaid, or the request id is already taken), so one more send asks for that replay before
+// anything is called refused.
 
-/** How long the settle write, and the Cash In insert, wait for an answer. */
+/** How long the write waits for an answer before it counts as lost (then it is sent again). */
 export const SETTLE_WRITE_MS = 20000
-/** The reads around them: the bill read back, the open shift, the bill's cash entry. */
+/** The reads around it: the party's bills, the open shift, a receipt read back for printing. */
 export const SETTLE_READ_MS = 8000
-/** How long an unanswered press on this page still counts as "this settlement": long enough to get
- *  back online and press again, short enough that cash taken on an earlier shift is never added to
- *  a later one by itself. */
-export const SETTLE_TRY_MS = 15 * 60 * 1000
 
-/** "9 Kartik 2083 at 7:42 PM". The server's clock since S823 (5c): the guard stamps who and when. */
+/** The ways a credit customer or a delivery partner pays (the RPC's list, and the receipts table's CHECK). */
+export const RECEIPT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Cheque', 'Bank Transfer']
+
+/** "9 Kartik 2083 at 7:42 PM", as Nepal reads it. */
 export function settledWhen(ts) {
   const day = nepalBsLong(ts) || nepalDateAd(ts)
   const time = nepalTime(ts)
   return time ? `${day} at ${time}` : day
 }
 
-/**
- * What a bill read back after a settle with no answer, or one that matched nothing, says.
- *  'open'    not settled (yet)
- *  'mine'    settled from this login with the method pressed, while this page holds an unanswered
- *            press of that method for the bill: it is that press
- *  'yours'   settled from this login some other way (another screen, an earlier visit, another method)
- *  'other'   settled by another login
- *  'unknown' the bill was not found
- */
-export function judgeSettled(stored, { profileId = null, method, tries = [], now = Date.now() } = {}) {
-  if (!stored) return 'unknown'
-  if (!stored.credit_settled_at) return 'open'
-  if (!profileId || stored.credit_settled_by !== profileId) return 'other'
-  const pressedHere = tries.some(t => t.method === method && now - t.at < SETTLE_TRY_MS)
-  return stored.credit_settled_method === method && pressedHere ? 'mine' : 'yours'
-}
-
-const SHIFT_GONE_RE = /pos_cash_movement_(shift_closed|no_shift)/i
-const shiftGone = e => SHIFT_GONE_RE.test(`${e?.hint || ''} ${e?.message || ''}`)
-const isDuplicate = e => e?.code === '23505'
-// The server's own refusal, as fine print. Nothing for no answer: the sentence already says it.
-const whyNot = res => (res?.error && !noAnswer(res) ? ` ${errorText(res.error, 'operator')}` : '')
-
-// SHIFTS-4: the next shift's float is counted from the drawer, so cash no shift recorded is either
-// kept out of that count and then recorded, or counted in it and not recorded. Both (what the page
-// used to ask) put it into Expected Cash twice, and the close read short on that shift's cashier.
-const NO_SHIFT_STEPS = 'Keep it out of the float you count when the next shift opens, then record it as a Cash In on that shift. If it stays in the drawer and is counted in the float, record nothing.'
-const lookFor = who => `look in Shifts for a "Credit settled" entry for ${who}, and add it as a Cash In only if there is none`
-const ADDED = { warn: false, text: " Added to the open shift's cash count." }
-const ALREADY = { warn: false, text: ' Its cash was already on the drawer record, so it was not added again.' }
-
-/**
- * A Cash settlement's drawer entry. The bill's payment_method stays 'Credit' forever, so without it
- * the shift's cash bucket never saw this money and the drawer read "over" with nothing to explain it
- * (S573). Best-effort: a failed entry must not undo a settlement the customer has paid, so it warns.
- * `checkFirst` (a settlement found by reading the bill back) looks for the bill's entry before adding
- * one. Returns { warn, text, error }: text follows the settle sentence; error, when there is one, is the
- * answer behind it, kept for the page's fine print (S842).
- */
-export async function postSettlementCash({ db, order, amount, profileId = null, checkFirst = false, newId = randomUUID }) {
-  const who = order.buyer_name || 'customer'
-  const amt = npr(amount)
-  if (checkFirst) {
-    const had = await settleWithin(db.cashFor(order.id), SETTLE_READ_MS, 'Checking the drawer record')
-    if (had.error) return { warn: true, text: ` Could not check whether this ${amt} is already on the drawer record, so nothing was added — ${lookFor(who)}.${whyNot(had)}`, error: had.error }
-    if (had.data?.length) return ALREADY
-  }
-  const shift = await settleWithin(db.openShift(), SETTLE_READ_MS, 'Checking for an open shift')
-  // A failed read is not "no shift is open" (S682): nothing was added, whichever it is.
-  if (shift.error) return { warn: true, text: ` Could not check whether a shift is open, so this ${amt} was not added to any drawer count. If a shift is open, add it there as a Cash In. If none is open, ${NO_SHIFT_STEPS.charAt(0).toLowerCase()}${NO_SHIFT_STEPS.slice(1)}${whyNot(shift)}`, error: shift.error }
-  if (!shift.data) return { warn: true, text: ` No shift is open, so this ${amt} is not on any drawer count. ${NO_SHIFT_STEPS}` }
-  const row = {
-    id: newId(),
-    shift_id: shift.data.id,
-    direction: 'in',
-    kind: 'credit_settlement',
-    amount,
-    reason: `Credit bill settled — ${who}`,
-    order_id: order.id,
-    created_by: profileId,
-  }
-  const first = await settleWithin(db.addCash(row), SETTLE_WRITE_MS, 'Adding the cash to the shift')
-  if (!first.error) return ADDED
-  if (!noAnswer(first)) {
-    // A fresh id cannot already exist, so a duplicate key is this bill's one settlement entry, made
-    // before (another screen, or a press this page no longer remembers): the cash is on a drawer
-    // record already (S823 5c).
-    if (isDuplicate(first.error)) return ALREADY
-    // The server refused it, so nothing landed (a BEFORE trigger raised).
-    if (shiftGone(first.error)) return { warn: true, text: ` The shift closed before this ${amt} could be added, so it is not on any drawer count. ${NO_SHIFT_STEPS}`, error: first.error }
-    // The cash is in the drawer and not in Expected Cash, so the close reads OVER (it used to say short).
-    return { warn: true, text: ` It could not be added to the open shift's cash count, so the drawer will read ${amt} over — add it as a Cash In on that shift.${whyNot(first)}`, error: first.error }
-  }
-  // No answer: the same row again. Its id makes a second copy impossible, and a duplicate key means
-  // the first one landed (or, since S823, that another entry for this bill already had).
-  const again = await settleWithin(db.addCash(row), SETTLE_WRITE_MS, 'Adding the cash to the shift')
-  if (!again.error || isDuplicate(again.error)) return ADDED
-  return { warn: true, text: ` It is not known whether this ${amt} reached the open shift's cash count: the answer was lost. Before adding anything, ${lookFor(who)}.`, error: again.error }
-}
-
-// `amount` is what actually reached us: a delivery partner remits the bill LESS its commission, so a
-// Cash settlement puts paid − commission in the drawer (posting the gross left every such shift short
-// by the commission, S754). A direct customer has no commission and pays the whole bill.
-async function collected({ db, order, method, amount, profileId, readBack, newId }) {
-  const head = `${npr(amount)} collected from ${order.buyer_name || 'customer'} via ${method}` +
-    (readBack ? ' (checked by reading the bill back: it is settled once)' : '') + '.'
-  if (method !== 'Cash') return { msg: 'ok:' + head, closePanel: true, reload: true }
-  const cash = await postSettlementCash({ db, order, amount, profileId, checkFirst: readBack, newId })
-  return { msg: (cash.warn ? 'warn:' : 'ok:') + head + cash.text, closePanel: true, reload: true, error: cash.error }
-}
-
-/**
- * One press of a settle method. `db` is the page's five calls (settle, readBill, openShift, cashFor,
- * addCash); `tries` is the page's memory of unanswered presses (order id → [{ method, at }]), kept
- * across presses and list reloads and lost with the page; `names` maps a login id to its name.
- * Returns { msg, closePanel, reload, error }, msg prefixed ok:, warn: or error: as the page renders it;
- * error (S842), when there is one, is the answer the sentence is about, for the page's fine print.
- */
-export async function settleCreditBill({
-  db, order, method, commission = null, profileId = null, tries, names = null,
-  newId = randomUUID, now = Date.now,
-}) {
-  const who = order.buyer_name || 'customer'
-  const at = now()
-  const patch = {
-    // Replaced by the server's own time (S823 5c); sent because a NULL tells the guard this write is
-    // not a settlement at all.
-    credit_settled_at: new Date(at).toISOString(),
-    credit_settled_by: profileId,
-    credit_settled_method: method,
-  }
-  if (commission != null) patch.commission_amount = commission
-  const attempt = { method, at }
-  tries.set(order.id, [...(tries.get(order.id) || []), attempt])
-  const forget = () => tries.set(order.id, (tries.get(order.id) || []).filter(t => t !== attempt))
-
+// One bounded call. The request is cancelled once the clock runs out: what was never sent is never
+// sent, and what the server already had finishes inside its own limits (the retry's id covers it).
+async function sendOnce(rpc, name, args, ms, label) {
   const ctrl = new AbortController()
-  const res = await settleWithin(db.settle(order.id, patch, ctrl.signal), SETTLE_WRITE_MS, 'Settling the bill')
-  // What was never sent is never sent; what the server already had finishes inside its own limits.
+  const res = await settleWithin(rpc(name, args, ctrl.signal), ms, label)
   if (isTimeout(res.error)) ctrl.abort()
-
-  if (!res.error && res.data?.length) {
-    tries.delete(order.id)
-    const amount = (Number(order.paid_amount) || 0) - (patch.commission_amount || 0)
-    return collected({ db, order, method, amount, profileId, readBack: false, newId })
-  }
-  const lost = !!res.error && noAnswer(res)
-  if (res.error && !lost) {
-    // The server's refusal: the statement rolled back, so "not settled" is true.
-    forget()
-    return { msg: 'error:The bill was not marked as settled. ' + errorText(res.error, 'operator'), closePanel: false, reload: false, error: res.error }
-  }
-  // Zero rows is an answer: this press wrote nothing. An earlier unanswered press may have.
-  if (!lost) forget()
-
-  const back = await settleWithin(db.readBill(order.id), SETTLE_READ_MS, 'Reading the bill back')
-  const stored = back.error ? null : back.data
-  const verdict = back.error ? 'unread' : judgeSettled(stored, { profileId, method, tries: tries.get(order.id) || [], now: now() })
-  const cashHint = m => (m === 'Cash' ? ` If that cash is in the drawer, ${lookFor(who)}.` : '')
-
-  if (verdict === 'mine') {
-    tries.delete(order.id)
-    const amount = (Number(stored.paid_amount) || 0) - (Number(stored.commission_amount) || 0)
-    return collected({ db, order, method, amount, profileId, readBack: true, newId })
-  }
-  if (verdict === 'yours' || verdict === 'other') {
-    tries.delete(order.id)
-    const when = settledWhen(stored.credit_settled_at)
-    const how = stored.credit_settled_method || 'an unrecorded method'
-    if (verdict === 'yours') {
-      const changed = stored.credit_settled_method && stored.credit_settled_method !== method
-        ? ` A settlement's method cannot be changed afterwards.` : ''
-      return {
-        msg: `error:This bill was already settled from your login on ${when}, by ${how}.${changed} Nothing was changed by this press and no cash was added to the drawer.${cashHint(stored.credit_settled_method)}`,
-        closePanel: true, reload: true,
-      }
-    }
-    const name = (names && stored.credit_settled_by && names[stored.credit_settled_by]) || null
-    const by = name || 'another login'
-    const ask = name ? `check with ${name}` : 'find out who settled it'
-    return {
-      msg: `error:This bill was already settled by ${by} on ${when}, by ${how}. Nothing was changed by this press and no cash was added to the drawer. If the customer is paying you now, ${ask} before taking or handing back any money — it may already have been paid.`,
-      closePanel: true, reload: true,
-    }
-  }
-  if (verdict === 'open' && !lost) {
-    return { msg: 'error:Nothing was recorded: the bill still shows as not settled. Reload the page and settle it again.', closePanel: true, reload: true }
-  }
-  const holdCash = method === 'Cash' ? ' Keep the cash aside until then: it is not on the drawer record yet.' : ''
-  if (verdict === 'open') {
-    return {
-      msg: `warn:No answer came back, and the bill still shows as not settled — the settlement may still arrive. Wait half a minute, then press ${method} again: a bill can never be settled twice, and if the first press went through, this page finishes it then.${holdCash}`,
-      closePanel: false, reload: false, error: res.error,
-    }
-  }
-  if (!lost) {
-    // Matched nothing, so it is settled or gone, and the read that would say by whom failed.
-    return {
-      msg: `error:This press changed nothing — the bill looks already settled, but it could not be read back to see by whom. No cash was added to the drawer. Reload the page: its row under Collected says who settled it and how.${whyNot(back)}`,
-      closePanel: true, reload: true, error: back.error,
-    }
-  }
-  const reloadHint = method === 'Cash'
-    ? ` If you reload instead and the bill shows under Collected with your name, ${lookFor(who)}.` : ''
-  return {
-    msg: `warn:It is not known whether this bill was settled: the answer was lost and the bill could not be read back. Do not hand any money back. When the connection is back, press ${method} again on this bill — a bill can never be settled twice, and if the first press went through, this page finishes it then.${holdCash}${reloadHint}${whyNot(back)}`,
-    closePanel: false, reload: false, error: back.error || res.error,
-  }
+  return res
 }
 
 /**
- * What one press of a settle method is about to do, for the question asked before it (S842, owner
- * decision): one tap used to stamp a set-once settlement and, for Cash, a Cash In. Worded from this
- * file's own facts — `amount` is what settleCreditBill posts: the bill, less the commission for a
- * delivery partner. `bill` is the page's label for the bill. Returns { title, lines, confirmLabel }.
+ * Records one payment. `rpc(name, args, signal)` is the page's supabase.rpc. `amount` is rupees to
+ * the paisa and `lines` the [{ order_id, amount, commission }] that add up to it (creditLedger's
+ * allocatePayment). `priorLost` marks Check again: the same request, sent after its answer was lost.
+ * Returns
+ *   { status: 'recorded' | 'replayed', receipt }   the receipt the server holds for this request
+ *   { status: 'refused', error }                   the server's refusal: nothing was recorded
+ *   { status: 'unknown', error }                   no answer: it may have landed; send the same id again
  */
-export function settleConsequence({ order, method, commission = null, bill = '' }) {
-  const paid = Number(order.paid_amount) || 0
-  const partner = order.delivery_partner || null
-  const comm = partner ? (Number(commission) || 0) : 0
-  const amount = paid - comm
-  const from = partner || order.buyer_name || 'the customer'
-  const ref = bill ? `Bill ${bill}` : 'This bill'
-  const kept = !partner ? '.'
-    : comm > 0 ? `, with ${npr(comm)} commission kept by ${partner}: ${npr(amount)} received.`
-      : `, with no commission recorded: ${npr(amount)} received.`
-  return {
-    title: `Settle ${partner || order.buyer_name ? `${from}'s` : 'this'} bill by ${method}?`,
-    lines: [
-      `${ref} from ${from}, ${npr(paid)}, is marked as paid by ${method}${kept}`,
-      method === 'Cash'
-        ? `${npr(amount)} goes on the open shift's drawer record as a Cash In, so the drawer count expects it. If no shift is open, the bill is still settled but the cash goes on no drawer count, and this page then says how to record it.`
-        : 'Nothing goes into the cash drawer count — only a Cash settlement does.',
-      'A settlement cannot be undone, and its method cannot be changed afterwards.',
-    ],
-    confirmLabel: `Settle as ${method}`,
+export async function recordCreditReceipt({
+  rpc, requestId, partyKey, method, amount, lines, reference = null, note = null, priorLost = false, ms = SETTLE_WRITE_MS,
+}) {
+  const args = {
+    p_request_id: requestId, p_party_key: partyKey, p_method: method, p_amount: amount, p_lines: lines,
+    p_reference: (reference || '').trim() || null, p_note: (note || '').trim() || null,
   }
+  const send = () => sendOnce(rpc, 'record_credit_receipt', args, ms, 'Recording the payment')
+  let res = await send()
+  // `priorLost`: this is Check again, after an earlier press of this same request went unanswered.
+  let lost = priorLost
+  if (res.error && noAnswer(res)) { lost = true; res = await send() }
+  // Refused after a lost answer: the first send may be what made the bills stale (or took the id),
+  // and it may still have been finishing when the retry arrived. One more send asks for its replay.
+  if (lost && res.error && !noAnswer(res)) res = await send()
+  if (!res.error && res.data?.receipt_id) {
+    return { status: res.data.replayed ? 'replayed' : 'recorded', receipt: res.data, lost }
+  }
+  if (!res.error) return { status: 'unknown', error: { message: 'record_credit_receipt answered with no receipt' }, lost }
+  if (noAnswer(res)) return { status: 'unknown', error: res.error, lost: true }
+  return { status: 'refused', error: res.error, lost }
+}
+
+/**
+ * Cancels one receipt, with the reason the server keeps on it. Cancelling is idempotent (a cancelled
+ * receipt answers `already_cancelled`), so a lost answer is simply sent again. Returns
+ *   { status: 'cancelled', data }          this press cancelled it (also when only the retry heard so)
+ *   { status: 'already', data }            it had been cancelled before this press
+ *   { status: 'refused' | 'unknown', error }
+ */
+export async function cancelCreditReceipt({ rpc, receiptId, reason, ms = SETTLE_WRITE_MS }) {
+  const args = { p_receipt_id: receiptId, p_reason: String(reason ?? '').trim() }
+  const send = () => sendOnce(rpc, 'cancel_credit_receipt', args, ms, 'Cancelling the payment')
+  let res = await send()
+  let lost = false
+  if (res.error && noAnswer(res)) { lost = true; res = await send() }
+  if (!res.error && res.data) {
+    return { status: res.data.already_cancelled && !lost ? 'already' : 'cancelled', data: res.data, lost }
+  }
+  if (!res.error) return { status: 'unknown', error: { message: 'cancel_credit_receipt answered with nothing' }, lost }
+  if (noAnswer(res)) return { status: 'unknown', error: res.error, lost: true }
+  return { status: 'refused', error: res.error, lost }
+}
+
+const money = n => `NPR ${npr2(n)}`
+
+/**
+ * The sentences shown before a payment is recorded (the Receive payment dialog's last paragraph), from
+ * the allocation the dialog shows. `rows` are allocatePayment's rows; `label(bill)` names a bill.
+ */
+export function paymentSummary({ partyName, partner = false, method, total, commissionTotal = 0, rows, label, shiftOpen }) {
+  const taking = (rows || []).filter(r => r.ticked && (r.amount + r.commission) > 0)
+  const full = taking.filter(r => r.owedAfter === 0)
+  const part = taking.filter(r => r.owedAfter > 0)
+  const parts = []
+  if (full.length) parts.push(`clears ${full.map(r => label(r.bill)).join(', ')} in full`)
+  if (part.length) parts.push(part.map(r => `puts ${money(fromPaisa(r.amount + r.commission))} against ${label(r.bill)} (${money(fromPaisa(r.owedAfter))} still owed on it)`).join(', '))
+  const who = partyName || 'the customer'
+  const lines = [`${money(fromPaisa(total))} from ${who} by ${method}${parts.length ? `: ${parts.join(' and ')}` : ''}.`]
+  if (partner && commissionTotal > 0) lines.push(`${who} keeps ${money(fromPaisa(commissionTotal))} as commission on these bills, so together they clear ${money(fromPaisa(total + commissionTotal))}.`)
+  lines.push(method === 'Cash'
+    ? (shiftOpen === false
+      ? 'No shift is open, so a Cash payment will be refused: open a shift first, or pick how they really paid.'
+      : "The cash goes on the open shift's drawer count, so the drawer count expects it.")
+    : 'Nothing goes into the cash drawer count. Only a Cash payment does.')
+  lines.push('A numbered money receipt is recorded and printed. A payment entered by mistake can be cancelled with a reason, never deleted.')
+  return lines
+}
+
+/**
+ * The line shown once a record press has an answer. `result` is recordCreditReceipt's; returns
+ * { kind: 'ok' | 'warn' | 'error', text, error }. A refusal says nothing was recorded, which is true:
+ * the function raises inside its one transaction, so a refusal rolls the whole payment back.
+ */
+export function recordOutcome(result, { partyName, method, amount }) {
+  const who = partyName || 'the customer'
+  if (result.status === 'recorded' || result.status === 'replayed') {
+    const r = result.receipt || {}
+    const settled = (r.bills || []).filter(b => b.settled).length
+    const head = `Receipt ${receiptNoLabel(r)} (${r.invoice_fy || ''}): ${money(amount)} from ${who} by ${method}.`
+    const cleared = settled ? ` ${settled} bill${settled === 1 ? '' : 's'} paid in full.` : ''
+    const replay = result.status === 'replayed' || result.lost
+      ? ' The first answer was lost, so this was checked with the server: the payment is recorded once.' : ''
+    const cash = method === 'Cash' ? " The cash is on the open shift's drawer count." : ''
+    return { kind: 'ok', text: head + cleared + cash + replay, error: null }
+  }
+  if (result.status === 'unknown') {
+    return {
+      kind: 'warn',
+      text: `No answer came back, so it is not known whether ${money(amount)} from ${who} was recorded. Do not hand any money back and do not record it again: press Check again, which asks the server about this same payment and can never record it twice.${method === 'Cash' ? ' Keep the cash aside until then.' : ''}`,
+      error: result.error,
+    }
+  }
+  return { kind: 'error', text: `The payment was not recorded, and no receipt was made. ${errorText(result.error, 'operator')}`, error: result.error }
+}
+
+/** The confirm text for cancelling a receipt (S843 owner decision): the amount, and where its cash goes. */
+export function cancelConsequence(receipt) {
+  const amt = money(receipt.amount)
+  const lines = [
+    `Receipt ${receiptNoLabel(receipt)} (${receipt.invoice_fy || ''}) for ${amt} from ${receipt.party_name || 'the customer'} is marked Cancelled, with your reason. It is never deleted.`,
+    'The bills it paid owe that money again, and any bill it had paid in full goes back to unpaid.',
+  ]
+  lines.push(receipt.method === 'Cash'
+    ? `${amt} leaves the cash drawer: it goes on the OPEN shift as cash taken out, so hand the money back or take it out of the drawer now. With no shift open, the cancel is refused.`
+    : `It was paid by ${receipt.method}, so nothing leaves the cash drawer. Return the money the same way if it is owed back.`)
+  return lines
+}
+
+/** The line shown once a cancel press has an answer. */
+export function cancelOutcome(result, receipt) {
+  const name = `Receipt ${receiptNoLabel(receipt)}`
+  if (result.status === 'cancelled') {
+    return {
+      kind: 'ok',
+      text: `${name} is cancelled.${receipt.method === 'Cash' ? ` ${money(receipt.amount)} went on the open shift as cash taken out.` : ''} Its bills are owed again.`,
+      error: null,
+    }
+  }
+  if (result.status === 'already') return { kind: 'warn', text: `${name} had already been cancelled, so nothing changed.`, error: null }
+  if (result.status === 'unknown') {
+    return { kind: 'warn', text: `No answer came back, so it is not known whether ${name} was cancelled. Reload the page: Collected shows it as Cancelled if it was. Pressing Cancel again is safe, as it can only be cancelled once.`, error: result.error }
+  }
+  return { kind: 'error', text: `${name} was not cancelled. It stands as it was. ${errorText(result.error, 'operator')}`, error: result.error }
 }

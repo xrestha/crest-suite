@@ -945,7 +945,7 @@ export default function PosTableManagement() {
           { key: 'notes', label: 'Quick Notes', title: "Preset instruction chips (e.g. 'No onion', 'Extra spicy') staff can tap on an order item instead of typing — prints under that item on the KOT/BOT" },
           { key: 'hsc', label: 'HSC Codes', title: 'Harmonized System Code per menu item — only required (min. 4 digits) if the item is an imported good sold as-is (e.g. imported bottled drinks). Not needed for freshly prepared dishes. Printed on POS bills if set.' },
           { key: 'discounts', label: 'Discounts', title: 'Preset reasons staff can pick when applying a discount at Charge — customize this list to match how your team actually discounts (e.g. Loyalty customer, Manager goodwill)' },
-          { key: 'delivery', label: 'Delivery Partners', title: "Foodmandu/Pathao commission % — never applied automatically at Charge (their orders close as Credit, not their own payment method). It's only a starting suggestion shown when you settle that bill in Customers → Outstanding Credit, adjustable against what the platform actually remitted" },
+          { key: 'delivery', label: 'Delivery Partners', title: "Foodmandu/Pathao commission % — never applied automatically at Charge (their orders close as Credit, not their own payment method). It's only a starting suggestion shown when you take the platform's payment in Customers → Credit, adjustable against what the platform actually remitted" },
           { key: 'reservations', label: 'Reservations', title: 'How long a party of each size is expected to sit (prefilled from your own measured turn times), when a booking counts as late, the WhatsApp confirmation message, and the booking link / QR customers scan to request a table' },
           { key: 'guestmenu', label: 'Guest Menu', title: "What guests see at the top of every table's QR menu and your online booking page — the restaurant name and logo (the owner sets these) — and the order of the menu's sections" },
           { key: 'printers', label: 'Printers', title: 'The computers at the restaurant that print kitchen and bar tickets on their own printer, instead of each till opening a print window — pair one, test it, and see what it printed. When none is online, the tills print as before' },
@@ -1262,7 +1262,7 @@ export default function PosTableManagement() {
             customer and remit to you later, minus commission. So their orders close as a Credit
             bill (Order Taking → Pay → Credit → tap the platform's chip), not a separate payment
             method. Commission is never calculated at Charge — it only shows up as an adjustable
-            suggestion when you settle that bill in Customers → Outstanding Credit, computed on the
+            suggestion when you take the platform's payment in Customers → Credit, computed on the
             bill's ex-VAT (taxable) value. Add, rename, or remove platforms below as your
             partnerships change — this list isn't fixed to just these two.
           </p>
@@ -1291,7 +1291,7 @@ export default function PosTableManagement() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 30px', gap: 8, marginBottom: 6 }}>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Platform</span>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      <Tip text="Only a starting suggestion at settlement time (Customers → Outstanding Credit) — leave blank if you haven't negotiated/confirmed a rate yet">Commission %</Tip>
+                      <Tip text="Only a starting suggestion when the platform's payment is taken (Customers → Credit) — leave blank if you haven't negotiated/confirmed a rate yet">Commission %</Tip>
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <Tip text="Pre-fills Buyer Phone whenever this platform's chip is tapped at Charge, so its orders always group under one customer record">Buyer Phone</Tip>

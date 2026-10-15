@@ -172,9 +172,9 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   <hr>
   <div class="row"><span>Opening Cash:</span><span>${npr2(opening)}</span></div>
   <div class="row"><span>Cash Sales:</span><span>${npr2(report.cashSales)}</span></div>
-  ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${npr2(report.creditSettlementsCash)} credit settled)` : ''}:</span><span>+${npr2(report.cashIn)}</span></div>` : ''}
-  ${report.cashOut ? `<div class="row"><span>Cash Out${report.refundsCash ? ` (incl. ${npr2(report.refundsCash)} refunded)` : ''}:</span><span>-${npr2(report.cashOut)}</span></div>` : ''}
-  ${(report.movements || []).filter(m => m.kind === 'refund').map(m => `<div class="row ind"><span>${esc(movementLabel(m))}</span><span>-${npr2(Number(m.amount) || 0)}</span></div>`).join('')}
+  ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${npr2(report.creditSettlementsCash)} from credit customers)` : ''}:</span><span>+${npr2(report.cashIn)}</span></div>` : ''}
+  ${report.cashOut ? `<div class="row"><span>Cash Out${esc(cashOutParts(report, npr2, 'refunded'))}:</span><span>-${npr2(report.cashOut)}</span></div>` : ''}
+  ${(report.movements || []).filter(m => m.kind === 'refund' || m.kind === 'credit_receipt_cancel').map(m => `<div class="row ind"><span>${esc(m.kind === 'credit_receipt_cancel' && m.reason ? m.reason : movementLabel(m))}</span><span>-${npr2(Number(m.amount) || 0)}</span></div>`).join('')}
   <div class="row tot"><span>Expected Cash:</span><span>${npr2(expected)}</span></div>
   <div class="row"><span>Counted Cash:</span><span>${npr2(closing)}</span></div>
   <div class="row tot"><span>Variance:</span><span>${varianceLabel}</span></div>
@@ -246,6 +246,10 @@ async function loadShiftReport(clientId, shiftId, compCost = {}) {
   const moveList = movements || []
   const cashIn  = moveList.filter(m => m.direction === 'in').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   const cashOut = moveList.filter(m => m.direction === 'out').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  // Cash a credit customer or delivery partner paid in: the old whole-bill settlement (one entry per
+  // bill, order_id set) and, since S843, a payment receipt's Cash In (one entry per receipt, order_id
+  // NULL, credit_receipt_id set — a receipt can cover several bills). Both are kind
+  // 'credit_settlement', direction 'in', so neither needs the bill.
   const creditSettlementsCash = moveList
     .filter(m => m.kind === 'credit_settlement').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   // Credit Note cash refunds (S754). Already inside cashOut — the database pins a refund to
@@ -253,6 +257,11 @@ async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // slip can say how much of Cash Out went back to customers.
   const refundsCash = moveList
     .filter(m => m.kind === 'refund').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  // A cash customer payment cancelled as a mistake (S843, cancel_credit_receipt): its cash leaves the
+  // drawer as its own entry, pinned to direction 'out' like a refund, so it is already in cashOut and
+  // in pos_shifts_guard's sum. Named only so the screen and the slip can say what that cash was.
+  const receiptCancelsCash = moveList
+    .filter(m => m.kind === 'credit_receipt_cancel').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   // The note number beside each refund. A label, never a figure, so a failed lookup degrades to
   // "Refund" rather than failing the report the drawer is counted against.
   const noteIds = [...new Set(moveList.filter(m => m.kind === 'refund' && m.pos_credit_note_id).map(m => m.pos_credit_note_id))]
@@ -333,7 +342,7 @@ async function loadShiftReport(clientId, shiftId, compCost = {}) {
   return {
     orderCount, paidCount, voidCount, compCount, byMethod,
     discountTotal, voidTotal, compTotal, salesTotal, cashSales,
-    movements: moveList, cashIn, cashOut, creditSettlementsCash, refundsCash,
+    movements: moveList, cashIn, cashOut, creditSettlementsCash, refundsCash, receiptCancelsCash,
     // What Voided Value is measured in, frozen with the report (S814 4d, SHIFTS-5). A closing_report
     // without it was frozen when voids were valued with VAT; the History row says so. Not one of the
     // eight cash figures pos_shifts_guard checks, so it can never refuse a close.
@@ -342,11 +351,24 @@ async function loadShiftReport(clientId, shiftId, compCost = {}) {
 }
 
 // One label per movement kind, for the screen and the signed slip alike. A refund used to fall
-// into "Cash out" (S754).
+// into "Cash out" (S754). A customer's cash payment is a receipt since S843 (credit_receipt_id set,
+// no bill), and its cancellation a cash out of its own; the entry's reason names the receipt.
+// expectedCashTwin.test.js checks every kind the database allows has a label here.
 function movementLabel(m) {
-  if (m.kind === 'credit_settlement') return 'Credit settled'
+  if (m.kind === 'credit_settlement') return m.credit_receipt_id ? 'Customer payment' : 'Credit settled'
+  if (m.kind === 'credit_receipt_cancel') return 'Customer payment cancelled'
   if (m.kind === 'refund') return m.credit_note_label ? `Refund — ${m.credit_note_label}` : 'Refund'
   return m.direction === 'in' ? 'Cash in' : 'Cash out'
+}
+
+// What Cash Out holds besides ordinary cash outs, for its label: "incl. NPR 300 refunded on Credit
+// Notes, NPR 500 customer payments cancelled". A closing_report frozen before S843 has no
+// receiptCancelsCash, which reads as none.
+function cashOutParts(report, fmt, refundWords) {
+  const parts = []
+  if (report.refundsCash > 0) parts.push(`${fmt(report.refundsCash)} ${refundWords}`)
+  if (report.receiptCancelsCash > 0) parts.push(`${fmt(report.receiptCancelsCash)} customer payments cancelled`)
+  return parts.length ? ` (incl. ${parts.join(', ')})` : ''
 }
 
 // The one definition of what should be in the drawer. Opening float, plus cash taken over the
@@ -411,8 +433,8 @@ function ReportBody({ report, opening, closing, variance }) {
             {(report.cashIn || 0) > 0 && (
               <tr>
                 <td>
-                  <Tip text="Cash that entered the drawer without being a sale — a pay-in, or a customer settling an older Credit bill in cash. Credit settlements used to be invisible here, so the drawer read as 'over' by the settled amount.">
-                    Cash In{report.creditSettlementsCash > 0 ? ` (incl. ${fmtNpr(report.creditSettlementsCash)} credit settled)` : ''}
+                  <Tip text="Cash that entered the drawer without being a sale — a pay-in, or a credit customer or delivery partner paying in cash towards their Credit bills (in full or in part). Those payments used to be invisible here, so the drawer read as 'over' by the amount paid.">
+                    Cash In{report.creditSettlementsCash > 0 ? ` (incl. ${fmtNpr(report.creditSettlementsCash)} from credit customers)` : ''}
                   </Tip>
                 </td>
                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-green-text)' }}>+{fmtNpr(report.cashIn)}</td>
@@ -420,8 +442,8 @@ function ReportBody({ report, opening, closing, variance }) {
             )}
             {(report.cashOut || 0) > 0 && (
               <tr>
-                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, a float drop to the safe, or a refund handed back on a Credit Note.">
-                  Cash Out{report.refundsCash > 0 ? ` (incl. ${fmtNpr(report.refundsCash)} refunded on Credit Notes)` : ''}
+                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, a float drop to the safe, a refund handed back on a Credit Note, or the cash of a customer payment cancelled as a mistake.">
+                  Cash Out{cashOutParts(report, fmtNpr, 'refunded on Credit Notes')}
                 </Tip></td>
                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>−{fmtNpr(report.cashOut)}</td>
               </tr>

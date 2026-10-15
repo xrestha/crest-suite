@@ -30,8 +30,32 @@ function latestGuardSql() {
   return { file: hits[hits.length - 1], body: squash(sqlCode(body)) }
 }
 
+// The LATEST migration's cash entry kinds and the way each one moves cash (both CHECKs on
+// pos_cash_movements). S843 added 'credit_receipt_cancel', the cash of a cancelled customer payment.
+function latestKindChecks() {
+  let kinds = null
+  let outKinds = null
+  let inKinds = null
+  for (const f of fs.readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith('.sql')).sort()) {
+    const sql = squash(sqlCode(fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8')))
+    const k = sql.match(/ADD CONSTRAINT pos_cash_movements_kind_check CHECK \(kind IN \(([^)]*)\)\)/)
+    if (k) kinds = [...k[1].matchAll(/'(\w+)'/g)].map(m => m[1])
+    const d = sql.match(/ADD CONSTRAINT pos_cash_movements_kind_direction_check CHECK \((.*?)\);/)
+    if (d) {
+      const of = dir => {
+        const m = d[1].match(new RegExp(`kind IN \\(([^)]*)\\) AND direction = '${dir}'`))
+        return m ? [...m[1].matchAll(/'(\w+)'/g)].map(x => x[1]) : null
+      }
+      outKinds = of('out')
+      inKinds = of('in')
+    }
+  }
+  return { kinds, outKinds, inKinds }
+}
+
 const jsx = squash(jsCode(fs.readFileSync(path.join(__dirname, 'PosShifts.jsx'), 'utf8')))
 const { file, body: guard } = latestGuardSql()
+const { kinds, outKinds, inKinds } = latestKindChecks()
 
 describe('Expected Cash and its SQL twin in pos_shifts_guard', () => {
   it('reads the guard from a migration at or after S809 1l', () => {
@@ -66,6 +90,29 @@ describe('Expected Cash and its SQL twin in pos_shifts_guard', () => {
     expect(jsx).toContain("const cashOut = moveList.filter(m => m.direction === 'out')")
     expect(guard).toContain("sum(m.amount) FILTER (WHERE m.direction = 'in')")
     expect(guard).toContain("sum(m.amount) FILTER (WHERE m.direction = 'out')")
+  })
+
+  // S843: a customer payment's Cash In carries no bill (one receipt can cover several), and a payment
+  // cancelled as a mistake takes its cash back out as a new kind. Expected Cash needs no change for
+  // either only because both sides count by direction and the database pins each kind to one
+  // direction; this holds the pinning, and the screen's naming of every kind, to the migrations.
+  it('every kind of cash entry moves one way only, so counting by direction counts it (S843)', () => {
+    expect(kinds).toEqual(expect.arrayContaining(['pay_in', 'pay_out', 'credit_settlement', 'refund', 'credit_receipt_cancel']))
+    expect([...outKinds, ...inKinds].sort()).toEqual([...kinds].sort())
+    expect(outKinds).toEqual(expect.arrayContaining(['pay_out', 'refund', 'credit_receipt_cancel']))
+    expect(inKinds).toEqual(expect.arrayContaining(['pay_in', 'credit_settlement']))
+  })
+
+  it('names every kind of cash entry the database allows, and never needs a bill to count one (S843)', () => {
+    for (const k of kinds.filter(k => k !== 'pay_in' && k !== 'pay_out')) {
+      expect([k, jsx.includes(`m.kind === '${k}'`)]).toEqual([k, true])
+    }
+    // A cancelled payment is told apart from other cash outs on the screen and the slip.
+    expect(jsx).toContain("if (m.kind === 'credit_receipt_cancel') return 'Customer payment cancelled'")
+    expect(jsx).toContain(".filter(m => m.kind === 'credit_receipt_cancel').reduce(")
+    // Credit collections are counted by kind alone: a receipt's Cash In has no order_id.
+    expect(jsx).toContain(".filter(m => m.kind === 'credit_settlement').reduce(")
+    expect(jsx).not.toMatch(/m\.order_id/)
   })
 
   it('the guard checks every cash figure the close sends, and the close still sends each one', () => {

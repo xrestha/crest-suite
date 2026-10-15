@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Modal from '../../../components/Modal'
@@ -13,6 +13,11 @@ import { normalizePhone } from '../../../utils/phone'
 import { SOURCES, OCCASIONS, LIVE_STATUSES, tableIdsOf } from './reservationStatus'
 import { durationFor } from './reservationSettings'
 import { findTableConflicts, describeHoldRefusal, MAX_DURATION_MINUTES } from './reservationConflicts'
+import { withTimeout } from '../../../utils/withTimeout'
+import { readReceiptLines, receiptTotalsByBill, owedOn } from '../creditOwed'
+
+// How long the guest lookup waits before it says it could not check (S843).
+const LOOKUP_MS = 15000
 
 const fmtNpr = npr
 
@@ -49,6 +54,7 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
   const [saveError, setSaveError] = useState(null)
   // null = nothing looked up yet; { loading } | { error } | { name, visits, credit, noShows }
   const [lookup,   setLookup]   = useState(null)
+  const lookupSeq = useRef(0)
   // S842: the form as it opened, so the dialog knows when it holds unsaved input. A chip or a picked
   // day fires no input event, so the backdrop guard is told outright (Modal's `dirty`).
   const [opened] = useState(() => ({ name, phone, party, dateIso, time, duration, source, occasion, notes, tables: [...tableIds].sort().join(',') }))
@@ -68,25 +74,44 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
 
   async function lookupPhone(raw) {
     const canonical = normalizePhone(raw)
+    // A later lookup (another blur, another number) wins; an earlier one landing after it is dropped.
+    const seq = ++lookupSeq.current
     if (!canonical) { setLookup(null); return }
     setLookup({ loading: true })
     const trimmed = String(raw).trim()
     // S809 3k: since 3k the till stores a bill's phone as the number ("9841234567"); bills from before
     // keep the spelling typed. Both are asked for, so a booking typed "+977 …" still finds the visits.
     const billPhones = [...new Set([trimmed, canonical])]
-    const [cust, visits, credit, noShows] = await Promise.all([
-      scopedFrom('pos_customers', 'id, name').eq('phone_canonical', canonical).limit(1),
-      scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').in('buyer_phone', billPhones),
-      scopedFrom('pos_orders', 'paid_amount').eq('payment_method', 'Credit').eq('status', 'billed').is('credit_settled_at', null).in('buyer_phone', billPhones),
-      scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('phone_canonical', canonical).eq('status', 'no_show'),
-    ])
+    // What the guest owes is pos_credit_open_bills' rule (S843, creditOwed.js): a paid Credit bill not
+    // settled and not credited — a credit note means it is no longer owed, which this used to count —
+    // less what they have paid on it in part. A delivery partner's bill is the partner's, not the
+    // guest's, whatever phone it carries. Bounded: a hung read left "Looking up…" up for good.
+    let cust, visits, credit, noShows, owing = [], owedLines = { data: [], error: null }
+    try {
+      ;[cust, visits, credit, noShows] = await withTimeout(Promise.all([
+        scopedFrom('pos_customers', 'id, name').eq('phone_canonical', canonical).limit(1),
+        scopedFrom('pos_orders', 'id', { count: 'exact', head: true }).eq('status', 'billed').in('buyer_phone', billPhones),
+        scopedFrom('pos_orders', 'id, paid_amount, delivery_partner').eq('payment_method', 'Credit').eq('status', 'billed').eq('close_type', 'paid')
+          .is('credit_settled_at', null).is('credit_note_id', null).in('buyer_phone', billPhones),
+        scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('phone_canonical', canonical).eq('status', 'no_show'),
+      ]), LOOKUP_MS, 'Looking up the guest')
+      owing = (credit.data || []).filter(o => !String(o.delivery_partner || '').trim())
+      if (!credit.error && owing.length > 0) {
+        owedLines = await withTimeout(readReceiptLines(scopedFrom, owing.map(o => o.id)), LOOKUP_MS, "Reading the guest's part payments")
+      }
+    } catch {
+      if (seq === lookupSeq.current) setLookup({ error: true })
+      return
+    }
+    if (seq !== lookupSeq.current) return
     // A failed lookup must not render as "new guest, no history" — that is the vacuous-guard shape.
-    if (cust.error || visits.error || credit.error || noShows.error) { setLookup({ error: true }); return }
+    if (cust.error || visits.error || credit.error || noShows.error || owedLines.error) { setLookup({ error: true }); return }
     const known = cust.data?.[0]?.name || ''
+    const paidSoFar = receiptTotalsByBill(owedLines.data)
     setLookup({
       name: known,
       visits: visits.count || 0,
-      credit: (credit.data || []).reduce((s, o) => s + (Number(o.paid_amount) || 0), 0),
+      credit: owing.reduce((s, o) => s + Math.max(0, owedOn(o.paid_amount, paidSoFar[o.id])), 0),
       noShows: noShows.count || 0,
     })
     if (known && !name.trim()) setName(known)

@@ -37,6 +37,7 @@ import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
+import { readReceiptLines, receiptTotalsByBill, owedOn, isPartPaid, settledMethodLabel } from '../creditOwed'
 
 const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
@@ -266,6 +267,10 @@ export default function SalesReport() {
   const [itemsByOrder, setItemsByOrder] = useState({})
   // pos_order_payments legs for the Split bills in orderById — the only bills paid more than one way.
   const [paymentsByOrder, setPaymentsByOrder] = useState({})
+  // S843: what each unsettled delivery-partner bill in the range has been paid so far, by receipts
+  // not cancelled ({ order_id: { received, commission, cash } }, creditOwed.js). A platform can pay a
+  // bill off in parts, and Outstanding is what is still owed.
+  const [receiptsByOrder, setReceiptsByOrder] = useState({})
   const [compsByOrder, setCompsByOrder] = useState({}) // { order_id: [{ compNo, reason, items, foodCost, potentialValue }] }
   const [vatReg, setVatReg] = useState(true)
   // For the credit note number on a minus row, as the Credit Note Book prints it.
@@ -295,7 +300,7 @@ export default function SalesReport() {
     const toTs   = nepalDayEndTs(toIso)
     const fail = err => {
       setRangeError(err)
-      setOrders([]); setCreditNotes([]); setOrderById({}); setItemsByOrder({}); setPaymentsByOrder({}); setCompsByOrder({})
+      setOrders([]); setCreditNotes([]); setOrderById({}); setItemsByOrder({}); setPaymentsByOrder({}); setCompsByOrder({}); setReceiptsByOrder({})
       setRangeLoading(false)
     }
     // Every read below is bounded (S842, reportTimeout.js): a hung one reaches `fail` as a timeout
@@ -362,8 +367,14 @@ export default function SalesReport() {
     let byOrder = {}
     let paymentsNext = {}
     let compsByOrderNext = {}
+    let receiptsNext = {}
     if (allOrders.length > 0) {
       const splitIds = allOrders.filter(o => o.payment_method === 'Split').map(o => o.id)
+      // S843: the range's delivery-partner bills still owed (Credit, not settled, not credited) — the
+      // only rows whose Outstanding depends on what has been paid on them so far.
+      const owingPartnerIds = orderList
+        .filter(o => o.delivery_partner && o.payment_method === 'Credit' && !o.credit_settled_at && !o.credit_note_id)
+        .map(o => o.id)
       const lineResults = await settleAll([
         // Excludes item-level comps (comped=true) — those never billed at menu price (they print
         // on their own Complimentary Slip instead, see PosOrders.jsx), so every tab built from
@@ -384,6 +395,9 @@ export default function SalesReport() {
         // same legs. Both reads derive their ids from the orders and nothing from each other.
         fetchAllRowsChunked(splitIds,
           ids => scopedFrom('pos_order_payments', 'order_id, payment_method, amount').in('order_id', ids).order('id')),
+        // The receipts paid against those bills (S843). A failed read fails the range like the
+        // others: an Outstanding without it would count a part-paid bill in full.
+        readReceiptLines(scopedFrom, owingPartnerIds),
       ], readMs, 'Loading the bill lines')
       if (!rangeReq.isCurrent(reqKey)) return
       // S612 silent-zero rule: with the parent orders loaded but the lines dropped, every figure
@@ -391,7 +405,8 @@ export default function SalesReport() {
       // bill would fall into "breakdown missing" and Cash would stop tying to the Z-report.
       const linesFailed = firstError(lineResults)
       if (linesFailed) { fail(linesFailed); return }
-      const [{ data: items }, { data: payments }] = lineResults
+      const [{ data: items }, { data: payments }, { data: receiptLines }] = lineResults
+      receiptsNext = receiptTotalsByBill(receiptLines)
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -455,6 +470,7 @@ export default function SalesReport() {
     setItemsByOrder(byOrder)
     setPaymentsByOrder(paymentsNext)
     setCompsByOrder(compsByOrderNext)
+    setReceiptsByOrder(receiptsNext)
     setRangeLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom, rangeReq, inventory, customizationEnabled])
 
@@ -597,18 +613,28 @@ export default function SalesReport() {
       // PosCustomers.jsx settles against (both platforms calculate on it), so an effective
       // rate measured off the VAT-inclusive total would read ~13% low on every bill of a
       // VAT-registered client and report every partner as under-remitting.
+      const settled = !!o.credit_settled_at
+      const credited = !!o.credit_note_id
+      // S843: an unsettled, uncredited bill may be part-paid. Its receipts so far (none: undefined)
+      // decide what it still owes; a settled or credited bill owes nothing whatever they were.
+      const paidSoFar = !settled && !credited ? receiptsByOrder[o.id] : undefined
       rows.push({
-        id: o.id, isReturn: false, billId: o.id, credited: !!o.credit_note_id,
+        id: o.id, isReturn: false, billId: o.id, credited,
         orderNo: o.order_no, invoiceNo: o.invoice_no, openedAt: o.opened_at, closedAt: o.closed_at,
         deliveryPartner: o.delivery_partner, tableName: o.table_name,
         amount: o.paid_amount || 0,
         exVatBase: e.amounts.taxable + e.amounts.nonTaxable,
-        settled: !!o.credit_settled_at, settledAt: o.credit_settled_at, settledMethod: o.credit_settled_method,
+        settled, settledAt: o.credit_settled_at, settledMethod: o.credit_settled_method,
+        // On a part-paid bill this is the commission kept so far; it is shown and counted only once
+        // the bill is settled, as before (the effective rate is measured on settled bills).
         commission: parseFloat(o.commission_amount) || 0,
+        owed: !settled && !credited ? owedOn(o.paid_amount, paidSoFar) : null,
+        paidSoFar: paidSoFar || null,
+        partPaid: !settled && !credited && isPartPaid(o.paid_amount, paidSoFar),
       })
     }
     return rows.sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
-  }, [salesEntries, cnLabel])
+  }, [salesEntries, cnLabel, receiptsByOrder])
 
   // One row per partner. Until this existed the tab could only answer "how much delivery business
   // did we do" - "what does Foodmandu owe me, and what has Pathao taken" meant reading down the
@@ -1094,11 +1120,14 @@ export default function SalesReport() {
           'Partner': r.deliveryPartner, 'Table': r.tableName || 'Takeaway',
           'Amount (NPR)': Math.round(r.amount * 100) / 100,
           'Commission Base, ex-VAT (NPR)': Math.round(r.exVatBase * 100) / 100,
-          'Status': r.isReturn ? (r.originalSettled ? 'Credit note (bill was settled)' : 'Credit note') : r.settled ? 'Settled' : r.credited ? 'Credited, not owed' : 'Outstanding',
+          'Status': r.isReturn ? (r.originalSettled ? 'Credit note (bill was settled)' : 'Credit note') : r.settled ? 'Settled' : r.credited ? 'Credited, not owed' : r.partPaid ? 'Part paid' : 'Outstanding',
+          // S843: what is still owed on a bill the platform has not settled (all of it, or what is left
+          // after part payments); blank once settled or credited.
+          'Still Owed (NPR)': r.isReturn || r.settled || r.credited ? '' : Math.round(deliveryOutstanding(r) * 100) / 100,
           'Commission (NPR)': r.settled ? Math.round(r.commission * 100) / 100 : '',
           'Comm. %': billPct == null ? '' : `${billPct.toFixed(2)}%`,
           'Net Received (NPR)': r.settled ? Math.round((r.amount - r.commission) * 100) / 100 : '',
-          'Settled Via': r.settled ? r.settledMethod : '',
+          'Settled Via': r.settled ? settledMethodLabel(r.settledMethod) : '',
           // settledAt has been on the row object since the tab was written and never exported —
           // 'Settled Via' told you how but never when.
           'Settled On': r.settled ? settledLabel(r.settledAt) : '',
@@ -1618,7 +1647,7 @@ export default function SalesReport() {
       ) : tab === 'delivery' ? (
         <div>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
-          Foodmandu/Pathao bills close as Credit (the platform doesn't pay at the counter — it remits later, minus commission), so an outstanding row here has no commission/net yet. Settle it from Customers → Outstanding Credit to record the platform's actual remittance. A credit note against a delivery bill is a minus row on the day it was issued: it comes off the partner's Billed figure, and the bill it cancels is no longer owed, so that bill leaves Outstanding whichever range the note falls in — it never changes a settled bill's commission or the effective rate. Click a partner below to see only its bills; click any bill to view it.
+          Foodmandu/Pathao bills close as Credit (the platform doesn't pay at the counter — it remits later, minus commission), so an outstanding row here has no commission/net yet. Record the platform's remittance with Receive payment on Customers → Credit; a bill it has paid part of shows as Part paid, and Outstanding counts only what is still owed on it. A credit note against a delivery bill is a minus row on the day it was issued: it comes off the partner's Billed figure, and the bill it cancels is no longer owed, so that bill leaves Outstanding whichever range the note falls in — it never changes a settled bill's commission or the effective rate. Click a partner below to see only its bills; click any bill to view it.
         </p>
         {partnerFilter !== 'all' && (
           <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -1637,7 +1666,7 @@ export default function SalesReport() {
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Bills in this range not yet settled from Customers → Outstanding Credit. A bill with a credit note against it is no longer owed, whichever range the note falls in, so it is not counted — as on the Customers page." width={260}>Outstanding</Tip>
+              <Tip text="What is still owed on this range's bills the platform has not paid off (Customers → Credit). A bill it has paid part of counts only what is left. A bill with a credit note against it is no longer owed, whichever range the note falls in, so it is not counted — as on the Customers page." width={260}>Outstanding</Tip>
             </div>
             <div className="stat-value" style={{ color: deliveryPartnerTotals.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.outstanding)}</div>
           </div>
@@ -1666,7 +1695,7 @@ export default function SalesReport() {
                   <Tip text="What the customers were billed for this platform's orders — after any discount, and including VAT — less credit notes issued in this range against its bills. Not the same as Gross on the other tabs, which is before discount." width={300}>Billed (incl. VAT)</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="What this platform still owes you — bills it took the money for but hasn't remitted yet. The figure in brackets is how many bills that is. A bill with a credit note against it is no longer owed, whichever range the note falls in. Record a remittance from Customers → Outstanding Credit." width={300}>Outstanding</Tip>
+                  <Tip text="What this platform still owes you — bills it took the money for but hasn't remitted yet, less anything it has already paid on them. The figure in brackets is how many bills that is (a part-paid one included). A bill with a credit note against it is no longer owed, whichever range the note falls in. Record a remittance with Receive payment on Customers → Credit." width={300}>Outstanding</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Commission this platform withheld across its settled bills, as entered at settlement from its own remittance statement." width={280}>Commission</Tip>
@@ -1790,6 +1819,12 @@ export default function SalesReport() {
                             <span className="badge-gray" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>Credited, not owed</span>
                           </Tip>
                         )
+                        : r.partPaid ? (
+                          // S843: paid in part by receipts, the rest still owed. Its Outstanding is that rest.
+                          <Tip text={`The platform has paid ${fmtNpr(r.paidSoFar?.received || 0)} on this bill so far${(r.paidSoFar?.commission || 0) > 0 ? `, and kept ${fmtNpr(r.paidSoFar.commission)} as commission` : ''}; ${fmtNpr(r.owed)} is still owed and counts in Outstanding. Its commission and net received show once it is paid off.`} width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                            <span className="badge-amber" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>Part paid · {fmtNpr(r.owed)} owed</span>
+                          </Tip>
+                        )
                         : <span className="badge-amber" style={{ fontSize: 11 }}>Outstanding</span>}
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.settled ? fmtNpr(r.commission) : '—'}</td>
@@ -1797,7 +1832,7 @@ export default function SalesReport() {
                       {billPct == null ? '—' : `${billPct.toFixed(1)}%${billOff ? ' ⚠' : ''}`}
                     </td>
                     <td style={{ textAlign: 'right' }}>{r.settled ? fmtNpr(r.amount - r.commission) : '—'}</td>
-                    <td>{r.settled ? r.settledMethod : '—'}</td>
+                    <td>{r.settled ? settledMethodLabel(r.settledMethod) : '—'}</td>
                     <td className="no-print">
                       <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 9px' }}
                         onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: r.billId }) }}>{r.isReturn ? 'View original bill' : 'View bill'}</button>

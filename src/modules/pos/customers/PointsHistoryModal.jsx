@@ -122,7 +122,7 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
     }
     const n = Number(data) || 0
     setMsg(n > 0
-      ? { ok: true, text: `+${n.toLocaleString('en-IN')} point${n === 1 ? '' : 's'} added for ${billLabel(bill)}${n !== expected ? ` (worked out from the bill as it is stored, not the ${expected} shown)` : ''}.${bill.payment_method === 'Credit' ? ' They can be spent once this Credit bill is settled.' : ''}` }
+      ? { ok: true, text: `+${n.toLocaleString('en-IN')} point${n === 1 ? '' : 's'} added for ${billLabel(bill)}${n !== expected ? ` (worked out from the bill as it is stored, not the ${expected} shown)` : ''}.${bill.payment_method === 'Credit' ? ' They can be spent once this Credit bill is paid in full.' : ''}` }
       : { ok: false, text: `No points were added for ${billLabel(bill)}: it already has its points, or it no longer earns any (its scheme or the customer changed). The list was read again.` })
     await load()
     onChanged?.()
@@ -137,7 +137,7 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
         {customer.phone} · holds <strong style={{ color: 'var(--theme-text1)' }}>{fmt(balance || 0)} points</strong>
         {pointValue != null && balance > 0 ? ` (worth ${nprPoints(pointsValue(balance, pointValue))})` : ''}
-        {held > 0 && <> · {fmt(spendable)} can be spent now, {fmt(held)} when a Credit bill is paid</>}
+        {held > 0 && <> · {fmt(spendable)} can be spent now, {fmt(held)} once its Credit bills are paid in full</>}
       </p>
 
       {msg && (

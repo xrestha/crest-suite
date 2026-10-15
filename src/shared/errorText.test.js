@@ -919,3 +919,104 @@ describe('table move, join and split refusals (S836)', () => {
     expect(errorInfo(hinted.pos_move_order_missing, 'operator').detail).toMatch(/T5's bill/)
   })
 })
+
+// S843 (migration 20261015120000): part payments on customer credit, each a numbered receipt. Every
+// refusal is raised inside record_credit_receipt / cancel_credit_receipt before they write, or by a
+// BEFORE trigger, so each may say nothing was recorded, cancelled or changed. The messages are the
+// migration's own.
+describe('customer payment receipt refusals (S843)', () => {
+  const raised = {
+    credit_receipt_auth: { code: '42501', message: 'credit_receipt_auth: sign in to the outlet to record a payment' },
+    credit_receipt_bad: { code: 'P0001', message: 'credit_receipt_bad: the bills add up to NPR 900, not the NPR 1000 received' },
+    credit_receipt_no_shift: { code: 'P0001', message: 'credit_receipt_no_shift: no shift is open, so this cash has no drawer to go in — open a shift first, or record it as another method' },
+    credit_receipt_stale: { code: 'P0001', message: "credit_receipt_stale: bill 1204 is no longer an unpaid Credit bill (paid, credited or not this outlet's) — reload and try again" },
+    credit_receipt_party: { code: 'P0001', message: 'credit_receipt_party: bill 1204 belongs to someone else' },
+    credit_receipt_over: { code: 'P0001', message: 'credit_receipt_over: bill 1204 still owes NPR 400.00, less than the NPR 500 put against it — a payment cannot be more than is owed' },
+    credit_receipt_cancel_reason: { code: 'P0001', message: 'credit_receipt_cancel_reason: say why the payment is being cancelled (3 to 300 characters)' },
+    credit_receipt_missing: { code: 'P0001', message: "credit_receipt_missing: that payment is not on this outlet's records" },
+    credit_receipt_cancel_credited: { code: 'P0001', message: "credit_receipt_cancel_credited: a credit note has been issued on one of this payment's bills, so the payment stands — the note settled that money" },
+    credit_receipt_cancel_no_shift: { code: 'P0001', message: 'credit_receipt_cancel_no_shift: no shift is open, so the cash cannot be taken back out of a drawer — open a shift first' },
+    pos_credit_receipt_locked: { code: '42501', message: 'pos_credit_receipt_locked: a payment receipt cannot be changed — cancel it with a reason instead' },
+    credit_use_receipts: { code: '42501', message: 'pos_orders: this bill has part payments recorded, so it is settled through Receive payment on Customers — reload Crest if that button is missing' },
+    pos_cash_receipt_direct: { code: '42501', message: "pos_cash_receipt_direct: a customer payment's cash is recorded by Receive payment itself, not entered directly" },
+    // Migration 20261015130000 (membership).
+    membership_type_in_use: { code: '23503', message: 'membership_type_in_use: customers still hold this membership type, so it cannot be deleted — switch it off instead, so it is no longer given to anyone new' },
+    membership_type_invalid: { code: '23514', message: "membership_type_invalid: a customer can only be given one of this outlet's own membership types, and only one that is switched on" },
+    membership_type_outlet_locked: { code: '42501', message: 'membership_type_outlet_locked: a membership type belongs to the outlet that made it and cannot be moved to another' },
+    consent_required: { code: '23514', message: 'consent_required: a birthday or an anniversary is kept only when the customer has agreed to it — record that they agreed, or, to withdraw their agreement, clear both dates in the same save' },
+    pos_membership_types_client_name_key: { code: '23505', message: 'duplicate key value violates unique constraint "pos_membership_types_client_name_key"' },
+    pos_customers_client_card_no_key: { code: '23505', message: 'duplicate key value violates unique constraint "pos_customers_client_card_no_key"' },
+  }
+  const hinted = Object.fromEntries(Object.entries(raised).map(([c, e]) => [c, { ...e, hint: c }]))
+  // rank_required carries two receipt refusals and the old settle's cash entry its own message.
+  const recordRank = { code: '42501', hint: 'rank_required', message: 'credit_receipt_rank: recording a customer payment needs a POS supervisor, a POS manager or the Owner' }
+  const reprintRank = { code: '42501', hint: 'rank_required', message: 'pos_credit_receipt_rank: reprinting a payment receipt needs a POS supervisor, a POS manager or the Owner' }
+  const oldCashIn = { code: '42501', hint: 'credit_use_receipts', message: "pos_cash_settlement_receipts: that bill's payments are recorded with receipts, which put their cash on the drawer themselves" }
+  // The membership file's three rank refusals, by the table and what the message names.
+  const typeRank = { code: '42501', hint: 'rank_required', message: 'pos_membership_types: only the Owner or a POS manager can add, change or delete a membership type' }
+  const cardRank = { code: '42501', hint: 'rank_required', message: "pos_customers: only the Owner or a POS manager can give, change or take away a customer's membership card, or set their credit limit" }
+  const datesRank = { code: '42501', hint: 'rank_required', message: "pos_customers: only a POS supervisor or manager, or the Owner, can record or change a customer's birthday, anniversary or agreement to keep them" }
+
+  it('every code has its own sentence in both audiences, ahead of the generic ones', () => {
+    const seen = new Set()
+    const all = { ...hinted, recordRank, reprintRank, oldCashIn, typeRank, cardRank, datesRank }
+    for (const [c, err] of Object.entries(all)) {
+      for (const aud of ['staff', 'operator']) {
+        const text = errorText(err, aud)
+        expect([c, text]).not.toEqual([c, errorText({ code: err.code, message: 'x' }, aud)])
+        expect([c, text]).not.toEqual([c, errorText({ message: 'x' }, aud)])
+        seen.add(text)
+      }
+    }
+    expect(seen.size).toBe(Object.keys(all).length * 2)
+  })
+
+  it('matches on the message alone, where the hint was lost', () => {
+    for (const [c, err] of Object.entries(raised)) {
+      if (c === 'credit_use_receipts') continue // its message leads with the table, not the code
+      for (const aud of ['staff', 'operator']) {
+        expect([c, errorText(err, aud)]).toEqual([c, errorText(hinted[c], aud)])
+      }
+    }
+  })
+
+  it('says what was not written, because the function raised before writing', () => {
+    const said = /[Nn]othing was (recorded|changed|cancelled|settled|saved)|was not (recorded|cancelled|removed)|neither recorded nor cancelled|was not cancelled|stands and was not cancelled|cannot reprint/
+    for (const [c, err] of Object.entries({ ...hinted, recordRank, reprintRank, oldCashIn, typeRank, cardRank, datesRank })) {
+      for (const aud of ['staff', 'operator']) {
+        expect([c, errorText(err, aud)]).toEqual([c, expect.stringMatching(said)])
+      }
+    }
+  })
+
+  it('a rank refusal names who may, and the reprint is not worded as recording a payment', () => {
+    expect(errorText(recordRank, 'operator')).toMatch(/POS supervisor, a POS manager or the Owner/)
+    expect(errorText(reprintRank, 'operator')).toMatch(/[Rr]eprint/)
+    expect(errorText(reprintRank, 'operator')).not.toBe(errorText(recordRank, 'operator'))
+    // Neither is the generic rank sentence.
+    expect(errorText(recordRank, 'operator')).not.toBe(errorText({ hint: 'rank_required', message: 'pos_orders: closing a bill needs POS Supervisor access or above' }, 'operator'))
+  })
+
+  it('the old settlement Cash In does not claim the bill was not settled, since its settle may have landed', () => {
+    for (const aud of ['staff', 'operator']) {
+      expect(errorText(oldCashIn, aud)).not.toMatch(/[Nn]othing was settled/)
+      expect(errorText(oldCashIn, aud)).toMatch(/cash entry was not recorded/)
+    }
+    expect(errorText(hinted.credit_use_receipts, 'operator')).toMatch(/Nothing was settled/)
+  })
+
+  it('offers a retry only where one can work', () => {
+    for (const c of ['credit_receipt_cancel_credited', 'pos_credit_receipt_locked', 'pos_cash_receipt_direct', 'membership_type_in_use', 'membership_type_outlet_locked']) {
+      for (const aud of ['staff', 'operator']) {
+        expect([c, errorText(hinted[c], aud)]).not.toEqual([c, expect.stringMatching(/try (it )?again/i)])
+      }
+    }
+    expect(errorText(hinted.credit_receipt_stale, 'operator')).toMatch(/Reload the list/)
+    expect(errorText(hinted.credit_receipt_no_shift, 'operator')).toMatch(/Open a shift/)
+  })
+
+  it('keeps the technical detail, which names the bill and the figures', () => {
+    expect(errorInfo(hinted.credit_receipt_over, 'operator').detail).toMatch(/still owes NPR 400\.00/)
+    expect(errorInfo(hinted.credit_receipt_bad, 'operator').detail).toMatch(/NPR 900/)
+  })
+})

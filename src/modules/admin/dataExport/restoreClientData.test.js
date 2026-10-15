@@ -65,6 +65,26 @@ describe('RESTORE_ORDER', () => {
     expect(at('pos_credit_notes')).toBeGreaterThan(at('pos_orders'))
   })
 
+  it('restores payment receipts after their shifts and bills, their lines after them, and cash after both (S843)', () => {
+    const at = t => RESTORE_ORDER.indexOf(t)
+    // The migration reader sees the new keys, or the ordering test above passes vacuously for them.
+    const has = (table, col, parent) => fks.some(f => f.table === table && f.cols.includes(col) && f.parent === parent)
+    expect(has('pos_credit_receipts', 'shift_id', 'pos_shifts')).toBe(true)
+    expect(has('pos_credit_receipt_lines', 'receipt_id', 'pos_credit_receipts')).toBe(true)
+    expect(has('pos_credit_receipt_lines', 'order_id', 'pos_orders')).toBe(true)
+    expect(has('pos_cash_movements', 'credit_receipt_id', 'pos_credit_receipts')).toBe(true)
+    expect(at('pos_credit_receipts')).toBeGreaterThan(at('pos_shifts'))
+    expect(at('pos_credit_receipts')).toBeGreaterThan(at('pos_orders'))
+    expect(at('pos_credit_receipt_lines')).toBeGreaterThan(at('pos_credit_receipts'))
+    expect(at('pos_cash_movements')).toBeGreaterThan(at('pos_credit_receipts'))
+    // Membership types before the customers who hold one.
+    expect(at('pos_membership_types')).toBeGreaterThanOrEqual(0)
+    expect(at('pos_membership_types')).toBeLessThan(at('pos_customers'))
+    // Who took or cancelled a payment is attribution: restored empty, the name kept in the file.
+    expect(isAttributionColumn('received_by')).toBe(true)
+    expect(isAttributionColumn('cancelled_by')).toBe(true)
+  })
+
   it('restores the joined tables and the record of moves after the tables and bills they name (S836)', () => {
     const at = t => RESTORE_ORDER.indexOf(t)
     for (const t of ['pos_table_joins', 'pos_table_moves']) {

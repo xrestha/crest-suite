@@ -312,7 +312,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setMsg(`ok:${n.toLocaleString('en-IN')} points moved from ${member.phone} to ${res?.to_phone}${res?.created ? ' (added to the customer book)' : ''}.`
       + (res?.enrolled ? ' The new number joined the scheme.' : '')
       + (res?.unenrolled ? ` ${member.phone} left its scheme.` : '')
-      + (left > 0 ? ` ${left.toLocaleString('en-IN')} points from an unpaid Credit bill stay on ${member.phone} until it is settled.` : ''))
+      + (left > 0 ? ` ${left.toLocaleString('en-IN')} points from an unpaid Credit bill stay on ${member.phone} until it is paid in full.` : ''))
     await load()
   }
 
@@ -602,7 +602,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                       <th>Phone</th>
                       <th>Scheme</th>
                       <th style={{ textAlign: 'right' }}>
-                        <Tip text="The customer's points balance. Points earned on a Credit bill that is not paid yet show as held: they can be spent once the bill is settled in Outstanding Credit." width={320}>Points</Tip>
+                        <Tip text="The customer's points balance. Points earned on a Credit bill that is not paid yet show as held: they can be spent once the bill is paid in full (Customers → Credit)." width={320}>Points</Tip>
                       </th>
                       <th style={{ textAlign: 'right' }}>Worth</th>
                       <th style={{ textAlign: 'right' }}>

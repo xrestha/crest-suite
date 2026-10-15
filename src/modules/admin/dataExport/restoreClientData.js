@@ -76,9 +76,16 @@ export const RESTORE_ORDER = [
   // came back fully owed. hr_salary_payments (S782) likewise references a run and an employee.
   'hr_advance_repayments', 'hr_salary_payments', 'hr_tada_claims', 'hr_tada_claim_items',
   // POS — tables/customers before orders; credit notes after orders (circular FK, see below)
-  'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts',
+  // Membership types (S843) before the customers who hold one.
+  'pos_tables', 'pos_loyalty_schemes', 'pos_membership_types', 'pos_customers', 'pos_shifts',
   // pos_order_item_options (S758) right after the lines it snapshots — FKs to the order and the line.
   'pos_orders', 'pos_order_items', 'pos_order_item_options', 'pos_order_payments', 'pos_kot_log', 'pos_kot_removals',
+  // Customer payment receipts (S843) after the shifts and the bills they name, and their split over
+  // bills after the receipts. guard_pos_credit_receipts / _lines let the operator's restore insert rows
+  // dated before it and refuse every other client write; received_by and cancelled_by are attribution,
+  // restored empty with their names kept in the file. A receipt's Cash In / cancellation Cash Out names
+  // it (credit_receipt_id), so pos_cash_movements stays below.
+  'pos_credit_receipts', 'pos_credit_receipt_lines',
   // Move, join and split tables (S836), after pos_tables and pos_orders, which both name. A join names
   // its table and the open bill it joined; the record of a move names the bills it moved between (SET
   // NULL, so one a join or put-back deleted is already empty in the file). joined_by and moved_by are
@@ -94,7 +101,8 @@ export const RESTORE_ORDER = [
   'pos_credit_notes',
   // After the shifts, the orders AND the credit notes (S809 DATABASE-3): a refund names its note.
   // A restored note's own trigger (pos_credit_note_settle, S809 2e) links its bill and writes no
-  // refund, so the refund the backup carries is restored here exactly once.
+  // refund, so the refund the backup carries is restored here exactly once. And after the receipts
+  // (S843), whose cash entries name them.
   'pos_cash_movements',
   // sales_entries AFTER the POS tables (S747), not beside the other IMS transactions. Its
   // pos_order_id (20260818170000) and pos_credit_note_id (20260914140200) are foreign keys, and

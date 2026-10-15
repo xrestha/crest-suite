@@ -139,6 +139,144 @@ const rules = [
     staff: 'The bill could not be marked as credited, so no Credit Note was issued. Close this, open the bill again and try again.',
     operator: 'The bill could not be marked as credited, so no Credit Note was issued and nothing was numbered. Reload the bill and issue it again; if it happens again, contact Crest support.',
   },
+  // ── S843 (migration 20261015120000): customer payments on Credit bills, each a numbered receipt ──
+  // record_credit_receipt and cancel_credit_receipt raise every one of these before they write, in
+  // one transaction, and the receipt guards are BEFORE triggers — so each may say nothing was
+  // recorded, cancelled or changed. A dropped connection to the same functions falls to the network
+  // rule above, which claims nothing (a replay of the same press returns the first receipt).
+  // rank_required is shared with every other rank refusal, so these two are told apart by the code
+  // their message leads with, and sit ahead of the generic rank sentence further down.
+  {
+    test: e => hasCode(e, 'rank_required') && /(^|[^a-z_])credit_receipt_rank/i.test(e.message || ''),
+    staff: 'Taking or cancelling a customer payment needs a supervisor or a manager. Nothing was recorded or cancelled — ask one of them to do it.',
+    operator: 'Recording or cancelling a customer payment needs a POS supervisor, a POS manager or the Owner, so nothing was recorded or cancelled from this login. Raise its rank on POS Staff if this person should take payments.',
+  },
+  {
+    test: e => hasCode(e, 'rank_required') && /pos_credit_receipt_rank/i.test(e.message || ''),
+    staff: 'Reprinting a payment receipt needs a supervisor or a manager, so this login cannot reprint it — ask one of them.',
+    operator: 'Reprinting a payment receipt needs a POS supervisor, a POS manager or the Owner, so this login cannot reprint it. Ask one of them to reprint it from the customer\'s receipts.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_auth'),
+    staff: 'This login is not signed in to the outlet, so nothing was recorded or cancelled. Sign in again, then try again.',
+    operator: 'This login is not signed in to an outlet, so the payment was neither recorded nor cancelled — nothing was changed. Sign in again, then try again.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_bad'),
+    staff: 'The payment could not be recorded as entered, so nothing was recorded. Check the amount and the bills it covers (the reason is in the small print), then try again.',
+    operator: 'The payment was refused as entered (the reason is in the detail below), so nothing was recorded and no receipt was numbered. Check the amount, the method and the bills it is split over, then record it again.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_no_shift'),
+    staff: 'No shift is open, so the cash has no drawer to go in and the payment was not recorded. Ask a supervisor to open a shift, or pick the method the money really came by if it was not cash.',
+    operator: 'Cash goes onto the open shift\'s drawer count, and no shift is open at this outlet, so the payment was not recorded and no receipt was numbered. Open a shift in POS → Shifts and record it again, or pick the method the money really came by if it was not cash.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_stale'),
+    staff: 'One of these bills was paid or credited since the list was loaded, so nothing was recorded. Reload the list and take the payment again.',
+    operator: 'One of the bills in this payment is no longer an unpaid Credit bill — it was paid or credited on another device a moment ago — so nothing was recorded and no receipt was numbered. Reload the list to see what is still owed, then record the payment again.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_party'),
+    staff: 'One of these bills belongs to a different customer, so nothing was recorded. Reload the list and pick this customer\'s bills.',
+    operator: 'One of the bills in this payment belongs to a different customer or delivery partner (the list was out of date), so nothing was recorded and no receipt was numbered. Reload this customer\'s bills and record the payment again.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_over'),
+    staff: 'That is more than is still owed on a bill, so nothing was recorded. Reload the list to see what is owed, and take no more than that.',
+    operator: 'A payment can never be more than is still owed (no advances), and one bill was given more than it still owes — another payment may have landed a moment ago; the figures are in the detail below. Nothing was recorded and no receipt was numbered. Reload the list and record what is owed.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_cancel_reason'),
+    staff: 'Say why the payment is being cancelled (3 to 300 characters). It was not cancelled.',
+    operator: 'A cancelled payment keeps its reason on the record, so one is needed (3 to 300 characters). The payment was not cancelled — add the reason, then cancel it again.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_missing'),
+    staff: 'That payment is not on this outlet\'s records, so nothing was cancelled. Reload the list.',
+    operator: 'That payment is not one of this outlet\'s (it may belong to an outlet this login has switched away from), so nothing was cancelled. Reload the page and find the payment again.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_cancel_credited'),
+    staff: 'A Credit Note has been issued on one of this payment\'s bills, so the payment stands and was not cancelled.',
+    operator: 'A Credit Note has been issued on one of this payment\'s bills, and the note settled that money, so the payment stands and was not cancelled. Cancelling it again will be refused the same way; any money given back to the customer belongs on the note.',
+  },
+  {
+    test: e => hasCode(e, 'credit_receipt_cancel_no_shift'),
+    staff: 'No shift is open, so the cash cannot be taken back out of a drawer and the payment was not cancelled. Ask a supervisor to open a shift first.',
+    operator: 'Cancelling a cash payment takes its cash back out of the open shift\'s drawer, and no shift is open at this outlet, so the payment was not cancelled. Open a shift in POS → Shifts, then cancel it again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_credit_receipt_locked'),
+    staff: 'A payment receipt cannot be changed or deleted. Nothing was changed — a mistake is cancelled with a reason instead.',
+    operator: 'A payment receipt is written only by Receive payment and is never edited or deleted, so nothing was changed. A payment entered by mistake is cancelled with a reason (a supervisor or manager can); if a page sent this, reload it.',
+  },
+  // credit_use_receipts is raised twice: by guard_pos_order_close on the old whole-bill Settle, and by
+  // pos_cash_movements_guard on the old settlement Cash In. The second can follow a settle that landed,
+  // so only the first may say the bill was not settled.
+  {
+    test: e => hasCode(e, 'credit_use_receipts') && /pos_cash_settlement_receipts/i.test(e.message || ''),
+    staff: 'This bill\'s payments are recorded with receipts, which put their own cash on the drawer, so this cash entry was not recorded. Tell your manager before recording any cash by hand.',
+    operator: 'This bill\'s payments are recorded with receipts, which put their own cash on the drawer, so this cash entry was not recorded. Reload the page and check the bill on Customers → Outstanding Credit before recording any cash by hand: a Cash In on top would count it twice.',
+  },
+  {
+    test: e => hasCode(e, 'credit_use_receipts'),
+    staff: 'This bill has part payments recorded, so the rest is taken with Receive payment. Nothing was settled — reload Crest if that button is missing.',
+    operator: 'This bill already has part payments recorded, so the rest is taken with Receive payment on Customers → Outstanding Credit, not settled whole. Nothing was settled and no cash was recorded. If Receive payment is missing, this page is an older version of Crest: reload it.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_receipt_direct'),
+    staff: 'A customer payment\'s cash goes on the drawer by itself, so this entry was not recorded. Nothing was changed.',
+    operator: 'A customer payment\'s cash goes on the drawer by itself when the payment is recorded, and comes off by itself when it is cancelled, so it cannot be entered directly — this entry was not recorded. Take the payment from Customers → Outstanding Credit instead.',
+  },
+  // S843 membership (migration 20261015130000). Each is raised by a BEFORE trigger, or is the unique
+  // index refusing the row, so nothing was written; the two indexes sit ahead of the generic 23505.
+  // Its three rank refusals share rank_required, told apart by the table and what the message names.
+  {
+    test: e => hasCode(e, 'rank_required') && onTable(e, 'pos_membership_types'),
+    staff: 'Membership types are set up by the owner or a POS manager. Nothing was changed — ask one of them.',
+    operator: 'Membership types are added, changed and deleted by the Owner or a POS manager, so nothing was changed from this login. Raise its rank on POS Staff if this person should set them up.',
+  },
+  {
+    test: e => hasCode(e, 'rank_required') && onTable(e, 'pos_customers') && /membership card|credit limit/i.test(e.message || ''),
+    staff: 'A membership card or a credit limit is given or changed by the owner or a POS manager. Nothing was saved — ask one of them.',
+    operator: 'A customer\'s membership card and credit limit are given, changed and taken away by the Owner or a POS manager, so nothing was saved from this login. Raise its rank on POS Staff if this person should.',
+  },
+  {
+    test: e => hasCode(e, 'rank_required') && onTable(e, 'pos_customers') && /birthday|anniversary/i.test(e.message || ''),
+    staff: 'A customer\'s birthday, anniversary and their agreement to keep them are recorded by a supervisor or a manager. Nothing was saved — ask one of them.',
+    operator: 'A customer\'s birthday, anniversary and their agreement to keep them are recorded by a POS supervisor, a POS manager or the Owner, so nothing was saved from this login. Raise its rank on POS Staff if this person should.',
+  },
+  {
+    test: e => hasCode(e, 'membership_type_in_use'),
+    staff: 'Customers still hold this membership type, so it was not removed. Nothing was changed — a manager can switch it off instead.',
+    operator: 'Customers still hold this membership type, so it cannot be deleted and nothing was changed. Switch it off instead: it is then given to no one new, and the customers who hold it keep it.',
+  },
+  {
+    test: e => hasCode(e, 'membership_type_invalid'),
+    staff: 'That membership type cannot be given — it is switched off, or not this outlet\'s. Nothing was saved; pick another.',
+    operator: 'A customer can only be given one of this outlet\'s own membership types, and only one that is switched on, so nothing was saved. Pick another type, or switch this one on in the membership types first.',
+  },
+  {
+    test: e => hasCode(e, 'membership_type_outlet_locked'),
+    staff: 'A membership type belongs to the outlet that made it, so it cannot be moved. Nothing was changed.',
+    operator: 'A membership type belongs to the outlet that made it and cannot be moved to another, so nothing was changed. Make a new type at the other outlet instead.',
+  },
+  {
+    test: e => hasCode(e, 'consent_required'),
+    staff: 'A birthday or an anniversary is kept only when the customer has agreed to it. Nothing was saved — tick that they agreed, or clear both dates.',
+    operator: 'A birthday or an anniversary is kept only when the customer has agreed to it, so nothing was saved. Record that they agreed, or, to withdraw their agreement, clear both dates in the same save.',
+  },
+  {
+    test: e => hasCode(e, 'pos_membership_types_client_name_key'),
+    staff: 'This outlet already has a membership type with that name, so nothing was saved. Use another name.',
+    operator: 'This outlet already has a membership type with that name (names are matched ignoring capitals), so nothing was saved. Use another name, or change the existing type.',
+  },
+  {
+    test: e => hasCode(e, 'pos_customers_client_card_no_key'),
+    staff: 'That card number is already given to another customer of this outlet, so nothing was saved. Check the number on the card.',
+    operator: 'That membership card number is already given to another customer of this outlet, so nothing was saved. Check the number on the card; if the card moved to this customer, take it off the other one first.',
+  },
   {
     test: e => hasCode(e, 'stale_order'),
     staff: 'This order was changed on another device since you opened it. Nothing was saved — reload the order and add your changes again.',

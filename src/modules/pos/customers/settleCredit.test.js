@@ -1,300 +1,177 @@
-// S809 CUSTOMERS-PARKING-6, SHIFTS-4: a Settle whose answer was lost is read back, never reported as
-// "not settled" and then as "already settled"; and the cash it brings is added to the drawer once.
+// S843: a credit payment is ONE call (record_credit_receipt) carrying a request id minted per press. A
+// lost answer is sent again with the SAME id, and a retry refused after a lost answer asks once more,
+// because the first send may be what made the bills stale; the server answers that with the first
+// receipt (replayed). Cancelling is idempotent.
 import {
-  SETTLE_TRY_MS, judgeSettled, settledWhen, postSettlementCash, settleCreditBill, settleConsequence,
+  RECEIPT_METHODS, SETTLE_READ_MS, recordCreditReceipt, cancelCreditReceipt, paymentSummary, recordOutcome,
+  cancelConsequence, cancelOutcome, settledWhen,
 } from './settleCredit'
 import { nepalTime } from '../../../shared/nepalTime'
 
-const ME = 'login-me'
-const SITA = 'login-sita'
-const NAMES = { [ME]: 'Ram Supervisor', [SITA]: 'Sita' }
-const T0 = Date.parse('2026-10-10T04:57:00.000Z') // 10:42 AM in Nepal
-const SETTLED_AT = '2026-10-10T04:57:00.000+00:00'
-
-const BILL = { id: 'b1', buyer_name: 'Hari', paid_amount: 3000, delivery_partner: null }
-const PATHAO = { id: 'b2', buyer_name: 'Pathao', paid_amount: 5650, delivery_partner: 'Pathao' }
-
 const ok = data => ({ data, error: null, status: 200 })
-const TIMEOUT = { data: null, error: { name: 'TimeoutError', message: 'Settling the bill timed out after 20s — check your connection and try again.' } }
 const DROPPED = { data: null, error: { message: 'TypeError: Failed to fetch' }, status: 0 }
-const RANK = { data: null, status: 403, error: { code: '42501', hint: 'rank_required', message: 'pos_orders: settling a credit bill needs POS Supervisor access or above' } }
-const stored = (over = {}) => ok({
-  id: 'b1', paid_amount: 3000, commission_amount: null,
-  credit_settled_at: SETTLED_AT, credit_settled_by: ME, credit_settled_method: 'Cash', ...over,
-})
-const unsettled = (over = {}) => stored({ credit_settled_at: null, credit_settled_by: null, credit_settled_method: null, ...over })
+const GATEWAY = { data: null, error: { message: 'Bad gateway' }, status: 502 }
+const STALE = { data: null, status: 400, error: { code: 'P0001', hint: 'credit_receipt_stale', message: 'credit_receipt_stale: bill 12 is no longer an unpaid Credit bill' } }
+const OVER = { data: null, status: 400, error: { code: 'P0001', hint: 'credit_receipt_over', message: 'credit_receipt_over: bill 12 still owes NPR 100' } }
+const RECEIPT = { receipt_id: 'r1', receipt_no: 7, invoice_fy: '82/83', received_at: '2026-10-15T05:00:00+00:00', bills: [{ order_id: 'o1', owed: 0, settled: true }, { order_id: 'o2', owed: 50, settled: false }], replayed: false }
 
-// The page's five calls, each answering from its own queue in order. An unexpected call throws.
-function fakeDb(q = {}) {
-  const queues = { settle: [], readBill: [], openShift: [], cashFor: [], addCash: [], ...q }
-  const calls = { settle: [], readBill: [], openShift: 0, cashFor: [], addCash: [] }
-  const take = name => {
-    if (!queues[name].length) throw new Error(`unexpected ${name} call`)
-    return Promise.resolve(queues[name].shift())
+// The page's supabase.rpc, answering from a queue; a 'hang' never answers. Records every call.
+function fakeRpc(answers) {
+  const queue = [...answers]
+  const calls = []
+  const rpc = (name, args, signal) => {
+    calls.push({ name, args, signal })
+    if (!queue.length) throw new Error(`unexpected ${name} call`)
+    const a = queue.shift()
+    return a === 'hang' ? new Promise(() => {}) : Promise.resolve(a)
   }
-  return {
-    calls,
-    settle: (id, patch, signal) => { calls.settle.push({ id, patch, signal }); return take('settle') },
-    readBill: id => { calls.readBill.push(id); return take('readBill') },
-    openShift: () => { calls.openShift += 1; return take('openShift') },
-    cashFor: id => { calls.cashFor.push(id); return take('cashFor') },
-    addCash: row => { calls.addCash.push(row); return take('addCash') },
-  }
+  return { rpc, calls }
 }
-const SHIFT = ok({ id: 'shift-1' })
-const ids = () => { let n = 0; return () => `cash-${++n}` }
-const press = (db, extra = {}) => settleCreditBill({
-  db, order: BILL, method: 'Cash', profileId: ME, tries: new Map(), names: NAMES, newId: ids(), now: () => T0, ...extra,
-})
+const PRESS = { requestId: 'req-1', partyKey: 'phone:9841234567', method: 'Cash', amount: 1050.5, lines: [{ order_id: 'o1', amount: 1000, commission: 0 }, { order_id: 'o2', amount: 50.5, commission: 0 }] }
 
-describe('judgeSettled — whose settlement a bill read back holds', () => {
-  const tries = [{ method: 'Cash', at: T0 }]
-  test('not found, not settled, and settled by another login', () => {
-    expect(judgeSettled(null, { profileId: ME, method: 'Cash', tries, now: T0 })).toBe('unknown')
-    expect(judgeSettled(unsettled().data, { profileId: ME, method: 'Cash', tries, now: T0 })).toBe('open')
-    expect(judgeSettled(stored({ credit_settled_by: SITA }).data, { profileId: ME, method: 'Cash', tries, now: T0 })).toBe('other')
-    expect(judgeSettled(stored({ credit_settled_by: null }).data, { profileId: ME, method: 'Cash', tries, now: T0 })).toBe('other')
-    expect(judgeSettled(stored().data, { profileId: null, method: 'Cash', tries, now: T0 })).toBe('other')
-  })
-  test('this login, the method pressed, and an unanswered press of it on this page: it is that press', () => {
-    expect(judgeSettled(stored().data, { profileId: ME, method: 'Cash', tries, now: T0 + 60000 })).toBe('mine')
-  })
-  test('this login but no such press here, another method, or a press too old: not taken as this one', () => {
-    expect(judgeSettled(stored().data, { profileId: ME, method: 'Cash', tries: [], now: T0 })).toBe('yours')
-    expect(judgeSettled(stored().data, { profileId: ME, method: 'eSewa', tries: [{ method: 'eSewa', at: T0 }], now: T0 })).toBe('yours')
-    expect(judgeSettled(stored().data, { profileId: ME, method: 'Cash', tries, now: T0 + SETTLE_TRY_MS + 1 })).toBe('yours')
-  })
-})
-
-describe('settledWhen', () => {
-  test('the Nepal day and clock time', () => {
-    expect(settledWhen(SETTLED_AT)).toContain(` at ${nepalTime(SETTLED_AT)}`)
-    expect(settledWhen(SETTLED_AT)).toMatch(/2083/)
-  })
-})
-
-describe('settleCreditBill — an answered settle', () => {
-  test('Cash: settled once, the whole bill added to the open shift with a minted id', async () => {
-    const db = fakeDb({ settle: [ok([{ id: 'b1' }])], openShift: [SHIFT], addCash: [ok([{ id: 'cash-1' }])] })
-    const tries = new Map()
-    const out = await press(db, { tries })
-    expect(out).toEqual({ msg: "ok:NPR 3,000 collected from Hari via Cash. Added to the open shift's cash count.", closePanel: true, reload: true })
-    expect(db.calls.settle[0].patch).toEqual({ credit_settled_at: new Date(T0).toISOString(), credit_settled_by: ME, credit_settled_method: 'Cash' })
-    expect(db.calls.addCash).toEqual([{
-      id: 'cash-1', shift_id: 'shift-1', direction: 'in', kind: 'credit_settlement', amount: 3000,
-      reason: 'Credit bill settled — Hari', order_id: 'b1', created_by: ME,
-    }])
-    expect(db.calls.readBill).toEqual([])
-    expect(tries.has('b1')).toBe(false)
-  })
-  test('a delivery partner pays the bill less its commission; a non-cash method touches no drawer', async () => {
-    const cash = fakeDb({ settle: [ok([{ id: 'b2' }])], openShift: [SHIFT], addCash: [ok([{}])] })
-    await press(cash, { order: PATHAO, commission: 1000 })
-    expect(cash.calls.settle[0].patch.commission_amount).toBe(1000)
-    expect(cash.calls.addCash[0].amount).toBe(4650)
-
-    const bank = fakeDb({ settle: [ok([{ id: 'b2' }])] })
-    const out = await press(bank, { order: PATHAO, commission: 1000, method: 'Bank Transfer' })
-    expect(out.msg).toBe('ok:NPR 4,650 collected from Pathao via Bank Transfer.')
-    expect(bank.calls.openShift).toBe(0)
-  })
-  test("the server's refusal is not settled, and says why", async () => {
-    const db = fakeDb({ settle: [RANK] })
-    const tries = new Map()
-    const out = await press(db, { tries })
-    expect(out.msg).toMatch(/^error:The bill was not marked as settled\. /)
-    expect(out.closePanel).toBe(false)
-    expect(db.calls.readBill).toEqual([])
-    expect(tries.get('b1')).toEqual([])
-  })
-})
-
-describe('settleCreditBill — a lost answer is read back (CUSTOMERS-PARKING-6)', () => {
-  test('the settle landed: it is this press, and its cash reaches the drawer once', async () => {
-    const db = fakeDb({
-      settle: [TIMEOUT], readBill: [stored()], cashFor: [ok([])], openShift: [SHIFT], addCash: [ok([{}])],
+describe('recordCreditReceipt', () => {
+  test('answered: one call with the request id, the lines and the trimmed reference', async () => {
+    const { rpc, calls } = fakeRpc([ok(RECEIPT)])
+    const res = await recordCreditReceipt({ rpc, ...PRESS, reference: '  CHQ 123 ', note: '' })
+    expect(res).toMatchObject({ status: 'recorded', receipt: RECEIPT, lost: false })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('record_credit_receipt')
+    expect(calls[0].args).toEqual({
+      p_request_id: 'req-1', p_party_key: 'phone:9841234567', p_method: 'Cash', p_amount: 1050.5,
+      p_lines: PRESS.lines, p_reference: 'CHQ 123', p_note: null,
     })
-    const out = await press(db)
-    expect(db.calls.settle[0].signal.aborted).toBe(true)
-    expect(out.msg).toMatch(/^ok:NPR 3,000 collected from Hari via Cash \(checked by reading the bill back: it is settled once\)\. Added/)
-    expect(out.msg).not.toMatch(/not marked as settled|already been settled/)
-    expect(db.calls.addCash).toHaveLength(1)
   })
-  test('unreadable, then pressed again: the second press finds the first one\'s settlement and finishes it', async () => {
-    const tries = new Map()
-    const first = await press(fakeDb({ settle: [DROPPED], readBill: [DROPPED] }), { tries })
-    expect(first.msg).toMatch(/^warn:It is not known whether this bill was settled/)
-    expect(first.msg).toMatch(/Do not hand any money back/)
-    expect(first.msg).toMatch(/not on the drawer record yet/)
-    expect(first).toMatchObject({ closePanel: false, reload: false })
-    expect(tries.get('b1')).toHaveLength(1)
 
-    const db = fakeDb({ settle: [ok([])], readBill: [stored()], cashFor: [ok([])], openShift: [SHIFT], addCash: [ok([{}])] })
-    const second = await press(db, { tries, now: () => T0 + 90000 })
-    expect(second.msg).toMatch(/^ok:NPR 3,000 collected from Hari via Cash/)
-    expect(db.calls.addCash).toHaveLength(1)
-    expect(db.calls.addCash[0].amount).toBe(3000)
-    expect(tries.has('b1')).toBe(false)
+  test("the server's refusal is final: not recorded, never sent again", async () => {
+    const { rpc, calls } = fakeRpc([OVER])
+    const res = await recordCreditReceipt({ rpc, ...PRESS })
+    expect(res).toMatchObject({ status: 'refused', error: OVER.error })
+    expect(calls).toHaveLength(1)
   })
-  test('the cash of that settlement already on the drawer record is not added again', async () => {
-    const db = fakeDb({ settle: [TIMEOUT], readBill: [stored()], cashFor: [ok([{ id: 'm1' }])] })
-    const out = await press(db)
-    expect(out.msg).toMatch(/already on the drawer record, so it was not added again\.$/)
-    expect(db.calls.openShift).toBe(0)
-  })
-  test('the cash entry is read with the stored commission, not the one on screen now', async () => {
-    const db = fakeDb({
-      settle: [TIMEOUT], readBill: [stored({ id: 'b2', paid_amount: 5650, commission_amount: 1000 })],
-      cashFor: [ok([])], openShift: [SHIFT], addCash: [ok([{}])],
-    })
-    await press(db, { order: PATHAO, commission: 300 })
-    expect(db.calls.addCash[0].amount).toBe(4650)
-  })
-  test('still not settled after no answer: it may yet land, so wait and press again, which then settles it once', async () => {
-    const tries = new Map()
-    const first = await press(fakeDb({ settle: [TIMEOUT], readBill: [unsettled()] }), { tries })
-    expect(first.msg).toMatch(/^warn:No answer came back, and the bill still shows as not settled — the settlement may still arrive/)
-    expect(first.msg).toMatch(/press Cash again/)
-    expect(first.closePanel).toBe(false)
 
-    const db = fakeDb({ settle: [ok([{ id: 'b1' }])], openShift: [SHIFT], addCash: [ok([{}])] })
-    const second = await press(db, { tries })
-    expect(second.msg).toMatch(/^ok:/)
-    expect(db.calls.addCash).toHaveLength(1)
+  test('a lost answer is sent again with the SAME request id; the replay is the first receipt', async () => {
+    const { rpc, calls } = fakeRpc([DROPPED, ok({ ...RECEIPT, replayed: true })])
+    const res = await recordCreditReceipt({ rpc, ...PRESS })
+    expect(res).toMatchObject({ status: 'replayed', lost: true })
+    expect(calls.map(c => c.args.p_request_id)).toEqual(['req-1', 'req-1'])
+  })
+
+  test('a timeout counts as no answer, and the request is cancelled before it is sent again', async () => {
+    const { rpc, calls } = fakeRpc(['hang', ok(RECEIPT)])
+    const res = await recordCreditReceipt({ rpc, ...PRESS, ms: 5 })
+    expect(res.status).toBe('recorded')
+    expect(calls[0].signal.aborted).toBe(true)
+    expect(calls).toHaveLength(2)
+  })
+
+  test('refused after a lost answer: asked once more, because the first may be what made the bills stale', async () => {
+    const { rpc, calls } = fakeRpc([GATEWAY, STALE, ok({ ...RECEIPT, replayed: true })])
+    const res = await recordCreditReceipt({ rpc, ...PRESS })
+    expect(res.status).toBe('replayed')
+    expect(calls).toHaveLength(3)
+    expect(new Set(calls.map(c => c.args.p_request_id))).toEqual(new Set(['req-1']))
+  })
+
+  test('refused again on that last ask: a real refusal, so nothing was recorded', async () => {
+    const { rpc } = fakeRpc([DROPPED, OVER, OVER])
+    expect(await recordCreditReceipt({ rpc, ...PRESS })).toMatchObject({ status: 'refused', lost: true })
+  })
+
+  test('no answer twice: not known', async () => {
+    const { rpc, calls } = fakeRpc([DROPPED, DROPPED])
+    expect(await recordCreditReceipt({ rpc, ...PRESS })).toMatchObject({ status: 'unknown', lost: true })
+    expect(calls).toHaveLength(2)
+  })
+
+  test('Check again (priorLost): a refusal on the first send still asks for the replay', async () => {
+    const { rpc, calls } = fakeRpc([STALE, ok({ ...RECEIPT, replayed: true })])
+    expect((await recordCreditReceipt({ rpc, ...PRESS, priorLost: true })).status).toBe('replayed')
+    expect(calls).toHaveLength(2)
+  })
+
+  test('an answer with no receipt is not taken as recorded', async () => {
+    const { rpc } = fakeRpc([ok(null)])
+    expect((await recordCreditReceipt({ rpc, ...PRESS })).status).toBe('unknown')
   })
 })
 
-describe('settleCreditBill — a press that matched nothing says who settled it', () => {
-  test('another login: named, with the time and method, and no cash added', async () => {
-    const db = fakeDb({ settle: [ok([])], readBill: [stored({ credit_settled_by: SITA })] })
-    const out = await press(db)
-    expect(out.msg).toBe(
-      `error:This bill was already settled by Sita on ${settledWhen(SETTLED_AT)}, by Cash. Nothing was changed by this press and no cash was added to the drawer. ` +
-      'If the customer is paying you now, check with Sita before taking or handing back any money — it may already have been paid.')
-    expect(out).toMatchObject({ closePanel: true, reload: true })
-    expect(db.calls.openShift).toBe(0)
+describe('cancelCreditReceipt', () => {
+  const R = { p_receipt_id: 'r1', p_reason: 'Entered twice' }
+  test('cancelled, with the reason trimmed', async () => {
+    const { rpc, calls } = fakeRpc([ok({ receipt_id: 'r1', already_cancelled: false })])
+    expect((await cancelCreditReceipt({ rpc, receiptId: 'r1', reason: '  Entered twice ' })).status).toBe('cancelled')
+    expect(calls[0]).toMatchObject({ name: 'cancel_credit_receipt', args: R })
   })
-  test('a login whose name is unknown is "another login"', async () => {
-    const out = await press(fakeDb({ settle: [ok([])], readBill: [stored({ credit_settled_by: 'login-gone' })] }))
-    expect(out.msg).toMatch(/settled by another login on .* find out who settled it/)
+  test('already cancelled before this press', async () => {
+    const { rpc } = fakeRpc([ok({ receipt_id: 'r1', already_cancelled: true })])
+    expect((await cancelCreditReceipt({ rpc, receiptId: 'r1', reason: 'Entered twice' })).status).toBe('already')
   })
-  test('this login, but not a press on this page: reported, never added to the drawer by itself', async () => {
-    const db = fakeDb({ settle: [ok([])], readBill: [stored()] })
-    const out = await press(db)
-    expect(out.msg).toMatch(/^error:This bill was already settled from your login on .*, by Cash\. Nothing was changed/)
-    expect(out.msg).toMatch(/look in Shifts for a "Credit settled" entry for Hari, and add it as a Cash In only if there is none\.$/)
-    expect(db.calls.addCash).toEqual([])
+  test('a lost answer, then "already cancelled": it was this press', async () => {
+    const { rpc, calls } = fakeRpc([DROPPED, ok({ receipt_id: 'r1', already_cancelled: true })])
+    expect((await cancelCreditReceipt({ rpc, receiptId: 'r1', reason: 'Entered twice' })).status).toBe('cancelled')
+    expect(calls).toHaveLength(2)
   })
-  test('pressed again with another method after a lost Cash press: the method stands, no cash is added', async () => {
-    const tries = new Map()
-    await press(fakeDb({ settle: [DROPPED], readBill: [DROPPED] }), { tries })
-    const db = fakeDb({ settle: [ok([])], readBill: [stored()] })
-    const out = await press(db, { tries, method: 'eSewa' })
-    expect(out.msg).toMatch(/by Cash\. A settlement's method cannot be changed afterwards\./)
-    expect(db.calls.addCash).toEqual([])
-  })
-  test('an unanswered press older than SETTLE_TRY_MS is not finished by itself', async () => {
-    const tries = new Map()
-    await press(fakeDb({ settle: [DROPPED], readBill: [DROPPED] }), { tries })
-    const db = fakeDb({ settle: [ok([])], readBill: [stored()] })
-    const out = await press(db, { tries, now: () => T0 + SETTLE_TRY_MS + 1000 })
-    expect(out.msg).toMatch(/from your login/)
-    expect(db.calls.addCash).toEqual([])
-  })
-  test('matched nothing and the read-back failed: who settled it is on Collected', async () => {
-    const out = await press(fakeDb({ settle: [ok([])], readBill: [DROPPED] }))
-    expect(out.msg).toMatch(/^error:This press changed nothing — the bill looks already settled/)
-    expect(out.msg).toMatch(/under Collected says who settled it/)
+  test('refused, and no answer twice', async () => {
+    const refusal = { data: null, status: 400, error: { hint: 'credit_receipt_cancel_no_shift', message: 'credit_receipt_cancel_no_shift: no shift is open' } }
+    expect((await cancelCreditReceipt({ rpc: fakeRpc([refusal]).rpc, receiptId: 'r1', reason: 'xyz' })).status).toBe('refused')
+    expect((await cancelCreditReceipt({ rpc: fakeRpc([DROPPED, DROPPED]).rpc, receiptId: 'r1', reason: 'xyz' })).status).toBe('unknown')
   })
 })
 
-describe('postSettlementCash — the drawer entry (SHIFTS-4)', () => {
-  const cash = (db, extra = {}) => postSettlementCash({ db, order: BILL, amount: 3000, profileId: ME, newId: ids(), ...extra })
+describe('the words', () => {
+  test('the methods a receipt can record', () => {
+    expect(RECEIPT_METHODS).toEqual(['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Cheque', 'Bank Transfer'])
+    expect(SETTLE_READ_MS).toBe(8000)
+  })
 
-  test('no shift open: keep it out of the next float and record it, or count it and record nothing', async () => {
-    const out = await cash(fakeDb({ openShift: [ok(null)] }))
-    expect(out.warn).toBe(true)
-    expect(out.text).toBe(' No shift is open, so this NPR 3,000 is not on any drawer count. Keep it out of the float you count when the next shift opens, then record it as a Cash In on that shift. If it stays in the drawer and is counted in the float, record nothing.')
+  test('settledWhen: the Nepal day and clock time', () => {
+    const ts = '2026-10-10T04:57:00.000+00:00'
+    expect(settledWhen(ts)).toBe(`24 Ashwin 2083 at ${nepalTime(ts)}`)
   })
-  test('a failed shift read says nothing was added, never "no shift"', async () => {
-    const out = await cash(fakeDb({ openShift: [DROPPED] }))
-    expect(out.text).toMatch(/^ Could not check whether a shift is open, so this NPR 3,000 was not added to any drawer count\. If a shift is open, add it there as a Cash In\./)
-  })
-  test('a refused entry leaves the drawer OVER, not short', async () => {
-    const out = await cash(fakeDb({ openShift: [SHIFT], addCash: [{ data: null, status: 403, error: { code: '42501', hint: 'pos_cash_movement_rank', message: 'pos_cash_movement_rank: recording cash …' } }] }))
-    expect(out.text).toMatch(/the drawer will read NPR 3,000 over — add it as a Cash In on that shift\./)
-    expect(out.text).not.toMatch(/short/)
-  })
-  test('a shift that closed in between: the no-shift steps', async () => {
-    const out = await cash(fakeDb({ openShift: [SHIFT], addCash: [{ data: null, status: 400, error: { code: 'P0001', hint: 'pos_cash_movement_shift_closed', message: 'pos_cash_movement_shift_closed: that shift is closed' } }] }))
-    expect(out.text).toMatch(/^ The shift closed before this NPR 3,000 could be added.*record nothing\.$/)
-  })
-  test('S823 5c: the bill already has its settlement entry (made on another screen): not added again, never "over"', async () => {
-    const db = fakeDb({ openShift: [SHIFT], addCash: [{ data: null, status: 409, error: { code: '23505', message: 'duplicate key value violates unique constraint "pos_cash_movements_one_credit_settlement"' } }] })
-    expect(await cash(db)).toEqual({ warn: false, text: ' Its cash was already on the drawer record, so it was not added again.' })
-    expect(db.calls.addCash).toHaveLength(1)
-  })
-  test('a lost answer is sent again with the same id; landing then, or a duplicate key, is added', async () => {
-    const db = fakeDb({ openShift: [SHIFT], addCash: [DROPPED, ok([{}])] })
-    expect(await cash(db)).toEqual({ warn: false, text: " Added to the open shift's cash count." })
-    expect(db.calls.addCash.map(r => r.id)).toEqual(['cash-1', 'cash-1'])
 
-    const dup = fakeDb({ openShift: [SHIFT], addCash: [TIMEOUT, { data: null, status: 409, error: { code: '23505', message: 'duplicate key value violates unique constraint "pos_cash_movements_pkey"' } }] })
-    expect((await cash(dup)).warn).toBe(false)
+  const rows = [
+    { ticked: true, amount: 100000, commission: 0, owedAfter: 0, bill: { n: 'TI12' } },
+    { ticked: true, amount: 5050, commission: 0, owedAfter: 4950, bill: { n: 'TI15' } },
+    { ticked: false, amount: 0, commission: 0, owedAfter: 900, bill: { n: 'TI16' } },
+  ]
+  test('paymentSummary: the amount, which bills it clears, where the cash goes, and that it is a receipt', () => {
+    const lines = paymentSummary({ partyName: 'Hari', method: 'Cash', total: 105050, rows, label: b => b.n, shiftOpen: true })
+    expect(lines[0]).toBe('NPR 1,050.50 from Hari by Cash: clears TI12 in full and puts NPR 50.50 against TI15 (NPR 49.50 still owed on it).')
+    expect(lines[1]).toMatch(/drawer count expects it/)
+    expect(lines[2]).toMatch(/numbered money receipt is recorded and printed/)
+    expect(paymentSummary({ partyName: 'Hari', method: 'Cash', total: 105050, rows, label: b => b.n, shiftOpen: false })[1]).toMatch(/No shift is open, so a Cash payment will be refused/)
+    expect(paymentSummary({ partyName: 'Hari', method: 'eSewa', total: 105050, rows, label: b => b.n })[1]).toMatch(/Nothing goes into the cash drawer/)
   })
-  test('no answer twice: not known — look before adding, never "could not be added"', async () => {
-    const out = await cash(fakeDb({ openShift: [SHIFT], addCash: [DROPPED, TIMEOUT] }))
-    expect(out.text).toBe(' It is not known whether this NPR 3,000 reached the open shift\'s cash count: the answer was lost. Before adding anything, look in Shifts for a "Credit settled" entry for Hari, and add it as a Cash In only if there is none.')
+  test('paymentSummary for a partner names the commission it keeps', () => {
+    const lines = paymentSummary({ partyName: 'Foodmandu', partner: true, method: 'Bank Transfer', total: 90000, commissionTotal: 10000, rows: [rows[0]], label: b => b.n })
+    expect(lines[1]).toBe('Foodmandu keeps NPR 100.00 as commission on these bills, so together they clear NPR 1,000.00.')
   })
-  test('checkFirst: a failed look adds nothing', async () => {
-    const db = fakeDb({ cashFor: [DROPPED] })
-    const out = await cash(db, { checkFirst: true })
-    expect(out.text).toMatch(/^ Could not check whether this NPR 3,000 is already on the drawer record, so nothing was added/)
-    expect(db.calls.openShift).toBe(0)
-  })
-})
 
-// S842: the page shows a failure through ActionError, so the answer behind each sentence comes back with
-// it, for the fine print. Nothing about the sentences or the read-back changed.
-describe('the answer behind a message (S842)', () => {
-  test('a refusal, a lost answer and an unreadable bill each hand back the error the sentence is about', async () => {
-    expect((await press(fakeDb({ settle: [RANK] }))).error).toBe(RANK.error)
-    expect((await press(fakeDb({ settle: [TIMEOUT], readBill: [unsettled()] }))).error).toBe(TIMEOUT.error)
-    expect((await press(fakeDb({ settle: [DROPPED], readBill: [DROPPED] }))).error).toBe(DROPPED.error)
-    expect((await press(fakeDb({ settle: [ok([])], readBill: [DROPPED] }))).error).toBe(DROPPED.error)
+  test('recordOutcome: recorded, a lost answer settled, not known, and refused', () => {
+    const press = { partyName: 'Hari', method: 'Cash', amount: 1050.5 }
+    const okLine = recordOutcome({ status: 'recorded', receipt: RECEIPT }, press)
+    expect(okLine.kind).toBe('ok')
+    expect(okLine.text).toBe("Receipt RC-7 (82/83): NPR 1,050.50 from Hari by Cash. 1 bill paid in full. The cash is on the open shift's drawer count.")
+    expect(recordOutcome({ status: 'replayed', receipt: RECEIPT, lost: true }, press).text).toMatch(/recorded once\.$/)
+    const unknown = recordOutcome({ status: 'unknown', error: DROPPED.error }, press)
+    expect(unknown.kind).toBe('warn')
+    expect(unknown.text).toMatch(/not known whether NPR 1,050.50 from Hari was recorded\. Do not hand any money back/)
+    expect(unknown.text).toMatch(/Keep the cash aside/)
+    const refused = recordOutcome({ status: 'refused', error: OVER.error }, press)
+    expect(refused.kind).toBe('error')
+    expect(refused.text).toMatch(/^The payment was not recorded, and no receipt was made\. /)
+    expect(refused.error).toBe(OVER.error)
   })
-  test("a settled bill whose Cash In was refused carries the refusal; a clean one carries none", async () => {
-    const refusal = { data: null, status: 403, error: { code: '42501', hint: 'pos_cash_movement_rank', message: 'pos_cash_movement_rank: recording cash …' } }
-    const warned = await press(fakeDb({ settle: [ok([{ id: 'b1' }])], openShift: [SHIFT], addCash: [refusal] }))
-    expect(warned.msg).toMatch(/^warn:NPR 3,000 collected from Hari via Cash\. It could not be added/)
-    expect(warned.error).toBe(refusal.error)
-    const clean = await press(fakeDb({ settle: [ok([{ id: 'b1' }])], openShift: [SHIFT], addCash: [ok([{}])] }))
-    expect(clean.error).toBeUndefined()
-  })
-})
 
-describe('settleConsequence — what a method press is about to do (S842)', () => {
-  test('Cash from a customer: the whole bill, the drawer, the open-shift caveat, and that it is final', () => {
-    const c = settleConsequence({ order: BILL, method: 'Cash', bill: 'TI12-CAC-82/83' })
-    expect(c.title).toBe("Settle Hari's bill by Cash?")
-    expect(c.confirmLabel).toBe('Settle as Cash')
-    expect(c.lines[0]).toBe('Bill TI12-CAC-82/83 from Hari, NPR 3,000, is marked as paid by Cash.')
-    expect(c.lines[1]).toMatch(/^NPR 3,000 goes on the open shift's drawer record as a Cash In/)
-    expect(c.lines[1]).toMatch(/If no shift is open, the bill is still settled but the cash goes on no drawer count/)
-    expect(c.lines[2]).toBe('A settlement cannot be undone, and its method cannot be changed afterwards.')
-  })
-  test('Cash from a delivery partner: the bill less the commission is what reaches the drawer', () => {
-    const c = settleConsequence({ order: PATHAO, method: 'Cash', commission: 1000 })
-    expect(c.title).toBe("Settle Pathao's bill by Cash?")
-    expect(c.lines[0]).toBe('This bill from Pathao, NPR 5,650, is marked as paid by Cash, with NPR 1,000 commission kept by Pathao: NPR 4,650 received.')
-    expect(c.lines[1]).toMatch(/^NPR 4,650 goes on the open shift's drawer record/)
-    expect(settleConsequence({ order: PATHAO, method: 'Cash', commission: 0 }).lines[0]).toMatch(/with no commission recorded: NPR 5,650 received\.$/)
-  })
-  test('any other method puts nothing in the drawer, and a bill with no name still reads', () => {
-    const c = settleConsequence({ order: { ...BILL, buyer_name: null }, method: 'eSewa' })
-    expect(c.title).toBe('Settle this bill by eSewa?')
-    expect(c.lines[0]).toBe('This bill from the customer, NPR 3,000, is marked as paid by eSewa.')
-    expect(c.lines[1]).toBe('Nothing goes into the cash drawer count — only a Cash settlement does.')
-    expect(c.confirmLabel).toBe('Settle as eSewa')
+  test('cancelConsequence names the amount and, for Cash, that it leaves the open drawer', () => {
+    const r = { receipt_no: 7, invoice_fy: '82/83', amount: 1050.5, party_name: 'Hari', method: 'Cash' }
+    const lines = cancelConsequence(r)
+    expect(lines[0]).toBe('Receipt RC-7 (82/83) for NPR 1,050.50 from Hari is marked Cancelled, with your reason. It is never deleted.')
+    expect(lines[2]).toMatch(/^NPR 1,050.50 leaves the cash drawer: it goes on the OPEN shift as cash taken out/)
+    expect(cancelConsequence({ ...r, method: 'eSewa' })[2]).toMatch(/nothing leaves the cash drawer/)
+    expect(cancelOutcome({ status: 'cancelled' }, r).text).toBe('Receipt RC-7 is cancelled. NPR 1,050.50 went on the open shift as cash taken out. Its bills are owed again.')
+    expect(cancelOutcome({ status: 'already' }, r).kind).toBe('warn')
+    expect(cancelOutcome({ status: 'unknown' }, r).text).toMatch(/can only be cancelled once/)
+    expect(cancelOutcome({ status: 'refused', error: { message: 'x' } }, r).text).toMatch(/^Receipt RC-7 was not cancelled\. It stands as it was\./)
   })
 })

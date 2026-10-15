@@ -301,6 +301,19 @@ describe('deliveryOutstanding', () => {
     expect(deliveryOutstanding({ ...owed(900), settled: true })).toBe(0)
     expect(deliveryOutstanding(owed(900))).toBe(900)
   })
+  // S843: a platform pays in parts, each part a receipt that may keep a commission. The bill stays
+  // unsettled until they reach its total, so its Outstanding is what is still owed, not its amount.
+  test('a part-paid bill adds what it still owes: 1,130 billed, 600 received, 30 commission → 500', () => {
+    expect(deliveryOutstanding({ ...owed(1130), owed: 500 })).toBe(500)
+    expect(total([owed(1000), { ...owed(1130), owed: 500 }])).toBe(1500)
+  })
+  test('a part-paid bill that is credited or settled adds nothing, whatever it owed', () => {
+    expect(deliveryOutstanding({ ...owed(1130), owed: 500, credited: true })).toBe(0)
+    expect(deliveryOutstanding({ ...owed(1130), owed: 0, settled: true })).toBe(0)
+  })
+  test('never a negative figure', () => {
+    expect(deliveryOutstanding({ ...owed(1130), owed: -0.01 })).toBe(0)
+  })
 })
 
 // S814 4d (REPORTS-7, SHIFTS-5): one basis for a void's and a comp's lost sale, before VAT.

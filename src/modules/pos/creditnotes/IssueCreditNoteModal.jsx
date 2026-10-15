@@ -15,6 +15,7 @@ import { errorLine, errorText, isNetworkError } from '../../../shared/errorText'
 import { creditNoteInInventory } from './creditNotePosting'
 import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
+import { RECEIPT_LINE_COLUMNS, receiptTotalsByBill, owedOn } from '../creditOwed'
 
 // "Was money returned to the customer?" (S754, owner decision). Asked on every note, because a
 // Credit Note corrects the VAT register and says nothing about the drawer: a cash refund handed
@@ -26,7 +27,7 @@ import { invoiceCodeOf } from '../../../shared/invoiceCode'
 const REFUND_OPTIONS = [
   { value: 'cash',  label: 'Cash',  hint: 'Paid out of the till — recorded as a Refund on the open shift, so the drawer count expects it.' },
   { value: 'other', label: 'Other (card, QR, bank)', hint: 'Returned outside the till. Nothing is taken off the drawer count.' },
-  { value: 'none',  label: 'None',  hint: 'No money went back — e.g. the bill is billed again to the right customer, or it is a Credit bill nobody has paid yet.' },
+  { value: 'none',  label: 'None',  hint: 'No money went back — e.g. the bill is billed again to the right customer, or it is a Credit bill nobody has paid anything on yet.' },
 ]
 
 // "Was the food on this bill served?" (S809 2e, owner decision Q10 a). Every bill counts its dishes as
@@ -77,6 +78,39 @@ function lostReplyText(cashShift, cashOut) {
     + ' A second note for this bill would be refused.'
 }
 
+// S843: what has been paid so far on a Credit bill (customers can pay one off in parts), so "Was money
+// returned?" is answered knowing what came in and how. The note clears whatever is still owed and
+// gives back only what was paid: the cash part from the drawer (the server's figure, `cashOut`), the
+// rest the way it came, as Other. Words only — a failed read says so and blocks nothing.
+export function CreditBillPaidLine({ creditPaid, bill, cashOut }) {
+  const style = { fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }
+  if (creditPaid.error) {
+    return (
+      <p style={{ ...style, color: 'var(--theme-amber-text)' }}>
+        Could not read what has been paid on this Credit bill, so it is not shown here. The cash that can go back is still worked out by the server when the note is issued.
+      </p>
+    )
+  }
+  const t = creditPaid.totals
+  if (!t) {
+    // No part payments: settled whole before they existed (the lines above say what it took), or unpaid.
+    if (bill?.credit_settled_at) return null
+    return <p style={style}>Nothing has been paid on this Credit bill yet: the note clears what it owes, and no money goes back — choose None.</p>
+  }
+  const owed = bill?.credit_settled_at ? 0 : Math.max(0, owedOn(bill?.paid_amount, t))
+  const otherWays = t.received - t.cash > 0.005
+  return (
+    <p style={style}>
+      {`This Credit bill has been paid ${fmtNpr(t.received)} so far`}
+      {t.cash > 0 ? `, ${fmtNpr(t.cash)} of it in cash` : ''}
+      {t.commission > 0 ? `, and the delivery partner kept ${fmtNpr(t.commission)} as commission` : ''}
+      {owed > 0 ? `; the ${fmtNpr(owed)} still owed is simply cleared by the note.` : '.'}
+      {' '}Only what was paid can go back: {cashOut > 0 ? `${fmtNpr(cashOut)} from the drawer if you choose Cash` : 'none of it from the drawer'}
+      {otherWays ? ', and what was paid by card, QR or bank goes back that way, as Other.' : '.'}
+    </p>
+  )
+}
+
 // Shared by two entry points — the Recent Bills "Credit Note" quick action (same-day) and the
 // standalone /pos/credit-notes "Issue New" search (any date). Self-contained: fetches its own
 // settings/outlet/HSC data rather than depending on the caller's cached state, so it works
@@ -114,6 +148,10 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   // S809 2e (SHIFTS-3): the cash this bill brought into the drawer — the server's own figure
   // (pos_bill_cash_taken), the same one the note's refund is recorded with.
   const [cashTaken, setCashTaken] = useState(null)
+  // S843: on a Credit bill, what has been paid on it so far by receipts (part payments). Only words —
+  // the refund is still the server's cash figure above — so a failed read says so and blocks nothing.
+  // null = not a Credit bill (or not read yet); { error } | { totals } once read.
+  const [creditPaid, setCreditPaid] = useState(null)
 
   async function readOpenShift() {
     const { data, error } = await settleWithin(
@@ -156,7 +194,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
         settleWithin(scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, selection_key, combo_line_id, combo_name, combo_sort, option_summary, pos_order_item_options(option_name, price_delta, ingredient_deltas, sort)').eq('order_id', order.id), LOAD_MS, "Reading the bill's lines"),
         settleWithin(supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(), LOAD_MS, "Reading this outlet's tax settings"),
         settleWithin(supabase.from('clients').select('name').eq('id', clientId).single(), LOAD_MS, "Reading the outlet's name"),
-        settleWithin(scopedFrom('pos_orders', 'vat_registered').eq('id', order.id).maybeSingle(), LOAD_MS, 'Reading the bill'),
+        // payment_method / paid_amount / credit_settled_at (S843): the entry points pass different
+        // columns, so whether this is a Credit bill, and what it still owes, is read here.
+        settleWithin(scopedFrom('pos_orders', 'vat_registered, payment_method, paid_amount, credit_settled_at').eq('id', order.id).maybeSingle(), LOAD_MS, 'Reading the bill'),
       ])
       if (cancelled) return
       // S754: all three reads dropped `error`. A failed item read computed NPR 0 and still let a
@@ -187,6 +227,14 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       setBillStamp(billRow || null)
       setHscMap(hsc)
       setLoading(false)
+      // S843: a Credit bill may have been paid in part. Read after the bill so a cash or card bill
+      // never asks; a single bill's few receipts need no paging.
+      if (billRow?.payment_method === 'Credit') {
+        const { data: lines, error: linesErr } = await settleWithin(
+          scopedFrom('pos_credit_receipt_lines', RECEIPT_LINE_COLUMNS).eq('order_id', order.id), LOAD_MS, 'Reading the payments on this bill')
+        if (cancelled) return
+        setCreditPaid(linesErr ? { error: linesErr } : { totals: receiptTotalsByBill(lines)[order.id] || null })
+      }
     })().catch(err => { if (!cancelled) { setLoadError(err); setLoading(false) } })
     return () => { cancelled = true }
   }, [clientId, order.id, scopedFrom])
@@ -549,10 +597,11 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
                 <p role="status" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>Checking how much of this bill was paid in cash…</p>
               ) : !(cashOut > 0) && (
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
-                  No cash was taken for this bill (it was paid by card, QR or points, or it is a Credit bill nobody has paid yet), so Cash is off.
+                  No cash was taken for this bill (it was paid by card, QR or points, or it is a Credit bill nobody has paid anything on in cash), so Cash is off.
                   Choose Other if the money went back by card, QR or bank. If you hand cash over anyway, record it in Shifts as a Cash Out.
                 </p>
               )}
+              {creditPaid && <CreditBillPaidLine creditPaid={creditPaid} bill={billStamp} cashOut={cashOut} />}
               {refundMode && (
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
                   {REFUND_OPTIONS.find(o => o.value === refundMode)?.hint}

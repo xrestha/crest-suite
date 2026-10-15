@@ -204,9 +204,15 @@ export function buildGroupedRows({ orders, creditNotes, orderById, itemsByOrder,
  * bill adds 0 in its own range, and the note's minus row adds 0 in the note's range. Before this the
  * note subtracted its amount while its bill was unsettled: a range holding only the note read
  * −NPR 1,130 owed, and a range holding both read 0 only by cancellation.
+ *
+ * What it adds is what is STILL owed (S843): a platform can pay a bill off in parts, each part a
+ * receipt that may keep a commission, and the bill is only stamped settled once they reach its total.
+ * `r.owed` is creditOwed.js's owedOn (paid_amount − received − commission, receipts not cancelled);
+ * a row the page could not work it out for has no `owed` and counts its whole amount, as before.
  */
 export function deliveryOutstanding(r) {
-  return !r.isReturn && !r.settled && !r.credited ? r.amount : 0
+  if (r.isReturn || r.settled || r.credited) return 0
+  return r.owed != null ? Math.max(0, r.owed) : r.amount
 }
 
 /**

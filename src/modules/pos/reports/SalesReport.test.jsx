@@ -99,3 +99,27 @@ test('a payment filter shows and is cleared by a named button, which starts the 
   expect(bodyRows()).toHaveLength(200)
   expect(screen.getByRole('status').textContent).toMatch(/^200 of 450 rows shown/)
 })
+
+// S843: a platform pays a delivery bill off in parts, each part a receipt that may keep a commission.
+// The bill stays unsettled until they reach its total, so Outstanding counts what is still owed.
+test('a part-paid delivery bill counts only what it still owes in Outstanding, and says so on its row', async () => {
+  const partnerBill = (id, n, paid) => ({
+    ...orders[0], id, order_no: n, invoice_no: n, payment_method: 'Credit', delivery_partner: 'Foodmandu', paid_amount: paid,
+  })
+  mockAnswers.pos_orders = { data: [partnerBill('p1', 901, 1130), partnerBill('p2', 902, 500)], error: null }
+  mockAnswers.pos_order_items = { data: [
+    { ...lines[0], order_id: 'p1', unit_price: 1130 },
+    { ...lines[0], order_id: 'p2', unit_price: 500 },
+  ], error: null }
+  mockAnswers.pos_credit_receipt_lines = { data: [
+    { order_id: 'p1', amount: 600, commission: 30, pos_credit_receipts: { method: 'Cash', cancelled_at: null } },
+    // A payment cancelled as a mistake puts its amount back on the bill.
+    { order_id: 'p1', amount: 100, commission: 0, pos_credit_receipts: { method: 'eSewa', cancelled_at: '2026-10-15T05:00:00Z' } },
+  ], error: null }
+  const { container } = render(<SalesReport />)
+  fireEvent.click(await screen.findByRole('tab', { name: 'Delivery Partners' }))
+  await screen.findByText('Part paid · NPR 500 owed')
+  const outstanding = [...container.querySelectorAll('.stat-card')].find(c => c.textContent.startsWith('Outstanding'))
+  // 1,130 − 600 received − 30 commission = 500 still owed on p1, and all of p2's 500.
+  expect(outstanding.querySelector('.stat-value').textContent).toBe('NPR 1,000')
+})

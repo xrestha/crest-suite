@@ -59,6 +59,10 @@ const TABLE_LABELS = {
   // audited since S809 3k — loyalty enrolment only (joined at creation, scheme changed, an enrolled
   // customer deleted); the till's customer upsert on every bill is not recorded
   pos_customers:          'POS Customer',
+  // audited since S843 — a customer payment's receipt (recorded, cancelled, or deleted by Danger
+  // Zone) and the membership types a customer can be given
+  pos_credit_receipts:    'Customer Payment',
+  pos_membership_types:   'Membership Type',
   // Crest Suite
   assets_register:          'Fixed Asset',
   assets_depreciation_runs: 'Depreciation Run',
