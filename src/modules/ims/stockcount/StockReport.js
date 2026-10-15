@@ -246,7 +246,7 @@ export default function StockReport() {
   // Print and Excel emit a document, so they wait for the figures and for the letterhead's name
   // (S792, PLANNING-5): live during a load they filed the previous month's rows under the new
   // month's title and filename, and after a failed read an empty sheet named as a report.
-  const emitDisabled = !figuresReady || !rows.length || !!biz.error
+  const emitDisabled = !figuresReady || !rows.length || !biz.ready
 
   return (
     <div>

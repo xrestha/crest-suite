@@ -513,8 +513,8 @@ export default function KotLog() {
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Off while the active tab is loading or failed, not only when empty (S728/S754). */}
-          {/* …and off while the letterhead's client-name read has failed (useBizInfo, S754). */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !!biz.error}>⬇ Excel</button>
+          {/* …and off until the letterhead's client-name read has answered (useBizInfo `ready`, S845). */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !biz.ready}>⬇ Excel</button>
         </div>
       </div>
 

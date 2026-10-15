@@ -157,7 +157,7 @@ export default function DemandForecast() {
   const [msg, setMsg] = useState('')
   const [lastRun, setLastRun] = useState(null)
   // The letterhead (S756): the hand-rolled clients + settings read dropped both errors, so a failed
-  // read printed and exported a nameless sheet. useBizInfo carries `error`, and Print/Export wait on it.
+  // read printed and exported a nameless sheet. Print/Export wait on useBizInfo's `ready`.
   const biz = useBizInfo()
   // The recipe-name read's own error slot (S756). It dropped `error`, and every dish then rendered
   // as its raw UUID on screen, on the printed sheet and in the workbook.
@@ -397,7 +397,7 @@ export default function DemandForecast() {
     : horizonLabel
   // Print and Export carry the figures, the dish names and the letterhead, so they wait on all
   // three (the S728 rule: a control that emits a file is where a stale or partial render sticks).
-  const emitBlocked = loading || !!loadError || forecast.length === 0 || ingredients.loading || !!biz.error || !!namesError
+  const emitBlocked = loading || !!loadError || forecast.length === 0 || ingredients.loading || !biz.ready || !!namesError
 
   function handlePrint() {
     printWithTitle(`${biz.name ? biz.name + ' - ' : ''}Demand Forecast - ${horizonLabel}`)

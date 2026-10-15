@@ -11,6 +11,10 @@
  * `scopeLine` is the one line that says WHAT the sheet covers: a period, a date range, an as-of
  * date. It is required rather than optional on purpose; a sheet that does not state its own
  * scope cannot be reconciled a month later even by the person who made it.
+ *
+ * The rows start at an explicit row (S845). `origin: -1` appends after the last row holding a
+ * CELL, and the closing `[]` holds none, so the column headings sat straight under the scope line
+ * on every export for as long as this helper existed.
  */
 export function sheetWithLetterhead(XLSX, { title, biz, scopeLine, rows, notes = [] }) {
   const b = biz || {}
@@ -25,6 +29,6 @@ export function sheetWithLetterhead(XLSX, { title, biz, scopeLine, rows, notes =
     [],
   ]
   const ws = XLSX.utils.aoa_to_sheet(aoa)
-  XLSX.utils.sheet_add_json(ws, rows, { origin: -1 })
+  XLSX.utils.sheet_add_json(ws, rows, { origin: aoa.length })
   return ws
 }

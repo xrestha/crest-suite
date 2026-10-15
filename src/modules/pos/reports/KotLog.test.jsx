@@ -25,7 +25,7 @@ jest.mock('../../../shared/fetchAllRows', () => ({
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: table => mockBuilder(table), rpc: () => mockBuilder('rpc') } }))
 const mockAuth = { clientId: 'c1', hasPosAccess: () => true }
 jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
-const mockBiz = { name: 'Test Cafe', error: null }
+const mockBiz = { name: 'Test Cafe', error: null, ready: true }
 jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => mockBiz }))
 
 // eslint-disable-next-line import/first
@@ -37,7 +37,10 @@ const tickets = Array.from({ length: 450 }, (_, i) => ({
   started_at: null, ready_at: null, estimated_prep_minutes: null, pos_orders: { status: 'billed' },
 }))
 
-beforeEach(() => { mockAnswers = { pos_kot_log: { data: tickets, error: null } }; mockHang = null })
+beforeEach(() => {
+  mockAnswers = { pos_kot_log: { data: tickets, error: null } }; mockHang = null
+  Object.assign(mockBiz, { name: 'Test Cafe', error: null, ready: true })
+})
 afterEach(() => jest.useRealTimers())
 
 // The register's rows: its row groups are thead, then tbody.
@@ -79,7 +82,7 @@ test('an empty Reconciliation and Pulled Items say what was checked, with no cel
 })
 
 test('a failed letterhead read is the report-error card, and Excel is off', async () => {
-  mockBiz.error = { code: 'PGRST301', message: 'JWT expired' }
+  Object.assign(mockBiz, { name: '', error: { code: 'PGRST301', message: 'JWT expired' }, ready: false })
   try {
     render(<KotLog />)
     const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
@@ -88,6 +91,19 @@ test('a failed letterhead read is the report-error card, and Excel is off', asyn
     expect(within(card).getByText('PGRST301 · JWT expired').className).toBe('action-error-detail')
     expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
   } finally {
-    mockBiz.error = null
+    Object.assign(mockBiz, { name: 'Test Cafe', error: null, ready: true })
   }
+})
+
+// S845: before the letterhead read lands there is no error and no name, and Excel waited only on
+// the error, so a press in the first moment shipped a blank CompanyName.
+test('Excel stays off until the letterhead read has answered, then comes on', async () => {
+  Object.assign(mockBiz, { name: '', error: null, ready: false })
+  const { rerender } = render(<KotLog />)
+  await screen.findByRole('status')
+  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+  expect(screen.queryByText("Could not load this outlet's name")).toBeNull()
+  Object.assign(mockBiz, { name: 'Test Cafe', ready: true })
+  rerender(<KotLog />)
+  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(false)
 })

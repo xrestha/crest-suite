@@ -260,7 +260,7 @@ export default function PaymentReport() {
               period's scope line, during a period change the old month's figures under the new
               month's name, and with no outlet name a blank CompanyName line. */}
           <button className="btn btn-ghost" onClick={exportExcel}
-            disabled={loading || !!loadError || !!biz.error || !selectedPeriod}>Export Excel</button>
+            disabled={loading || !!loadError || !biz.ready || !selectedPeriod}>Export Excel</button>
         </div>
       </div>
 

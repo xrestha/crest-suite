@@ -348,7 +348,7 @@ export default function StockAgeing() {
       <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Stock Ageing — ${scopeLine}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || filtered.length === 0 || !!biz.error}>↓ Export Excel</button>
+        disabled={loading || !!loadError || filtered.length === 0 || !biz.ready}>↓ Export Excel</button>
       <select aria-label="As at month" className="form-select" value={selectedPeriod?.id || ''}
         onChange={e => handlePeriodChange(e.target.value)}>
         {periods.map(p => <option key={p.id} value={p.id}>As at {monthLabel(p)}{p.status === 'open' ? ' (open)' : ''}</option>)}

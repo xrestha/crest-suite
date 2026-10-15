@@ -483,7 +483,7 @@ export default function PeriodComparison() {
             {/* Gated on the load (S728/S756): while a range change loads, `stats` holds the previous
                 range's figures while scopeLine, the print title and the filename already name the new one. */}
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Period-over-Period Comparison - ${scopeLine}`)} disabled={loading || !!loadError}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error || !shown.length}
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || !shown.length}
               title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
           </div>
         </div>

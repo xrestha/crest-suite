@@ -332,8 +332,8 @@ export default function DeadStock() {
           </select>
           <button className="btn btn-ghost" disabled={loading || !!loadError}
             onClick={() => printWithTitle(`Dead Stock / Slow Movers — ${scopeLine}`)}>Print</button>
-          {/* biz.error (S756): the export waits rather than send a nameless document. */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !!biz.error}>Export Excel</button>
+          {/* biz.ready (S756, S845): the export waits rather than send a nameless document. */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !biz.ready}>Export Excel</button>
         </div>
       </div>
 

@@ -51,13 +51,13 @@ jest.mock('../../../shared/fetchAllRows', () => ({
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: table => mockBuilder(table), rpc: () => mockBuilder('rpc') } }))
 const mockAuth = { clientId: 'c1', hasPosAccess: () => true, isAdmin: false, imsEnabled: false, clientModules: {}, customizationEnabled: false }
 jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
-const mockBiz = { name: 'Test Cafe', error: null }
+const mockBiz = { name: 'Test Cafe', error: null, ready: true }
 jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => mockBiz }))
 
 // eslint-disable-next-line import/first
 import PosExceptionReport from './PosExceptionReport'
 
-beforeEach(() => { mockHang = false; mockVoidLinesError = null; mockNoBills = false; mockBiz.error = null })
+beforeEach(() => { mockHang = false; mockVoidLinesError = null; mockNoBills = false; Object.assign(mockBiz, { name: 'Test Cafe', error: null, ready: true }) })
 afterEach(() => jest.useRealTimers())
 
 const staffSelect = () => screen.getByLabelText('Staff')
@@ -122,7 +122,7 @@ test('an empty range says so in plain words, with no celebration emoji', async (
 })
 
 test('a failed letterhead read is the report-error card, and Excel is off', async () => {
-  mockBiz.error = { code: 'PGRST301', message: 'JWT expired' }
+  Object.assign(mockBiz, { name: '', error: { code: 'PGRST301', message: 'JWT expired' }, ready: false })
   render(<PosExceptionReport />)
   const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
   expect(card.getAttribute('role')).toBe('alert')

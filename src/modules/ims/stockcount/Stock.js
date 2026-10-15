@@ -2079,7 +2079,7 @@ export default function Stock() {
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             {/* A failed client-name read would ship the register with a blank CompanyName line (S754 rule). */}
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!!biz.error || figuresLoading}
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={!biz.ready || figuresLoading}
               title={biz.error ? 'Your business name could not be loaded, so the export is paused — reload the page and try again.' : undefined}>
               Export Excel
             </button>

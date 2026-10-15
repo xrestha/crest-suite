@@ -382,7 +382,7 @@ export default function SupplierContribution() {
       <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Supplier Contribution - ${periodLabel}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || rows.length === 0 || !!biz.error}>↓ Export Excel</button>
+        disabled={loading || !!loadError || rows.length === 0 || !biz.ready}>↓ Export Excel</button>
       <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
         onChange={e => handlePeriodChange(e.target.value)}>
         {periods.map(p => (

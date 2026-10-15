@@ -364,7 +364,7 @@ export default function AnnualSummary() {
                   year change, while the print title, scope line and filename already name the new one.
                   `busy` also covers the render before a new year's load has begun (S792). */}
               <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError || !!biz.error || !report.rows.length} onClick={exportExcel}
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError || !biz.ready || !report.rows.length} onClick={exportExcel}
                 title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
             </div>
           )}

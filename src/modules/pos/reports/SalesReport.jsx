@@ -311,10 +311,14 @@ export default function SalesReport() {
   // wiped by the range load that started beside it, and the page went on to export a workbook with
   // a blank CompanyName and VAT number and a Delivery Partners tab with every Agreed % silently gone.
   const [bizError, setBizError] = useState(null)
+  // True once that read has answered (S845): before it lands bizError is null and the name blank,
+  // so gating Excel on the error alone let a press in the first moment ship a blank letterhead.
+  const [bizLoaded, setBizLoaded] = useState(false)
   useEffect(() => {
     if (!clientId) return
     let cancelled = false
     setBizError(null)
+    setBizLoaded(false)
     // Bounded (S842): a hung read here left Excel on with a blank letterhead and nothing said.
     settleAll([
       supabase.from('clients').select('name').eq('id', clientId).single(),
@@ -337,6 +341,7 @@ export default function SalesReport() {
         .map(p => [p.name, p.commission_pct === '' || p.commission_pct == null ? null : parseFloat(p.commission_pct)])))
       setVegById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.is_veg])))
       setCodeById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.recipe_code])))
+      setBizLoaded(true)
     })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1304,8 +1309,8 @@ export default function SalesReport() {
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Figure-bearing control (S728): off while the active tab's pipeline is loading or has
               failed — the filename and scope line come from the pickers, which move before the data
-              does — and off while the letterhead read has failed, or the sheet ships blank (S754). */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !!bizError}>⬇ Excel</button>
+              does — and off until the letterhead read has answered, or the sheet ships blank (S754, S845). */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !bizLoaded}>⬇ Excel</button>
         </div>
       </div>
 

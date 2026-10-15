@@ -336,9 +336,9 @@ export default function PosExceptionReport() {
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Off while loading or failed as well as when empty (S728/S754): the filename and scope
               line come from the pickers, which move before the rows do. */}
-          {/* …and off while the letterhead's client-name read has failed, or the sheet ships with a
-              blank CompanyName (S754 — useBizInfo now returns that read's error). */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={filtered.length === 0 || loading || !!loadError || !!biz.error}>
+          {/* …and off until the letterhead's client-name read has answered, or the sheet ships with a
+              blank CompanyName (S754, S845 — useBizInfo's `ready`). */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={filtered.length === 0 || loading || !!loadError || !biz.ready}>
             ⬇ Excel
           </button>
         </div>

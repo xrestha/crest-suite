@@ -481,7 +481,7 @@ const PAYMENT_PAGE = path.join(__dirname, 'PaymentReport.js')
 
 describe('the tax pages gate what they print and export', () => {
   it('Payment Summary gates Export Excel like its siblings (TAX-5)', () => {
-    expect(flatten(PAYMENT_PAGE)).toMatch(/onClick=\{exportExcel\} disabled=\{loading \|\| !!loadError \|\| !!biz\.error/)
+    expect(flatten(PAYMENT_PAGE)).toMatch(/onClick=\{exportExcel\} disabled=\{loading \|\| !!loadError \|\| !biz\.ready/)
   })
 
   it('Payment Summary computes its % of Net Total footer rather than asserting 100% (TAX-10)', () => {

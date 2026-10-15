@@ -395,7 +395,7 @@ export default function Variance() {
               </option>
             ))}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error || filtered.length === 0}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || filtered.length === 0}
             title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
         </div>
       </div>

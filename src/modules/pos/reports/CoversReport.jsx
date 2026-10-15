@@ -406,10 +406,8 @@ export default function CoversReport() {
   // The shared letterhead (excelLetterhead.js), as on the other three POS reports: title, company,
   // VAT/PAN, address, then the range line.
   const letterhead = (XLSX, title, rows) => sheetWithLetterhead(XLSX, { title, biz, scopeLine: dateRangeLine, rows })
-  // useBizInfo() has no "loaded" flag, and its name is '' until the read answers, so a name is the
-  // sign the letterhead has landed. A sheet with a blank company name is the thing the gate exists
-  // to stop, so a blank name keeps Excel off too.
-  const letterheadReady = !biz.error && !!biz.name
+  // Off until the letterhead read has answered, as on every report that exports (useBizInfo, S845).
+  const letterheadReady = biz.ready
 
   async function exportExcel() {
     const XLSX = await import('xlsx')

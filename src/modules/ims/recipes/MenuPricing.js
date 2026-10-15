@@ -967,7 +967,7 @@ export default function MenuPricing() {
   // sent those old food costs out as current. The sheet now carries the letterhead and a scope
   // line (what it covers, as of when, at which rates) like every other export, and waits on the
   // outlet name that letterhead needs.
-  const exportBlocked = loading || !!loadError || !!biz.error || display.length === 0
+  const exportBlocked = loading || !!loadError || !biz.ready || display.length === 0
   async function exportExcel() {
     if (exportBlocked) return
     const XLSX = await import('xlsx')

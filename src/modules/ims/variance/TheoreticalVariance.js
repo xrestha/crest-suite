@@ -568,7 +568,7 @@ export default function TheoreticalVariance() {
         {/* Gated on the load as well as the rows (S728): while a period change computes, `rows` is
             the previous month's while the filename and scope line already name the new one. */}
         <button className="btn btn-ghost" onClick={exportExcel}
-          disabled={loading || computing || !!loadError || !!biz.error || rows.length === 0}
+          disabled={loading || computing || !!loadError || !biz.ready || rows.length === 0}
           title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
       </div>
 

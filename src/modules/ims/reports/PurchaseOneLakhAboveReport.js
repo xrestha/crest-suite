@@ -288,7 +288,7 @@ export default function PurchaseOneLakhAboveReport() {
         {/* Gated on `loading` (S756): the FY label and filename move on the click and the rows only
             when the read lands, so an ungated export named one year's disclosure after another. */}
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel}
-          disabled={loading || !!loadError || !!biz.error || rows.length === 0}>Export Excel</button>
+          disabled={loading || !!loadError || !biz.ready || rows.length === 0}>Export Excel</button>
       </div>
 
       {!loadError && !loading && openPeriods.length > 0 && (

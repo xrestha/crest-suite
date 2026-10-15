@@ -359,7 +359,7 @@ export default function CustomizationReport() {
     XLSX.writeFile(wb, `customization-report-${fromIso}-to-${toIso}.xlsx`)
   }
 
-  const exportDisabled = loading || !!loadError || !report || !!biz.error
+  const exportDisabled = loading || !!loadError || !report || !biz.ready
   const visibleTabs = TABS.filter(t => t.key !== 'margin' || imsOn)
 
   const marginCell = o => {

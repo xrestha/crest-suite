@@ -739,9 +739,9 @@ export default function VendorReport() {
               while `scopeLine` and the filename already read the NEW `selectedPeriod` —
               one month’s figures leaving the building inside another month’s workbook,
               which is the S601 rule verbatim. */}
-          {/* biz.error (S756): a failed client-name read shipped all three sheets with a blank
-              CompanyName line. */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error}>Export Excel</button>
+          {/* biz.ready (S756, S845): a failed or unfinished client-name read shipped all three sheets
+              with a blank CompanyName line. */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready}>Export Excel</button>
         </div>
       </div>
 

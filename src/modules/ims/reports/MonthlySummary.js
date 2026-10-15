@@ -227,7 +227,7 @@ export default function MonthlySummary() {
   // permanent, so it gates on more than `loading`).
   const reportIsCurrent = !!report && !!selectedPeriod
     && report.periodId === selectedPeriod.id && report.clientId === effectiveClientId
-  const exportBlocked = loading || !!loadError || !!biz.error || !reportIsCurrent
+  const exportBlocked = loading || !!loadError || !biz.ready || !reportIsCurrent
 
   async function exportExcel() {
     if (exportBlocked) return

@@ -426,9 +426,9 @@ export default function FifoReport() {
           </select>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
             onClick={() => printWithTitle(`FIFO / Expiry Report — ${scopeLine}`)}>🖨 Print</button>
-          {/* biz.error (S756): a failed client-name read shipped a blank CompanyName line. */}
+          {/* biz.ready (S756, S845): a failed or unfinished client-name read shipped a blank CompanyName line. */}
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-            disabled={loading || !!loadError || filtered.length === 0 || !!biz.error}>↓ Export Excel</button>
+            disabled={loading || !!loadError || filtered.length === 0 || !biz.ready}>↓ Export Excel</button>
         </div>
       </div>
 

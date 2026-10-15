@@ -32,7 +32,7 @@ jest.mock('../../../shared/fetchAllRows', () => ({
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: table => mockBuilder(table), rpc: () => mockBuilder('rpc') } }))
 const mockAuth = { clientId: 'c1', profile: { client_id: 'c1' }, loading: false, hasImsAccess: () => true }
 jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
-jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => ({ name: 'Test Outlet', error: null }) }))
+jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => ({ name: 'Test Outlet', error: null, ready: true }) }))
 
 // eslint-disable-next-line import/first
 import PaymentReport from './PaymentReport'

@@ -183,7 +183,8 @@ export default function WastageReport() {
             ))}
           </select>
           <button className="btn btn-ghost" disabled={loading || !!loadError} onClick={() => printWithTitle(`Wastage Report — ${scopeLine}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length}>Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !biz.ready}
+            title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
         </div>
       </div>
 

@@ -254,7 +254,7 @@ export default function RecipeMargin() {
   // alone it stayed live while a period change was loading, so the previous month's rows could
   // leave in a file named for the new one; and a failed read was refused only because it happens
   // to clear the rows, which is not a gate anyone can see.
-  const exportBlocked = loading || !!loadError || !!biz.error || !display.length
+  const exportBlocked = loading || !!loadError || !biz.ready || !display.length
   async function exportExcel() {
     if (exportBlocked) return
     const XLSX = await import('xlsx')

@@ -509,7 +509,7 @@ export default function ReorderReport() {
                 period's rows into a file named for the new one, and after a failed read an empty
                 sheet named as a report. */}
             <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
-              <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || rows.length === 0 || !!biz.error} style={{ fontSize: 12 }}>Export Excel</button>
+              <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || rows.length === 0 || !biz.ready} style={{ fontSize: 12 }}>Export Excel</button>
             </Tip>
           </div>
           <select aria-label="Period" className="form-select" style={{ marginLeft: 'auto' }} value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>

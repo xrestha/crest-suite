@@ -41,7 +41,7 @@ jest.mock('../../../supabaseClient', () => ({ supabase: { from: table => mockBui
 const mockAuth = { clientId: 'c1', hasPosAccess: () => true }
 jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
 // The letterhead comes from useBizInfo(), as on KOT Log and Sales Exceptions (2026-10-15 audit).
-const BIZ = { name: 'Test Cafe', vat: '301234567', address: 'Thamel, Kathmandu', vatReg: true, error: null }
+const BIZ = { name: 'Test Cafe', vat: '301234567', address: 'Thamel, Kathmandu', vatReg: true, error: null, ready: true }
 const mockBiz = { ...BIZ }
 jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => mockBiz }))
 // The real workbook is built; only the download is caught, so the test can read the sheet.
@@ -162,6 +162,7 @@ test('a failed letterhead read is the report-error card, and Excel is off', asyn
   withDineInBills()
   mockBiz.error = { code: 'PGRST301', message: 'JWT expired' }
   mockBiz.name = ''
+  mockBiz.ready = false
   await openTab('Daily Trend')
   const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
   expect(card.getAttribute('role')).toBe('alert')
@@ -171,7 +172,7 @@ test('a failed letterhead read is the report-error card, and Excel is off', asyn
 
 test('Excel stays off until the letterhead read has answered', async () => {
   withDineInBills()
-  mockBiz.name = '' // useBizInfo before its read lands: no name, no error yet
+  Object.assign(mockBiz, { name: '', ready: false }) // useBizInfo before its read lands: no name, no error yet
   await openTab('Daily Trend')
   await screen.findByRole('columnheader', { name: 'Date (BS)' })
   expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
@@ -196,10 +197,11 @@ test('the export carries the shared letterhead: company, VAT number and address 
     [],
   ])
   expect(rows[5][0]).toMatch(/^@As On Dated : .*@Division : Test Cafe {2}@Basis : dine-in bills only/)
-  // The shared letterhead's closing blank row holds no cell, so `sheet_add_json(origin: -1)` starts
-  // the columns straight under the range line, on every report that uses it.
-  expect(rows[6][0]).toBe('Date (BS)')
-  expect(rows[7].slice(1)).toEqual([2, 6, 1500, 250])
+  // The shared letterhead's closing blank row reaches the sheet (S845): the columns start one row
+  // below the range line, not straight under it.
+  expect(rows[6]).toEqual([])
+  expect(rows[7][0]).toBe('Date (BS)')
+  expect(rows[8].slice(1)).toEqual([2, 6, 1500, 250])
 })
 
 test('a PAN-registered outlet\'s letterhead says PAN No', async () => {

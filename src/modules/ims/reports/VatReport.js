@@ -364,9 +364,9 @@ export default function VatReport() {
             {/* Gated on `loading` too (S756): the period label, print title, scope line and filename
                 move the moment a month is picked, and the rows on screen are the PREVIOUS month's
                 until the read lands — so an ungated export shipped last month's figures under this
-                month's name. And on biz.error for Excel, or the letterhead's company name is blank. */}
+                month's name. And on biz.ready for Excel, or the letterhead's company name is blank. */}
             <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={loading || !!loadError || !hasFigures}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error || !hasFigures}>Export Excel</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || !hasFigures}>Export Excel</button>
           </div>
         </div>
       </div>

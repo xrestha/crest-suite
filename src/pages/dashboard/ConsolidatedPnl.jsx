@@ -422,7 +422,8 @@ export default function ConsolidatedPnl() {
       <button className="btn btn-ghost" style={{ fontSize: 12 }}
         onClick={() => printWithTitle(`Profit & Loss - ${periodLabel}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || isEmpty}>↓ Export Excel</button>
+        disabled={loading || !!loadError || isEmpty || !biz.ready}
+        title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>↓ Export Excel</button>
       <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
         onChange={e => handlePeriodChange(e.target.value)}>
         {periods.map(p => (
