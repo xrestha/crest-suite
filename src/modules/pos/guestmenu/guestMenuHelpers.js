@@ -191,3 +191,8 @@ export function guestRuleText({ min, max }, optionCount = Infinity) {
   if (hi != null && hi < cap) return `Pick up to ${hi}`
   return 'Pick any'
 }
+
+// ── Motion ───────────────────────────────────────────────────────────────────────────────────────
+// Whether the guest asked their phone for less motion, read on every call so a changed setting
+// counts on the next scroll. One definition for the menu and the booking page (S842).
+export const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches

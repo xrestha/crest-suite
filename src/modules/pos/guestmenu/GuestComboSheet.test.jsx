@@ -1,4 +1,5 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { createRef } from 'react'
 import GuestComboSheet, {
   comboPicksOf, comboOrderable, comboCartKey, defaultDishOf, comboOrderItem, pickChoices, comboUnitPrice,
   comboOrderName, comboContents, comboLineProblem, comboCartWithout, comboMatches,
@@ -203,5 +204,74 @@ describe('GuestComboSheet', () => {
       { group_id: 'g-momo', recipe_id: VEG, option_ids: [] },
       { group_id: 'g-drink', recipe_id: COKE, option_ids: [] },
     ])
+  })
+
+  // S842 (owner decision): the phone's Back reaches the sheet through `backRef` (GuestMenu's history
+  // guard). It walks back one step and asks before picks are lost; true means the sheet kept it.
+  describe("the phone's Back", () => {
+    const back = ref => { let kept; act(() => { kept = ref.current.back() }); return kept }
+
+    test('nothing picked on the first step: Back closes as before', () => {
+      const backRef = createRef()
+      renderSheet({ backRef })
+      expect(back(backRef)).toBe(false)
+    })
+
+    test('goes back one step, then asks before the picks are lost', () => {
+      const backRef = createRef()
+      const { onClose } = renderSheet({ backRef })
+      fireEvent.click(screen.getByRole('radio', { name: /Veg Momo/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Next · NPR 350$/ }))
+      expect(screen.getByText('Review · step 2 of 2')).toBeInTheDocument()
+
+      expect(back(backRef)).toBe(true)
+      expect(screen.getByText('Step 1 of 2')).toBeInTheDocument()
+
+      expect(back(backRef)).toBe(true)
+      expect(screen.getByText('Leave without adding? Your choices will be lost.')).toBeInTheDocument()
+      const keep = screen.getByRole('button', { name: 'Keep choosing' })
+      expect(keep).toHaveFocus()
+      expect(screen.queryByRole('button', { name: /^Next/ })).not.toBeInTheDocument()
+
+      // Keep choosing: the picks and the step are as they were.
+      fireEvent.click(keep)
+      expect(screen.queryByText(/Leave without adding/)).not.toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: /Veg Momo/ })).toHaveAttribute('aria-checked', 'true')
+
+      // A second Back on the confirm keeps choosing too; only Leave leaves.
+      back(backRef)
+      expect(back(backRef)).toBe(true)
+      expect(screen.queryByText(/Leave without adding/)).not.toBeInTheDocument()
+      back(backRef)
+      fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    test('after a Change from Review, Back returns to Review', () => {
+      const backRef = createRef()
+      renderSheet({
+        backRef, editing: true,
+        initialPicks: [{ group_id: 'g-momo', recipe_id: VEG, option_ids: [] }, { group_id: 'g-drink', recipe_id: COKE, option_ids: [] }],
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Change Pick a momo' }))
+      expect(screen.getByText('Step 1 of 2')).toBeInTheDocument()
+      expect(back(backRef)).toBe(true)
+      expect(screen.getByText('Review · step 2 of 2')).toBeInTheDocument()
+      // Review is where an edit opened, so it is the first step: unchanged, Back closes.
+      expect(back(backRef)).toBe(false)
+    })
+
+    test('an edit with a change asks in its own words', () => {
+      const backRef = createRef()
+      renderSheet({
+        backRef, editing: true,
+        initialPicks: [{ group_id: 'g-momo', recipe_id: VEG, option_ids: [] }, { group_id: 'g-drink', recipe_id: COKE, option_ids: [] }],
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Change Pick a momo' }))
+      fireEvent.click(screen.getByRole('radio', { name: /Chicken Momo/ }))
+      back(backRef)
+      expect(back(backRef)).toBe(true)
+      expect(screen.getByText('Leave without updating? Your changes will be lost.')).toBeInTheDocument()
+    })
   })
 })

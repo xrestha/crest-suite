@@ -9,7 +9,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import {
   DISH_PHOTO_BUCKET, PHOTO_ACCEPT, PHOTO_EXT,
   photoRefusal, photoPath, versionedUrl, objectPathFromUrl, guestCanLoad, downscalePhoto, storageRefusal,
-  photoMayBeDeleted,
+  photoPathsToRelease, THUMB_PHOTO_SIDE, thumbPathOf, markThumbUrl,
 } from './dishPhoto'
 
 // A dish photo that guests can actually see (S756, owner decision D16).
@@ -31,6 +31,11 @@ import {
 //
 // A FAILED UPLOAD CHANGES NOTHING. The existing photo, the form value and the row are untouched
 // until the new file has landed and (for a saved recipe) the row has accepted it.
+//
+// A THUMB GOES UP BESIDE IT (S842). Once the photo has landed, a 256px copy is uploaded to
+// `<path>.thumb.<ext>` and the stored URL gains `thumb=1`, which is what tells the guest menu to load
+// the small file. Best effort: a thumb that fails to upload leaves the photo and no mark, and the
+// guest menu loads the full photo as it always has. A delete takes the thumb with the photo.
 
 const UPLOAD_TIMEOUT_MS = 60000
 const WRITE_TIMEOUT_MS = 20000
@@ -73,10 +78,11 @@ export default function DishPhotoField({
   // so a failure leaves an unused file rather than a wrong screen, and there is nothing the person
   // editing a recipe could do about it. Only a path inside THIS client's folder is attempted —
   // anything else the storage policy would refuse anyway (a restored copy of another outlet's link).
-  async function removeObjectQuietly(path) {
-    if (!path || !clientId || !path.startsWith(`${clientId}/`)) return
+  async function removeObjectsQuietly(paths) {
+    const mine = (paths || []).filter(p => p && clientId && p.startsWith(`${clientId}/`))
+    if (mine.length === 0) return
     try {
-      const { error: rmErr } = await withTimeout(bucket().remove([path]), WRITE_TIMEOUT_MS, 'Delete photo')
+      const { error: rmErr } = await withTimeout(bucket().remove(mine), WRITE_TIMEOUT_MS, 'Delete photo')
       if (rmErr) console.error('Dish photo file not deleted from storage:', rmErr.message)
     } catch (e) {
       console.error('Dish photo file not deleted from storage:', e?.message)
@@ -88,21 +94,44 @@ export default function DishPhotoField({
   // replacing it on one used to delete the other's picture from the guest menu without a word. The
   // check reads every dish's link fresh rather than trusting the page's list, and anything it cannot
   // settle — a failed read, the guest-menu logo, a file this field did not name — keeps the file:
-  // an unused file costs nothing, a missing photo costs the other dish its picture.
+  // an unused file costs nothing, a missing photo costs the other dish its picture. Its `.thumb` copy
+  // goes in the same request (S842, photoPathsToRelease).
   async function releaseObject(path) {
     if (!path || !clientId || !path.startsWith(`${clientId}/`)) return
+    let paths
     try {
       const { data, error: readErr } = await withTimeout(
         fetchAllRows(() => scopedFrom('recipes', 'id, image_url').not('image_url', 'is', null).order('id')),
         WRITE_TIMEOUT_MS, 'Check photo'
       )
       if (readErr) { console.error('Dish photo kept: could not check which dishes use it:', readErr.message); return }
-      if (!photoMayBeDeleted(path, { clientId, recipeId, others: data || [], supabaseUrl })) return
+      paths = photoPathsToRelease(path, { clientId, recipeId, others: data || [], supabaseUrl })
     } catch (e) {
       console.error('Dish photo kept: could not check which dishes use it:', e?.message)
       return
     }
-    await removeObjectQuietly(path)
+    await removeObjectsQuietly(paths)
+  }
+
+  // The small copy (S842), after the photo itself has landed. True only when one was stored. Made
+  // from the chosen file, not the 1200px copy, so it is drawn once from the sharpest source; a
+  // photo already that small, or a browser that cannot shrink it, stores no thumb.
+  async function uploadThumb(file, path) {
+    const thumbPath = thumbPathOf(path)
+    if (!thumbPath) return false
+    try {
+      const small = await downscalePhoto(file, { maxSide: THUMB_PHOTO_SIDE })
+      if (!small || small === file || photoRefusal(small)) return false
+      const res = await withTimeout(
+        bucket().upload(thumbPath, small, { contentType: small.type, cacheControl: '31536000', upsert: false }),
+        WRITE_TIMEOUT_MS, 'Upload thumbnail'
+      )
+      if (res?.error) { console.error('Dish photo thumbnail not stored; guests load the full photo:', res.error.message); return false }
+      return true
+    } catch (e) {
+      console.error('Dish photo thumbnail not stored; guests load the full photo:', e?.message)
+      return false
+    }
   }
 
   // A refused RLS update is 0 rows and no error, so a write that matters reads its count back.
@@ -148,13 +177,14 @@ export default function DishPhotoField({
       }
       if (upErr) { setError(describe(upErr, 'The photo was not uploaded. ')); return }
 
+      const hasThumb = await uploadThumb(file, path)
       const { data: { publicUrl } } = bucket().getPublicUrl(path)
-      const url = versionedUrl(publicUrl)
+      const url = hasThumb ? markThumbUrl(versionedUrl(publicUrl)) : versionedUrl(publicUrl)
       const previousPath = ownPath
 
       const rowErr = await writeRow(url)
       if (rowErr) {
-        await removeObjectQuietly(path)
+        await removeObjectsQuietly(hasThumb ? [path, thumbPathOf(path)] : [path])
         setError(describe(rowErr, 'The photo uploaded, but the recipe could not be updated, so it still shows the previous photo. '))
         return
       }

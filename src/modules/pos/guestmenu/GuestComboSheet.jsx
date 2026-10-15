@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { X, Check } from 'lucide-react'
 import Modal from '../../../components/Modal'
 import { npr } from '../../../shared/nepalMoney'
@@ -9,6 +9,7 @@ import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
 import { comboGuestTotal } from '../../customization/comboPricing'
 import { tidyName, guestRuleText, matchesSearch } from './guestMenuHelpers'
+import { useLeaveConfirm, LeaveConfirm } from './GuestOptionSheet'
 
 // Combos on the QR menu (S839, docs/pos-combos.md): the sheet a guest builds one combo in. A combo is
 // sold at one price ("Momo Combo, NPR 350") and made of picks ("Pick a momo", "Pick a drink"), each
@@ -24,6 +25,9 @@ import { tidyName, guestRuleText, matchesSearch } from './guestMenuHelpers'
 // shown through its VAT rate, as the dish sheet shows them. The server prices every line itself.
 //
 // The pure helpers below are exported for GuestMenu and the tests; the page keeps no second copy.
+//
+// The phone's Back (S842, owner decision) walks back one step and asks before picks are lost, exactly
+// as the dish sheet does (GuestOptionSheet's useLeaveConfirm / LeaveConfirm, through `backRef`).
 
 const bySortThenName = (a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0)
   || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id || a.recipe_id || '').localeCompare(String(b.id || b.recipe_id || ''))
@@ -198,8 +202,9 @@ const FOCUSABLE_CHIP = '[role="radio"]:not([disabled]), [role="checkbox"]:not([d
  * @param {Array<{ group_id, recipe_id, option_ids }>} [props.initialPicks]  an edit's picks
  * @param {boolean} [props.editing]  opens on Review and says Update
  * @param {(picks: Array<{ group_id, recipe_id, option_ids }>) => void} props.onConfirm
+ * @param {{ current: { back: () => boolean } | null }} [props.backRef]  GuestMenu's handle for the phone's Back (S842)
  */
-export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, vatOf, initialPicks, editing = false, onConfirm, onClose }) {
+export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, vatOf, initialPicks, editing = false, onConfirm, onClose, backRef }) {
   const picks = useMemo(() => comboPicksOf(combo), [combo])
   const groupsOf = rid => dishGroupsByRecipe?.[rid] || []
   const ctx = { optionMaps: catalog, dishGroupsByRecipe, vatOf }
@@ -242,7 +247,8 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
     [picks, dishGroupsByRecipe],
   )
   // An edit, and a set meal that asks nothing, open on Review.
-  const [step, setStep] = useState(() => (editing ? steps.length : 0))
+  const startStep = editing ? steps.length : 0
+  const [step, setStep] = useState(startStep)
   const [returnToReview, setReturnToReview] = useState(false)
   const [tried, setTried] = useState(false)
   const onReview = step >= steps.length
@@ -292,6 +298,17 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
     }
     onConfirm(current.map(p => ({ ...p, option_ids: [...p.option_ids] })))
   }
+
+  // ── The phone's Back (S842) ── true = taken, the sheet stays; false = nothing to lose, close it.
+  const leave = useLeaveConfirm()
+  function handleBack() {
+    if (leave.open) { leave.keep(); return true }
+    if (returnToReview) { setTried(false); setReturnToReview(false); setStep(steps.length); return true }
+    if (step > 0 && step !== startStep) { setTried(false); setStep(s => s - 1); return true }
+    if (dirty) { leave.ask(); return true }
+    return false
+  }
+  useImperativeHandle(backRef, () => ({ back: handleBack }))
 
   function chooseDish(gid, rid) {
     setChosen(prev => ({ ...prev, [gid]: rid }))
@@ -418,23 +435,29 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
       )}
 
       <div className="gm-sheet-foot">
-        {tried && stepProblem && <p role="alert" className="gm-error">{problemText(stepProblem)}</p>}
-        <div className="gm-sheet-foot-row">
-          {step > 0 && !returnToReview && (
-            <button type="button" className="btn btn-ghost gm-sheet-back"
-              onClick={() => { setTried(false); setStep(s => Math.max(0, s - 1)) }}>Back</button>
-          )}
-          {onReview ? (
-            <button type="button" className="btn btn-primary gm-sheet-primary" onClick={confirmFromReview}>
-              {addLabel}
-            </button>
-          ) : (
-            <button type="button" className="btn btn-primary gm-sheet-primary"
-              aria-disabled={!!stepProblem} onClick={goNext}>
-              {nextLabel}
-            </button>
-          )}
-        </div>
+        {leave.open ? (
+          <LeaveConfirm leave={leave} editing={editing} onLeave={onClose} />
+        ) : (
+          <>
+            {tried && stepProblem && <p role="alert" className="gm-error">{problemText(stepProblem)}</p>}
+            <div className="gm-sheet-foot-row">
+              {step > 0 && !returnToReview && (
+                <button type="button" className="btn btn-ghost gm-sheet-back"
+                  onClick={() => { setTried(false); setStep(s => Math.max(0, s - 1)) }}>Back</button>
+              )}
+              {onReview ? (
+                <button type="button" ref={leave.returnRef} className="btn btn-primary gm-sheet-primary" onClick={confirmFromReview}>
+                  {addLabel}
+                </button>
+              ) : (
+                <button type="button" ref={leave.returnRef} className="btn btn-primary gm-sheet-primary"
+                  aria-disabled={!!stepProblem} onClick={goNext}>
+                  {nextLabel}
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   )

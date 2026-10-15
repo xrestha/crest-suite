@@ -84,6 +84,12 @@
   overflow-wrap: anywhere;
   text-wrap: balance;
 }
+/* Focus lands on the name when the control holding it has gone (S842: the tracker's Close, an order
+   sheet whose opener left), un-ringed like the tracker's heading: there is nothing to press. */
+.guest-menu .gm-name:focus,
+.guest-menu .gm-sheet-title:focus {
+  outline: none;
+}
 .guest-menu .gm-meta {
   display: flex;
   align-items: center;
@@ -938,6 +944,19 @@
 .guest-menu .gm-sheet-back {
   min-height: 52px;
   justify-content: center;
+}
+/* "Leave without adding?" (S842): asked from the phone's Back, in the foot where the thumb is. */
+.guest-menu .gm-leave {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.guest-menu .gm-leave-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--theme-text1);
 }
 
 

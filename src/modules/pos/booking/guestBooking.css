@@ -97,11 +97,12 @@
 .gb-day-bs { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .gb-day small { display: block; font-size: 10px; color: var(--theme-text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 /* A selected day or time is the accent, filled — the one place this page spends it besides the
-   submit button, because "which one did I pick" has to be answered at a glance. */
-.gb-day[aria-pressed="true"],
-.gb-chip[aria-pressed="true"] { background: var(--theme-accent); border-color: var(--theme-accent); color: var(--theme-accent-text); }
-.gb-day[aria-pressed="true"] small,
-.gb-chip[aria-pressed="true"] small { color: var(--theme-accent-text); }
+   submit button, because "which one did I pick" has to be answered at a glance. The pickers are
+   radiogroups since S842, so the state is aria-checked. */
+.gb-day[aria-checked="true"],
+.gb-chip[aria-checked="true"] { background: var(--theme-accent); border-color: var(--theme-accent); color: var(--theme-accent-text); }
+.gb-day[aria-checked="true"] small,
+.gb-chip[aria-checked="true"] small { color: var(--theme-accent-text); }
 .gb-day:focus-visible,
 .gb-chip:focus-visible,
 .gb-stepper button:focus-visible,
@@ -149,8 +150,8 @@
 .gb-chip small { display: block; font-size: 11px; color: var(--theme-text3); }
 .gb-chip--time { min-height: 44px; min-width: 84px; padding: 10px 8px; }
 @media (hover: hover) {
-  .gb-day:not(:disabled):not([aria-pressed="true"]):hover,
-  .gb-chip:not(:disabled):not([aria-pressed="true"]):hover { border-color: var(--theme-accent); }
+  .gb-day:not(:disabled):not([aria-checked="true"]):hover,
+  .gb-chip:not(:disabled):not([aria-checked="true"]):hover { border-color: var(--theme-accent); }
 }
 
 .gb-field { margin-bottom: 12px; }
@@ -197,6 +198,10 @@
 }
 .gb-submit:hover:not(:disabled) { background: var(--theme-accent-hover); }
 .gb-submit:disabled { opacity: 0.55; cursor: default; }
+/* In flight (S842): still pressable and at full contrast, so focus stays and "Sending…" reads; the
+   handler refuses a second send. */
+.gb-submit[aria-busy="true"] { cursor: progress; }
+.gb-submit[aria-busy="true"]:hover { background: var(--theme-accent); }
 .gb-submit:focus-visible { outline: 2px solid var(--theme-focus-outline); outline-offset: 3px; }
 .gb-linkbtn { background: none; border: none; color: var(--theme-accent-ink); font: inherit; font-size: 15px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 8px 0; min-height: 44px; }
 
@@ -225,6 +230,10 @@
 .gb-summary { margin: 14px 0 0; padding: 12px; border: 1px solid var(--theme-border-lt); background: var(--theme-bg); font-size: 14px; color: var(--theme-text1); line-height: 1.6; }
 
 .gb-empty { padding: 64px 0; color: var(--theme-text2); font-size: 15px; line-height: 1.6; }
+/* The failed-load card (S842), the guest menu's .gm-state shape: a heading, a sentence, Try again. */
+.gb-state { padding-top: 64px; }
+.gb-state-title { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; color: var(--theme-text1); }
+.gb-state-text { margin: 8px 0 20px; font-size: 15px; line-height: 1.5; color: var(--theme-text2); }
 .gb-foot { font-size: 12px; color: var(--theme-text3); margin-top: 24px; }
 
 @media (prefers-reduced-motion: no-preference) {

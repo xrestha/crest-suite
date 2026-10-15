@@ -17,10 +17,12 @@ import GuestComboSheet, {
 import { groupsForDish, describeSelection, lowestDishPrice, selectionProblems, inclFromEx } from '../../../shared/optionPricing'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
 import { playChime } from '../posChime'
+import { setIfChanged } from '../../../shared/setIfChanged'
+import { photoThumbUrl } from '../../ims/recipes/dishPhoto'
 import {
   tidyName, orderCategories, matchesSearch, SEARCH_THRESHOLD,
   STAGES, STAGE_SHORT, stageFromProgress, laterStage,
-  newRequestKey, orderSignature, cartWithout, MENU_UNAVAILABLE, ORDERING_OFF_TEXT,
+  newRequestKey, orderSignature, cartWithout, MENU_UNAVAILABLE, ORDERING_OFF_TEXT, reduceMotion,
 } from './guestMenuHelpers'
 // The page's structure, the order tracker, the choice sheet and the touch tier. Colour comes from the
 // app theme, which ThemeContext pins to the default preset on this route (S767) — see the header
@@ -169,8 +171,14 @@ function normalizeCart(cart) {
 const UNCATEGORISED = String.fromCharCode(0) + 'uncategorised'
 // S839: the Combos section's key among the menu's sections, a sentinel for the same reason.
 const COMBOS = String.fromCharCode(0) + 'combos'
+// S842: where focus goes after the last line leaves "Your order" (reviewFocusRef).
+const EMPTY_ORDER = String.fromCharCode(0) + 'empty'
 
-const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+// S842: what each poll draws, so a reading that changes nothing is not a render (setIfChanged). Every
+// field the tracker and the badge read, `forId` included: it is what keeps a second order off the
+// first one's stage.
+const progressSignature = p => `${p.forId}|${p.requestStatus}|${p.kotStatus}|${p.remainingMinutes}|${p.orderClosed}`
+const tableKotSignature = t => (t ? `${t.kotStatus}|${t.remainingMinutes}` : 'none')
 
 // ── Back closes the sheet ────────────────────────────────────────────────────────────────────────
 // A phone's Back gesture with a sheet open used to leave the menu altogether (measured: the URL
@@ -178,6 +186,9 @@ const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)
 // the TOPMOST sheet only; closing with a control takes the entry off again. One module-level stack,
 // because the choice sheet opens on top of the order sheet ("Edit choices"). The removal is deferred
 // a tick so React StrictMode's mount-unmount-mount in development does not pop the entry it re-adds.
+// S842 (owner decision): a sheet may keep Back for itself — `onClose` returns false — and stays open,
+// so the guard goes back up for the next Back. The dish and combo sheets do, to step back one screen
+// or to ask before picks are lost.
 const sheetStack = []
 function hasGuard() {
   try { return !!window.history.state?.guestSheet } catch { return false }
@@ -188,9 +199,9 @@ function pushGuard() {
 function onGuestPopState() {
   const top = sheetStack[sheetStack.length - 1]
   if (!top) return
-  top.onCloseRef.current()
-  // A sheet is still open underneath: give Back something to close it with too.
-  if (sheetStack.length > 1) pushGuard()
+  const stays = top.onCloseRef.current() === false
+  // This sheet stayed, or one is still open underneath: give Back something to close it with too.
+  if (stays || sheetStack.length > 1) pushGuard()
 }
 function useBackToClose(open, onClose, enabled = true) {
   const onCloseRef = useRef(onClose)
@@ -274,6 +285,15 @@ export default function GuestMenu() {
   // True while focus was last inside the tracker (S841), so a card that replaces it can take it back.
   const statusFocusRef = useRef(false)
   const [restoreNote, setRestoreNote] = useState('')
+  // S842: GuestMenu's handles on the open sheet's Back, and the places focus lands when its node goes.
+  const optionBackRef = useRef(null)
+  const comboBackRef = useRef(null)
+  const menuTopRef = useRef(null)
+  const cartBarRef = useRef(null)
+  const reviewHeadingRef = useRef(null)
+  const reviewEmptyRef = useRef(null)
+  const reviewMinusRefs = useRef({})
+  const reviewFocusRef = useRef(null) // a line key, or EMPTY_ORDER
 
   const [activeCategory, setActiveCategory] = useState(null)
   const categoryRefs = useRef({}) // category name -> section DOM node, populated during render
@@ -396,6 +416,7 @@ export default function GuestMenu() {
     let id = null
     let legacy = false
     let sawOpenOrder = false
+    let legacyStatus = null
 
     const fail = () => { failures += 1; if (failures >= 2) setStatusStale(true) }
     const ok = () => { failures = 0; setStatusStale(false) }
@@ -412,7 +433,7 @@ export default function GuestMenu() {
           const row = data?.[0]
           // No row: the request no longer exists (a restore, or POS switched off). Keep what we had.
           if (!row) return
-          setProgress({ forId: requestId, requestStatus: row.status, kotStatus: row.kot_status, remainingMinutes: row.remaining_minutes ?? null, orderClosed: !!row.order_closed })
+          setIfChanged(setProgress, { forId: requestId, requestStatus: row.status, kotStatus: row.kot_status, remainingMinutes: row.remaining_minutes ?? null, orderClosed: !!row.order_closed }, progressSignature)
           return
         }
       }
@@ -426,16 +447,16 @@ export default function GuestMenu() {
       const r = req?.[0]
       const t = tbl?.[0]
       if (t?.has_open_order) sawOpenOrder = true
-      setProgress(prev => {
-        const prevStatus = prev.forId === requestId ? prev.requestStatus : null
-        return {
-          forId: requestId,
-          requestStatus: r?.status ?? prevStatus,
-          kotStatus: t?.has_open_order ? t.kot_status : null,
-          remainingMinutes: t?.has_open_order ? (t.remaining_minutes ?? null) : null,
-          orderClosed: (r?.status ?? prevStatus) === 'accepted' && sawOpenOrder && !t?.has_open_order,
-        }
-      })
+      // The last status this order read, kept in the poll itself: the effect is per order, so it is
+      // what the updater used to read back off `prev` for the same `forId`.
+      if (r?.status != null) legacyStatus = r.status
+      setIfChanged(setProgress, {
+        forId: requestId,
+        requestStatus: legacyStatus,
+        kotStatus: t?.has_open_order ? t.kot_status : null,
+        remainingMinutes: t?.has_open_order ? (t.remaining_minutes ?? null) : null,
+        orderClosed: legacyStatus === 'accepted' && sawOpenOrder && !t?.has_open_order,
+      }, progressSignature)
     }
     const pollBadge = async () => {
       const { data, error: err } = await pollTable()
@@ -443,7 +464,7 @@ export default function GuestMenu() {
       if (err) { fail(); return }
       ok()
       const t = data?.[0]
-      setTableKot(t?.has_open_order && t.kot_status ? { kotStatus: t.kot_status, remainingMinutes: t.remaining_minutes ?? null } : null)
+      setIfChanged(setTableKot, t?.has_open_order && t.kot_status ? { kotStatus: t.kot_status, remainingMinutes: t.remaining_minutes ?? null } : null, tableKotSignature)
     }
     const poll = requestId ? pollOwn : pollBadge
 
@@ -658,8 +679,41 @@ export default function GuestMenu() {
 
   useBackToClose(reviewOpen, () => setReviewOpen(false), !inPreview)
   useBackToClose(filtersOpen, () => setFiltersOpen(false), !inPreview)
-  useBackToClose(!!optionSheet, () => setOptionSheet(null), !inPreview)
-  useBackToClose(!!comboSheet, () => setComboSheet(null), !inPreview)
+  // S842: a sheet the guest is building takes Back first — one step back, or "Leave without adding?"
+  // when picks would be lost — and only a sheet with nothing to lose closes.
+  useBackToClose(!!optionSheet, () => { if (optionBackRef.current?.back()) return false; setOptionSheet(null) }, !inPreview)
+  useBackToClose(!!comboSheet, () => { if (comboBackRef.current?.back()) return false; setComboSheet(null) }, !inPreview)
+
+  // ── Where focus goes when the control holding it has gone (S842) ────────────────────────────────
+  // The tracker's Close and "Put it back in my order" go with their card, and the order sheet's opener
+  // can be gone by the time it closes (the card again, or the cart bar once the last dish came off).
+  // Focus then lands on the cart bar if there is one, else the restaurant's name at the top of the
+  // menu; never <body>. A frame later, so it lands after Modal's own hand-back has had its turn.
+  function focusMenuTop() {
+    requestAnimationFrame(() => (cartBarRef.current || menuTopRef.current)?.focus())
+  }
+  const reviewWasOpenRef = useRef(false)
+  useEffect(() => {
+    if (reviewOpen) { reviewWasOpenRef.current = true; return undefined }
+    if (!reviewWasOpenRef.current) return undefined
+    reviewWasOpenRef.current = false
+    const frame = requestAnimationFrame(() => {
+      const el = document.activeElement
+      if (el && el !== document.body && el.isConnected) return
+      ;(cartBarRef.current || menuTopRef.current)?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [reviewOpen])
+  // A line taken to 0 in "Your order" unmounts with the − that was pressed: focus goes to the next
+  // line's −, else the previous one's, else the sheet's heading, and to "Back to the menu" once the
+  // order is empty. Set by the press (reviewQtyChange), spent once the cart has re-rendered.
+  useEffect(() => {
+    const want = reviewFocusRef.current
+    if (!want) return
+    reviewFocusRef.current = null
+    const el = want === EMPTY_ORDER ? reviewEmptyRef.current : reviewMinusRefs.current[want]
+    ;(el || reviewHeadingRef.current)?.focus()
+  }, [cart])
 
   // ── The three states before a menu ────────────────────────────────────────────────────────────
   // All three render inside the page's own shell and theme. They used to render outside it, in the
@@ -780,6 +834,11 @@ export default function GuestMenu() {
       else next[key] = { ...line, qty: q }
       return next
     })
+  }
+  // The order sheet's stepper (S842): a line about to reach 0 names where focus goes once it is gone.
+  function reviewQtyChange(index, key, qty) {
+    if (qty <= 0) reviewFocusRef.current = (orderLines[index + 1] || orderLines[index - 1])?.key || EMPTY_ORDER
+    setQty(key, qty)
   }
   // A plain dish's row stepper: its one plain line.
   function setPlainQty(recipeId, qty) {
@@ -1006,7 +1065,16 @@ export default function GuestMenu() {
     })
     setRestoreNote(missing.length ? `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} no longer on the menu.` : '')
     clearTracker()
+    // The order sheet opens over the page; when it closes, the review net above places focus. With
+    // nothing to put back there is no sheet, and the button went with the card (S842).
     if (lines.length > missing.length) setReviewOpen(true)
+    else focusMenuTop()
+  }
+
+  // The tracker card's Close (S842): the card and the button go together.
+  function closeTracker() {
+    clearTracker()
+    focusMenuTop()
   }
 
   const showNav = sections.length > 1 || searchable
@@ -1018,7 +1086,7 @@ export default function GuestMenu() {
       <div className="gm-page">
         <header className="gm-mast">
           {logoUrl && <GuestLogo src={logoUrl} name={displayName} />}
-          <h1 className="gm-name">{displayName}</h1>
+          <h1 ref={menuTopRef} tabIndex={-1} className="gm-name">{displayName}</h1>
           <div className="gm-meta">
             <p className="gm-table">{tableName}</p>
             {showFilters && (
@@ -1059,7 +1127,7 @@ export default function GuestMenu() {
               stage={stage || 'placed'} progress={progress}
               items={requestSnapshot.items} covers={requestSnapshot.covers} sentAt={requestSnapshot.sentAt}
               tableName={tableName} statusStale={statusStale}
-              onRestore={restoreRefusedOrder} onClear={clearTracker} headingRef={statusHeadingRef}
+              onRestore={restoreRefusedOrder} onClear={closeTracker} headingRef={statusHeadingRef}
             />
           </div>
         ) : tableKot && (
@@ -1175,7 +1243,7 @@ export default function GuestMenu() {
 
       {orderingEnabled && cartCount > 0 && (
         <div className="gm-cartbar no-print">
-          <button type="button" className="gm-cartbar-btn" onClick={() => setReviewOpen(true)}>
+          <button type="button" ref={cartBarRef} className="gm-cartbar-btn" onClick={() => setReviewOpen(true)}>
             <span className="gm-cartbar-count">{cartCount} {cartCount === 1 ? 'item' : 'items'} · {fmtNpr(cartTotal)}</span>
             <span className="gm-cartbar-go">Review order <ChevronRight size={18} aria-hidden="true" /></span>
           </button>
@@ -1226,20 +1294,20 @@ export default function GuestMenu() {
 
       {reviewOpen && (
         <Modal variant="sheet" title="Your order" onClose={() => { if (!submitting) setReviewOpen(false) }}>
-          <SheetHeader title="Your order" onClose={() => { if (!submitting) setReviewOpen(false) }} />
+          <SheetHeader title="Your order" headingRef={reviewHeadingRef} onClose={() => { if (!submitting) setReviewOpen(false) }} />
           {/* Emptying the cart from inside this sheet used to leave a single sentence and no way
               forward. */}
           {orderLines.length === 0 ? (
             <div className="gm-empty">
               <p>Nothing in your order yet.</p>
-              <button type="button" className="btn btn-primary" onClick={() => setReviewOpen(false)}>Back to the menu</button>
+              <button type="button" ref={reviewEmptyRef} className="btn btn-primary" onClick={() => setReviewOpen(false)}>Back to the menu</button>
             </div>
           ) : (
             // Locked while the order is sending: an edit made then was silently not sent.
             <fieldset className="gm-fieldset" disabled={submitting}>
               <legend className="sr-only">Your order</legend>
               <ul className="gm-review-lines">
-                {orderLines.map(l => (
+                {orderLines.map((l, index) => (
                   <li key={l.key} className="gm-review-line">
                     <div className="gm-review-line-name">
                       <span className="gm-dish-name">{l.name}</span>
@@ -1261,7 +1329,10 @@ export default function GuestMenu() {
                         >Change choices</button>
                       )}
                     </div>
-                    <Stepper qty={l.qty} label={l.name} onChange={qty => setQty(l.key, qty)} />
+                    <Stepper
+                      qty={l.qty} label={l.name} onChange={qty => reviewQtyChange(index, l.key, qty)}
+                      minusRef={el => { if (el) reviewMinusRefs.current[l.key] = el; else delete reviewMinusRefs.current[l.key] }}
+                    />
                     <span className="gm-review-line-total">{fmtNpr(l.unit * l.qty)}</span>
                   </li>
                 ))}
@@ -1323,6 +1394,7 @@ export default function GuestMenu() {
           initialIds={optionSheet.initialIds}
           editing={!!optionSheet.editKey}
           stepped={(optionCatalog.buildYourOwn || []).includes(optionSheet.item.recipe_id)}
+          backRef={optionBackRef}
           onClose={() => setOptionSheet(null)}
           onConfirm={ids => { addCustom(optionSheet.item, ids, optionSheet.editKey); setOptionSheet(null) }}
         />
@@ -1336,6 +1408,7 @@ export default function GuestMenu() {
           vatOf={vatOf}
           initialPicks={comboSheet.initialPicks}
           editing={!!comboSheet.editKey}
+          backRef={comboBackRef}
           onClose={() => setComboSheet(null)}
           onConfirm={picks => { addCombo(comboSheet.combo, picks, comboSheet.editKey); setComboSheet(null) }}
         />
@@ -1369,10 +1442,12 @@ function GuestLogo({ src, name }) {
   return <img className="gm-logo" src={src} alt="" data-name={name} onError={() => setFailed(true)} />
 }
 
-function SheetHeader({ title, onClose }) {
+// `headingRef` (S842) makes the heading a focus target (tabIndex -1) for when the control holding
+// focus inside the sheet has gone.
+function SheetHeader({ title, onClose, headingRef }) {
   return (
     <div className="gm-sheet-head">
-      <h2 className="gm-sheet-title">{title}</h2>
+      <h2 ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="gm-sheet-title">{title}</h2>
       <button type="button" className="btn btn-ghost btn-icon gm-close" onClick={onClose} aria-label="Close" title="Close">
         <X size={20} aria-hidden="true" />
       </button>
@@ -1459,7 +1534,13 @@ function Stepper({ qty, onChange, label, plusRef, minusRef }) {
   const what = label ? ` of ${label}` : ''
   return (
     <div className="gm-stepper">
-      <button type="button" ref={minusRef} className="gm-step-btn" aria-label={`Decrease quantity${what}`} onClick={() => onChange(qty - 1)}>
+      {/* A held Enter repeats the press (S842): once a line reaches 0, focus moves on to the next
+          line's −, and the repeat would walk on and empty the order. One press per keystroke. */}
+      <button
+        type="button" ref={minusRef} className="gm-step-btn" aria-label={`Decrease quantity${what}`}
+        onKeyDown={e => { if (e.repeat && e.key === 'Enter') e.preventDefault() }}
+        onClick={() => onChange(qty - 1)}
+      >
         <Minus size={16} aria-hidden="true" />
       </button>
       <span className="gm-step-qty" aria-live="polite">{qty}</span>
@@ -1500,7 +1581,9 @@ function ComboRow({ combo, orderingEnabled, qty, onChoose }) {
         {orderingEnabled && (
           <button
             type="button" className="btn btn-ghost btn-sm gm-add"
-            aria-label={`Choose and add ${name} to your order`}
+            // The visible words and the count are in the name (S842), so "Add another" is what a voice
+            // user says and what a screen reader hears.
+            aria-label={qty > 0 ? `Add another ${name}, ${qty} in your order` : `Choose and add ${name} to your order`}
             onClick={onChoose}
           >
             <Plus size={15} aria-hidden="true" />{qty > 0 ? `Add another (${qty})` : 'Add'}
@@ -1523,6 +1606,10 @@ function searchCountText(dishes, combos, query) {
 
 function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, qty, onQtyChange, dishGroups, onChoose }) {
   const [imgFailed, setImgFailed] = useState(false)
+  // S842: the 256px copy stored beside a photo uploaded since S842 (its URL carries the mark), falling
+  // back to the full photo if the copy will not load. An older photo has no mark and loads in full.
+  const thumbUrl = useMemo(() => photoThumbUrl(item.image_url), [item.image_url])
+  const [thumbFailed, setThumbFailed] = useState(false)
   const plusRef = useRef(null)
   const addRef = useRef(null)
   const focusAfter = useRef(null) // 'plus' | 'add' — where focus goes once the control it needs exists
@@ -1552,7 +1639,8 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
     <li className={`gm-row${compact ? ' gm-row--compact' : ''}${hasImage ? ' gm-row--image' : ''}`}>
       {hasImage && (
         <img
-          className="gm-thumb" src={item.image_url} alt={name} onError={() => setImgFailed(true)}
+          className="gm-thumb" src={thumbUrl && !thumbFailed ? thumbUrl : item.image_url} alt={name}
+          onError={() => { if (thumbUrl && !thumbFailed) setThumbFailed(true); else setImgFailed(true) }}
           loading="lazy" decoding="async"
         />
       )}
@@ -1578,7 +1666,7 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
         {orderingEnabled && dishGroups && (
           <button
             type="button" className="btn btn-ghost btn-sm gm-add"
-            aria-label={`Choose options and add ${name} to your order`}
+            aria-label={qty > 0 ? `Add another ${name}, ${qty} in your order` : `Choose options and add ${name} to your order`}
             onClick={onChoose}
           >
             <Plus size={15} aria-hidden="true" />{qty > 0 ? `Add another (${qty})` : 'Add'}

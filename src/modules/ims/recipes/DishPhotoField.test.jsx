@@ -72,8 +72,8 @@ it('uploads into the client folder with a plain insert, saves the row, then dele
   const saved = persist.mock.calls[0][0]
   expect(saved).toMatch(new RegExp(`^${BASE}/storage/v1/object/public/dish-photos/client-1/rec-1-\\d+\\.jpg\\?v=\\d+$`))
   expect(onValue).toHaveBeenCalledWith(saved)
-  // The old file goes only after the row has accepted the new URL.
-  expect(mockRemove).toHaveBeenCalledWith(['client-1/rec-1-100.jpg'])
+  // The old file goes only after the row has accepted the new URL, with its thumb beside it (S842).
+  expect(mockRemove).toHaveBeenCalledWith(['client-1/rec-1-100.jpg', 'client-1/rec-1-100.thumb.jpg'])
   expect(persist.mock.invocationCallOrder[0]).toBeLessThan(mockRemove.mock.invocationCallOrder[0])
 })
 
@@ -137,7 +137,7 @@ it('Remove clears the row and the form, then deletes the stored file', async () 
 
   confirmRemove()
 
-  await waitFor(() => expect(mockRemove).toHaveBeenCalledWith(['client-1/rec-1-100.jpg']))
+  await waitFor(() => expect(mockRemove).toHaveBeenCalledWith(['client-1/rec-1-100.jpg', 'client-1/rec-1-100.thumb.jpg']))
   expect(persist).toHaveBeenCalledWith(null)
   expect(onValue).toHaveBeenCalledWith('')
 })
@@ -212,4 +212,70 @@ it('shows no link warning for a photo stored in Crest', () => {
   render(<Harness initial={OLD} />)
   expect(screen.queryByText(/Guests will not see this photo/)).toBeNull()
   expect(screen.getByRole('button', { name: 'Replace photo' })).toBeInTheDocument()
+})
+
+// S842: a 256px copy beside each new photo, marked on the stored URL, for the guest menu's thumbnail.
+describe('the thumbnail copy', () => {
+  const small = () => new Blob([new Uint8Array(50)], { type: 'image/jpeg' })
+  beforeEach(() => {
+    downscalePhoto.mockImplementation(async (f, env) => (env?.maxSide ? small() : f))
+  })
+
+  it('uploads a thumb beside the photo and marks the stored URL', async () => {
+    const persist = jest.fn(async () => ({ data: [{ id: 'rec-1' }], error: null }))
+    render(<Harness initial={OLD} persist={persist} />)
+
+    pick(jpg())
+
+    await waitFor(() => expect(persist).toHaveBeenCalled())
+    expect(mockUpload).toHaveBeenCalledTimes(2)
+    const [mainPath] = mockUpload.mock.calls[0]
+    const [thumbPath, thumbFile, thumbOpts] = mockUpload.mock.calls[1]
+    expect(thumbPath).toBe(mainPath.replace(/\.jpg$/, '.thumb.jpg'))
+    expect(thumbFile.size).toBe(50)
+    expect(thumbOpts).toMatchObject({ upsert: false, contentType: 'image/jpeg' })
+    expect(downscalePhoto).toHaveBeenCalledWith(expect.anything(), { maxSide: 256 })
+    expect(persist.mock.calls[0][0]).toMatch(/\.jpg\?v=\d+&thumb=1$/)
+  })
+
+  it('a thumb that fails to upload keeps the photo, with no mark', async () => {
+    mockUpload
+      .mockResolvedValueOnce({ data: { path: 'x' }, error: null })
+      .mockResolvedValueOnce({ data: null, error: { statusCode: '500', message: 'boom' } })
+    const persist = jest.fn(async () => ({ data: [{ id: 'rec-1' }], error: null }))
+    const onValue = jest.fn()
+    render(<Harness initial={OLD} persist={persist} onValue={onValue} />)
+
+    pick(jpg())
+
+    await waitFor(() => expect(onValue).toHaveBeenCalled())
+    expect(persist.mock.calls[0][0]).toMatch(/\.jpg\?v=\d+$/)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('a photo the browser could not shrink stores no thumb', async () => {
+    downscalePhoto.mockImplementation(async f => f)
+    const persist = jest.fn(async () => ({ data: [{ id: 'rec-1' }], error: null }))
+    render(<Harness initial={OLD} persist={persist} />)
+
+    pick(jpg())
+
+    await waitFor(() => expect(persist).toHaveBeenCalled())
+    expect(mockUpload).toHaveBeenCalledTimes(1)
+    expect(persist.mock.calls[0][0]).not.toMatch(/thumb=1/)
+  })
+
+  it('a refused row write removes the new photo and its thumb', async () => {
+    const persist = jest.fn(async () => ({ data: [], error: null }))
+    render(<Harness initial={OLD} persist={persist} />)
+
+    pick(jpg())
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/still shows the previous photo/))
+    expect(mockRemove).toHaveBeenCalledTimes(1)
+    const [paths] = mockRemove.mock.calls[0]
+    expect(paths).toHaveLength(2)
+    expect(paths[1]).toBe(paths[0].replace(/\.jpg$/, '.thumb.jpg'))
+    expect(paths).not.toContain('client-1/rec-1-100.jpg')
+  })
 })

@@ -3,6 +3,7 @@ import path from 'path'
 import {
   MAX_PHOTO_BYTES, photoRefusal, photoPath, versionedUrl, objectPathFromUrl, guestCanLoad,
   fitWithin, downscalePhoto, storageRefusal, photoMayBeDeleted,
+  THUMB_PHOTO_SIDE, thumbPathOf, markThumbUrl, photoThumbUrl, photoPathsToRelease,
 } from './dishPhoto'
 
 const BASE = 'https://abcd.supabase.co'
@@ -51,6 +52,57 @@ describe('objectPathFromUrl', () => {
     expect(objectPathFromUrl('https://other.supabase.co/storage/v1/object/public/dish-photos/a/b.jpg', BASE)).toBeNull()
     expect(objectPathFromUrl('not a url', BASE)).toBeNull()
     expect(objectPathFromUrl('', BASE)).toBeNull()
+  })
+})
+
+// S842: a small copy beside each new photo, for the menu row's 72–84px thumbnail.
+describe('thumbPathOf', () => {
+  it('puts .thumb before the extension, in the same folder', () => {
+    expect(thumbPathOf('client-1/rec-9-123.jpg')).toBe('client-1/rec-9-123.thumb.jpg')
+    expect(thumbPathOf('client-1/new-5.webp')).toBe('client-1/new-5.thumb.webp')
+    expect(thumbPathOf('client-1/rec-9-123.PNG')).toBe('client-1/rec-9-123.thumb.PNG')
+  })
+  it('has none for a thumb, or for a path that is not a photo', () => {
+    expect(thumbPathOf('client-1/rec-9-123.thumb.jpg')).toBeNull()
+    expect(thumbPathOf('client-1/notes.txt')).toBeNull()
+    expect(thumbPathOf('')).toBeNull()
+    expect(thumbPathOf(null)).toBeNull()
+  })
+  it('a thumb is never read as a dish photo by the delete rule', () => {
+    const others = []
+    expect(photoMayBeDeleted('client-1/rec-9-123.thumb.jpg', { clientId: 'client-1', recipeId: 'rec-9', others, supabaseUrl: BASE })).toBe(false)
+    expect(photoMayBeDeleted('client-1/new-123.thumb.webp', { clientId: 'client-1', recipeId: null, others, supabaseUrl: BASE })).toBe(false)
+  })
+  it('is small enough for a thumbnail and no smaller', () => {
+    expect(THUMB_PHOTO_SIDE).toBe(256)
+  })
+})
+
+describe('markThumbUrl / photoThumbUrl', () => {
+  const photo = `${BASE}/storage/v1/object/public/dish-photos/client-1/rec-9-123.jpg?v=123`
+  it('marks a stored URL, and objectPathFromUrl still names the photo', () => {
+    const marked = markThumbUrl(photo)
+    expect(marked).toBe(`${photo}&thumb=1`)
+    expect(objectPathFromUrl(marked, BASE)).toBe('client-1/rec-9-123.jpg')
+    expect(markThumbUrl('https://x/a.jpg')).toBe('https://x/a.jpg?thumb=1')
+  })
+  it('gives the thumb for a marked URL of this bucket, query kept', () => {
+    expect(photoThumbUrl(markThumbUrl(photo)))
+      .toBe(`${BASE}/storage/v1/object/public/dish-photos/client-1/rec-9-123.thumb.jpg?v=123&thumb=1`)
+    expect(photoThumbUrl(markThumbUrl(photo), BASE)).toMatch(/rec-9-123\.thumb\.jpg\?v=123&thumb=1$/)
+  })
+  it('gives none for a photo with no mark — every photo from before S842 loads as it always did', () => {
+    expect(photoThumbUrl(photo)).toBeNull()
+    expect(photoThumbUrl(`${photo}&thumb=0`)).toBeNull()
+  })
+  it('gives none for anything this bucket did not issue', () => {
+    expect(photoThumbUrl('https://scontent.fbcdn.net/dish.jpg?thumb=1')).toBeNull()
+    expect(photoThumbUrl(`${BASE}/storage/v1/object/public/Logos/client-1/logo.png?thumb=1`)).toBeNull()
+    expect(photoThumbUrl('https://other.supabase.co/storage/v1/object/public/dish-photos/a/b-1.jpg?thumb=1', BASE)).toBeNull()
+    expect(photoThumbUrl(`${BASE}/storage/v1/object/public/dish-photos/client-1/rec-9-1.thumb.jpg?thumb=1`)).toBeNull()
+    expect(photoThumbUrl('not a url')).toBeNull()
+    expect(photoThumbUrl('')).toBeNull()
+    expect(photoThumbUrl(null)).toBeNull()
   })
 })
 
@@ -166,6 +218,30 @@ describe('photoMayBeDeleted', () => {
     expect(photoMayBeDeleted(`client-2/${VEG}-100.jpg`, ctx([]))).toBe(false)
     expect(photoMayBeDeleted('client-1/menu-board.jpg', ctx([]))).toBe(false)
     expect(photoMayBeDeleted(null, ctx([]))).toBe(false)
+  })
+})
+
+// S842: the thumb goes with its photo, under the same "no other dish shows it" rule.
+describe('photoPathsToRelease', () => {
+  const VEG = '1b0c7a2e-3d4f-4a5b-8c6d-7e8f9a0b1c2d'
+  const CHICKEN = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f'
+  const url = p => `${BASE}/storage/v1/object/public/dish-photos/${p}?v=1`
+  const vegPhoto = `client-1/${VEG}-100.jpg`
+  const vegThumb = `client-1/${VEG}-100.thumb.jpg`
+  const ctx = (others, recipeId = VEG) => ({ clientId: 'client-1', recipeId, others, supabaseUrl: BASE })
+
+  it('the photo and its thumb, when no other dish shows the photo', () => {
+    expect(photoPathsToRelease(vegPhoto, ctx([{ id: VEG, image_url: markThumbUrl(url(vegPhoto)) }]))).toEqual([vegPhoto, vegThumb])
+  })
+  it('neither, when another dish still shows the photo', () => {
+    expect(photoPathsToRelease(vegPhoto, ctx([{ id: CHICKEN, image_url: markThumbUrl(url(vegPhoto)) }]))).toEqual([])
+  })
+  it('the photo but not the thumb, when another dish names the thumb itself', () => {
+    expect(photoPathsToRelease(vegPhoto, ctx([{ id: CHICKEN, image_url: url(vegThumb) }]))).toEqual([vegPhoto])
+  })
+  it('nothing for a file the photo rule refuses', () => {
+    expect(photoPathsToRelease('client-1/guest-menu-logo-123.png', ctx([]))).toEqual([])
+    expect(photoPathsToRelease(vegThumb, ctx([]))).toEqual([])
   })
 })
 

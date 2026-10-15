@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { X, Check } from 'lucide-react'
 import Modal from '../../../components/Modal'
 import { npr } from '../../../shared/nepalMoney'
@@ -41,6 +41,11 @@ import { tidyName, guestRuleText } from './guestMenuHelpers'
 //   - "Change" on Review comes straight back to Review after that one step;
 //   - the step count sits in the pinned header, where it can no longer scroll under it, and no
 //     longer repeats the group name printed directly below it.
+//
+// S842, the phone's Back (owner decision). It used to close the sheet and drop every pick. GuestMenu's
+// history guard now asks `backRef.current.back()` first: a stepped sheet goes back one screen, and on
+// the screen it opened on, picks the guest would lose bring an inline "Leave without adding?" with
+// Keep choosing focused (LeaveConfirm). Nothing picked, it closes as before.
 
 // The same mark the menu row draws beside a dish: an outlined square with a dot, green for veg, red
 // for non-veg. Egg is the market's third convention and takes amber. The word is the accessible name.
@@ -68,7 +73,7 @@ const sameIds = (a, b) => {
 
 const FOCUSABLE_CHIP = '[role="radio"]:not([disabled]), [role="checkbox"]:not([disabled])'
 
-export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, onConfirm, onClose }) {
+export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, onConfirm, onClose, backRef }) {
   // Captured once: what the sheet opened with, so a backdrop tap can tell "looked" from "picked".
   const [initial] = useState(() => initialIds ?? defaultSelection(dishGroups))
   const [selected, setSelected] = useState(initial)
@@ -92,7 +97,8 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
     ? [...dishGroups.filter(d => d.group.kind === 'size'), ...dishGroups.filter(d => d.group.kind !== 'size')]
     : dishGroups), [stepped, dishGroups])
   // An edit opens on Review: the guest already built this bowl and is here to change one thing.
-  const [step, setStep] = useState(() => (stepped && editing ? steps.length : 0))
+  const startStep = stepped && editing ? steps.length : 0
+  const [step, setStep] = useState(startStep)
   // Set by "Change" on Review: finishing that one step returns to Review rather than walking every
   // later step again.
   const [returnToReview, setReturnToReview] = useState(false)
@@ -139,6 +145,19 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
     }
     onConfirm(selected)
   }
+
+  // ── The phone's Back (S842) ──
+  // True = the sheet took it and stays open; false = nothing to lose, so GuestMenu closes it. The
+  // screen the sheet opened on is its first step: Review for an edit, step 1 otherwise.
+  const leave = useLeaveConfirm()
+  function handleBack() {
+    if (leave.open) { leave.keep(); return true }
+    if (stepped && returnToReview) { setTried(false); setReturnToReview(false); setStep(steps.length); return true }
+    if (stepped && step > 0 && step !== startStep) { setTried(false); setStep(s => s - 1); return true }
+    if (dirty) { leave.ask(); return true }
+    return false
+  }
+  useImperativeHandle(backRef, () => ({ back: handleBack }))
 
   function toggle(groupId, rule, optionId) {
     setSelected(prev => {
@@ -319,44 +338,90 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
       </div>
 
       <div className="gm-sheet-foot">
-        {tried && (stepped ? stepProblem : shortGroup) && (() => {
-          const p = stepped ? stepProblem : shortGroup
-          return (
-            <p role="alert" className="gm-error">
-              {p.rule.min > p.count
-                ? `Choose ${p.rule.min - p.count} more from ${tidyName(p.group.name)}.`
-                : `Too many chosen in ${tidyName(p.group.name)}. Remove ${p.real - p.rule.max}.`}
-            </p>
-          )
-        })()}
-        {!stepped ? (
-          <button
-            type="button" className="btn btn-primary gm-sheet-primary"
-            aria-disabled={problems.length > 0}
-            onClick={() => { if (problems.length) { refuseAdd(); return } onConfirm(selected) }}
-          >
-            {addLabel}
-          </button>
+        {leave.open ? (
+          <LeaveConfirm leave={leave} editing={editing} onLeave={onClose} />
         ) : (
-          <div className="gm-sheet-foot-row">
-            {step > 0 && !returnToReview && (
-              <button type="button" className="btn btn-ghost gm-sheet-back"
-                onClick={() => { setTried(false); setStep(s => Math.max(0, s - 1)) }}>Back</button>
-            )}
-            {onReview ? (
-              <button type="button" className="btn btn-primary gm-sheet-primary"
-                aria-disabled={problems.length > 0} onClick={confirmFromReview}>
+          <>
+            {tried && (stepped ? stepProblem : shortGroup) && (() => {
+              const p = stepped ? stepProblem : shortGroup
+              return (
+                <p role="alert" className="gm-error">
+                  {p.rule.min > p.count
+                    ? `Choose ${p.rule.min - p.count} more from ${tidyName(p.group.name)}.`
+                    : `Too many chosen in ${tidyName(p.group.name)}. Remove ${p.real - p.rule.max}.`}
+                </p>
+              )
+            })()}
+            {!stepped ? (
+              <button
+                type="button" ref={leave.returnRef} className="btn btn-primary gm-sheet-primary"
+                aria-disabled={problems.length > 0}
+                onClick={() => { if (problems.length) { refuseAdd(); return } onConfirm(selected) }}
+              >
                 {addLabel}
               </button>
             ) : (
-              <button type="button" className="btn btn-primary gm-sheet-primary"
-                aria-disabled={!!stepProblem} onClick={goNext}>
-                {nextLabel}
-              </button>
+              <div className="gm-sheet-foot-row">
+                {step > 0 && !returnToReview && (
+                  <button type="button" className="btn btn-ghost gm-sheet-back"
+                    onClick={() => { setTried(false); setStep(s => Math.max(0, s - 1)) }}>Back</button>
+                )}
+                {onReview ? (
+                  <button type="button" ref={leave.returnRef} className="btn btn-primary gm-sheet-primary"
+                    aria-disabled={problems.length > 0} onClick={confirmFromReview}>
+                    {addLabel}
+                  </button>
+                ) : (
+                  <button type="button" ref={leave.returnRef} className="btn btn-primary gm-sheet-primary"
+                    aria-disabled={!!stepProblem} onClick={goNext}>
+                    {nextLabel}
+                  </button>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </Modal>
+  )
+}
+
+// ── Leave without adding? (S842) ─────────────────────────────────────────────────────────────────
+// Shared with GuestComboSheet. Asked only from the phone's Back (the backdrop already ignores a tap
+// once anything is picked; Close and Escape still close). It stands in the pinned foot, where the
+// thumb is, with Keep choosing focused; keeping hands focus back to where it was, or to the sheet's
+// primary button when that control went with the confirm.
+export function useLeaveConfirm() {
+  const [open, setOpen] = useState(false)
+  const fromRef = useRef(null)
+  const keepRef = useRef(null)
+  const returnRef = useRef(null)
+  useEffect(() => {
+    if (open) { keepRef.current?.focus({ preventScroll: true }); return }
+    const from = fromRef.current
+    if (!from) return
+    fromRef.current = null
+    ;(from.isConnected ? from : returnRef.current)?.focus({ preventScroll: true })
+  }, [open])
+  return {
+    open, keepRef, returnRef,
+    ask: () => { fromRef.current = document.activeElement; setOpen(true) },
+    keep: () => setOpen(false),
+  }
+}
+
+export function LeaveConfirm({ leave, editing, onLeave }) {
+  const textId = useId()
+  return (
+    <div className="gm-leave" role="group" aria-labelledby={textId}>
+      <p id={textId} className="gm-leave-text">
+        {editing ? 'Leave without updating? Your changes will be lost.' : 'Leave without adding? Your choices will be lost.'}
+      </p>
+      <div className="gm-sheet-foot-row">
+        <button type="button" className="btn btn-ghost gm-sheet-back" onClick={onLeave}>Leave</button>
+        <button type="button" ref={leave.keepRef} className="btn btn-primary gm-sheet-primary"
+          aria-describedby={textId} onClick={leave.keep}>Keep choosing</button>
+      </div>
+    </div>
   )
 }

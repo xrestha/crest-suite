@@ -19,6 +19,11 @@ export const PHOTO_ACCEPT = Object.keys(PHOTO_EXT).join(',')
 // takes a 12-megapixel phone photo from ~4 MB to a few hundred KB.
 export const MAX_PHOTO_SIDE = 1200
 
+// S842 (owner decision: new photos only): the menu row draws the photo at 72–84 CSS px, ~250 device
+// px at 3x, so every guest's phone was downloading the 1200px file for a thumbnail. An upload also
+// stores a copy this size beside it (`thumbPathOf`), and the stored URL says so (`thumb=1`).
+export const THUMB_PHOTO_SIDE = 256
+
 /** Which of the refusals applies to a chosen file, or null if it may be uploaded as-is. */
 export function photoRefusal(file) {
   if (!file) return 'No file was chosen.'
@@ -48,6 +53,48 @@ export function photoPath(clientId, recipeId, mimeType, now = Date.now()) {
 /** getPublicUrl() plus a version, per the S739 stable-path rule. */
 export function versionedUrl(publicUrl, now = Date.now()) {
   return `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}v=${now}`
+}
+
+const PHOTO_FILE_EXT = /\.(jpg|png|webp)$/i
+const THUMB_FILE_EXT = /\.thumb\.(?:jpg|png|webp)$/i
+
+/**
+ * The small copy's path beside a dish photo (S842): `.thumb` before the extension, so
+ * `<client>/<stem>-<ts>.jpg` → `<client>/<stem>-<ts>.thumb.jpg`. Same folder, so the storage
+ * policy (first folder = the client) admits it, and DISH_PHOTO_NAME below never reads it as a dish
+ * photo. Null for a path that is not a photo name, or is already a thumb.
+ */
+export function thumbPathOf(path) {
+  if (!path || THUMB_FILE_EXT.test(path) || !PHOTO_FILE_EXT.test(path)) return null
+  return path.replace(PHOTO_FILE_EXT, '.thumb.$1')
+}
+
+/** A stored photo URL marked as having a thumb (S842). `objectPathFromUrl` strips the query, so the mark never changes which file a delete names. */
+export function markThumbUrl(url) {
+  return `${url}${url.includes('?') ? '&' : '?'}thumb=1`
+}
+
+/**
+ * The thumb's URL for a stored dish photo, or null to load the full photo (S842). Only a URL of the
+ * dish-photos bucket carrying `thumb=1` has one: a photo uploaded before S842, a pasted link and the
+ * guest-menu logo carry no mark, so a guest's phone never asks for a thumb that is not there. The
+ * query (`?v=`) is kept, so a replaced photo's thumb is not served stale either. `supabaseUrl`, when
+ * given, must be the URL's origin too.
+ */
+export function photoThumbUrl(url, supabaseUrl = null) {
+  if (!url) return null
+  let u
+  try { u = new URL(url) } catch { return null }
+  if (u.searchParams.get('thumb') !== '1') return null
+  if (supabaseUrl) {
+    try { if (u.origin !== new URL(supabaseUrl).origin) return null } catch { return null }
+  }
+  const prefix = `/storage/v1/object/public/${DISH_PHOTO_BUCKET}/`
+  if (!u.pathname.startsWith(prefix)) return null
+  const thumb = thumbPathOf(u.pathname.slice(prefix.length))
+  if (!thumb) return null
+  u.pathname = prefix + thumb
+  return u.toString()
 }
 
 /**
@@ -100,6 +147,20 @@ export function photoMayBeDeleted(path, { clientId, recipeId = null, others = []
   if (!path || !clientId || !path.startsWith(`${clientId}/`)) return false
   if (!isDishPhotoName(path.slice(clientId.length + 1), recipeId)) return false
   return !(others || []).some(r => r && r.id !== recipeId && objectPathFromUrl(r.image_url, supabaseUrl) === path)
+}
+
+/**
+ * The stored files to delete when this dish lets go of `path` (S842): the photo and its `.thumb`
+ * copy, under the photoMayBeDeleted rule — [] when the photo must stay, and the thumb kept too if
+ * another dish names it on its own (a link copied off a guest's phone). A photo from before S842 has
+ * no thumb; naming its sibling in the same remove request costs nothing and finds nothing.
+ */
+export function photoPathsToRelease(path, ctx) {
+  if (!photoMayBeDeleted(path, ctx)) return []
+  const thumb = thumbPathOf(path)
+  const { recipeId = null, others = [], supabaseUrl } = ctx || {}
+  const thumbNamed = thumb && (others || []).some(r => r && r.id !== recipeId && objectPathFromUrl(r.image_url, supabaseUrl) === thumb)
+  return thumb && !thumbNamed ? [path, thumb] : [path]
 }
 
 /**

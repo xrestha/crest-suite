@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { Minus, Plus } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
-import { tidyName } from '../guestmenu/guestMenuHelpers'
+import { tidyName, reduceMotion } from '../guestmenu/guestMenuHelpers'
 import { useGuestDocumentIdentity } from '../guestmenu/guestDocument'
 import { adToBsSafe, formatBsDay, BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 import { nepalCivilDate, nepalTime, nepalBs, nepalDateLong } from '../../../shared/nepalTime'
 import { normalizePhone } from '../../../utils/phone'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
+import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 import { durationFor } from '../reservations/reservationSettings'
 import { loadMapFrom, slotIsFull, dayFlags } from './bookingAvailability'
 import './guestBooking.css'
@@ -21,6 +22,9 @@ import './guestBooking.css'
 
 const DAYS_AHEAD = 14
 const SLOT_MINUTES = 30
+// S842: the first read is bounded, as the guest menu's is (GUEST-6). A stalled read on café Wi-Fi left
+// "Loading…" up with nothing to press; past this it is the failed-load card, whose Try again reads again.
+const PAGE_TIMEOUT_MS = 20000
 // English day names, because the first pill says "Today" in English and a strip that switches
 // language after one chip reads as a mistake. The BS date under it is where the Nepali calendar
 // lives on this page.
@@ -163,12 +167,16 @@ export default function GuestBooking() {
   const [notes, setNotes] = useState('')
   const [fieldErr, setFieldErr] = useState({})
   const [submitting, setSubmitting] = useState(false)
+  // S842: the send is guarded here, not by `disabled` — a disabled button drops the guest's focus to
+  // the top of the page, and a second tap before the first answer must not send twice.
+  const sendingRef = useRef(false)
   const [submitError, setSubmitError] = useState('')
   // Where a refused submit takes the guest: the first card or field that still needs them.
   const dayCardRef = useRef(null)
   const timeCardRef = useRef(null)
   const nameRef = useRef(null)
   const phoneRef = useRef(null)
+  const focusFormRef = useRef(false) // set by Make another booking (S842)
 
   const [request, setRequest] = useState(() => loadStored(clientId)) // { id, name, party, reservedFor }
   const [status, setStatus] = useState(null)   // { status, reserved_for, party_size, outlet_name, cancel_reason }
@@ -182,20 +190,25 @@ export default function GuestBooking() {
   const days = useMemo(() => buildDays(today).map(d => ({ ...d, ...dayFlags(d, page || null) })), [today, page])
   const slots = useMemo(() => (page ? buildSlots(page.open_time, page.close_time) : []), [page])
 
+  // retryToken bumps on Try again, re-running the reads below for the same outlet.
+  const [retryToken, setRetryToken] = useState(0)
+  const retryLoad = () => { setError(false); setPage(null); setRetryToken(t => t + 1) }
+
   useEffect(() => {
     let cancelled = false
-    supabase.rpc('get_booking_page', { p_client_id: clientId }).then(({ data, error: err }) => {
+    settleWithin(supabase.rpc('get_booking_page', { p_client_id: clientId }), PAGE_TIMEOUT_MS, 'Loading the booking page').then(({ data, error: err }) => {
       if (cancelled) return
       if (err) { setError(true); return }
       const row = data?.[0]
       setPage(row || false)
     })
-    supabase.rpc('get_booking_availability', { p_client_id: clientId }).then(({ data, error: err }) => {
+    // A failed or stalled availability read offers every slot; the server's own check still refuses a full one.
+    settleWithin(supabase.rpc('get_booking_availability', { p_client_id: clientId }), PAGE_TIMEOUT_MS, 'Loading availability').then(({ data, error: err }) => {
       if (cancelled || err) return
       setLoad(loadMapFrom(data))
     })
     return () => { cancelled = true }
-  }, [clientId])
+  }, [clientId, retryToken])
 
   // The restaurant's own name and logo, as the Owner set them for the guest menu (POS Setup → Guest
   // Menu; get_booking_page returns them since 20260921110000). With no name set, the account name —
@@ -284,6 +297,12 @@ export default function GuestBooking() {
     dayIso, hm: hm(slot.h, slot.m), party, durationMinutes: sittingMinutes, load, totalSeats: page?.total_seats || 0,
   })
   const allFull = visibleSlots.length > 0 && visibleSlots.every(isFull)
+  // Each picker's one Tab stop (S842): the picked one, else the first that can be picked.
+  const dayTabStop = (selectedDay && !(selectedDay.closed || selectedDay.walkIn) ? selectedDay : days.find(d => !(d.closed || d.walkIn)))?.iso
+  const firstOpenSlot = visibleSlots.find(s => !isFull(s))
+  const timeTabStop = visibleSlots.some(s => hm(s.h, s.m) === time && !isFull(s))
+    ? time
+    : (firstOpenSlot ? hm(firstOpenSlot.h, firstOpenSlot.m) : null)
 
   function validate() {
     const e = {}
@@ -297,7 +316,7 @@ export default function GuestBooking() {
     setSubmitError(missingSummary(e))
     const target = e.day ? dayCardRef.current : e.time ? timeCardRef.current : e.name ? nameRef.current : phoneRef.current
     if (target) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' })
       target.focus({ preventScroll: true })
     }
     return false
@@ -305,7 +324,9 @@ export default function GuestBooking() {
 
   async function submit(ev) {
     ev.preventDefault()
+    if (sendingRef.current) return
     if (!validate()) return
+    sendingRef.current = true
     setSubmitting(true); setSubmitError('')
     // A supabase call can hang before it ever reaches fetch (withTimeout.js); on a public page
     // that would leave the button on "Sending…" with no way back but a reload.
@@ -319,6 +340,7 @@ export default function GuestBooking() {
       res = { data: null, error: e }
     }
     const { data, error: err } = res
+    sendingRef.current = false
     setSubmitting(false)
     const outlet = outletName
     if (err) {
@@ -350,7 +372,19 @@ export default function GuestBooking() {
     try { sessionStorage.removeItem(sessionKey(clientId)) } catch { /* private mode */ }
     setRequest(null); setStatus(null); setStatusStale(false)
     setDayIso(''); setTime(''); setParty(2); setOccasion(''); setNotes('')
+    focusFormRef.current = true
   }
+  // S842: "Make another booking" goes with the status card, so focus goes to the form's first card
+  // (the Day card, already a focus target for a refused send) once the form is on screen; a form
+  // still loading takes it when it lands.
+  useEffect(() => {
+    if (!focusFormRef.current || request) return
+    if (page === false || error) { focusFormRef.current = false; return }
+    const card = dayCardRef.current
+    if (!card) return
+    focusFormRef.current = false
+    card.focus()
+  }, [request, page, error])
 
   const whenLabel = iso => {
     const bs = nepalBs(iso)
@@ -359,15 +393,20 @@ export default function GuestBooking() {
 
   // ── Render ─────────────────────────────────────────────────────────────────────────────────
 
+  // The guest menu's failed-load card (S842): what happened, what to do, and a way to do it.
   if (error) {
     return (
-      <BookingShell announcement={announcement}><div className="gb-empty">
-        We couldn't load the booking page just now. Please try again in a moment.
-      </div></BookingShell>
+      <BookingShell announcement={announcement}>
+        <div className="gb-state">
+          <h1 className="gb-state-title">We couldn’t load the booking page</h1>
+          <p className="gb-state-text">Check your internet connection, then try again.</p>
+          <button type="button" className="gb-submit" onClick={retryLoad}>Try again</button>
+        </div>
+      </BookingShell>
     )
   }
   if (page === null && !request) {
-    return <BookingShell announcement={announcement}><div className="gb-empty">Loading…</div></BookingShell>
+    return <BookingShell announcement={announcement}><div className="gb-empty" role="status">Loading…</div></BookingShell>
   }
 
   // A submitted request shows its status card even if the outlet has since switched the page off.
@@ -422,14 +461,17 @@ export default function GuestBooking() {
             <span className="gb-label" id="gb-day-label" style={{ margin: 0 }}>Day</span>
             <span className="gb-cal-caption">{monthCaption(days)} · next 14 days</span>
           </div>
-          <div className="gb-cal" role="group" aria-labelledby="gb-day-label">
+          {/* One choice of fourteen (S842): a radiogroup with one Tab stop and arrow keys between the
+              days, as the guest menu's option sheets are. It was fourteen aria-pressed buttons. */}
+          <div className="gb-cal" role="radiogroup" aria-labelledby="gb-day-label" onKeyDown={e => moveRovingFocus(e, '[role="radio"]')}>
             {WEEKDAY.map(w => <span key={w} className="gb-cal-head" aria-hidden="true">{w.slice(0, 3)}</span>)}
             {Array.from({ length: days[0]?.weekdayIdx || 0 }, (_, i) => <span key={`pad-${i}`} aria-hidden="true" />)}
             {days.map(d => {
               const off = d.closed || d.walkIn
               const why = d.closed ? 'closed' : d.walkIn ? 'walk-ins only' : ''
               return (
-                <button key={d.iso} type="button" className="gb-day" aria-pressed={dayIso === d.iso} disabled={off}
+                <button key={d.iso} type="button" className="gb-day" role="radio" aria-checked={dayIso === d.iso} disabled={off}
+                  tabIndex={rovingTabIndex(d.iso === dayTabStop)}
                   aria-label={`${d.isToday ? 'Today, ' : ''}${d.weekday} ${d.bsLong} (${d.adLabel})${why ? `, ${why}` : ''}`}
                   onClick={() => { setDayIso(d.iso); setTime(''); setSubmitError(''); setFieldErr(e => ({ ...e, day: undefined })) }}>
                   <span className="gb-day-bs">{d.bsNum}</span>
@@ -450,12 +492,13 @@ export default function GuestBooking() {
             <p className="gb-note" style={{ margin: 0 }}>No times left today — try another day, or call {outletName}.</p>
           ) : (
             <>
-              <div className="gb-chips gb-chips--wrap" role="group" aria-labelledby="gb-time-label">
+              <div className="gb-chips gb-chips--wrap" role="radiogroup" aria-labelledby="gb-time-label" onKeyDown={e => moveRovingFocus(e, '[role="radio"]')}>
                 {visibleSlots.map(s => {
                   const v = hm(s.h, s.m)
                   const full = isFull(s)
                   return (
-                    <button key={v} type="button" className="gb-chip gb-chip--time" aria-pressed={time === v} disabled={full}
+                    <button key={v} type="button" className="gb-chip gb-chip--time" role="radio" aria-checked={time === v} disabled={full}
+                      tabIndex={rovingTabIndex(v === timeTabStop)}
                       aria-label={`${label12(s.h, s.m)}${full ? ', fully booked' : ''}`}
                       onClick={() => { setTime(v); setSubmitError(''); setFieldErr(e => ({ ...e, time: undefined })) }}>
                       {label12(s.h, s.m)}
@@ -514,7 +557,9 @@ export default function GuestBooking() {
 
         {submitError && <p className="gb-alert gb-alert--danger" role="alert">{submitError}</p>}
 
-        <button type="submit" className="gb-submit" disabled={submitting}>
+        {/* Pressable while sending (S842): `disabled` dropped focus to the top of the page and greyed
+            "Sending…" below AA. aria-busy says it is in flight; submit() refuses a second send. */}
+        <button type="submit" className="gb-submit" aria-busy={submitting ? 'true' : undefined}>
           {submitting ? 'Sending…' : 'Request this table'}
         </button>
         <p className="gb-note">

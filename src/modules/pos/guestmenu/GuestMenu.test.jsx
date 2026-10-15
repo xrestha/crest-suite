@@ -5,7 +5,8 @@
  * own words; focus goes to the tracker's heading after a send.
  */
 
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { Profiler } from 'react'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 // Plain functions, not jest.fn: CRA resets mock implementations before every test.
@@ -68,6 +69,8 @@ async function placeOrder() {
 beforeAll(() => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => mockVisibility })
   Element.prototype.scrollIntoView = () => {}
+  // A menu with two sections scrolls its chip bar to the section in view.
+  Element.prototype.scrollTo = () => {}
 })
 
 beforeEach(() => {
@@ -179,4 +182,159 @@ it('starts a second order from its own readings, never the first order’s stage
   await pollNow()
   expect(screen.getByRole('heading', { level: 2, name: SENT })).toBeTruthy()
   expect(screen.queryByRole('heading', { level: 2, name: 'Ready to serve.' })).toBeNull()
+})
+
+// ── S842 ─────────────────────────────────────────────────────────────────────────────────────────
+const BOWL = {
+  recipe_id: 'r-bowl', name: 'Acai Bowl', selling_price: 300, vat_rate: 0, category: 'Bowls',
+  table_name: 'Table 3', menu_name: 'Test Cafe', guest_ordering_enabled: true, is_vat_registered: false,
+}
+const LASSI = { ...ROWS[0], recipe_id: 'r-lassi', name: 'Mango Lassi', category: 'Drinks' }
+// A build-your-own bowl: a required size, then optional toppings, then Review (three steps).
+const BOWL_OPTIONS = {
+  groups: [
+    { id: 'g-size', name: 'Size', kind: 'size', min_select: 1, max_select: 1, included_count: 0, sort: 0, is_active: true },
+    { id: 'g-top', name: 'Toppings', kind: 'addon', min_select: 0, max_select: null, included_count: 0, sort: 1, is_active: true },
+  ],
+  options: [
+    { id: 'o-small', group_id: 'g-size', name: 'Small', price_delta: 0, is_default: false, sort: 0, is_active: true },
+    { id: 'o-large', group_id: 'g-size', name: 'Large', price_delta: 100, is_default: false, sort: 1, is_active: true },
+    { id: 'o-nuts', group_id: 'g-top', name: 'Nuts', price_delta: 30, is_default: false, sort: 0, is_active: true },
+  ],
+  attachments: [
+    { id: 'a1', recipe_id: 'r-bowl', group_id: 'g-size', sort: 0 },
+    { id: 'a2', recipe_id: 'r-bowl', group_id: 'g-top', sort: 1 },
+  ],
+  build_your_own: ['r-bowl'],
+}
+const phoneBack = () => act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })) })
+
+describe("the phone's Back in a dish being built (S842)", () => {
+  beforeEach(() => {
+    mockAnswers.get_guest_menu = { data: [...ROWS, BOWL], error: null }
+    mockAnswers.get_guest_menu_options = { data: BOWL_OPTIONS, error: null }
+  })
+
+  it('goes back one step, asks before the picks are lost, and leaves only on Leave', async () => {
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Small/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Next/ }))
+    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument()
+
+    phoneBack()
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Small/ })).toHaveAttribute('aria-checked', 'true')
+
+    phoneBack()
+    expect(screen.getByRole('dialog', { name: 'Acai Bowl' })).toBeInTheDocument()
+    expect(screen.getByText('Leave without adding? Your choices will be lost.')).toBeInTheDocument()
+    await waitFor(() => expect(focused()).toBe(screen.getByRole('button', { name: 'Keep choosing' })))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep choosing' }))
+    expect(screen.queryByText(/Leave without adding/)).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Acai Bowl' })).toBeInTheDocument()
+
+    phoneBack()
+    fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
+    expect(screen.queryByRole('dialog', { name: 'Acai Bowl' })).toBeNull()
+  })
+
+  it('with nothing picked, Back closes the sheet as before', async () => {
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    expect(screen.getByRole('dialog', { name: 'Acai Bowl' })).toBeInTheDocument()
+    phoneBack()
+    expect(screen.queryByRole('dialog', { name: 'Acai Bowl' })).toBeNull()
+  })
+
+  it('names the count in "Add another", as the button shows it', async () => {
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    fireEvent.click(screen.getByRole('radio', { name: /Small/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Next/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Skip/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Add to order/ }))
+    const again = await screen.findByRole('button', { name: 'Add another Acai Bowl, 1 in your order' })
+    expect(again).toHaveTextContent('Add another (1)')
+  })
+})
+
+describe('focus after a control goes away (S842)', () => {
+  it("the refused card's Close moves focus to the top of the menu", async () => {
+    renderMenu()
+    await placeOrder()
+    mockProgress = { status: 'dismissed', kot_status: null, remaining_minutes: null, order_closed: false }
+    await pollNow()
+    fireEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(focused()).toBe(screen.getByRole('heading', { level: 1, name: 'Test Cafe' })))
+  })
+
+  it('"Put it back in my order" leaves focus on the cart bar once the order sheet closes', async () => {
+    renderMenu()
+    await placeOrder()
+    mockProgress = { status: 'dismissed', kot_status: null, remaining_minutes: null, order_closed: false }
+    await pollNow()
+    fireEvent.click(await screen.findByRole('button', { name: 'Put it back in my order' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Your order' })
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(focused()).toBe(screen.getByRole('button', { name: /Review order/ })))
+  })
+
+  it('removing a line in "Your order" moves focus to the next line, then to Back to the menu', async () => {
+    mockAnswers.get_guest_menu = { data: [...ROWS, LASSI], error: null }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Veg Momo to your order' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Mango Lassi to your order' }))
+    fireEvent.click(screen.getByRole('button', { name: /Review order/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Your order' })
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Decrease quantity of Veg Momo' }))
+    await waitFor(() => expect(focused()).toBe(within(sheet).getByRole('button', { name: 'Decrease quantity of Mango Lassi' })))
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Decrease quantity of Mango Lassi' }))
+    await waitFor(() => expect(focused()).toBe(within(sheet).getByRole('button', { name: 'Back to the menu' })))
+
+    // The cart bar went with the last dish, so closing lands on the top of the menu.
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Back to the menu' }))
+    await waitFor(() => expect(focused()).toBe(screen.getByRole('heading', { level: 1, name: 'Test Cafe' })))
+  })
+})
+
+describe('dish photos load the thumbnail when there is one (S842)', () => {
+  const PHOTO = 'https://abcd.supabase.co/storage/v1/object/public/dish-photos/c1/r-momo-100.jpg?v=100'
+  it('loads the marked thumb, and the full photo if the thumb will not load', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], image_url: `${PHOTO}&thumb=1` }], error: null }
+    renderMenu()
+    const img = await screen.findByRole('img', { name: 'Veg Momo' })
+    expect(img.getAttribute('src')).toBe('https://abcd.supabase.co/storage/v1/object/public/dish-photos/c1/r-momo-100.thumb.jpg?v=100&thumb=1')
+    fireEvent.error(img)
+    expect(screen.getByRole('img', { name: 'Veg Momo' }).getAttribute('src')).toBe(`${PHOTO}&thumb=1`)
+  })
+  it('a photo without the mark loads in full, with no request for a thumb', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], image_url: PHOTO }], error: null }
+    renderMenu()
+    expect((await screen.findByRole('img', { name: 'Veg Momo' })).getAttribute('src')).toBe(PHOTO)
+  })
+})
+
+it('a poll that changes nothing does not redraw the page (S842)', async () => {
+  let commits = 0
+  render(
+    <Profiler id="menu" onRender={() => { commits += 1 }}>
+      <MemoryRouter initialEntries={['/menu/t-1']}>
+        <Routes><Route path="/menu/:tableId" element={<GuestMenu />} /></Routes>
+      </MemoryRouter>
+    </Profiler>,
+  )
+  await placeOrder()
+  mockProgress = { status: 'accepted', kot_status: 'in_progress', remaining_minutes: 12, order_closed: false }
+  await pollNow()
+  await waitFor(() => expect(announcer().textContent).toBe('Being prepared. About 12 min.'))
+  await pollNow()
+  const settled = commits
+  await pollNow()
+  await pollNow()
+  expect(commits).toBe(settled)
 })
