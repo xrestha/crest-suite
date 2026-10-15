@@ -14,6 +14,8 @@ import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
+import { settleAll, rangeReadMs } from './reportTimeout'
+import { settleWithin, withTimeout } from '../../../utils/withTimeout'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../orders/posRecipeBook'
 import { outletHasIms } from '../orders/posImsWaiting'
@@ -77,8 +79,11 @@ export default function PosExceptionReport() {
     // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
+    // Every read below is bounded (S842, reportTimeout.js): a hung one reaches ReportLoadError as a
+    // timeout instead of leaving "Loading…" on screen for good. The guard and firstError as before.
+    const readMs = rangeReadMs(fromIso, toIso)
 
-    const results = await Promise.all([
+    const results = await settleAll([
       // Paged: this is the fraud/exception audit trail, so a truncated read hides exactly the
       // rows someone would be looking for — and reports a smaller total as if it were complete.
       fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, invoice_prefix, close_type, close_reason, discount_amount, discount_reason, paid_amount, table_name, closed_at, closed_by, vat_registered')
@@ -100,7 +105,7 @@ export default function PosExceptionReport() {
       // surface, with no error to say so (S529).
       fetchAllRows(() => scopedFrom('pos_order_items', `order_id, recipe_id, qty, unit_price, comped_by, comped_at, comp_reason, comp_no, ${LINE_CHOICE_STOCK}`)
         .eq('comped', true).gte('comped_at', fromTs).lte('comped_at', toTs).order('id')),
-    ])
+    ], readMs, 'Loading Sales Exceptions')
     if (!loadReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read would render "no exceptions — a quiet report is a
     // healthy one" over an audit trail that never loaded.
@@ -131,8 +136,9 @@ export default function PosExceptionReport() {
     if (needItems.length > 0) {
       // Chunked (S754): every void and comp in the range, spelled out as uuids in one URL. With each
       // line's choices' stock lines, which a comp's food cost includes.
-      const { data: items, error: itemsError } = await fetchAllRowsChunked(needItems.map(o => o.id),
-        ids => scopedFrom('pos_order_items', `order_id, qty, unit_price, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).order('id'))
+      const { data: items, error: itemsError } = await settleWithin(fetchAllRowsChunked(needItems.map(o => o.id),
+        ids => scopedFrom('pos_order_items', `order_id, qty, unit_price, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).order('id')),
+        readMs, 'Loading the voided and comped lines')
       if (!loadReq.isCurrent(reqKey)) return
       // S612: without the lines, every void/comp values at a believable NPR 0.
       if (itemsError) { setLoadError(itemsError.message || String(itemsError)); setRows([]); setLoading(false); return }
@@ -153,10 +159,11 @@ export default function PosExceptionReport() {
     const compLines = [...writeoffLines, ...(itemComps || [])]
     if (compLines.length > 0) {
       try {
-        costing = await posLineCosts(supabase, clientId, compLines, {
+        // Bounded too (S842): it throws a timeout into the same catch as a refused read.
+        costing = await withTimeout(posLineCosts(supabase, clientId, compLines, {
           inventory,
           buildYourOwn: inventory && customizationEnabled ? buildYourOwnAmong(scopedFrom, compLines.map(i => i.recipe_id)) : [],
-        })
+        }), readMs, 'Costing the comps')
       } catch (err) {
         if (!loadReq.isCurrent(reqKey)) return
         setLoadError(err); setRows([]); setLoading(false); return
@@ -190,8 +197,9 @@ export default function PosExceptionReport() {
     if ((itemComps || []).length > 0) {
       const orderIds = [...new Set(itemComps.map(i => i.order_id))]
       // Chunked and paged (S754): one parent per comped bill in the range, as a `.in()` URL.
-      const { data: parentOrders, error: parentsError } = await fetchAllRowsChunked(orderIds,
-        ids => scopedFrom('pos_orders', 'id, order_no, table_name, invoice_no, invoice_fy, invoice_prefix, vat_registered').in('id', ids).order('id'))
+      const { data: parentOrders, error: parentsError } = await settleWithin(fetchAllRowsChunked(orderIds,
+        ids => scopedFrom('pos_orders', 'id, order_no, table_name, invoice_no, invoice_fy, invoice_prefix, vat_registered').in('id', ids).order('id')),
+        readMs, 'Loading the comped bills')
       if (!loadReq.isCurrent(reqKey)) return
       // S612: a dropped error here would strip every item-comp of its parent bill reference.
       if (parentsError) { setLoadError(parentsError.message); setRows([]); setLoading(false); return }
@@ -265,6 +273,13 @@ export default function PosExceptionReport() {
   const staffRows = Object.entries(byStaff).sort((a, b) => b[1].revenue - a[1].revenue)
 
   const staffOptions = [...new Set(rows.map(r => r.closed_by).filter(Boolean))]
+  // The options come from this range's rows, so a person picked for an earlier range can have no
+  // option here (S842). The select then showed "All staff" while still filtering to them, and
+  // picking "All staff" fired no change. The picked person keeps an option of their own instead,
+  // saying they have none in this range, so the select always shows what the table is filtered to.
+  const staffPickedAbsent = staffFilter !== 'all' && !staffOptions.includes(staffFilter)
+  // A name, never a raw login id (S842).
+  const staffLabel = id => staffNames[id] || 'A staff member'
 
   const TYPE_FILTER_LABEL = { all: 'All', discount: 'Discounts', void: 'Voids', writeoff: 'Comps' }
   const filtersActive = typeFilter !== 'all' || staffFilter !== 'all'
@@ -273,7 +288,7 @@ export default function PosExceptionReport() {
     const XLSX = await import('xlsx')
     // The sheet exports the FILTERED rows, so it has to say which filters (S594/S754) — a bare
     // json_to_sheet of "Voids by one cashier" was indistinguishable from the whole range's audit.
-    const staffScope = staffFilter === 'all' ? 'All staff' : (staffNames[staffFilter] || staffFilter)
+    const staffScope = staffFilter === 'all' ? 'All staff' : staffLabel(staffFilter)
     const scopeLine = `@Date Range : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Type : ${TYPE_FILTER_LABEL[typeFilter]}  @Staff : ${staffScope}  @Times : Nepal time (UTC+05:45), 24-hour`
     const ws = sheetWithLetterhead(XLSX, { title: 'Sales Exceptions', biz, scopeLine, rows: filtered.map(r => {
       const bs = nepalBs(r.closed_at)
@@ -341,7 +356,10 @@ export default function PosExceptionReport() {
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-exception-report-staff">Staff</label>
           <select id="pos-exception-report-staff" className="form-select" value={staffFilter} onChange={e => setStaffFilter(e.target.value)}>
             <option value="all">All staff</option>
-            {staffOptions.map(id => <option key={id} value={id}>{staffNames[id] || id}</option>)}
+            {staffOptions.map(id => <option key={id} value={id}>{staffLabel(id)}</option>)}
+            {staffPickedAbsent && (
+              <option value={staffFilter}>{staffLabel(staffFilter)}{loading || loadError ? '' : ' (none in this range)'}</option>
+            )}
           </select>
         </div>
         {/* A filter over one list, so FilterChips (aria-pressed), not Tabs (S776). */}

@@ -13,6 +13,10 @@ import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
+import ShowMoreRows from './ShowMoreRows'
+import { useRowWindow } from './useRowWindow'
+import { settleAll, rangeReadMs } from './reportTimeout'
+import { settleWithin } from '../../../utils/withTimeout'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
@@ -110,7 +114,9 @@ export default function KotLog() {
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
 
-    const results = await Promise.all([
+    // Every tab's reads are bounded (S842, reportTimeout.js): a hung one reaches the tab's
+    // ReportLoadError as a timeout instead of leaving "Loading…" on screen for good.
+    const results = await settleAll([
       // Paged: the Reconciliation and Bill Trail tabs below were already wrapped, and this — the
       // KOT Register, the one tab whose entire purpose is being a COMPLETE log — was not. A busy
       // outlet's month silently showed the most recent 1000 tickets as if that were all of them.
@@ -124,7 +130,7 @@ export default function KotLog() {
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
       profileNamesRpc(supabase, clientId),
-    ])
+    ], rangeReadMs(fromIso, toIso), 'Loading the KOT Register')
     if (!registerReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read would render an empty Register as if no tickets went out.
     const failed = firstError(results)
@@ -156,14 +162,15 @@ export default function KotLog() {
     // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
+    const readMs = rangeReadMs(fromIso, toIso)
 
     // Paged (S754): every billed and voided order in the range — a busy month crosses 1000, and the
     // orders past the cut would simply never be checked by the anti-fraud comparison below, which
     // then celebrates a clean report. `id` is the unique tiebreaker; display order is set in JS.
-    const { data: orders, error: ordersError } = await fetchAllRows(() => scopedFrom('pos_orders', 'id, status, close_type, table_name, order_no, closed_at')
+    const { data: orders, error: ordersError } = await settleWithin(fetchAllRows(() => scopedFrom('pos_orders', 'id, status, close_type, table_name, order_no, closed_at')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
-      .order('id'))
+      .order('id')), readMs, 'Loading the bills')
     if (!reconReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read here would render the celebratory "no discrepancies"
     // empty state over an anti-fraud check that never ran.
@@ -178,12 +185,12 @@ export default function KotLog() {
     // comparison below would flag phantom discrepancies from missing rows alone (S529).
     // Chunked too (S754): `orderIds` is every order in the range, past a URL's limit well before
     // it is past the row cap.
-    const reconResults = await Promise.all([
+    const reconResults = await settleAll([
       fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_kot_log', 'order_id, items').in('order_id', ids).order('id')),
       fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', ids).order('id')),
       // S836: sent food moved to another bill keeps its ticket here, so it is moved, not removed.
       ...readSentMoves(scopedFrom, orderIds),
-    ])
+    ], readMs, 'Loading the tickets')
     if (!reconReq.isCurrent(reqKey)) return
     // S612: worse than a zero here — a failed pos_order_items read would flag EVERY sent line as
     // a discrepancy, and a failed pos_kot_log read would clear the report entirely. A failed moves
@@ -216,13 +223,14 @@ export default function KotLog() {
     // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
+    const readMs = rangeReadMs(fromIso, toIso)
 
     // Paged (S754), as in loadReconciliation: past 1000 orders the rest of the range was simply
     // missing from the trail. Display order is the closed_at sort in JS below.
-    const { data: orders, error: ordersError } = await fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, status, close_type, table_name, closed_at, buyer_name')
+    const { data: orders, error: ordersError } = await settleWithin(fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, status, close_type, table_name, closed_at, buyer_name')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
-      .order('id'))
+      .order('id')), readMs, 'Loading the bills')
     if (!trailReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read is not "no paid or voided bills in this range".
     if (ordersError) { setTabError('trail', ordersError); setBillTrailRows([]); setBillTrailLoading(false); return }
@@ -231,7 +239,7 @@ export default function KotLog() {
     const orderIds = orderList.map(o => o.id)
     const orderById = Object.fromEntries(orderList.map(o => [o.id, o]))
 
-    const trailResults = await Promise.all([
+    const trailResults = await settleAll([
       // Paged, same as the summary load above. `id` follows sent_at as the unique tiebreaker —
       // several tickets can share a timestamp, and paging a non-unique sort can repeat a row on
       // one page and skip it on the next.
@@ -247,7 +255,7 @@ export default function KotLog() {
       profileNamesRpc(supabase, clientId),
       // S836, as in loadReconciliation: a dish moved to another table is moved, not removed.
       ...readSentMoves(scopedFrom, orderIds),
-    ])
+    ], readMs, 'Loading the tickets')
     if (!trailReq.isCurrent(reqKey)) return
     // S612: a failed ticket-log read would badge every bill "No KOT" — the alarming direction. A
     // failed moves read would badge every bill a dish moved off "Discrepancy" (S836).
@@ -311,7 +319,7 @@ export default function KotLog() {
     // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
-    const pulledResults = await Promise.all([
+    const pulledResults = await settleAll([
       // Paged like every other tab here: one row per pulled line, so a busy month crosses 1000
       // sooner than the ticket log does on a client that edits orders a lot.
       fetchAllRows(() => scopedFrom('pos_kot_removals',
@@ -319,7 +327,7 @@ export default function KotLog() {
         .gte('removed_at', fromTs).lte('removed_at', toTs)
         .order('removed_at', { ascending: false }).order('id')),
       profileNamesRpc(supabase, clientId),
-    ])
+    ], rangeReadMs(fromIso, toIso), 'Loading the pulled items')
     if (!pulledReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read would render the celebratory "nothing pulled" state.
     const pulledFailed = firstError(pulledResults)
@@ -351,7 +359,7 @@ export default function KotLog() {
     // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
-    const movesResults = await Promise.all([
+    const movesResults = await settleAll([
       // Paged like every other tab here, oldest first: a move reads as a sequence (split, then put
       // back), and `id` is the unique tiebreaker for moves made in one second.
       fetchAllRows(() => scopedFrom('pos_table_moves',
@@ -359,7 +367,7 @@ export default function KotLog() {
         .gte('moved_at', fromTs).lte('moved_at', toTs)
         .order('moved_at').order('id')),
       profileNamesRpc(supabase, clientId),
-    ])
+    ], rangeReadMs(fromIso, toIso), 'Loading the moves')
     if (!movesReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read is not "nothing was moved in this range".
     const movesFailed = firstError(movesResults)
@@ -374,6 +382,11 @@ export default function KotLog() {
   }, [clientId, fromIso, toIso, scopedFrom, movesReq, setTabError])
 
   useEffect(() => { if (tab === 'moves') loadMoves() }, [tab, loadMoves])
+
+  // The Register renders a page of tickets at a time (S842, useRowWindow.js); Excel exports all of
+  // logRows. A new range starts again at one page.
+  const registerWindow = useRowWindow(`${fromIso}:${toIso}`)
+  const shownLogRows = registerWindow.slice(logRows)
 
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
@@ -545,13 +558,14 @@ export default function KotLog() {
             : 'No paid or voided bills in this range.'}
         </div>
       ) : tab === 'register' ? (
+        <>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr><th>Date/Time (BS)</th><th>Table</th><th>Order#</th><th>Station</th><th><Tip text="Where the ticket got to on the Kitchen Display: Sent, Started, Ready, then Served once the floor has taken it to the table. Cleared: the kitchen took it off the board because every dish on it was taken off the order. Voided: the bill was voided, which stops its tickets still in the kitchen." width={280}>Stage</Tip></th><th>Items</th><th>Sent By</th><th style={{ textAlign: 'right' }}><Tip text="Estimated prep time (entered by kitchen/bar staff on Start) vs. actual time from Start to Ready. Red when actual ran over the estimate." width={280}>Prep (Est/Actual)</Tip></th></tr>
             </thead>
             <tbody>
-              {logRows.map(r => {
+              {shownLogRows.map(r => {
                 const stage = kotStage(r)
                 const actual = actualPrepMin(r)
                 const est = r.estimated_prep_minutes
@@ -581,6 +595,10 @@ export default function KotLog() {
             </tbody>
           </table>
         </div>
+        <ShowMoreRows shown={shownLogRows.length} total={logRows.length} step={registerWindow.step}
+          noun="tickets" note="Excel exports all of them."
+          onMore={registerWindow.showMore} onAll={registerWindow.showAll} onFirst={registerWindow.showFirst} />
+        </>
       ) : tab === 'pulled' ? (
         <div className="table-wrap">
           <table className="data-table">

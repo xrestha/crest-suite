@@ -16,6 +16,7 @@ import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
+import { settleAll, rangeReadMs } from './reportTimeout'
 import ChartCard from '../../../components/ChartCard'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
@@ -119,8 +120,11 @@ export default function CoversReport() {
     // Nepal's day boundaries, not the runtime's (S754) — see reportRange.js.
     const fromTs = nepalDayStartTs(fromIso)
     const toTs   = nepalDayEndTs(toIso)
+    // Both waves are bounded (S842, reportTimeout.js): a hung read reaches ReportLoadError as a
+    // timeout instead of leaving "Loading…" on screen for good. The guard and firstError as before.
+    const readMs = rangeReadMs(fromIso, toIso)
 
-    const results = await Promise.all([
+    const results = await settleAll([
       // Paged: every figure on this page (covers, RevPASH, turnover) divides by a count taken
       // from this read, so a truncation doesn't just shrink a total — it skews the averages.
       // `part_of_order_id` (S836): a part bill has no table but is dine-in (coversMath.isDineIn),
@@ -145,7 +149,7 @@ export default function CoversReport() {
       fetchAllRows(() => scopedFrom('pos_credit_notes', 'id, order_id, net_amount, created_at')
         .gte('created_at', fromTs).lte('created_at', toTs)
         .order('id')),
-    ])
+    ], readMs, 'Loading the Covers Report')
     if (!rangeReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read here would render a confident report of 0 covers,
     // visually identical to a genuinely quiet range.
@@ -180,7 +184,7 @@ export default function CoversReport() {
     // is sent). A failure leaves those rows unnamed, never the figures.
     const namesFill = fillMissingNames(supabase, clientId, firstNames, orderList.map(o => o.opened_by))
     // Both derive their ids from the reads above and nothing from each other — one wave.
-    const secondWave = await Promise.all([
+    const secondWave = await settleAll([
       // Paged — a month of bill lines runs to thousands, past the silent 1000-row cap (S529).
       // Chunked as well (S754): the `.in()` list is every paid bill in the range, and a few hundred
       // uuids is past what a proxy accepts in a URL. selection_key marks a combo's dish ('@'), which
@@ -191,7 +195,7 @@ export default function CoversReport() {
       // table (dine-in or takeaway, a part bill dine-in since S836), party size (turnover band) and server.
       fetchAllRowsChunked(outsideIds,
         ids => scopedFrom('pos_orders', 'id, table_id, part_of_order_id, covers, opened_by').in('id', ids).order('id')),
-    ])
+    ], readMs, 'Loading the bill lines')
     if (!rangeReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: with orders loaded but their lines dropped, every Net/RevPASH figure
     // would be a believable zero; with the credited bills dropped, a return would land nowhere.
@@ -502,7 +506,11 @@ export default function CoversReport() {
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {tab !== 'overview' && orders.length > 0
+          {/* Reservations counts bookings, not bills, so it has its own sentence (S842): the bill
+              lines below used to answer an empty Reservations tab, and its own card never rendered. */}
+          {tab === 'reservations'
+            ? "No bookings in this range. Bookings are taken on the Reservations page or through the outlet's booking link."
+            : tab !== 'overview' && orders.length > 0
             ? `No dine-in bills in this range — only takeaway or delivery (${orders.length} bill${orders.length === 1 ? '' : 's'}), which have no covers. See Overview for their sales.`
             : 'No paid bills in this range.'}
         </div>
@@ -655,100 +663,94 @@ export default function CoversReport() {
         {turnoverNote && <p className="page-footnote">{turnoverNote}</p>}
         </>
       ) : tab === 'reservations' ? (
-        reservations.length === 0 ? (
-          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-            No bookings in this range. Bookings are taken on the Reservations page or through the outlet's booking link.
+        <>
+          <div className="stat-grid" style={{ marginBottom: 20 }}>
+            <div className="stat-card">
+              <div className="stat-label">Bookings</div>
+              <div className="stat-value">{resvStats.total}</div>
+              <div className="stat-sub">{resvStats.kept} kept · {resvStats.cancelled} cancelled</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">No-show rate <Tip text="No-shows ÷ (kept + no-shows). Cancelled and still-open bookings are neither, so they do not dilute it." width={240}>ⓘ</Tip></div>
+              <div className="stat-value" style={{ color: resvStats.noShowRate != null && resvStats.noShowRate >= 0.1 ? 'var(--theme-red-text)' : undefined }}>
+                {resvStats.noShowRate == null ? '—' : `${(resvStats.noShowRate * 100).toFixed(1)}%`}
+              </div>
+              <div className="stat-sub">{resvStats.noShows} no-show{resvStats.noShows === 1 ? '' : 's'}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Booked covers <Tip text="Covers on bills that a booking was seated onto — the party size becomes the order's covers at seating." width={240}>ⓘ</Tip></div>
+              <div className="stat-value">{resvStats.bookedCovers.toLocaleString('en-IN')}</div>
+              <div className="stat-sub">
+                {resvStats.bookedCovers + resvStats.walkInCovers > 0
+                  ? `${Math.round(100 * resvStats.bookedCovers / (resvStats.bookedCovers + resvStats.walkInCovers))}% of covers served`
+                  : 'no covers served'}
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Walk-in covers</div>
+              <div className="stat-value">{resvStats.walkInCovers.toLocaleString('en-IN')}</div>
+              <div className="stat-sub">dine-in bills with no booking behind them</div>
+            </div>
           </div>
-        ) : (
-          <>
-            <div className="stat-grid" style={{ marginBottom: 20 }}>
-              <div className="stat-card">
-                <div className="stat-label">Bookings</div>
-                <div className="stat-value">{resvStats.total}</div>
-                <div className="stat-sub">{resvStats.kept} kept · {resvStats.cancelled} cancelled</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">No-show rate <Tip text="No-shows ÷ (kept + no-shows). Cancelled and still-open bookings are neither, so they do not dilute it." width={240}>ⓘ</Tip></div>
-                <div className="stat-value" style={{ color: resvStats.noShowRate != null && resvStats.noShowRate >= 0.1 ? 'var(--theme-red-text)' : undefined }}>
-                  {resvStats.noShowRate == null ? '—' : `${(resvStats.noShowRate * 100).toFixed(1)}%`}
-                </div>
-                <div className="stat-sub">{resvStats.noShows} no-show{resvStats.noShows === 1 ? '' : 's'}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Booked covers <Tip text="Covers on bills that a booking was seated onto — the party size becomes the order's covers at seating." width={240}>ⓘ</Tip></div>
-                <div className="stat-value">{resvStats.bookedCovers.toLocaleString('en-IN')}</div>
-                <div className="stat-sub">
-                  {resvStats.bookedCovers + resvStats.walkInCovers > 0
-                    ? `${Math.round(100 * resvStats.bookedCovers / (resvStats.bookedCovers + resvStats.walkInCovers))}% of covers served`
-                    : 'no covers served'}
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Walk-in covers</div>
-                <div className="stat-value">{resvStats.walkInCovers.toLocaleString('en-IN')}</div>
-                <div className="stat-sub">dine-in bills with no booking behind them</div>
-              </div>
-            </div>
 
-            <div className="table-wrap" style={{ marginBottom: 24 }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Booked via <Tip text="How the booking reached you — phone, WhatsApp, a walk-in asking for later, the booking link." width={220}>ⓘ</Tip></th>
-                    <th style={{ textAlign: 'right' }}>Bookings</th>
-                    <th style={{ textAlign: 'right' }}>Guests booked</th>
-                    <th style={{ textAlign: 'right' }}>Kept</th>
-                    <th style={{ textAlign: 'right' }}>No-shows</th>
-                    <th style={{ textAlign: 'right' }}>Cancelled</th>
+          <div className="table-wrap" style={{ marginBottom: 24 }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Booked via <Tip text="How the booking reached you — phone, WhatsApp, a walk-in asking for later, the booking link." width={220}>ⓘ</Tip></th>
+                  <th style={{ textAlign: 'right' }}>Bookings</th>
+                  <th style={{ textAlign: 'right' }}>Guests booked</th>
+                  <th style={{ textAlign: 'right' }}>Kept</th>
+                  <th style={{ textAlign: 'right' }}>No-shows</th>
+                  <th style={{ textAlign: 'right' }}>Cancelled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resvStats.bySource.map(r => (
+                  <tr key={r.source}>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{SOURCE_LABEL[r.source] || r.source}</td>
+                    <td style={{ textAlign: 'right' }}>{r.bookings}</td>
+                    <td style={{ textAlign: 'right' }}>{r.covers}</td>
+                    <td style={{ textAlign: 'right' }}>{r.kept}</td>
+                    <td style={{ textAlign: 'right', fontWeight: r.noShows > 0 ? 700 : 400 }}>{r.noShows}</td>
+                    <td style={{ textAlign: 'right' }}>{r.cancelled}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {resvStats.bySource.map(r => (
-                    <tr key={r.source}>
-                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{SOURCE_LABEL[r.source] || r.source}</td>
-                      <td style={{ textAlign: 'right' }}>{r.bookings}</td>
-                      <td style={{ textAlign: 'right' }}>{r.covers}</td>
-                      <td style={{ textAlign: 'right' }}>{r.kept}</td>
-                      <td style={{ textAlign: 'right', fontWeight: r.noShows > 0 ? 700 : 400 }}>{r.noShows}</td>
-                      <td style={{ textAlign: 'right' }}>{r.cancelled}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td>Total</td>
-                    <td style={{ textAlign: 'right' }}>{resvStats.total}</td>
-                    <td style={{ textAlign: 'right' }}>{resvStats.bySource.reduce((s, r) => s + r.covers, 0)}</td>
-                    <td style={{ textAlign: 'right' }}>{resvStats.kept}</td>
-                    <td style={{ textAlign: 'right' }}>{resvStats.noShows}</td>
-                    <td style={{ textAlign: 'right' }}>{resvStats.cancelled}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td style={{ textAlign: 'right' }}>{resvStats.total}</td>
+                  <td style={{ textAlign: 'right' }}>{resvStats.bySource.reduce((s, r) => s + r.covers, 0)}</td>
+                  <td style={{ textAlign: 'right' }}>{resvStats.kept}</td>
+                  <td style={{ textAlign: 'right' }}>{resvStats.noShows}</td>
+                  <td style={{ textAlign: 'right' }}>{resvStats.cancelled}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
 
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Booked for <Tip text="The hour bookings were made FOR (their booked time), not when they were taken." width={220}>ⓘ</Tip></th>
-                    <th style={{ textAlign: 'right' }}>Bookings</th>
-                    <th style={{ textAlign: 'right' }}>Guests booked</th>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Booked for <Tip text="The hour bookings were made FOR (their booked time), not when they were taken." width={220}>ⓘ</Tip></th>
+                  <th style={{ textAlign: 'right' }}>Bookings</th>
+                  <th style={{ textAlign: 'right' }}>Guests booked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resvStats.byHour.filter(h => h.bookings > 0).map(h => (
+                  <tr key={h.hour}>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{hourLabel(h.hour)}</td>
+                    <td style={{ textAlign: 'right' }}>{h.bookings}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{h.covers}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {resvStats.byHour.filter(h => h.bookings > 0).map(h => (
-                    <tr key={h.hour}>
-                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{hourLabel(h.hour)}</td>
-                      <td style={{ textAlign: 'right' }}>{h.bookings}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{h.covers}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       ) : tab === 'peak' ? (
         <>
           <ChartCard

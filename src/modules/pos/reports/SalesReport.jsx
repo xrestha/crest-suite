@@ -15,6 +15,9 @@ import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RangePresets from './RangePresets'
+import ShowMoreRows from './ShowMoreRows'
+import { useRowWindow } from './useRowWindow'
+import { settleAll, rangeReadMs, REPORT_READ_MS, YEAR_READ_MS } from './reportTimeout'
 import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, todayNepalBs, bsSlash } from './reportRange'
@@ -26,7 +29,7 @@ import {
   deliveryOutstanding, forgoneMenuValue,
 } from './salesReportMath'
 import { barCategoriesOf, NO_BAR_TEXT } from '../ticketRouting'
-import { settleWithin } from '../../../utils/withTimeout'
+import { settleWithin, withTimeout } from '../../../utils/withTimeout'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../orders/posRecipeBook'
 import { outletHasIms } from '../orders/posImsWaiting'
@@ -167,6 +170,16 @@ const ONE_LAKH_READ_MAX_ROWS = 200000
 // How many 150-bill chunks of the year's line read are in flight at once (S834, S809.4 3m). A
 // 1,09,500-bill year is ~730 chunks, which all used to start together.
 const ONE_LAKH_CHUNK_CONCURRENCY = 6
+// The Bill Register's three sticky anchors (S842, page-layout.md): it is ~15 columns wide, so on a
+// tablet the bill number and its Net scrolled apart. Header on top, Voucher# on the left, Net on the
+// right; the two corner headers sit highest, and every sticky cell is opaque so scrolled columns
+// don't show through.
+const STICKY_BG = 'var(--theme-card)'
+const REG_HEAD = { position: 'sticky', top: 0, zIndex: 2, background: STICKY_BG }
+const REG_HEAD_LEFT = { ...REG_HEAD, left: 0, zIndex: 3 }
+const REG_HEAD_RIGHT = { ...REG_HEAD, right: 0, zIndex: 3 }
+const REG_LEFT = { position: 'sticky', left: 0, zIndex: 1, background: STICKY_BG }
+const REG_RIGHT = { position: 'sticky', right: 0, zIndex: 1, background: STICKY_BG }
 
 export default function SalesReport() {
   const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules, customizationEnabled } = useAuth()
@@ -209,11 +222,12 @@ export default function SalesReport() {
     if (!clientId) return
     let cancelled = false
     setBizError(null)
-    Promise.all([
+    // Bounded (S842): a hung read here left Excel on with a blank letterhead and nothing said.
+    settleAll([
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('vat_number, property_address, pos_delivery_partners').eq('client_id', clientId).maybeSingle(),
       scopedFrom('recipes', 'id, is_veg, recipe_code'),
-    ]).then(results => {
+    ], REPORT_READ_MS, 'Loading the letterhead').then(results => {
       // An admin switching client mid-read must not have the previous client's letterhead land.
       if (cancelled) return
       // S612 silent-zero rule: a failed read here isn't cosmetic — it blanks the letterhead and
@@ -284,8 +298,11 @@ export default function SalesReport() {
       setOrders([]); setCreditNotes([]); setOrderById({}); setItemsByOrder({}); setPaymentsByOrder({}); setCompsByOrder({})
       setRangeLoading(false)
     }
+    // Every read below is bounded (S842, reportTimeout.js): a hung one reaches `fail` as a timeout
+    // instead of leaving "Loading…" on screen for good. useLatestRequest and firstError as before.
+    const readMs = rangeReadMs(fromIso, toIso)
 
-    const results = await Promise.all([
+    const results = await settleAll([
       // Paged: the child pos_order_items read below was already wrapped (S529) while this parent
       // was not, so on a busy month every one of this page's ten tabs silently reported the first
       // 1000 bills as if they were all of them — a believable total, not an error.
@@ -305,7 +322,7 @@ export default function SalesReport() {
       fetchAllRows(() => scopedFrom('pos_credit_notes', CREDIT_NOTE_COLUMNS)
         .gte('created_at', fromTs).lte('created_at', toTs)
         .order('id')),
-    ])
+    ], readMs, 'Loading the Sales Report')
     if (!rangeReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read here would run every tab's arithmetic over `|| []`
     // and render a confident report of NPR 0, visually identical to a quiet range.
@@ -326,8 +343,8 @@ export default function SalesReport() {
     const outsideIds = [...new Set(noteList.map(n => n.order_id).filter(id => id && !inRangeIds.has(id)))]
     let creditedOutside = []
     if (outsideIds.length > 0) {
-      const { data, error } = await fetchAllRowsChunked(outsideIds,
-        ids => scopedFrom('pos_orders', ORDER_COLUMNS).in('id', ids).order('id'))
+      const { data, error } = await settleWithin(fetchAllRowsChunked(outsideIds,
+        ids => scopedFrom('pos_orders', ORDER_COLUMNS).in('id', ids).order('id')), readMs, 'Loading the credited bills')
       if (!rangeReq.isCurrent(reqKey)) return
       // A dropped read here would leave every such note with no lines and no payment method —
       // a minus row valued but unattributed on four tabs.
@@ -347,7 +364,7 @@ export default function SalesReport() {
     let compsByOrderNext = {}
     if (allOrders.length > 0) {
       const splitIds = allOrders.filter(o => o.payment_method === 'Split').map(o => o.id)
-      const lineResults = await Promise.all([
+      const lineResults = await settleAll([
         // Excludes item-level comps (comped=true) — those never billed at menu price (they print
         // on their own Complimentary Slip instead, see PosOrders.jsx), so every tab built from
         // itemsByOrder must exclude them too or Gross/Taxable/Net overstate actual revenue.
@@ -367,7 +384,7 @@ export default function SalesReport() {
         // same legs. Both reads derive their ids from the orders and nothing from each other.
         fetchAllRowsChunked(splitIds,
           ids => scopedFrom('pos_order_payments', 'order_id, payment_method, amount').in('order_id', ids).order('id')),
-      ])
+      ], readMs, 'Loading the bill lines')
       if (!rangeReq.isCurrent(reqKey)) return
       // S612 silent-zero rule: with the parent orders loaded but the lines dropped, every figure
       // built from itemsByOrder would be a believable zero — and with the legs dropped every split
@@ -399,10 +416,11 @@ export default function SalesReport() {
         // with no error anywhere (S754).
         let costing
         try {
-          costing = await posLineCosts(supabase, clientId, compedItems, {
+          // Bounded too (S842): it throws a timeout into the same catch as a refused read.
+          costing = await withTimeout(posLineCosts(supabase, clientId, compedItems, {
             inventory,
             buildYourOwn: inventory && customizationEnabled ? buildYourOwnAmong(scopedFrom, compedItems.map(i => i.recipe_id)) : [],
-          })
+          }), readMs, 'Costing the comped dishes')
         } catch (err) {
           if (!rangeReq.isCurrent(reqKey)) return
           fail(err)
@@ -532,6 +550,11 @@ export default function SalesReport() {
     paymentFilter ? voucherRows.filter(v => v.payMethods.includes(paymentFilter)) : voucherRows
   ), [voucherRows, paymentFilter])
   const filterHasSplit = paymentFilter != null && filteredVoucherRows.some(v => v.payMethods.length > 1)
+  // The Bill Register renders a page of rows at a time (S842, useRowWindow.js); its TOTAL row and
+  // the Excel export keep reading filteredVoucherRows whole. A new range or payment filter starts
+  // again at one page.
+  const billWindow = useRowWindow(`${fromIso}:${toIso}:${paymentFilter ?? ''}`)
+  const shownVoucherRows = billWindow.slice(filteredVoucherRows)
 
   const paymentRows = useMemo(
     () => sortByMethodOrder(buildPaymentRows(salesEntries, paymentsByOrder), PAY_METHOD_ORDER),
@@ -806,7 +829,9 @@ export default function SalesReport() {
     setOneLakhLoading(true)
     setOneLakhError(null)
     const fail = err => { setOneLakhError(err); setParties([]); setOneLakhLoading(false) }
-    const results = await Promise.all([
+    // A fiscal year's reads, bounded at a year's limit (S842, reportTimeout.js): a hung one reaches
+    // `fail` as a timeout instead of leaving the tab on "Loading…" for good.
+    const results = await settleAll([
       // Paged for the same reason the item read below it already was: this feeds the IRD
       // Annexure 13 one-lakh threshold over a whole fiscal year, so a truncated read drops a
       // party below the threshold and understates a statutory disclosure.
@@ -827,7 +852,7 @@ export default function SalesReport() {
       fetchAllRows(() => scopedFrom('pos_credit_notes', 'id, order_id, gross_amount, taxable_amount, non_taxable_amount, vat_amount, net_amount')
         .eq('invoice_fy', selectedFy)
         .order('id')),
-    ])
+    ], YEAR_READ_MS, 'Loading the 1L+ Report')
     if (!oneLakhReq.isCurrent(reqKey)) return
     // S612 silent-zero rule — and this one feeds an IRD Annexure 13 disclosure, where a silent
     // zero reads as "no party crossed one lakh".
@@ -843,7 +868,7 @@ export default function SalesReport() {
     const listIds = new Set(list.map(o => o.id))
     const outsideIds = [...new Set(notes.map(n => n.order_id).filter(id => id && !listIds.has(id)))]
 
-    const secondWave = await Promise.all([
+    const secondWave = await settleAll([
       // Same comped exclusion as loadRange above — an item-level comp isn't part of what the
       // party actually paid, so it can't count toward their Annexure 13 one-lakh threshold.
       // Paged for the same reason as loadRange above — and this one feeds an IRD Annexure 13
@@ -857,7 +882,7 @@ export default function SalesReport() {
       fetchAllRowsChunked(outsideIds,
         ids => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan').in('id', ids).order('id'),
         { concurrency: ONE_LAKH_CHUNK_CONCURRENCY }),
-    ])
+    ], YEAR_READ_MS, 'Loading the 1L+ Report lines')
     if (!oneLakhReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: lines missing means every party's net reads zero — below threshold;
     // credited bills missing means a return nets no one and the walk-in row absorbs it.
@@ -1359,9 +1384,9 @@ export default function SalesReport() {
               border: '1px solid var(--theme-accent)', color: 'var(--theme-accent-ink)',
             }}>
               Filtered: paid by {paymentFilter}
-              <button onClick={() => setPaymentFilter(null)} title="Clear filter" style={{
-                background: 'none', border: 'none', color: 'var(--theme-accent-ink)', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1,
-              }}>×</button>
+              {/* A named, full-size target (S842): this was a bare 8px-wide "×" named by its glyph. */}
+              <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => setPaymentFilter(null)}
+                aria-label="Clear payment filter" title="Clear payment filter"><span aria-hidden="true">×</span></button>
             </span>
           )}
         </div>
@@ -1375,25 +1400,25 @@ export default function SalesReport() {
           <table className="data-table">
             <thead>
               <tr>
-                <th><Tip text="The BS day the bill was paid, with the order's own clock times beneath it — when the order was opened, then when it was paid. Both in Nepal time, whatever timezone you are reading from. The row's date is the date it was PAID — where the order was opened on an earlier day, that day is shown next to the opening time. For an order taken while the till was offline, the opened time is when it synced rather than when the guest sat down." width={320}>Date/Time (BS)</Tip></th><th>Voucher#</th><th>Invoice#</th><th>Customer</th><th>Payment Mode</th><th>Order Mode</th>
-                <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Discount</th>
-                <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
-                <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
-                <th>Remarks</th><th>Entered By</th>
+                <th style={REG_HEAD}><Tip text="The BS day the bill was paid, with the order's own clock times beneath it — when the order was opened, then when it was paid. Both in Nepal time, whatever timezone you are reading from. The row's date is the date it was PAID — where the order was opened on an earlier day, that day is shown next to the opening time. For an order taken while the till was offline, the opened time is when it synced rather than when the guest sat down." width={320}>Date/Time (BS)</Tip></th><th style={REG_HEAD_LEFT}>Voucher#</th><th style={REG_HEAD}>Invoice#</th><th style={REG_HEAD}>Customer</th><th style={REG_HEAD}>Payment Mode</th><th style={REG_HEAD}>Order Mode</th>
+                <th style={{ ...REG_HEAD, textAlign: 'right' }}>Gross</th><th style={{ ...REG_HEAD, textAlign: 'right' }}>Discount</th>
+                <th style={{ ...REG_HEAD, textAlign: 'right' }}>Non-Taxable</th><th style={{ ...REG_HEAD, textAlign: 'right' }}>Taxable</th>
+                <th style={{ ...REG_HEAD, textAlign: 'right' }}>VAT</th><th style={{ ...REG_HEAD_RIGHT, textAlign: 'right' }}>Net</th>
+                <th style={REG_HEAD}>Remarks</th><th style={REG_HEAD}>Entered By</th>
                 {/* Keyboard-reachable drill-down (S613): the row onClick stays for mouse users,
                     but a click target must also be tabbable — a <tr> is not. */}
-                <th className="no-print"></th>
+                <th className="no-print" style={REG_HEAD}></th>
               </tr>
             </thead>
             <tbody>
-              {filteredVoucherRows.map(v => {
+              {shownVoucherRows.map(v => {
                 return (
                   <tr key={v.id} onClick={() => v.billId && viewPosBill(clientId, { id: v.billId })} style={{ cursor: v.billId ? 'pointer' : undefined }}>
                     <BillDateTimeCell openedAt={v.openedAt} closedAt={v.closedAt} />
                     {/* The row keeps its onClick as the mouse convenience; this button is the
                         keyboard/SR path. Never role="button" on the tr — that overrides the
                         implicit row role and unhooks every currency cell from its header. */}
-                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                    <td style={{ ...REG_LEFT, fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {v.billId ? (
                         <button className="btn-linklike" onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: v.billId }) }}>
                           #{v.orderNo}
@@ -1433,7 +1458,7 @@ export default function SalesReport() {
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.nonTaxable)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.taxable)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.vat)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(v.net)}</td>
+                    <td style={{ ...REG_RIGHT, textAlign: 'right', fontWeight: 700 }}>{fmtNpr(v.net)}</td>
                     <td>{v.remarks || '—'}</td>
                     <td>{v.enteredBy}</td>
                     <td className="no-print">
@@ -1448,18 +1473,23 @@ export default function SalesReport() {
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
-                <td colSpan={6}>TOTAL</td>
+                {/* TOTAL under the sticky Voucher# column and the Net total under the sticky Net: a
+                    six-column label cell made sticky would slide over the figures (S842). */}
+                <td></td><td style={REG_LEFT}>TOTAL</td><td colSpan={4}></td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.gross)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.discount)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.nonTaxable)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.taxable)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.vat)}</td>
-                <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.net)}</td>
+                <td style={{ ...REG_RIGHT, textAlign: 'right' }}>{fmtNpr(voucherTotals.net)}</td>
                 <td></td><td></td><td className="no-print"></td>
               </tr>
             </tfoot>
           </table>
         </div>
+        <ShowMoreRows shown={shownVoucherRows.length} total={filteredVoucherRows.length} step={billWindow.step}
+          noun="rows" note="The TOTAL row and Excel cover all of them."
+          onMore={billWindow.showMore} onAll={billWindow.showAll} onFirst={billWindow.showFirst} />
         </div>
       ) : tab === 'compxref' ? (
         <div>
@@ -1653,8 +1683,9 @@ export default function SalesReport() {
             <tbody>
               {deliveryPartnerSummary.map(g => {
                 const active = partnerFilter === g.partner
+                // row-tinted when active (S842): Light's text3 fails AA on this tint without it.
                 return (
-                  <tr key={g.partner} onClick={() => setPartnerFilter(active ? 'all' : g.partner)}
+                  <tr key={g.partner} onClick={() => setPartnerFilter(active ? 'all' : g.partner)} className={active ? 'row-tinted' : undefined}
                     style={{ cursor: 'pointer', background: active ? 'var(--theme-focus-ring)' : undefined }}>
                     <td>
                       {/* aria-pressed, not a link: this filters the table below in place rather
