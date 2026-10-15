@@ -204,6 +204,19 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~The 2026-10-15 `/impeccable audit` of the POS module (13/20: 1 P0, 10 P1, ~20 P2, ~10 P3)~~ —
+  **shipped across S841 (P0 + P1, crest-v457), S842 (the P2 list, crest-v458) and S844 (the P3 list and
+  the Bill Register phone cards, crest-v460), 2026-10-15.** Report: `.impeccable/audit/2026-10-15T03-00-26Z__src-modules-pos.md`
+  (recovered from the S841 session in S844; it had been given in chat only). Owner decisions in S844,
+  asked in plain words, each the recommended option: **the floor's `window.alert` refusals become a till
+  notice** (`TillNotice.jsx`: same words, red bar on top, until ✕) — this reverses the S682 / S809 4l
+  re-affirmation, because `window.alert` froze the guest-order chime and every poll until OK; a nav group
+  left with one item is a plain link (so POS's Menu group is just Menu Pricing); off-scale type sizes
+  snap to the scale. S841's decisions: a tap while a table is opening is ignored (the tile says
+  Opening…), and the till waits 10 s for an answer before treating the internet as down. S842's: phone
+  Back on a half-built guest dish steps back and asks before leaving; settling a Credit bill confirms
+  first, naming the amount and the drawer; only new dish photos get a small copy.
+
 - [x] ~~POS small leftovers, second pass (the rest of the S809.4 lists): about twenty fixes, sixteen
   closed without work~~ — **shipped S835, 2026-10-14**: migration `20261014110000` applied live on the
   first try (its rolled-back probe passed at BLOOM CAFE as an anonymous guest, the POS manager and the

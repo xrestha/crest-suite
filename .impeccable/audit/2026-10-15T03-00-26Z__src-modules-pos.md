@@ -341,3 +341,17 @@ The automated design checker found **zero issues** across all of POS, even with 
   - The `savingRef`/`closingRef` re-entry guards stop double sends and charges. The idle lock measures from the last real input, so it never locks someone mid-typing.
 
 
+
+## Resolution (S841, S842, S844 — 2026-10-15)
+
+Every finding is closed, in three releases, each with a CHANGELOG entry in `CHANGELOG/S804-S853.md`.
+
+| Release | What it closed |
+| --- | --- |
+| S841 (crest-v457) | P0 and P1: the till's saved menu on a dead internet (`tillOffline()`, 10 s bound), one table opening at a time, the shell `inert` behind the order screen, Modal / RowMenu / BsCalendarPicker focus, 44px touch targets, `aria-pressed` on selected controls, the PIN list bounded, guest pages' spoken status |
+| S842 (crest-v458) | The P2 list: memoised menu grid, keyed cart lines, polls paused offline, bounded report reads, register paging, `dirty` backdrop guard on every Modal variant, guest Back asks, Credit settle confirms, KDS error card and narrow layout, dish-photo thumbnails, read-out save results |
+| S844 (crest-v460) | The P3 list above (all helpers' items, including the KDS id sets, estimate keypad names, PIN key touch feedback, safe areas, Parking leftovers, heading outline, the hourly chart's text alternative, report error forms and the shared letterhead, totals rows, emoji icons, the diet mark and option chips, booking day labels, the filter count, `.modal-sheet`'s `vh` fallback), the Bill Register phone cards, and the floor's `window.alert`s replaced by a till notice (owner decision) |
+
+Found while fixing and filed in `POS_TODO.md` B3, not fixed: `useBizInfo()` has no loaded flag, so three
+reports offer Excel before the letterhead has loaded; `sheetWithLetterhead`'s closing blank row never
+reaches the sheet.
