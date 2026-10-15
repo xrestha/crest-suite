@@ -559,7 +559,7 @@ export const POS_GUIDE_GROUPS = [
         gotchas: [
           'A Product Type axis that could only produce a single row is hidden rather than rendered — so an axis you expected but don\'t see usually means the data can\'t split it (e.g. no bar categories configured), not a fault.',
           'All reads are paged — a busy month\'s line items far exceed the database\'s silent 1,000-row page, and the 1L+ tab in particular must never drop a party below a statutory disclosure line. Since S754 the long id lists are also sent in chunks; before that the 1L+ read could not succeed at all on a real client\'s year.',
-          'Day boundaries are Nepal\'s (S754): a bill closed at 00:15 in Kathmandu lands on the same day for a viewer abroad, and the pickers default to Nepal\'s today. Excel is disabled while a range is still loading, or when the company-name read for the letterhead failed.',
+          'Day boundaries are Nepal\'s (S754): a bill closed at 00:15 in Kathmandu lands on the same day for a viewer abroad, and the pickers default to Nepal\'s today. Excel is disabled while a range is still loading, or until the company-name read for the letterhead has loaded (S845: it used to wait only for a failed one).',
           'An off-rate flag needs BOTH a gap of half a percentage point AND a rupee gap bigger than per-bill rounding can explain. Commission is rounded to the rupee at settlement, so one tolerance alone flags honest platforms on small bills.',
         ],
         connections: 'Reads Orders\' bills and payments; the Kitchen/Bar axis reads POS Setup\'s ticket routing; Comped Bills cross-references Exceptions; Payment Summary\'s Cash ties to Shifts\' frozen Z-reports over a range of whole shifts, never day by day.',

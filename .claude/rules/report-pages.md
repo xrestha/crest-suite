@@ -169,7 +169,8 @@ that does not state what it covers cannot be reconciled a month later by the per
 client-name read used to take `data` and drop `error`, so a failed read shipped every workbook with
 a blank `CompanyName :` line and nothing on the page said so. It is a field rather than a throw so
 existing consumers kept working, which makes it opt-in: **a page that exports disables its export
-while `error` is set** and shows its own notice. Give that read its own error slot, not the page's
+until `ready`** (S845: true once the read answered, so it covers "still loading" as well as
+`error`, which alone let a first-moment press ship the blank line) and shows its own notice on `error`. Give that read its own error slot, not the page's
 `loadError`. On Covers Report the letterhead read reported into `loadError`, which the range load
 clears on its first line, and both effects fire on mount, so the failure was wiped before anyone
 could see it.

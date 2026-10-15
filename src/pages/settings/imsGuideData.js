@@ -522,7 +522,7 @@ export const IMS_GUIDE_GROUPS = [
           'IMS branch: type a new VAT-inclusive price in the New Price box and press Enter to save. POS-only branch: Price is shown as plain read-only text — change it through the row\'s Edit link, which opens the item form. Both branches: toggle On POS to control order-screen visibility (also how staff "86" an item that\'s run out). A dish with no price above NPR 0 stays off the till even with On POS ticked (S809 2h).',
           'POS-only branch ONLY: click Pair on a row to pin cross-sell suggestions for the POS order screen. The IMS branch has no Pair control by design — an IMS client\'s order screen derives its suggestions from real "frequently ordered together" sales history instead, which is richer than a hand-pinned list. (It rendered an unreachable copy of the Pair modal until 2026-09-09.)',
           '🖨 Print and ⬇ Excel both export the table exactly as filtered and sorted on screen (the active category tab and any search — the print title and the .xlsx filename both name them, so a narrowed export is never mistaken for the whole menu). Both deliberately leave New Price BLANK: the printed sheet\'s New Price boxes come out as empty ruled boxes to price by hand with a pen, and the Excel has an empty New Price column for the same send-it-out-get-prices-back round trip over email.',
-          'S792 stage 3, IMS branch: ⬇ Excel is disabled while the table is loading, after a failed ↻ Refresh Costs and when the letterhead read failed (exportBlocked), so a sheet never goes out with the previous food costs; the sheet opens with the business name, the date and its scope (category, search, VAT basis), and a build-your-own dish reads "costed by build" rather than a figure.',
+          'S792 stage 3, IMS branch: ⬇ Excel is disabled while the table is loading, after a failed ↻ Refresh Costs and until the letterhead read has loaded (exportBlocked; S845, it used to wait only for a failed one), so a sheet never goes out with the previous food costs; the sheet opens with the business name, the date and its scope (category, search, VAT basis), and a build-your-own dish reads "costed by build" rather than a figure.',
         ],
         fields: [
           { label: 'On POS toggle', desc: 'Controls recipes.pos_enabled — whether the item appears on the POS order screen, and the mechanism staff use to temporarily disable a sold-out item.' },
@@ -1160,7 +1160,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'Breaks down purchase spend by payment method (Cash / Credit / FonePay) for a period, at BILL totals — net of discount and returns, including VAT where charged.',
         workflow: [
           'Defaults to the currently open period, falling back to the most recent period when none is open. Method Summary tab (aggregate) and Daily Breakdown tab (per-day, per-method).',
-          'S792 stage 3: Export Excel is gated like its siblings (TAX-5) — off while a month loads, after a failed read, or when the letterhead (outlet name) read failed — and only the load that still owns the page may un-gate it (TAX-4). The Daily Breakdown ends in a TOTAL row on screen and in its sheet, equal to the Method Summary (TAX-9). The period chip is provisionalWhenOpen, reading OPEN while the month can still change (TAX-10).',
+          'S792 stage 3: Export Excel is gated like its siblings (TAX-5) — off while a month loads, after a failed read, or until the letterhead (outlet name) read has loaded (S845; it used to wait only for a failed one) — and only the load that still owns the page may un-gate it (TAX-4). The Daily Breakdown ends in a TOTAL row on screen and in its sheet, equal to the Method Summary (TAX-9). The period chip is provisionalWhenOpen, reading OPEN while the month can still change (TAX-10).',
           'S844: a month that loaded with no bills and no returns says so in one card ("No purchase bills or supplier returns recorded for Bhadra 2083") with a link to Purchases, instead of six NPR 0 tiles and a table of zeros. A failed read keeps its error card.',
         ],
         fields: [],
@@ -1277,7 +1277,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'Shows the total NPR profit CONTRIBUTION each recipe generated in a period — (Selling Price − Food Cost) × Qty Sold — to find which dishes drive the most profit dollars, not just the best margin %.',
         workflow: [
           'Select period. Filters: category, "Only recipes with sales" (default on), sort by Total Contribution / Margin per Portion / best FC%.',
-          'S792 stage 3: Export is gated on loading, a failed read and a failed letterhead read, so it waits for the month; the sheet is letterheaded and names the period, the category and the filter.',
+          'S792 stage 3: Export is gated on loading, a failed read and the letterhead read until it has loaded (S845), so it waits for the month; the sheet is letterheaded and names the period, the category and the filter.',
         ],
         fields: [],
         formulas: [

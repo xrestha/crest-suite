@@ -354,4 +354,4 @@ Every finding is closed, in three releases, each with a CHANGELOG entry in `CHAN
 
 Found while fixing and filed in `POS_TODO.md` B3, not fixed: `useBizInfo()` has no loaded flag, so three
 reports offer Excel before the letterhead has loaded; `sheetWithLetterhead`'s closing blank row never
-reaches the sheet.
+reaches the sheet. Both fixed in S845 (crest-v461), the first on every IMS export too.

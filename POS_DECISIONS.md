@@ -216,6 +216,9 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   Opening…), and the till waits 10 s for an answer before treating the internet as down. S842's: phone
   Back on a half-built guest dish steps back and asks before leaving; settling a Credit bill confirms
   first, naming the amount and the drawer; only new dish photos get a small copy.
+  **S845 (crest-v461)** closed the two shared-code leftovers S844 filed: Excel waits for the letterhead
+  read to answer (`useBizInfo().ready`), and the letterhead's blank row reaches the sheet. Owner decision:
+  fix the same early-press gap on every IMS export in the same release, not only the four POS reports.
 
 - [x] ~~POS small leftovers, second pass (the rest of the S809.4 lists): about twenty fixes, sixteen
   closed without work~~ — **shipped S835, 2026-10-14**: migration `20261014110000` applied live on the
