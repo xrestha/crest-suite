@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-14 (S839 — combos shipped, moved to POS_DECISIONS.md A; migration `20261014160000`). Before that, 2026-10-14 (S838 — Crest Customization's code follow-ups shipped, moved to POS_DECISIONS.md A; migration `20261014150000`). Before that, 2026-10-14 (S837 — kitchen and bar printers shipped, moved to POS_DECISIONS.md A; migration `20261014140000` applied live, crest-v453, admin-user-ops v70). Before that, 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452, then `20261014130000` with the till floor at 452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
+Last updated: 2026-10-15 (S840 — the combo leftovers and four parked items closed; migration `20261015100000`, crest-v456). Before that, 2026-10-14 (S839 — combos shipped, moved to POS_DECISIONS.md A; migration `20261014160000`). Before that, 2026-10-14 (S838 — Crest Customization's code follow-ups shipped, moved to POS_DECISIONS.md A; migration `20261014150000`). Before that, 2026-10-14 (S837 — kitchen and bar printers shipped, moved to POS_DECISIONS.md A; migration `20261014140000` applied live, crest-v453, admin-user-ops v70). Before that, 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452, then `20261014130000` with the till floor at 452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
 
 ---
 
@@ -663,10 +663,11 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
   - ~~For 3f: when the unknown-send branch queues and prints offline, drop that order's send marks first
     (`putSendAttempts(oid, [])`), or the poll can print the same dishes again if the lost save landed (3e).~~
     Fixed in 3f.
-  - ORDER-FLOW-4's residual: a double ticket is still possible when this till's unanswered send did not
+  - ~~ORDER-FLOW-4's residual: a double ticket is still possible when this till's unanswered send did not
     land, another tablet fired the identical full cart meanwhile, AND that tablet is the same login or
-    its ticket-log insert failed. The fix if it shows up: a client-minted save id stored by
-    `save_pos_order_items` (3e).
+    its ticket-log insert failed.~~ Fixed in S840: a client-minted save id (`pos_orders.recent_saves`);
+    the till judges its own save by id, and an offline upload overtaken by the same dishes asks staff
+    to check with the kitchen (owner decision 2026-10-15).
   - ~~The Owner Report (`computeMonthlyReport.js`) counts takeaway as covers and drops credited bills from
     them (now owner-decided, slice 3m).~~ Fixed in 3m (schema 15: seated guests, credited bills kept).
     ~~`hr_labour_actuals` counts every paid bill as at least 1 cover and
@@ -758,8 +759,8 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
     (`unavailable_options`); the guest page cannot tell it from a hidden choice.~~ Fixed in S835: `below_zero_options`, with its own sentence.
   - ~~A till on crest-v431 or older still numbers a "No …" removal as a free pick on screen and greys
     other picks under its "Max"; the server prices the new rule (0 removals live).~~ Closed in S835: moot, the till floor is 448.
-  - The server's `option_count` still counts picks of hidden options (harmless while
-    `option_not_on_menu` fires first), as filed in 3o. Parked (S835): with the next rebuild of those bodies.
+  - ~~The server's `option_count` still counts picks of hidden options (harmless while
+    `option_not_on_menu` fires first).~~ Fixed in S840, in the save and `pos_price_selection`.
 
 - **Found while building stage 4, slice 4i (2026-10-12, not fixed):**
   - ~~`guard_pos_order_insert` does not refuse an order on an inactive table. A till whose floor read is up
@@ -800,8 +801,9 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
     clears POS first), but the message names no table.~~ Fixed in S835: the message names the table it stopped at and says pressing Delete again clears it.
   - ~~`fetchViewModules` (AuthContext) still drops its read error; on a failed read `clientModulesKnown`
     stays false and the D30 till notice never shows for support (it fails open, as every UI gate does).~~ Fixed in S834: logged, and a failed read keeps the last good list.
-  - `get_client_profile_names` now returns every Crest operator login's id (as "Crest support") to any
-    client's caller. One login today; ids only, no name. Parked (S835).
+  - ~~`get_client_profile_names` now returns every Crest operator login's id (as "Crest support") to any
+    client's caller.~~ Fixed in S840: `p_ids`, and Crest support only for the ids a screen asks about
+    (`src/shared/profileNames.js`).
   - ~~Live today: 0 bills closed and 0 tickets sent by support (BLOOM CAFE was rebuilt in S810), so the
     new label shows on nothing yet.~~ Closed in S835 (a record).
   - ~~`POS_DECISIONS.md` has no entry for slice 4j (S818 moved its rows out of this file and wrote none
@@ -830,8 +832,8 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
     migration, keeping its HR and IMS twins while their fallbacks remain.~~ Fixed in S834: dropped by `20261014100000`.
   - ~~`canEditWeatherCity()` still tests raw roles, so a settled or POS-blocked manager is offered the city
     picker and refused by the server (advisory only; the guard is right).~~ Fixed in S834: effective ranks, both columns in AuthContext's profile select.
-  - `log_audit()` still strips a `pos_device_secret` key from `clients` snapshots; dead since S531 and
-    harmless. Drop it the next time that function is rebuilt for another reason.
+  - ~~`log_audit()` still strips a `pos_device_secret` key from `clients` snapshots.~~ Dropped in S840,
+    proven with a real clients write in the rolled-back probe.
 
 ---
 
@@ -852,10 +854,8 @@ In this order. Service charge was offered and **not** chosen.
     Left open from it (the till floor 455, `20261014170000`, and `admin-user-ops` v71 are live):
     **browser checks** on BLOOM CAFE (set up a combo, ring one on the till with a
     swap and a dish's own choice, Pay with a discount on a mixed bill, comp and move it, a guest QR combo,
-    the bill, ticket and KDS look); **HQ's menu push does not carry combos** (S838 carries option
-    groups only); the till's combo picker shows the choice window's own quantity stepper, which it
-    ignores (OptionPickerModal); and `printedBackAsSent` (offline recovery) matches a printed dish by
-    recipe only, as it always has for dishes with choices.
+    the bill, ticket and KDS look). Closed in S840: HQ's push carries combos; the combo window hides the
+    dish's quantity stepper; offline recovery matches a printed dish by its full line key.
 
 ## A2. Known gaps left by S754
 
