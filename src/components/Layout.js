@@ -1002,6 +1002,11 @@ export default function Layout() {
   const onTillScreen = !!tillGuestView && (location.pathname === '/pos/orders' || location.pathname === '/pos/billing')
   const guestAlerts = useGuestOrderAlerts(posVisible && !tillStoppedHere, { heldIds: onTillScreen ? tillGuestView.heldIds : null })
   const guestPlan = shellGuestAlertPlan({ pathname: location.pathname, till: onTillScreen ? tillGuestView : null, requests: guestAlerts.requests })
+  // S841: the POS order screen is a full-screen layer drawn over the shell, not a dialog, so the
+  // shell under it stayed live: Tab walked the hidden top bar and drawer (41 controls), and a screen
+  // reader swiped into them. While it is up, everything of the shell behind it is inert. The
+  // arrival alert, the idle-lock warning, the palette and the calculator sit above it and stay live.
+  const tillLayerUp = onTillScreen && tillGuestView.view === 'order'
   const guestAlertOn = guestPlan.banner
   const guestAlertSound = guestPlan.sound
   useEffect(() => {
@@ -1419,7 +1424,7 @@ export default function Layout() {
         />
       )}
       {/* WCAG 2.4.1 — 41 sidebar controls precede the first control in <main> on every route. */}
-      <a href="#main-content" className="skip-link">Skip to content</a>
+      <a href="#main-content" className="skip-link" inert={tillLayerUp}>Skip to content</a>
       {mobileSidebarOpen && <div className="sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />}
       {/* The phone drawer. At/below 768px this slides in exactly as it always did; above it the
           drawer is display:none and the top bar below IS the navigation.
@@ -1429,7 +1434,7 @@ export default function Layout() {
           `.sidebar-wrap`, and `display` for it lives in Layout.css rather than inline here — an
           inline declaration beats an external rule at any specificity, so a component that sets
           its own display can never be hidden by a media query. */}
-      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}`}>
+      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}`} inert={tillLayerUp}>
         <div className="sidebar-shell">
 
           {/* Brand — logo + wordmark + search trigger. Always visible; text hides when collapsed
@@ -1829,7 +1834,7 @@ export default function Layout() {
           destinations do not fit across a bar, so band 2 folds each existing nav group into a
           dropdown: every destination stays at most two interactions away, and the gates, the
           counts and the pin star are the same objects the drawer uses rather than a second copy. */}
-      <header className="app-topnav">
+      <header className="app-topnav" inert={tillLayerUp}>
         <div className="topbar-primary">
           {/* app_name is white-labeled per client, so this is the CUSTOMER's brand. In a
               fixed-height band it truncates on one line rather than clamping to two the way the
@@ -2103,7 +2108,7 @@ export default function Layout() {
           scrolled past, and every page title carried a 60px indent to clear it. On an installed
           iPhone the app also draws under the status bar (black-translucent, viewport-fit=cover in
           index.html), and nothing reserved that space, so the tenant line sat under the clock. */}
-      <div className="phone-topbar">
+      <div className="phone-topbar" inert={tillLayerUp}>
         {/* "☰" is a glyph, not an accessible name — this button announced as the character itself,
             with no indication it opens anything or whether it is currently open. */}
         <button
@@ -2152,7 +2157,7 @@ export default function Layout() {
         {/* This window followed its login to another outlet (S798 GAP-OUTLETS-2). A plain fact, so the
             neutral note banner: nothing failed, and the reader has nothing to fix. */}
         {outletMoved && (
-          <div role="status" className="note-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div role="status" className="note-banner" inert={tillLayerUp} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <span>{outletMovedText(outletMoved.name, { cartKeptAt: outletMoved.cartKeptAt })}</span>
             <button type="button" className="btn btn-ghost btn-sm" onClick={dismissOutletMoved}>Dismiss</button>
           </div>
@@ -2184,7 +2189,7 @@ export default function Layout() {
             the only warning a paying client gets before SubscriptionLock replaces the whole app,
             so it states the exact date access stops rather than just "expired". */}
         {accessReason === 'grace' && (
-          <div style={{
+          <div inert={tillLayerUp} style={{
             background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 40%, transparent)',
             borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
@@ -2219,7 +2224,7 @@ export default function Layout() {
           const tone = urgent ? 'var(--theme-amber)' : 'var(--theme-accent)'
           const ink  = urgent ? 'var(--theme-amber-text)' : 'var(--theme-accent-ink)'
           return (
-          <div style={{
+          <div inert={tillLayerUp} style={{
             background: `color-mix(in srgb, ${tone} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)`,
             borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',

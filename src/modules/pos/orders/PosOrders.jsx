@@ -69,7 +69,7 @@ import { playChime } from '../posChime'
 import { barCategoriesOf } from '../ticketRouting'
 import { publishTillGuestView, clearTillGuestView, useGuestAlertMute } from '../../../shared/guestAlertBridge'
 import { errorText, isNetworkError } from '../../../shared/errorText'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, isTimeout } from '../../../utils/withTimeout'
 import { keepLockedCart, takeLockedCart, lockedCartWhere, POS_BEFORE_LOCK_EVENT } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
 import { KOT_CHANGE_ITEMS, sendsChangeLine, joinNote, guestDishNote } from '../kitchenNotes'
@@ -138,6 +138,13 @@ const stripCodeWord = (msg, word) => String(msg || '').replace(new RegExp(`^(pos
 const CLOSE_STEP_MS = 20000
 const bounded = (call, label, ms = CLOSE_STEP_MS) =>
   withTimeout(call, ms, label).catch(error => ({ data: null, error }))
+
+// S841: opening a table, and reading the menu, wait this long for the server (owner decision
+// 2026-10-15), then take no answer as the internet being down, by S809 3f's rule: the table opens
+// from this till's own copy, the menu from the copy saved on the tablet. 5 s went "offline" too
+// often on mobile data; 20 s kept a waiter standing at the table.
+const OPEN_READ_MS = 10000
+const noReply = err => !!err && (isTimeout(err) || isNetworkError(err))
 
 // S809 ORDER-FLOW-7 (3f): the offline upload running on this page, whichever order screen started it.
 // Module-level, not a ref: the screen remounts (Orders ↔ Billing) while an upload runs, the unmounted
@@ -313,6 +320,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [menuLoaded,  setMenuLoaded]  = useState(false)
   // Same S754 rule as floorLoadError: a failed menu read is not "No POS-enabled items".
   const [menuLoadError, setMenuLoadError] = useState('')
+  // S841: the menu on screen came from the copy saved on this tablet, not from the server just now.
+  const menuFromSavedRef = useRef(false)
   // Crest Customization (S758): the option groups, options and dish attachments, read with the menu
   // and cached with it for offline. Empty for a client without the module.
   const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
@@ -506,6 +515,18 @@ export default function PosOrders({ billingStation = false } = {}) {
   const noteLinkDown = () => { linkDownUntilRef.current = Date.now() + LINK_DOWN_MS; setLinkDown(true) }
   const noteLinkUp = () => { linkDownUntilRef.current = 0; setLinkDown(false) }
   const tillOffline = () => !navigator.onLine || Date.now() < linkDownUntilRef.current
+  // S841 (owner decision 2026-10-15): one table or takeaway opens from a tap at a time. The id being
+  // opened; a tap while it is set is ignored and that tile says "Opening…". Before this, a second tap
+  // (or a tap on another table) raced the first, and whichever answer landed last took the screen: a
+  // slow read for T3 could replace T5's open order and the dishes just added to it.
+  const openingRef = useRef(null)
+  const [openingId, setOpeningId] = useState(null)
+  const openOnce = async (id, run) => {
+    if (openingRef.current) return
+    openingRef.current = id
+    setOpeningId(id)
+    try { return await run() } finally { openingRef.current = null; setOpeningId(null) }
+  }
   // S837, kitchen and bar printers: a station slip goes to that station's print device when one is
   // online (docs/kitchen-printers.md), and through this till's print window otherwise, as before.
   const stationPrint = useStationPrinting({ clientId, isOffline: tillOffline, printHtml })
@@ -1378,6 +1399,31 @@ export default function PosOrders({ billingStation = false } = {}) {
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [unsavedOnLeave])
+
+  // S841: focus follows the screen. The floor and the order screen are separate trees, so the tile or
+  // Bill button that opened an order unmounts with the floor and focus fell to the page body, from
+  // where Tab walked the hidden shell. Opening an order puts focus on ← Table, its first control (not
+  // the menu search, which on a tablet raises the on-screen keyboard over the menu); leaving it puts
+  // focus back on that table's tile or Bill button. Only when focus is lost: a dialog that opened on
+  // top (the payment window on Billing) keeps it.
+  const backBtnRef = useRef(null)
+  const returnFocusRef = useRef(null)
+  const prevViewRef = useRef(view)
+  useEffect(() => {
+    if (view === 'order') returnFocusRef.current = activeTable?.id || orderId || null
+  }, [view, activeTable, orderId])
+  useEffect(() => {
+    const prev = prevViewRef.current
+    prevViewRef.current = view
+    if (prev === view) return
+    const focusLost = !document.activeElement || document.activeElement === document.body
+    if (!focusLost) return
+    if (view === 'order') { backBtnRef.current?.focus(); return }
+    if (prev !== 'order') return
+    const id = returnFocusRef.current
+    const target = id && document.querySelector(`[data-table-tile="${id}"], [data-takeaway-tile="${id}"], [data-bill-for="${id}"]`)
+    ;(target || document.getElementById('main-content'))?.focus()
+  }, [view])
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
   // The Floor → Billing nav item is Supervisor+; a nav item is not a guard and /pos/billing is a
@@ -2332,23 +2378,34 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Resolves true only when the menu was read from the server just now (S809 4h): a caller that
   // says "the menu has been reloaded" says it after this, and only on true.
   async function loadMenu({ force = false } = {}) {
-    if (!clientId || (menuLoaded && !force)) return false
+    // S841: a menu taken from the saved copy is read from the server again the next time the order
+    // screen opens with the link up, so a menu changed during an outage is not kept all day.
+    const refreshSaved = menuFromSavedRef.current && !tillOffline()
+    if (!clientId || (menuLoaded && !force && !refreshSaved)) return false
 
-    if (!navigator.onLine) {
-      const cached = await getCachedPosMenu(clientId)
-      if (cached) {
-        setMenu(cached.menu || [])
-        setManualSuggestions(cached.manualSuggestions || {})
-        // Offline customized orders are allowed (owner decision): the till uses its saved copy of the
-        // options, and the server prices them when the order syncs.
-        if (cached.optionCatalog) setOptionCatalog(cached.optionCatalog)
-        setMenuLoaded(true)
-      }
-      return false
+    // The copy of the menu saved on this tablet at its last complete online read. False when this
+    // device has none: it has never loaded the menu online.
+    const takeSavedMenu = async () => {
+      const cached = await getCachedPosMenu(clientId).catch(err => { console.error('saved menu read failed:', err); return null })
+      if (!cached) return false
+      setMenu(cached.menu || [])
+      setManualSuggestions(cached.manualSuggestions || {})
+      // Offline customized orders are allowed (owner decision): the till uses its saved copy of the
+      // options, and the server prices them when the order syncs.
+      if (cached.optionCatalog) setOptionCatalog(cached.optionCatalog)
+      setMenuLoaded(true)
+      setMenuLoadError('')
+      menuFromSavedRef.current = true
+      return true
     }
 
+    // S841 (P0): the till's own link test, not navigator.onLine. That flag is true on a restaurant
+    // wifi whose internet is down, so a till reloaded in that outage asked the server, heard
+    // nothing, never looked at its saved menu, and had no menu and no way to take an order.
+    if (tillOffline()) { await takeSavedMenu(); return false }
+
     const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog, comboCatalog] = await Promise.all([
-      scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
+      bounded(scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
         .eq('is_active', true)
         .eq('pos_enabled', true)
         // `.or(...)`, not `.neq('category','Sub-Recipe')` (S714). category is NULLABLE with no
@@ -2359,17 +2416,31 @@ export default function PosOrders({ billingStation = false } = {}) {
         // S809 2h: a dish with no price above zero is left off, as the guest menu does. The till
         // billed it at NPR 0; save_pos_order_items now refuses it as a new line (line_not_on_menu).
         .gt('selling_price', 0)
-        .order('name'),
-      scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
+        .order('name'), 'Loading the menu', OPEN_READ_MS),
+      bounded(scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'), 'Loading dish pairings', OPEN_READ_MS),
       customizationEnabled
-        ? loadOptionCatalog(scopedFrom)
+        ? bounded(loadOptionCatalog(scopedFrom), 'Loading dish choices', OPEN_READ_MS)
         : Promise.resolve({ error: null, groups: [], options: [], attachments: [], buildYourOwn: [] }),
       // Combos (S839): the outlet's active combos, their picks and dishes, and every combo dish's recipe
       // (a side sold only in combos is not On POS, so the menu read above does not have it).
       customizationEnabled
-        ? loadComboCatalog(scopedFrom)
+        ? bounded(loadComboCatalog(scopedFrom), 'Loading combos', OPEN_READ_MS)
         : Promise.resolve({ error: null, combos: [], recipes: {} }),
     ])
+    // S841: no answer is the internet, not the menu (S809 3f's rule for orders). A menu already on
+    // screen stays; a screen with none takes the saved copy, and says so only when there is none.
+    if ([menuErr, catalog.error, comboCatalog.error].some(noReply)) {
+      noteLinkDown()
+      if (menuLoaded || menuFromSavedRef.current || await takeSavedMenu()) return false
+      setMenuLoadError("This till can't reach the server and has no saved menu yet, so no dish can be added. Check the internet connection, then press Retry.")
+      return false
+    }
+    // A refresh of the saved copy that the server refused keeps the saved copy: it is still a menu
+    // the till can take orders from, and the next order screen tries again.
+    if (refreshSaved && (menuErr || catalog.error || comboCatalog.error)) {
+      console.error('menu refresh failed, keeping the saved menu:', menuErr || catalog.error || comboCatalog.error)
+      return false
+    }
     // S754: a dropped error here rendered "No POS-enabled items" over a menu the client has, AND
     // cached that empty menu as the offline fallback. Keep last-good, leave menuLoaded false so a
     // Retry actually re-reads, and say it failed.
@@ -2409,6 +2480,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       setManualSuggestions(suggMap)
     }
     setMenuLoaded(true)
+    menuFromSavedRef.current = false
     // Only a complete read is worth keeping as the offline copy.
     if (!suggErr) cachePosMenu(clientId, data || [], suggMap, nextCatalog)
     return true
@@ -2975,12 +3047,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       setFloorMsg('error:That takeaway order has not been loaded on this device yet — reconnect to open it.')
       return
     }
-    const { data: existing, error } = await scopedFrom('pos_orders', OPEN_ORDER_SELECT)
+    const { data: existing, error } = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT)
       .eq('id', oid)
-      .maybeSingle()
+      .maybeSingle(), 'Opening the order', OPEN_READ_MS)
     // S809 3f (Q16): no answer at all is the internet, not the order — it opens as offline, from this till's
-    // copy. Not for billing: a bill takes its number from the server.
-    if (error && isNetworkError(error)) {
+    // copy. Not for billing: a bill takes its number from the server. S841: a timed-out read is no answer.
+    if (noReply(error)) {
       noteLinkDown()
       if (billOnOpenRef.current) { setFloorMsg(LINK_DOWN_BILL_TEXT); return }
       return openOrderById(oid)
@@ -3072,18 +3144,19 @@ export default function PosOrders({ billingStation = false } = {}) {
       return
     }
 
-    const { data: existing, error: existingErr } = await scopedFrom('pos_orders', OPEN_ORDER_SELECT)
+    const { data: existing, error: existingErr } = await bounded(scopedFrom('pos_orders', OPEN_ORDER_SELECT)
       .eq('status', 'open')
       .eq('table_id', table.id)
-      .maybeSingle()
+      .maybeSingle(), `Opening ${table.name}`, OPEN_READ_MS)
 
     // A dropped error here is the worst swallow in this file: `existing` comes back null, the
     // table reads as EMPTY, and staff start a SECOND order on a table whose items are already
     // with the kitchen — re-firing every KOT and opening a second bill on one guest. Refuse to
     // guess. window.alert rather than the floor's `floorMsg` banner because this cannot be
     // missable mid-service (S616; see the note at the imports). S809 3f (Q16): no answer at all is the internet, not the table — it opens
-    // as offline, by the offline rules (this till's copy, and never a table it has not loaded).
-    if (existingErr && isNetworkError(existingErr)) {
+    // as offline, by the offline rules (this till's copy, and never a table it has not loaded). S841: so
+    // is an answer that has not come within OPEN_READ_MS.
+    if (noReply(existingErr)) {
       noteLinkDown()
       if (existingOnly) { setFloorMsg(LINK_DOWN_BILL_TEXT); return }
       return openTable(table)
@@ -6554,7 +6627,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           loading={floorLoad}
           loadError={floorLoadError}
           onRetry={() => loadFloor()}
-          onBill={billOrder}
+          onBill={row => openOnce(row.kind === 'table' ? row.tableId : row.orderId, () => billOrder(row))}
+          openingId={openingId}
           isOnline={isOnline && !linkDown}
           now={kotNow}
           canVoid={isAdmin || isOwner || !!profile?.pos_allow_void}
@@ -6594,7 +6668,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         minHeight: 'calc(52px + max(env(safe-area-inset-top, 0px), var(--arrival-alert-h, 0px)))', flexShrink: 0,
         background: 'var(--theme-card)', borderBottom: '1px solid var(--theme-border)',
       }}>
-        <button onClick={requestBackToFloor} className="till-hit--row" style={{
+        <button ref={backBtnRef} type="button" onClick={requestBackToFloor} className="till-hit--row" style={{
           background: 'none', border: '1px solid var(--theme-border)',
           borderRadius: 'var(--radius-sm)', padding: '6px 14px',
           color: 'var(--theme-text2)', cursor: 'pointer', fontSize: 14,
@@ -6678,13 +6752,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           {/* S836: move, join and split. Above the order screen's own layer (1000). */}
           {orderId && (
             <RowMenu label="Table: move, join or split this bill" triggerLabel={narrowTill ? '⇄ Table' : '⇄ Table…'}
-              items={tableMenuItems} zIndex={1100} busy={tableBusy} disabled={tableBusy} />
+              items={tableMenuItems} zIndex={1100} busy={tableBusy} disabled={tableBusy} className="till-hit--row" />
           )}
           {orderId && isOnline && orderKotTickets.some(t => t.status === 'ready') && (() => {
             const readyCount = orderKotTickets.filter(t => t.status === 'ready').length
             return (
               <Tip text="The kitchen or bar has marked food for this order Ready. Tap once it is at the table — the ticket leaves the Kitchen Display and the floor stops showing food waiting. Only Ready tickets are marked; anything still cooking is left alone.">
-                <button type="button" className="btn btn-primary btn-sm" onClick={markOrderServed} disabled={servingTickets}>
+                <button type="button" className="btn btn-primary btn-sm till-hit--row" onClick={markOrderServed} disabled={servingTickets}>
                   {servingTickets ? 'Marking…' : `✓ Served${readyCount > 1 ? ` (${readyCount} ready)` : ''}`}
                 </button>
               </Tip>
@@ -6694,7 +6768,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             <Tip text={isOnline
               ? "Prints the last kitchen and/or bar ticket again, marked REPRINT — for a ticket that was sent but never came out of the printer. It does not send anything to the kitchen again."
               : 'Reprinting reads the ticket history from the server — reconnect first.'}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={reprintLastTickets} disabled={!isOnline || saving}>
+              <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={reprintLastTickets} disabled={!isOnline || saving}>
                 {narrowTill ? '⎙ Reprint' : '⎙ Reprint KOT/BOT'}
               </button>
             </Tip>
@@ -6743,13 +6817,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             borderBottom: '1px solid var(--theme-border)',
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'thin' }}>
+            {/* S841: which category is showing was carried by colour alone; aria-pressed says it. */}
+            <div role="group" aria-label="Menu category" style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'thin' }}>
               {combos.length > 0 && (
-                <button key={COMBO_TAB} className={`tab-btn till-hit${catTab === COMBO_TAB ? ' tab-btn--active' : ''}`}
+                <button key={COMBO_TAB} type="button" aria-pressed={catTab === COMBO_TAB} className={`tab-btn till-hit${catTab === COMBO_TAB ? ' tab-btn--active' : ''}`}
                   onClick={() => setCatTab(COMBO_TAB)} style={{ flexShrink: 0 }}>{COMBO_TAB_LABEL}</button>
               )}
               {menuCats.map(c => (
-                <button key={c} className={`tab-btn till-hit${!onCombosTab && menuTab === c ? ' tab-btn--active' : ''}`}
+                <button key={c} type="button" aria-pressed={!onCombosTab && menuTab === c} className={`tab-btn till-hit${!onCombosTab && menuTab === c ? ' tab-btn--active' : ''}`}
                   onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
               ))}
             </div>
@@ -6773,7 +6848,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             {menuLoadError && (
               <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '0 0 12px', fontSize: 13 }}>
                 Couldn't load the menu. {menuLoadError}{menu.length > 0 ? ' Showing the last menu loaded.' : ' This is a failed read, not an empty menu.'}{' '}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadMenu()}>Retry</button>
+                <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadMenu()}>Retry</button>
               </p>
             )}
             {!menuLoaded && !(menuLoadError && menu.length > 0) ? (
@@ -6949,7 +7024,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                           <Tip text="Change this dish's choices. Once it has gone to the kitchen it can't be changed — remove it and add it again.">
                             <button
                               type="button"
-                              className="btn btn-ghost btn-sm"
+                              className="btn btn-ghost btn-sm till-hit--row"
                               aria-label={`Change choices for ${item.name}`}
                               onClick={() => {
                                 const recipe = menu.find(m => m.id === item.recipe_id)
@@ -7187,7 +7262,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: narrowBilling ? '16px 16px' : '24px 28px' }}>
             {narrowBilling && (
               <>
-                <button type="button" className="btn btn-ghost btn-sm" aria-expanded={billPreviewOpen}
+                <button type="button" className="btn btn-ghost btn-sm till-hit--row" aria-expanded={billPreviewOpen}
                   onClick={() => setBillPreviewOpen(v => !v)} style={{ marginBottom: 12 }}>
                   {billPreviewOpen ? '▾ Hide bill' : '▸ Show bill'}
                 </button>
@@ -7224,14 +7299,16 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               </p>
             )}
 
-            <div className="tab-bar" style={{ marginBottom: 16 }}>
+            {/* S841: the close type was shown by colour alone; aria-pressed says which, and till-hit--row
+                gives the three the 44px touch floor. */}
+            <div className="tab-bar" role="group" aria-label="How this bill closes" style={{ marginBottom: 16 }}>
               {/* An unsettled try keeps its own tab (S809 CHECKOUT-7): voiding or comping a bill whose payment may still land is changing that payment. */}
-              <button className={`tab-btn${billingTab === 'pay' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('pay'); setCloseMsg('') }} disabled={closeLocked && billingTab !== 'pay'}>Pay</button>
+              <button type="button" aria-pressed={billingTab === 'pay'} className={`tab-btn till-hit--row${billingTab === 'pay' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('pay'); setCloseMsg('') }} disabled={closeLocked && billingTab !== 'pay'}>Pay</button>
               {(isAdmin || isOwner || profile?.pos_allow_void) && (
-                <button className={`tab-btn${billingTab === 'void' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('void'); setCloseMsg('') }} disabled={closeLocked && billingTab !== 'void'}>Void</button>
+                <button type="button" aria-pressed={billingTab === 'void'} className={`tab-btn till-hit--row${billingTab === 'void' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('void'); setCloseMsg('') }} disabled={closeLocked && billingTab !== 'void'}>Void</button>
               )}
               {hasPosAccess('supervisor') && (
-                <button className={`tab-btn${billingTab === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={openCompTab} disabled={closeLocked && billingTab !== 'writeoff'}>Complimentary</button>
+                <button type="button" aria-pressed={billingTab === 'writeoff'} className={`tab-btn till-hit--row${billingTab === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={openCompTab} disabled={closeLocked && billingTab !== 'writeoff'}>Complimentary</button>
               )}
             </div>
 
@@ -7340,11 +7417,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                           placeholder={`max ${cap}`}
                           aria-label="Points to redeem"
                         />
-                        <button className="btn btn-ghost btn-sm" onClick={applyRedemption}
+                        <button className="btn btn-ghost btn-sm till-hit--row" onClick={applyRedemption}
                           disabled={closeLocked || !(Math.floor(Number(redeemStr) || 0) > 0 && Math.floor(Number(redeemStr) || 0) <= cap)}>
                           Apply
                         </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setRedeemStr(String(cap))}>Use max</button>
+                        <button className="btn btn-ghost btn-sm till-hit--row" onClick={() => setRedeemStr(String(cap))}>Use max</button>
                       </div>
                     ) : (
                       <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
@@ -7473,7 +7550,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                   {shareCount == null ? (
                     <Tip text="Print a slip for each guest with their equal share of this bill, in whole rupees (any leftover rupee goes on the first slips). Not a tax invoice: the one tax invoice prints when the bill is paid. Take each share with Split Payment.">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareCount(MIN_SHARES)} disabled={payTotal <= 0}>÷ Share slips</button>
+                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setShareCount(MIN_SHARES)} disabled={payTotal <= 0}>÷ Share slips</button>
                     </Tip>
                   ) : (
                     <>
@@ -7482,8 +7559,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{shareCount}</span>
                       <button type="button" className="btn btn-ghost till-hit" aria-label="One guest more" onClick={() => setShareCount(n => Math.min(MAX_SHARES, n + 1))} disabled={shareCount >= MAX_SHARES}>+</button>
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)' }}>{shareSummary(equalShares(payTotal, shareCount))}</span>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={printShareSlips}>Print {shareCount} slips</button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareCount(null)}>Close</button>
+                      <button type="button" className="btn btn-primary btn-sm till-hit--row" onClick={printShareSlips}>Print {shareCount} slips</button>
+                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setShareCount(null)}>Close</button>
                     </>
                   )}
                 </div>
@@ -7540,20 +7617,23 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   Discount <Tip text="Reduces the pre-VAT taxable amount — VAT is recalculated on the discounted base, matching standard invoice practice. Leave at 0 for no discount.">(optional)</Tip>
                 </p>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                  <button onClick={() => setDiscountMode('amount')} disabled={tendersLocked} style={{
+                  {/* S841: the discount type was shown by colour alone; aria-pressed and a spoken name. */}
+                  <span role="group" aria-label="Discount type" style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className="till-hit" aria-pressed={discountMode === 'amount'} aria-label="Discount in rupees" onClick={() => setDiscountMode('amount')} disabled={tendersLocked} style={{
                     padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
                     fontWeight: discountMode === 'amount' ? 700 : 400,
                     background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                     color: discountMode === 'amount' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                     border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                   }}>₨</button>
-                  <button onClick={() => setDiscountMode('percent')} disabled={tendersLocked} style={{
+                  <button type="button" className="till-hit" aria-pressed={discountMode === 'percent'} aria-label="Discount in percent" onClick={() => setDiscountMode('percent')} disabled={tendersLocked} style={{
                     padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
                     fontWeight: discountMode === 'percent' ? 700 : 400,
                     background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                     color: discountMode === 'percent' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                     border: `1px solid ${discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                   }}>%</button>
+                  </span>
                   <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}
                     aria-label={discountMode === 'percent' ? 'Discount percent' : 'Discount amount in rupees'}
                     placeholder="0" value={comboOnlyBill ? '' : discountStr} onChange={e => { if (!comboOnlyBill) setDiscountStr(e.target.value) }}
@@ -8123,7 +8203,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         return (
           <div
             className="guest-order-banner"
-            onClick={() => firstTable && openTable(firstTable)}
+            onClick={() => firstTable && openOnce(firstTable.id, () => openTable(firstTable))}
             style={{
               display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
               background: 'color-mix(in srgb, var(--theme-accent) 16%, transparent)', border: '1px solid var(--theme-accent)',
@@ -8257,9 +8337,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       ))}
 
       {sections.length > 1 && (
-        <div className="tab-bar" style={{ marginBottom: 20 }}>
+        <div className="tab-bar" role="group" aria-label="Floor section" style={{ marginBottom: 20 }}>
+          {/* S841: the section showing was carried by colour alone; aria-pressed says it. */}
           {sections.map(s => (
-            <button key={s} className={`tab-btn${secFilter === s ? ' tab-btn--active' : ''}`}
+            <button key={s} type="button" aria-pressed={secFilter === s} className={`tab-btn till-hit--row${secFilter === s ? ' tab-btn--active' : ''}`}
               onClick={() => setSecFilter(s)}>{s}</button>
           ))}
         </div>
@@ -8302,8 +8383,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   role="button"
                   tabIndex={0}
                   aria-label={`${label}, ${t.itemCount} item${t.itemCount !== 1 ? 's' : ''}, ${fmtNpr(t.total)}`}
-                  onClick={() => openOrderById(t.orderId)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOrderById(t.orderId) } }}
+                  data-takeaway-tile={t.orderId}
+                  aria-busy={openingId === t.orderId || undefined}
+                  onClick={() => openOnce(t.orderId, () => openOrderById(t.orderId))}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOnce(t.orderId, () => openOrderById(t.orderId)) } }}
                   style={{ padding: '16px 18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden', borderColor: 'var(--theme-accent)' }}
                 >
                   <div style={{
@@ -8336,6 +8419,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 3 }}>
                       {fmtNpr(t.total)}
                     </div>
+                    {openingId === t.orderId && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginTop: 3 }}>Opening…</div>}
                   </div>
                 </div>
               )
@@ -8362,10 +8446,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             const joinedMain = joinedTo ? tables.find(x => x.id === mainTableOfJoin(joinedTo, tableOrders)) : null
             // S817 4i (FLOOR-KITCHEN-7): a table taken out of service with its bill still open opens that
             // bill; one with no bill says why it takes no order, instead of ignoring the tap.
-            const openTile = () => (inactive && !ord && !joinedTo ? setFloorMsg(`error:${inactiveTableText(t.name)}`) : openTable(t))
+            const openTile = () => (inactive && !ord && !joinedTo ? setFloorMsg(`error:${inactiveTableText(t.name)}`) : openOnce(t.id, () => openTable(t)))
+            const opening = openingId === t.id
             return (
               <div
                 key={t.id}
+                data-table-tile={t.id}
+                aria-busy={opening || undefined}
                 className={`card${hasPendingGuest ? ' guest-order-glow' : ''}`}
                 onClick={openTile}
                 style={{
@@ -8444,6 +8531,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {t.section && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>
                 )}
+                {opening && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)' }}>Opening…</div>}
 
                 {/* The booking due on this table. Quiet by default; brass when due within the seat
                     window (tap to seat); amber ONLY when the party has arrived and the table is

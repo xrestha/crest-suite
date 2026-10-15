@@ -168,7 +168,7 @@ export default function PosImsPostingBanner({ bills = 0, notes = 0, onPosted }) 
             <div key={`c-${m.year}-${m.month}`} style={LINE}>
               {countPhrase(m.bills, m.notes)} from <strong>{m.label}</strong>:{' '}
               {ownsClosedMonths
-                ? <>that month is closed in Inventory, so post {m.bills + m.notes === 1 ? 'it' : 'them'} from <Link to="/periods">Periods</Link> → Post POS bills to Inventory on {m.label}.</>
+                ? <>that month is closed in Inventory, so post {m.bills + m.notes === 1 ? 'it' : 'them'} from <Link to="/periods" className="btn-linklike">Periods</Link> → Post POS bills to Inventory on {m.label}.</>
                 : <>that month is closed in Inventory, and only the Owner can post into a closed month (from Periods). Let the Owner know.</>}
             </div>
           ))}

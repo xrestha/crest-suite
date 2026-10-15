@@ -40,6 +40,9 @@ export default function BillingStation({
   loadError,
   onRetry,
   onBill,
+  // S841: the table or takeaway a Bill tap is opening right now; its button says so, and the till
+  // ignores another tap until it has opened.
+  openingId = null,
   isOnline,
   now,
   canVoid,
@@ -187,9 +190,11 @@ export default function BillingStation({
                   style={{ minWidth: 120, justifyContent: 'center', flexShrink: 0 }}
                   disabled={!isOnline || r.offlinePending}
                   onClick={() => onBill(r)}
+                  data-bill-for={r.kind === 'table' ? r.tableId : r.orderId}
                   aria-label={`Bill ${r.label}, ${fmtNpr(r.total)}`}
+                  aria-busy={openingId === (r.kind === 'table' ? r.tableId : r.orderId) || undefined}
                 >
-                  Bill
+                  {openingId === (r.kind === 'table' ? r.tableId : r.orderId) ? 'Opening…' : 'Bill'}
                 </button>
               </div>
             )

@@ -3331,7 +3331,11 @@ textarea::placeholder {
     min-height: 44px;
   }
   .till-hit--row,
-  .ticket-btn {
+  .ticket-btn,
+  /* S841: every tender, Single/Split, the tender method and the delivery partner on the payment
+     window. A class of its own, so no coarse rule reached it: 34px, where a cashier picked Card for
+     eSewa on a tablet. */
+  .pay-method-btn {
     min-height: 44px;
   }
 }
