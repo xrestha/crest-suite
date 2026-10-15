@@ -310,7 +310,7 @@ export default function CreditNotes() {
                         <td>{o.buyer_name || 'CASH SALES'}</td>
                         <td style={{ textAlign: 'right' }}>{fmtNpr(o.paid_amount)}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => setPickedOrder(o)}>Credit Note</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => setPickedOrder(o)}>Credit Note</button>
                         </td>
                       </tr>
                     )
@@ -412,7 +412,7 @@ export default function CreditNotes() {
                             : (
                               <Tip width={260} style={{ display: 'inline-flex', borderBottom: 'none' }}
                                 text="This note was issued but has never been printed — the connection dropped or the pop-up was blocked. Print gives the original; everything else about the note is already done.">
-                                <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintNote(n)}>Print</button>
+                                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintNote(n)}>Print</button>
                               </Tip>
                             )}
                         </td>

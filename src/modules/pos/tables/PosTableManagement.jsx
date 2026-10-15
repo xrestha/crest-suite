@@ -1393,7 +1393,7 @@ export default function PosTableManagement() {
               <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: qsClashText ? '0 0 6px' : '0 0 14px', fontStyle: 'italic' }}>
                 Will create: <span style={{ color: 'var(--theme-text2)', fontStyle: 'normal' }}>{qsPreview()}</span>
                 {parseInt(qs.count, 10) > 0 && (
-                  <span style={{ color: 'var(--theme-accent-ink)', marginLeft: 6 }}>({parseInt(qs.count, 10)} tables)</span>
+                  <span style={{ color: 'var(--theme-text1)', marginLeft: 6, fontVariantNumeric: 'tabular-nums' }}>({parseInt(qs.count, 10)} tables)</span>
                 )}
               </p>
               {qsClashText && (
@@ -1416,14 +1416,14 @@ export default function PosTableManagement() {
               {[
                 { label: 'Total Tables', value: tables.length,    color: 'var(--theme-text1)', tip: null },
                 { label: 'Available',    value: counts.available, color: 'var(--theme-text1)',      tip: 'Tables ready to seat a new party right now' },
-                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-accent-ink)', tip: 'Tables with an active order currently open' },
+                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-text1)',      tip: 'Tables with an active order currently open' },
                 { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-text1)',      tip: 'Tables held for an upcoming booking or walk-in queue' },
               ].map(s => (
                 <div key={s.label} className="card" style={{ padding: '12px 18px' }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                     {s.tip ? <Tip text={s.tip}>{s.label}</Tip> : s.label}
                   </div>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.value}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
                 </div>
               ))}
             </div>

@@ -73,15 +73,6 @@
         "reason": "80mm thermal parking-slip print template (parkingSlipHtml.js) - vehicle number sized for a printed token; print templates are the documented allowed class, value predates S754. S765 ADDED the files: key - without it this was a GLOBAL value suppression while its reason named one file, so it silently exempted 26px on eight on-screen sites (ImsCountLogin, PosLogin, GuestMenu, Pricing x3, Settings, ClientDrawer, ArrivalAlert.css) and the detector read as passing on all of them. An ignore is scoped to the thing that is genuinely exempt."
       },
       {
-        "rule": "design-system-radius",
-        "value": "50%",
-        "files": [
-          "src/modules/pos/guestmenu/**"
-        ],
-        "createdAt": "2026-09-16T14:05:42.458Z",
-        "reason": "S767 (owner moved the guest pages onto the default Modernist preset): the ONLY radius left in this directory is 50% on the veg / non-veg food mark dot (.gm-diet in guestMenu.css) - the market food-labelling symbol, named as a Shapes exemption in DESIGN.md. Value-specific (50% only, so any other corner here is still flagged) and directory-scoped because the hook reports this stylesheet as GuestMenu.css (derived from the component name) while the file is guestMenu.css, so a basename-scoped entry never matches (S763). Replaces the pre-S767 entries that exempted the whole bone-and-pine guest shape language."
-      },
-      {
         "rule": "design-system-color",
         "value": "#60a5fa",
         "files": [

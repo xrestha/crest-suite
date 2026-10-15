@@ -5,9 +5,17 @@ import { CLOSE_TYPE_BADGE } from '../posSignals'
 describe('kotStage', () => {
   test('the live stages keep their labels and badges', () => {
     expect(kotStage({ status: 'new' })).toEqual({ label: 'Sent', badge: 'badge-gray' })
-    expect(kotStage({ status: 'in_progress' })).toEqual({ label: 'Started', badge: 'badge-yellow' })
+    expect(kotStage({ status: 'in_progress' })).toEqual({ label: '◷ Started', badge: 'badge-gray' })
     expect(kotStage({ status: 'ready' })).toEqual({ label: 'Ready', badge: 'badge-green' })
     expect(kotStage({ status: 'served', pos_orders: { status: 'voided' } })).toEqual({ label: 'Served', badge: 'badge-green' })
+  })
+
+  test('no stage wears the brass accent, and Started keeps the clock mark that tells it from Sent (S846)', () => {
+    for (const status of ['new', 'in_progress', 'ready', 'served', 'cancelled']) {
+      expect(kotStage({ status }).badge).not.toBe('badge-yellow')
+    }
+    expect(kotStage({ status: 'in_progress' }).label.startsWith('◷ ')).toBe(true)
+    expect(kotStage({ status: 'new' }).label).not.toMatch(/◷/)
   })
 
   test('a cancelled ticket of a voided bill reads Voided, in the void red', () => {

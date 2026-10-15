@@ -407,14 +407,14 @@ export default function PosExceptionReport() {
               <div className="stat-label">
                 <Tip text="Food cost of complimentary orders and individually-comped items — valued at ingredient cost (not menu price), matching the Complimentary Slip" width={250}>Comp Food Cost</Tip>
               </div>
-              <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(totals.writeoff.amt)}</div>
+              <div className="stat-value">{fmtNpr(totals.writeoff.amt)}</div>
               <div className="stat-sub">{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">
                 <Tip text="What every comped order/item would have sold for at menu price, excluding VAT, had it not been comped — the revenue given away, not just its ingredient cost" width={280}>Comp Potential Sales Value</Tip>
               </div>
-              <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(totals.writeoff.potential)}</div>
+              <div className="stat-value">{fmtNpr(totals.writeoff.potential)}</div>
               <div className="stat-sub">{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="stat-card">

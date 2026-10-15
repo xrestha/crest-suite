@@ -304,7 +304,7 @@ export default function CustomerEditModal({ customer, types, typesError = null, 
             <p style={{ margin: '0 0 6px', fontSize: 13, color: 'var(--theme-text1)' }}>
               {customer.membership_type_id
                 ? <>
-                    <span className="badge-yellow">{heldType?.name || 'Member'}</span>
+                    <span className="badge-gray">{heldType?.name || 'Member'}</span>
                     {customer.card_no && <> · card <span style={{ whiteSpace: 'nowrap' }}>{customer.card_no}</span></>}
                     {customer.card_expires_on ? <> · expires {formatAdAsBs(customer.card_expires_on)}</> : ' · never expires'}
                   </>

@@ -7,6 +7,7 @@ import {
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import { offeredPicks, goneChoicesText } from '../../shared/offeredPicks'
 import { DIET_LABEL } from './customizationData'
+import DietMark from '../pos/guestmenu/DietMark'
 
 // Crest Customization (S758 stage 5, reshaped S759): the choice window a waiter sees for a dish
 // that has option groups. It no longer opens on every tap of such a dish (owner decision, S759):
@@ -175,7 +176,9 @@ export default function OptionPickerModal({
                   const metaParts = [
                     priceNode,
                     full ? `Max ${rule.max}` : null,
-                    o.diet ? DIET_LABEL[o.diet] : null,
+                    // S846: the shape-coded mark before the word, the guest menu's own (DietMark).
+                    // Decorative: the word beside it is the name.
+                    o.diet && DIET_LABEL[o.diet] ? <><DietMark diet={o.diet} decorative className="diet-mark--lead" />{DIET_LABEL[o.diet]}</> : null,
                   ].filter(Boolean)
                   // The mark for a removal: a quiet "No" prefix, only when the name does not already
                   // say it. The red ✕ this replaced shared the danger hue with Void and was read

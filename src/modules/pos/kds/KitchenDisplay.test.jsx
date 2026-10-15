@@ -13,7 +13,7 @@
  */
 
 import React from 'react'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 // The tickets read's answer per station, set per test. A function so a test can change it between polls.
@@ -32,7 +32,9 @@ function mockBuilder(table, patch) {
   }
   const answer = () => {
     if (table !== 'pos_kot_log') return { data: [], error: null }
-    if (patch) { mockUpdates.push(patch); return { data: [], error: null } }
+    // A write that landed answers its row, as `.select('id')` does (tapMiss reads an empty answer as
+    // "already moved").
+    if (patch) { mockUpdates.push(patch); return { data: [{ id: 'landed' }], error: null } }
     const station = q.filters.find(f => f[0] === 'eq' && f[1] === 'station')?.[2]
     const voided = q.filters.some(f => f[0] === 'eq' && f[1] === 'status' && f[2] === 'cancelled')
     if (voided) return mockVoidAnswer(station)
@@ -81,6 +83,8 @@ const servedAsks = () => mockUpdates.filter(p => p.status === 'served').length
 const okButton = () => screen.queryByRole('button', { name: /OK, take the voided ticket for Table 7/ })
 
 const renderBoard = () => render(<MemoryRouter><KitchenDisplay /></MemoryRouter>)
+// S846: Start on a New ticket starts it at the default estimate in one tap; its name says so.
+const START = /^Start .+ with a 10-minute estimate$/
 
 beforeEach(() => {
   localStorage.clear()
@@ -110,25 +114,25 @@ test('the board appears on the next good poll, and a later failure keeps it unde
 
   mockTicketAnswer = () => ({ data: [ticket('t1', 'KOT', 'Table 5')], error: null })
   await act(async () => { jest.advanceTimersByTime(4000) })
-  expect(await screen.findByRole('button', { name: 'Start' })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: START })).toBeTruthy()
   expect(screen.queryByText('Could not load the kitchen tickets')).toBeNull()
 
   mockTicketAnswer = () => dead
   await act(async () => { jest.advanceTimersByTime(4000) })
   expect(await screen.findByText(/Could not refresh the board — the tickets shown are from the last successful check/)).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Start' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: START })).toBeTruthy()
 })
 
 test('switching to Bar never leaves the kitchen\'s tickets under the bar heading when the bar read fails', async () => {
   mockTicketAnswer = station => (station === 'KOT' ? { data: [ticket('t1', 'KOT', 'Table 5')], error: null } : dead)
   renderBoard()
-  expect(await screen.findByRole('button', { name: 'Start' })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: START })).toBeTruthy()
   expect(screen.getByText('Table 5')).toBeTruthy()
 
   fireEvent.click(screen.getByRole('button', { name: 'Bar (BOT)' }))
   expect(await screen.findByText('Could not load the bar tickets')).toBeTruthy()
   expect(screen.queryByText('Table 5')).toBeNull()
-  expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
+  expect(screen.queryByRole('button', { name: START })).toBeNull()
   expect(screen.queryByText(/Nothing on the board/)).toBeNull()
   expect(mockTicketReads).toEqual(['KOT', 'BOT'])
 })
@@ -207,5 +211,68 @@ describe('the ids the board remembers are forgotten once their read no longer ha
     inRead = true
     await pollFor(4000)
     expect(okButton()).toBeTruthy()
+  })
+})
+
+// S846 (owner decision): Start takes a 10-minute estimate in one tap, and Other time opens the popup.
+describe('one-tap Start', () => {
+  const startsSent = () => mockUpdates.filter(p => p.status === 'in_progress')
+
+  test('Start · 10m starts the ticket at once with a 10-minute estimate, no popup', async () => {
+    mockTicketAnswer = () => ({ data: [ticket('t1', 'KOT', 'Table 5')], error: null })
+    renderBoard()
+    const start = await screen.findByRole('button', { name: START })
+    expect(start.textContent).toBe('Start · 10m')
+    expect(start).toHaveClass('btn-ghost')
+    expect(start).not.toHaveClass('btn-primary')
+    expect(start).toHaveClass('till-hit--row')
+
+    await act(async () => { fireEvent.click(start) })
+    expect(startsSent()).toHaveLength(1)
+    expect(startsSent()[0]).toMatchObject({ status: 'in_progress', estimated_prep_minutes: 10, status_updated_by: 'u1' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // The card is in In Progress now, and its button is Ready.
+    expect(await screen.findByRole('button', { name: 'Ready' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: START })).toBeNull()
+  })
+
+  test('Other time opens the estimate popup, and a preset there starts the ticket with that figure', async () => {
+    mockTicketAnswer = () => ({ data: [ticket('t1', 'KOT', 'Table 5')], error: null })
+    renderBoard()
+    await screen.findByRole('button', { name: START })
+    const other = screen.getByRole('button', { name: /^Other time/ })
+    expect(other).toHaveClass('btn-ghost')
+    expect(other).toHaveClass('till-hit--row')
+
+    fireEvent.click(other)
+    const dialog = screen.getByRole('dialog', { name: 'Estimated Prep Time' })
+    expect(mockUpdates).toHaveLength(0)
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Start · 15m' })) })
+    expect(startsSent()).toEqual([expect.objectContaining({ status: 'in_progress', estimated_prep_minutes: 15 })])
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  test('a double tap starts one ticket, even when the next card slides up under the second tap', async () => {
+    jest.useFakeTimers()
+    mockTicketAnswer = () => ({ data: [ticket('t1', 'KOT', 'Table 5'), ticket('t2', 'KOT', 'Table 6')], error: null })
+    renderBoard()
+    const first = await screen.findByRole('button', { name: /^Start Table 5 #12/ })
+    await act(async () => { fireEvent.click(first) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Start Table 6 #12/ })) })
+    expect(startsSent()).toHaveLength(1)
+
+    // A cook starting the next ticket on purpose, a moment later, is not held up.
+    await act(async () => { jest.advanceTimersByTime(600) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Start Table 6 #12/ })) })
+    expect(startsSent()).toHaveLength(2)
+  })
+
+  test('a CHANGE card in New keeps its one Seen button, with no Other time', async () => {
+    const change = { ...ticket('c1', 'KOT', 'Table 5'), items: [{ name: 'VEG MOMO', qty: 0, change: true, notes: 'no onion' }] }
+    mockTicketAnswer = () => ({ data: [change], error: null })
+    renderBoard()
+    expect(await screen.findByRole('button', { name: 'Seen' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Other time/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: START })).toBeNull()
   })
 })

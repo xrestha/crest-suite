@@ -39,16 +39,17 @@ const SHOW_MAX = 200
 const NO_ROWS = []
 const DAY_OPTIONS = [{ key: '7', label: 'Next 7 days' }, { key: '30', label: 'Next 30 days' }]
 
-// A card as the till sees it today (memberDiscount.memberStatus), as a chip. Category is badge-yellow
-// in POS; an expired card is a warning; a switched-off type gives nothing, so it reads as inert.
+// A card as the till sees it today (memberDiscount.memberStatus), as a chip. A card type is a
+// category, so grey (S846; it was the accent tag until POS took the accent off every category); an
+// expired card is a warning; a switched-off type gives nothing and says so in words beside its name.
 export function CardBadge({ customer, typesById, todayIso }) {
   if (!customer.membership_type_id) return <span style={{ color: 'var(--theme-text3)' }}>—</span>
   const type = typesById[customer.membership_type_id]
-  if (!type) return <span className="badge-yellow">Card</span>
+  if (!type) return <span className="badge-gray">Card</span>
   const s = memberStatus({ ...customer, pos_membership_types: type }, todayIso)
   if (s.kind === 'expired') return <span className="badge-amber" title="Past its expiry date: the till gives no card discount">{type.name} · expired</span>
   if (s.kind === 'inactive') return <span className="badge-gray" title="This card type is switched off: the till gives no card discount">{type.name} · switched off</span>
-  return <span className="badge-yellow">{type.name}</span>
+  return <span className="badge-gray">{type.name}</span>
 }
 
 function DatesCell({ customer }) {

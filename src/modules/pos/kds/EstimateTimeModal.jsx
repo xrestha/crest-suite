@@ -6,9 +6,14 @@ const KEYS = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['C', '0', '⌫
 const PRESETS = [5, 10, 15, 20]
 const MAX_LEN = 3 // up to 999 minutes — comfortably above any real kitchen prep time
 
-// Calculator-style popup shown when kitchen/bar staff tap "Start" on a KOT/BOT ticket — required
-// before the ticket can move to In Progress, so every started ticket has an estimate to show
-// front-of-house (PosOrders.jsx table badge) and to compare against actual prep time later
+// S846 (owner decision): Start on a New ticket starts it in one tap with this estimate, always. The
+// card's "Other time" opens this popup for any other figure. Every started ticket still carries an
+// estimate, so the floor badge and the KOT Log's Est/Actual column have one to show.
+export const DEFAULT_START_MINUTES = 10
+
+// Calculator-style popup behind a ticket's "Other time" button on the Kitchen Display: a preset starts
+// the ticket at once, or typed minutes start it with Confirm & Start. The estimate is shown
+// front-of-house (PosOrders.jsx table badge) and compared against actual prep time later
 // (KotLog.jsx Register tab). Digit-grid pattern adapted from the PIN pad in PosLogin.jsx, but
 // unmasked since this is a plain minutes value, not a PIN.
 export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
@@ -97,6 +102,9 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
           {KEYS.flat().map((k, i) => (
             <button
               key={i}
+              type="button"
+              // S846: the till's touch floor and focus ring. The inline 58px is above the floor, so it stands.
+              className="till-hit"
               onClick={() => pressKey(k)}
               disabled={!k}
               // Named as the PIN pad names its two (PosLogin.jsx): read aloud, "C" and "⌫" say nothing.

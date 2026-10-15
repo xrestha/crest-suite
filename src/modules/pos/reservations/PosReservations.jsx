@@ -518,7 +518,7 @@ export default function PosReservations() {
         <button type="button" className={`tab-btn${filter === 'activity' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'activity'} onClick={() => setFilter('activity')}>
           Activity
           {newCount > 0 && (
-            <> <span className="badge badge-yellow badge-sentence" aria-label={`${newCount} changed since you last looked`}>{newCount > 99 ? '99+' : newCount} new</span></>
+            <> <span className="badge badge-gray badge-sentence" aria-label={`${newCount} changed since you last looked`}>{newCount > 99 ? '99+' : newCount} new</span></>
           )}
         </button>
       </div>
@@ -706,7 +706,7 @@ export default function PosReservations() {
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <span className={`badge ${RESERVATION_STATUS_BADGE[r.status] || 'badge-gray'}`}>{ev.label}</span>
                           {by && <span className="cell-sub">{by}</span>}
-                          {fresh && <> <span className="badge badge-yellow badge-sentence">new</span></>}
+                          {fresh && <> <span className="badge badge-gray badge-sentence">new</span></>}
                         </td>
                         <td>
                           <button type="button" className="btn-linklike" onClick={e => { e.stopPropagation(); setModal({ row: r }) }}>{r.customer_name}</button>

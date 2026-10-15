@@ -252,6 +252,8 @@ const TABS = [
 // 'Loyalty' is deliberately absent from PAYMENT_METHODS — that is the list a cashier PICKS, and a
 // points redemption is applied, not picked (S290->S291 learned the same with Foodmandu/Pathao).
 const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
+// The Product Type tab's veg axis, in reading order (S846 added Egg). A label not listed sorts last.
+const VEG_AXIS_ORDER = ['Veg', 'Egg', 'Non-Veg', 'Not set']
 
 // `vat_registered` (S809 2c, REPORTS-1): the tax status each bill was issued under. The figures read
 // it per bill (salesReportMath.js), so a past Tax Invoice keeps its VAT after a deregistration.
@@ -301,6 +303,9 @@ export default function SalesReport() {
   // the letterhead fetch (once per client) rather than the date-range one, and needs no paging —
   // no client's menu comes close to PostgREST's 1000-row cap.
   const [vegById, setVegById] = useState({})
+  // Recipes marked Egg (recipes.is_egg, S846). Read on its own, best effort: the column is newer than
+  // this page, and a database without it must still give the report. No answer = no Egg row.
+  const [eggIds, setEggIds] = useState(() => new Set())
   // recipe_code → shown as the Product Code column on the Item Wise tab. Rides the same once-per-
   // client master-data fetch as is_veg.
   const [codeById, setCodeById] = useState({})
@@ -324,14 +329,22 @@ export default function SalesReport() {
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('vat_number, property_address, pos_delivery_partners').eq('client_id', clientId).maybeSingle(),
       scopedFrom('recipes', 'id, is_veg, recipe_code'),
+      // Its own query so a database without is_egg (42703 / PGRST204) fails only this one; it is
+      // left out of the error check below on purpose. Bounded with the rest, so it cannot hang Excel.
+      scopedFrom('recipes', 'id, is_egg').eq('is_egg', true),
     ], REPORT_READ_MS, 'Loading the letterhead').then(results => {
       // An admin switching client mid-read must not have the previous client's letterhead land.
       if (cancelled) return
       // S612 silent-zero rule: a failed read here isn't cosmetic — it blanks the letterhead and
       // silently drops every Agreed % commission check on the Delivery Partners tab.
-      const failed = firstError(results)
+      const failed = firstError(results.slice(0, 3))
       if (failed) { setBizError(failed); return }
-      const [{ data: client }, { data: settings }, { data: recipeRows }] = results
+      const [{ data: client }, { data: settings }, { data: recipeRows }, eggRes] = results
+      // A database without the column is expected until the migration is live, so only log the rest.
+      if (eggRes?.error && !['42703', 'PGRST204'].includes(eggRes.error.code)) {
+        console.error('Sales Report: the Egg marks could not be read, so egg dishes count as Non-Veg', eggRes.error)
+      }
+      setEggIds(new Set(eggRes?.error ? [] : (eggRes?.data || []).filter(r => r?.is_egg === true).map(r => r.id)))
       setBizInfo({ name: client?.name || '', vat: settings?.vat_number || '', address: settings?.property_address || '' })
       // The CONTRACTED commission rate per partner (POS Setup -> Delivery Partners). It is
       // the only thing a settled bill's actual commission can be checked against - without it the
@@ -836,9 +849,12 @@ export default function SalesReport() {
      Crest has one menu axis (recipes.category) where the competitor ERP has two, so 'Product
      Type' has to be a real second axis rather than a rename of the first. All three below
      already exist in the data and none was reportable before: the Kitchen/Bar split the tills
-     route tickets by, the VAT mode each line was billed at, and the veg flag set in Recipes. */
+     route tickets by, the VAT mode each line was billed at, and the veg flag set in Recipes
+     (with Egg since S846: a recipe with is_veg false and is_egg true). */
   const [productAxis, setProductAxis] = useState('station')
   const hasVegData = useMemo(() => Object.values(vegById).some(v => v === true || v === false), [vegById])
+  // Egg is a kind of non-veg, so it only counts on a recipe whose veg flag is false.
+  const hasEggData = useMemo(() => [...eggIds].some(id => vegById[id] === false), [eggIds, vegById])
   // An axis that can only ever produce one row is hidden rather than rendered empty: VAT Mode
   // collapses to a single Non-Taxable row for a client that is not VAT-registered, and Veg/
   // Non-Veg to a single 'Not set' row until someone has actually set the flag on a recipe.
@@ -846,8 +862,8 @@ export default function SalesReport() {
     { key: 'station', label: 'Kitchen / Bar' },
     // S809 2c: also when a bill in the range was issued as a Tax Invoice, though the outlet is not now.
     ...(vatReg || orders.some(o => o.vat_registered === true) ? [{ key: 'vat', label: 'VAT Mode' }] : []),
-    ...(hasVegData ? [{ key: 'veg', label: 'Veg / Non-Veg' }] : []),
-  ], [vatReg, orders, hasVegData])
+    ...(hasVegData ? [{ key: 'veg', label: hasEggData ? 'Veg / Egg / Non-Veg' : 'Veg / Non-Veg' }] : []),
+  ], [vatReg, orders, hasVegData, hasEggData])
   useEffect(() => {
     if (!productAxes.some(a => a.key === productAxis)) setProductAxis('station')
   }, [productAxes, productAxis])
@@ -856,16 +872,23 @@ export default function SalesReport() {
     if (productAxis === 'vat') return (i.vat_rate ?? 0) > 0 ? 'Taxable' : 'Non-Taxable'
     if (productAxis === 'veg') {
       const v = vegById[i.recipe_id]
-      return v === true ? 'Veg' : v === false ? 'Non-Veg' : 'Not set'
+      if (v === true) return 'Veg'
+      if (v === false) return eggIds.has(i.recipe_id) ? 'Egg' : 'Non-Veg'
+      return 'Not set'
     }
     // Matches sendTicket()'s own rule in PosOrders.jsx exactly, default category included, so
     // the Bar figure here is the same set of lines that printed on BOT tickets.
     return botCategories.has(i.category || 'Other') ? 'Bar (BOT)' : 'Kitchen (KOT)'
-  }, [productAxis, vegById, botCategories])
+  }, [productAxis, vegById, eggIds, botCategories])
 
-  const productTypeRows = useMemo(
-    () => groupedRowsOf(productTypeKeyOf, productTypeKeyOf),
-    [groupedRowsOf, productTypeKeyOf])
+  // The veg axis reads in its own order (Veg, Egg, Non-Veg, Not set), not by takings; the other
+  // two keep the largest first. The Excel sheet is built from these rows, so it follows.
+  const productTypeRows = useMemo(() => {
+    const rows = groupedRowsOf(productTypeKeyOf, productTypeKeyOf)
+    if (productAxis !== 'veg') return rows
+    const at = k => { const n = VEG_AXIS_ORDER.indexOf(k); return n < 0 ? VEG_AXIS_ORDER.length : n }
+    return [...rows].sort((a, b) => at(a.key) - at(b.key))
+  }, [groupedRowsOf, productTypeKeyOf, productAxis])
 
   const customerRows = useMemo(() => {
     const grouped = {}
@@ -1437,7 +1460,7 @@ export default function SalesReport() {
             footer={hourlyTotalNet > 0 && (
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(hourlyTotalNet)}</strong>
-                {hourlyPeak && hourlyPeak.net > 0 && <> · peak hour <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{hourLabel(hourlyPeak.hour)}</span> ({fmtNpr(hourlyPeak.net)})</>}
+                {hourlyPeak && hourlyPeak.net > 0 && <> · peak hour <span style={{ color: 'var(--theme-text1)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{hourLabel(hourlyPeak.hour)}</span> ({fmtNpr(hourlyPeak.net)})</>}
               </div>
             )}
             renderChart={h => (
@@ -1638,7 +1661,7 @@ export default function SalesReport() {
                         {c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`}
                       </button>
                     </td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
                     <td>{c.tableName || 'Takeaway'}</td>
                     <td>{c.itemNames}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(c.foodCost)}</td>
@@ -2007,6 +2030,8 @@ export default function SalesReport() {
                 ? `Bar (BOT) is every line in a bar category (${[...botCategories].join(', ')}) — the same split the tills print BOT tickets from, set in POS Setup → Ticket Routing. Everything else is Kitchen (KOT).`
                 : productAxis === 'vat'
                 ? 'Taxable is every line billed at a VAT rate above zero, Non-Taxable everything else — as billed, not as the item is configured today.'
+                : hasEggData
+                ? 'Veg, Egg and Non-Veg come from the flags on each recipe. Items with the flag unset are shown separately rather than assumed.'
                 : 'Veg / Non-Veg comes from the flag on each recipe. Items with the flag unset are shown separately rather than assumed.'}
             </p>
           </div>

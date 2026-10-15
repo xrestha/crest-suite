@@ -7,6 +7,7 @@ import {
 } from '../../../shared/optionPricing'
 import { tidyName } from './guestMenuHelpers'
 import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
+import { DietLabel, dietOfDish } from './DietMark'
 
 // Crest Customization on the QR menu (S758 stage 6): the sheet a guest picks a dish's choices in.
 // Same rules as the till's OptionPickerModal — describeSelection is the twin of the server's pricer
@@ -48,7 +49,8 @@ import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
 // Keep choosing focused (LeaveConfirm). Nothing picked, it closes as before.
 //
 // S844: each group's chips are GuestOptionGroup and the veg / egg mark is DietMark, one copy each,
-// shared with the combo sheet.
+// shared with the combo sheet. S846: the dish's own mark sits under its name with the word spelled
+// out ("Contains egg"), when the restaurant has stated it.
 
 const sameIds = (a, b) => {
   if (a.length !== b.length) return false
@@ -64,6 +66,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
   const groupRefs = useRef({})
   const vat = vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0
   const dishName = tidyName(item.name)
+  const diet = dietOfDish(item.is_veg, item.is_egg)
   const base = parseFloat(item.selling_price) || 0
 
   const attachByGroup = useMemo(() => Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment])), [dishGroups])
@@ -187,6 +190,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
         <div className="gm-sheet-head-row">
           <div style={{ minWidth: 0 }}>
             <h2 className="gm-sheet-title">{dishName}</h2>
+            {diet && <p className="gm-sheet-diet"><DietLabel diet={diet} long /></p>}
             {item.description && <p className="gm-sheet-sub">{item.description}</p>}
           </div>
           <button type="button" className="btn btn-ghost btn-icon gm-close" onClick={onClose} aria-label="Close" title="Close">

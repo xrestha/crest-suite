@@ -86,7 +86,7 @@ export function pickChoices(pick, ctx) {
   return { incl: inclFromEx(desc.delta, ctx?.vatOf ? ctx.vatOf(pick.recipe_id) : 0), summary: desc.summary }
 }
 
-/** The menu entry a pick names, or undefined: `{ recipe_id, name, is_veg, extra_price, … }`. */
+/** The menu entry a pick names, or undefined: `{ recipe_id, name, is_veg, is_egg, extra_price, … }`. */
 function pickedItem(picks, pick) {
   return picks.find(g => g.id === pick.group_id)?.items.find(it => it.recipe_id === pick.recipe_id)
 }
@@ -168,6 +168,7 @@ export function comboCartWithout(cart, sentLines) {
  */
 export function comboMatches(combo, { query = '', vegOnly = false, excludedAllergens = [], allergensOf = () => [] } = {}) {
   const picks = comboPicksOf(combo)
+  // Egg is not vegetarian: an egg dish has is_veg false, so it never satisfies a pick here.
   if (vegOnly && !picks.every(g => g.items.some(it => it.is_veg === true))) return false
   if (excludedAllergens.length > 0
     && !picks.every(g => g.items.some(it => !(allergensOf(it.recipe_id) || []).some(a => excludedAllergens.includes(a))))) return false
@@ -376,7 +377,7 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
                     <>
                       <span className="gm-review-pick">
                         <span style={{ minWidth: 0 }}>
-                          {dietOfDish(it.is_veg) && <><DietMark diet={dietOfDish(it.is_veg)} />{' '}</>}
+                          {dietOfDish(it.is_veg, it.is_egg) && <><DietMark diet={dietOfDish(it.is_veg, it.is_egg)} />{' '}</>}
                           {tidyName(it.name)}
                         </span>
                         <span className="gm-review-price">{extra > 0 ? `+${npr(extra)}` : 'Included'}</span>
@@ -469,7 +470,7 @@ function PickStep({ pick, chosenId, optionIds, dishGroups, catalog, vat, tried, 
           </div>
           <p className="gm-review-pick">
             <span style={{ minWidth: 0 }}>
-              {dietOfDish(pick.items[0].is_veg) && <><DietMark diet={dietOfDish(pick.items[0].is_veg)} />{' '}</>}
+              {dietOfDish(pick.items[0].is_veg, pick.items[0].is_egg) && <><DietMark diet={dietOfDish(pick.items[0].is_veg, pick.items[0].is_egg)} />{' '}</>}
               {tidyName(pick.items[0].name)}
             </span>
             {Number(pick.items[0].extra_price) > 0 && <span className="gm-review-price">+{npr(Number(pick.items[0].extra_price))}</span>}
@@ -493,7 +494,7 @@ function PickStep({ pick, chosenId, optionIds, dishGroups, catalog, vat, tried, 
             {pick.items.map((it, i) => {
               const on = it.recipe_id === chosenId
               const extra = Number(it.extra_price) || 0
-              const diet = dietOfDish(it.is_veg)
+              const diet = dietOfDish(it.is_veg, it.is_egg)
               return (
                 <button
                   key={it.recipe_id} type="button" role="radio" aria-checked={on}

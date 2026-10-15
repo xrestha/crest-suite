@@ -22,7 +22,7 @@ import { outletHasIms } from '../orders/posImsWaiting'
 import { forgoneMenuValue } from '../reports/salesReportMath'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
-import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
+import { nepalTime, nepalDateAd, nepalBsLong, nepalHour } from '../../../shared/nepalTime'
 import {
   shiftDates, historyRowLabel, asOfLabel, isNoAnswer, openUnknownText, closeUnknownText,
   cashUnknownText, detailSuffix, slipNotPrintedText, shiftReadFailLead, SHIFT_ALREADY_CLOSED_TEXT, SHIFT_ALREADY_OPEN_TEXT,
@@ -58,7 +58,9 @@ function sumDenoms(counts) {
 // Suggests a generic shift label from the current time — Morning/Afternoon/Evening/Night,
 // matching standard F&B daypart terms. Pre-fills the Label field on Open Shift; fully editable.
 function suggestShiftLabel() {
-  const h = new Date().getHours()
+  // Nepal's clock, not the device's: a till or an operator in another timezone still gets the
+  // daypart the outlet is actually in.
+  const h = nepalHour(new Date())
   if (h >= 4 && h < 11) return 'Morning'
   if (h >= 11 && h < 16) return 'Afternoon'
   if (h >= 16 && h < 21) return 'Evening'
@@ -409,7 +411,7 @@ function ReportBody({ report, opening, closing, variance }) {
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Comp Food Cost</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(report.compTotal)}</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(report.compTotal)}</div>
         </div>
       </div>
 
@@ -1015,7 +1017,7 @@ export default function PosShifts() {
             <>
               <div className="card" style={{ padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <span className="badge-yellow" style={{ fontSize: 11, marginRight: 10 }}>OPEN</span>
+                  <span className="badge-gray" style={{ fontSize: 11, marginRight: 10 }}>◷ OPEN</span>
                   <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{openShift.label || 'Shift'}</span>
                   <span style={{ fontSize: 12, color: 'var(--theme-text3)', marginLeft: 10 }}>
                     Opened by {staffNames[openShift.opened_by] || '—'} · {fmtSpan(openShift.opened_at)} ago
@@ -1262,6 +1264,27 @@ export default function PosShifts() {
                 the shift was closed and the slip printed, which is too late to recount. */}
             {modal === 'close' && currentReport && (() => {
               const counted = sumDenoms(denomCounts)
+              // S846: before a single box is filled in, nothing has been counted, so there is no
+              // variance to judge yet. The dialog used to open on a red "▲ Short by" the whole
+              // Expected Cash. A typed 0 is '0', so it counts as counting.
+              const nothingCounted = DENOMINATIONS.every(d => denomCounts[d] === '' || denomCounts[d] == null)
+              if (nothingCounted) {
+                return (
+                  <div style={{
+                    marginTop: 14, padding: '10px 14px', borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--theme-border)', background: 'var(--theme-card)',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span style={{ color: 'var(--theme-text2)' }}>Counted</span>
+                      <strong style={{ color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(counted)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 4 }}>
+                      <span style={{ color: 'var(--theme-text2)' }}>Still to count</span>
+                      <strong style={{ color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(expectedCash)}</strong>
+                    </div>
+                  </div>
+                )
+              }
               const diff = counted - expectedCash
               const over = diff > 0
               const signal = varianceSignal(diff)

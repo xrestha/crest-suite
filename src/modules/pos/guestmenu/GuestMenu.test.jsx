@@ -329,6 +329,9 @@ describe('dish photos load the thumbnail when there is one (S842)', () => {
   })
 })
 
+// The key under "Vegetarian dishes only" (S846): a line of mark + word, the marks themselves unnamed.
+const dietKey = () => screen.getByText(/Marks on this menu/).closest('p') // eslint-disable-line testing-library/no-node-access
+
 describe('the filter sheet counts what it will show (S844)', () => {
   const VEG = { recipe_id: 'r-veg', name: 'Veg Momo', is_veg: true }
   const MEAT = { recipe_id: 'r-meat', name: 'Chicken Momo', is_veg: false }
@@ -350,6 +353,8 @@ describe('the filter sheet counts what it will show (S844)', () => {
     expect(screen.getAllByRole('img', { name: 'Non-vegetarian' })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
     expect(screen.getByRole('button', { name: 'Show 3 dishes and 1 combo' })).toBeTruthy()
+    // S846: the key beside the filter lists only the marks this menu uses (no egg dish here).
+    expect(dietKey().textContent).toBe('Marks on this menu: VegNon-veg')
     // Vegetarian only hides the chicken momo and the combo whose one pick is chicken.
     fireEvent.click(screen.getByRole('checkbox', { name: 'Vegetarian dishes only' }))
     expect(screen.getByRole('button', { name: 'Show 2 dishes' })).toBeTruthy()
@@ -361,6 +366,46 @@ describe('the filter sheet counts what it will show (S844)', () => {
     expect(screen.getByRole('button', { name: 'Show 1 dish and 1 combo' })).toBeTruthy()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Vegetarian dishes only' }))
     expect(screen.getByRole('button', { name: 'No dish matches · Close' })).toBeTruthy()
+  })
+})
+
+describe('egg is its own mark, and is not vegetarian (S846)', () => {
+  const VEG = { recipe_id: 'r-veg', name: 'Veg Momo', is_veg: true }
+  const MEAT = { recipe_id: 'r-meat', name: 'Chicken Momo', is_veg: false, is_egg: false }
+  const EGG = { recipe_id: 'r-egg', name: 'Egg Fried Rice', is_veg: false, is_egg: true }
+
+  it('marks the egg dish, keys all three marks, and hides egg under Vegetarian only', async () => {
+    mockAnswers.get_guest_menu = { data: [VEG, MEAT, EGG].map(d => ({ ...ROWS[0], ...d })), error: null }
+    renderMenu()
+    expect(await screen.findAllByRole('img', { name: 'Contains egg' })).toHaveLength(1)
+    expect(screen.getAllByRole('img', { name: 'Vegetarian' })).toHaveLength(1)
+    expect(screen.getAllByRole('img', { name: 'Non-vegetarian' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
+    expect(dietKey().textContent).toBe('Marks on this menu: VegEggNon-veg')
+    // The key's marks sit beside their words, so they add no second name.
+    expect(within(dietKey()).queryByRole('img')).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Vegetarian dishes only' }))
+    expect(screen.getByRole('button', { name: 'Show 1 dish' })).toBeTruthy()
+  })
+
+  it('a choice marked egg puts egg in the key even when no dish is', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...BOWL, is_veg: true }], error: null }
+    mockAnswers.get_guest_menu_options = {
+      data: { ...BOWL_OPTIONS, options: BOWL_OPTIONS.options.map(o => (o.id === 'o-nuts' ? { ...o, diet: 'egg' } : o)) },
+      error: null,
+    }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Filters' }))
+    expect(dietKey().textContent).toBe('Marks on this menu: VegEgg')
+  })
+
+  it('the dish sheet names the diet in full under the dish name', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...BOWL, is_veg: false, is_egg: true }], error: null }
+    mockAnswers.get_guest_menu_options = { data: BOWL_OPTIONS, error: null }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    const sheet = screen.getByRole('dialog', { name: 'Acai Bowl' })
+    expect(within(sheet).getByText('Contains egg')).toBeInTheDocument()
   })
 })
 

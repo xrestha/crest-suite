@@ -409,7 +409,8 @@ export default function KotLog() {
           'Table': r.table_name || 'Takeaway',
           'Order#': r.order_no,
           'Station': r.station,
-          'Stage': kotStage(r).label,
+          // S846: the on-screen ◷ mark stays on screen; a spreadsheet cell reads the plain word.
+          'Stage': kotStage(r).label.replace(/^◷\s*/, ''),
           'Items': (r.items || []).map(kotItemText).join(', '),
           'Sent By': staffNames[r.sent_by] || '—',
           'Est. Prep (min)': r.estimated_prep_minutes ?? '',
@@ -562,7 +563,7 @@ export default function KotLog() {
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Date/Time (BS)</th><th>Table</th><th>Order#</th><th>Station</th><th><Tip text="Where the ticket got to on the Kitchen Display: Sent, Started, Ready, then Served once the floor has taken it to the table. Cleared: the kitchen took it off the board because every dish on it was taken off the order. Voided: the bill was voided, which stops its tickets still in the kitchen." width={280}>Stage</Tip></th><th>Items</th><th>Sent By</th><th style={{ textAlign: 'right' }}><Tip text="Estimated prep time (entered by kitchen/bar staff on Start) vs. actual time from Start to Ready. Red when actual ran over the estimate." width={280}>Prep (Est/Actual)</Tip></th></tr>
+              <tr><th>Date/Time (BS)</th><th>Table</th><th>Order#</th><th>Station</th><th><Tip text="Where the ticket got to on the Kitchen Display: Sent, Started, Ready, then Served once the floor has taken it to the table. Cleared: the kitchen took it off the board because every dish on it was taken off the order. Voided: the bill was voided, which stops its tickets still in the kitchen." width={280}>Stage</Tip></th><th>Items</th><th>Sent By</th><th style={{ textAlign: 'right' }}><Tip text="Estimated prep time (10 minutes when the kitchen taps Start, or the time they chose under Other time) vs. actual time from Start to Ready. Red when actual ran over the estimate." width={280}>Prep (Est/Actual)</Tip></th></tr>
             </thead>
             <tbody>
               {shownLogRows.map(r => {

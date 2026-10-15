@@ -525,7 +525,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
                 </tbody>
               </table>
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums', marginBottom: 14 }}>
               Net amount to credit: {fmtNpr(amounts.net)}
             </div>
             {nothingToCredit && (

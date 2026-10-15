@@ -84,7 +84,8 @@
 }
 
 .ps-status--ok .ps-dot { background: var(--theme-green); }
-.ps-status--busy .ps-dot { background: var(--theme-accent); }
+/* Busy is a state in progress, not a verdict and not something to press: ink, not the accent (S846). */
+.ps-status--busy .ps-dot { background: var(--theme-text2); }
 .ps-status--warn .ps-dot { background: var(--theme-amber); }
 
 .ps-status__title {

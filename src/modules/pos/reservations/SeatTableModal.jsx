@@ -115,7 +115,7 @@ export default function SeatTableModal({ reservation, tables: pageTables, openTa
                   title={busy ? `${t.name} has a running order` : `Seat at ${t.name}`}
                   style={{
                     justifyContent: 'space-between', gap: 8, padding: '10px 12px',
-                    ...(wasHeld ? { borderColor: 'var(--theme-accent)' } : {}),
+                    ...(wasHeld ? { borderColor: 'var(--theme-text2)' } : {}),
                   }}
                 >
                   <span style={{ fontWeight: 700 }}>{t.name}</span>

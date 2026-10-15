@@ -8,7 +8,9 @@ import { fmtNpr, btnSm } from './posOrdersConstants'
 
 /**
  * The Combos tab of the till menu: one tile per combo, its name and price (what the guest pays), and
- * how many of it are on this order.
+ * how many of it are on this order. S846: the accent is only for what is pressed or current, so the
+ * price is ink and a combo on the order is told by an ink count badge and a text2 border, as on the
+ * dish tiles (MenuGrid). A combo tile carries no food mark: its dishes have their own.
  */
 export function ComboTiles({ combos, countOf, onPick }) {
   return (
@@ -20,19 +22,20 @@ export function ComboTiles({ combos, countOf, onPick }) {
           <button key={c.id} type="button" className="till-tile" onClick={() => onPick(c)}
             aria-label={`${c.name}, ${fmtNpr(c.guest_price)}${n ? `, ${n} on this order` : ''}`}
             style={{
-              background: n ? 'color-mix(in srgb, var(--theme-accent) 12%, var(--theme-card))' : 'var(--theme-card)',
-              border: `1px solid ${n ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+              background: 'var(--theme-card)',
+              border: `1px solid ${n ? 'var(--theme-text2)' : 'var(--theme-border)'}`,
               borderRadius: 'var(--radius-md)', padding: '12px 10px', cursor: 'pointer', textAlign: 'left',
               display: 'flex', flexDirection: 'column', gap: 6, position: 'relative', transition: 'border-color 0.12s',
             }}>
             {n > 0 && (
               <span aria-hidden="true" style={{
-                position: 'absolute', top: 6, right: 8, background: 'var(--theme-accent)', color: 'var(--theme-accent-text)',
+                position: 'absolute', top: 6, right: 8, background: 'var(--theme-text1)', color: 'var(--theme-card)',
                 borderRadius: 'var(--radius-full)', fontSize: 11, fontWeight: 700, padding: '1px 7px',
+                fontVariantNumeric: 'tabular-nums',
               }}>{n}</span>
             )}
             <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.3, paddingRight: n ? 28 : 0 }}>{c.name}</span>
-            <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmtNpr(c.guest_price)}</span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text1)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(c.guest_price)}</span>
             <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>
               {setMeal ? 'Set meal' : `Pick ${c.groups.filter(g => g.items.length > 1).length === 1 ? 'a dish' : 'dishes'}`}
             </span>

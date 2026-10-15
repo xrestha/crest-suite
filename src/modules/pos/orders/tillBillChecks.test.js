@@ -96,9 +96,9 @@ describe('closeStartRefusal — settings first, then the empty cart', () => {
     }
   })
 
-  test('an emptied cart: a login with Allow Void is sent to the Void tab', () => {
+  test('an emptied cart: a login with Allow Void is sent to Void the bill', () => {
     const r = closeStartRefusal({ ...base, itemCount: 0, canVoid: true, closeType: 'paid' })
-    expect(r.text).toBe('Nothing is on this bill — void it from the Void tab, or add the items back.')
+    expect(r.text).toBe('Nothing is on this bill — void it under Other ways to close, or add the items back.')
   })
 
   test('an emptied cart can still be voided: the stored lines are the record of what was voided', () => {

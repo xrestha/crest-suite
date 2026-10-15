@@ -88,3 +88,19 @@ test('dishes with no selling price are counted as left off, and an all-unpriced 
   expect(await screen.findByText(/Guests see no menu at all/)).toBeInTheDocument()
   expect(screen.getByText(/2 dishes are switched on for POS but have no selling price/)).toBeInTheDocument()
 })
+
+test('the coverage line counts an egg dish as marked, and says so in words (S846)', async () => {
+  mockData = {
+    clients: { name: 'Casa Acai', pos_enabled: true },
+    pos_tables: [{ id: 't1', name: 'T1', status: 'available' }],
+    // Veg, egg (is_veg false, is_egg true) and one with no mark: two of three are marked.
+    recipes: [
+      { id: 'r1', selling_price: 300, is_veg: true },
+      { id: 'r2', selling_price: 250, is_veg: false, is_egg: true },
+      { id: 'r3', selling_price: 200, is_veg: null },
+    ],
+  }
+  renderPage()
+  expect(await screen.findByText(/This menu is mostly names and prices/)).toBeInTheDocument()
+  expect(screen.getByText(/2 are marked veg, egg or non-veg/)).toBeInTheDocument()
+})

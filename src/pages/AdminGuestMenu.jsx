@@ -107,6 +107,8 @@ export default function AdminGuestMenu() {
           unpriced: (recipes || []).length - served.length,
           images: served.filter(r => r.image_url).length,
           descriptions: served.filter(r => r.description && r.description.trim()).length,
+          // Marked = `is_veg` stated: an egg dish stores is_veg false (S846), so it counts here
+          // without naming `is_egg`, which a database before that column would refuse.
           vegMarks: served.filter(r => r.is_veg != null).length,
         })
       }
@@ -287,7 +289,7 @@ export default function AdminGuestMenu() {
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-text1)' }}>This menu is mostly names and prices.</strong>{' '}
           {coverage.images} of {coverage.total} dishes on it have a photo, {coverage.descriptions} have a description
-          {coverage.vegMarks < coverage.total ? `, ${coverage.vegMarks} are marked veg or non-veg` : ''}.
+          {coverage.vegMarks < coverage.total ? `, ${coverage.vegMarks} are marked veg, egg or non-veg` : ''}.
           A photo is the single largest lever on a QR menu, and a description is the only way a
           visitor knows what a dish is — both are fields on the recipe.{' '}
           <Link to="/recipes" style={linkStyle}>Edit dishes in Recipes →</Link>

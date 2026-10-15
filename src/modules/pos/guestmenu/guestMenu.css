@@ -273,29 +273,30 @@
   white-space: nowrap;
 }
 
-/* Veg / non-veg / egg: the market's labelling symbol, an outlined square with a filled dot. The dot
-   is round on purpose — see VegMark in GuestMenu.jsx and DESIGN.md → Shapes. */
-.guest-menu .gm-diet {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 12px;
-  height: 12px;
-  border: 1.5px solid currentColor;
-  box-sizing: border-box;
-  vertical-align: -1px;
+/* The veg / egg / non-veg mark is DietMark.jsx, styled by dietMark.css (unscoped, S846: the till
+   draws it too). Before a combo pick's name a space follows the mark, so 2px; in a choice's meta
+   line the allergens follow straight on, so 4px. */
+.guest-menu .gm-review-pick .diet-mark {
   margin-right: 2px;
 }
-.guest-menu .gm-diet > span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+.guest-menu .gm-option-meta .diet-mark {
+  margin-right: 4px;
 }
-.guest-menu .gm-diet--veg    { color: var(--theme-green); }
-.guest-menu .gm-diet--nonveg { color: var(--theme-red); }
-.guest-menu .gm-diet--egg    { color: var(--theme-amber); }
+/* The key beside "Vegetarian dishes only" (S846): which marks this menu uses, each with its word. */
+.guest-menu .gm-diet-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--theme-text2);
+}
+/* The dish sheet's diet line under the dish name (S846): the mark with its long word. */
+.guest-menu .gm-sheet-diet {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--theme-text2);
+}
 
 /* Quantity stepper: one outlined control, square, 32px on a mouse and 44px under a thumb. */
 .guest-menu .gm-stepper {

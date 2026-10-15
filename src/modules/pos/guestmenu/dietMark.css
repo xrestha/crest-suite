@@ -1,0 +1,40 @@
+/* The veg / egg / non-veg food mark (DietMark.jsx). Unscoped on purpose: the guest menu, the till's
+   menu tiles and the till's choice window all draw it. The shape inside the square carries the
+   meaning (dot, triangle, E), so the colour is a second cue, never the only one. These colours are
+   FILLS of a shape, so they take the base signal tokens, not the *-text ones.
+
+   The veg dot is the one round shape in the product: a food-labelling mark whose shape is its
+   meaning (DESIGN.md → Shapes). The square stays square. */
+.diet-mark {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  line-height: 0;
+  vertical-align: -1px;
+}
+.diet-mark svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+.diet-mark--veg    { color: var(--theme-green); }
+.diet-mark--nonveg { color: var(--theme-red); }
+.diet-mark--egg    { color: var(--theme-amber); }
+
+/* A mark leading a name in running text (the till's menu tile). */
+.diet-mark--lead { margin-right: 4px; }
+
+/* The mark with its word beside it (DietLabel). The word keeps the surrounding text's size and colour. */
+.diet-label {
+  white-space: nowrap;
+}
+.diet-label .diet-mark {
+  margin-right: 4px;
+}
+
+/* A forced-colours mode (Windows High Contrast) drops the signal colours; the shape still reads, in
+   the system's text colour. Last, so it beats the modifiers above. */
+@media (forced-colors: active) {
+  .diet-mark { color: CanvasText; }
+}

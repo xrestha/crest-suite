@@ -70,7 +70,7 @@ export function closeStartRefusal({ closeType, settingsLoaded, settingsFailed, i
   if (!settingsLoaded) return { text: tillSettingsBlockText(settingsFailed), label: 'Till settings not loaded yet' }
   if (itemCount > 0) return null
   return canVoid
-    ? { text: 'Nothing is on this bill — void it from the Void tab, or add the items back.', label: 'Nothing on this bill — void it instead' }
+    ? { text: 'Nothing is on this bill — void it under Other ways to close, or add the items back.', label: 'Nothing on this bill — void it instead' }
     : { text: 'Nothing is on this bill. Ask someone who can void bills to void it, or add the items back.', label: 'Nothing on this bill — ask someone with Void' }
 }
 

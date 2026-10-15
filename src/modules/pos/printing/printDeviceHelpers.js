@@ -84,8 +84,9 @@ export function portProblem(input) {
 // ── Stations and kinds ──────────────────────────────────────────────────────────────────────────
 export const STATIONS = ['KOT', 'BOT']
 export const STATION_NAME = { KOT: 'Kitchen', BOT: 'Bar' }
-// KOT vs BOT is a category, not a status (pos-billing.md, S613): KOT purple, BOT the accent tag.
-export const STATION_BADGE = { KOT: 'badge-purple', BOT: 'badge-yellow' }
+// KOT vs BOT is a category, not a status (pos-billing.md, S613): KOT purple, BOT grey (S846; it was
+// the accent tag until POS took the accent off every category). Same values as posSignals.js.
+export const STATION_BADGE = { KOT: 'badge-purple', BOT: 'badge-gray' }
 export const KIND_NAME = { page: 'Print station page', helper: 'Print helper' }
 
 /** The stations a device covers, in KOT-then-BOT order, unknown values dropped. */

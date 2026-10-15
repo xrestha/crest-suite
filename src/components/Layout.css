@@ -3421,6 +3421,91 @@ textarea::placeholder {
   min-width: 0;
 }
 
+/* The payment window's order since S846: amount → method → cash received or the QR → Confirm, then
+   one "Adjust this bill" fold, then the two closes that are not a payment. The method row's label
+   carries the Split switch at its right edge, so splitting is a word beside the methods rather than
+   a second row of method-shaped buttons above them. */
+.pay-method-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+/* The fold. Its folded line names what is already on the bill (a discount, a member, points), so an
+   adjustment can never be applied and then hidden; with nothing applied it names what is inside. */
+.pay-adjust {
+  border-top: 1px solid var(--theme-border-lt);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.pay-adjust__toggle,
+.pay-adjust__sub {
+  -webkit-appearance: none;
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--theme-text1);
+}
+
+.pay-adjust__sub {
+  display: block;
+  font-size: 11px;
+  color: var(--theme-text3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.pay-adjust__toggle:focus-visible,
+.pay-adjust__sub:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+.pay-adjust__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pay-adjust__summary {
+  font-size: 12px;
+  color: var(--theme-text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pay-adjust__summary--empty {
+  color: var(--theme-text3);
+}
+
+.pay-adjust__body {
+  padding: 10px 0 4px;
+}
+
+/* Void and Complimentary, last and quiet. Their own screens keep their red and amber close buttons. */
+.pay-other-ways {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--theme-border-lt);
+  margin-top: 16px;
+  padding-top: 12px;
+  font-size: 12px;
+  color: var(--theme-text3);
+}
+
 /* Red tint rather than a solid red fill (DESIGN.md's Danger-button spec): --theme-red ranges from
    light to dark across the presets, so no single foreground contrasts on a red fill in all ten. The
    text takes --theme-red-text, which is tuned per preset. Selected Credit adds a 2px red edge, so it
@@ -3445,6 +3530,47 @@ textarea::placeholder {
 .till-tile:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+/* A floor or takeaway tile (S846). It used to be a role="button" card holding up to seven focusable
+   Tip triggers: interactive content inside a button role, six tab stops a tile, and a tap on a chip
+   that both opened its tip and bubbled up to open the table. Now the table's NAME is the tile's one
+   real <button>, and its ::after is stretched over the whole card, so a tap anywhere still opens the
+   table, the tile is one tab stop, and the chips are plain words the button reads out
+   (aria-describedby). The ring is drawn INSET on the ::after because the card clips its overflow. */
+.floor-tile {
+  position: relative;
+}
+
+.floor-tile__open {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--theme-text1);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.floor-tile__open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.floor-tile__open:focus-visible {
+  outline: none;
+}
+
+.floor-tile__open:focus-visible::after {
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline), inset 0 0 0 5px var(--theme-focus-ring);
 }
 
 .ticket-btn {

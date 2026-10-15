@@ -515,8 +515,8 @@ export default function CoversReport() {
         </div>
       ) : tab === 'overview' ? (
         <>
-          {/* KPI strip — the shared stat-grid/stat-card grammar (S613); `gold` is the shell's
-              accent-as-text class, same accent-ink the hand-rolled tile used. */}
+          {/* KPI strip — the shared stat-grid/stat-card grammar (S613). Every figure is ink
+              (S846): Revenue / Cover wore the accent (`gold`) until POS took it off figures. */}
           <div className="stat-grid" style={{ marginBottom: 24 }}>
             <div className="stat-card">
               <div className="stat-label">
@@ -535,7 +535,7 @@ export default function CoversReport() {
               <div className="stat-label">
                 <Tip text="Dine-in net sales ÷ covers served — the standard restaurant 'average check per guest' metric. Net sales are after credit notes issued in this range against dine-in bills, the same way the Sales Report's Net is." width={290}>Revenue / Cover</Tip>
               </div>
-              <div className="stat-value gold">{fmtNpr(totals.revPerCover)}</div>
+              <div className="stat-value">{fmtNpr(totals.revPerCover)}</div>
               {totals.returns > 0 && <div className="stat-sub">after {totals.returns} credit note{totals.returns === 1 ? '' : 's'}</div>}
             </div>
             <div className="stat-card">
@@ -593,7 +593,7 @@ export default function CoversReport() {
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{trendTotalCovers.toLocaleString('en-IN')}</strong> covers
                 {' '}· avg <strong style={{ color: 'var(--theme-text1)' }}>{trendAvgPerDay.toFixed(1)}</strong>/day
-                {trendBusiestDay && <> · busiest <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{formatBsDay(trendBusiestDay.day, trendBusiestDay.month)}</span> ({trendBusiestDay.covers} covers)</>}
+                {trendBusiestDay && <> · busiest <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{formatBsDay(trendBusiestDay.day, trendBusiestDay.month)}</span> ({trendBusiestDay.covers} covers)</>}
               </div>
             )}
             renderChart={h => (
@@ -769,7 +769,7 @@ export default function CoversReport() {
             footer={peakTotalCovers > 0 && (
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{peakTotalCovers.toLocaleString('en-IN')}</strong> covers
-                {peakBusiestHour && peakBusiestHour.covers > 0 && <> · peak hour <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{hourLabel(peakBusiestHour.hour)}</span> ({peakBusiestHour.covers} covers)</>}
+                {peakBusiestHour && peakBusiestHour.covers > 0 && <> · peak hour <span style={{ color: 'var(--theme-text1)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{hourLabel(peakBusiestHour.hour)}</span> ({peakBusiestHour.covers} covers)</>}
               </div>
             )}
             renderChart={h => (

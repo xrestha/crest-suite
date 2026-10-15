@@ -6,7 +6,7 @@
 
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
-import EstimateTimeModal from './EstimateTimeModal'
+import EstimateTimeModal, { DEFAULT_START_MINUTES } from './EstimateTimeModal'
 
 const ticket = {
   id: 't1', order_no: 12, table_name: 'Table 5', pos_orders: { table_name: 'Table 5' },
@@ -42,4 +42,25 @@ test('typed minutes still confirm the ticket', () => {
   fireEvent.click(screen.getByRole('button', { name: '8' }))
   fireEvent.click(screen.getByRole('button', { name: /Confirm & Start/ }))
   expect(started).toBe(8)
+})
+
+// S846: the popup is now behind a card's "Other time"; Start itself takes the default in one tap.
+test('a preset still starts the ticket in one tap', () => {
+  let started = null
+  renderPad(m => { started = m })
+  fireEvent.click(screen.getByRole('button', { name: 'Start · 15m' }))
+  expect(started).toBe(15)
+})
+
+test('the default one-tap estimate is one of the presets, ten minutes', () => {
+  expect(DEFAULT_START_MINUTES).toBe(10)
+  renderPad()
+  expect(screen.getByRole('button', { name: `Start · ${DEFAULT_START_MINUTES}m` })).toBeTruthy()
+})
+
+test('every keypad key takes the till touch floor and focus ring', () => {
+  renderPad()
+  for (const name of ['1', '0', '9', 'Clear minutes', 'Delete last digit']) {
+    expect(screen.getByRole('button', { name })).toHaveClass('till-hit')
+  }
 })

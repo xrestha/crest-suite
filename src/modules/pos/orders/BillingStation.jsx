@@ -90,7 +90,8 @@ export default function BillingStation({
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                   {rows.length} open bill{rows.length !== 1 ? 's' : ''}
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 2 }}>
+                {/* S846 (owner decision, the accent pass): a figure is ink, never the accent. */}
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
                   {fmtNpr(grandTotal)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
@@ -189,12 +190,14 @@ export default function BillingStation({
                   </div>
                 </div>
 
-                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                   {fmtNpr(r.total)}
                 </div>
 
+                {/* S846: ghost, not a filled primary. One on every row, the fill marked nothing. */}
                 <button
-                  className="btn btn-primary"
+                  type="button"
+                  className="btn btn-ghost till-hit--row"
                   style={{ minWidth: 120, justifyContent: 'center', flexShrink: 0 }}
                   disabled={!isOnline || r.offlinePending}
                   onClick={() => onBill(r)}

@@ -396,8 +396,8 @@ export {
 // sent_at, started_at, ready_at, estimated_prep_minutes); `now` is a live-ticking epoch ms so the
 // caller re-renders on a timer without this function needing to know about React.
 //
-// Colours follow ../posSignals.js: a dish cooking to plan is brass (working, nothing to do), not
-// amber — amber here used to mean the same thing as "you have not fired this yet", two lines
+// Colours follow ../posSignals.js: a dish cooking to plan is ink with ◷ (working, nothing to do;
+// S846, it was brass), not amber — amber here used to mean the same thing as "you have not fired this yet", two lines
 // apart on the same cart row. Amber and red are kept for the one case that needs a person: past
 // the kitchen's own estimate.
 export function kotTimerLabel(ticket, now) {
@@ -415,9 +415,10 @@ export function kotTimerLabel(ticket, now) {
     if (ticket.started_at && ticket.estimated_prep_minutes) {
       const remainingMin = Math.round((new Date(ticket.started_at).getTime() + ticket.estimated_prep_minutes * 60000 - now) / 60000)
       const over = remainingMin < 0
-      return { text: over ? `${Math.abs(remainingMin)}m over` : `~${remainingMin}m left`, color: over ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)' }
+      // S846: in progress is a plain state in ink (◷ is its mark), not the accent; only "over" is a verdict.
+      return { text: over ? `${Math.abs(remainingMin)}m over` : `◷ ~${remainingMin}m left`, color: over ? 'var(--theme-red-text)' : 'var(--theme-text2)' }
     }
-    return { text: 'Cooking', color: 'var(--theme-accent-ink)' }
+    return { text: '◷ Cooking', color: 'var(--theme-text2)' }
   }
   // 'new' — sent but not yet started
   const sentMin = Math.max(0, Math.round((now - new Date(ticket.sent_at).getTime()) / 60000))

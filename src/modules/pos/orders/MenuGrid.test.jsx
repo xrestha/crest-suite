@@ -1,11 +1,12 @@
 // The till's memoised menu grid (S842): what it shows, and when it may skip a render.
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import MenuGrid, { filterMenu, sameTiles } from './MenuGrid'
 
 const MENU = [
-  { id: 'r1', name: 'Veg Momo', category: 'Momo', recipe_code: 'MOM-01', selling_price: 200, vat_rate: 0 },
-  { id: 'r2', name: 'Chicken Momo', category: 'Momo', recipe_code: 'MOM-02', selling_price: 250, vat_rate: 0 },
+  { id: 'r1', name: 'Veg Momo', category: 'Momo', recipe_code: 'MOM-01', selling_price: 200, vat_rate: 0, is_veg: true, is_egg: false },
+  { id: 'r2', name: 'Chicken Momo', category: 'Momo', recipe_code: 'MOM-02', selling_price: 250, vat_rate: 0, is_veg: false, is_egg: false },
   { id: 'r3', name: 'Lemon Tea', category: 'Beverage', recipe_code: 'BEV-01', selling_price: 80, vat_rate: 0 },
+  { id: 'r4', name: 'Egg Fried Rice', category: 'Rice', recipe_code: 'RIC-01', selling_price: 220, vat_rate: 0, is_veg: false, is_egg: true },
 ]
 const base = {
   menu: MENU, menuTab: 'All', menuQuery: '', orderItems: [], vatReg: false,
@@ -47,4 +48,13 @@ it('skips a render for a cart change no tile shows, and not for one a tile shows
   expect(sameTiles({ ...base, orderItems: lines }, { ...base, orderItems: sent })).toBe(false)
   expect(sameTiles(base, { ...base, menuQuery: 'mo' })).toBe(false)
   expect(sameTiles(base, { ...base, kotNow: 1 })).toBe(false)
+})
+
+it('leads a dish name with its food mark when the recipe states one (S846)', () => {
+  render(<MenuGrid {...base} />)
+  expect(within(screen.getByRole('button', { name: /Veg Momo/ })).getByRole('img', { name: 'Vegetarian' })).toBeTruthy()
+  expect(within(screen.getByRole('button', { name: /Egg Fried Rice/ })).getByRole('img', { name: 'Contains egg' })).toBeTruthy()
+  expect(within(screen.getByRole('button', { name: /Chicken Momo/ })).getByRole('img', { name: 'Non-vegetarian' })).toBeTruthy()
+  // Not stated: no mark at all, rather than a guess.
+  expect(within(screen.getByRole('button', { name: /Lemon Tea/ })).queryByRole('img')).toBeNull()
 })

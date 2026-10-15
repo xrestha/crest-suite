@@ -10,7 +10,7 @@ import Modal from '../../../components/Modal'
 import { useGuestDocumentIdentity } from './guestDocument'
 import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
-import DietMark, { dietOfDish } from './DietMark'
+import DietMark, { dietOfDish, DietLabel, DIET_ORDER } from './DietMark'
 import GuestComboSheet, {
   comboOrderable, comboMatches, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
   comboLineProblem, comboCartWithout, comboContents, comboPicksOf, pickChoices,
@@ -562,6 +562,16 @@ export default function GuestMenu() {
 
   const allAllergens = useMemo(() => Array.from(new Set((rows || []).flatMap(r => r.allergens || []))).sort(), [rows])
   const hasVegMarks = (rows || []).some(r => r.is_veg != null)
+  // S846: the marks this menu actually uses (dishes, combo dishes and choices alike), for the key
+  // beside the vegetarian filter, in the key's order: veg, egg, non-veg.
+  const dietKinds = useMemo(() => {
+    const seen = new Set((rows || []).map(r => dietOfDish(r.is_veg, r.is_egg)))
+    for (const o of optionCatalog.options || []) seen.add(o.diet)
+    for (const c of optionCatalog.combos || []) {
+      for (const g of c.groups || []) for (const it of g.items || []) seen.add(dietOfDish(it.is_veg, it.is_egg))
+    }
+    return DIET_ORDER.filter(d => seen.has(d))
+  }, [rows, optionCatalog])
   const searchable = (rows || []).length > SEARCH_THRESHOLD
   const trimmedQuery = searchable ? query.trim() : ''
 
@@ -1256,10 +1266,19 @@ export default function GuestMenu() {
           <SheetHeader title="Filter the menu" onClose={() => setFiltersOpen(false)} />
           <div className="gm-filter-body">
             {hasVegMarks && (
-              <label className="gm-check">
-                <input type="checkbox" checked={vegOnly} onChange={e => setVegOnly(e.target.checked)} />
-                <span>Vegetarian dishes only</span>
-              </label>
+              <div>
+                {/* Egg is not vegetarian: an egg dish (is_veg false) is hidden with the meat ones. */}
+                <label className="gm-check">
+                  <input type="checkbox" checked={vegOnly} onChange={e => setVegOnly(e.target.checked)} />
+                  <span>Vegetarian dishes only</span>
+                </label>
+                {dietKinds.length > 0 && (
+                  <p className="gm-diet-key">
+                    <span className="sr-only">Marks on this menu: </span>
+                    {dietKinds.map(d => <DietLabel key={d} diet={d} />)}
+                  </p>
+                )}
+              </div>
             )}
             {allAllergens.length > 0 && (
               <div role="group" aria-labelledby="gm-allergen-label">
@@ -1603,7 +1622,7 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
   const addRef = useRef(null)
   const focusAfter = useRef(null) // 'plus' | 'add' — where focus goes once the control it needs exists
   const name = tidyName(item.name)
-  const diet = dietOfDish(item.is_veg)
+  const diet = dietOfDish(item.is_veg, item.is_egg)
   const priceInc = priceIncVat(item, vatRegistered)
   // A dish with choices shows "From" its cheapest valid version (owner decision, S758).
   const fromPrice = dishGroups

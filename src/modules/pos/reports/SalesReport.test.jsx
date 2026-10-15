@@ -11,12 +11,18 @@ import { nepalBs, nepalTime } from '../../../shared/nepalTime'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 let mockAnswers = {}
+// An answer keyed `table:column` (a column the query filtered with .eq) wins over the table's own,
+// so one read of a table can be told apart from another (the Egg marks, S846).
 function mockBuilder(table) {
   const b = {}
+  const eqs = []
   for (const op of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit', 'not', 'or', 'range', 'single', 'maybeSingle']) {
     b[op] = () => b
   }
-  b.then = (ok, fail) => Promise.resolve(mockAnswers[table] || { data: [], error: null }).then(ok, fail)
+  b.eq = col => { eqs.push(col); return b }
+  b.then = (ok, fail) => Promise.resolve(
+    eqs.map(c => mockAnswers[`${table}:${c}`]).find(Boolean) || mockAnswers[table] || { data: [], error: null },
+  ).then(ok, fail)
   return b
 }
 const mockScopedDb = { scopedFrom: table => mockBuilder(table) }
@@ -204,4 +210,44 @@ test('the 1L+ TOTAL row fills Taxable and Non-Taxable, as every row does', async
   const foot = within(screen.getAllByRole('table').at(-1).querySelector('tfoot')).getAllByRole('cell').map(c => c.textContent)
   // TOTAL, Gross, Taxable, Non-Taxable, VAT, Net, Flag
   expect(foot).toEqual(['TOTAL', 'NPR 1,500', 'NPR 1,000', 'NPR 500', 'NPR 130', 'NPR 1,630', ''])
+})
+
+// S846: recipes.is_egg adds an Egg row to the Product Type tab's veg axis, read in a fixed order.
+describe('Product Type: the veg axis', () => {
+  const vegLine = (orderId, recipeId, name, price) => ({
+    order_id: orderId, recipe_id: recipeId, name, category: 'Main', qty: 1, unit_price: price, vat_rate: 0,
+    comped: false, comp_no: null, comp_reason: null, selection_key: null,
+  })
+  const RECIPES = [
+    { id: 'rV', is_veg: true, is_egg: false, recipe_code: 'V1' },
+    { id: 'rE', is_veg: false, is_egg: true, recipe_code: 'E1' },
+    { id: 'rN', is_veg: false, is_egg: false, recipe_code: 'N1' },
+  ]
+  beforeEach(() => {
+    // Takings run opposite to the reading order, so a sort by takings would show it.
+    mockAnswers.pos_orders = { data: orders.slice(0, 4), error: null }
+    mockAnswers.pos_order_items = { data: [
+      vegLine('o0', 'rV', 'Dal', 100), vegLine('o1', 'rE', 'Egg curry', 200),
+      vegLine('o2', 'rN', 'Chicken', 300), vegLine('o3', 'rX', 'Mystery', 400),
+    ], error: null }
+    mockAnswers.recipes = { data: RECIPES, error: null }
+  })
+  const axisRows = () => within(within(screen.getAllByRole('table').at(-1)).getAllByRole('rowgroup')[1])
+    .getAllByRole('row').map(r => within(r).getAllByRole('cell')[0].textContent)
+
+  test('reads Veg, Egg, Non-Veg, Not set, in that order', async () => {
+    render(<SalesReport />)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Product Type' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Veg / Egg / Non-Veg' }))
+    expect(axisRows()).toEqual(['Veg', 'Egg', 'Non-Veg', 'Not set'])
+  })
+
+  test('a database without is_egg still gives the report, with egg dishes as Non-Veg', async () => {
+    mockAnswers['recipes:is_egg'] = { data: null, error: { code: '42703', message: 'column recipes.is_egg does not exist' } }
+    render(<SalesReport />)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Product Type' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Veg / Non-Veg' }))
+    expect(axisRows()).toEqual(['Veg', 'Non-Veg', 'Not set'])
+    expect(screen.queryByText(/could not load/i)).toBeNull()
+  })
 })

@@ -16,20 +16,32 @@
 //            synced · a ticket about to go late · money owed · a slip still running · a blank reason.
 //   green  — finished, and finished right.
 //            a ticket Ready · a bill settled or collected · cash reconciled · a saved write.
-//   brass  — the live, working, on-brand layer. NEVER a verdict.
-//            an occupied table · the open shift · money totals · a rank · a close type ·
-//            a discount · a credit note · the primary action.
-//   grey   — inert, or a plain identity.
-//            an inactive table · an auto-closed slip · a delivery partner · a payment method ·
-//            nothing sent yet.
+//   grey   — inert, a plain identity, or a CATEGORY or STATE (`badge-gray`).
+//            an inactive, occupied or reserved table · a close type · a discount · a credit note ·
+//            a rank · a station that is not the kitchen · a delivery partner · a payment method ·
+//            nothing sent yet. A state that is under way but not finished (a ticket Started, an
+//            open shift) carries a "◷ " mark, as HR's OWED_STATUS does: the clock is what keeps it
+//            apart from a void grey.
 //   purple — loyalty, and the KOT station chip (see STATION_BADGE for why that one stays).
+//
+// Since S846 (owner decision, the way IMS went in S796 and HR in S804) a figure and a category take
+// no colour at all, and the accent is not a hue in this vocabulary any more:
+//
+//   ink    — every FIGURE is `--theme-text1` with tabular-nums (a money total, a comp total, a
+//            count, a peak hour); a code or secondary identifier is `--theme-text2`.
+//   accent — only what is PRESSED or CURRENT: the one primary commit button on a screen or dialog,
+//            a link, the active tab, toggle or filter chip, today, focus, the PIN dots. Never a
+//            verdict, a category or a figure. A primary button repeated down every row of a table is
+//            `btn btn-ghost`. Under Modernist Light the accent is a red, so a figure or chip painted
+//            in it read as a near-danger verdict beside the real red.
+//   red, amber and green come only from a band, a threshold or a status word.
 //
 // Two boundaries, so a later sweep does not churn things this rule does not govern:
 //
 //   1. A BUTTON is an instruction, not a verdict, and keeps the product-wide control vocabulary
 //      (primary = accent, destructive = red fill, caution = amber fill). So the Void button stays
 //      red and the Complimentary button stays amber, while the *records* they write read as a
-//      close type in brass. The action asks; the badge reports.
+//      close type in grey. The action asks; the badge reports.
 //   2. Loudness tracks demand for action, not importance. This is what most of the sweep actually
 //      corrected: the loudest mark on a floor tile was "Occupied" (a full table — the outcome you
 //      want) and on a KDS card was the ticket's stage (already the column it is sitting in), while
@@ -40,16 +52,17 @@ import { isChangeLine } from './kitchenNotes'
 
 // ---------------------------------------------------------------------------------------------
 // Table status — a CATEGORY. Available / Occupied / Reserved are three states of a table and
-// none of them is a problem, so none of them takes a signal colour. Occupied is the live one and
-// takes brass; the other two recede. Previously available/occupied/reserved were green/red/amber,
+// none of them is a problem, so none of them takes a signal colour: all four are grey (S846; Occupied
+// and Reserved took the accent until then). Previously available/occupied/reserved were green/red/amber,
 // which painted an empty room green and a full one red — an inverted verdict on the busiest
 // screen in the product, and a wall of red that trained the eye past the red that matters.
 export const TABLE_STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
-export const TABLE_STATUS_BADGE = { available: 'badge-gray', occupied: 'badge-yellow', reserved: 'badge-yellow', inactive: 'badge-gray' }
+export const TABLE_STATUS_BADGE = { available: 'badge-gray', occupied: 'badge-gray', reserved: 'badge-gray', inactive: 'badge-gray' }
 
 // ---------------------------------------------------------------------------------------------
 // Reservation status (S677). Booked / Confirmed / Seated are three states of a promise and none
-// of them is a problem — categories, so grey and brass. Two states are waiting on a PERSON, right
+// of them is a problem — categories, so grey (S846; Confirmed and Seated took the accent until
+// then). Two states are waiting on a PERSON, right
 // now, and take amber: a public request nobody has accepted, and a party that has arrived and is
 // standing at the door. Completed is the finished-right verdict; No-show is the exception the
 // Covers Report chases and the one line here with a cost, so it is the only red. Cancelled is
@@ -57,9 +70,9 @@ export const TABLE_STATUS_BADGE = { available: 'badge-gray', occupied: 'badge-ye
 export const RESERVATION_STATUS_BADGE = {
   requested: 'badge-amber',
   booked:    'badge-gray',
-  confirmed: 'badge-yellow',
+  confirmed: 'badge-gray',
   arrived:   'badge-amber',
-  seated:    'badge-yellow',
+  seated:    'badge-gray',
   completed: 'badge-green',
   no_show:   'badge-red',
   cancelled: 'badge-gray',
@@ -69,19 +82,20 @@ export const RESERVATION_STATUS_BADGE = {
 // Kitchen/bar ticket stage, worded from the wait staff's side (they see a ticket get Sent /
 // Started / Ready, they do not "start" or "ready" it). A monotone progression inert → working →
 // done: nothing here is a fault, so nothing here is red or amber. Only Ready asks for anything —
-// somebody has to run the food — and it is the one that is green.
+// somebody has to run the food — and it is the one that is green. Started is grey with the "◷ "
+// in-progress mark (S846; it took the accent until then), so it still reads apart from Sent.
 //
 // Served (S754, migration 20260916110000) is the stage after Ready: the food reached the table.
 // It is FINISHED and asks nothing of anyone, so it is inert grey — never green (green on the floor
 // means "food in the pass, run it") and never a strip colour. A served ticket leaves the Kitchen
 // Display, and on the floor it stops counting as ready.
-export const KOT_STATUS_LABEL = { new: 'Sent', in_progress: 'Started', ready: 'Ready', served: 'Served' }
+export const KOT_STATUS_LABEL = { new: 'Sent', in_progress: '◷ Started', ready: 'Ready', served: 'Served' }
 // When a ticket still being made is flagged going late / late. One definition (S800): the Kitchen
 // Display, the kitchen team's dashboard cards and the POS Dashboard's floor band all read these,
 // so a ticket can never be late on one screen and on time on another.
 export const KDS_WARN_MS = 8 * 60 * 1000
 export const KDS_LATE_MS = 15 * 60 * 1000
-export const KOT_STATUS_BADGE = { new: 'badge-gray', in_progress: 'badge-yellow', ready: 'badge-green', served: 'badge-gray' }
+export const KOT_STATUS_BADGE = { new: 'badge-gray', in_progress: 'badge-gray', ready: 'badge-green', served: 'badge-gray' }
 // Lower = less done. When a table has several open tickets at different stages, the floor badge
 // shows the least-advanced one still in the kitchen's hands — that is the one needing attention.
 export const KOT_STATUS_RANK  = { new: 0, in_progress: 1, ready: 2, served: 3 }
@@ -128,17 +142,17 @@ export function ticketAllPulled(items, removedByLine) {
 
 // ---------------------------------------------------------------------------------------------
 // How a bill was closed. A comp and a discount are decided facts about a bill where the money did
-// not (fully) move — brass, the same reading HR gives an approved-but-unpaid claim. Only a void
+// not (fully) move — a category, so grey (S846; they took the accent until then). Only a void
 // is red: the bill was destroyed, and it is the one line on an exception report with real fraud
 // exposure. Previously Comp was amber on five surfaces, which put a close type in the same colour
 // as an unfired dish.
-export const CLOSE_TYPE_BADGE = { billed: 'badge-green', void: 'badge-red', writeoff: 'badge-yellow', discount: 'badge-yellow' }
+export const CLOSE_TYPE_BADGE = { billed: 'badge-green', void: 'badge-red', writeoff: 'badge-gray', discount: 'badge-gray' }
 
 // ---------------------------------------------------------------------------------------------
-// POS rank is a ladder of access, not a scale of goodness — a category, so all three take brass.
+// POS rank is a ladder of access, not a scale of goodness — a category, so all three are grey.
 // The value is shared with IMS and HR (`src/shared/staffLevelBadge.js`): the identical decision had
 // been made three times independently and two of the three had drifted, so a Supervisor was amber
-// in two modules and brass in the third. Re-exported here because this file is where a reader of
+// in two modules and the accent in the third. Re-exported here because this file is where a reader of
 // the POS module looks for what a colour means.
 export { STAFF_LEVEL_BADGE as POS_LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../shared/staffLevelBadge'
 
@@ -148,14 +162,15 @@ export { STAFF_LEVEL_BADGE as POS_LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '..
 // needs it.
 export const IDENTITY_BADGE = 'badge-gray'
 
-// The KOT/BOT station is the ONE identity here that keeps a hue, and it is deliberate rather than
-// an oversight: S613 settled it (purple for the kitchen, brass for the bar) after that chip had
+// The KOT station is the ONE identity here that keeps a hue, and it is deliberate rather than
+// an oversight: S613 settled it (purple for the kitchen, the accent for the bar) after that chip had
 // spent success-green on a category, and it is a filterable column in a long log where the hue is
-// doing real scanning work. It does mean purple carries a second meaning in this module beside
+// doing real scanning work. S846 took the accent off the bar (BOT is grey now, a category like any
+// other); purple vs grey still separates the two at a glance. It does mean purple carries a second meaning in this module beside
 // loyalty — but the two never appear on the same screen (KOT Log versus the billing modal and the
 // Loyalty tab), which is the condition the one-meaning rule is actually written against. Considered
 // and kept, not missed; re-deciding a settled colour is how a module ends up with three answers.
-export const STATION_BADGE = { KOT: 'badge-purple', BOT: 'badge-yellow' }
+export const STATION_BADGE = { KOT: 'badge-purple', BOT: 'badge-gray' }
 
 // ---------------------------------------------------------------------------------------------
 // The floor tile's colour strip. It is 6px of full-tile width — the loudest thing on the tile and
@@ -174,7 +189,7 @@ export function tableStripColor({ status, order, kotStatus, guestPending }) {
   if (guestPending)                                         return 'var(--theme-amber)'  // a guest is waiting on you
   if (order && (order.pending > 0 || order.offlinePending)) return 'var(--theme-amber)'  // typed, not fired / not synced
   if (foodReady)                                            return 'var(--theme-green)'  // food in the pass, run it
-  if (order || status === 'occupied')                       return 'var(--theme-accent)' // live and in hand
+  if (order || status === 'occupied')                       return 'var(--theme-text3)'  // live and in hand (S846: no accent)
   return 'var(--theme-border)'                                                           // available or held: quiet
 }
 

@@ -4,7 +4,20 @@
 
 export const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
 
-export const EMPTY_RECIPE = { name: '', category: 'Food', recipe_code: '', selling_price: '', vat_rate: '0.13', yield_qty: '1', yield_uom: 'portion', target_fc_pct: '30', description: '', image_url: '', is_veg: '', is_build_your_own: false }
+export const EMPTY_RECIPE = { name: '', category: 'Food', recipe_code: '', selling_price: '', vat_rate: '0.13', yield_qty: '1', yield_uom: 'portion', target_fc_pct: '30', description: '', image_url: '', diet: '', is_build_your_own: false }
+
+/**
+ * S846: the recipe form's one food-mark value ('' | 'veg' | 'egg' | 'non_veg') as the two stored
+ * columns. Egg is "has egg, no meat or fish": not vegetarian, so `is_veg` false. Not set stores
+ * `is_veg` NULL (no mark). The reverse, a stored pair to a form value, is the guest menu's
+ * `dietOfDish` (DietMark.jsx), so the form reads a pair exactly as every screen that draws the mark.
+ */
+export function dietColumns(diet) {
+  if (diet === 'veg') return { is_veg: true, is_egg: false }
+  if (diet === 'egg') return { is_veg: false, is_egg: true }
+  if (diet === 'non_veg') return { is_veg: false, is_egg: false }
+  return { is_veg: null, is_egg: false }
+}
 
 // Format one nutrient value for display, e.g. "130 kcal", "2.7 g".
 export function fmtNutrient(def, value) {

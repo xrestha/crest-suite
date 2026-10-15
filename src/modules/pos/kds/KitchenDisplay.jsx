@@ -6,7 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
-import EstimateTimeModal from './EstimateTimeModal'
+import EstimateTimeModal, { DEFAULT_START_MINUTES } from './EstimateTimeModal'
 import { ticketStripColor, ticketAllPulled, KDS_WARN_MS, KDS_LATE_MS } from '../posSignals'
 import { isChangeLine, isChangeTicket, changeNoteText } from '../kitchenNotes'
 import { POS_IDLE_LOCK_MS, posIdleLockApplies } from '../usePosIdleLock'
@@ -153,22 +153,25 @@ const READY_VISIBLE_MS = 10 * 60 * 1000
 // for it. One stalled request on kitchen Wi-Fi froze that ticket's button until the page was reloaded.
 const KDS_READ_MS = 15000
 const KDS_TAP_MS = 15000
+// S846: how long after a one-tap Start another Start is ignored (see startNow). A double tap lands well
+// inside it; a cook starting two tickets on purpose moves a hand between them, which takes longer.
+const START_SETTLE_MS = 500
 // Elapsed-time flag thresholds, matching the "flag the outlier" pattern used elsewhere in POS
 // (Sales Exceptions, KOT Reconciliation) — a ticket sitting too long gets visually called out.
 const WARN_MS = KDS_WARN_MS
 const LATE_MS = KDS_LATE_MS
 
-// The column dot is the module's shared three-stage progression — inert → working → done, the
-// same grey/brass/green KOT_STATUS_BADGE puts on a floor tile. It deliberately does not reuse the
-// card strip's colours: those mean lateness now, and a legend keyed to a retired encoding is
-// worse than no legend.
+// The column dot is the stage progression — inert → working → done. It deliberately does not reuse
+// the card strip's colours: those mean lateness now, and a legend keyed to a retired encoding is
+// worse than no legend. S846 (owner decision, the accent pass IMS and HR had): the working dot is
+// ink, not the brass accent, which is kept for what is pressed or current; a stage is neither.
 //
 // Ready → Served (S754, migration 20260916110000): the runner taps Served when the food has left the
 // pass, and the ticket leaves the board. There is no fourth column — a served ticket has nothing left
 // for the kitchen to do, the same reason a cancelled one is not shown.
 const COLUMNS = [
   { status: 'new',         label: 'New',         action: 'Start',  next: 'in_progress', dot: 'var(--theme-text3)' },
-  { status: 'in_progress', label: 'In Progress',  action: 'Ready',  next: 'ready',       dot: 'var(--theme-accent)' },
+  { status: 'in_progress', label: 'In Progress',  action: 'Ready',  next: 'ready',       dot: 'var(--theme-text1)' },
   { status: 'ready',       label: 'Ready',        action: 'Served', next: 'served',      dot: 'var(--theme-green)' },
 ]
 // The stages the board shows. Read with `.in(...)` rather than "not cancelled", so a served ticket
@@ -573,8 +576,22 @@ export default function KitchenDisplay() {
     setAdvancing(prev => { const next = new Set(prev); next.delete(ticket.id); return next })
   }
 
-  // Start requires an estimate first — opens EstimateTimeModal instead of advancing directly;
-  // Ready has no such requirement and still advances immediately (see TicketCard's onClick below).
+  // S846 (owner decision): Start takes DEFAULT_START_MINUTES in one tap; the card's Other time opens
+  // EstimateTimeModal for any other figure. Both go through advance(), so the alert clearing, the
+  // optimistic move and tapMiss's revert are the same for each.
+  //
+  // A double tap. The popup used to take the second tap; now nothing sits between the finger and the
+  // board. A second tap on the SAME card does nothing: advance() refuses a ticket already in
+  // `advancing`, and the button is disabled ("…") until the write answers. But the card leaves New the
+  // moment it is tapped, so the next ticket's Start can slide up under the same finger: a Start within
+  // START_SETTLE_MS of the last one is ignored, on any card.
+  const lastStartAt = useRef(0)
+  function startNow(ticket) {
+    const at = Date.now()
+    if (at - lastStartAt.current < START_SETTLE_MS) return
+    lastStartAt.current = at
+    advance(ticket, 'in_progress', DEFAULT_START_MINUTES)
+  }
   function requestEstimate(ticket) { setEstimateTicket(ticket) }
   function confirmStart(minutes) {
     const ticket = estimateTicket
@@ -820,7 +837,7 @@ export default function KitchenDisplay() {
                   ))}
                   {colTickets.map(t => (
                     <TicketCard
-                      key={t.id} ticket={t} now={now} onAdvance={advance} onRequestEstimate={requestEstimate}
+                      key={t.id} ticket={t} now={now} onAdvance={advance} onStart={startNow} onRequestEstimate={requestEstimate}
                       action={col.action} next={col.next} isStartAction={col.status === 'new'} advancing={advancing.has(t.id)}
                     />
                   ))}
@@ -889,7 +906,7 @@ function VoidedCard({ ticket, onDismiss }) {
   )
 }
 
-function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, isStartAction, advancing }) {
+function TicketCard({ ticket, now, onAdvance, onStart, onRequestEstimate, action, next, isStartAction, advancing }) {
   const sentMs = new Date(ticket.sent_at).getTime()
   const elapsedMin = Math.max(0, Math.round((now - sentMs) / 60000))
   // FLOOR-KITCHEN-2 (S809 3d): every dish on it was taken off the order, so there is nothing to make
@@ -905,9 +922,14 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
   // already has, so there is nothing new to cook: its one button, Seen, moves it straight to served
   // (guard_pos_kot_log allows any forward move) and it leaves the board.
   const change = isChangeTicket(ticket)
+  // S846: a New ticket with food on it starts in one tap at DEFAULT_START_MINUTES, with Other time
+  // beside it. A Clear or Seen card in New keeps its one button.
+  const oneTapStart = isStartAction && !pulledAll && !change
+  const cardName = `${ticket.tableNow || 'Takeaway'} #${ticket.order_no}`
 
-  // Estimated-vs-actual readout, shown once a ticket has an estimate on it (set via the Start
-  // popup) — a live "time left" while in progress, then a settled comparison once Ready.
+  // Estimated-vs-actual readout, shown once a ticket has an estimate on it (set on Start, 10 minutes
+  // unless Other time chose another) — a live "time left" while in progress, then a settled
+  // comparison once Ready.
   let etaNode = null
   if (!pulledAll && ticket.status === 'in_progress' && ticket.started_at && ticket.estimated_prep_minutes) {
     const startedMs = new Date(ticket.started_at).getTime()
@@ -991,7 +1013,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
           )
         })}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Tip text={`Time since this ticket was sent. △ means it is approaching the ${Math.round(WARN_MS / 60000)}-minute mark, ▲ that it is past ${Math.round(LATE_MS / 60000)} minutes.`}>
             <span style={{ fontSize: 16, color: isLate ? 'var(--theme-red-text)' : isWarn ? 'var(--theme-amber-text)' : 'var(--theme-text3)', fontWeight: isLate || isWarn ? 700 : 400 }}>
@@ -1006,13 +1028,27 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
           </Tip>
           {etaNode}
         </div>
+        {/* S846 (owner decision, the accent pass): the card's action is ghost on every stage. The accent
+            had filled one button on every card, so it marked nothing; it stays for what is pressed. */}
         {action && (
-          <button
-            className="btn btn-primary" style={{ fontSize: 16, padding: '10px 20px' }} disabled={advancing}
-            onClick={() => pulledAll ? onAdvance(ticket, 'cancelled') : change ? onAdvance(ticket, 'served') : isStartAction ? onRequestEstimate(ticket) : onAdvance(ticket, next)}
-          >
-            {advancing ? '…' : pulledAll ? 'Clear' : change ? 'Seen' : action}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+            {oneTapStart && (
+              <button
+                type="button" className="btn btn-ghost till-hit--row" style={{ fontSize: 14, padding: '8px 12px' }} disabled={advancing}
+                onClick={() => onRequestEstimate(ticket)}
+                aria-label={`Other time: choose the prep estimate and start ${cardName}`}
+              >
+                Other time
+              </button>
+            )}
+            <button
+              type="button" className="btn btn-ghost till-hit--row" style={{ fontSize: 16, padding: '10px 20px' }} disabled={advancing}
+              onClick={() => pulledAll ? onAdvance(ticket, 'cancelled') : change ? onAdvance(ticket, 'served') : oneTapStart ? onStart(ticket) : onAdvance(ticket, next)}
+              aria-label={oneTapStart && !advancing ? `Start ${cardName} with a ${DEFAULT_START_MINUTES}-minute estimate` : undefined}
+            >
+              {advancing ? '…' : pulledAll ? 'Clear' : change ? 'Seen' : oneTapStart ? `Start · ${DEFAULT_START_MINUTES}m` : action}
+            </button>
+          </div>
         )}
       </div>
     </div>

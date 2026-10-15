@@ -19,7 +19,8 @@ import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
 import { suggestSeeds } from '../../../data/nutritionSeed'
 import { fetchUsdaNutrition } from '../../../utils/usdaNutrition'
-import { EMPTY_RECIPE, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead } from './recipeCostCalc'
+import { EMPTY_RECIPE, dietColumns, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead } from './recipeCostCalc'
+import { dietOfDish } from '../../pos/guestmenu/DietMark'
 import { productCodePrefix, nextProductCode, SUB_RECIPE_CATEGORY } from '../../../shared/productCode'
 import RecipeCostCardPrint, { costPerYieldTile } from './RecipeCostCardPrint'
 import { unitRateText, unitRateCell } from '../../../shared/unitRate'
@@ -386,7 +387,9 @@ export default function Recipes() {
       target_fc_pct: recipe.target_fc_pct ? String(recipe.target_fc_pct) : '30',
       description: recipe.description || '',
       image_url: recipe.image_url || '',
-      is_veg: recipe.is_veg === true ? 'veg' : recipe.is_veg === false ? 'non_veg' : '',
+      // S846: the food mark as one value. `is_egg` is undefined on a database without the column,
+      // which reads as no egg.
+      diet: dietOfDish(recipe.is_veg, recipe.is_egg) || '',
       is_build_your_own: !!recipe.is_build_your_own,
     }
   }
@@ -905,7 +908,15 @@ export default function Recipes() {
         // Guest-facing QR menu fields — all optional, blank means "not shown" on that page.
         description: recipeForm.description.trim() || null,
         image_url: recipeForm.image_url.trim() || null,
-        is_veg: recipeForm.is_veg === 'veg' ? true : recipeForm.is_veg === 'non_veg' ? false : null
+        is_veg: dietColumns(recipeForm.diet).is_veg,
+      }
+
+      // S846: the egg mark, written only when it differs from what was loaded (a new recipe loads
+      // as no egg), so saving any edit that does not involve egg never names a column the database
+      // may not have yet. The S760 rule for is_build_your_own, below.
+      {
+        const nextEgg = dietColumns(recipeForm.diet).is_egg
+        if (nextEgg !== (selectedRecipe?.is_egg === true)) payload.is_egg = nextEgg
       }
 
       // Menu items now carry a free-text Product Code (recognisability for a migrating client +
@@ -2231,11 +2242,12 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   persist={selectedRecipe?.id ? persistDishPhoto : null}
                 />
                 <div className="form-field">
-                  <label htmlFor="recipe-f8"><Tip text="Optional — shows a veg/non-veg badge on the guest-facing QR menu. Leave unset to hide the badge for this item.">Veg / Non-Veg</Tip></label>
-                  <select id="recipe-f8" value={recipeForm.is_veg} onChange={e => setRecipeForm(f => ({ ...f, is_veg: e.target.value }))}>
-                    <option value="">— Not set —</option>
+                  <label htmlFor="recipe-f8"><Tip text="Optional. Shows a food mark beside the dish on the guest QR menu and the till: Veg (a dot), Egg (an E) or Non-veg (a triangle). Egg means it has egg but no meat or fish; guests filtering for vegetarian dishes won't see it. Leave it unset to show no mark.">Veg / Egg / Non-veg</Tip></label>
+                  <select id="recipe-f8" value={recipeForm.diet} onChange={e => setRecipeForm(f => ({ ...f, diet: e.target.value }))}>
+                    <option value="">Not set</option>
                     <option value="veg">Veg</option>
-                    <option value="non_veg">Non-Veg</option>
+                    <option value="egg">Egg</option>
+                    <option value="non_veg">Non-veg</option>
                   </select>
                 </div>
               </div>

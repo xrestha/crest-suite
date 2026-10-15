@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { vatOf, fmtNpr, kotTimerLabel, isComboLine } from './posOrdersConstants'
+import DietMark, { dietOfDish } from '../guestmenu/DietMark'
 
 // The order screen's dish tiles (S842), moved out of PosOrders so they render only when something a
 // tile shows has changed. Inside the one 8,500-line component every keystroke anywhere on the screen
@@ -10,6 +11,11 @@ import { vatOf, fmtNpr, kotTimerLabel, isComboLine } from './posOrdersConstants'
 // The till owns every state and handler; this only lays the tiles out. `addRef` is the till's
 // latest-ref to addItem (the closeOrderRef pattern), so a tile never calls a stale closure and the
 // memo never sees a new function.
+//
+// S846: a dish's food mark (DietMark, the guest menu's own) leads its name when the recipe states
+// it; the till's menu rows carry `is_veg` and `is_egg`. And the accent is only for what is pressed or
+// current (owner decision, as in IMS and HR): the price is ink, and a dish already on the order is
+// told by its ink quantity badge and a text2 border, not an accent tint.
 
 /** The dishes the grid shows: the category tab, then a name or Product Code match. One definition,
  * used by the till for its empty-state check and by the grid itself, so the two cannot disagree. */
@@ -51,12 +57,11 @@ function MenuGrid({ menu, menuTab, menuQuery, orderItems, vatReg, dishGroupsByRe
         const inOrd = inCart.get(r.id)
         const hasOptions = !!dishGroupsByRecipe[r.id]
         const kotTimer = inOrd?.sent ? kotTimerLabel(ticketFor(r.id), kotNow) : null
+        const diet = dietOfDish(r.is_veg, r.is_egg)
         return (
           <button key={r.id} className="till-tile" onClick={() => addRef.current(r)} style={{
-            background: inOrd
-              ? 'color-mix(in srgb, var(--theme-accent) 12%, var(--theme-card))'
-              : 'var(--theme-card)',
-            border: `1px solid ${inOrd ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+            background: 'var(--theme-card)',
+            border: `1px solid ${inOrd ? 'var(--theme-text2)' : 'var(--theme-border)'}`,
             borderRadius: 'var(--radius-md)', padding: '12px 10px',
             cursor: 'pointer', textAlign: 'left',
             display: 'flex', flexDirection: 'column', gap: 6,
@@ -65,15 +70,16 @@ function MenuGrid({ menu, menuTab, menuQuery, orderItems, vatReg, dishGroupsByRe
             {inOrd && (
               <span style={{
                 position: 'absolute', top: 6, right: 8,
-                background: 'var(--theme-accent)', color: 'var(--theme-accent-text)',
+                background: 'var(--theme-text1)', color: 'var(--theme-card)',
                 borderRadius: 'var(--radius-full)', fontSize: 11, fontWeight: 700, padding: '1px 7px',
+                fontVariantNumeric: 'tabular-nums',
               }}>{inOrd.qty}</span>
             )}
             <span style={{
               fontWeight: 600, fontSize: 13, color: 'var(--theme-text1)',
               lineHeight: 1.3, paddingRight: inOrd ? 28 : 0,
-            }}>{r.name}</span>
-            <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
+            }}>{diet && <DietMark diet={diet} className="diet-mark--lead" />}{r.name}</span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text1)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {fmtNpr(price)}
             </span>
             {hasOptions && (

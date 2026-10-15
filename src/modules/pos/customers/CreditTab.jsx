@@ -395,7 +395,9 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
     const waiting = unknownPress?.partyKey === p.key
     return (
       <>
-        <button type="button" className={`btn btn-primary${sm ? ' btn-sm' : ''}`} onClick={() => openReceive(p)}
+        {/* On every row, so ghost like Statement beside it (S846): one accent fill per row was a
+            column of red buttons on Modernist Light. The receipt dialog's own commit is the primary. */}
+        <button type="button" className={`btn btn-ghost${sm ? ' btn-sm' : ''}`} onClick={() => openReceive(p)}
           aria-disabled={waiting ? true : undefined} aria-label={`Receive payment from ${p.name}`}>Receive payment</button>
         <button type="button" className={`btn btn-ghost${sm ? ' btn-sm' : ''}`} onClick={() => setStatementFor(p)}
           aria-label={`Statement for ${p.name}`}>Statement</button>

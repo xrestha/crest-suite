@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { createRef } from 'react'
 import GuestComboSheet, {
   comboPicksOf, comboOrderable, comboCartKey, defaultDishOf, comboOrderItem, pickChoices, comboUnitPrice,
@@ -10,6 +10,7 @@ import { groupsForDish } from '../../../shared/optionPricing'
 // cart, its order payload and its refusal re-read from.
 
 const MOMO = 'r-momo-chicken', VEG = 'r-momo-veg', COKE = 'r-coke'
+const EGG_MOMO = { recipe_id: 'r-momo-egg', name: 'Egg Momo', is_veg: false, is_egg: true, extra_price: 0, is_default: false, sort: 2 }
 const combo = {
   id: 'c1', name: 'Momo Combo', description: 'A plate of momo and a drink', guest_price: 350, sort: 0,
   groups: [
@@ -133,6 +134,9 @@ describe('combo helpers', () => {
     expect(comboMatches(combo, { vegOnly: true })).toBe(true)
     const meaty = { ...combo, groups: [combo.groups[0], { ...combo.groups[1], items: [combo.groups[1].items[0]] }] }
     expect(comboMatches(meaty, { vegOnly: true })).toBe(false)
+    // S846: egg is not vegetarian, so a pick offering only an egg dish fails the filter too.
+    const eggOnly = { ...combo, groups: [combo.groups[0], { ...combo.groups[1], items: [EGG_MOMO] }] }
+    expect(comboMatches(eggOnly, { vegOnly: true })).toBe(false)
     const allergensOf = rid => (rid === VEG ? ['gluten'] : rid === MOMO ? ['gluten'] : [])
     expect(comboMatches(combo, { excludedAllergens: ['gluten'], allergensOf })).toBe(false)
     expect(comboMatches(combo, { excludedAllergens: ['dairy'], allergensOf })).toBe(true)
@@ -151,6 +155,14 @@ describe('GuestComboSheet', () => {
     )
     return { onConfirm, onClose }
   }
+
+  test('each dish in a pick wears its food mark, egg included (S846)', () => {
+    const eggy = { ...combo, groups: [combo.groups[0], { ...combo.groups[1], items: [...combo.groups[1].items, EGG_MOMO] }] }
+    renderSheet({ combo: eggy })
+    expect(within(screen.getByRole('radio', { name: /Egg Momo/ })).getByRole('img', { name: 'Contains egg' })).toBeInTheDocument()
+    expect(within(screen.getByRole('radio', { name: /Veg Momo/ })).getByRole('img', { name: 'Vegetarian' })).toBeInTheDocument()
+    expect(within(screen.getByRole('radio', { name: /Chicken Momo/ })).getByRole('img', { name: 'Non-vegetarian' })).toBeInTheDocument()
+  })
 
   test('one step per question, then Review, then one combo with every pick', () => {
     const { onConfirm } = renderSheet()

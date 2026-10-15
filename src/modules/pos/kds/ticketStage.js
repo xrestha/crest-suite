@@ -4,9 +4,12 @@ import { CLOSE_TYPE_BADGE } from '../posSignals'
 // new: the floor marks a Ready ticket as delivered so its Ready clears. Not posSignals' KOT_STATUS_LABEL,
 // which is the till's live-floor vocabulary ('Sent' / 'Started') and does not know served or cancelled.
 // Served and Ready are both finished food, so both take the done verdict; the label tells them apart.
+// S846 (owner decision, the accent pass IMS and HR had): Started was the brass accent, which is kept
+// for what is pressed or current. It is grey now, with HR's ◷ for "in progress, not finished", which is
+// what tells it apart from Sent's grey.
 const KOT_STAGE = {
   new:         { label: 'Sent',      badge: 'badge-gray' },
-  in_progress: { label: 'Started',   badge: 'badge-yellow' },
+  in_progress: { label: '◷ Started', badge: 'badge-gray' },
   ready:       { label: 'Ready',     badge: 'badge-green' },
   served:      { label: 'Served',    badge: 'badge-green' },
   cancelled:   { label: 'Cancelled', badge: 'badge-gray' },

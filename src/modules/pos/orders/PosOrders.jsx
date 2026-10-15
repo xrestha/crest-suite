@@ -434,10 +434,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [compQtyByLine, setCompQtyByLine] = useState({})
   const [itemCompReason, setItemCompReason] = useState('')
   const [itemsExpanded,  setItemsExpanded]  = useState(false) // collapsed by default — see render site
-  // Buyer details used to always render 4 fields on every single Cash payment, on top of the
-  // payment-method/discount/comp choices already on this tab — collapsed by default the same way
-  // Items is, and force-expanded (no toggle) whenever requireBuyerId actually makes them mandatory.
-  const [buyerExpanded, setBuyerExpanded] = useState(false)
+  // S846: "Adjust this bill" — member card, buyer details, discount, points, comps and share slips
+  // behind one fold, so the payment method is the first thing under the amount. Folded on every new
+  // bill (openBilling); opened by pressClose when Confirm needs a field inside it, and by a card
+  // number that finds a member. Buyer details that a bill REQUIRES render outside it, open.
+  const [adjustOpen, setAdjustOpen] = useState(false)
   const [discountMode,    setDiscountMode]    = useState('amount') // 'amount' | 'percent'
   const [discountStr,     setDiscountStr]     = useState('')
   const [discountReason,  setDiscountReason]  = useState('')
@@ -1438,7 +1439,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (!data) { setBillCustomerMsg(`No customer holds card ${card}. Check the number, or find the guest by phone.`); return }
       setBillCustomerMsg('')
       setBillCustomer(data)
-      setBuyerExpanded(true)
+      setAdjustOpen(true)
       setBuyerName(prev => (prev.trim() ? prev : (data.name || '')))
       if (data.phone) setBuyerPhone(data.phone)
     }, 500)
@@ -1568,7 +1569,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (view === 'order') { backBtnRef.current?.focus(); return }
     if (prev !== 'order') return
     const id = returnFocusRef.current
-    const target = id && document.querySelector(`[data-table-tile="${id}"], [data-takeaway-tile="${id}"], [data-bill-for="${id}"]`)
+    const host = id && document.querySelector(`[data-table-tile="${id}"], [data-takeaway-tile="${id}"], [data-bill-for="${id}"]`)
+    // A floor tile is a card since S846; the control to land on is its one button inside.
+    const target = host && (host.querySelector('.floor-tile__open') || host)
     ;(target || document.getElementById('main-content'))?.focus()
   }, [view])
 
@@ -2567,8 +2570,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     // nothing, never looked at its saved menu, and had no menu and no way to take an order.
     if (tillOffline()) { await takeSavedMenu(); return false }
 
-    const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog, comboCatalog] = await Promise.all([
-      bounded(scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
+    const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog, comboCatalog, { data: eggData, error: eggErr }] = await Promise.all([
+      // is_veg is the dish's food mark on the tile (S846); it dates from July, so naming it is safe.
+      bounded(scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class, is_veg')
         .eq('is_active', true)
         .eq('pos_enabled', true)
         // `.or(...)`, not `.neq('category','Sub-Recipe')` (S714). category is NULLABLE with no
@@ -2589,6 +2593,11 @@ export default function PosOrders({ billingStation = false } = {}) {
       customizationEnabled
         ? bounded(loadComboCatalog(scopedFrom), 'Loading combos', OPEN_READ_MS)
         : Promise.resolve({ error: null, combos: [], recipes: {} }),
+      // S846: which dishes are Egg. Its own read because the till never names a new recipe column
+      // in its menu query (the S760 rule): on a database without is_egg this one fails, is ignored,
+      // and the tiles show veg / non-veg as before. Never a menu failure.
+      bounded(scopedFrom('recipes', 'id').eq('is_egg', true).eq('is_active', true).eq('pos_enabled', true),
+        'Loading egg marks', OPEN_READ_MS),
     ])
     // S841: no answer is the internet, not the menu (S809 3f's rule for orders). A menu already on
     // screen stays; a screen with none takes the saved copy, and says so only when there is none.
@@ -2632,7 +2641,10 @@ export default function PosOrders({ billingStation = false } = {}) {
       combos: comboCatalog.combos || [], comboRecipes: comboCatalog.recipes || {},
     }
     setOptionCatalog(nextCatalog)
-    setMenu(data || [])
+    if (eggErr) console.error('egg-dish read failed, tiles show veg / non-veg only:', eggErr)
+    const eggIds = new Set(eggErr ? [] : (eggData || []).map(r => r.id))
+    const menuRows = (data || []).map(r => (eggIds.has(r.id) ? { ...r, is_egg: true } : r))
+    setMenu(menuRows)
     let suggMap = {}
     if (suggErr) console.error('recipe_suggestions read failed — pairings fall back to the other signals:', suggErr)
     else if (suggData) {
@@ -2645,7 +2657,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     setMenuLoaded(true)
     menuFromSavedRef.current = false
     // Only a complete read is worth keeping as the offline copy.
-    if (!suggErr) cachePosMenu(clientId, data || [], suggMap, nextCatalog)
+    if (!suggErr) cachePosMenu(clientId, menuRows, suggMap, nextCatalog)
     return true
   }
 
@@ -4832,7 +4844,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     setCreditOwedBefore(null); setCreditOwedMsg('')
     setCloseMsg('')
     setCompCosting(null); setCompCostFailed(false)
-    setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
+    setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false); setAdjustOpen(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
     setLoyaltyBalance(null); setLoyaltyHeld(0); setLoyaltyOnOtherBills([]); setLoyaltyScheme(null); setRedeemStr(''); setLoyaltyLookupMsg('')
@@ -5112,7 +5124,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     if (hasItemComp && !itemCompReason) return block('Select a reason for the complimentary item(s).', 'Choose a reason for the comped items', 'pos-orders-comp-reason')
     if (orderItems.length > 0 && payableOrderItems.length === 0) {
-      return block('Every item is comped — use the Complimentary tab instead of issuing a ₨0 bill.', 'Every item is comped — use Complimentary')
+      return block('Every item is comped — close it with Complimentary, under Other ways to close, instead of issuing a ₨0 bill.', 'Every item is comped — use Complimentary')
     }
     return null
   }
@@ -5126,7 +5138,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     const blocker = closeBlocker(closeType)
     if (blocker?.field) {
       if (blocker.field === 'pos-orders-comp-reason') setItemsExpanded(true)
-      if (blocker.field.startsWith('pos-orders-buyer-')) setBuyerExpanded(true)
+      // S846: every field Confirm can send the cashier to, except the tender itself, is in the fold.
+      if (blocker.field === 'pos-orders-comp-reason' || blocker.field === 'pos-orders-discount-reason' ||
+          blocker.field.startsWith('pos-orders-buyer-')) setAdjustOpen(true)
       setTimeout(() => {
         const el = document.getElementById(blocker.field)
         if (!el) return
@@ -6487,8 +6501,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
           <span style={{
             fontSize: 10, fontWeight: 700, flexShrink: 0,
-            background: 'color-mix(in srgb, var(--theme-accent) 18%, transparent)',
-            color: 'var(--theme-accent-ink)',
+            // S846: a sent line is a plain state, so it reads as the grey badge does; only an unsent
+            // line (amber) asks for anything.
+            background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)',
+            color: 'var(--theme-text2)',
             borderRadius: 0, padding: '1px 5px', cursor: 'default',
           }}>
             ✓ {!routingShown ? 'Sent' : botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
@@ -6621,10 +6637,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       (at the top of this screen) before taking the payment again; the till keeps checking and finishes the bill if it did.
     </div>
   )
+  // Plain text since S846: it sits on a floor tile, and a tile's chips are words read with its one
+  // button, never a Tip trigger of their own (see .floor-tile in Layout.css). Help explains it.
   const unsettledCloseChip = (
-    <Tip text="This bill's payment was sent, and the connection dropped before the till heard back — so it may have closed. Check Recent Bills before taking the payment again. The mark clears itself once the till knows, and if the bill did close, the till finishes it then." width={300}>
-      <span className="badge-amber" style={{ fontSize: 10, whiteSpace: 'nowrap', cursor: 'default' }}>Payment not yet known</span>
-    </Tip>
+    <span className="badge-amber" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>Payment not yet known</span>
   )
   // The "did not save" notes (S754). Drawn on the Billing station too since S809: a close the till
   // found after it stopped waiting reports here, and the station is where most bills are closed.
@@ -6708,7 +6724,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>(Void)</span>}
-                      {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>(Complimentary)</span>}
+                      {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-text2)', fontSize: 11 }}>(Complimentary)</span>}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                       {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {nepalTime(o.closed_at)}
@@ -6884,7 +6900,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         )}
         {screenOrder?.partOf && (
           <Tip text="A part bill: dishes split off this table's bill so a guest can pay for them on their own, with their own invoice number. Cancel its payment to put them back.">
-            <span className="badge badge-yellow" style={{ fontSize: 11, cursor: 'default' }}>Part bill</span>
+            <span className="badge badge-gray" style={{ fontSize: 11, cursor: 'default' }}>Part bill</span>
           </Tip>
         )}
 
@@ -6902,8 +6918,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         {orderNo && (
           <Tip text="Order number — printed on every KOT/BOT ticket so the kitchen, bar and bill all reference the same order">
             <span style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--theme-accent-ink)',
-              border: '1px solid var(--theme-accent)', borderRadius: 'var(--radius-sm)',
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums',
+              border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
               padding: '2px 7px', cursor: 'default',
             }}>#{orderNo}</span>
           </Tip>
@@ -6985,10 +7001,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {req.guest_notes && <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}> — Note for the kitchen: "{req.guest_notes}" (goes on each of their dishes)</span>}
               </span>
               <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-                <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}
+                {/* S846: the class's own size — a 12px Accept was the smallest control on the screen
+                    for the decision a guest is waiting on. */}
+                <button className="btn btn-primary"
                   disabled={decidingGuestReqIds.has(req.id)}
                   onClick={() => decideGuestOrder(req, 'accepted')}>Accept</button>
-                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 12px' }}
+                <button className="btn btn-ghost"
                   disabled={decidingGuestReqIds.has(req.id)}
                   onClick={() => decideGuestOrder(req, 'dismissed')}>Dismiss</button>
               </div>
@@ -7204,7 +7222,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             <div style={{
               borderTop: '1px solid var(--theme-border)', flexShrink: 0,
               padding: '8px 14px',
-              background: 'color-mix(in srgb, var(--theme-accent) 5%, var(--theme-card))',
+              background: 'var(--theme-card)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-text2)' }}>Pair with</span>
@@ -7223,24 +7241,27 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <button
                       key={r.id}
                       onClick={() => addItem(r)}
+                      // S846: the touch floor and the focus pair, which these chips were the one control
+                      // on the order screen without.
+                      className="till-hit--row"
                       style={{
                         background: 'var(--theme-card)',
-                        // A Chef's pick is a CATEGORY (menu-engineering "puzzle"), not a verdict, so it
-                        // takes brass at half strength — never amber, which on this same screen already
-                        // means "unfired lines" and "a guest order waiting" (One Signal Meaning Rule).
-                        border: `1px solid ${r._manual ? 'var(--theme-accent)' : isChefsPick ? 'color-mix(in srgb, var(--theme-accent) 55%, transparent)' : 'var(--theme-border)'}`,
+                        // PAIRED and CHEF'S PICK are categories, not verdicts: since S846 they are said by
+                        // their word in ink, with a firmer border, never by the accent — and never amber,
+                        // which on this screen means "unfired lines" and "a guest order waiting".
+                        border: `1px solid ${r._manual || isChefsPick ? 'var(--theme-text2)' : 'var(--theme-border)'}`,
                         borderRadius: 'var(--radius-md)', padding: '5px 10px', fontSize: 12, cursor: 'pointer',
                         color: 'var(--theme-text1)', display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left',
                       }}
                     >
                       {r._manual && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>PAIRED</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', letterSpacing: 0.5 }}>PAIRED</span>
                       )}
                       {isChefsPick && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
                       )}
                       <span>{r.name}</span>
-                      <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>+{fmtNpr(price)}</span>
+                      <span style={{ fontSize: 10, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums' }}>+{fmtNpr(price)}</span>
                     </button>
                   )
                 })}
@@ -7266,7 +7287,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               marginBottom: narrowTill ? 10 : 14,
             }}>
               <span>TOTAL</span>
-              <span style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(total)}</span>
+              {/* S846: a figure is ink; Send below is the one lit thing in this pane. */}
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(total)}</span>
             </div>
 
             {/* S809 2a (ORDER-FLOW-1): a standing condition, not a message — it stays until a read lands. */}
@@ -7312,12 +7334,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     {/* Outlined, not filled (S776): Send Order and Payment were identical accent fills side
                         by side, so the eye could not tell the kitchen action from the money one. Send
                         stays the fill — it is the action every order needs; Payment is the one a
-                        supervisor comes to. */}
+                        supervisor comes to. Since S846 the outline is plain ink too: an accent border and
+                        accent text beside Send's fill was the accent spent twice in one pane. */}
                     <button
                       className="btn btn-ghost"
                       style={{
                         width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex',
-                        color: 'var(--theme-accent-ink)', fontWeight: 700, borderColor: 'var(--theme-accent)',
+                        fontWeight: 700, borderColor: 'var(--theme-text2)',
                         // Same disabled treatment as the KOT/BOT ticket-btn class (opacity 0.5) — this
                         // button uses inline styles instead of that class, so it needs its own dimming.
                         opacity: saving ? 0.5 : payDisabled ? 0.6 : 1,
@@ -7423,7 +7446,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               <h3 style={{ margin: 0, fontSize: 18, color: 'var(--theme-text1)' }}>
                 {screenOrder?.partOf ? partBillLabel(screenTableName, null) : screenTableName}
               </h3>
-              <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', textAlign: 'right' }}>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
                 {billingTab === 'writeoff' && compCostFailed ? '—' : fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
                 {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>{compCostFailed ? '(food cost could not be read — open the tab again to retry)' : compChoicesUnsaved ? '(food cost, not menu price; the slip adds the choices of a dish not saved yet)' : '(food cost, not menu price)'}</span>}
                 {billingTab === 'pay' && discountAmt > 0 && (
@@ -7449,280 +7472,126 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               </p>
             )}
 
-            {/* S841: the close type was shown by colour alone; aria-pressed says which, and till-hit--row
-                gives the three the 44px touch floor. */}
-            <div className="tab-bar" role="group" aria-label="How this bill closes" style={{ marginBottom: 16 }}>
-              {/* An unsettled try keeps its own tab (S809 CHECKOUT-7): voiding or comping a bill whose payment may still land is changing that payment. */}
-              <button type="button" aria-pressed={billingTab === 'pay'} className={`tab-btn till-hit--row${billingTab === 'pay' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('pay'); setCloseMsg('') }} disabled={closeLocked && billingTab !== 'pay'}>Pay</button>
-              {(isAdmin || isOwner || profile?.pos_allow_void) && (
-                <button type="button" aria-pressed={billingTab === 'void'} className={`tab-btn till-hit--row${billingTab === 'void' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('void'); setCloseMsg('') }} disabled={closeLocked && billingTab !== 'void'}>Void</button>
-              )}
-              {hasPosAccess('supervisor') && (
-                <button type="button" aria-pressed={billingTab === 'writeoff'} className={`tab-btn till-hit--row${billingTab === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={openCompTab} disabled={closeLocked && billingTab !== 'writeoff'}>Complimentary</button>
-              )}
-            </div>
-
-            {billingTab === 'pay' && (
-              <div style={{ marginBottom: 16 }}>
-                {requireBuyerId || requireFullInvoice ? (
-                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-                    Buyer details <span style={{ color: 'var(--theme-red-text)', textTransform: 'none', letterSpacing: 'normal' }}>
-                      <Tip text={!requireBuyerId ? FULL_INVOICE_TIP
-                        : `Name and Phone are required whenever a discount is applied or the bill goes on Credit, so there's an identifiable record.${requireFullInvoice ? ` ${FULL_INVOICE_TIP}` : ''}`}>
-                        {requireBuyerId && requireFullInvoice ? '(Name, Phone + Address required)'
-                          : requireFullInvoice ? `(Name + Address required above ${fmtNpr(ABBREVIATED_INVOICE_LIMIT)})`
-                          : payMethod === 'Credit' ? '(Name + Phone required for Credit)' : '(Name + Phone required for this discount)'}
-                      </Tip>
-                    </span>
-                  </p>
-                ) : (
-                  // Collapsed by default — same disclosure treatment as Items below. Buyer details
-                  // are only mandatory for a discount/Credit bill; a plain Cash sale doesn't need 4
-                  // fields surfaced before the payment-method choice a cashier actually taps every time.
-                  <button type="button" aria-expanded={buyerExpanded} onClick={() => setBuyerExpanded(v => !v)} style={{
-                    display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none',
-                    padding: 0, marginBottom: buyerExpanded ? 8 : 0, cursor: 'pointer', textAlign: 'left',
-                  }}>
-                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      {buyerExpanded ? '▾' : '▸'} Buyer details <Tip text={optionalBuyerTip(vatReg)}>(optional)</Tip>
-                    </span>
-                  </button>
-                )}
-                {(requireBuyerId || requireFullInvoice || buyerExpanded) && (
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                      {/* Placeholder text is not a label (it vanishes on the first keystroke), and a
-                          red border is reinforcement, not the message — so each field carries its
-                          name and the mandatory ones carry aria-invalid (S682). */}
-                      <input id="pos-orders-buyer-name" placeholder="Name" aria-label="Buyer name" aria-invalid={(requireBuyerId || requireFullInvoice) && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
-                        style={{ ...billInput, borderColor: (requireBuyerId || requireFullInvoice) && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
-                      <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
-                      <input id="pos-orders-buyer-address" placeholder="Address" aria-label="Buyer address" aria-invalid={requireFullInvoice && !buyerAddress.trim() ? true : undefined} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)}
-                        style={{ ...billInput, borderColor: requireFullInvoice && !buyerAddress.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
-                      <input id="pos-orders-buyer-phone" placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
-                        style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
-                    </div>
-                    {/* S843: shown only where the outlet gives out member cards. */}
-                    {outletHasCards && !deliveryPartner && (
-                      <div style={{ marginBottom: 8 }}>
-                        <Tip text="Type a member's card number to find them: their phone goes on the bill and their card discount fills in below. Their phone number finds them too.">
-                          <label htmlFor="pos-orders-member-card" style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'inline-block', marginBottom: 4 }}>Member card no.</label>
-                        </Tip>
-                        <input id="pos-orders-member-card" placeholder="Card no." autoComplete="off" value={memberCardStr}
-                          onChange={e => setMemberCardStr(e.target.value)} disabled={tendersLocked}
-                          style={disabledStyle({ ...billInput, width: '100%' }, tendersLocked)} />
-                      </div>
-                    )}
-                    <input placeholder="Remarks" aria-label="Bill remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
-                  </>
-                )}
+            {/* S846: Void and Complimentary left the top of this window. They were three tabs above every
+                bill, so the two rarest closes sat before the method a cashier taps on every one; they are
+                now a quiet "Other ways to close" row at the foot of the payment, and their own screens
+                lead back here. The close BUTTONS keep their colours (Void red, Complimentary amber). */}
+            {billingTab !== 'pay' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                <button type="button" className="btn btn-ghost btn-sm till-hit--row"
+                  onClick={() => { setBillingTab('pay'); setCloseMsg('') }} disabled={closeLocked}>
+                  ← Back to payment
+                </button>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>
+                  {billingTab === 'void' ? 'Void this bill' : 'Complimentary — the whole table, ₨0 collected'}
+                </span>
               </div>
             )}
 
-            {/* Loyalty redemption. Rendered inside the ORDER-screen return, beside the item-comp
-                panel — PosOrders has three returns and a control placed in the floor tree sets state
-                that nothing renders (S578).
+            {billingTab === 'pay' && (() => {
+              const buyerRequired = requireBuyerId || requireFullInvoice
+              const canVoid = isAdmin || isOwner || !!profile?.pos_allow_void
+              const canComp = hasPosAccess('supervisor')
+              const showLoyalty = hasFeature('loyalty') && (loyaltyBalance !== null || loyaltyLookupMsg) &&
+                !deliveryPartner && !isDeliveryPartnerPhone(buyerPhone, billingSettings.delivery_partners)
+              const appliedPoints = tenders.find(t => t.method === 'Loyalty')
+              const spendableNow = showLoyalty && !loyaltyLookupMsg ? spendablePoints(loyaltyBalance, loyaltyHeld) : 0
+              const showComp = canComp && orderItems.length > 0
 
-                Deliberately NOT gated on Supervisor rank, unlike comp above it: comping is
-                discretionary and giving away stock, whereas redeeming is a customer spending
-                something they already own. The real control is server-side — redeem_loyalty_points
-                re-checks the balance and will refuse.
-                S809 2g: nor for a delivery partner's order — the partner owes the bill and neither earns
-                nor spends points (award/redeem_loyalty_points refuse it too). */}
-            {billingTab === 'pay' && hasFeature('loyalty') && (loyaltyBalance !== null || loyaltyLookupMsg) &&
-              !deliveryPartner && !isDeliveryPartnerPhone(buyerPhone, billingSettings.delivery_partners) && (() => {
-              const applied = tenders.find(t => t.method === 'Loyalty')
-              // S815 4g (Q19 c): points earned on an unpaid Credit bill wait for it to be settled, and
-              // redeem_loyalty_points refuses them, so the window offers only what can be spent.
-              const spendable = spendablePoints(loyaltyBalance, loyaltyHeld)
-              const cap = maxRedeemablePoints(spendable, redeemableTotal, loyaltyPointValue)
-              // CUSTOMERS-PARKING-11: what this bill earns, never a promise to a guest who will earn none.
-              const earn = earnPreview({ base: paySubEx - discountAmt, scheme: loyaltyScheme, credit: !splitMode && payMethod === 'Credit' })
-              return (
-                <div style={{
-                  marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
-                  background: 'color-mix(in srgb, var(--theme-purple) 7%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--theme-purple) 25%, transparent)',
-                }}>
-                  {loyaltyLookupMsg ? (
-                    <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>{loyaltyLookupMsg}</p>
-                  ) : (<>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                        <Tip text="Points this customer can spend now, earned on past bills. Redeeming settles part of this bill like a gift card — it is not a discount, so the VAT on the bill does not change. Points from a Credit bill that is not paid yet can be spent once it is settled." width={300}>Loyalty points</Tip>
+              // What "Adjust this bill" already holds, said on its folded line, so nothing applied to the
+              // bill is ever out of sight. When nothing is, the line names what is inside instead.
+              const applied = [
+                discountAmt > 0 && `Discount −${fmtNpr(discountAmt)}`,
+                memberNow.kind === 'active' && `★ ${memberNow.typeName} member`,
+                !buyerRequired && (buyerName.trim() || buyerPhone.trim()) && `Buyer: ${buyerName.trim() || buyerPhone.trim()}`,
+                appliedPoints ? `${appliedPoints.points} pts used` : spendableNow > 0 && `${spendableNow} pts to spend`,
+                hasItemComp && `${itemCompCount} comped`,
+                shareCount != null && `Share slips: ${shareCount}`,
+              ].filter(Boolean)
+              const inside = [
+                'Discount',
+                outletHasCards && !deliveryPartner ? 'member card' : null,
+                !buyerRequired ? 'buyer details' : null,
+                showLoyalty ? 'points' : null,
+                showComp ? 'comp items' : null,
+                'share slips',
+              ].filter(Boolean).join(', ')
+
+              const sectionLabel = { fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }
+
+              const buyerBlock = (
+                <div style={{ marginBottom: 16 }}>
+                  {buyerRequired ? (
+                    <p style={sectionLabel}>
+                      Buyer details <span style={{ color: 'var(--theme-red-text)', textTransform: 'none', letterSpacing: 'normal' }}>
+                        <Tip text={!requireBuyerId ? FULL_INVOICE_TIP
+                          : `Name and Phone are required whenever a discount is applied or the bill goes on Credit, so there's an identifiable record.${requireFullInvoice ? ` ${FULL_INVOICE_TIP}` : ''}`}>
+                          {requireBuyerId && requireFullInvoice ? '(Name, Phone + Address required)'
+                            : requireFullInvoice ? `(Name + Address required above ${fmtNpr(ABBREVIATED_INVOICE_LIMIT)})`
+                            : payMethod === 'Credit' ? '(Name + Phone required for Credit)' : '(Name + Phone required for this discount)'}
+                        </Tip>
                       </span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-purple-text)' }}>
-                        {spendable} pt{spendable === 1 ? '' : 's'} · {fmtNpr(pointsValue(spendable, loyaltyPointValue))}
-                      </span>
-                    </div>
-                    {loyaltyHeld > 0 && (
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                        + {loyaltyHeld} pt{loyaltyHeld === 1 ? '' : 's'} from a Credit bill not paid yet — usable once it is settled.
-                      </p>
-                    )}
-                    {loyaltyOnOtherBills.map(b => (
-                      <p key={b.orderId} style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                        {pointsOnOtherBillText(b)}
-                      </p>
-                    ))}
-                    {applied ? (
-                      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-purple-text)' }}>
-                        {applied.points} pt{applied.points === 1 ? '' : 's'} applied ({fmtNpr(applied.amount)}) — undo it in the tender list below to change it.
-                      </p>
-                    ) : cap > 0 ? (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                        <input
-                          type="number" min="1" max={cap} value={redeemStr}
-                          onChange={e => setRedeemStr(e.target.value)}
-                          className="form-input form-input--auto" style={{ width: 110 }}
-                          placeholder={`max ${cap}`}
-                          aria-label="Points to redeem"
-                        />
-                        <button className="btn btn-ghost btn-sm till-hit--row" onClick={applyRedemption}
-                          disabled={closeLocked || !(Math.floor(Number(redeemStr) || 0) > 0 && Math.floor(Number(redeemStr) || 0) <= cap)}>
-                          Apply
-                        </button>
-                        <button className="btn btn-ghost btn-sm till-hit--row" onClick={() => setRedeemStr(String(cap))}>Use max</button>
-                      </div>
-                    ) : (
-                      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
-                        {spendable > 0 ? 'Not enough to cover any of this bill yet.' : 'No points to spend yet.'}
-                      </p>
-                    )}
-                    <p style={{ margin: '8px 0 0', fontSize: 12, color: earn.points > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>
-                      {earn.text}
                     </p>
-                  </>)}
+                  ) : (
+                    <p style={sectionLabel}>
+                      Buyer details <Tip text={optionalBuyerTip(vatReg)}>(optional)</Tip>
+                    </p>
+                  )}
+                  {/* S843: shown only where the outlet gives out member cards. First, because the card
+                      fills the guest's phone and their member discount in. */}
+                  {outletHasCards && !deliveryPartner && (
+                    <div style={{ marginBottom: 8 }}>
+                      <Tip text="Type a member's card number to find them: their phone goes on the bill and their card discount fills in below. Their phone number finds them too.">
+                        <label htmlFor="pos-orders-member-card" style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'inline-block', marginBottom: 4 }}>Member card no.</label>
+                      </Tip>
+                      <input id="pos-orders-member-card" placeholder="Card no." autoComplete="off" value={memberCardStr}
+                        onChange={e => setMemberCardStr(e.target.value)} disabled={tendersLocked}
+                        style={disabledStyle({ ...billInput, width: '100%' }, tendersLocked)} />
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    {/* Placeholder text is not a label (it vanishes on the first keystroke), and a
+                        red border is reinforcement, not the message — so each field carries its
+                        name and the mandatory ones carry aria-invalid (S682). */}
+                    <input id="pos-orders-buyer-name" placeholder="Name" aria-label="Buyer name" aria-invalid={buyerRequired && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
+                      style={{ ...billInput, borderColor: buyerRequired && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                    <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
+                    <input id="pos-orders-buyer-address" placeholder="Address" aria-label="Buyer address" aria-invalid={requireFullInvoice && !buyerAddress.trim() ? true : undefined} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)}
+                      style={{ ...billInput, borderColor: requireFullInvoice && !buyerAddress.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                    <input id="pos-orders-buyer-phone" placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
+                      style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                  </div>
+                  <input placeholder="Remarks" aria-label="Bill remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
                 </div>
               )
-            })()}
 
-            {billingTab === 'pay' && hasPosAccess('supervisor') && orderItems.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                {/* Collapsed by default — a comp checkbox on every item, visible on every single
-                    payment, reads as a standing suggestion to comp something. Folding it behind a
-                    deliberate tap keeps it available without pushing it in front of every cashier
-                    on every bill. */}
-                <button type="button" aria-expanded={itemsExpanded} onClick={() => setItemsExpanded(v => !v)} style={{
-                  display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none',
-                  padding: 0, marginBottom: itemsExpanded ? 8 : 0, cursor: 'pointer', textAlign: 'left',
-                }}>
-                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                    {itemsExpanded ? '▾' : '▸'} Items <Tip text="Comp an individual item — including just part of its quantity, e.g. 1 of 3 — it's removed from this bill and printed on its own internal Complimentary Slip instead, while the rest of the table (and the rest of that line's qty, if any) bills normally. Supervisor+ only.">(tap to comp)</Tip>
-                  </span>
-                  {hasItemComp && (
-                    <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
-                      · {itemCompCount} comped
-                    </span>
-                  )}
-                </button>
+              return (<>
                 {allItemsComped && (
-                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
-                    ⚠ Every item is comped — nothing left to bill. Switch to the Complimentary tab to close this table instead of issuing a ₨0 Tax Invoice/PAN Bill.
+                  <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
+                    ⚠ Every item is comped — nothing left to bill. Close the table with Complimentary, under Other ways to close below, instead of issuing a ₨0 Tax Invoice/PAN Bill.
                   </p>
                 )}
-                {itemsExpanded && (
-                <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: hasItemComp ? 10 : 0 }}>
-                  {cartRows(orderItems).map(row => {
-                    // S839: a combo is ONE row, and comping n of it comps n of every one of its dishes
-                    // (apply_pos_item_comps refuses part of a combo, combo_comp_whole).
-                    const dishes = row.kind === 'combo' ? row.block.dishes.map(d => d.item) : [row.item]
-                    const i = row.kind === 'combo'
-                      ? { name: row.block.name, qty: row.block.qty, unit_price: dishes.reduce((s, d) => s + d.unit_price, 0) }
-                      : row.item
-                    const keys = dishes.map(lineKeyOf)
-                    const lk = row.kind === 'combo' ? `combo:${row.block.id}` : keys[0]
-                    const compQty = Math.min(...keys.map(k => Math.min(compQtyByLine[k] || 0, i.qty)))
-                    const comped = compQty > 0
-                    const setQty = next => setCompQtyByLine(prev => {
-                      const out = { ...prev }
-                      for (const k of keys) out[k] = Math.max(0, Math.min(i.qty, next))
-                      return out
-                    })
-                    return (
-                      <div key={lk} style={{
-                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
-                        background: comped ? 'var(--theme-input-bg)' : 'transparent',
-                        color: comped ? 'var(--theme-amber-text)' : 'var(--theme-text2)',
-                        fontWeight: comped ? 600 : 400,
-                      }}>
-                        <span style={{ flex: 1 }}>{i.qty} x {i.name}</span>
-                        <span>{fmtNpr(i.qty * i.unit_price)}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <button type="button" className="till-hit" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0 || tendersLocked}
-                            aria-label={`Comp one fewer ${i.name}`}
-                            title={tendersLocked ? tendersLockHint : undefined}
-                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty <= 0 || tendersLocked ? 0.4 : 1 }}>−</button>
-                          <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
-                          <button type="button" className="till-hit" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty || tendersLocked}
-                            aria-label={`Comp one more ${i.name}`}
-                            title={tendersLocked ? tendersLockHint : undefined}
-                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty >= i.qty || tendersLocked ? 0.4 : 1 }}>+</button>
-                          <span style={{ fontSize: 10, minWidth: 44 }}>{comped ? `/${i.qty} comped` : 'comped'}</span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                {hasItemComp && (
-                  <div>
-                    <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
-                      {compCostFailed ? 'Food cost could not be read' : `${fmtNpr(itemCompFoodCost)} in food cost`} across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
-                      {!compCostFailed && itemCompChoicesUnsaved && ' The slip adds the choices of a dish not saved yet.'}
-                    </p>
-                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-comp-reason">Comp Reason</label>
-                    <select id="pos-orders-comp-reason" className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>
-                      <option value="">— Select —</option>
-                      {COMP_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                )}
-                </>
-                )}
-              </div>
-            )}
 
-            {billingTab === 'pay' && (
-              <>
-                {/* One `disabled` locks every method, tender and discount control below while a try at
-                    this bill is unsettled (S809 CHECKOUT-7); the footer says why. */}
+                {/* ── 1. How the guest pays, and what they hand over. The cashier's every-bill path:
+                    amount (above) → method → cash received or the QR → Confirm (the footer). One
+                    `disabled` locks every method and tender control while a try at this bill is
+                    unsettled (S809 CHECKOUT-7); the footer says why. */}
                 <fieldset className="pay-lock" disabled={closeLocked}>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                  <Tip text={tenders.length > 0 ? 'Undo all tenders below first to switch back.' : 'Collect this bill with one payment method.'}>
-                    <button onClick={() => setSplitMode(false)} disabled={tenders.length > 0}
-                      aria-pressed={!splitMode}
-                      className={`pay-method-btn${!splitMode ? ' pay-method-btn--selected' : ''}`}
-                      style={{ opacity: tenders.length > 0 ? 0.5 : 1, cursor: tenders.length > 0 ? 'not-allowed' : 'pointer' }}>
-                      Single Payment
-                    </button>
-                  </Tip>
-                  <Tip text="Collect this bill using more than one payment method — e.g. part eSewa, part cash. Not available with Credit.">
-                    <button onClick={() => { setSplitMode(true); setPayMethod('Cash'); setTenderMethod('Cash'); setTenderAmtStr(''); setDeliveryPartner('') }}
-                      aria-pressed={splitMode}
-                      className={`pay-method-btn${splitMode ? ' pay-method-btn--selected' : ''}`}>
-                      Split Payment
-                    </button>
-                  </Tip>
-                </div>
-
-                {/* S836 (owner, 2026-10-14): an equal split is ONE tax invoice and a printed share slip per
-                    guest; each share is then taken with Split Payment. Printing writes nothing. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-                  {shareCount == null ? (
-                    <Tip text="Print a slip for each guest with their equal share of this bill, in whole rupees (any leftover rupee goes on the first slips). Not a tax invoice: the one tax invoice prints when the bill is paid. Take each share with Split Payment.">
-                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setShareCount(MIN_SHARES)} disabled={payTotal <= 0}>÷ Share slips</button>
+                <div className="pay-method-head">
+                  <span style={{ ...sectionLabel, margin: 0 }}>{splitMode ? 'Split between methods' : 'Payment method'}</span>
+                  {splitMode ? (
+                    <Tip text={tenders.length > 0 ? 'Undo all the payments below first to go back to one method.' : 'Collect this bill with one payment method.'}>
+                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setSplitMode(false)} disabled={tenders.length > 0}>
+                        Back to one method
+                      </button>
                     </Tip>
                   ) : (
-                    <>
-                      <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Share between</span>
-                      <button type="button" className="btn btn-ghost till-hit" aria-label="One guest fewer" onClick={() => setShareCount(n => Math.max(MIN_SHARES, n - 1))} disabled={shareCount <= MIN_SHARES}>−</button>
-                      <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{shareCount}</span>
-                      <button type="button" className="btn btn-ghost till-hit" aria-label="One guest more" onClick={() => setShareCount(n => Math.min(MAX_SHARES, n + 1))} disabled={shareCount >= MAX_SHARES}>+</button>
-                      <span style={{ fontSize: 13, color: 'var(--theme-text1)' }}>{shareSummary(equalShares(payTotal, shareCount))}</span>
-                      <button type="button" className="btn btn-primary btn-sm till-hit--row" onClick={printShareSlips}>Print {shareCount} slips</button>
-                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setShareCount(null)}>Close</button>
-                    </>
+                    <Tip text="Collect this bill using more than one payment method — e.g. part eSewa, part cash. Not available with Credit.">
+                      <button type="button" className="btn btn-ghost btn-sm till-hit--row"
+                        onClick={() => { setSplitMode(true); setPayMethod('Cash'); setTenderMethod('Cash'); setTenderAmtStr(''); setDeliveryPartner('') }}>
+                        Split between methods
+                      </button>
+                    </Tip>
                   )}
                 </div>
 
@@ -7735,7 +7604,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         {m}
                       </button>
                     ))}
-                    {hasPosAccess('supervisor') && (
+                    {canComp && (
                       <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later, whole or in part, from Customers → Credit.">
                         <button onClick={() => setPayMethod('Credit')}
                           aria-pressed={payMethod === 'Credit'}
@@ -7757,7 +7626,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 )}
                 {!splitMode && payMethod === 'Credit' && billingSettings.delivery_partners.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
-                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 6px' }}>
+                    <p style={sectionLabel}>
                       <Tip text="Optional — delivery-aggregator orders don't pay at the counter, they remit later minus commission, so they close as Credit like any other unpaid balance. This just marks the buyer as the platform so Customers → Credit and the Delivery Partners report can track it separately; the actual commission is entered when the platform's payment is taken in Customers → Credit, not now." width={300}>Delivery Partner (optional)</Tip>
                     </p>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -7777,105 +7646,6 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   </div>
                 )}
 
-                {/* A visual break between the core payment choice above (method/tender — what a
-                    cashier taps on every single bill) and the adjustment fields below (discount —
-                    only relevant on some bills), so the fast path doesn't visually run together
-                    with the exception-handling path. */}
-                <div style={{ borderTop: '1px solid var(--theme-border-lt)', paddingTop: 14, marginTop: 2 }}>
-                {/* S843: what the guest's member card does on this bill, said in one line, with the
-                    one move the cashier may want (take it off / put it back). */}
-                {(memberNow.kind !== 'none' || billCustomerMsg) && (
-                  <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: 12 }}>
-                    {billCustomerMsg ? (
-                      <span style={{ color: 'var(--theme-amber-text)' }}>{billCustomerMsg}</span>
-                    ) : memberNow.kind === 'active' ? (
-                      <>
-                        <span className="badge badge-yellow" style={{ whiteSpace: 'nowrap' }}>★ {memberNow.typeName} member</span>
-                        {isMembershipReason(discountReason) ? (
-                          <>
-                            <span style={{ color: 'var(--theme-text2)' }}>{pctText(memberNow.pct)}% member discount filled in below.</span>
-                            {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={removeMemberDiscount}>Take it off</button>}
-                          </>
-                        ) : (
-                          <>
-                            <span style={{ color: 'var(--theme-text2)' }}>Member discount ({pctText(memberNow.pct)}%) is not on this bill.</span>
-                            {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={reapplyMemberDiscount}>Give {pctText(memberNow.pct)}%</button>}
-                          </>
-                        )}
-                      </>
-                    ) : memberNow.kind === 'expired' ? (
-                      <span style={{ color: 'var(--theme-amber-text)' }}>{memberNow.typeName} card expired on {formatAdAsBs(memberNow.expiresOn)}, so there is no member discount. A manager can renew it on Customers.</span>
-                    ) : (
-                      <span style={{ color: 'var(--theme-amber-text)' }}>{memberNow.typeName} cards are switched off, so there is no member discount.</span>
-                    )}
-                  </div>
-                )}
-                <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-                  Discount <Tip text="Reduces the pre-VAT taxable amount — VAT is recalculated on the discounted base, matching standard invoice practice. Leave at 0 for no discount.">(optional)</Tip>
-                </p>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                  {/* S841: the discount type was shown by colour alone; aria-pressed and a spoken name. */}
-                  <span role="group" aria-label="Discount type" style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" className="till-hit" aria-pressed={discountMode === 'amount'} aria-label="Discount in rupees" onClick={() => setDiscountMode('amount')} disabled={tendersLocked} style={{
-                    padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
-                    fontWeight: discountMode === 'amount' ? 700 : 400,
-                    background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                    color: discountMode === 'amount' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
-                    border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                  }}>₨</button>
-                  <button type="button" className="till-hit" aria-pressed={discountMode === 'percent'} aria-label="Discount in percent" onClick={() => setDiscountMode('percent')} disabled={tendersLocked} style={{
-                    padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
-                    fontWeight: discountMode === 'percent' ? 700 : 400,
-                    background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                    color: discountMode === 'percent' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
-                    border: `1px solid ${discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                  }}>%</button>
-                  </span>
-                  <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}
-                    aria-label={discountMode === 'percent' ? 'Discount percent' : 'Discount amount in rupees'}
-                    placeholder="0" value={comboOnlyBill ? '' : discountStr} onChange={e => { if (!comboOnlyBill) setDiscountStr(e.target.value) }}
-                    // S839: a bill of combos only has nothing a discount may touch. Read-only rather than
-                    // disabled, with the sentence below tied to it, so a press says why.
-                    readOnly={comboOnlyBill} aria-disabled={comboOnlyBill || undefined}
-                    aria-describedby={comboOnlyBill ? 'pos-orders-discount-combo' : undefined}
-                    disabled={tendersLocked} title={tendersLocked ? tendersLockHint : undefined}
-                    style={disabledStyle({ ...billInput, flex: 1 }, tendersLocked || comboOnlyBill)} />
-                  {discountMode === 'percent' && discountAmt > 0 && (
-                    <span style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>≈ {fmtNpr(discountAmt)}</span>
-                  )}
-                </div>
-                {tendersLocked && (
-                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '2px 0 8px' }}>{tendersLockHint}</p>
-                )}
-                {comboOnlyBill ? (
-                  <p id="pos-orders-discount-combo" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '2px 0 8px' }}>
-                    A combo is already a deal, so a bill discount does not apply to it.
-                  </p>
-                ) : payableOrderItems.some(isComboItem) && (
-                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '2px 0 8px' }}>
-                    The discount comes off the other dishes only ({fmtNpr(discountBase)} before VAT): a combo is already a deal.
-                  </p>
-                )}
-                {discountClamped && (
-                  <p style={{ fontSize: 11, color: 'var(--theme-amber-text)', margin: '2px 0 8px' }}>
-                    Capped at your {discountCapPct}% discount limit ({fmtNpr(discountAmt)}).
-                  </p>
-                )}
-                {discountAmt > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-discount-reason">Discount Reason</label>
-                    <select id="pos-orders-discount-reason" className="form-select" style={{ width: '100%' }} value={discountReason} onChange={e => setDiscountReason(e.target.value)}>
-                      <option value="">— Select —</option>
-                      {/* S843: a member discount's reason names the card, and is on no outlet list. */}
-                      {isMembershipReason(discountReason) && !discountReasons.includes(discountReason) && (
-                        <option value={discountReason}>{discountReason}</option>
-                      )}
-                      {discountReasons.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                )}
-                </div>
-
                 {!splitMode ? (
                   <>
                     {payMethod === 'Cash' && (
@@ -7891,7 +7661,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                             {cashShortfall > 0 ? 'Short by' : 'Change'}
                           </span>
                           <div role={cashShortfall > 0 ? 'alert' : undefined}
-                            style={{ fontSize: 15, fontWeight: 700, color: cashShortfall > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+                            style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cashShortfall > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
                             {cashShortfall > 0 ? fmtNpr(cashShortfall) : fmtNpr(Math.max(0, resolveTendered(payTotal) - payTotal))}
                           </div>
                         </div>
@@ -7912,7 +7682,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Remaining</span>
-                        <span style={{ fontWeight: 700, color: remaining > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(remaining)}</span>
+                        <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: remaining > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(remaining)}</span>
                       </div>
                       {tendersOverpaid && (
                         <p role="alert" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-red-text)' }}>
@@ -7920,10 +7690,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         </p>
                       )}
                       {tenders.map((t, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0 0', marginTop: 5, borderTop: '1px solid var(--theme-border-lt)' }}>
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 0 0', marginTop: 5, borderTop: '1px solid var(--theme-border-lt)' }}>
                           <span style={{ color: 'var(--theme-text2)' }}>{t.method}</span>
                           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(t.amount)}</span>
+                            <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--theme-text1)' }}>{fmtNpr(t.amount)}</span>
                             <Tip text="Prints a small courtesy slip for this payment only — not the Tax Invoice/PAN Bill, which still prints once at the end.">
                               {/* S842: named, and the 44px touch floor; it was an unnamed 11px glyph about 14px wide. */}
                               <button type="button" onClick={() => printHtml(buildTenderSlipHtml({
@@ -7935,8 +7705,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                                 <span aria-hidden="true">🖨</span>
                               </button>
                             </Tip>
+                            {/* S846: the one control that takes money back off a bill was the smallest and
+                                faintest on the screen (11px underlined text, no touch floor, no focus ring). */}
                             {i === tenders.length - 1 && (
-                              <button onClick={undoLastTender} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 11, textDecoration: 'underline', padding: 0 }}>
+                              <button type="button" onClick={undoLastTender} className="btn btn-ghost btn-sm till-hit--row"
+                                aria-label={`Undo the ${t.method} payment of ${fmtNpr(t.amount)}`}>
                                 ↩ Undo
                               </button>
                             )}
@@ -7985,8 +7758,318 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   </>
                 )}
                 </fieldset>
-              </>
-            )}
+
+                {/* A bill that must name its buyer (a discount, Credit, or a VAT bill above the abbreviated
+                    limit) shows the fields right here, open, rather than inside the fold below. */}
+                {buyerRequired && buyerBlock}
+
+                {/* ── 2. Adjust this bill (S846). Everything that changes a bill only sometimes — member
+                    card, buyer, discount, points, comps, share slips — behind one fold whose folded
+                    line names what is already applied. It opens itself when Confirm needs a field
+                    inside it (pressClose) and when a card number finds a member. */}
+                <div className="pay-adjust">
+                  <button type="button" className="pay-adjust__toggle till-hit--row" aria-expanded={adjustOpen}
+                    aria-controls="pos-orders-adjust" onClick={() => setAdjustOpen(v => !v)}>
+                    <span className="pay-adjust__title">{adjustOpen ? '▾' : '▸'} Adjust this bill</span>
+                    <span className={applied.length ? 'pay-adjust__summary' : 'pay-adjust__summary pay-adjust__summary--empty'}>
+                      {applied.length ? applied.join(' · ') : inside}
+                    </span>
+                  </button>
+                  {adjustOpen && (
+                    <div id="pos-orders-adjust" className="pay-adjust__body">
+                      {/* S843: what the guest's member card does on this bill, said in one line, with the
+                          one move the cashier may want (take it off / put it back). */}
+                      <fieldset className="pay-lock" disabled={closeLocked}>
+                      {(memberNow.kind !== 'none' || billCustomerMsg) && (
+                        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+                          {billCustomerMsg ? (
+                            <span style={{ color: 'var(--theme-amber-text)' }}>{billCustomerMsg}</span>
+                          ) : memberNow.kind === 'active' ? (
+                            <>
+                              <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>★ {memberNow.typeName} member</span>
+                              {isMembershipReason(discountReason) ? (
+                                <>
+                                  <span style={{ color: 'var(--theme-text2)' }}>{pctText(memberNow.pct)}% member discount filled in below.</span>
+                                  {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={removeMemberDiscount}>Take it off</button>}
+                                </>
+                              ) : (
+                                <>
+                                  <span style={{ color: 'var(--theme-text2)' }}>Member discount ({pctText(memberNow.pct)}%) is not on this bill.</span>
+                                  {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={reapplyMemberDiscount}>Give {pctText(memberNow.pct)}%</button>}
+                                </>
+                              )}
+                            </>
+                          ) : memberNow.kind === 'expired' ? (
+                            <span style={{ color: 'var(--theme-amber-text)' }}>{memberNow.typeName} card expired on {formatAdAsBs(memberNow.expiresOn)}, so there is no member discount. A manager can renew it on Customers.</span>
+                          ) : (
+                            <span style={{ color: 'var(--theme-amber-text)' }}>{memberNow.typeName} cards are switched off, so there is no member discount.</span>
+                          )}
+                        </div>
+                      )}
+                      </fieldset>
+
+                      {!buyerRequired && buyerBlock}
+
+                      <fieldset className="pay-lock" disabled={closeLocked}>
+                      <p style={sectionLabel}>
+                        Discount <Tip text="Reduces the pre-VAT taxable amount — VAT is recalculated on the discounted base, matching standard invoice practice. Leave at 0 for no discount.">(optional)</Tip>
+                      </p>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                        {/* S841: the discount type was shown by colour alone; aria-pressed and a spoken name. */}
+                        <span role="group" aria-label="Discount type" style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" className="till-hit" aria-pressed={discountMode === 'amount'} aria-label="Discount in rupees" onClick={() => setDiscountMode('amount')} disabled={tendersLocked} style={{
+                          padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
+                          fontWeight: discountMode === 'amount' ? 700 : 400,
+                          background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                          color: discountMode === 'amount' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
+                          border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                        }}>₨</button>
+                        <button type="button" className="till-hit" aria-pressed={discountMode === 'percent'} aria-label="Discount in percent" onClick={() => setDiscountMode('percent')} disabled={tendersLocked} style={{
+                          padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
+                          fontWeight: discountMode === 'percent' ? 700 : 400,
+                          background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                          color: discountMode === 'percent' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
+                          border: `1px solid ${discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                        }}>%</button>
+                        </span>
+                        <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}
+                          aria-label={discountMode === 'percent' ? 'Discount percent' : 'Discount amount in rupees'}
+                          placeholder="0" value={comboOnlyBill ? '' : discountStr} onChange={e => { if (!comboOnlyBill) setDiscountStr(e.target.value) }}
+                          // S839: a bill of combos only has nothing a discount may touch. Read-only rather than
+                          // disabled, with the sentence below tied to it, so a press says why.
+                          readOnly={comboOnlyBill} aria-disabled={comboOnlyBill || undefined}
+                          aria-describedby={comboOnlyBill ? 'pos-orders-discount-combo' : undefined}
+                          disabled={tendersLocked} title={tendersLocked ? tendersLockHint : undefined}
+                          style={disabledStyle({ ...billInput, flex: 1 }, tendersLocked || comboOnlyBill)} />
+                        {discountMode === 'percent' && discountAmt > 0 && (
+                          <span style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>≈ {fmtNpr(discountAmt)}</span>
+                        )}
+                      </div>
+                      {tendersLocked && (
+                        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '2px 0 8px' }}>{tendersLockHint}</p>
+                      )}
+                      {comboOnlyBill ? (
+                        <p id="pos-orders-discount-combo" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '2px 0 8px' }}>
+                          A combo is already a deal, so a bill discount does not apply to it.
+                        </p>
+                      ) : payableOrderItems.some(isComboItem) && (
+                        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '2px 0 8px' }}>
+                          The discount comes off the other dishes only ({fmtNpr(discountBase)} before VAT): a combo is already a deal.
+                        </p>
+                      )}
+                      {discountClamped && (
+                        <p style={{ fontSize: 11, color: 'var(--theme-amber-text)', margin: '2px 0 8px' }}>
+                          Capped at your {discountCapPct}% discount limit ({fmtNpr(discountAmt)}).
+                        </p>
+                      )}
+                      {discountAmt > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-discount-reason">Discount Reason</label>
+                          <select id="pos-orders-discount-reason" className="form-select" style={{ width: '100%' }} value={discountReason} onChange={e => setDiscountReason(e.target.value)}>
+                            <option value="">— Select —</option>
+                            {/* S843: a member discount's reason names the card, and is on no outlet list. */}
+                            {isMembershipReason(discountReason) && !discountReasons.includes(discountReason) && (
+                              <option value={discountReason}>{discountReason}</option>
+                            )}
+                            {discountReasons.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      </fieldset>
+
+                      {/* Loyalty redemption. Rendered inside the ORDER-screen return, beside the item-comp
+                          panel — PosOrders has three returns and a control placed in the floor tree sets state
+                          that nothing renders (S578).
+
+                          Deliberately NOT gated on Supervisor rank, unlike comp below it: comping is
+                          discretionary and giving away stock, whereas redeeming is a customer spending
+                          something they already own. The real control is server-side — redeem_loyalty_points
+                          re-checks the balance and will refuse.
+                          S809 2g: nor for a delivery partner's order — the partner owes the bill and neither earns
+                          nor spends points (award/redeem_loyalty_points refuse it too). */}
+                      {showLoyalty && (() => {
+                        // S815 4g (Q19 c): points earned on an unpaid Credit bill wait for it to be settled, and
+                        // redeem_loyalty_points refuses them, so the window offers only what can be spent.
+                        const spendable = spendablePoints(loyaltyBalance, loyaltyHeld)
+                        const cap = maxRedeemablePoints(spendable, redeemableTotal, loyaltyPointValue)
+                        // CUSTOMERS-PARKING-11: what this bill earns, never a promise to a guest who will earn none.
+                        const earn = earnPreview({ base: paySubEx - discountAmt, scheme: loyaltyScheme, credit: !splitMode && payMethod === 'Credit' })
+                        return (
+                          <div style={{
+                            margin: '16px 0', padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+                            background: 'color-mix(in srgb, var(--theme-purple) 7%, transparent)',
+                            border: '1px solid color-mix(in srgb, var(--theme-purple) 25%, transparent)',
+                          }}>
+                            {loyaltyLookupMsg ? (
+                              <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>{loyaltyLookupMsg}</p>
+                            ) : (<>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                                  <Tip text="Points this customer can spend now, earned on past bills. Redeeming settles part of this bill like a gift card — it is not a discount, so the VAT on the bill does not change. Points from a Credit bill that is not paid yet can be spent once it is settled." width={300}>Loyalty points</Tip>
+                                </span>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-purple-text)' }}>
+                                  {spendable} pt{spendable === 1 ? '' : 's'} · {fmtNpr(pointsValue(spendable, loyaltyPointValue))}
+                                </span>
+                              </div>
+                              {loyaltyHeld > 0 && (
+                                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+                                  + {loyaltyHeld} pt{loyaltyHeld === 1 ? '' : 's'} from a Credit bill not paid yet — usable once it is settled.
+                                </p>
+                              )}
+                              {loyaltyOnOtherBills.map(b => (
+                                <p key={b.orderId} style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+                                  {pointsOnOtherBillText(b)}
+                                </p>
+                              ))}
+                              {appliedPoints ? (
+                                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-purple-text)' }}>
+                                  {appliedPoints.points} pt{appliedPoints.points === 1 ? '' : 's'} applied ({fmtNpr(appliedPoints.amount)}) — undo it in the payment list above to change it.
+                                </p>
+                              ) : cap > 0 ? (
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                                  <input
+                                    type="number" min="1" max={cap} value={redeemStr}
+                                    onChange={e => setRedeemStr(e.target.value)}
+                                    className="form-input form-input--auto" style={{ width: 110 }}
+                                    placeholder={`max ${cap}`}
+                                    aria-label="Points to redeem"
+                                  />
+                                  <button className="btn btn-ghost btn-sm till-hit--row" onClick={applyRedemption}
+                                    disabled={closeLocked || !(Math.floor(Number(redeemStr) || 0) > 0 && Math.floor(Number(redeemStr) || 0) <= cap)}>
+                                    Apply
+                                  </button>
+                                  <button className="btn btn-ghost btn-sm till-hit--row" onClick={() => setRedeemStr(String(cap))}>Use max</button>
+                                </div>
+                              ) : (
+                                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
+                                  {spendable > 0 ? 'Not enough to cover any of this bill yet.' : 'No points to spend yet.'}
+                                </p>
+                              )}
+                              <p style={{ margin: '8px 0 0', fontSize: 12, color: earn.points > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>
+                                {earn.text}
+                              </p>
+                            </>)}
+                          </div>
+                        )
+                      })()}
+
+                      {showComp && (
+                        <div style={{ margin: '16px 0' }}>
+                          {/* Collapsed by default — a comp checkbox on every item, visible on every single
+                              payment, reads as a standing suggestion to comp something. Folding it behind a
+                              deliberate tap keeps it available without pushing it in front of every cashier
+                              on every bill. The Tip sits around the button since S846, never inside it. */}
+                          <Tip text="Comp an individual item — including just part of its quantity, e.g. 1 of 3 — it's removed from this bill and printed on its own internal Complimentary Slip instead, while the rest of the table (and the rest of that line's qty, if any) bills normally. Supervisor+ only.">
+                            <button type="button" className="pay-adjust__sub till-hit--row" aria-expanded={itemsExpanded} onClick={() => setItemsExpanded(v => !v)}>
+                              {itemsExpanded ? '▾' : '▸'} Comp items
+                              {hasItemComp && (
+                                <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600, textTransform: 'none', letterSpacing: 'normal' }}>
+                                  {' '}· {itemCompCount} comped
+                                </span>
+                              )}
+                            </button>
+                          </Tip>
+                          {itemsExpanded && (
+                          <>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, margin: '8px 0', marginBottom: hasItemComp ? 10 : 0 }}>
+                            {cartRows(orderItems).map(row => {
+                              // S839: a combo is ONE row, and comping n of it comps n of every one of its dishes
+                              // (apply_pos_item_comps refuses part of a combo, combo_comp_whole).
+                              const dishes = row.kind === 'combo' ? row.block.dishes.map(d => d.item) : [row.item]
+                              const i = row.kind === 'combo'
+                                ? { name: row.block.name, qty: row.block.qty, unit_price: dishes.reduce((s, d) => s + d.unit_price, 0) }
+                                : row.item
+                              const keys = dishes.map(lineKeyOf)
+                              const lk = row.kind === 'combo' ? `combo:${row.block.id}` : keys[0]
+                              const compQty = Math.min(...keys.map(k => Math.min(compQtyByLine[k] || 0, i.qty)))
+                              const comped = compQty > 0
+                              const setQty = next => setCompQtyByLine(prev => {
+                                const out = { ...prev }
+                                for (const k of keys) out[k] = Math.max(0, Math.min(i.qty, next))
+                                return out
+                              })
+                              return (
+                                <div key={lk} style={{
+                                  display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
+                                  background: comped ? 'var(--theme-input-bg)' : 'transparent',
+                                  color: comped ? 'var(--theme-amber-text)' : 'var(--theme-text2)',
+                                  fontWeight: comped ? 600 : 400,
+                                }}>
+                                  <span style={{ flex: 1 }}>{i.qty} x {i.name}</span>
+                                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(i.qty * i.unit_price)}</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <button type="button" className="till-hit" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0 || tendersLocked}
+                                      aria-label={`Comp one fewer ${i.name}`}
+                                      title={tendersLocked ? tendersLockHint : undefined}
+                                      style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty <= 0 || tendersLocked ? 0.4 : 1 }}>−</button>
+                                    <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
+                                    <button type="button" className="till-hit" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty || tendersLocked}
+                                      aria-label={`Comp one more ${i.name}`}
+                                      title={tendersLocked ? tendersLockHint : undefined}
+                                      style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty >= i.qty || tendersLocked ? 0.4 : 1 }}>+</button>
+                                    <span style={{ fontSize: 10, minWidth: 44 }}>{comped ? `/${i.qty} comped` : 'comped'}</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                          {hasItemComp && (
+                            <div>
+                              <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+                                {compCostFailed ? 'Food cost could not be read' : `${fmtNpr(itemCompFoodCost)} in food cost`} across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
+                                {!compCostFailed && itemCompChoicesUnsaved && ' The slip adds the choices of a dish not saved yet.'}
+                              </p>
+                              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-comp-reason">Comp Reason</label>
+                              <select id="pos-orders-comp-reason" className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>
+                                <option value="">— Select —</option>
+                                {COMP_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                              </select>
+                            </div>
+                          )}
+                          </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* S836 (owner, 2026-10-14): an equal split is ONE tax invoice and a printed share slip per
+                          guest; each share is then taken with Split between methods. Printing writes nothing. */}
+                      <fieldset className="pay-lock" disabled={closeLocked}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+                        {shareCount == null ? (
+                          <Tip text="Print a slip for each guest with their equal share of this bill, in whole rupees (any leftover rupee goes on the first slips). Not a tax invoice: the one tax invoice prints when the bill is paid. Take each share with Split between methods.">
+                            <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setShareCount(MIN_SHARES)} disabled={payTotal <= 0}>÷ Share slips</button>
+                          </Tip>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Share between</span>
+                            <button type="button" className="btn btn-ghost till-hit" aria-label="One guest fewer" onClick={() => setShareCount(n => Math.max(MIN_SHARES, n - 1))} disabled={shareCount <= MIN_SHARES}>−</button>
+                            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{shareCount}</span>
+                            <button type="button" className="btn btn-ghost till-hit" aria-label="One guest more" onClick={() => setShareCount(n => Math.min(MAX_SHARES, n + 1))} disabled={shareCount >= MAX_SHARES}>+</button>
+                            <span style={{ fontSize: 13, color: 'var(--theme-text1)' }}>{shareSummary(equalShares(payTotal, shareCount))}</span>
+                            <button type="button" className="btn btn-primary btn-sm till-hit--row" onClick={printShareSlips}>Print {shareCount} slips</button>
+                            <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setShareCount(null)}>Close</button>
+                          </>
+                        )}
+                      </div>
+                      </fieldset>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── 3. The two closes that are not a payment, last and quiet. */}
+                {(canVoid || canComp) && (
+                  <div className="pay-other-ways">
+                    <span>Other ways to close</span>
+                    {canComp && (
+                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={openCompTab} disabled={closeLocked}>Complimentary</button>
+                    )}
+                    {canVoid && (
+                      <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => { setBillingTab('void'); setCloseMsg('') }} disabled={closeLocked}>Void the bill</button>
+                    )}
+                  </div>
+                )}
+              </>)
+            })()}
 
             {billingTab === 'void' && (
               <>
@@ -8270,11 +8353,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             return (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20 }}>
                 {[1,2,3,4,5,6,7,8,9].map(d => (
-                  <button key={d} onClick={() => numpadPress(String(d))} style={pad}>{d}</button>
+                  <button key={d} className="till-hit" onClick={() => numpadPress(String(d))} style={pad}>{d}</button>
                 ))}
-                <button onClick={numpadClear} aria-label="Clear" style={{ ...pad, color: 'var(--theme-red-text)', fontSize: 14, fontWeight: 700 }}>CLR</button>
-                <button onClick={() => numpadPress('0')} style={pad}>0</button>
-                <button onClick={numpadBackspace} aria-label="Backspace" style={{ ...pad, fontSize: 18 }}>⌫</button>
+                {/* S846: till-hit gives each key the focus pair; the 72x52 box is already over the floor. */}
+                <button className="till-hit" onClick={numpadClear} aria-label="Clear" style={{ ...pad, color: 'var(--theme-red-text)', fontSize: 14, fontWeight: 700 }}>CLR</button>
+                <button className="till-hit" onClick={() => numpadPress('0')} style={pad}>0</button>
+                <button className="till-hit" onClick={numpadBackspace} aria-label="Backspace" style={{ ...pad, fontSize: 18 }}>⌫</button>
               </div>
             )
           })()}
@@ -8376,7 +8460,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         </div>
       </div>
 
-      {/* Today's bookings — a quiet strip, not an alarm: brass/grey chips, amber only for a party
+      {/* Today's bookings — a quiet strip, not an alarm: grey chips, amber only for a party
           that has arrived and is waiting (loudness tracks demand for action, posSignals.js). */}
       {(floorReservations.length > 0 || requestCount > 0) && (
         <div className="card" style={{ padding: '10px 14px', marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -8396,7 +8480,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               <span className="badge badge-amber" style={{ cursor: 'default' }}>🔔 {requestCount} booking request{requestCount === 1 ? '' : 's'}</span>
             </Tip>
           )}
-          <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => navigate('/pos/reservations')}>Reservations →</button>
+          <button type="button" className="btn btn-ghost btn-sm till-hit--row" style={{ marginLeft: 'auto' }} onClick={() => navigate('/pos/reservations')}>Reservations →</button>
         </div>
       )}
 
@@ -8562,14 +8646,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       {floorLoadError && (
         <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
           Couldn't refresh the floor. {floorLoadError}{tables.length > 0 ? ' Tables below are as last loaded and may be out of date.' : ''}{' '}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadFloor()}>Retry</button>
+          <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadFloor()}>Retry</button>
         </p>
       )}
       {/* S809 2a (ORDER-FLOW-1): a line like the one above, for the same reason — the till retries on its own. */}
       {settingsFailure && (
         <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
           {tillSettingsNotice(settingsFailure)}{' '}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadTillSettings()} disabled={settingsReading}>
+          <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadTillSettings()} disabled={settingsReading}>
             {settingsReading ? 'Trying…' : 'Retry'}
           </button>
         </p>
@@ -8590,36 +8674,35 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               return (
                 <div
                   key={t.orderId}
-                  className="card"
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${label}, ${t.itemCount} item${t.itemCount !== 1 ? 's' : ''}, ${fmtNpr(t.total)}`}
+                  className="card floor-tile"
                   data-takeaway-tile={t.orderId}
-                  aria-busy={openingId === t.orderId || undefined}
-                  onClick={() => openOnce(t.orderId, () => openOrderById(t.orderId))}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOnce(t.orderId, () => openOrderById(t.orderId)) } }}
-                  style={{ padding: '16px 18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden', borderColor: 'var(--theme-accent)' }}
+                  style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
                 >
                   <div style={{
                     margin: '-16px -18px 2px', height: 6, flexShrink: 0,
                     background: tableStripColor({ status: 'occupied', order: t, kotStatus: kot, guestPending: false }),
                   }} />
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{label}</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                    {/* S846: the tile's ONE control. Its ::after covers the card, so a tap anywhere opens
+                        the order and the tile is one tab stop; the chips beside it are read with it. */}
+                    <button
+                      type="button"
+                      className="floor-tile__open"
+                      aria-label={`${label}, ${t.itemCount} item${t.itemCount !== 1 ? 's' : ''}, ${fmtNpr(t.total)}`}
+                      aria-describedby={`takeaway-facts-${t.orderId}`}
+                      aria-busy={openingId === t.orderId || undefined}
+                      onClick={() => openOnce(t.orderId, () => openOrderById(t.orderId))}
+                    >{label}</button>
+                    <div id={`takeaway-facts-${t.orderId}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                       {kotChip && (
                         <span className={kotChip.className} style={{ fontSize: 10 }}>{kotChip.label}</span>
                       )}
                       {unsettledCloses.some(a => a.orderId === t.orderId) && unsettledCloseChip}
                       {t.offlinePending && (
-                        <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
-                          <span style={{ fontSize: 10, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default' }}>📵</span>
-                        </Tip>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, padding: '1px 6px', whiteSpace: 'nowrap' }}>📵 Not synced</span>
                       )}
                       {t.pending > 0 && (
-                        <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
-                          <span style={{ fontSize: 10, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap' }}>⚠ {t.pending}</span>
-                        </Tip>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, padding: '1px 6px', whiteSpace: 'nowrap' }}>⚠ {t.pending} not sent</span>
                       )}
                     </div>
                   </div>
@@ -8627,7 +8710,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                       {t.itemCount} item{t.itemCount !== 1 ? 's' : ''}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 3 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums', marginTop: 3 }}>
                       {fmtNpr(t.total)}
                     </div>
                     {openingId === t.orderId && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginTop: 3 }}>Opening…</div>}
@@ -8663,22 +8746,18 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               <div
                 key={t.id}
                 data-table-tile={t.id}
-                aria-busy={opening || undefined}
-                className={`card${hasPendingGuest ? ' guest-order-glow' : ''}`}
-                onClick={openTile}
+                className={`card floor-tile${hasPendingGuest ? ' guest-order-glow' : ''}`}
                 style={{
                   padding: '16px 18px',
-                  cursor: inactive && !ord && !joinedTo ? 'default' : 'pointer',
                   // Muted by a dashed edge and the badge, not opacity (S776): 0.4 took the name and
                   // seat count below AA, so an inactive table was also an unreadable one.
                   ...(inactive ? { borderStyle: 'dashed', background: 'transparent' } : {}),
                   display: 'flex', flexDirection: 'column', gap: 8,
                   overflow: 'hidden',
-                  ...(ord || joinedTo ? { borderColor: 'var(--theme-accent)' } : {}),
+                  // S846: no accent border for a taken table. The status badge says Occupied in words and
+                  // the strip carries what needs a waiter; a lit edge on every full table was the accent
+                  // spent on the outcome everyone wants.
                 }}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTile() } }}
               >
                 {/* Glanceable ATTENTION strip — readable across the room, and deliberately not a
                     status strip: a waiter crossing the floor can already see which tables are
@@ -8692,74 +8771,69 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   }),
                 }} />
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{t.name}</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                  {/* S846: the tile's ONE control (the S653 rule: a card holding controls takes no
+                      role="button"). Its ::after covers the card, so a tap anywhere opens the table and
+                      the tile is one tab stop; every chip below is plain text read with it. */}
+                  <button
+                    type="button"
+                    className="floor-tile__open"
+                    style={inactive && !ord && !joinedTo ? { cursor: 'default' } : undefined}
+                    aria-describedby={`table-facts-${t.id} table-more-${t.id}`}
+                    aria-busy={opening || undefined}
+                    onClick={openTile}
+                  >{t.name}</button>
+                  <div id={`table-facts-${t.id}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                     <span className={STATUS_BADGE[t.status] || 'badge-gray'} style={{ fontSize: 10 }}>
                       {STATUS_LABEL[t.status] || t.status}
                     </span>
                     {unsettledCloses.some(a => a.tableId === t.id) && unsettledCloseChip}
                     {ord && ticketSummaryChip(kotStatusByTable[t.id]) && (() => {
                       const chip = ticketSummaryChip(kotStatusByTable[t.id])
-                      return (
-                        <Tip text="Kitchen/bar status of items sent for this order — Sent (not yet started) / Started (being prepared) / Ready or “N ready” (food waiting to be taken to the table) / Served. Open the table to see per-item prep timers and mark Ready food as served.">
-                          <span className={chip.className} style={{ fontSize: 10 }}>{chip.label}</span>
-                        </Tip>
-                      )
+                      return <span className={chip.className} style={{ fontSize: 10 }}>{chip.label}</span>
                     })()}
                     {pendingGuestOrders[t.id]?.length > 0 && (
-                      <Tip text="A guest submitted an order from the QR menu on this table — open it to Accept or Dismiss">
-                        <span className="badge-amber" style={{ fontSize: 10 }}>
-                          🔔 Guest order{pendingGuestOrders[t.id].length > 1 ? ` (${pendingGuestOrders[t.id].length})` : ''}
-                        </span>
-                      </Tip>
+                      <span className="badge-amber" style={{ fontSize: 10 }}>
+                        🔔 Guest order{pendingGuestOrders[t.id].length > 1 ? ` (${pendingGuestOrders[t.id].length})` : ''}
+                      </span>
                     )}
                     {ord?.offlinePending && (
-                      <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, color: amberBadgeText,
-                          background: 'var(--theme-amber)', borderRadius: 0,
-                          width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          cursor: 'default',
-                        }}>
-                          📵
-                        </span>
-                      </Tip>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, color: amberBadgeText,
+                        background: 'var(--theme-amber)', borderRadius: 0,
+                        padding: '1px 6px', whiteSpace: 'nowrap',
+                      }}>
+                        📵 Not synced
+                      </span>
                     )}
                     {ord?.pending > 0 && (
-                      <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, color: amberBadgeText,
-                          background: 'var(--theme-amber)', borderRadius: 0,
-                          padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap',
-                        }}>
-                          ⚠ {ord.pending}
-                        </span>
-                      </Tip>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, color: amberBadgeText,
+                        background: 'var(--theme-amber)', borderRadius: 0,
+                        padding: '1px 6px', whiteSpace: 'nowrap',
+                      }}>
+                        ⚠ {ord.pending} not sent
+                      </span>
                     )}
                   </div>
                 </div>
+                <div id={`table-more-${t.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
 
                 {t.section && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>
                 )}
                 {opening && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)' }}>Opening…</div>}
 
-                {/* The booking due on this table. Quiet by default; brass when due within the seat
-                    window (tap to seat); amber ONLY when the party has arrived and the table is
-                    still occupied — the one state here that is waiting on a person. */}
+                {/* The booking due on this table. Grey, with the WORD "Due" inside the seat window (tap
+                    to seat) since S846 rather than the accent; amber ONLY when the party has arrived and
+                    the table is still occupied — the one state here that is waiting on a person. */}
                 {reservationsByTable[t.id] && (() => {
                   const r = reservationsByTable[t.id]
                   const waiting = r.status === 'arrived' && !!ord
                   const due = !waiting && isDue(r, kotNow, reservationSettings.seat_window_minutes)
-                  const cls = waiting ? 'badge-amber' : due ? 'badge-yellow' : 'badge-gray'
                   return (
-                    <Tip text={waiting
-                      ? `${r.customer_name} (party of ${r.party_size}) has arrived — this table is still occupied.`
-                      : `Booked ${nepalTime(r.reserved_for)} for ${r.customer_name}, party of ${r.party_size}. Tap the table when they sit down: the order opens with the covers filled in.`} width={240}>
-                      <span className={`badge ${cls}`} style={{ fontSize: 10, alignSelf: 'flex-start', cursor: 'default' }}>
-                        🕗 {nepalTime(r.reserved_for)} · {r.customer_name} ×{r.party_size}
-                      </span>
-                    </Tip>
+                    <span className={`badge ${waiting ? 'badge-amber' : 'badge-gray'}`} style={{ fontSize: 10, alignSelf: 'flex-start', fontWeight: due ? 700 : undefined }}>
+                      {waiting ? 'Arrived · ' : due ? 'Due · ' : ''}🕗 {nepalTime(r.reserved_for)} · {r.customer_name} ×{r.party_size}
+                    </span>
                   )
                 })()}
 
@@ -8768,17 +8842,16 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                       {ord.itemCount} item{ord.itemCount !== 1 ? 's' : ''} · {ord.covers} cover{ord.covers !== 1 ? 's' : ''}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 3 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums', marginTop: 3 }}>
                       {fmtNpr(ord.total)}
                     </div>
                   </div>
                 ) : joinedTo ? (
-                  <Tip text={`Joined to ${joinedMain?.name || 'another table'}'s bill — tap to open it. It stays taken until that bill is paid.`}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)' }}>⇄ With {joinedMain?.name || 'another table'}</div>
-                  </Tip>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)' }}>⇄ With {joinedMain?.name || 'another table'}'s bill</div>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>👥 {t.capacity} seats</div>
                 )}
+                </div>
               </div>
             )
           })}
