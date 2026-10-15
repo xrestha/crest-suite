@@ -217,6 +217,8 @@
 /* The status card after submitting. */
 .gb-status { padding: 16px; }
 .gb-status-stage { font-size: 22px; font-weight: 700; margin: 0 0 6px; color: var(--theme-text1); }
+/* Focus lands on the stage heading after sending (S841), un-ringed like the form's cards. */
+.gb-status-stage:focus { outline: none; }
 .gb-status--confirmed .gb-status-stage { color: var(--theme-green-text); }
 .gb-status--declined .gb-status-stage { color: var(--theme-red-text); }
 .gb-status-detail { margin: 0; font-size: 15px; color: var(--theme-text2); line-height: 1.5; }

@@ -53,6 +53,30 @@ function refusalCopy(code, outlet, maxParty, lead) {
   }
 }
 
+// Where a sent request stands, as its card shows it.
+function requestStageOf(status, request) {
+  const s = status?.status
+  // S818 RESERVATIONS-9: a request still unanswered once its time has passed is not "will confirm
+  // shortly". The poll re-renders this every few seconds, so the clock read here stays current.
+  const forIso = status?.reserved_for || request.reservedFor
+  const passed = forIso && new Date(forIso).getTime() < Date.now()
+  return s === 'confirmed' || s === 'arrived' || s === 'seated' || s === 'completed' ? 'confirmed'
+    : s === 'cancelled' || s === 'no_show' ? 'declined'
+    : passed ? 'expired' : 'requested'
+}
+
+// The status card's words for each stage. The card shows them and the announcer says them (S841), so
+// what a screen reader hears is what the card says. The ✓ is a mark, not a word.
+function requestWords(stage, outlet, cancelReason) {
+  if (stage === 'confirmed') return { title: 'Confirmed', mark: '✓', detail: 'Your table is booked. See you soon!' }
+  if (stage === 'declined') return { title: 'Not available', detail: `${cancelReason ? `${cancelReason}. ` : ''}Please call or message ${outlet || 'them'} for another time.` }
+  if (stage === 'expired') {
+    return { title: 'Not answered in time', detail: `${outlet || 'They'} did not confirm this request before the time you asked for. Please call or message ${outlet || 'them'}, or tap Make another booking below.` }
+  }
+  return { title: 'Request sent', detail: `${outlet || 'They'} will confirm shortly. Keep this page open, or come back to it — it updates by itself.` }
+}
+const STALE_TEXT = "We've lost touch with the booking system for a moment — this may be out of date. Reconnecting…"
+
 const sessionKey = clientId => `guestBooking:${clientId}`
 // What the alert beside the button says when a submit is refused for a card the guest cannot
 // see. Name and phone sit right above the button and keep their inline error; Day and Time are
@@ -206,6 +230,43 @@ export default function GuestBooking() {
     return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVisibility) }
   }, [request?.id])
 
+  // ── Said aloud (S841) ─────────────────────────────────────────────────────────────────────────
+  // The status card used to be its own live region, and it mounted already holding "Request sent",
+  // which screen readers announce unreliably. One region in the shell, mounted before any card,
+  // says the request the guest has just sent and then each stage the card moves to, in the card's
+  // words. A card restored on a reload arrives holding its words and is read on the page. `n`
+  // re-keys the text, so the same sentence is said again when it comes round again.
+  const [announcement, setAnnouncement] = useState({ text: '', n: 0 })
+  const spokenRef = useRef({ id: null, stage: null })
+  const sentIdRef = useRef(null) // the request this page just sent, until its card is said and focused
+  const statusHeadRef = useRef(null)
+  const requestId = request?.id || null
+  const requestStage = !error && request ? requestStageOf(status, request) : null
+  const requestOutlet = (page?.menu_name && page.menu_name.trim()) || tidyName(status?.outlet_name || page?.outlet_name || '')
+  const words = requestStage ? requestWords(requestStage, requestOutlet, status?.cancel_reason) : null
+  const wordsSaid = words ? `${words.title}. ${words.detail}` : ''
+  // A lost connection was said by the card's live region; it is said here now. Before the stage
+  // effect, so a stage that lands in the same render is the last word.
+  const staleShown = statusStale && !!requestStage
+  useEffect(() => {
+    if (staleShown) setAnnouncement(a => ({ text: STALE_TEXT, n: a.n + 1 }))
+  }, [staleShown])
+  useEffect(() => {
+    const last = spokenRef.current
+    spokenRef.current = { id: requestId, stage: requestStage }
+    if (!requestStage) return
+    if (last.id !== requestId || !last.stage) {
+      // Just sent: said, and focused, since the button the guest pressed went with the form.
+      if (sentIdRef.current === requestId) {
+        sentIdRef.current = null
+        setAnnouncement(a => ({ text: wordsSaid, n: a.n + 1 }))
+        statusHeadRef.current?.focus()
+      }
+      return
+    }
+    if (last.stage !== requestStage) setAnnouncement(a => ({ text: wordsSaid, n: a.n + 1 }))
+  }, [requestId, requestStage, wordsSaid])
+
   // The instant the guest picked, pinned to Nepal's offset — never the phone's timezone.
   const reservedFor = dayIso && time ? `${dayIso}T${time}:00+05:45` : null
   const minLeadMs = (page?.min_lead_minutes ?? 60) * 60000
@@ -280,6 +341,7 @@ export default function GuestBooking() {
     }
     const stored = { id: data.id, name: name.trim(), party, reservedFor }
     try { sessionStorage.setItem(sessionKey(clientId), JSON.stringify(stored)) } catch { /* private mode */ }
+    sentIdRef.current = data.id
     setRequest(stored)
     setStatus(null)
   }
@@ -299,76 +361,54 @@ export default function GuestBooking() {
 
   if (error) {
     return (
-      <div className="guest-booking"><div className="gb-wrap"><div className="gb-empty">
+      <BookingShell announcement={announcement}><div className="gb-empty">
         We couldn't load the booking page just now. Please try again in a moment.
-      </div></div></div>
+      </div></BookingShell>
     )
   }
   if (page === null && !request) {
-    return <div className="guest-booking"><div className="gb-wrap"><div className="gb-empty">Loading…</div></div></div>
+    return <BookingShell announcement={announcement}><div className="gb-empty">Loading…</div></BookingShell>
   }
 
   // A submitted request shows its status card even if the outlet has since switched the page off.
+  // No live region on the card (S841): the shell's announcer says each stage. Its heading is where
+  // focus goes after sending, un-ringed like the form's cards.
   if (request) {
-    const s = status?.status
-    // S818 RESERVATIONS-9: a request still unanswered once its time has passed is not "will confirm
-    // shortly". The poll re-renders this every few seconds, so the clock read here stays current.
-    const forIso = status?.reserved_for || request.reservedFor
-    const passed = forIso && new Date(forIso).getTime() < Date.now()
-    const stage = s === 'confirmed' || s === 'arrived' || s === 'seated' || s === 'completed' ? 'confirmed'
-      : s === 'cancelled' || s === 'no_show' ? 'declined'
-      : passed ? 'expired' : 'requested'
-    const outlet = (page?.menu_name && page.menu_name.trim()) || tidyName(status?.outlet_name || page?.outlet_name || '')
+    const stage = requestStage
     return (
-      <div className="guest-booking"><div className="gb-wrap">
+      <BookingShell announcement={announcement}>
         <header className="gb-head">
           {logoUrl && <BookingLogo src={logoUrl} />}
-          <h1 className="gb-outlet">{outlet}</h1>
+          <h1 className="gb-outlet">{requestOutlet}</h1>
           <p className="gb-tagline">Table booking</p>
         </header>
-        <div className={`gb-card gb-status gb-status--${stage === 'expired' ? 'declined' : stage}`} role="status" aria-live="polite">
-          {stage === 'requested' && (<>
-            <p className="gb-status-stage">Request sent</p>
-            <p className="gb-status-detail">{outlet || 'They'} will confirm shortly. Keep this page open, or come back to it — it updates by itself.</p>
-          </>)}
-          {stage === 'expired' && (<>
-            <p className="gb-status-stage">Not answered in time</p>
-            <p className="gb-status-detail">
-              {outlet || 'They'} did not confirm this request before the time you asked for. Please call or message {outlet || 'them'}, or tap Make another booking below.
-            </p>
-          </>)}
-          {stage === 'confirmed' && (<>
-            <p className="gb-status-stage">Confirmed ✓</p>
-            <p className="gb-status-detail">Your table is booked. See you soon!</p>
-          </>)}
-          {stage === 'declined' && (<>
-            <p className="gb-status-stage">Not available</p>
-            <p className="gb-status-detail">
-              {status?.cancel_reason ? `${status.cancel_reason}. ` : ''}Please call or message {outlet || 'them'} for another time.
-            </p>
-          </>)}
+        <div className={`gb-card gb-status gb-status--${stage === 'expired' ? 'declined' : stage}`}>
+          <h2 ref={statusHeadRef} tabIndex={-1} className="gb-status-stage">
+            {words.title}{words.mark && <span aria-hidden="true"> {words.mark}</span>}
+          </h2>
+          <p className="gb-status-detail">{words.detail}</p>
           <div className="gb-summary">
             <strong>{request.name}</strong> · {status?.party_size || request.party} guest{(status?.party_size || request.party) === 1 ? '' : 's'}<br />
             {whenLabel(status?.reserved_for || request.reservedFor)}
           </div>
-          {statusStale && <p className="gb-alert gb-alert--stale" style={{ marginTop: 12 }}>We've lost touch with the booking system for a moment — this may be out of date. Reconnecting…</p>}
+          {statusStale && <p className="gb-alert gb-alert--stale" style={{ marginTop: 12 }}>{STALE_TEXT}</p>}
           <button type="button" className="gb-linkbtn" onClick={bookAnother}>Make another booking</button>
         </div>
         <p className="gb-foot">Powered by Crest POS</p>
-      </div></div>
+      </BookingShell>
     )
   }
 
   if (page === false) {
     return (
-      <div className="guest-booking"><div className="gb-wrap"><div className="gb-empty">
+      <BookingShell announcement={announcement}><div className="gb-empty">
         Online booking isn't available here right now. Please call or message directly.
-      </div></div></div>
+      </div></BookingShell>
     )
   }
 
   return (
-    <div className="guest-booking"><div className="gb-wrap">
+    <BookingShell announcement={announcement}>
       <header className="gb-head">
         {logoUrl && <BookingLogo src={logoUrl} />}
         <h1 className="gb-outlet">{outletName}</h1>
@@ -482,7 +522,20 @@ export default function GuestBooking() {
         </p>
       </form>
       <p className="gb-foot">Powered by Crest POS</p>
-    </div></div>
+    </BookingShell>
+  )
+}
+
+// The page's scrollport, shared by every state, with the announcer first in it (S841): mounted from
+// the very first render, it never moves or remounts when the page's state changes.
+function BookingShell({ announcement, children }) {
+  return (
+    <div className="guest-booking">
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement.text && <span key={announcement.n}>{announcement.text}</span>}
+      </div>
+      <div className="gb-wrap">{children}</div>
+    </div>
   )
 }
 

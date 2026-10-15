@@ -403,6 +403,8 @@
   font-size: 18px;
   font-weight: 700;
   line-height: 1.3;
+  /* Focus lands here after a send (S841), un-ringed like the sheet's step labels: nothing to press. */
+  outline: none;
 }
 .guest-menu .gm-status-minutes {
   font-weight: 600;

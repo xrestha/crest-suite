@@ -56,6 +56,27 @@ const STAGE_LABEL = {
   ready: 'Ready to serve.',
 }
 
+// The tracker's words for a stage. The card shows them and the announcer says them (S841), so what a
+// screen reader hears is what the card says.
+function statusWords(stage, progress, sentAt) {
+  if (stage === 'dismissed') {
+    // S834 (D34): an order nobody answered for 30 minutes is turned away by itself, and says so.
+    const unanswered = turnedAwayUnanswered(sentAt, Date.now())
+    return {
+      title: unanswered ? 'No one answered this order in time' : 'Staff couldn’t take this order',
+      text: `${unanswered ? 'It waited 30 minutes without an answer, so it was cancelled. ' : ''}Please ask a member of staff. You can send it again from your order.`,
+    }
+  }
+  if (stage === 'done') return { title: 'Your bill is closed. Thank you!', text: 'We hope you enjoyed your meal.' }
+  // "About" rather than a bare countdown — this is the kitchen's own estimate, not a measured time.
+  // Omitted once it's no longer positive rather than showing a negative number to a paying guest.
+  const minutes = stage === 'preparing' && progress.kotStatus === 'in_progress' && progress.remainingMinutes > 0 ? progress.remainingMinutes : null
+  return { title: STAGE_LABEL[stage] || STAGE_LABEL.placed, minutes }
+}
+const spokenStatus = w => [
+  /[.!?]$/.test(w.title) ? w.title : `${w.title}.`, w.minutes != null ? `About ${w.minutes} min.` : '', w.text || '',
+].filter(Boolean).join(' ')
+
 // Ascending, where the staff-side alert descends, so it reads as "your order updated" rather than
 // the staff's "new order arrived". It is `playChime` with the tones reversed since S763 — the
 // inline copy this replaces built a new AudioContext per stage change and never closed one, and a
@@ -236,7 +257,10 @@ export default function GuestMenu() {
     return stored ? { items: stored.items || [], lines: stored.lines || [], covers: stored.covers || 1 } : null
   })
   // What the server says about this guest's own order (get_guest_order_progress).
-  const [progress, setProgress] = useState({ requestStatus: null, kotStatus: null, remainingMinutes: null, orderClosed: false })
+  // `forId` (S841): the order these readings belong to. The reset below lands a render AFTER a new
+  // order's id, so without it the stage was seeded from the PREVIOUS order's readings, and since the
+  // stage never moves back, a second order showed the first one's "Ready" or "Your bill is closed".
+  const [progress, setProgress] = useState({ forId: null, requestStatus: null, kotStatus: null, remainingMinutes: null, orderClosed: false })
   // The stage on screen. Never moves backwards (laterStage) and is reset for each new order.
   const [stage, setStage] = useState(null)
   const stageRef = useRef(null)
@@ -246,6 +270,9 @@ export default function GuestMenu() {
   // returning guest isn't chimed at for an order they placed minutes ago.
   const [justPlaced, setJustPlaced] = useState(false)
   const statusCardRef = useRef(null)
+  const statusHeadingRef = useRef(null)
+  // True while focus was last inside the tracker (S841), so a card that replaces it can take it back.
+  const statusFocusRef = useRef(false)
   const [restoreNote, setRestoreNote] = useState('')
 
   const [activeCategory, setActiveCategory] = useState(null)
@@ -385,7 +412,7 @@ export default function GuestMenu() {
           const row = data?.[0]
           // No row: the request no longer exists (a restore, or POS switched off). Keep what we had.
           if (!row) return
-          setProgress({ requestStatus: row.status, kotStatus: row.kot_status, remainingMinutes: row.remaining_minutes ?? null, orderClosed: !!row.order_closed })
+          setProgress({ forId: requestId, requestStatus: row.status, kotStatus: row.kot_status, remainingMinutes: row.remaining_minutes ?? null, orderClosed: !!row.order_closed })
           return
         }
       }
@@ -399,12 +426,16 @@ export default function GuestMenu() {
       const r = req?.[0]
       const t = tbl?.[0]
       if (t?.has_open_order) sawOpenOrder = true
-      setProgress(prev => ({
-        requestStatus: r?.status ?? prev.requestStatus,
-        kotStatus: t?.has_open_order ? t.kot_status : null,
-        remainingMinutes: t?.has_open_order ? (t.remaining_minutes ?? null) : null,
-        orderClosed: (r?.status ?? prev.requestStatus) === 'accepted' && sawOpenOrder && !t?.has_open_order,
-      }))
+      setProgress(prev => {
+        const prevStatus = prev.forId === requestId ? prev.requestStatus : null
+        return {
+          forId: requestId,
+          requestStatus: r?.status ?? prevStatus,
+          kotStatus: t?.has_open_order ? t.kot_status : null,
+          remainingMinutes: t?.has_open_order ? (t.remaining_minutes ?? null) : null,
+          orderClosed: (r?.status ?? prevStatus) === 'accepted' && sawOpenOrder && !t?.has_open_order,
+        }
+      })
     }
     const pollBadge = async () => {
       const { data, error: err } = await pollTable()
@@ -435,13 +466,13 @@ export default function GuestMenu() {
     stageRef.current = null
     setStage(null)
     setStatusStale(false)
-    setProgress({ requestStatus: null, kotStatus: null, remainingMinutes: null, orderClosed: false })
+    setProgress({ forId: null, requestStatus: null, kotStatus: null, remainingMinutes: null, orderClosed: false })
   }, [requestId])
 
   // Advance the stage — only forwards — and chime once per real step. Silent on the first reading
   // after a mount or reload, so a returning guest isn't chimed at for an order placed minutes ago.
   useEffect(() => {
-    if (!requestId || !progress.requestStatus) return
+    if (!requestId || !progress.requestStatus || progress.forId !== requestId) return
     const next = laterStage(stageRef.current, stageFromProgress(progress))
     if (stageRef.current !== null && next !== stageRef.current) playStageChangeChime()
     stageRef.current = next
@@ -455,9 +486,49 @@ export default function GuestMenu() {
     if (!justPlaced) return
     statusCardRef.current?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' })
     playStageChangeChime()
+    // S841: and focus goes to the tracker's heading. The Place order button went with the sheet and
+    // the cart bar Modal hands focus back to went with the cart, so focus was falling to <body>. A
+    // frame later, so it lands after Modal's own hand-back on close.
+    const frame = requestAnimationFrame(() => statusHeadingRef.current?.focus({ preventScroll: true }))
     const t = setTimeout(() => setJustPlaced(false), 2800)
-    return () => clearTimeout(t)
+    return () => { clearTimeout(t); cancelAnimationFrame(frame) }
   }, [justPlaced])
+
+  // ── Said aloud (S841) ─────────────────────────────────────────────────────────────────────────
+  // The chime told a screen-reader guest that something happened, never what, even for a refusal.
+  // One region in the shell, mounted before any tracker exists (a region that mounts already holding
+  // its text is often not read), says the guest's own send and then each stage the card moves to, in
+  // the card's words. Keyed on the stage, so a poll that changes nothing, or only the kitchen's
+  // minutes, says nothing. A tracker that arrives already holding its words (a reload) is read on the
+  // page. `n` re-keys the text, so the same sentence for a new order is said again.
+  const [announcement, setAnnouncement] = useState({ text: '', n: 0 })
+  const spokenRef = useRef({ requestId: null, stage: null })
+  const trackerStage = rows?.length > 0 && !error && requestSnapshot && requestId ? (stage || 'placed') : null
+  const trackerWords = trackerStage ? spokenStatus(statusWords(trackerStage, progress, requestSnapshot.sentAt)) : ''
+  useEffect(() => {
+    const last = spokenRef.current
+    spokenRef.current = { requestId, stage: trackerStage }
+    if (!trackerStage) return
+    if (last.requestId !== requestId || !last.stage) {
+      // Said as sent: the first render after a send can still hold the last order's stage.
+      if (justPlaced) {
+        spokenRef.current = { requestId, stage: 'placed' }
+        setAnnouncement(a => ({ text: STAGE_LABEL.placed, n: a.n + 1 }))
+      }
+      return
+    }
+    if (last.stage !== trackerStage) setAnnouncement(a => ({ text: trackerWords, n: a.n + 1 }))
+  }, [requestId, trackerStage, trackerWords, justPlaced])
+
+  // S841: a card that replaces the tracker (refused, or the bill closed) must not leave focus on a
+  // node that went with the old one. React keeps the heading itself; this is the net for the rest.
+  useEffect(() => {
+    if (!trackerStage) { statusFocusRef.current = false; return }
+    if (!statusFocusRef.current) return
+    const el = document.activeElement
+    if (el && el !== document.body) return
+    statusHeadingRef.current?.focus({ preventScroll: true })
+  }, [trackerStage])
 
   // ── Menu derivations ──────────────────────────────────────────────────────────────────────────
   // Computed unconditionally (safe on the loading/error/empty renders too) so the hooks below have
@@ -595,7 +666,7 @@ export default function GuestMenu() {
   // staff app's palette with a red button — the first thing a guest on a slow connection saw.
   if (rows === null) {
     return (
-      <GuestShell>
+      <GuestShell announcement={announcement}>
         <div className="gm-page" role="status" aria-live="polite" aria-busy="true">
           <span className="sr-only">Loading the menu…</span>
           <div aria-hidden="true">
@@ -617,7 +688,7 @@ export default function GuestMenu() {
   }
   if (error) {
     return (
-      <GuestShell>
+      <GuestShell announcement={announcement}>
         <div className="gm-page gm-state">
           <h1 className="gm-state-title">We couldn’t load the menu</h1>
           <p className="gm-state-text">Check your internet connection, then try again.</p>
@@ -628,7 +699,7 @@ export default function GuestMenu() {
   }
   if (rows.length === 0) {
     return (
-      <GuestShell>
+      <GuestShell announcement={announcement}>
         <div className="gm-page gm-state">
           <h1 className="gm-state-title">{MENU_UNAVAILABLE.title}</h1>
           <p className="gm-state-text">{MENU_UNAVAILABLE.text}</p>
@@ -943,7 +1014,7 @@ export default function GuestMenu() {
   const showFilters = hasVegMarks || allAllergens.length > 0
 
   return (
-    <GuestShell scrollRef={scrollRootRef} style={{ '--gm-nav-h': `${navHeight}px` }}>
+    <GuestShell announcement={announcement} scrollRef={scrollRootRef} style={{ '--gm-nav-h': `${navHeight}px` }}>
       <div className="gm-page">
         <header className="gm-mast">
           {logoUrl && <GuestLogo src={logoUrl} name={displayName} />}
@@ -979,12 +1050,16 @@ export default function GuestMenu() {
         {restoreNote && <p role="status" className="gm-note gm-note--warn">{restoreNote}</p>}
 
         {requestSnapshot && requestId ? (
-          <div ref={statusCardRef} className={`gm-status-wrap${justPlaced ? ' guest-order-glow' : ''}`}>
+          <div
+            ref={statusCardRef} className={`gm-status-wrap${justPlaced ? ' guest-order-glow' : ''}`}
+            onFocus={() => { statusFocusRef.current = true }}
+            onBlur={e => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) statusFocusRef.current = false }}
+          >
             <OrderStatusCard
               stage={stage || 'placed'} progress={progress}
               items={requestSnapshot.items} covers={requestSnapshot.covers} sentAt={requestSnapshot.sentAt}
               tableName={tableName} statusStale={statusStale}
-              onRestore={restoreRefusedOrder} onClear={clearTracker}
+              onRestore={restoreRefusedOrder} onClear={clearTracker} headingRef={statusHeadingRef}
             />
           </div>
         ) : tableKot && (
@@ -1270,10 +1345,14 @@ export default function GuestMenu() {
 }
 
 // The page's own scrollport and theme scope, shared by the loading, error and menu states so none of
-// them can render outside it.
-function GuestShell({ children, scrollRef, style }) {
+// them can render outside it. The announcer sits first in it (S841): mounted from the very first
+// render, it never moves or remounts when the page's state changes.
+function GuestShell({ children, scrollRef, style, announcement }) {
   return (
     <div className="guest-menu" ref={scrollRef} style={style}>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement?.text && <span key={announcement.n}>{announcement.text}</span>}
+      </div>
       {children}
     </div>
   )
@@ -1301,7 +1380,9 @@ function SheetHeader({ title, onClose }) {
   )
 }
 
-function OrderStatusCard({ stage, progress, items, covers, sentAt, tableName, statusStale, onRestore, onClear }) {
+// `headingRef` is where focus goes after a send (S841); every card's heading takes it, tabIndex -1.
+function OrderStatusCard({ stage, progress, items, covers, sentAt, tableName, statusStale, onRestore, onClear, headingRef }) {
+  const words = statusWords(stage, progress, sentAt)
   const list = items?.length > 0 && (
     <ul className="gm-status-items">
       {items.map((it, i) => <li key={i}>{it.qty} × {tidyName(it.name)}</li>)}
@@ -1312,12 +1393,10 @@ function OrderStatusCard({ stage, progress, items, covers, sentAt, tableName, st
   )
 
   if (stage === 'dismissed') {
-    // S834 (D34): an order nobody answered for 30 minutes is turned away by itself, and says so.
-    const unanswered = turnedAwayUnanswered(sentAt, Date.now())
     return (
       <section className="gm-status gm-status--refused" aria-labelledby="gm-status-title">
-        <h2 id="gm-status-title" className="gm-status-title">{unanswered ? 'No one answered this order in time' : 'Staff couldn’t take this order'}</h2>
-        <p className="gm-status-text">{unanswered ? 'It waited 30 minutes without an answer, so it was cancelled. ' : ''}Please ask a member of staff. You can send it again from your order.</p>
+        <h2 id="gm-status-title" ref={headingRef} tabIndex={-1} className="gm-status-title">{words.title}</h2>
+        <p className="gm-status-text">{words.text}</p>
         {list}
         <div className="gm-status-actions">
           <button type="button" className="btn btn-primary" onClick={onRestore}>Put it back in my order</button>
@@ -1330,8 +1409,8 @@ function OrderStatusCard({ stage, progress, items, covers, sentAt, tableName, st
   if (stage === 'done') {
     return (
       <section className="gm-status" aria-labelledby="gm-status-title">
-        <h2 id="gm-status-title" className="gm-status-title">Your bill is closed. Thank you!</h2>
-        <p className="gm-status-text">We hope you enjoyed your meal.</p>
+        <h2 id="gm-status-title" ref={headingRef} tabIndex={-1} className="gm-status-title">{words.title}</h2>
+        <p className="gm-status-text">{words.text}</p>
         {list}
         <div className="gm-status-actions">
           <button type="button" className="btn btn-ghost" onClick={onClear}>Close</button>
@@ -1341,15 +1420,14 @@ function OrderStatusCard({ stage, progress, items, covers, sentAt, tableName, st
   }
 
   const stageIdx = Math.max(0, STAGES.indexOf(stage))
-  // "About" rather than a bare countdown — this is the kitchen's own estimate, not a measured time.
-  // Omitted once it's no longer positive rather than showing a negative number to a paying guest.
-  const minutes = stage === 'preparing' && progress.kotStatus === 'in_progress' && progress.remainingMinutes > 0 ? progress.remainingMinutes : null
 
+  // No aria-live here (S841): a heading that mounts holding its text was often not read, and the
+  // shell's announcer now says each stage.
   return (
     <section className="gm-status" aria-labelledby="gm-status-title">
-      <h2 id="gm-status-title" className="gm-status-title" aria-live="polite">
-        {STAGE_LABEL[stage] || STAGE_LABEL.placed}
-        {minutes != null && <span className="gm-status-minutes"> About {minutes} min.</span>}
+      <h2 id="gm-status-title" ref={headingRef} tabIndex={-1} className="gm-status-title">
+        {words.title}
+        {words.minutes != null && <span className="gm-status-minutes"> About {words.minutes} min.</span>}
       </h2>
       {/* A stalled poll is not a stage. Saying so keeps the tracker honest: the steps below are still
           the last stage we actually heard. */}
