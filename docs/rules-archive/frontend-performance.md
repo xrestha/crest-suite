@@ -59,6 +59,36 @@ The sweeps since S528, their per-table thresholds, and the two traps that cost r
 
 _Original lines 405–546:_
 
+## S847 POS sweep
+
+`/impeccable optimize` for "POS is slow loading data on a poor connection". Counted in serial round
+trips (about 0.6 s each on Fast 3G), since Chrome was not connected to time it live.
+
+- **A reset-on-leave was a full re-read per table.** The till reset `menuLoaded` on every return to
+  the floor (a July change, to keep `me_class` fresh for the suggestion engine), so every table opened
+  on "Loading menu…" and waited for 7–10 menu reads that only started after its own order read: two
+  waits in a row, on the screen worked hardest. The menu now stays; `menuReadMode` /
+  `MENU_FRESH_MS` (`posOrdersConstants.js`) re-read it behind the screen at most once a minute, and
+  the floor reads it behind its own load before the first tap. A background read never calls
+  `noteLinkDown`: a slow link is not the waiter's table failing to open. `loadMenu` is single-flight,
+  and a quiet re-read that changed nothing keeps the objects on screen (`setIfChanged`), so tiles do
+  not redraw under a finger.
+- **Reads that used nothing of the floor's waited for it**: guest orders and today's bookings now go
+  with the floor read. Kitchen badges still follow it, since they need its order ids.
+- **Every release re-downloads the till's code** (the service worker purges its cache on activate),
+  so `prefetchPosPages.js` fetches the till and the KDS from the PIN screen while a PIN is typed, and
+  the POS pages a login's sidebar offers once a POS page is up (`isItemVisible`, so a kitchen station
+  fetches nothing more). Same shape as `prefetchHrPages.js`.
+- **An embed instead of a second wave**: the POS Dashboard's today read carries
+  `pos_order_items(...)` and the hinted `pos_order_payments!pos_order_payments_order_id_fkey(...)`,
+  sorted back into id order in JS so Top 5 and the payment mix cannot move with embed order.
+- **Not changed, and why**: the shift report's waves beyond the refund-label lookup (the close guard
+  re-adds its cash figures, so a different row set refuses every close), Menu Pricing's
+  `recipe_ingredients` wave (figures need a live check), the KDS (one wait already), Parking's
+  once-a-day sweep, and the app-wide sign-in levels.
+
+---
+
 ## The 1000-row truncation sweeps: S528, S529, S613, S628
 
 The rule is the section above; its one-line form stays in the root `CLAUDE.md`. These are the sweep histories behind it, migrated S663 — read them before starting another sweep.

@@ -5,7 +5,7 @@
 // customizations of one recipe are two lines.
 import {
   lineKeyOf, selectionKeyOf, missingFromServer, mergeUnsentLines, storedLinesMatchPayload,
-  menuDrift, withServerLineFields, toItemPayload, lineOptionIds,
+  menuDrift, withServerLineFields, toItemPayload, lineOptionIds, menuReadMode, MENU_FRESH_MS,
 } from './posOrdersConstants'
 
 const A = 'a1b2c3d4-0000-4000-8000-000000000001'
@@ -145,5 +145,29 @@ describe('combo dishes', () => {
 
   test('a plain line\'s payload has no combo', () => {
     expect(toItemPayload({ recipe_id: 'r1', name: 'Tea', qty: 1 }).combo).toBeUndefined()
+  })
+})
+
+// S847: the till keeps its menu between tables. A menu read within the minute stands; one on screen is
+// re-read quietly; only a screen with no menu, a forced re-read or a saved copy to replace reads by the
+// full rules (an error the waiter sees, the saved copy on no answer).
+describe('menuReadMode', () => {
+  const now = 1_000_000
+  it('leaves a menu the server gave within the minute alone', () => {
+    expect(menuReadMode({ hasMenu: true, readAt: now - MENU_FRESH_MS + 1, now })).toBe('none')
+    expect(menuReadMode({ hasMenu: true, readAt: now - 5000, now, background: true })).toBe('none')
+  })
+  it('re-reads an older menu quietly, behind the one on screen', () => {
+    expect(menuReadMode({ hasMenu: true, readAt: now - MENU_FRESH_MS, now })).toBe('quiet')
+    expect(menuReadMode({ hasMenu: true, readAt: 0, now })).toBe('quiet')
+  })
+  it("reads the floor's early menu quietly, so it never marks the internet down", () => {
+    expect(menuReadMode({ hasMenu: false, readAt: 0, now, background: true })).toBe('quiet')
+    expect(menuReadMode({ hasMenu: true, savedToReplace: true, readAt: 0, now, background: true })).toBe('quiet')
+  })
+  it('reads by the full rules with no menu on screen, on a forced re-read, or over a saved copy', () => {
+    expect(menuReadMode({ hasMenu: false, readAt: 0, now })).toBe('full')
+    expect(menuReadMode({ hasMenu: true, readAt: now - 1000, now, force: true })).toBe('full')
+    expect(menuReadMode({ hasMenu: true, savedToReplace: true, readAt: now - 1000, now })).toBe('full')
   })
 })

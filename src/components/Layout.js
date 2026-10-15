@@ -16,6 +16,7 @@ import { isSoloGroup } from '../shared/navSoloGroup'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { prefetchHrPages } from '../shared/prefetchHrPages'
+import { prefetchPosPages } from '../shared/prefetchPosPages'
 import { outletMovedText, outletHeldText } from '../shared/outletWatch'
 import { isTillPath, readTillDevice, tillStop } from '../modules/pos/tillOutlet'
 import { withTimeout, isTimeout } from '../utils/withTimeout'
@@ -455,7 +456,12 @@ export default function Layout() {
   // (S808, prefetchHrPages.js), so each later page skips the code round trip. Once per session.
   useEffect(() => {
     if (location.pathname.startsWith('/hr/') && !location.pathname.startsWith('/hr/self-service')) prefetchHrPages()
-  }, [location.pathname])
+    // S847: the same for POS, fetching only the POS pages this login's sidebar offers, the till first
+    // (prefetchPosPages.js). The public POS routes (guest menu, booking, PIN screen) are not in the shell.
+    if (location.pathname === '/pos' || location.pathname.startsWith('/pos/')) {
+      prefetchPosPages([POS_DASHBOARD, ...POS_GROUPS.flatMap(g => g.items)].filter(isItemVisible).map(i => i.to))
+    }
+  }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps -- isItemVisible is rebuilt each render; the prefetch runs once a session
 
   // On a phone the sidebar IS a modal drawer — it covers the page behind a 55% scrim — but it had
   // none of a modal's behavior: Escape did nothing, focus never entered it, and focus never came

@@ -103,7 +103,7 @@ import {
   isComboLine, comboFieldsOf, comboSuffixOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
-  keptLinesToRestore, mergeRecoveredLines,
+  keptLinesToRestore, mergeRecoveredLines, menuReadMode,
 } from './posOrdersConstants'
 
 // The pre-20260818150000 delete-then-insert fallback for save_pos_order_items is GONE (S754). Since
@@ -151,6 +151,8 @@ const bounded = (call, label, ms = CLOSE_STEP_MS) =>
 // often on mobile data; 20 s kept a waiter standing at the table.
 const OPEN_READ_MS = 10000
 const noReply = err => !!err && (isTimeout(err) || isNetworkError(err))
+// The whole value as a signature (setIfChanged), for a menu re-read whose every field is drawn.
+const sameJson = v => JSON.stringify(v)
 
 // S842: how long after a cart line is removed the cart's − and × ignore a press. Removing a line moves
 // the lines below it up under the finger, so the second tap of a double tap landed on the next dish.
@@ -184,7 +186,7 @@ const keptLinesText = kept => keptLinesToRestore(kept?.items, []).map(l => `${l.
 // ~1,500 lines of interlocked state in this file (tenders, splits, comps, discount caps, loyalty,
 // the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
 export default function PosOrders({ billingStation = false } = {}) {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, clientModules, hasFeature, customizationEnabled, outlets } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, clientModules, clientModulesKnown, hasFeature, customizationEnabled, outlets } = useAuth()
   // Who the floor's Inventory-posting banner is for (S776): since S809 3j it posts the open month itself
   // (Post to Inventory); a closed month stays the Owner's, in Periods. hasPosAccess resolves admin and
   // Owner to manager already.
@@ -332,6 +334,16 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [menuLoadError, setMenuLoadError] = useState('')
   // S841: the menu on screen came from the copy saved on this tablet, not from the server just now.
   const menuFromSavedRef = useRef(false)
+  // S847: when the server last answered a menu read (0: never), and the read in flight, if any. The
+  // menu stays on screen between tables and is re-read behind it (MENU_FRESH_MS), so a table opens
+  // straight onto its dishes; one read at a time, or a tap during the floor's early read sent a second.
+  const menuReadAtRef = useRef(0)
+  const menuInFlightRef = useRef(null)
+  // Whether Customization was on for that read: a menu read before an operator's client switches
+  // loaded is not fresh once they have. And the latest loadMenu, for the floor's early read, which
+  // runs from a loadFloor closure that can be as old as the mount.
+  const menuReadCustomRef = useRef(null)
+  const loadMenuRef = useRef(null)
   // Crest Customization (S758): the option groups, options and dish attachments, read with the menu
   // and cached with it for offline. Empty for a client without the module.
   const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
@@ -1682,7 +1694,13 @@ export default function PosOrders({ billingStation = false } = {}) {
       return
     }
 
-    if (!quiet) loadOpenShift()
+    if (!quiet) {
+      loadOpenShift()
+      // S847: guest orders and today's bookings read nothing of the floor's, so they go with it rather
+      // than a round trip after it. Each keeps its own last-good on a failure.
+      loadPendingGuestOrders()
+      loadFloorReservations()
+    }
     // An outlet without Inventory (S809 4e, D6) asks for neither count: nothing of its waits for a post.
     const noCount = Promise.resolve({ count: 0, error: null })
     // Taken before the count is asked, so a miss noted while it is in flight is not pruned by it.
@@ -1786,9 +1804,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     applyQueueCounts(rawQueue)
     setFloorLoad(false)
     if (quiet) return
+    // Needs this read's orders, so it is the one read that waits for the floor.
     loadKotStatus(map, takeaways)
-    loadPendingGuestOrders()
-    loadFloorReservations()
+    // S847: the menu is read now, behind the floor, so the first table tapped opens onto its dishes.
+    // Through the ref: this closure can be the mount's, older than the till's switches.
+    void loadMenuRef.current?.({ background: true })
   }
 
   // Today's live bookings for the floor tiles, plus the count of public requests awaiting an
@@ -2420,6 +2440,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   }
   flushRef.current = flushPosOrderQueue
   loadFloorRef.current = loadFloor
+  loadMenuRef.current = loadMenu
 
   // S754 (owner decision): a conflict's items back onto the floor as UNSENT lines — a new order on
   // that table (or a new takeaway), or, if the table already has an open order again, that order
@@ -2543,12 +2564,39 @@ export default function PosOrders({ billingStation = false } = {}) {
   // stale-true, which is why it is an argument rather than a state reset.
   // Resolves true only when the menu was read from the server just now (S809 4h): a caller that
   // says "the menu has been reloaded" says it after this, and only on true.
-  async function loadMenu({ force = false } = {}) {
+  //
+  // S847: the menu stays on screen between tables (it was re-read, with "Loading menu…", on every
+  // table opened, behind the order read), and `background` is the floor's early read, before any
+  // table is tapped. menuReadMode decides: a menu the server gave within MENU_FRESH_MS stands; one
+  // on screen is re-read QUIETLY behind it; none on screen, a forced re-read or a saved copy to
+  // replace (S841) reads by the full rules. Prices are safe either way: the server prices every new
+  // line and a close stops on menuDrift.
+  async function loadMenu({ force = false, background = false } = {}) {
+    if (!clientId) return false
+    // An operator's view of a client whose switches have not loaded yet would read it with
+    // Customization off; the table opened next reads it with them.
+    if (background && isAdmin && !clientModulesKnown) return false
+    // One read at a time: one in flight answers for this call too. Except the floor's early read
+    // that did not land for a screen with no menu: the table opened now reads by the full rules,
+    // so the waiter is told, or handed the saved copy.
+    const inFlight = menuInFlightRef.current
+    if (inFlight && !force) {
+      const landed = await inFlight.promise
+      if (landed || background || inFlight.hadMenu || inFlight.mode === 'full') return landed
+    }
     // S841: a menu taken from the saved copy is read from the server again the next time the order
     // screen opens with the link up, so a menu changed during an outage is not kept all day.
     const refreshSaved = menuFromSavedRef.current && !tillOffline()
-    if (!clientId || (menuLoaded && !force && !refreshSaved)) return false
+    const hasMenu = menuLoaded || menuReadAtRef.current > 0
+    const readAt = menuReadCustomRef.current === customizationEnabled ? menuReadAtRef.current : 0
+    const mode = menuReadMode({ hasMenu, savedToReplace: refreshSaved, readAt, now: Date.now(), force, background })
+    if (mode === 'none') return false
+    const entry = { promise: readMenu(mode, refreshSaved), mode, hadMenu: hasMenu }
+    menuInFlightRef.current = entry
+    try { return await entry.promise } finally { if (menuInFlightRef.current === entry) menuInFlightRef.current = null }
+  }
 
+  async function readMenu(mode, refreshSaved) {
     // The copy of the menu saved on this tablet at its last complete online read. False when this
     // device has none: it has never loaded the menu online.
     const takeSavedMenu = async () => {
@@ -2568,7 +2616,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     // S841 (P0): the till's own link test, not navigator.onLine. That flag is true on a restaurant
     // wifi whose internet is down, so a till reloaded in that outage asked the server, heard
     // nothing, never looked at its saved menu, and had no menu and no way to take an order.
-    if (tillOffline()) { await takeSavedMenu(); return false }
+    // A quiet read keeps what is on screen (S847).
+    if (tillOffline()) { if (mode === 'full') await takeSavedMenu(); return false }
 
     const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog, comboCatalog, { data: eggData, error: eggErr }] = await Promise.all([
       // is_veg is the dish's food mark on the tile (S846); it dates from July, so naming it is safe.
@@ -2599,6 +2648,14 @@ export default function PosOrders({ billingStation = false } = {}) {
       bounded(scopedFrom('recipes', 'id').eq('is_egg', true).eq('is_active', true).eq('pos_enabled', true),
         'Loading egg marks', OPEN_READ_MS),
     ])
+    // S847: a quiet read that failed, or heard nothing, keeps the menu on screen (or none, for the
+    // floor's early read) and says nothing. It never marks the internet down: a background read on a
+    // slow link is not the waiter's table failing to open. The next order screen asks again.
+    const menuReadErr = menuErr || catalog.error || comboCatalog.error
+    if (mode === 'quiet' && menuReadErr) {
+      console.error('menu re-read failed, keeping the menu on screen:', menuReadErr)
+      return false
+    }
     // S841: no answer is the internet, not the menu (S809 3f's rule for orders). A menu already on
     // screen stays; a screen with none takes the saved copy, and says so only when there is none.
     if ([menuErr, catalog.error, comboCatalog.error].some(noReply)) {
@@ -2640,11 +2697,13 @@ export default function PosOrders({ billingStation = false } = {}) {
       groups: catalog.groups, options: catalog.options, attachments: catalog.attachments, buildYourOwn: catalog.buildYourOwn || [],
       combos: comboCatalog.combos || [], comboRecipes: comboCatalog.recipes || {},
     }
-    setOptionCatalog(nextCatalog)
+    // S847: a re-read that changed nothing keeps the objects on screen, so the tiles do not redraw
+    // under a waiter's finger once a minute. The whole value is the signature: every field drawn is in it.
+    setIfChanged(setOptionCatalog, nextCatalog, sameJson)
     if (eggErr) console.error('egg-dish read failed, tiles show veg / non-veg only:', eggErr)
     const eggIds = new Set(eggErr ? [] : (eggData || []).map(r => r.id))
     const menuRows = (data || []).map(r => (eggIds.has(r.id) ? { ...r, is_egg: true } : r))
-    setMenu(menuRows)
+    setIfChanged(setMenu, menuRows, sameJson)
     let suggMap = {}
     if (suggErr) console.error('recipe_suggestions read failed — pairings fall back to the other signals:', suggErr)
     else if (suggData) {
@@ -2652,9 +2711,11 @@ export default function PosOrders({ billingStation = false } = {}) {
         if (!suggMap[s.recipe_id]) suggMap[s.recipe_id] = []
         suggMap[s.recipe_id].push(s.suggest_recipe_id)
       })
-      setManualSuggestions(suggMap)
+      setIfChanged(setManualSuggestions, suggMap, sameJson)
     }
     setMenuLoaded(true)
+    menuReadAtRef.current = Date.now()
+    menuReadCustomRef.current = customizationEnabled
     menuFromSavedRef.current = false
     // Only a complete read is worth keeping as the offline copy.
     if (!suggErr) cachePosMenu(clientId, menuRows, suggMap, nextCatalog)
@@ -6433,7 +6494,9 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     setScreenOrder(null); setTableDialog(null); setShareCount(null) // S836
     setCartOpen(false)
     setSuggestions([])
-    setMenuLoaded(false)
+    // The menu stays loaded (S847): the next table opens onto it, and loadMenu re-reads it behind
+    // the screen once it is over MENU_FRESH_MS old. Resetting it here (since July, to freshen
+    // me_class) made every table wait for the whole menu after its own order read.
     setMenuLoadError('')
     // A seat abandoned before the first save must not leak onto the next table opened.
     seatReservationRef.current = null
@@ -7061,7 +7124,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             {menuLoadError && (
               <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '0 0 12px', fontSize: 13 }}>
                 Couldn't load the menu. {menuLoadError}{menu.length > 0 ? ' Showing the last menu loaded.' : ' This is a failed read, not an empty menu.'}{' '}
-                <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadMenu()}>Retry</button>
+                {/* force: a menu read within the minute would otherwise answer "fresh" and Retry do nothing. */}
+                <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadMenu({ force: true })}>Retry</button>
               </p>
             )}
             {!menuLoaded && !(menuLoadError && menu.length > 0) ? (
@@ -8484,7 +8548,9 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         </div>
       )}
 
-      {Object.keys(pendingGuestOrders).length > 0 && (() => {
+      {/* S847: guest orders are read beside the floor now, so on a first load they can land first;
+          the banner waits for the tables it names rather than reading "— ?" with Review dead. */}
+      {Object.keys(pendingGuestOrders).length > 0 && !(floorLoad && tables.length === 0) && (() => {
         const total = Object.values(pendingGuestOrders).reduce((s, arr) => s + arr.length, 0)
         const tableNames = Object.keys(pendingGuestOrders).map(tid => tables.find(t => t.id === tid)?.name || '?')
         const firstTable = tables.find(t => t.id === Object.keys(pendingGuestOrders)[0])

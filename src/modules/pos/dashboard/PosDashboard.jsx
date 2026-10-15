@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { withTimeout } from '../../../utils/withTimeout'
 import { npr, nprOrDash } from '../../../shared/nepalMoney'
@@ -55,6 +55,14 @@ const ORDER_SELECT = 'id, covers, paid_amount, discount_amount, payment_method, 
 // A credit note with the bill it credits, which may have closed on an earlier day: the bill's table,
 // method and partner decide which channel, payment line and cover figure the note comes off.
 const NOTE_SELECT = 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, part_of_order_id, payment_method, delivery_partner)'
+// S847: TODAY's reads carry each bill's lines and payment legs, so Top 5 and the payment mix come with
+// the bills instead of a second round trip of chunked .in() reads after them. Last week's need neither.
+const LEGS = 'pos_order_payments!pos_order_payments_order_id_fkey(id, payment_method, amount)'
+const TODAY_ORDER_SELECT = `${ORDER_SELECT}, pos_order_items(id, recipe_id, name, qty, comped), ${LEGS}`
+const TODAY_NOTE_SELECT = `id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, part_of_order_id, payment_method, delivery_partner, ${LEGS})`
+// Lines and legs in id order, as the separate reads returned them, so a figure cannot move with the
+// order an embed happens to come back in (Top 5 names a dish after its first line).
+const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
 function weekdayOf(adIso) {
   const [y, m, d] = adIso.split('-').map(Number)
@@ -164,11 +172,11 @@ export default function PosDashboard() {
       // Each day's credit notes are read on the same cut (S814 4d, REPORTS-5): a note is a minus on
       // the day it was issued, its bill staying on the day it was sold (the Sales Report's rule).
       const salesReads = canMoney ? Promise.all([
-        fetchAllRows(() => scopedFrom('pos_orders', ORDER_SELECT).in('close_type', ['paid', 'void', 'writeoff'])
+        fetchAllRows(() => scopedFrom('pos_orders', TODAY_ORDER_SELECT).in('close_type', ['paid', 'void', 'writeoff'])
           .gte('closed_at', todayStart).lte('closed_at', nowIso).order('id')),
         fetchAllRows(() => scopedFrom('pos_orders', ORDER_SELECT).in('close_type', ['paid', 'void', 'writeoff'])
           .gte('closed_at', lastWeekStart).lte('closed_at', lastWeekNowIso).order('id')),
-        fetchAllRows(() => scopedFrom('pos_credit_notes', NOTE_SELECT)
+        fetchAllRows(() => scopedFrom('pos_credit_notes', TODAY_NOTE_SELECT)
           .gte('created_at', todayStart).lte('created_at', nowIso).order('id')),
         fetchAllRows(() => scopedFrom('pos_credit_notes', NOTE_SELECT)
           .gte('created_at', lastWeekStart).lte('created_at', lastWeekNowIso).order('id')),
@@ -184,21 +192,15 @@ export default function PosDashboard() {
         todayReturns = returnsOf(salesRes[2].data, new Map(todayOrders.map(o => [o.id, o])))
         lastWeekReturns = returnsOf(salesRes[3].data, new Map(lastWeekOrders.map(o => [o.id, o])))
         // Every paid bill's lines, a since-credited one included: Top 5 counts plates that went out.
-        const paidIds = todayOrders.filter(o => o.close_type === 'paid').map(o => o.id)
+        items = todayOrders.filter(o => o.close_type === 'paid').flatMap(o => o.pos_order_items || []).sort(byId)
         // Today's Split bills, and the Split bills today's notes credit (an earlier day's included):
-        // a note comes off the methods its bill was paid with, in the legs' shares.
-        const splitIds = [...new Set([
-          ...todayOrders.filter(o => o.payment_method === 'Split').map(o => o.id),
-          ...todayReturns.filter(r => r.order?.payment_method === 'Split').map(r => r.order.id),
-        ])]
-        const [legRes, itemRes] = await withTimeout(Promise.all([
-          fetchAllRowsChunked(splitIds, ids => scopedFrom('pos_order_payments', 'id, order_id, payment_method, amount').in('order_id', ids).order('id')),
-          fetchAllRowsChunked(paidIds, ids => scopedFrom('pos_order_items', 'id, order_id, recipe_id, name, qty, comped').in('order_id', ids).order('id')),
-        ]), 25000, 'POS Dashboard')
-        const err2 = legRes.error || itemRes.error
-        if (err2) throw err2
-        for (const l of legRes.data || []) legs.set(l.order_id, [...(legs.get(l.order_id) || []), l])
-        items = itemRes.data || []
+        // a note comes off the methods its bill was paid with, in the legs' shares. A bill credited
+        // today that also closed today is one bill either way, so its legs are set once.
+        const splitBills = [
+          ...todayOrders.filter(o => o.payment_method === 'Split'),
+          ...(salesRes[2].data || []).map(n => n.pos_orders).filter(o => o?.payment_method === 'Split'),
+        ]
+        for (const o of splitBills) if (!legs.has(o.id)) legs.set(o.id, [...(o.pos_order_payments || [])].sort(byId))
       }
       if (!latest.isCurrent(id)) return
 

@@ -7,6 +7,7 @@ import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/a
 import { withTimeout } from '../../../utils/withTimeout'
 import { listLockedCarts } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
+import { prefetchTillPages } from '../../../shared/prefetchPosPages'
 import ArrivalAlert from '../../../components/ArrivalAlert'
 import { useGuestOrderAlerts, REPEAT_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { guestAlertTitle, guestAlertDetail } from '../../../shared/guestAlertBridge'
@@ -56,6 +57,12 @@ export default function PosLogin() {
   const [deviceDead, setDeviceDead] = useState(false)
 
   useReleaseReload(!signingIn, RELEASE_IDLE_MS)
+
+  // S847: an activated tablet downloads the till's code while staff pick their name and type the PIN
+  // (prefetchPosPages.js), so a sign-in lands on a screen already here, after a release most of all.
+  useEffect(() => {
+    if (clientId && deviceId && deviceSecret) prefetchTillPages()
+  }, [clientId, deviceId, deviceSecret])
 
   useEffect(() => {
     // No silent bounce — an unactivated device shows its own explanatory screen below

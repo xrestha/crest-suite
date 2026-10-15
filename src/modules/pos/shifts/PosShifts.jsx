@@ -216,7 +216,7 @@ function throwIfFailed(results) {
 // book with each dish's choices (posLineCosts), as on the Complimentary Slip. `compCost` says how:
 // { inventory } the outlet has Crest IMS, { customization } Crest Customization is on. A shift already
 // closed keeps the figure frozen in its closing_report; only a live read or a close uses this.
-async function loadShiftReport(clientId, shiftId, compCost = {}) {
+export async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // Both reads are filtered on the shift alone — neither needs the other's result — so they go
   // together. This is the report the drawer is counted against and it is rebuilt every time a
   // history row is expanded, so a needless round trip here is paid over and over.
@@ -265,18 +265,13 @@ async function loadShiftReport(clientId, shiftId, compCost = {}) {
   const receiptCancelsCash = moveList
     .filter(m => m.kind === 'credit_receipt_cancel').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   // The note number beside each refund. A label, never a figure, so a failed lookup degrades to
-  // "Refund" rather than failing the report the drawer is counted against.
+  // "Refund" rather than failing the report the drawer is counted against. S847: started here and
+  // awaited with the second wave below, which needs nothing of it — it used to be a round trip of its
+  // own in front of that wave on every shift with a refund.
   const noteIds = [...new Set(moveList.filter(m => m.kind === 'refund' && m.pos_credit_note_id).map(m => m.pos_credit_note_id))]
-  if (noteIds.length > 0) {
-    const { data: notes, error: notesErr } = await scopedFromRaw('pos_credit_notes', clientId, 'id, credit_note_no, invoice_fy').in('id', noteIds)
-    if (!notesErr) {
-      const byId = new Map((notes || []).map(n => [n.id, n]))
-      for (const m of moveList) {
-        const n = m.kind === 'refund' ? byId.get(m.pos_credit_note_id) : null
-        if (n) m.credit_note_label = `Credit Note ${n.credit_note_no ?? '?'}${n.invoice_fy ? ` (${n.invoice_fy})` : ''}`
-      }
-    }
-  }
+  const noteLabels = noteIds.length > 0
+    ? scopedFromRaw('pos_credit_notes', clientId, 'id, credit_note_no, invoice_fy').in('id', noteIds)
+    : Promise.resolve({ data: [], error: null })
 
   // Split-payment orders (multiple tenders against one bill) don't carry a single payment_method
   // — their real per-method breakdown lives in pos_order_payments instead. Fetched up front so the
@@ -288,13 +283,21 @@ async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // Both derive their id list from `orders` above and neither reads the other, so they are one
   // wave rather than two. Chunked because an `.in()` list is spelled out in the URL and both
   // return several rows per order — a busy shift's split bills alone can outgrow either limit.
-  const secondWave = await Promise.all([
+  const [notesRes, ...secondWave] = await Promise.all([
+    noteLabels,
     fetchAllRowsChunked(splitOrderIds,
       ids => scopedFromRaw('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
     // With each line's choices' stock lines, which a Complimentary bill's food cost includes.
     fetchAllRowsChunked(needItems.map(o => o.id),
       ids => scopedFromRaw('pos_order_items', clientId, `order_id, qty, unit_price, vat_rate, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).order('id')),
   ])
+  if (!notesRes.error) {
+    const byId = new Map((notesRes.data || []).map(n => [n.id, n]))
+    for (const m of moveList) {
+      const n = m.kind === 'refund' ? byId.get(m.pos_credit_note_id) : null
+      if (n) m.credit_note_label = `Credit Note ${n.credit_note_no ?? '?'}${n.invoice_fy ? ` (${n.invoice_fy})` : ''}`
+    }
+  }
   throwIfFailed(secondWave)
   const [{ data: payments }, { data: items }] = secondWave
   const paymentsByOrder = (payments || []).reduce((acc, p) => { (acc[p.order_id] = acc[p.order_id] || []).push(p); return acc }, {})

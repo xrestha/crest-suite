@@ -342,6 +342,23 @@ export function menuDrift(localLines, serverItems) {
   return drift
 }
 
+// S847: the till keeps its menu between tables and re-reads it behind the screen at most this often.
+export const MENU_FRESH_MS = 60000
+
+// How the till reads its menu (S847). 'none': the server gave it within MENU_FRESH_MS, so the menu on
+// screen stands. 'quiet': re-read behind a menu already on screen, or the floor's early read before
+// any table is opened (`background`): a failure or no answer keeps what is there, says nothing and
+// never marks the internet down. 'full': no menu on screen yet, a forced re-read after a refusal, or
+// a saved copy to replace once the link is back (S841) — the rules every table open had before.
+// `readAt` is when the server last answered (0: never, or not for the till's current switches).
+export function menuReadMode({ hasMenu, savedToReplace = false, readAt, now, force = false, background = false }) {
+  if (force) return 'full'
+  if (!savedToReplace && readAt > 0 && now - readAt < MENU_FRESH_MS) return 'none'
+  if (background) return 'quiet'
+  if (savedToReplace) return 'full'
+  return hasMenu ? 'quiet' : 'full'
+}
+
 // The cart with each line's price, VAT rate, name and category taken from the server's lines (by
 // line key — recipe plus customization). Quantities, notes and sent flags are left alone, so a line
 // tapped in while the save was in flight is not disturbed. Returns the same array when nothing changed.
