@@ -85,6 +85,15 @@ export default function SearchableSelect({ value, onChange, options, placeholder
     }
   }, [highlight, open])
 
+  // Close when focus moves to something outside (S842). The mousedown close above never sees Tab,
+  // so tabbing out of the filter left the list open over the next field. The trigger, the filter
+  // box and the fixed panel all sit inside rootRef, so one focusout covers all three. A null
+  // relatedTarget is ignored: a window switch, a press on the panel's padding, or Safari's
+  // unfocusable button click (closing there made the trigger's own click reopen the list).
+  function onBlur(e) {
+    if (open && e.relatedTarget && !rootRef.current?.contains(e.relatedTarget)) close()
+  }
+
   function pick(opt) { onChange(opt.value); close() }
 
   function onKeyDown(e) {
@@ -95,7 +104,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
   }
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', ...style }}>
+    <div ref={rootRef} onBlur={onBlur} style={{ position: 'relative', ...style }}>
       <button
         type="button"
         id={id}

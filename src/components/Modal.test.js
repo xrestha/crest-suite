@@ -152,3 +152,66 @@ test('StrictMode double effects do not move an autofocused field\'s focus to the
   openFrom()
   expect(screen.getByLabelText('Name')).toHaveFocus()
 })
+
+// S842: an explicit `dirty` guards the backdrop for every variant, so POS's card dialogs (Adjust
+// Points, Issue Credit Note, Booking) keep a half-filled form through a stray tap. The automatic
+// onInput/onChange tracking stays sheet-only: a card dialog changes only when its caller opts in.
+const backdrop = () => screen.getByRole('dialog').parentElement // eslint-disable-line testing-library/no-node-access
+
+test('a card dialog passed dirty ignores a backdrop click, and Escape and × still close it', () => {
+  const close = jest.fn()
+  render(<Modal title="Adjust points" onClose={close} dirty><input aria-label="Points" /></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).not.toHaveBeenCalled()
+  pressEscape()
+  expect(close).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByLabelText('Close'))
+  expect(close).toHaveBeenCalledTimes(2)
+})
+
+test('an unstyled dialog passed dirty ignores a backdrop click too', () => {
+  const close = jest.fn()
+  render(<Modal title="Bill" unstyled onClose={close} dirty><input aria-label="Tendered" /></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).not.toHaveBeenCalled()
+  pressEscape()
+  expect(close).toHaveBeenCalledTimes(1)
+})
+
+test('a card dialog without dirty still closes on a backdrop click, even after typing', () => {
+  const close = jest.fn()
+  render(<Modal title="Edit vendor" onClose={close}><input aria-label="Name" /></Modal>)
+  fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Ram' } })
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ram Traders' } })
+  fireEvent.click(backdrop())
+  expect(close).toHaveBeenCalledTimes(1)
+})
+
+test('a card dialog whose dirty goes back to false closes on a backdrop click again', () => {
+  const close = jest.fn()
+  const { rerender } = render(<Modal title="Booking" onClose={close} dirty><input aria-label="Guests" /></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).not.toHaveBeenCalled()
+  rerender(<Modal title="Booking" onClose={close} dirty={false}><input aria-label="Guests" /></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).toHaveBeenCalledTimes(1)
+})
+
+test('a sheet closes on an untouched backdrop tap and ignores one after typing; Escape still closes', () => {
+  const close = jest.fn()
+  render(<Modal title="TADA claim" variant="sheet" onClose={close}><input aria-label="Amount" /></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).toHaveBeenCalledTimes(1)
+  fireEvent.input(screen.getByLabelText('Amount'), { target: { value: '500' } })
+  fireEvent.click(backdrop())
+  expect(close).toHaveBeenCalledTimes(1)
+  pressEscape()
+  expect(close).toHaveBeenCalledTimes(2)
+})
+
+test('a sheet passed dirty ignores the backdrop before anything is typed', () => {
+  const close = jest.fn()
+  render(<Modal title="Options" variant="sheet" onClose={close} dirty><button>Large</button></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).not.toHaveBeenCalled()
+})

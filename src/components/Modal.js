@@ -23,7 +23,8 @@ function registerModal(entry) {
 
 // Centered modal overlay — hosts a create/edit form so it pops up in front of the
 // user instead of rendering at the top of the page (no scrolling to reach it).
-// Backdrop click and the × button both call onClose; the panel itself stops propagation.
+// Backdrop click and the × button both call onClose; the panel itself stops propagation. A caller
+// passing `dirty` turns the backdrop click off while it is true; × and Escape still close (S842).
 //
 // `zIndex` (default 100) exists because POS's order screen is a `position: fixed` full-screen
 // layer at 1000 and therefore its own stacking context: a dialog opened from it needs a higher
@@ -88,7 +89,10 @@ export default function Modal({
   // closing on backdrop exactly as a dialog does.
   // `dirty` lets a caller state it outright: a chip <button> click fires neither onInput nor
   // onChange, so a sheet made of picks (GuestOptionSheet) passes `dirty` from its own state.
-  const onBackdrop = () => { if (!(sheet && (dirty || dirtyRef.current))) onClose() }
+  // An explicit `dirty` guards the backdrop for EVERY variant (S842): a stray tap was discarding
+  // POS's half-filled card dialogs (Adjust Points, Issue Credit Note, Booking). The automatic
+  // onInput/onChange tracking stays sheet-only, so a card dialog changes only if its caller opts in.
+  const onBackdrop = () => { if (!(dirty || (sheet && dirtyRef.current))) onClose() }
   const markDirty = () => { dirtyRef.current = true }
 
   useEffect(() => {
