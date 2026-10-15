@@ -24,7 +24,9 @@ import { Ellipsis } from 'lucide-react'
  */
 // `triggerLabel` (S836) shows a text button instead of the ⋯ glyph, for a menu that is a screen's
 // control rather than a row's; `zIndex` lifts the panel above a full-screen layer (the till is 1000).
-export default function RowMenu({ label, items, disabled = false, busy = false, triggerLabel = null, zIndex = null }) {
+// `className` (S841) is appended to the trigger's classes, for a host with its own hooks (the till
+// passes `till-hit--row` so the trigger meets its 44px touch floor).
+export default function RowMenu({ label, items, disabled = false, busy = false, triggerLabel = null, zIndex = null, className = '' }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
   const btnRef = useRef(null)
@@ -100,7 +102,7 @@ export default function RowMenu({ label, items, disabled = false, busy = false, 
       <button
         ref={btnRef}
         type="button"
-        className={triggerLabel ? 'btn btn-ghost btn-sm' : 'btn btn-ghost btn-sm btn-icon'}
+        className={`${triggerLabel ? 'btn btn-ghost btn-sm' : 'btn btn-ghost btn-sm btn-icon'}${className ? ` ${className}` : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -125,7 +127,10 @@ export default function RowMenu({ label, items, disabled = false, busy = false, 
                 className={`row-menu-item${it.danger ? ' row-menu-item--danger' : ''}`}
                 disabled={!!it.disabled}
                 title={it.disabled && it.hint ? it.hint : undefined}
-                onClick={() => { close(false); it.onSelect?.() }}
+                // Focus goes back to the trigger BEFORE the action runs (S841): an action that opens a
+                // Modal records whatever has focus as its opener, and the menu item is about to be
+                // removed, so closing that dialog dropped focus to the top of the page.
+                onClick={() => { close(); it.onSelect?.() }}
               >
                 {it.label}
                 {it.disabled && it.hint && <span className="row-menu-hint">{it.hint}</span>}

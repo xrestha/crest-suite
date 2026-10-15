@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { daysInBsMonth, getBsToday, bsToAd, adToBsSafe, formatAd, BS_MONTHS, BS_YEAR_MIN, BS_YEAR_MAX } from '../utils/bsCalendar'
 import SearchableSelect from './SearchableSelect'
@@ -11,6 +11,15 @@ const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 // approximated year would silently store a wrong AD date (the S559 five-days-out DOB bug).
 const YEAR_RANGE = Array.from({ length: BS_YEAR_MAX - BS_YEAR_MIN + 1 }, (_, i) => BS_YEAR_MIN + i)
 const YEAR_OPTIONS = YEAR_RANGE.map(y => ({ value: String(y), label: String(y) }))
+
+// What Tab cycles through inside the open popover. Unlike Modal's list it skips `tabindex="-1"`
+// buttons, which is every day but the roving one.
+const POPOVER_FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const ARROW_DAYS = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }
+
+// The day cells are inline-styled with `outline: none`, and `:focus-visible` has no inline form, so
+// the ring is drawn from this test instead (S841). Older engines without the selector get the ring.
+const isFocusVisible = el => { try { return el.matches(':focus-visible') } catch { return true } }
 
 /**
  * Visual BS calendar picker — two modes:
@@ -60,21 +69,60 @@ export default function BsCalendarPicker({
   const [navMonth, setNavMonth] = useState(selected?.month || lockMonth || today.month)
   const [open,     setOpen]     = useState(false)
   const [pos,      setPos]      = useState({ top: 0, left: 0, width: 0, above: false })
+  // The day the arrow keys last moved to, or null for the shown month's default (selected day,
+  // else today, else the 1st). Only that day's button is a Tab stop: a roving tabindex (S841).
+  const [activeDay, setActiveDay] = useState(null)
+  // Whether the focused day was reached by keyboard, so it wears the focus ring. Only the roving
+  // day can hold keyboard focus, so a flag is enough; a per-day value would follow the wrong cell
+  // when a page turn reuses the focused button for another day.
+  const [dayRing, setDayRing] = useState(false)
 
   const triggerRef = useRef(null)
+  const buttonRef  = useRef(null)
   const popoverRef = useRef(null)
+  // What the next render should focus: 'day' (the roving day) or 'year' (the year field's button,
+  // after a pick unmounts its search box). A ref, so setting it never renders by itself.
+  const focusPendingRef = useRef(null)
+  const popoverId = useId()
+  const yearId = useId()
 
   // Keep nav pinned to the locked period whenever it changes
   useEffect(() => {
     if (locked) { setNavYear(lockYear); setNavMonth(lockMonth) }
   }, [locked, lockYear, lockMonth])
 
-  // When picker opens (free mode), navigate to the selected date (or today)
+  // Opening (free mode) navigates to the selected date, or today. This was an effect on `open`;
+  // it is set in the same batch as `open` now (S841), so the popover's first render already shows
+  // the right month and the focus move below lands on the right day, not on the last visit's.
+  function openPicker() {
+    if (!locked) {
+      if (selected) { setNavYear(selected.year); setNavMonth(selected.month) }
+      else          { setNavYear(today.year);    setNavMonth(today.month) }
+    }
+    setActiveDay(null)
+    focusPendingRef.current = 'day'
+    setOpen(true)
+  }
+
+  // Every close from inside the popover hands focus back to the trigger; the popover is about to
+  // unmount, and focus inside it would otherwise fall to <body> (S841).
+  function closePicker() {
+    setOpen(false)
+    buttonRef.current?.focus()
+  }
+
+  // Move focus into the popover on open, and after an arrow key or a year pick re-renders it.
+  // No dependency list on purpose: it acts only when focusPendingRef asks it to.
   useEffect(() => {
-    if (!open || locked) return
-    if (selected) { setNavYear(selected.year); setNavMonth(selected.month) }
-    else          { setNavYear(today.year);    setNavMonth(today.month) }
-  }, [open]) // eslint-disable-line
+    const want = focusPendingRef.current
+    if (!open || !want) return
+    focusPendingRef.current = null
+    const pop = popoverRef.current
+    const el = want === 'year'
+      ? pop?.querySelector('button[aria-haspopup="listbox"]')
+      : pop?.querySelector('button[data-bs-day][tabindex="0"]')
+    el?.focus()
+  })
 
   // Position the dropdown
   useEffect(() => {
@@ -101,13 +149,30 @@ export default function BsCalendarPicker({
   // leave request vanishing because someone dismissed a date picker. Capture phase plus
   // stopPropagation is what keeps the outer dialog out of it; the picker only claims the key
   // while it is actually open.
+  //
+  // Tab and Shift+Tab cycle inside the popover (S841). It is portalled to <body>, so inside a Modal,
+  // whose trap covers only its own panel, Tab went from the trigger straight to the next field and
+  // the calendar could not be reached by keyboard at all (POS Reservations' booking form).
+  // preventDefault is what makes Modal's own listener stand down: it returns on `defaultPrevented`.
   useEffect(() => {
     if (!open) return undefined
     const onKey = e => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      setOpen(false)
-      triggerRef.current?.querySelector('button')?.focus()
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setOpen(false)
+        buttonRef.current?.focus()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const items = Array.from(popoverRef.current?.querySelectorAll(POPOVER_FOCUSABLE) || [])
+      if (items.length === 0) return
+      e.preventDefault()
+      const i = items.indexOf(document.activeElement)
+      const step = e.shiftKey ? -1 : 1
+      const next = i === -1
+        ? items[e.shiftKey ? items.length - 1 : 0]
+        : items[(i + step + items.length) % items.length]
+      next.focus()
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
@@ -131,6 +196,7 @@ export default function BsCalendarPicker({
 
   function prevMonth() {
     if (locked) return
+    setActiveDay(null)
     if (navMonth === 1) {
       if (navYear <= BS_YEAR_MIN) return // don't walk off the verified table
       setNavYear(y => y - 1); setNavMonth(12)
@@ -138,15 +204,39 @@ export default function BsCalendarPicker({
   }
   function nextMonth() {
     if (locked) return
+    setActiveDay(null)
     if (navMonth === 12) {
       if (navYear >= BS_YEAR_MAX) return // don't walk off the verified table
       setNavYear(y => y + 1); setNavMonth(1)
     } else setNavMonth(m => m + 1)
   }
 
+  // Arrow keys on a day: ±1 day across, ±7 down (S841). Past the month's edge they turn the page,
+  // except in locked mode (the grid is pinned to its period) and at the verified table's ends,
+  // the same bound prevMonth/nextMonth keep. Month lengths come from the table, never 30.
+  function onDayKeyDown(e, day) {
+    const delta = ARROW_DAYS[e.key]
+    if (!delta) return
+    e.preventDefault()
+    let y = navYear, m = navMonth, d = day + delta
+    const len = daysInBsMonth(y, m)
+    if (d < 1 || d > len) {
+      if (locked) return
+      if (d < 1) {
+        if (m === 1) { if (y <= BS_YEAR_MIN) return; y -= 1; m = 12 } else m -= 1
+        d += daysInBsMonth(y, m)
+      } else {
+        if (m === 12) { if (y >= BS_YEAR_MAX) return; y += 1; m = 1 } else m += 1
+        d -= len
+      }
+    }
+    setNavYear(y); setNavMonth(m); setActiveDay(d)
+    focusPendingRef.current = 'day'
+  }
+
   function selectDay(day) {
     onChange(locked ? String(day) : formatAd(bsToAd(navYear, navMonth, day)))
-    setOpen(false)
+    closePicker()
   }
 
   // "Today" — in locked mode only valid when the locked period is the current BS month
@@ -162,7 +252,7 @@ export default function BsCalendarPicker({
       setNavMonth(today.month)
       onChange(formatAd(bsToAd(today.year, today.month, today.day)))
     }
-    setOpen(false)
+    closePicker()
   }
 
   // Build calendar grid cells: null = blank padding, number = day
@@ -172,6 +262,12 @@ export default function BsCalendarPicker({
   for (let i = 0; i < firstDow; i++) cells.push(null)
   for (let d = 1; d <= daysCount; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
+
+  // The one day button that is a Tab stop: where the arrows last went, else the selected day if
+  // it is in view, else today if it is, else the 1st.
+  const inView = d => Number.isInteger(d) && d >= 1 && d <= daysCount
+  const shows  = bs => bs && bs.year === navYear && bs.month === navMonth
+  const rovingDay = [activeDay, shows(selected) && selected.day, shows(today) && today.day].find(inView) || 1
 
   // A value whose BS conversion is out of the verified range still displays — as its truthful
   // AD form — rather than as a silently-approximated BS date or a blank that reads as "unset".
@@ -191,6 +287,10 @@ export default function BsCalendarPicker({
   const popover = open ? createPortal(
     <div
       ref={popoverRef}
+      id={popoverId}
+      // A dialog, not a modal one: nothing behind it is made inert, so no aria-modal (S841).
+      role="dialog"
+      aria-label="Choose a date"
       style={{
         position:  'fixed',
         top:       pos.above ? undefined : pos.top,
@@ -211,7 +311,7 @@ export default function BsCalendarPicker({
     >
       {/* Month/year navigation (locked mode keeps the plain label, no controls to jump around) */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 6 }}>
-        <button style={navBtn(!locked)} onClick={prevMonth} disabled={locked}>‹</button>
+        <button style={navBtn(!locked)} onClick={prevMonth} disabled={locked} aria-label="Previous month">‹</button>
         {locked ? (
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
             {BS_MONTHS[navMonth - 1]} {navYear}
@@ -220,7 +320,7 @@ export default function BsCalendarPicker({
           <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
             <select aria-label="Month"
               value={navMonth}
-              onChange={e => setNavMonth(parseInt(e.target.value, 10))}
+              onChange={e => { setNavMonth(parseInt(e.target.value, 10)); setActiveDay(null) }}
               style={{
                 flex: 1.3, minWidth: 0, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
                 borderRadius: 0, padding: touch ? '10px 8px' : '4px 4px',
@@ -232,16 +332,22 @@ export default function BsCalendarPicker({
             >
               {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
             </select>
+            {/* SearchableSelect's `id` lands on its trigger, so a hidden label names the year field
+                the way aria-label names the month one (S841); it read as a bare "2082" button. */}
+            <label htmlFor={yearId} className="sr-only">Year</label>
             <SearchableSelect
+              id={yearId}
               value={String(navYear)}
-              onChange={v => setNavYear(parseInt(v, 10))}
+              // A pick unmounts the year search box that had focus; hand it to the year field's
+              // button so the keyboard stays inside the popover (S841).
+              onChange={v => { setNavYear(parseInt(v, 10)); setActiveDay(null); focusPendingRef.current = 'year' }}
               options={YEAR_OPTIONS}
               touch={touch}
               style={{ flex: 1 }}
             />
           </div>
         )}
-        <button style={navBtn(!locked)} onClick={nextMonth} disabled={locked}>›</button>
+        <button style={navBtn(!locked)} onClick={nextMonth} disabled={locked} aria-label="Next month">›</button>
       </div>
 
       {/* Day-of-week headers */}
@@ -258,15 +364,25 @@ export default function BsCalendarPicker({
         {cells.map((day, i) => {
           if (!day) return <div key={i} style={{ height: touch ? 44 : 26 }} />
           const isToday = day === today.day && navMonth === today.month && navYear === today.year
-          const isSel   = selected && day === selected.day && navMonth === selected.month && navYear === selected.year
+          const isSel   = !!selected && day === selected.day && navMonth === selected.month && navYear === selected.year
+          // The full BS date as the name, and the states as attributes, so neither the selected day
+          // nor today is carried by colour alone (S841).
           return (
             <button
               key={i}
               type="button"
+              data-bs-day={day}
+              tabIndex={day === rovingDay ? 0 : -1}
+              aria-label={`${day} ${BS_MONTHS[navMonth - 1]} ${navYear}`}
+              aria-pressed={isSel}
+              aria-current={isToday ? 'date' : undefined}
               onClick={() => selectDay(day)}
+              onKeyDown={e => onDayKeyDown(e, day)}
+              onFocus={e => setDayRing(isFocusVisible(e.currentTarget))}
+              onBlur={() => setDayRing(false)}
               style={{
                 width: '100%', height: touch ? 44 : 26, border: 'none',
-                borderRadius: touch ? 'var(--radius-sm)' : 4, fontSize: touch ? 15 : 11, cursor: 'pointer',
+                borderRadius: touch ? 'var(--radius-sm)' : 'var(--radius-xs)', fontSize: touch ? 15 : 11, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontWeight: isSel || isToday ? 700 : 400,
                 background: isSel
@@ -277,9 +393,14 @@ export default function BsCalendarPicker({
                 color: isSel
                   ? 'var(--theme-accent-text)'
                   : isToday
-                    ? 'var(--theme-accent)'
+                    ? 'var(--theme-accent-ink)'
                     : 'var(--theme-text1)',
                 outline: isToday && !isSel ? '1px solid var(--theme-accent)' : 'none',
+                // The focus pair as an inset: the outline token, then a card-coloured gap so the
+                // ring still reads on the selected day's accent fill.
+                boxShadow: dayRing && day === rovingDay
+                  ? 'inset 0 0 0 2px var(--theme-focus-outline), inset 0 0 0 4px var(--theme-card)'
+                  : 'none',
                 fontFamily: 'inherit',
               }}
             >
@@ -306,7 +427,7 @@ export default function BsCalendarPicker({
         {clearable && value && (
           <button
             type="button"
-            onClick={() => { onChange(''); setOpen(false) }}
+            onClick={() => { onChange(''); closePicker() }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: touch ? 14 : 11, color: 'var(--theme-text3)', padding: touch ? '10px 8px' : '2px 4px', minHeight: touch ? 44 : undefined, fontFamily: 'inherit' }}
           >
             Clear
@@ -326,19 +447,23 @@ export default function BsCalendarPicker({
           is the sighted half. Making this a real combobox, the way SearchableSelect became one in
           S521, would earn aria-invalid properly — a larger change than the one this belongs to. */}
       <button
+        ref={buttonRef}
         type="button"
         id={id}
         aria-label={ariaLabel}
         aria-describedby={invalid && id ? `${id}-err` : undefined}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
         disabled={disabled}
-        onClick={() => !disabled && setOpen(o => !o)}
+        onClick={() => { if (disabled) return; if (open) setOpen(false); else openPicker() }}
         style={{
           width: '100%', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer',
           background: 'var(--theme-input-bg)',
           // Invalid outranks open: focusing the field the user has to fix is exactly when the
           // signal must not disappear.
           border: `1px solid ${invalid ? 'var(--theme-red)' : open ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-          borderRadius: touch ? 'var(--radius-md)' : 6, padding: touch ? '11px 12px' : '8px 10px',
+          borderRadius: 'var(--radius-md)', padding: touch ? '11px 12px' : '8px 10px',
           minHeight: touch ? 44 : undefined, fontSize: touch ? 16 : 13,
           color: displayValue ? 'var(--theme-text1)' : 'var(--theme-text3)',
           boxShadow: open ? '0 0 0 3px var(--theme-focus-ring)' : 'none',

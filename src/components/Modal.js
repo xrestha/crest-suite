@@ -68,7 +68,14 @@ export default function Modal({
   const ownHeader = unstyled || sheet
   const titleId = useId()
   const panelRef = useRef(null)
-  const triggerRef = useRef(null)
+  // The control that opened the dialog, read on the FIRST RENDER (S841). Reading it in the mount
+  // effect was too late: a child's `autoFocus` runs during React's commit, before any passive
+  // effect, so the modal recorded its own input as the opener, and on close it focused that
+  // removed input and focus fell to <body> (POS Staff's Reset PIN, POS Setup's Add Table). Render
+  // runs before any child commits, so this is the real opener. `undefined` = not yet read.
+  const triggerRef = useRef(undefined)
+  if (triggerRef.current === undefined) triggerRef.current = document.activeElement || null
+  const initialFocusRef = useRef(null)
   const dirtyRef = useRef(false)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -85,12 +92,19 @@ export default function Modal({
   const markDirty = () => { dirtyRef.current = true }
 
   useEffect(() => {
-    // Remember whatever had focus before the modal opened (the button that triggered it)
-    // so it can be restored on close instead of leaving focus on a now-removed element.
-    triggerRef.current = document.activeElement
     const panel = panelRef.current
-    const focusable = panel?.querySelector(FOCUSABLE)
-    ;(focusable || panel)?.focus()
+    // An opener inside this panel is no opener (S841): it is about to be removed with the dialog.
+    if (panel && triggerRef.current && panel.contains(triggerRef.current)) triggerRef.current = null
+    // A child that already took focus (an `autoFocus` field, an inner Modal mounting in the same
+    // commit) keeps it; moving it to the × button was stealing the caret from the field the
+    // dialog is for (S841). Otherwise focus the first focusable, or the panel itself. StrictMode's
+    // dev-only unmount/remount hands focus to the opener in between, so the second run re-takes
+    // the element the first run settled on rather than falling back to the × button.
+    let initial = panel?.contains(document.activeElement) ? document.activeElement : null
+    if (!initial && panel?.contains(initialFocusRef.current)) initial = initialFocusRef.current
+    if (!initial) initial = panel?.querySelector(FOCUSABLE) || panel
+    initialFocusRef.current = initial
+    if (initial && document.activeElement !== initial) initial.focus?.()
 
     const stackToken = {}
     registerModal({ token: stackToken, el: panel })
@@ -118,7 +132,10 @@ export default function Modal({
       document.removeEventListener('keydown', onKeyDown)
       const i = modalStack.findIndex(o => o.token === stackToken)
       if (i !== -1) modalStack.splice(i, 1)
-      triggerRef.current?.focus?.()
+      // Hand focus back to the opener while it still exists. One that unmounted with the dialog
+      // open (S805's Fab case) cannot take focus, so leave it rather than call focus on nothing.
+      const opener = triggerRef.current
+      if (opener?.isConnected) opener.focus?.()
     }
     // Deliberately mount-only: `onClose` is almost always a fresh inline arrow function from the
     // caller, so depending on it here would re-run this effect (and re-steal focus into the panel's
