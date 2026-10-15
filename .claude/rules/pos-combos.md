@@ -34,4 +34,5 @@ there.
   `apply_pos_item_comps`) must carry the seven combo columns, and `guard_pos_item_price` lists them.
 - **The till floor** was raised once the combo release was deployed: an older till would read the `@`
   key as an option id.
-- **HQ's master-data push does not carry combos** yet (POS_TODO.md).
+- **HQ's push carries combos with the choices (S840)**: `master_id` on `pos_combos` / `pos_combo_groups`,
+  the rules in `docs/pos-combos.md`.

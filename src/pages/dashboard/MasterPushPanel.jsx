@@ -40,8 +40,8 @@ const ENTITY_CHOICES = [
   {
     key: 'options',
     keys: ['options'],
-    label: 'Choices (sizes, add-ons, build-your-own)',
-    tip: 'Crest Customization’s choice groups and choices, what each one takes from stock, the groups on each dish and the build-your-own mark. A new choice arrives at HQ’s price; after that its price follows Selling prices, and whether it is switched on stays the branch’s own. A choice HQ deletes is switched off at the branch, never deleted, so past bills keep its name. A group the branch made itself is left alone.',
+    label: 'Choices and combos (sizes, add-ons, build-your-own, combos)',
+    tip: 'Crest Customization’s choice groups and choices, what each one takes from stock, the groups on each dish, the build-your-own mark, and combos with their picks and dishes. A new choice or combo arrives at HQ’s price; after that its price follows Selling prices, and whether it is switched on stays the branch’s own. A choice or combo HQ deletes is switched off at the branch, never deleted, so past bills keep its name. A group the branch made itself is left alone. A new combo whose dish is not at the branch yet arrives switched off, and the preview names the dish.',
     requires: 'recipes',
   },
 ]

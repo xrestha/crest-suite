@@ -164,6 +164,15 @@ Every read of bill lines that feeds this maths must select `combo_line_id` (or `
 - The Customization Report gains a **Combos** tab: per combo, how many sold (Σ over its
   `combo_line_id`s of their qty), revenue (Σ the dishes' amounts), and each pick's dish mix.
 
+### HQ's push (S840)
+
+Combos travel with Choices on the Group Console's push (`push_master_data`, entity `options`):
+`pos_combos` and `pos_combo_groups` carry `master_id` (adopted by name once); a combo's picks are HQ's
+list and each pick's dishes HQ's, mapped through `recipes.master_id`. A new combo arrives at HQ's price
+(no VAT rule: the price is the guest's); after that its price and each dish's extra follow "Selling
+prices", and its switches are the branch's own. One HQ deleted is switched off at the branch. A new
+combo whose dish has no branch copy arrives switched off and the preview names the dish.
+
 ### Rollout
 
 The till floor (`pos_min_till_build`) is raised to this release once it is deployed: an older till
