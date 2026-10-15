@@ -114,8 +114,8 @@ renders that snapshot; only pre-S573 shifts fall back to a recompute.
 (`expectedCashOf`)** used by the screen, the close modal and the printed slip. Cash genuinely
 moves without being a sale in this market — supplier payments, staff advances, float drops — and
 most importantly a customer settling an older **Credit** bill in cash: that order's
-`payment_method` stays `'Credit'` forever. `pos_cash_movements` (pay_in / pay_out / credit_settlement) is that ledger, and
-`PosCustomers`' settle action posts to it automatically.
+`payment_method` stays `'Credit'` forever. `pos_cash_movements` (pay_in / pay_out / credit_settlement) is that ledger, and a Cash customer
+payment posts to it inside `record_credit_receipt` (S843; a cancelled one is `credit_receipt_cancel`, out).
 
 **Since S754 (`20260916110000`) there is a fourth movement kind, `refund`**: cash handed back
 against a Credit Note, manager-only, one per note, pinned to `direction = 'out'`, so
@@ -609,7 +609,7 @@ History: docs/rules-archive/pos-billing.md#rank-guard-origin
 | What | Rank the table now requires |
 | --- | --- |
 | Close a bill (Pay, Void, Complimentary, Credit) | Supervisor |
-| Settle a Credit bill | Supervisor, once, `credit_settled_by` and `credit_settled_at` stamped |
+| Receive or cancel a customer payment (S843) | Supervisor, through the two receipt functions only; a cancel needs a reason; `credit_settled_*` stamped when receipts reach the total |
 | Open or close a shift | Supervisor. A **closed shift is immutable**, and a client cannot DELETE one |
 | Cash In / Cash Out | Supervisor, against an OPEN shift. **Never edited or deleted**: a mistake is a second movement |
 | Cash refund on a credit note (`kind = 'refund'`) | Manager. One per note, written by the note's own trigger: the cash the bill took (`pos_bill_cash_taken`), no more than the note's net (S809 2e) |
@@ -619,6 +619,7 @@ History: docs/rules-archive/pos-billing.md#rank-guard-origin
 | Invoice prefix, VAT number and flag, property address and phone, payment QR | Owner (admin exempt) |
 | `pos_tables` but `status` (and `inactive`, S817) | POS manager. **No delete, retire or rename under an open bill**, for everyone; no delete with bills on record, no new order when inactive (S835); names unique in service |
 | Loyalty schemes and enrolment (deleting an enrolled customer too) | POS manager |
+| Membership types, a customer's card and credit limit (S843) | POS manager; birthdays, anniversaries and consent: Supervisor (`pos_customers_guard_loyalty`) |
 | Add or take off loyalty points by hand (`adjust_loyalty_points`, S809 3k) | POS manager; reason required, never below 0 |
 | Block / Unblock / Delete a till login (admin-user-ops, S809 3i) | POS manager, as a PIN reset (never a peer manager, own login, or a stronger login). Delete only a login with no rows in `pos_login_recorded_rows` |
 | Parking slips (`pos_parking_slips_guard`, S809 1k) | Issue: Supervisor. Reprint, Mark Exited, the day's auto-close: any POS rank. Number (UNIQUE per outlet), issuer, Time In, the linked bill's number, close time and closer are the server's. Never edited; a closed slip stays closed; auto-close only before today's 6 AM Nepal |
@@ -730,11 +731,11 @@ concluding the client simply has no data.
 
 ## A delivery platform is a party, not a tag on a bill (S596)
 
-Sales Report → Delivery Partners and Customers → Outstanding Credit each carry a per-partner rollup,
+Sales Report → Delivery Partners and Customers → Credit each carry a per-partner view,
 so a screen can say what one platform owed and what it took. Four rules:
 
 **Commission is measured against the ex-VAT, post-discount base with comped lines excluded — never
-`paid_amount`.** That is the base `PosCustomers.jsx` settles on, because it is the base Foodmandu
+`paid_amount`.** That is the base Receive payment pre-fills commission on (`creditLedger.js`), because it is the base Foodmandu
 and Pathao themselves invoice on (confirmed with the client at S290). An effective rate computed off the VAT-inclusive total reads
 about 13 percentage points low on **every** bill of a VAT-registered client, so a report built that
 way would accuse every platform of over-charging, every month, in the alarming direction. Recompute
@@ -753,9 +754,8 @@ orders. The flag requires a gap of ≥0.5 percentage points **and** a rupee gap 
 rounding could produce (`max(1, settledBills × 0.5)` in aggregate, NPR 1 on a single bill). A
 report that raises a false alarm about a supplier relationship is worse than one that stays quiet.
 
-**A rollup must reconcile with the total printed beside it.** Customers' rollup keeps a
-**Direct customers** row for non-partner Credit precisely so its Outstanding column ties to the KPI
-card directly above it. Its figures
+**A rollup must reconcile with the total printed beside it.** Customers → Credit lists every party
+(each customer and each platform, S843), so its rows sum to the owed figure above them. Its figures
 legitimately differ from the report's — that page is every Credit bill ever, the report is a date
 range — which is stated in a line under the table, because two screens showing the same words and
 different numbers is a support call.
@@ -874,11 +874,31 @@ History: docs/rules-archive/pos-billing.md#close-read-back-evidence
 - **The shell is `inert` behind the order screen** (`tillLayerUp`, `Layout.js`, S841). Focus goes to ← Table on entry (not the search: it raises a tablet's keyboard) and back to the tile or Bill button (`data-table-tile`/`data-takeaway-tile`/`data-bill-for`) when lost.
 - **The cover count is written after the line save and only when changed on this tablet** (ORDER-FLOW-14). A saved take-off re-added prints +1 (`sentQtyAfterQtyChange`, ORDER-FLOW-13).
 
-## A Credit settle whose answer is lost is read back too (S809 3l)
+## Customer credit is paid by receipts (S843)
 
-- `settleCredit.js`: the write waits 20 s (then aborted), reads 8 s. No answer or zero rows reads the bill back; only a server refusal says "not settled".
-- It is this page's own press only if `credit_settled_by` is this login with the pressed method while the page holds an unanswered press (memory, 15 min); its Cash In follows once the bill has none. Anyone else's settlement is named, never posted.
-- The Cash In has a minted id (no answer: sent once more, 23505 = landed); a refusal reads OVER. A unique index holds one entry per bill (S823), so a first-try 23505 is "already on the drawer record". No shift: keep the cash out of the next float and record it, or count it and record nothing. The commission base is `{ orderId, base }` under `useLatestRequest`.
+- **A payment is a numbered money receipt** (`pos_credit_receipts`, own series per outlet and year,
+  no VAT), split over bills by `pos_credit_receipt_lines` (amount, and a partner's commission kept).
+  Only `record_credit_receipt` / `cancel_credit_receipt` (DEFINER, Supervisor+, one transaction,
+  bills locked in id order) write either; the guards refuse every client write but the reprint count
+  and the operator's restore. Owner decisions: oldest bills first, the cashier may tick others; never
+  more than is owed (no advances); a Supervisor or Manager cancels with a reason, never a delete.
+- **Owed has one definition**: `pos_credit_open_bills` (paid_amount − Σ active lines' amount +
+  commission); `pos_credit_party_events` is the statement, and its balance equals Σ owed.
+  `creditOwed.js` is the browser twin for range reports. Pass `p_client_id`: the operator's view-as
+  is a browser setting. A bill is stamped `credit_settled_*` only when its receipts reach its total
+  ('Mixed' for several methods), so every older reader still means "paid in full"; a cancel
+  un-stamps it.
+- **A party is a key** (`pos_credit_party_key` / `creditPartyKey`, twins): partner name, else the
+  canonical phone (7+ digits), else the name. It is DEFINER (`20261015140000`) because
+  `pos_phone_canonical` has no client grant.
+- **Cash** needs an open shift: one `credit_settlement` Cash In per receipt (no `order_id`), and a
+  cancel's `credit_receipt_cancel` Cash Out; Expected Cash counts both by direction, unchanged.
+  `pos_bill_cash_taken` counts a bill's Cash lines, so a credit note refunds the cash really taken.
+- **The old whole-bill settle survives only for a bill with no receipts** (an older bundle):
+  `guard_pos_order_close` and `pos_cash_movements_guard` refuse it otherwise (`credit_use_receipts`).
+- A press with no answer is resent with the same `p_request_id` (the server returns the first
+  receipt); until the page knows, it blocks another payment from that party (`settleCredit.js`).
+History: docs/rules-archive/pos-billing.md#credit-settle-read-back
 
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682, S809 4l)
 
@@ -986,6 +1006,12 @@ is charged on the full bill, and **IMS revenue needs no change at all** — the 
   so a client delete's one-statement cascade still passes. Moving points to a new number is Move
   (S815 4g, above), never two hand corrections.
 
+- **A member card is a DISCOUNT, never a tender (S843, owner decisions)**: a real price reduction,
+  so it lowers the VAT base and stays inside the cashier's cap (no exemption in the close guard). The
+  till fills it (`memberDiscount.js`, reason "Membership – <type> <pct>%"), the cashier may take it
+  off; an expired card or switched-off type gives nothing. Card numbers are stored upper-cased (the
+  guard). Birthdays/anniversaries need consent (`consent_at`/`consent_by`, server-stamped) and stay
+  out of the audit WHEN clauses (Privacy Act). Card, type and credit limit: POS manager.
 History: docs/rules-archive/pos-billing.md#tender-and-loyalty-history
 
 ## One colour vocabulary, and loudness tracks demand for action (S661)
@@ -1106,5 +1132,5 @@ which is why pinning net to it pins VAT too. Since S809 2c the note is worked ou
 stamp (`billVatRegistered`), so a bill from before a VAT change is credited as issued and passes;
 only an unstamped bill (restored from a pre-2c backup) can still meet today's setting and be refused.
 **A Credit bill with a credit note against it is no longer owed**, so
-it leaves Customers → Outstanding. A bill settled before it was credited stays in Collected,
+it leaves Customers → Credit. A bill settled before it was credited stays in Collected,
 because that money really changed hands.

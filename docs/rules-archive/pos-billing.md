@@ -712,3 +712,12 @@ Moved word for word out of `## A credit note that cannot reach Inventory is mark
   in the Credit Note Book and never printed. It was appended to the reason, which printed on the tax
   document as if it were the reason. Notes issued before S755 keep that text: a printed note is not
   rewritten.
+
+## Credit settle read-back
+
+Moved from `.claude/rules/pos-billing.md` in S843, when part payments by receipt replaced the
+whole-bill settle. The rules as they stood (S809 3l, S823):
+
+- `settleCredit.js`: the write waits 20 s (then aborted), reads 8 s. No answer or zero rows reads the bill back; only a server refusal says "not settled".
+- It is this page's own press only if `credit_settled_by` is this login with the pressed method while the page holds an unanswered press (memory, 15 min); its Cash In follows once the bill has none. Anyone else's settlement is named, never posted.
+- The Cash In has a minted id (no answer: sent once more, 23505 = landed); a refusal reads OVER. A unique index holds one entry per bill (S823), so a first-try 23505 is "already on the drawer record". No shift: keep the cash out of the next float and record it, or count it and record nothing. The commission base is `{ orderId, base }` under `useLatestRequest`.
