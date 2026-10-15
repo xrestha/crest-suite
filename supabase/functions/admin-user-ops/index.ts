@@ -184,6 +184,13 @@ const POS_RECORD_WORDS: Record<string, [string, string]> = {
   'pos_devices.revoked_by':             ['switched off 1 till', 'switched off {n} tills'],
   'pos_print_devices.created_by':       ['added 1 printer computer', 'added {n} printer computers'],
   'pos_print_devices.revoked_by':       ['removed 1 printer computer', 'removed {n} printer computers'],
+  // S843: customer payment receipts (a numbered receipt per payment on Credit bills).
+  'pos_credit_receipts.received_by':    ['received 1 customer payment', 'received {n} customer payments'],
+  'pos_credit_receipts.cancelled_by':   ['cancelled 1 customer payment', 'cancelled {n} customer payments'],
+  // S843 membership: who added a membership type, and who recorded a customer's agreement to keep
+  // their birthday and anniversary.
+  'pos_membership_types.created_by':    ['added 1 membership type', 'added {n} membership types'],
+  'pos_customers.consent_by':           ['recorded consent for 1 customer', 'recorded consent for {n} customers'],
   'profiles.pos_blocked_by':            ['blocked 1 login', 'blocked {n} logins'],
 }
 
@@ -312,8 +319,15 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   // By client_id (S792, DATABASE-5): every order id of a busy till was thousands of uuids in one URL.
   await del(admin.from('pos_order_items').delete().eq('client_id', clientId), 'pos_order_items')
   await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
-  // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
+  // Before orders/shifts — its FKs to both are ON DELETE SET NULL. And before the payment receipts
+  // (S843): a receipt's Cash In / cancellation Cash Out names it (credit_receipt_id, NO ACTION).
   await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
+  // S843: how each payment was split over bills, then the receipts. A line's order_id is NO ACTION
+  // (a delete must never orphan money), so both go before pos_orders; a receipt's shift_id is SET
+  // NULL, and it goes before pos_shifts so the sequence still names every table it clears. The
+  // receipt guards let the service role through.
+  await del(admin.from('pos_credit_receipt_lines').delete().eq('client_id', clientId), 'pos_credit_receipt_lines')
+  await del(admin.from('pos_credit_receipts').delete().eq('client_id', clientId), 'pos_credit_receipts')
   await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
   // Reservations BEFORE orders, and that order is load-bearing (S818, RESERVATIONS-6): order_id is
   // ON DELETE SET NULL, and a Seated booking must keep its order (CHECK
@@ -336,6 +350,8 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
   await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
   await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
+  // S843: membership types after the customers who hold one.
+  await del(admin.from('pos_membership_types').delete().eq('client_id', clientId), 'pos_membership_types')
   await del(admin.from('pos_loyalty_schemes').delete().eq('client_id', clientId), 'pos_loyalty_schemes')
   await del(admin.from('pos_parking_slips').delete().eq('client_id', clientId), 'pos_parking_slips')
   await del(admin.from('pos_tables').delete().eq('client_id', clientId), 'pos_tables')
@@ -2637,8 +2653,13 @@ Deno.serve(async (req) => {
           await del(admin.from('sales_entries').delete().in('period_id', periodIds).in('source', POS_SALES_SOURCES), 'pos sales_entries')
         }
         // Before orders/shifts: its FKs to both are ON DELETE SET NULL, so leaving it until
-        // after would orphan the rows rather than remove them.
+        // after would orphan the rows rather than remove them. And before the payment receipts it
+        // names (S843, credit_receipt_id, NO ACTION).
         await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
+        // S843: the payment receipts' split over bills, then the receipts, before the orders (a line's
+        // order_id is NO ACTION) and the shifts (see deleteClientDataFor).
+        await del(admin.from('pos_credit_receipt_lines').delete().eq('client_id', clientId), 'pos_credit_receipt_lines')
+        await del(admin.from('pos_credit_receipts').delete().eq('client_id', clientId), 'pos_credit_receipts')
         // pos_kot_removals cascades from pos_orders, so this delete is not load-bearing — it is
         // here so the sequence still names every table it clears, which is what makes a missed
         // one visible on review (S382's pos_credit_notes was missed exactly by being implicit).
@@ -2656,6 +2677,8 @@ Deno.serve(async (req) => {
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
         await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
+        // S843: membership types after the customers who hold one, as loyalty schemes go.
+        await del(admin.from('pos_membership_types').delete().eq('client_id', clientId), 'pos_membership_types')
         await del(admin.from('pos_loyalty_schemes').delete().eq('client_id', clientId), 'pos_loyalty_schemes')
         await del(admin.from('pos_parking_slips').delete().eq('client_id', clientId), 'pos_parking_slips')
         // Tables are kept (setup) but any left "occupied" by a deleted order are freed
