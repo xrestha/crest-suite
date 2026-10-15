@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import { POS_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../posSignals'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
@@ -1001,11 +1002,13 @@ export default function PosStaff() {
       {addModal && (
         <Modal title="Add Staff Member" onClose={() => { if (!adding) setAddModal(false) }} maxWidth={380}>
 
+            {/* S841: which of the two is chosen is announced (aria-pressed), not only tinted. */}
             {hrEnabled && (
-              <div className="tab-bar" style={{ marginBottom: 16 }}>
-                <button className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
-                <button className={`tab-btn${addMode === 'manual' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('manual')}>POS-only Staff</button>
-              </div>
+              <FilterChips label="Add as" active={addMode} onChange={setAddMode} style={{ marginBottom: 16 }}
+                options={[
+                  { key: 'hr', label: 'HR Employee' },
+                  { key: 'manual', label: 'POS-only Staff' },
+                ]} />
             )}
 
             {addMode === 'hr' ? (

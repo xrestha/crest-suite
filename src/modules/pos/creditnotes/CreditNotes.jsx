@@ -8,6 +8,7 @@ import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { getBsFiscalYear, formatAd } from '../../../utils/bsCalendar'
 import { nepalBsLong, nepalCivilDate } from '../../../shared/nepalTime'
@@ -248,10 +249,12 @@ export default function CreditNotes() {
         </p>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 20 }}>
-        <button className={`tab-btn${tab === 'issue' ? ' tab-btn--active' : ''}`} onClick={() => setTab('issue')}>Issue New</button>
-        <button className={`tab-btn${tab === 'book' ? ' tab-btn--active' : ''}`} onClick={() => setTab('book')}>Credit Note Book</button>
-      </div>
+      {/* `Tabs` since S841, so the open section is announced rather than shown by its tint alone. */}
+      <Tabs idBase="pos-credit-notes" label="Credit Notes sections" active={tab} onChange={setTab} style={{ marginBottom: 20 }}
+        tabs={[
+          { key: 'issue', label: 'Issue New' },
+          { key: 'book', label: 'Credit Note Book' },
+        ]} />
 
       {tab === 'issue' && (
         <>

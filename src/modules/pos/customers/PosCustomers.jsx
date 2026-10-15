@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
@@ -412,33 +413,26 @@ export default function PosCustomers() {
         </p>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 24 }}>
-        <Tip text="Every bill closed with buyer Name + Phone (any discount or Credit sale requires them) adds or updates a customer here automatically — no manual entry needed">
-          <button
-            className={`tab-btn${mainTab === 'customers' ? ' tab-btn--active' : ''}`}
-            onClick={() => setMainTab('customers')}
-          >Customers</button>
-        </Tip>
-        <Tip text="Credit bills closed at Charge but not yet collected. Settle one here when the customer pays — pick the payment method actually used">
-          <button
-            className={`tab-btn${mainTab === 'credit' ? ' tab-btn--active' : ''}`}
-            onClick={openCreditTab}
-          >
-            Outstanding Credit
-            {creditLoaded && !creditError && unsettled.length > 0 && (
-              <span className="badge-amber" style={{ marginLeft: 6, fontSize: 11, padding: '1px 7px', borderRadius: 0 }}>{unsettled.length}</span>
-            )}
-          </button>
-        </Tip>
-        {hasFeature('loyalty') && (
-          <Tip text="Points schemes, who is enrolled, and each member's balance. Points are earned automatically on any bill closed with a name and phone, and are spent at the till like a gift card">
-            <button
-              className={`tab-btn${mainTab === 'loyalty' ? ' tab-btn--active' : ''}`}
-              onClick={() => setMainTab('loyalty')}
-            >Loyalty</button>
-          </Tip>
-        )}
-      </div>
+      {/* `Tabs` since S841, so the open section is announced rather than shown by its tint alone.
+          A section's hint rides as its tab's `title`: a Tip around a tab is not the tab. */}
+      <Tabs idBase="pos-customers" label="Customers sections" active={mainTab} style={{ marginBottom: 24 }}
+        onChange={key => (key === 'credit' ? openCreditTab() : setMainTab(key))}
+        tabs={[
+          { key: 'customers', label: 'Customers', title: 'Every bill closed with buyer Name + Phone (any discount or Credit sale requires them) adds or updates a customer here automatically — no manual entry needed' },
+          {
+            key: 'credit',
+            title: 'Credit bills closed at Charge but not yet collected. Settle one here when the customer pays — pick the payment method actually used',
+            label: (
+              <>
+                Outstanding Credit
+                {creditLoaded && !creditError && unsettled.length > 0 && (
+                  <span className="badge-amber" style={{ marginLeft: 6, fontSize: 11, padding: '1px 7px', borderRadius: 0 }}>{unsettled.length}</span>
+                )}
+              </>
+            ),
+          },
+          ...(hasFeature('loyalty') ? [{ key: 'loyalty', label: 'Loyalty', title: "Points schemes, who is enrolled, and each member's balance. Points are earned automatically on any bill closed with a name and phone, and are spent at the till like a gift card" }] : []),
+        ]} />
 
       {/* ══ LOYALTY TAB ══ */}
       {mainTab === 'loyalty' && hasFeature('loyalty') && (

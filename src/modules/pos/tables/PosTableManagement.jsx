@@ -7,6 +7,7 @@ import QRCode from 'qrcode'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import Tabs, { FilterChips } from '../../../components/Tabs'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { TABLE_STATUS_BADGE as STATUS_BADGE, TABLE_STATUS_LABEL as STATUS_LABEL, tableStripColor } from '../posSignals'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -804,6 +805,16 @@ export default function PosTableManagement() {
     if (!resvLoaded) loadReservationSettings()
   }
 
+  // The section row's one handler (S841): a section that reads on first open keeps its own opener.
+  function openSection(key) {
+    const opener = {
+      routing: openRoutingTab, notes: openNotesTab, hsc: openHscTab,
+      discounts: openDiscountsTab, delivery: openDeliveryTab, reservations: openReservationsTab,
+    }[key]
+    if (opener) opener()
+    else setMainTab(key)
+  }
+
   function setResvField(key, value) { setResv(prev => ({ ...prev, [key]: value })); setResvMsg('') }
   function setResvBand(key, value)  { setResv(prev => ({ ...prev, duration_by_band: { ...prev.duration_by_band, [key]: value } })); setResvMsg('') }
   function toggleResvWeekday(key, n) {
@@ -895,69 +906,22 @@ export default function PosTableManagement() {
         </div>
       </div>
 
-      {/* Main tab bar */}
-      <div className="tab-bar" style={{ marginBottom: 24 }}>
-        <button
-          className={`tab-btn${mainTab === 'tables' ? ' tab-btn--active' : ''}`}
-          onClick={() => setMainTab('tables')}
-        >Tables</button>
-        <Tip text="Assign each menu category to KOT (kitchen) or BOT (bar) — controls where the ticket prints when staff send an order">
-          <button
-            className={`tab-btn${mainTab === 'routing' ? ' tab-btn--active' : ''}`}
-            onClick={openRoutingTab}
-          >Ticket Routing</button>
-        </Tip>
-        <Tip text="Preset instruction chips (e.g. 'No onion', 'Extra spicy') staff can tap on an order item instead of typing — prints under that item on the KOT/BOT">
-          <button
-            className={`tab-btn${mainTab === 'notes' ? ' tab-btn--active' : ''}`}
-            onClick={openNotesTab}
-          >Quick Notes</button>
-        </Tip>
-        <Tip text="Harmonized System Code per menu item — only required (min. 4 digits) if the item is an imported good sold as-is (e.g. imported bottled drinks). Not needed for freshly prepared dishes. Printed on POS bills if set.">
-          <button
-            className={`tab-btn${mainTab === 'hsc' ? ' tab-btn--active' : ''}`}
-            onClick={openHscTab}
-          >HSC Codes</button>
-        </Tip>
-        <Tip text="Preset reasons staff can pick when applying a discount at Charge — customize this list to match how your team actually discounts (e.g. Loyalty customer, Manager goodwill)">
-          <button
-            className={`tab-btn${mainTab === 'discounts' ? ' tab-btn--active' : ''}`}
-            onClick={openDiscountsTab}
-          >Discounts</button>
-        </Tip>
-        <Tip text="Foodmandu/Pathao commission % — never applied automatically at Charge (their orders close as Credit, not their own payment method). It's only a starting suggestion shown when you settle that bill in Customers → Outstanding Credit, adjustable against what the platform actually remitted">
-          <button
-            className={`tab-btn${mainTab === 'delivery' ? ' tab-btn--active' : ''}`}
-            onClick={openDeliveryTab}
-          >Delivery Partners</button>
-        </Tip>
-        <Tip text="How long a party of each size is expected to sit (prefilled from your own measured turn times), when a booking counts as late, the WhatsApp confirmation message, and the booking link / QR customers scan to request a table">
-          <button
-            className={`tab-btn${mainTab === 'reservations' ? ' tab-btn--active' : ''}`}
-            onClick={openReservationsTab}
-          >Reservations</button>
-        </Tip>
-        <Tip text="What guests see at the top of every table's QR menu and your online booking page — the restaurant name and logo (the owner sets these) — and the order of the menu's sections">
-          <button
-            className={`tab-btn${mainTab === 'guestmenu' ? ' tab-btn--active' : ''}`}
-            onClick={() => setMainTab('guestmenu')}
-          >Guest Menu</button>
-        </Tip>
-        <Tip text="The computers at the restaurant that print kitchen and bar tickets on their own printer, instead of each till opening a print window — pair one, test it, and see what it printed. When none is online, the tills print as before">
-          <button
-            className={`tab-btn${mainTab === 'printers' ? ' tab-btn--active' : ''}`}
-            onClick={() => setMainTab('printers')}
-          >Printers</button>
-        </Tip>
-        {hasWeather && (
-          <Tip text="The town the outlet's weather is read for. Today's and the next three days' weather then show at the top of the Dashboard">
-            <button
-              className={`tab-btn${mainTab === 'weather' ? ' tab-btn--active' : ''}`}
-              onClick={() => setMainTab('weather')}
-            >Weather</button>
-          </Tip>
-        )}
-      </div>
+      {/* Main tab bar. `Tabs` since S841, so the open section is announced rather than shown by its
+          tint alone. A section's hint rides as its tab's `title`: a Tip around a tab is not the tab. */}
+      <Tabs idBase="pos-setup" label="POS Setup sections" active={mainTab} style={{ marginBottom: 24 }}
+        onChange={openSection}
+        tabs={[
+          { key: 'tables', label: 'Tables' },
+          { key: 'routing', label: 'Ticket Routing', title: 'Assign each menu category to KOT (kitchen) or BOT (bar) — controls where the ticket prints when staff send an order' },
+          { key: 'notes', label: 'Quick Notes', title: "Preset instruction chips (e.g. 'No onion', 'Extra spicy') staff can tap on an order item instead of typing — prints under that item on the KOT/BOT" },
+          { key: 'hsc', label: 'HSC Codes', title: 'Harmonized System Code per menu item — only required (min. 4 digits) if the item is an imported good sold as-is (e.g. imported bottled drinks). Not needed for freshly prepared dishes. Printed on POS bills if set.' },
+          { key: 'discounts', label: 'Discounts', title: 'Preset reasons staff can pick when applying a discount at Charge — customize this list to match how your team actually discounts (e.g. Loyalty customer, Manager goodwill)' },
+          { key: 'delivery', label: 'Delivery Partners', title: "Foodmandu/Pathao commission % — never applied automatically at Charge (their orders close as Credit, not their own payment method). It's only a starting suggestion shown when you settle that bill in Customers → Outstanding Credit, adjustable against what the platform actually remitted" },
+          { key: 'reservations', label: 'Reservations', title: 'How long a party of each size is expected to sit (prefilled from your own measured turn times), when a booking counts as late, the WhatsApp confirmation message, and the booking link / QR customers scan to request a table' },
+          { key: 'guestmenu', label: 'Guest Menu', title: "What guests see at the top of every table's QR menu and your online booking page — the restaurant name and logo (the owner sets these) — and the order of the menu's sections" },
+          { key: 'printers', label: 'Printers', title: 'The computers at the restaurant that print kitchen and bar tickets on their own printer, instead of each till opening a print window — pair one, test it, and see what it printed. When none is online, the tills print as before' },
+          ...(hasWeather ? [{ key: 'weather', label: 'Weather', title: "The town the outlet's weather is read for. Today's and the next three days' weather then show at the top of the Dashboard" }] : []),
+        ]} />
 
       {/* ══ WEATHER TAB (S786) ══ — the city only: the rainy-day sales figure moves the Inventory
           sales chart and lives in Inventory Settings. WeatherCityPicker saves through the settings
@@ -1038,21 +1002,15 @@ export default function PosTableManagement() {
                           </Tip>
                         )}
                       </span>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {['KOT', 'BOT'].map(station => {
-                          const active = station === 'BOT' ? isBot : !isBot
-                          return (
-                            <button key={station} onClick={() => toggleCat(cat, station)} style={{
-                              padding: '5px 18px', borderRadius: 'var(--radius-sm)', fontSize: 12,
-                              fontWeight: active ? 700 : 400, cursor: 'pointer',
-                              background: active ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                              color: active ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
-                              border: `1px solid ${active ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                              transition: 'all 0.1s',
-                            }}>{station}</button>
-                          )
-                        })}
-                      </div>
+                      {/* S841: the station is the setting being edited, so a screen reader hears which
+                          one this category prints to (aria-pressed), named for the category. Centred
+                          in the Station heading's 120px so the pair sits under it. till-hit--row keeps
+                          the 44px touch floor the unclassed buttons had (.tab-btn alone is 32px). */}
+                      <FilterChips label={`Ticket station for ${cat}`}
+                        style={{ flexWrap: 'nowrap', justifyContent: 'center', minWidth: 120 }}
+                        options={[{ key: 'KOT', label: 'KOT', className: 'till-hit--row' }, { key: 'BOT', label: 'BOT', className: 'till-hit--row' }]}
+                        active={isBot ? 'BOT' : 'KOT'}
+                        onChange={station => toggleCat(cat, station)} />
                     </div>
                   )
                 })}
@@ -1442,13 +1400,11 @@ export default function PosTableManagement() {
             </div>
           )}
 
-          {/* Section filter */}
+          {/* Section filter: it narrows the floor grid below, so chips, not tabs (S841) */}
           {sections.length > 1 && (
-            <div className="tab-bar" style={{ marginBottom: 20 }}>
-              {sections.map(s => (
-                <button key={s} className={`tab-btn${secFilter === s ? ' tab-btn--active' : ''}`} onClick={() => setSecFilter(s)}>{s}</button>
-              ))}
-            </div>
+            <FilterChips label="Floor section" style={{ marginBottom: 20 }}
+              options={sections.map(s => ({ key: s, label: s }))}
+              active={secFilter} onChange={setSecFilter} />
           )}
 
           {floorMsg && (() => {
