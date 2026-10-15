@@ -33,6 +33,7 @@ import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import OptionPickerModal from '../../customization/OptionPickerModal'
 import ComboPickerModal from '../../customization/ComboPickerModal'
 import { ComboTiles, ComboCartBlock } from './ComboTill'
+import MenuGrid, { filterMenu } from './MenuGrid'
 import {
   COMBO_TAB, COMBO_TAB_LABEL, loadComboCatalog, comboAddsInOneTap, defaultComboPicks, buildComboLines, comboDishLine,
   comboIdOf, comboGroupOf, groupComboBlocks, cartRows, addComboLinesToCart, setComboQtyIn, comboUnitsPulled,
@@ -145,6 +146,10 @@ const bounded = (call, label, ms = CLOSE_STEP_MS) =>
 // often on mobile data; 20 s kept a waiter standing at the table.
 const OPEN_READ_MS = 10000
 const noReply = err => !!err && (isTimeout(err) || isNetworkError(err))
+
+// S842: how long after a cart line is removed the cart's − and × ignore a press. Removing a line moves
+// the lines below it up under the finger, so the second tap of a double tap landed on the next dish.
+const CART_REMOVE_GUARD_MS = 400
 
 // S809 ORDER-FLOW-7 (3f): the offline upload running on this page, whichever order screen started it.
 // Module-level, not a ref: the screen remounts (Orders ↔ Billing) while an upload runs, the unmounted
@@ -519,6 +524,10 @@ export default function PosOrders({ billingStation = false } = {}) {
   // opened; a tap while it is set is ignored and that tile says "Opening…". Before this, a second tap
   // (or a tap on another table) raced the first, and whichever answer landed last took the screen: a
   // slow read for T3 could replace T5's open order and the dishes just added to it.
+  // S842: the latest addItem, for the memoised menu grid (MenuGrid.jsx): its tiles call through this
+  // ref, so the grid never holds a stale closure and never sees a new function on a keystroke.
+  const addItemRef = useRef(null)
+  addItemRef.current = addItem
   const openingRef = useRef(null)
   const [openingId, setOpeningId] = useState(null)
   const openOnce = async (id, run) => {
@@ -824,11 +833,27 @@ export default function PosOrders({ billingStation = false } = {}) {
     return () => { clearInterval(poll); window.removeEventListener('online', retry) }
   }, [billingSettingsLoaded, clientId, view]) // eslint-disable-line
 
+  // S842: the three 5-second checks (the floor's kitchen badges, the open order's tickets, guest orders).
+  // None runs while the link is down (tillOffline(): the Wi-Fi can be up with no internet behind it),
+  // each read is bounded (SEND_READ_MS), and one still waiting is not started again. During an outage
+  // they stacked two or three hung requests every 5 s, and an older answer landing last could turn a
+  // table's Ready back to Started.
+  const pollBusyRef = useRef({})
+  const pollOnce = (key, run) => {
+    if (tillOffline() || pollBusyRef.current[key]) return
+    pollBusyRef.current[key] = true
+    void Promise.resolve().then(run).catch(err => console.error(`${key} check failed:`, err))
+      .finally(() => { pollBusyRef.current[key] = false })
+  }
+  // The order whose tickets are on screen (S842): a ticket read that answers after another order
+  // opened is dropped rather than drawn on it.
+  const ticketsOrderRef = useRef(null)
+
   // Keeps the floor-view Sent/Started/Ready badges live while a staff member is just looking at
   // the board (not tapping into a table, which is the only other time loadFloor/loadKotStatus run).
   useEffect(() => {
     if (view !== 'floor') return
-    const poll = setInterval(() => loadKotStatus(), 5000)
+    const poll = setInterval(() => pollOnce('kitchen badges', () => loadKotStatus()), 5000)
     return () => clearInterval(poll)
   }, [view, tableOrders, takeawayOrders]) // eslint-disable-line
 
@@ -872,9 +897,12 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Keeps each cart line's KOT/BOT timer live while the order screen for a saved order is open.
   // A brand-new, not-yet-sent order (orderId still null) has no tickets to poll for.
   useEffect(() => {
-    if (view !== 'order' || !orderId) { setOrderKotTickets([]); return }
+    ticketsOrderRef.current = view === 'order' ? orderId : null
+    // Another order's tickets never stay on this one's lines, online or not (S842).
+    setOrderKotTickets(prev => (prev.length ? [] : prev))
+    if (view !== 'order' || !orderId) return
     loadOrderKotTickets(orderId)
-    const poll = setInterval(() => loadOrderKotTickets(orderId), 5000)
+    const poll = setInterval(() => pollOnce('order tickets', () => loadOrderKotTickets(orderId)), 5000)
     return () => clearInterval(poll)
   }, [view, orderId]) // eslint-disable-line
 
@@ -893,7 +921,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // the switch.
   useEffect(() => {
     if (view !== 'floor' && view !== 'order') return
-    const poll = setInterval(() => loadPendingGuestOrders(), 5000)
+    const poll = setInterval(() => pollOnce('guest orders', () => loadPendingGuestOrders()), 5000)
     return () => clearInterval(poll)
   }, [view, clientId]) // eslint-disable-line
 
@@ -1425,6 +1453,22 @@ export default function PosOrders({ billingStation = false } = {}) {
     ;(target || document.getElementById('main-content'))?.focus()
   }, [view])
 
+  // S842: a cart line removed by its own − or × took the focused button with it, and focus fell to the
+  // page body. Once the cart has redrawn, focus goes to the line that took its place (else the one above
+  // it, else ← Table), and only when focus was lost. Lines are keyed by dish now, so it no longer slides
+  // to the next dish's button by itself either.
+  const cartFocusAfterRef = useRef(null)
+  const cartRemovedAtRef = useRef(0)
+  useEffect(() => {
+    const idx = cartFocusAfterRef.current
+    if (idx == null) return
+    cartFocusAfterRef.current = null
+    if (document.activeElement && document.activeElement !== document.body) return
+    const lines = document.querySelectorAll('#pos-order-lines [data-cart-line]')
+    const line = lines[Math.min(idx, lines.length - 1)]
+    ;(line?.querySelector('button') || backBtnRef.current)?.focus()
+  }, [orderItems])
+
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
   // The Floor → Billing nav item is Supervisor+; a nav item is not a guard and /pos/billing is a
   // plain URL, so the page says no itself. Back to Orders rather than /pos: a staff PIN that got
@@ -1657,9 +1701,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // submit_guest_order/pos_guest_order_requests (Guest QR self-ordering, Pro-tier feature).
   // Guest ordering only ever happens online, so (like loadKotStatus) this is skipped offline.
   async function loadPendingGuestOrders() {
-    if (!navigator.onLine) return
-    const { data, error } = await scopedFrom('pos_guest_order_requests', 'id, table_id, items, guest_notes, covers, created_at')
-      .eq('status', 'pending')
+    if (tillOffline()) return
+    const { data, error } = await bounded(scopedFrom('pos_guest_order_requests', 'id, table_id, items, guest_notes, covers, created_at')
+      .eq('status', 'pending'), 'Checking guest orders', SEND_READ_MS)
     // A failed read here would empty the floor's guest-order banner AND clear seenGuestRequestIds,
     // so the next successful poll re-chimes for requests already seen. Keep both as they were.
     if (error) { console.error('loadPendingGuestOrders failed, keeping last known requests:', error); return }
@@ -1876,7 +1920,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // which hid the food sitting in the pass. Takes an optional fresh map (passed synchronously from
   // loadFloor right after setTableOrders) to avoid reading stale state before that setState lands.
   async function loadKotStatus(ordersMap = tableOrders, takeaways = takeawayOrders) {
-    if (!navigator.onLine) return
+    if (tillOffline()) return
     const orderIdToTable = {}
     for (const [tableId, ord] of Object.entries(ordersMap)) {
       if (ord?.orderId && !ord.offlinePending) orderIdToTable[ord.orderId] = tableId
@@ -1887,12 +1931,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (t.orderId && !t.offlinePending) orderIdToTable[t.orderId] = `takeaway:${t.orderId}`
     }
     const orderIds = Object.keys(orderIdToTable)
-    if (orderIds.length === 0) { setKotStatusByTable({}); return }
+    if (orderIds.length === 0) { setKotStatusByTable(prev => (Object.keys(prev).length ? {} : prev)); return }
     // Cancelled tickets belong to a voided order; they used to fall through KOT_STATUS_RANK's `?? 0`
     // and read as "Sent". Served ones are kept — they are what turns a finished table to "Served".
     // A CHANGE ticket (S809 3a, kitchenNotes.js) is nothing to cook, so it never makes a table read "Sent".
-    const { data, error } = await scopedFrom('pos_kot_log', 'order_id, status').in('order_id', orderIds).neq('status', 'cancelled')
-      .not('items', 'cs', KOT_CHANGE_ITEMS)
+    const { data, error } = await bounded(scopedFrom('pos_kot_log', 'order_id, status').in('order_id', orderIds).neq('status', 'cancelled')
+      .not('items', 'cs', KOT_CHANGE_ITEMS), 'Checking the kitchen', SEND_READ_MS)
     // Polled every few seconds. Returning here keeps the last known badges on screen; falling
     // through with a null `data` computes an EMPTY map and blanks every table's kitchen status,
     // which a waiter reads as "nothing has been started" rather than as a failed read.
@@ -1909,17 +1953,20 @@ export default function PosOrders({ billingStation = false } = {}) {
   }
 
   // Ticket rows for the order currently open on screen — matched to a cart line by its line key
-  // (ticketForLine, S817 4i) and to a menu tile by recipe (ticketForRecipe below), so each item can
+  // (ticketForLine, S817 4i) and to a menu tile by recipe (MenuGrid.jsx, S842), so each item can
   // show its own Sent/Started/Ready timer, not just the table-wide summary loadKotStatus computes.
   async function loadOrderKotTickets(oid) {
-    if (!oid || !navigator.onLine) { setOrderKotTickets([]); return }
+    // Offline or with the link down the last tickets read for this order stay (S842); the effect that
+    // opens an order clears the previous order's.
+    if (!oid || tillOffline()) return
     // Served tickets stay in this read (S754): a line whose ticket was served reads "Served" on the
     // cart rather than falling back to an older ticket's stage.
-    const { data, error } = await scopedFrom('pos_kot_log', 'id, items, status, sent_at, started_at, ready_at, estimated_prep_minutes')
+    const { data, error } = await bounded(scopedFrom('pos_kot_log', 'id, items, status, sent_at, started_at, ready_at, estimated_prep_minutes')
       .eq('order_id', oid)
       .neq('status', 'cancelled')
       .not('items', 'cs', KOT_CHANGE_ITEMS) // a CHANGE ticket (S809 3a) is no dish's cooking stage
-      .order('sent_at', { ascending: false })
+      .order('sent_at', { ascending: false }), 'Checking this order\'s tickets', SEND_READ_MS)
+    if (ticketsOrderRef.current !== oid) return
     // Same rule as loadKotStatus: an empty result on a failed read would drop every per-item
     // Sent/Started/Ready timer off the cart, which is indistinguishable from the kitchen not
     // having touched the order.
@@ -1930,15 +1977,6 @@ export default function PosOrders({ billingStation = false } = {}) {
     // always shows up as a different set of ids.
     setIfChanged(setOrderKotTickets, data || [],
       rows => rowsSignature(rows, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes']))
-  }
-
-  // Most-recently-sent ticket containing this recipe — if the same item was sent in two separate
-  // KOT/BOT sends (e.g. reordered after the first batch was already Ready), the newer send is the
-  // one still relevant to a waiter checking on it. For the MENU TILE only, which is a dish; a cart
-  // line follows its own line (ticketForLine, ORDER-FLOW-17).
-  function ticketForRecipe(recipeId) {
-    if (!recipeId) return null
-    return orderKotTickets.find(t => (t.items || []).some(i => i.recipe_id === recipeId)) || null
   }
 
   // "Served" on the order screen (S754, migration 20260916110000): every ticket of this order that is
@@ -3564,6 +3602,13 @@ export default function PosOrders({ billingStation = false } = {}) {
     applyQty(idx, qty)
   }
 
+  // The cart's − and × (S842): ignored for CART_REMOVE_GUARD_MS after a line was removed, so a double
+  // tap does not take the dish that slid up into its place. + is never held back.
+  function pressLineLess(idx, qty) {
+    if (Date.now() - cartRemovedAtRef.current < CART_REMOVE_GUARD_MS) return
+    setQty(idx, qty)
+  }
+
   // ORDER-FLOW-13 (S809 3e): the line as it stands is what the server holds — saved online, not waiting
   // in the offline queue — so a pull on it is already recorded there (sentQtyAfterQtyChange).
   const pullIsSaved = item => !pendingOrderIds.has(orderId)
@@ -3571,6 +3616,8 @@ export default function PosOrders({ billingStation = false } = {}) {
 
   function applyQty(idx, qty) {
     if (qty <= 0) {
+      cartRemovedAtRef.current = Date.now()
+      cartFocusAfterRef.current = idx
       setOrderItems(prev => prev.filter((_, i) => i !== idx))
     } else {
       setOrderItems(prev => prev.map((item, i) => i === idx
@@ -6294,10 +6341,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
   const menuTab   = catTab === COMBO_TAB ? 'All' : catTab
   const visCombos = onCombosTab ? combos.filter(c => c.name.toLowerCase().includes(menuQuery)) : []
   const cartCombos = groupComboBlocks(orderItems)
+  // S842: a cart line's React key is its line key (numbered when two lines share one), never its
+  // position: keyed by index, removing a line handed its DOM node, and keyboard focus, to the next dish.
+  const cartRowKeys = (() => {
+    const seen = new Map()
+    return orderItems.map(i => { const k = lineKeyOf(i); const n = seen.get(k) || 0; seen.set(k, n + 1); return n ? `${k}~${n}` : k })
+  })()
   const comboCountOf = comboId => [...cartCombos.values()].reduce((n, b) => n + (b.combo_id === comboId ? b.qty : 0), 0)
-  const visMenu   = (menuTab === 'All' ? menu : menu.filter(r => r.category === menuTab))
-    // Match on name OR Product Code so staff can ring an item by its code (e.g. "MOM-03").
-    .filter(r => r.name.toLowerCase().includes(menuQuery) || (r.recipe_code || '').toLowerCase().includes(menuQuery))
+  const visMenu   = filterMenu(menu, menuTab, menuQuery)
 
   // A cart line's marks (sent to which station, the kitchen's timer, the +N added since), its kitchen
   // note with the presets, and its amount: one definition for a plain line and a combo's dish (S839).
@@ -6654,6 +6705,16 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       // under the status bar instead of leaving a strip of page ground there.
       paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     }}>
+      {/* S842: two always-mounted spoken lines. A status line that mounts already holding its words is
+          often not read out (TalkBack especially), so "Order sent!" and losing the internet were heard by
+          nobody; these regions exist before any text does and only their words change. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {msg && !msg.startsWith('error:') ? msg.replace(/^ok:/, '') : ''}
+      </div>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {!isOnline ? 'Offline. This order is saved on this device and will sync when you reconnect.'
+          : linkDown ? 'No internet. Orders are kept on this till and their tickets print as usual.' : ''}
+      </div>
 
       {/* ── Top bar ── */}
       {/* S809 3c (FLOOR-KITCHEN-10): the guest-order banner is fixed above this layer and publishes its
@@ -6776,10 +6837,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         </div>
       </div>
 
+      {/* S842: amber, as a waiting guest order is everywhere else in POS (posSignals.js); it was brass here. */}
       {screenGuestReqs.length > 0 && (
         <div style={{
           flexShrink: 0, padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8,
-          background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', borderBottom: '1px solid var(--theme-border)',
+          background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', borderBottom: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)',
         }}>
           {screenGuestReqs.map(req => (
             <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -6866,57 +6928,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     : 'No items in this category.'}
               </p>
             ) : (
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-                gap: 10,
-              }}>
-                {visMenu.map(r => {
-                  const vat   = vatReg ? vatOf(r) : 0
-                  const price = Math.round((parseFloat(r.selling_price) || 0) * (1 + vat))
-                  // A combo's dish counts on its combo's tile, not here (S839).
-                  const inOrd = orderItems.find(i => i.recipe_id === r.id && !isComboLine(i))
-                  // Every line of this dish, customized ones included (S758) — one tile, one count.
-                  const inOrdQty = orderItems.reduce((n, i) => n + (i.recipe_id === r.id && !isComboLine(i) ? i.qty : 0), 0)
-                  const hasOptions = !!dishGroupsByRecipe[r.id]
-                  const kotTimer = inOrd?.sent_to_kot ? kotTimerLabel(ticketForRecipe(r.id), kotNow) : null
-                  return (
-                    <button key={r.id} className="till-tile" onClick={() => addItem(r)} style={{
-                      background: inOrd
-                        ? 'color-mix(in srgb, var(--theme-accent) 12%, var(--theme-card))'
-                        : 'var(--theme-card)',
-                      border: `1px solid ${inOrd ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                      borderRadius: 'var(--radius-md)', padding: '12px 10px',
-                      cursor: 'pointer', textAlign: 'left',
-                      display: 'flex', flexDirection: 'column', gap: 6,
-                      position: 'relative', transition: 'border-color 0.12s',
-                    }}>
-                      {inOrd && (
-                        <span style={{
-                          position: 'absolute', top: 6, right: 8,
-                          background: 'var(--theme-accent)', color: 'var(--theme-accent-text)',
-                          borderRadius: 'var(--radius-full)', fontSize: 11, fontWeight: 700, padding: '1px 7px',
-                        }}>{inOrdQty}</span>
-                      )}
-                      <span style={{
-                        fontWeight: 600, fontSize: 13, color: 'var(--theme-text1)',
-                        lineHeight: 1.3, paddingRight: inOrd ? 28 : 0,
-                      }}>{r.name}</span>
-                      <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
-                        {fmtNpr(price)}
-                      </span>
-                      {hasOptions && (
-                        <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>Choices</span>
-                      )}
-                      {kotTimer && (
-                        <span style={{ fontSize: 10, fontWeight: 600, color: kotTimer.color }}>
-                          {kotTimer.text}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
+              <MenuGrid menu={menu} menuTab={menuTab} menuQuery={menuQuery} orderItems={orderItems} vatReg={vatReg}
+                dishGroupsByRecipe={dishGroupsByRecipe} orderKotTickets={orderKotTickets} kotNow={kotNow} addRef={addItemRef} />
             )}
           </div>
         </div>
@@ -6966,7 +6979,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               }
               const lineTotal = cartLineTotal(item)
               return (
-                <div key={idx} data-cart-line style={{
+                <div key={cartRowKeys[idx]} data-cart-line style={{
                   display: 'flex', flexDirection: 'column', gap: 4,
                   borderBottom: '1px solid var(--theme-border)', padding: '9px 0',
                 }}>
@@ -6980,17 +6993,18 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-                    <button onClick={() => setQty(idx, item.qty - 1)} className="till-hit" style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
+                    <button type="button" onClick={() => pressLineLess(idx, item.qty - 1)} className="till-hit" style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
                     <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13 }}>
                       {item.qty}
                     </span>
-                    <button onClick={() => setQty(idx, item.qty + 1)} className="till-hit" style={btnSm} aria-label={`One more ${item.name}`}>+</button>
+                    <button type="button" onClick={() => setQty(idx, item.qty + 1)} className="till-hit" style={btnSm} aria-label={`One more ${item.name}`}>+</button>
                   </div>
                   <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600, minWidth: 68, textAlign: 'right', flexShrink: 0 }}>
                     {fmtNpr(lineTotal)}
                   </span>
                   <button
-                    onClick={() => setQty(idx, 0)}
+                    type="button"
+                    onClick={() => pressLineLess(idx, 0)}
                     title="Remove"
                     aria-label={`Remove ${item.name}`}
                     className="till-hit"
@@ -7090,7 +7104,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>PAIRED</span>
                       )}
                       {isChefsPick && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
                       )}
                       <span>{r.name}</span>
                       <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>+{fmtNpr(price)}</span>
@@ -7136,7 +7150,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 ActionError; a confirmation ("Order sent!") a status line. */}
             {msg && (msg.startsWith('error:')
               ? <ActionError error={msg.slice('error:'.length)} className="action-error--till" />
-              : <p role="status" style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.45, color: 'var(--theme-green-text)' }}>{msg.replace(/^ok:/, '')}</p>)}
+              : <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.45, color: 'var(--theme-green-text)' }}>{msg.replace(/^ok:/, '')}</p>)}
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <button
@@ -7251,7 +7265,10 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           onClose={requestCloseBilling}
           zIndex={1100}
           unstyled
-          panelStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)', width: 'min(1060px, 96vw)', maxHeight: '92vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}
+          // S842: never taller than the overlay's padded box, and `margin: auto` rather than the overlay's
+          // centring, so on a landscape phone or under the guest-order bar (which pads the overlay by
+          // --arrival-alert-h) the panel can no longer run off the top where no scroll reaches it.
+          panelStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)', width: 'min(1060px, 96vw)', maxHeight: 'min(92vh, calc(100dvh - 32px - var(--arrival-alert-h, 0px)))', margin: 'auto 0', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}
         >
           {/* The preview pane. Beside the form on a wide screen; on a narrow one (S754) it moves
               INSIDE the form's scroller behind a "Show bill" toggle, because a fixed 418px column
@@ -7724,12 +7741,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(t.amount)}</span>
                             <Tip text="Prints a small courtesy slip for this payment only — not the Tax Invoice/PAN Bill, which still prints once at the end.">
-                              <button onClick={() => printHtml(buildTenderSlipHtml({
+                              {/* S842: named, and the 44px touch floor; it was an unnamed 11px glyph about 14px wide. */}
+                              <button type="button" onClick={() => printHtml(buildTenderSlipHtml({
                                   tender: t, remainingAfter: payTotal - tenders.slice(0, i + 1).reduce((s, x) => s + x.amount, 0),
                                   outletName, tableName: screenTableName,
                                 }))}
-                                style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
-                                🖨
+                                className="btn btn-ghost btn-sm btn-icon till-hit"
+                                aria-label={`Print a slip for this ${t.method} payment of ${fmtNpr(t.amount)}`}>
+                                <span aria-hidden="true">🖨</span>
                               </button>
                             </Tip>
                             {i === tenders.length - 1 && (
@@ -8201,22 +8220,29 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         const tableNames = Object.keys(pendingGuestOrders).map(tid => tables.find(t => t.id === tid)?.name || '?')
         const firstTable = tables.find(t => t.id === Object.keys(pendingGuestOrders)[0])
         return (
+          // S842: amber, as a waiting guest order is on the tile, the strip and the glow (posSignals.js):
+          // it was brass here, the one place the same event wore the accent. The whole banner still takes
+          // a tap; "Review" is the real button a keyboard and a screen reader reach (it was a div).
           <div
             className="guest-order-banner"
             onClick={() => firstTable && openOnce(firstTable.id, () => openTable(firstTable))}
             style={{
-              display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-              background: 'color-mix(in srgb, var(--theme-accent) 16%, transparent)', border: '1px solid var(--theme-accent)',
+              display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexWrap: 'wrap',
+              background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', border: '1px solid var(--theme-amber)',
               borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13.5, fontWeight: 700,
-              color: 'var(--theme-accent-ink)',
+              color: 'var(--theme-amber-text)',
             }}
           >
-            <span style={{ fontSize: 18 }}>🔔</span>
+            <span aria-hidden="true" style={{ fontSize: 18 }}>🔔</span>
             <span>{total} new guest order{total !== 1 ? 's' : ''} — {tableNames.join(', ')}</span>
-            <span style={{ marginLeft: 'auto', fontWeight: 600 }}>Tap to review →</span>
+            <button type="button" className="btn btn-primary btn-sm till-hit--row" style={{ marginLeft: 'auto' }}
+              disabled={!firstTable}
+              onClick={e => { e.stopPropagation(); if (firstTable) openOnce(firstTable.id, () => openTable(firstTable)) }}>
+              Review {firstTable?.name || 'the order'} →
+            </button>
             {/* S809 3c: the app-wide alert keeps sounding here until someone answers; its banner stands
                 aside for this one, so its Mute is here. Mute keeps this banner up (S763). */}
-            <button type="button" className="btn btn-ghost btn-sm" disabled={guestAlertMute.muted}
+            <button type="button" className="btn btn-ghost btn-sm till-hit--row" disabled={guestAlertMute.muted}
               onClick={e => { e.stopPropagation(); guestAlertMute.mute() }}>
               {guestAlertMute.muted ? 'Muted' : 'Mute 5 min'}
             </button>

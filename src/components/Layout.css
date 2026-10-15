@@ -2848,17 +2848,13 @@ textarea:focus-visible {
    Amber, not the accent: a submitted guest order is waiting on a person to accept or dismiss it,
    which is what amber means across POS (posSignals.js). It was brass here while the floor banner
    announcing the same event was already amber, so the glow and the banner disagreed. */
-@keyframes guest-order-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-.guest-order-banner {
-  animation: guest-order-pulse 1.4s ease-in-out infinite;
-}
 @keyframes guest-order-glow-pulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--theme-amber) 50%, transparent); }
   50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--theme-amber) 18%, transparent); }
 }
+/* S842: the banner glows at its edge like the tile, never by fading its own text. An opacity pulse
+   took the words and the Mute button below AA for half of every cycle, indefinitely (WCAG 1.4.3). */
+.guest-order-banner,
 .guest-order-glow {
   animation: guest-order-glow-pulse 1.4s ease-in-out infinite;
 }
@@ -3592,6 +3588,11 @@ textarea::placeholder {
 .dash-tile-link:focus-visible {
   outline: 2px solid var(--theme-focus-outline); outline-offset: 2px;
   box-shadow: 0 0 0 4px var(--theme-focus-ring);
+}
+/* S842: a 12px link stood ~18px tall, on the phone the owner checks the dashboard from. 32px, the
+   tier this file gives an in-card control under a coarse pointer, without moving it on a mouse. */
+@media (pointer: coarse) {
+  .dash-tile-link { display: inline-flex; align-items: center; min-height: 32px; }
 }
 
 @media (max-width: 768px) {

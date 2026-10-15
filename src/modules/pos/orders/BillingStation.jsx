@@ -60,6 +60,14 @@ export default function BillingStation({
 
   return (
     <div>
+      {/* S842: always mounted, so losing the connection and a narrowed list are read out; a status line
+          that mounts already holding its words often is not. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {!isOnline ? 'Offline. No bill can be closed until this device reconnects.' : ''}
+      </div>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {q ? `${shown.length} of ${rows.length} open bill${rows.length === 1 ? '' : 's'}` : ''}
+      </div>
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Billing</h1>
@@ -135,7 +143,7 @@ export default function BillingStation({
                 style={{ minWidth: 220 }}
               />
               {q && (
-                <span role="status" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                   {shown.length} of {rows.length} open bill{rows.length === 1 ? '' : 's'}
                 </span>
               )}
