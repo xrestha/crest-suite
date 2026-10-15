@@ -9,12 +9,15 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBs, nepalDateAd, serviceDayStartIso } from '../../../shared/nepalTime'
 import { settleWithin } from '../../../utils/withTimeout'
+import { nprInt } from '../../../shared/nepalMoney'
 import { openSlipWindow, printParkingSlip } from './parkingSlipHtml'
 import { noAnswer, parkingSlipNotice } from './parkingSlipList'
 
 const VEHICLE_TYPES = ['Two Wheeler', 'Four Wheeler']
 // The issue waits this long for the server before saying its answer did not arrive (S814).
 const ISSUE_WRITE_MS = 20000
+// Today's bills for the Bill Number picker, the page's own read limit (S842).
+const BILLS_READ_MS = 20000
 
 // S754 (owner decision): parking's "day" is the SERVICE day — it rolls over at 6 AM Nepal time, not
 // at the device's midnight. The helper lives in shared/nepalTime.js since S756 (it was defined here
@@ -65,13 +68,20 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   // Only today's billed orders — a slip is issued the same moment a customer is parked, so a bill
   // from a past day is never the right link (and would just be noise in the dropdown).
   useEffect(() => {
+    let live = true
     // S754: the service day (6 AM Nepal rollover), not the device's midnight — see serviceDayStartIso.
-    scopedFrom('pos_orders', 'id, order_no, invoice_no, table_name, buyer_name, paid_amount')
+    // S842: time-limited, so a stalled read ends in the failed-read placeholder instead of "Loading…"
+    // in the bill picker for as long as the dialog is open.
+    settleWithin(scopedFrom('pos_orders', 'id, order_no, invoice_no, table_name, buyer_name, paid_amount')
       .eq('status', 'billed')
       .not('invoice_no', 'is', null)
       .gte('closed_at', serviceDayStartIso())
-      .order('closed_at', { ascending: false })
-      .then(({ data, error }) => { setBillsError(!!error); setTodaysBills(data || []); setBillsLoading(false) })
+      .order('closed_at', { ascending: false }), BILLS_READ_MS, "Reading today's bills")
+      .then(({ data, error }) => {
+        if (!live) return
+        setBillsError(!!error); setTodaysBills(error ? [] : data || []); setBillsLoading(false)
+      })
+    return () => { live = false }
   }, [scopedFrom])
 
   if (!hasPosAccess('supervisor')) {
@@ -87,7 +97,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
 
   const billOptions = todaysBills.map(o => ({
     value: o.id,
-    label: `Bill #${o.invoice_no} — ${o.table_name || o.buyer_name || 'Takeaway'} — NPR ${Math.round(o.paid_amount || 0).toLocaleString('en-IN')}`,
+    label: `Bill #${o.invoice_no} — ${o.table_name || o.buyer_name || 'Takeaway'} — NPR ${nprInt(o.paid_amount)}`,
   }))
 
   async function handleSave() {

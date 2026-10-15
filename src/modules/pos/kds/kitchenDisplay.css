@@ -6,3 +6,21 @@
 .tab-btn.kds-chip {
   font-size: 15px;
 }
+
+/* The board's three columns (S842). They were an inline `repeat(3, 1fr)` with no breakpoint, and a
+   1fr track keeps an `auto` minimum, so one long dish name could push the board wider than the
+   screen. minmax(0, 1fr) holds each column to its third, a long word breaks inside its card rather
+   than being clipped by it, and on a phone the three stack: New first, then In Progress, then Ready.
+   `screen and`, because paper matches a bare width query. */
+.kds-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  overflow-wrap: break-word;
+}
+
+@media screen and (max-width: 700px) {
+  .kds-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -14,7 +14,7 @@ import { playGuestAlert, soundBlocked, unlockAudio, primeAudio } from '../posChi
 import { voidColumn, visibleVoids, VOID_READ_WINDOW_MS } from './voidedTickets'
 import ArrivalAlert from '../../../components/ArrivalAlert'
 import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorInfo } from '../../../shared/errorText'
 import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
 import { useReleaseReload } from '../../../shared/releaseWatch'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -222,7 +222,13 @@ export default function KitchenDisplay() {
   }
   const [station, setStation] = useState(() => isTeamLocked ? lockedStation : (localStorage.getItem('pos_kds_station') || 'KOT'))
   const [tickets, setTickets] = useState([])
-  const [loading, setLoading] = useState(true)
+  // S842: the station the tickets on screen were read for, set by each read that is applied and
+  // cleared with the tickets on a station switch. Until it equals `station` nothing has loaded for the
+  // board on screen: the first read failing showed "Nothing on the board" under a banner citing a
+  // "last successful check" there never was, and a failed BOT read after KOT left the kitchen's
+  // tickets under "Bar (BOT)" with live buttons. A client switch remounts this page (Layout keys its
+  // Outlet on the client, TillOutletGate stops a till), so the station is the whole key.
+  const [loadedStation, setLoadedStation] = useState(null)
   const [now, setNow] = useState(() => Date.now()) // ticks every 30s to redraw elapsed-time labels/colors
   // Silences the standing alert for five minutes. The banner stays — the tickets are still
   // unstarted, and a control that removes the evidence is how this gets missed a second time.
@@ -241,7 +247,9 @@ export default function KitchenDisplay() {
   const [kdsError, setKdsError] = useState('')
   // A failed POLL, kept apart from a failed ticket update: it clears itself on the next good
   // poll, and while it shows the board is the last successful read, not an empty kitchen.
-  const [pollError, setPollError] = useState('')
+  // S842: `{ text, detail }` (errorInfo, staff), worded where it renders: a banner over the last good
+  // board, or the error card when nothing has loaded for this station yet.
+  const [pollError, setPollError] = useState(null)
   // Ticket awaiting an estimated prep time before it can advance to In Progress — see
   // requestEstimate/confirmStart below and EstimateTimeModal.jsx.
   const [estimateTicket, setEstimateTicket] = useState(null)
@@ -353,11 +361,12 @@ export default function KitchenDisplay() {
       // erased every New/Cooking/Ready ticket from the wall — the kitchen reads "nothing to cook"
       // — and rebuilt `seenTicketIds` from the empty set, so the next good poll re-chimed for
       // every ticket already on the board. Keep the last-good tickets and say the board is stale.
-      setPollError('Could not refresh the board — the tickets shown are from the last successful check. ' + errorText(error, 'staff'))
-      setLoading(false)
+      // The same failure on every poll keeps the same object, so a dead link does not repaint every 4 s.
+      const info = errorInfo(error, 'staff')
+      setPollError(prev => (prev && prev.text === info.text && prev.detail === info.detail ? prev : info))
       return
     }
-    setPollError('')
+    setPollError(null)
     appliedSeq.current = seq
     // FLOOR-KITCHEN-6 (S809 3d): a move this screen made after this read left wins over what the read
     // says; once a read that left after the move was confirmed lands, the server's answer is the truth.
@@ -388,7 +397,7 @@ export default function KitchenDisplay() {
     // `tableNow` and `tableWas` are in it as well.
     setIfChanged(setTickets, rows,
       rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes', 'removalSig', 'tableNow', 'tableWas']))
-    setLoading(false)
+    setLoadedStation(station) // S842: these tickets are this station's (the read above was dropped otherwise)
 
     // FLOOR-KITCHEN-5 (S809 3d): a ticket left in Ready for 10 minutes (when the board stops showing it)
     // is marked served, the step a runner skipped, so the floor stops calling that table's food "Ready". Conditional on 'ready', so
@@ -458,7 +467,7 @@ export default function KitchenDisplay() {
       window.removeEventListener('keydown', onInput)
     }
   }, [])
-  useEffect(() => { setLoading(true); load() }, [load])
+  useEffect(() => { load() }, [load])
   useEffect(() => {
     // S809 3d (FLOOR-KITCHEN-6): a tick waits while a read is still out, so a slow link never piles
     // reads up behind each other. A station switch and a refused tap still read at once.
@@ -471,8 +480,14 @@ export default function KitchenDisplay() {
   }, [])
 
   function selectStation(s) {
+    if (s === station) return // FilterChips calls back for the chip already on; nothing to switch
     stationReq.begin(s) // S809 3d: a read still out for the station being left is dropped when it lands
     setStation(s)
+    // S842: in the same render as the switch, so the station left never stands under the new heading,
+    // and its poll error is not this station's.
+    setTickets([])
+    setLoadedStation(null)
+    setPollError(null)
     setKdsError('')
     localStorage.setItem('pos_kds_station', s)
   }
@@ -584,6 +599,7 @@ export default function KitchenDisplay() {
   const shownVoids = visibleVoids(voids, { firstSeen: voidFirstSeen.current, dismissed: voidDismissed, now })
   const dismissVoid = id => setVoidDismissed(prev => new Set(prev).add(id))
 
+  const boardReady = loadedStation === station // S842: see loadedStation
   const visible = tickets.filter(t => {
     // S809 3d: a Ready ticket whose dishes were all taken off stays up until it is cleared.
     if (t.status !== 'ready' || t.allPulled) return true
@@ -600,7 +616,11 @@ export default function KitchenDisplay() {
     // The top and bottom insets clear an installed iPhone's or iPad's status and home bars (env() is
     // 0 in a browser tab, S797). While the arrival alert is up it covers the status bar itself and
     // pads for it, and the header below already pads by its height, so the top inset is left out.
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--theme-bg)', display: 'flex', flexDirection: 'column', padding: `${alertOn ? '20px' : 'calc(20px + env(safe-area-inset-top, 0px))'} 28px calc(20px + env(safe-area-inset-bottom, 0px))`, overflowY: 'auto' }}>
+    // S842: the left and right insets too, for a tablet on its side with a notch or rounded corners.
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--theme-bg)', display: 'flex', flexDirection: 'column', overflowY: 'auto',
+      padding: `${alertOn ? '20px' : 'calc(20px + env(safe-area-inset-top, 0px))'} calc(28px + env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) calc(28px + env(safe-area-inset-left, 0px))`,
+    }}>
       {/* ArrivalAlert is position: fixed at z-index 3000, so it paints OVER this 1000 layer rather
           than inside it — the board keeps its full height and nothing below shifts. The padding
           here is what stops the Exit button sitting underneath it. */}
@@ -693,7 +713,9 @@ export default function KitchenDisplay() {
 
       {/* A real Dismiss button, not a "(tap to dismiss)" div: role="alert" is not an interactive
           role, and the div had no tabIndex or key handler — mouse and touch only. */}
-      {[pollError && ['poll', pollError, () => setPollError('')], removalsError && ['removals', removalsError, () => setRemovalsError('')], kdsError && ['kds', kdsError, () => setKdsError('')]]
+      {/* S842: the two stale-board banners only over a board this station's read filled; before that
+          the error card below takes the board's place, and there are no cancellations on screen. */}
+      {[pollError && boardReady && ['poll', 'Could not refresh the board — the tickets shown are from the last successful check. ' + pollError.text, () => setPollError(null)], removalsError && boardReady && ['removals', removalsError, () => setRemovalsError('')], kdsError && ['kds', kdsError, () => setKdsError('')]]
         .filter(Boolean).map(([key, text, dismiss]) => (
         <div key={key} role="alert" style={{
           display: 'flex', alignItems: 'center', gap: 12,
@@ -706,8 +728,30 @@ export default function KitchenDisplay() {
         </div>
       ))}
 
-      {loading ? (
-        <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+      {!boardReady ? (
+        pollError ? (
+          // S842: nothing has loaded for this station, so there is no board to show: not the empty
+          // state, not three "(0)" columns, not the station just left. The poll keeps asking.
+          <>
+          <div className="card report-error" role="alert" style={{ marginBottom: 16 }}>
+            <div className="report-error-title" style={{ fontSize: 18 }}>Could not load the {station === 'KOT' ? 'kitchen' : 'bar'} tickets</div>
+            <p className="report-error-body" style={{ fontSize: 15 }}>{pollError.text}</p>
+            <p className="report-error-hint" style={{ fontSize: 14 }}>
+              This is not an empty {station === 'KOT' ? 'kitchen' : 'bar'}: no ticket can show here until this screen reads them, so work from the
+              printed tickets for now. It tries again every few seconds by itself.
+            </p>
+            {pollError.detail && <p className="action-error-detail">{pollError.detail}</p>}
+          </div>
+          {/* A voided order's stop still shows: its own read answered (S817 4i). */}
+          {shownVoids.length > 0 && (
+            <div className="kds-board">
+              {shownVoids.map(t => <VoidedCard key={`void-${t.id}`} ticket={t} onDismiss={dismissVoid} />)}
+            </div>
+          )}
+          </>
+        ) : (
+          <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+        )
       ) : (
         <>
         {/* An empty board had no state of its own — three columns each holding a bare "—", which
@@ -717,7 +761,8 @@ export default function KitchenDisplay() {
             Nothing on the board right now. Tickets appear here the moment a waiter sends an order — no refresh needed.
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+        {/* S842: three columns that stack on a phone, and never wider than the screen (kitchenDisplay.css). */}
+        <div className="kds-board">
           {COLUMNS.map(col => {
             const colTickets = visible.filter(t => t.status === col.status)
             const colVoids = shownVoids.filter(t => voidColumn(t) === col.status)

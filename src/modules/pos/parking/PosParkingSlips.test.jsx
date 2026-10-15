@@ -112,9 +112,26 @@ test('Mark Exited takes the slip off the Open list from the server\'s answer', a
   const vehicle = await screen.findByText('BA 2 PA')
   // The next Open read no longer has it, as the server would answer.
   mockOpenRows = []
-  fireEvent.click(within(vehicle.closest('tr')).getByRole('button', { name: 'Mark Exited' }))
+  fireEvent.click(within(vehicle.closest('tr')).getByRole('button', { name: 'Mark Exited' })) // eslint-disable-line testing-library/no-node-access
   expect(await screen.findByText('No vehicles currently parked.')).toBeInTheDocument()
   const exit = mockUpdates.find(u => u.patch.status === 'closed' && !u.patch.auto_closed)
   expect(exit.filters).toEqual([['eq', 'id', 'fresh']])
   expect(exit.select).toBe('id, status, time_out, exited_by, auto_closed')
+})
+
+// S842: an unclassed Bill No button took the coarse pointer's 44px floor with no focus pair and did
+// not print; the actions cell was a flex <td>, and the actions column had no header for a screen reader.
+test('a row\'s bill link, actions and actions header are built from the shared classes', async () => {
+  mockOpenRows = [{ ...row('fresh', 2, nowIso()), bill_invoice_no: '1042', order_id: 'o1' }]
+  render(<PosParkingSlips />)
+  const link = await screen.findByRole('button', { name: '#1042' })
+  expect(link).toHaveAttribute('type', 'button')
+  expect(link.className).toBe('btn-linklike btn-linklike--prints')
+  expect(link.getAttribute('style')).not.toMatch(/background|border|padding/)
+
+  expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy()
+  // One open slip, so one Mark Exited. Its wrapper and cell are the point of the check.
+  const exit = screen.getByRole('button', { name: 'Mark Exited' })
+  expect(exit.parentElement).toHaveClass('parking-row-actions') // eslint-disable-line testing-library/no-node-access
+  expect(exit.closest('td')).not.toHaveStyle('display: flex') // eslint-disable-line testing-library/no-node-access
 })

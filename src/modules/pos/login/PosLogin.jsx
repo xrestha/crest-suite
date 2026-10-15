@@ -229,8 +229,9 @@ export default function PosLogin() {
           setPin('')
           setRetryToken(t => t + 1)
         } else {
-          // A 4xx this screen does not recognise. Not a wrong PIN, so don't say it is.
-          setError(`Couldn't sign in${body?.error ? ` (${body.error})` : ''}. Ask your manager.`)
+          // A 4xx this screen does not recognise. Not a wrong PIN, so don't say it is. S842: the
+          // function's own text is the fine print, never the headline, and the status rides with it.
+          setError({ text: "Couldn't sign in. Ask your manager.", detail: [status, body?.error].filter(Boolean).join(' · ') })
         }
         return
       }
@@ -529,10 +530,15 @@ const pinDots = Math.max(4, pin.length)
             ))}
           </div>
 
+          {/* A sentence, or (S842) `{ text, detail }` for an answer this screen does not recognise:
+              the server's own words go on the quiet line under it. */}
           {error && (
-            <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, textAlign: 'center', margin: 0 }}>
-              {error}
-            </p>
+            <div role="alert" style={{ textAlign: 'center' }}>
+              <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: 0 }}>
+                {typeof error === 'string' ? error : error.text}
+              </p>
+              {error.detail && <p className="action-error-detail">{error.detail}</p>}
+            </div>
           )}
 
           {/* Back + Login row */}

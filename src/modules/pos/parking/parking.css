@@ -35,3 +35,12 @@
   font-size: 12px;
   color: var(--theme-amber-text);
 }
+
+/* A row's Mark Exited and Reprint (S842). `display: flex` on the <td> itself took the cell out of
+   table layout (its height and borders stopped matching the row's); the cell stays a cell and the
+   buttons sit side by side in this span, right-aligned by the cell's text-align. */
+.parking-row-actions {
+  display: inline-flex;
+  gap: 8px;
+  vertical-align: middle;
+}

@@ -95,8 +95,11 @@ export default function TillOutletGate({ children }) {
     if (isTimeout(err)) setError('The server took too long to answer. If the switch went through, this till carries on by itself in a moment; if not, press the button again.')
     // set_active_outlet's own refusals are sentences (RAISE with no code of its own); keep them.
     else if (err.code === 'P0001' && err.message) setError(err.message)
-    else if (err.code || err.hint) setError(asActionError(err, isPin ? 'staff' : 'operator'))
-    else setError(err.message || 'Could not switch back.')
+    // S842: everything else through the error table, the raw text kept as the fine print. A dropped
+    // connection ("TypeError: Failed to fetch", no code) and a thrown profile reload used to reach a
+    // waiter as the headline. switchOutlet's own queue sentence cannot come here: a till's way back is
+    // to this window's or the till's outlet, which skips that check.
+    else setError(asActionError(err, isPin ? 'staff' : 'operator'))
   }
 
   return (

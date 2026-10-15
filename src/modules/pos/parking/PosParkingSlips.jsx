@@ -297,7 +297,7 @@ export default function PosParkingSlips() {
             <th>Notes</th>
             <th><Tip text="Open means the vehicle is still parked; Closed means staff marked it exited/retrieved; Auto-Closed means it rolled over from a previous day unattended and was closed automatically — the vehicle's actual exit was never confirmed." width={300}>Status</Tip></th>
             <th>Issued By</th>
-            <th></th>
+            <th><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -309,11 +309,12 @@ export default function PosParkingSlips() {
               <td>{s.customer_name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
               <td style={{ whiteSpace: 'nowrap' }}>{slipTimeIn(s.time_in)}</td>
               <td>
+                {/* S842: the shared link-like class, not an unclassed button: a coarse pointer's 44px
+                    `button:not([class])` floor made every linked row tall, it had no focus pair, and
+                    print hides every button (--prints brings the number back on paper). */}
                 {s.bill_invoice_no ? (
-                  <button
-                    onClick={() => viewPosBill(clientId, { id: s.order_id })}
-                    style={{ background: 'none', border: 'none', color: 'var(--theme-accent-ink)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}
-                  >
+                  <button type="button" className="btn-linklike btn-linklike--prints" style={{ whiteSpace: 'nowrap' }}
+                    onClick={() => viewPosBill(clientId, { id: s.order_id })}>
                     #{s.bill_invoice_no}
                   </button>
                 ) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
@@ -333,17 +334,21 @@ export default function PosParkingSlips() {
                 )}
               </td>
               <td>{staffNames[s.issued_by] || '—'}</td>
-              <td style={{ textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                {s.status === 'open' && (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => markExited(s)} disabled={!!busy[s.id]}
-                    aria-busy={busy[s.id] === 'exit' ? 'true' : undefined}>
-                    {busy[s.id] === 'exit' ? 'Marking…' : 'Mark Exited'}
+              {/* S842: a flex <td> stops being a table cell (its borders and height leave the row);
+                  the buttons sit in an inline-flex span instead (parking.css). */}
+              <td style={{ textAlign: 'right' }}>
+                <span className="parking-row-actions">
+                  {s.status === 'open' && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => markExited(s)} disabled={!!busy[s.id]}
+                      aria-busy={busy[s.id] === 'exit' ? 'true' : undefined}>
+                      {busy[s.id] === 'exit' ? 'Marking…' : 'Mark Exited'}
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => reprint(s)} disabled={!!busy[s.id]}
+                    aria-busy={busy[s.id] === 'print' ? 'true' : undefined}>
+                    {busy[s.id] === 'print' ? 'Printing…' : 'Reprint'}
                   </button>
-                )}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => reprint(s)} disabled={!!busy[s.id]}
-                  aria-busy={busy[s.id] === 'print' ? 'true' : undefined}>
-                  {busy[s.id] === 'print' ? 'Printing…' : 'Reprint'}
-                </button>
+                </span>
               </td>
             </tr>
           ))}

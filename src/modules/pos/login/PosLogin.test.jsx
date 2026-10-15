@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { keepLockedCart } from '../posLockedCart'
 
@@ -239,6 +239,18 @@ describe('signing in', () => {
     renderAt()
     await typePinAndLogin()
     expect((await screen.findByRole('alert')).textContent).toBe('Incorrect PIN. Try again.')
+  })
+
+  // S842: the function's own words used to sit inside the headline ("Couldn't sign in (…)").
+  it('an answer it does not recognise says so plainly, with the server\'s words only as fine print', async () => {
+    mockSignInAnswer = { data: null, error: httpError(409, { error: 'staff_id does not belong to client_id' }) }
+    renderAt()
+    await typePinAndLogin()
+    const alert = await screen.findByRole('alert')
+    // An exact match: the headline holds the sentence and nothing of the server's.
+    expect(within(alert).getByText("Couldn't sign in. Ask your manager.")).toBeTruthy()
+    expect(within(alert).getByText('409 · staff_id does not belong to client_id')).toHaveClass('action-error-detail')
+    expect(screen.getByText('4 digits entered')).toBeTruthy() // not a wrong PIN, so the PIN stays
   })
 })
 
