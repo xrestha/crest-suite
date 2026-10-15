@@ -49,6 +49,12 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
   const [saveError, setSaveError] = useState(null)
   // null = nothing looked up yet; { loading } | { error } | { name, visits, credit, noShows }
   const [lookup,   setLookup]   = useState(null)
+  // S842: the form as it opened, so the dialog knows when it holds unsaved input. A chip or a picked
+  // day fires no input event, so the backdrop guard is told outright (Modal's `dirty`).
+  const [opened] = useState(() => ({ name, phone, party, dateIso, time, duration, source, occasion, notes, tables: [...tableIds].sort().join(',') }))
+  const dirty = name !== opened.name || phone !== opened.phone || party !== opened.party || dateIso !== opened.dateIso
+    || time !== opened.time || duration !== opened.duration || source !== opened.source || occasion !== opened.occasion
+    || notes !== opened.notes || [...tableIds].sort().join(',') !== opened.tables
 
   // Party size drives the expected sitting length until the host overrides it by hand.
   useEffect(() => {
@@ -249,7 +255,7 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
   const idFor = k => `resv-${k}`
 
   return (
-    <Modal title={row ? `Edit booking — ${row.customer_name}` : 'New booking'} onClose={saving ? () => {} : onClose} maxWidth={640}>
+    <Modal title={row ? `Edit booking — ${row.customer_name}` : 'New booking'} onClose={saving ? () => {} : onClose} maxWidth={640} dirty={dirty}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px 16px' }}>
         <div className="form-field">
           <label htmlFor={idFor('name')}>Guest name</label>
@@ -267,14 +273,20 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
             {...fieldAria(idFor('phone'), errors.phone)}
           />
           <FieldError id={idFor('phone')} message={errors.phone} />
-          {lookup?.loading && <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Looking up…</span>}
-          {lookup?.error && <span style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>Could not check the customer book just now.</span>}
-          {lookup && !lookup.loading && !lookup.error && (
-            <span style={{ fontSize: 11, color: 'var(--theme-text2)', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-              <span>{lookup.visits > 0 ? `${lookup.visits} visit${lookup.visits === 1 ? '' : 's'}` : 'New guest'}</span>
-              {lookup.credit > 0 && <span className="badge badge-amber">Owes {fmtNpr(lookup.credit)}</span>}
-              {lookup.noShows > 0 && <span className="badge badge-red">{lookup.noShows} no-show{lookup.noShows === 1 ? '' : 's'}</span>}
-            </span>
+          {/* S842: one status region from "Looking up…" to the answer, so the visits, what the guest
+              owes and their no-shows are announced when they arrive after the field is left. */}
+          {lookup && (
+            <div role="status">
+              {lookup.loading && <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Looking up…</span>}
+              {lookup.error && <span style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>Could not check the customer book just now.</span>}
+              {!lookup.loading && !lookup.error && (
+                <span style={{ fontSize: 11, color: 'var(--theme-text2)', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                  <span>{lookup.visits > 0 ? `${lookup.visits} visit${lookup.visits === 1 ? '' : 's'}` : 'New guest'}</span>
+                  {lookup.credit > 0 && <span className="badge badge-amber">Owes {fmtNpr(lookup.credit)}</span>}
+                  {lookup.noShows > 0 && <span className="badge badge-red">{lookup.noShows} no-show{lookup.noShows === 1 ? '' : 's'}</span>}
+                </span>
+              )}
+            </div>
           )}
         </div>
         <div className="form-field">

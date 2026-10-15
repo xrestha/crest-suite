@@ -40,19 +40,21 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
     setHistory(h => ({ ...h, loading: true, error: null }))
     setMissing(m => ({ ...m, loading: true, error: null }))
     const phones = [...new Set([customer.phone, normalizePhone(customer.phone)].filter(Boolean))]
+    // S842: every read here is bounded like the names beside them, so a hung one is the section's own
+    // error line rather than "Reading…" for ever.
     const [ledRes, nameRes, billRes] = await Promise.all([
-      fetchAllRows(() => scopedFrom('pos_loyalty_ledger', 'id, kind, points, note, order_id, created_by, created_at, pos_orders(order_no, invoice_no)')
+      settleWithin(fetchAllRows(() => scopedFrom('pos_loyalty_ledger', 'id, kind, points, note, order_id, created_by, created_at, pos_orders(order_no, invoice_no)')
         .eq('customer_id', customer.id)
-        .order('created_at', { ascending: false }).order('id', { ascending: false })),
+        .order('created_at', { ascending: false }).order('id', { ascending: false })), CALL_MS, 'Reading the points history'),
       settleWithin(profileNamesRpc(supabase, clientId), CALL_MS, 'Reading staff names'),
       // Bills that could be missing their points: only for a member, only since they joined (D13).
       scheme && scheme.is_active !== false
-        ? fetchAllRows(() => {
+        ? settleWithin(fetchAllRows(() => {
           let q = scopedFrom('pos_orders', 'id, order_no, invoice_no, closed_at, close_type, payment_method, credit_note_id, delivery_partner, discount_amount')
             .eq('status', 'billed').in('buyer_phone', phones)
           if (customer.loyalty_enrolled_at) q = q.gte('closed_at', customer.loyalty_enrolled_at)
           return q.order('closed_at', { ascending: false }).order('id')
-        })
+        }), CALL_MS, "Reading this customer's bills")
         : Promise.resolve({ data: [], error: null }),
     ])
     if (nameRes.error) { console.error('staff names read failed, By shows ?:', nameRes.error); setNames({ map: {}, failed: true }) }
@@ -79,8 +81,8 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
     if (ledRes.error || billRes.error) { setMissing({ loading: false, rows: [], error: billRes.error || ledRes.error }); return }
     const earnedIds = new Set((ledRes.data || []).filter(r => r.kind === 'earn' && r.order_id).map(r => r.order_id))
     const candidates = (billRes.data || []).filter(b => b.close_type === 'paid' && !b.credit_note_id && !b.delivery_partner && !earnedIds.has(b.id))
-    const { data: items, error: itemErr } = await fetchAllRowsChunked(candidates.map(b => b.id), ids =>
-      scopedFrom('pos_order_items', 'order_id, qty, unit_price, comped').in('order_id', ids).order('id'))
+    const { data: items, error: itemErr } = await settleWithin(fetchAllRowsChunked(candidates.map(b => b.id), ids =>
+      scopedFrom('pos_order_items', 'order_id, qty, unit_price, comped').in('order_id', ids).order('id')), CALL_MS, "Reading the bills' lines")
     if (itemErr) { setMissing({ loading: false, rows: [], error: itemErr }); return }
     const itemsByOrder = new Map()
     for (const i of items || []) {

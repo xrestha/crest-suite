@@ -40,7 +40,6 @@ const REQUEST_POLL_MS = 15000
 // The day list refreshes on its own too, so a colleague's "Arrived" on the door phone reaches the
 // till without anyone acting here. Less often than requests: nothing chimes for it.
 const LIST_POLL_MS = 30000
-const NOTICE_MS = 8000
 const NOTE_PREVIEW = 60
 // The Activity view is the latest changes, not the whole history: the newest hundred by updated_at.
 const ACTIVITY_LIMIT = 100
@@ -266,12 +265,8 @@ export default function PosReservations() {
     return () => clearInterval(t)
   }, [])
 
-  // The status line clears itself; the next move replaces it.
-  useEffect(() => {
-    if (!notice) return
-    const t = setTimeout(() => setNotice(null), NOTICE_MS)
-    return () => clearTimeout(t)
-  }, [notice])
+  // The status line stays until the next move replaces it, a booking is saved, or it is dismissed
+  // (S842, WCAG 2.2.1): it cleared itself after 8 s, taking its "Show that day" with it.
 
   const liveRows = useMemo(() => rows.filter(r => LIVE_STATUSES.includes(r.status)), [rows])
   const visibleRows = useMemo(() => (filter === 'unconfirmed' ? rows.filter(r => r.status === 'booked') : rows), [rows, filter])
@@ -503,7 +498,9 @@ export default function PosReservations() {
           {!isToday && dayScoped && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(todayIso())}>Today</button>
           )}
-          <Fab label="+ New booking" onClick={() => setModal({ row: null })} show={!modal && !seatTarget} />
+          {/* Always mounted (S842, the S805 rule): it is the opener the dialog hands focus back to, and
+              the dialog's overlay already covers it. */}
+          <Fab label="+ New booking" onClick={() => setModal({ row: null })} />
         </div>
       </div>
 
@@ -572,12 +569,13 @@ export default function PosReservations() {
 
       <ActionError error={actionError} className="action-error--top" />
       {notice && (
-        <p role="status" className="resv-notice">
-          ✓ {notice.text}
+        <div className="resv-notice" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span role="status">✓ {notice.text}</span>
           {notice.jumpIso && (
-            <>{' '}<button type="button" className="btn-linklike" onClick={() => { setFilter('day'); setDayIso(notice.jumpIso); setNotice(null) }}>Show that day</button></>
+            <button type="button" className="btn-linklike" onClick={() => { setFilter('day'); setDayIso(notice.jumpIso); setNotice(null) }}>Show that day</button>
           )}
-        </p>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
       )}
 
       {loading ? (
@@ -642,7 +640,9 @@ export default function PosReservations() {
                 {weekOver.length === 0
                   ? <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>none upcoming</span>
                   : weekOver.map(d => (
-                    <button key={d.iso} type="button" className="badge badge-amber badge-sentence" style={{ border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
+                    // till-hit--row (S842): the 44px floor under a finger only, so a mouse keeps the chip's
+                    // size, and the product's focus pair. The badge class alone gave an ~18px target.
+                    <button key={d.iso} type="button" className="badge badge-amber badge-sentence till-hit--row" style={{ border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
                       onClick={() => { setFilter('day'); setDayIso(d.iso) }} title={`Open ${d.label}`}>
                       ⚠ {d.label}: {d.hours.join(', ')}
                     </button>
@@ -803,7 +803,7 @@ export default function PosReservations() {
           settings={settings}
           dayIso={dayScoped ? dayIso : todayIso()}
           onClose={() => setModal(null)}
-          onSaved={({ partial } = {}) => { if (!partial) setModal(null); load({ quiet: true }) }}
+          onSaved={({ partial } = {}) => { if (!partial) setModal(null); setNotice(null); load({ quiet: true }) }}
         />
       )}
 

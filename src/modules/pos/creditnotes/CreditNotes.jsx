@@ -24,6 +24,9 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 
 const fmtNpr = npr
+// S842: how long this page's list reads wait before they count as failed (the reprint's own limit).
+// A hung read used to leave "Loading…" up for good; a timeout is now the failed read each one words.
+const LIST_READ_MS = REPRINT_READ_MS
 
 // pos_credit_notes.refund_method (S755). NULL on notes issued before it existed.
 const REFUND_LABEL = { cash: 'Cash', other: 'Card / QR / bank', none: 'None' }
@@ -119,7 +122,7 @@ export default function CreditNotes() {
     // Paged: the range is whatever the two pickers are set to, so a widened window at a busy
     // outlet passes 1000 bills — and the truncation would drop the bill the customer is standing
     // there holding, indistinguishably from it having already been credited.
-    const { data, error } = await fetchAllRows(makeQuery)
+    const { data, error } = await settleWithin(fetchAllRows(makeQuery), LIST_READ_MS, 'Reading the bills')
     if (!candReq.isCurrent(key)) return
     setCandLoading(false)
     // S754: a failed read rendered "No un-credited bills in this range" — i.e. told a manager the
@@ -139,15 +142,15 @@ export default function CreditNotes() {
     const results = await Promise.all([
       // The bill's close rides along (the hinted embed: pos_orders also points back at the note), so a
       // note on a bill from before the outlet's Inventory began is not badged as waiting (S831 5f-3).
-      scopedFrom('pos_credit_notes', '*, pos_orders!pos_credit_notes_order_id_fkey(closed_at)')
-        .gte('created_at', fromTs).lte('created_at', toTs).order('created_at', { ascending: false }),
+      settleWithin(scopedFrom('pos_credit_notes', '*, pos_orders!pos_credit_notes_order_id_fkey(closed_at)')
+        .gte('created_at', fromTs).lte('created_at', toTs).order('created_at', { ascending: false }), LIST_READ_MS, 'Reading the Credit Notes'),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
-      profileNamesRpc(supabase, clientId),
-      supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
-      supabase.from('clients').select('name').eq('id', clientId).single(),
+      settleWithin(profileNamesRpc(supabase, clientId), LIST_READ_MS, 'Reading staff names'),
+      settleWithin(supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(), LIST_READ_MS, "Reading this outlet's settings"),
+      settleWithin(supabase.from('clients').select('name').eq('id', clientId).single(), LIST_READ_MS, "Reading the outlet's name"),
     ])
     if (!notesReq.isCurrent(key)) return
     // S754: every one of these dropped `error`. A failed notes read showed "No Credit Notes issued"

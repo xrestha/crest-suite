@@ -92,7 +92,8 @@ export default function AdjustPointsModal({ customer, balance, held = 0, pointVa
 
   return (
     <Modal title={`Adjust points — ${customer.name}`} onClose={() => { if (!busy) onClose() }} maxWidth={520}
-      dirty={pointsStr !== '' || reason !== ''}>
+      // S842: a stray backdrop tap no longer drops typed input; a changed Add / Take off counts too.
+      dirty={pointsStr !== '' || reason !== '' || direction !== (isPartner ? 'take' : 'add')}>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
         {customer.phone} · holds <strong style={{ color: 'var(--theme-text1)' }}>{balance == null ? '—' : `${fmt(balance)} points`}</strong>{balance == null ? '' : worth(balance)}
         {/* S815 4g (Q19 c): part of it may wait on an unpaid Credit bill. */}

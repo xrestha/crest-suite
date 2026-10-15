@@ -79,19 +79,20 @@ const ALREADY = { warn: false, text: ' Its cash was already on the drawer record
  * the shift's cash bucket never saw this money and the drawer read "over" with nothing to explain it
  * (S573). Best-effort: a failed entry must not undo a settlement the customer has paid, so it warns.
  * `checkFirst` (a settlement found by reading the bill back) looks for the bill's entry before adding
- * one. Returns { warn, text }: text follows the settle sentence.
+ * one. Returns { warn, text, error }: text follows the settle sentence; error, when there is one, is the
+ * answer behind it, kept for the page's fine print (S842).
  */
 export async function postSettlementCash({ db, order, amount, profileId = null, checkFirst = false, newId = randomUUID }) {
   const who = order.buyer_name || 'customer'
   const amt = npr(amount)
   if (checkFirst) {
     const had = await settleWithin(db.cashFor(order.id), SETTLE_READ_MS, 'Checking the drawer record')
-    if (had.error) return { warn: true, text: ` Could not check whether this ${amt} is already on the drawer record, so nothing was added — ${lookFor(who)}.${whyNot(had)}` }
+    if (had.error) return { warn: true, text: ` Could not check whether this ${amt} is already on the drawer record, so nothing was added — ${lookFor(who)}.${whyNot(had)}`, error: had.error }
     if (had.data?.length) return ALREADY
   }
   const shift = await settleWithin(db.openShift(), SETTLE_READ_MS, 'Checking for an open shift')
   // A failed read is not "no shift is open" (S682): nothing was added, whichever it is.
-  if (shift.error) return { warn: true, text: ` Could not check whether a shift is open, so this ${amt} was not added to any drawer count. If a shift is open, add it there as a Cash In. If none is open, ${NO_SHIFT_STEPS.charAt(0).toLowerCase()}${NO_SHIFT_STEPS.slice(1)}${whyNot(shift)}` }
+  if (shift.error) return { warn: true, text: ` Could not check whether a shift is open, so this ${amt} was not added to any drawer count. If a shift is open, add it there as a Cash In. If none is open, ${NO_SHIFT_STEPS.charAt(0).toLowerCase()}${NO_SHIFT_STEPS.slice(1)}${whyNot(shift)}`, error: shift.error }
   if (!shift.data) return { warn: true, text: ` No shift is open, so this ${amt} is not on any drawer count. ${NO_SHIFT_STEPS}` }
   const row = {
     id: newId(),
@@ -111,15 +112,15 @@ export async function postSettlementCash({ db, order, amount, profileId = null, 
     // record already (S823 5c).
     if (isDuplicate(first.error)) return ALREADY
     // The server refused it, so nothing landed (a BEFORE trigger raised).
-    if (shiftGone(first.error)) return { warn: true, text: ` The shift closed before this ${amt} could be added, so it is not on any drawer count. ${NO_SHIFT_STEPS}` }
+    if (shiftGone(first.error)) return { warn: true, text: ` The shift closed before this ${amt} could be added, so it is not on any drawer count. ${NO_SHIFT_STEPS}`, error: first.error }
     // The cash is in the drawer and not in Expected Cash, so the close reads OVER (it used to say short).
-    return { warn: true, text: ` It could not be added to the open shift's cash count, so the drawer will read ${amt} over — add it as a Cash In on that shift.${whyNot(first)}` }
+    return { warn: true, text: ` It could not be added to the open shift's cash count, so the drawer will read ${amt} over — add it as a Cash In on that shift.${whyNot(first)}`, error: first.error }
   }
   // No answer: the same row again. Its id makes a second copy impossible, and a duplicate key means
   // the first one landed (or, since S823, that another entry for this bill already had).
   const again = await settleWithin(db.addCash(row), SETTLE_WRITE_MS, 'Adding the cash to the shift')
   if (!again.error || isDuplicate(again.error)) return ADDED
-  return { warn: true, text: ` It is not known whether this ${amt} reached the open shift's cash count: the answer was lost. Before adding anything, ${lookFor(who)}.` }
+  return { warn: true, text: ` It is not known whether this ${amt} reached the open shift's cash count: the answer was lost. Before adding anything, ${lookFor(who)}.`, error: again.error }
 }
 
 // `amount` is what actually reached us: a delivery partner remits the bill LESS its commission, so a
@@ -130,14 +131,15 @@ async function collected({ db, order, method, amount, profileId, readBack, newId
     (readBack ? ' (checked by reading the bill back: it is settled once)' : '') + '.'
   if (method !== 'Cash') return { msg: 'ok:' + head, closePanel: true, reload: true }
   const cash = await postSettlementCash({ db, order, amount, profileId, checkFirst: readBack, newId })
-  return { msg: (cash.warn ? 'warn:' : 'ok:') + head + cash.text, closePanel: true, reload: true }
+  return { msg: (cash.warn ? 'warn:' : 'ok:') + head + cash.text, closePanel: true, reload: true, error: cash.error }
 }
 
 /**
  * One press of a settle method. `db` is the page's five calls (settle, readBill, openShift, cashFor,
  * addCash); `tries` is the page's memory of unanswered presses (order id → [{ method, at }]), kept
  * across presses and list reloads and lost with the page; `names` maps a login id to its name.
- * Returns { msg, closePanel, reload }, msg prefixed ok:, warn: or error: as the page renders it.
+ * Returns { msg, closePanel, reload, error }, msg prefixed ok:, warn: or error: as the page renders it;
+ * error (S842), when there is one, is the answer the sentence is about, for the page's fine print.
  */
 export async function settleCreditBill({
   db, order, method, commission = null, profileId = null, tries, names = null,
@@ -171,7 +173,7 @@ export async function settleCreditBill({
   if (res.error && !lost) {
     // The server's refusal: the statement rolled back, so "not settled" is true.
     forget()
-    return { msg: 'error:The bill was not marked as settled. ' + errorText(res.error, 'operator'), closePanel: false, reload: false }
+    return { msg: 'error:The bill was not marked as settled. ' + errorText(res.error, 'operator'), closePanel: false, reload: false, error: res.error }
   }
   // Zero rows is an answer: this press wrote nothing. An earlier unanswered press may have.
   if (!lost) forget()
@@ -213,20 +215,49 @@ export async function settleCreditBill({
   if (verdict === 'open') {
     return {
       msg: `warn:No answer came back, and the bill still shows as not settled — the settlement may still arrive. Wait half a minute, then press ${method} again: a bill can never be settled twice, and if the first press went through, this page finishes it then.${holdCash}`,
-      closePanel: false, reload: false,
+      closePanel: false, reload: false, error: res.error,
     }
   }
   if (!lost) {
     // Matched nothing, so it is settled or gone, and the read that would say by whom failed.
     return {
       msg: `error:This press changed nothing — the bill looks already settled, but it could not be read back to see by whom. No cash was added to the drawer. Reload the page: its row under Collected says who settled it and how.${whyNot(back)}`,
-      closePanel: true, reload: true,
+      closePanel: true, reload: true, error: back.error,
     }
   }
   const reloadHint = method === 'Cash'
     ? ` If you reload instead and the bill shows under Collected with your name, ${lookFor(who)}.` : ''
   return {
     msg: `warn:It is not known whether this bill was settled: the answer was lost and the bill could not be read back. Do not hand any money back. When the connection is back, press ${method} again on this bill — a bill can never be settled twice, and if the first press went through, this page finishes it then.${holdCash}${reloadHint}${whyNot(back)}`,
-    closePanel: false, reload: false,
+    closePanel: false, reload: false, error: back.error || res.error,
+  }
+}
+
+/**
+ * What one press of a settle method is about to do, for the question asked before it (S842, owner
+ * decision): one tap used to stamp a set-once settlement and, for Cash, a Cash In. Worded from this
+ * file's own facts — `amount` is what settleCreditBill posts: the bill, less the commission for a
+ * delivery partner. `bill` is the page's label for the bill. Returns { title, lines, confirmLabel }.
+ */
+export function settleConsequence({ order, method, commission = null, bill = '' }) {
+  const paid = Number(order.paid_amount) || 0
+  const partner = order.delivery_partner || null
+  const comm = partner ? (Number(commission) || 0) : 0
+  const amount = paid - comm
+  const from = partner || order.buyer_name || 'the customer'
+  const ref = bill ? `Bill ${bill}` : 'This bill'
+  const kept = !partner ? '.'
+    : comm > 0 ? `, with ${npr(comm)} commission kept by ${partner}: ${npr(amount)} received.`
+      : `, with no commission recorded: ${npr(amount)} received.`
+  return {
+    title: `Settle ${partner || order.buyer_name ? `${from}'s` : 'this'} bill by ${method}?`,
+    lines: [
+      `${ref} from ${from}, ${npr(paid)}, is marked as paid by ${method}${kept}`,
+      method === 'Cash'
+        ? `${npr(amount)} goes on the open shift's drawer record as a Cash In, so the drawer count expects it. If no shift is open, the bill is still settled but the cash goes on no drawer count, and this page then says how to record it.`
+        : 'Nothing goes into the cash drawer count — only a Cash settlement does.',
+      'A settlement cannot be undone, and its method cannot be changed afterwards.',
+    ],
+    confirmLabel: `Settle as ${method}`,
   }
 }

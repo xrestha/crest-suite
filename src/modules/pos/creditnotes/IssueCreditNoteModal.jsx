@@ -48,6 +48,9 @@ const FOOD_OPTIONS = [
 const REASON_CHIPS = ['Wrong customer', 'Tax correction', 'Duplicate bill']
 
 const fmtNpr = npr
+// S842: how long the bill's own reads wait (the cash-taken read's limit). A hung one used to leave
+// "Loading bill…" up for good; a timeout is now the failed load that already says no note can be issued.
+const LOAD_MS = 20000
 
 function invoiceLabel(order, vatReg, current) {
   const prefix = invoiceCodeOf(order, current) // S834 (D35): the bill's own code
@@ -134,7 +137,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   useEffect(() => {
     if (!clientId) return
     let cancelled = false
-    settleWithin(supabase.rpc('pos_bill_cash_taken', { p_order_id: order.id }), 20000, 'Reading the cash on this bill')
+    settleWithin(supabase.rpc('pos_bill_cash_taken', { p_order_id: order.id }), LOAD_MS, 'Reading the cash on this bill')
       .then(({ data, error }) => {
         if (cancelled) return
         if (error) { setLoadError(error); setLoading(false); return }
@@ -150,10 +153,10 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       const results = await Promise.all([
         // S839: a combo's dish carries its combo (isComboItem), so the note spreads the bill discount
         // as the bill did, over the other lines only, and prints the combo as one row with its name.
-        scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, selection_key, combo_line_id, combo_name, combo_sort, option_summary, pos_order_item_options(option_name, price_delta, ingredient_deltas, sort)').eq('order_id', order.id),
-        supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
-        supabase.from('clients').select('name').eq('id', clientId).single(),
-        scopedFrom('pos_orders', 'vat_registered').eq('id', order.id).maybeSingle(),
+        settleWithin(scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, selection_key, combo_line_id, combo_name, combo_sort, option_summary, pos_order_item_options(option_name, price_delta, ingredient_deltas, sort)').eq('order_id', order.id), LOAD_MS, "Reading the bill's lines"),
+        settleWithin(supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(), LOAD_MS, "Reading this outlet's tax settings"),
+        settleWithin(supabase.from('clients').select('name').eq('id', clientId).single(), LOAD_MS, "Reading the outlet's name"),
+        settleWithin(scopedFrom('pos_orders', 'vat_registered').eq('id', order.id).maybeSingle(), LOAD_MS, 'Reading the bill'),
       ])
       if (cancelled) return
       // S754: all three reads dropped `error`. A failed item read computed NPR 0 and still let a
@@ -167,7 +170,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       const recipeIds = [...new Set((its || []).map(i => i.recipe_id).filter(Boolean))]
       let hsc = {}
       if (recipeIds.length > 0) {
-        const { data: recs, error: hscErr } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
+        const { data: recs, error: hscErr } = await settleWithin(scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds), LOAD_MS, 'Reading the HSC codes')
         if (cancelled) return
         if (hscErr) { setLoadError(hscErr); setLoading(false); return }
         hsc = Object.fromEntries((recs || []).map(r => [r.id, r.hsc_code]))
@@ -194,6 +197,11 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   // "did not print / not in Inventory" notice was lost and onIssued never ran, so the bill kept a live
   // Credit Note button.
   const closeUnlessIssuing = submitting ? () => {} : onClose
+  // S842: anything typed or picked since the dialog opened (a reason chip is a button, which no input
+  // event sees) keeps a stray backdrop tap from throwing it away. × and Escape still close.
+  const dirty = reason !== '' || refundMode !== '' || foodAnswer !== ''
+    || buyerName !== (order.buyer_name || '') || buyerAddress !== (order.buyer_address || '')
+    || buyerPan !== (order.buyer_pan || '') || buyerPhone !== (order.buyer_phone || '')
 
   if (!hasPosAccess('manager')) {
     return (
@@ -429,7 +437,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   }
 
   return (
-    <Modal title="Issue Credit Note" onClose={closeUnlessIssuing} maxWidth={520}>
+    <Modal title="Issue Credit Note" onClose={closeUnlessIssuing} maxWidth={520} dirty={dirty}>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
           Corrects {order.invoice_no != null ? invoiceLabel(order, vatReg, settings.invoice_prefix) : `Order #${order.order_no}`}. This is a formal VAT-Rules Credit Note — it reduces revenue for this fiscal month{askFood ? ', and puts the food back into stock only if you say it was not served' : ''}.
         </p>

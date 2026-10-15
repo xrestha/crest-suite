@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, memo, useCallback, useDeferredValue, useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -18,8 +18,9 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { settleWithin } from '../../../utils/withTimeout'
-import { settleCreditBill, SETTLE_READ_MS } from './settleCredit'
+import { settleCreditBill, settleConsequence, SETTLE_READ_MS } from './settleCredit'
 import { customerBookAfterRead } from './customerBook'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
@@ -57,6 +58,108 @@ function daysAgo(iso) {
   return d <= 0 ? 'today' : d === 1 ? '1 day' : `${d} days`
 }
 
+const NO_ROWS = []
+
+// S842: what the last Settle press did, as the line beside that bill. `msg` is settleCredit.js' shape
+// (ok:/warn:/error: and the sentence); `error` is the answer behind it, kept as ActionError's fine print.
+// closedAt places the line where the bill's row was once a settle has moved it to Collected.
+function outcomeOf(order, msg, error = null) {
+  const m = /^(ok|warn|error):/.exec(msg || '')
+  return {
+    orderId: order.id, closedAt: order.closed_at, kind: m ? m[1] : 'error',
+    text: m ? msg.slice(m[0].length) : msg, detail: error ? asActionError(error, 'operator').detail : '',
+  }
+}
+
+// The customer book's table (S842). Memoized and fed the DEFERRED search, so a keystroke repaints the
+// box at once and the rows only when React has a moment: every character used to redraw the whole book.
+// `onToggle` is a stable callback, so a keystroke changes none of these props.
+const CustomerBookTable = memo(function CustomerBookTable({ rows, expandedId, historyMap, noShowByPhone, vatReg, prefix, onToggle }) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Address</th>
+            <th><Tip text="Customer's own PAN, if given for a full tax invoice" width={200}>PAN</Tip></th>
+            <th style={{ textAlign: 'right' }}><Tip text="Bookings under this phone number that were marked No-show on the Reservations page. Shown on the booking form when they book again." width={260}>No-shows</Tip></th>
+            <th><Tip text="When this customer first appeared on a bill" width={200}>Since</Tip></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(c => (
+            <Fragment key={c.id}>
+              <tr onClick={() => onToggle(c)} style={{ cursor: 'pointer' }}>
+                {/* RowDisclosure is the keyboard/SR path to the expansion — the row
+                    onClick stays as the mouse convenience, never role="button" on the
+                    tr, which would strip the row out of the table's structure. */}
+                <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                  <RowDisclosure
+                    expanded={expandedId === c.id}
+                    onToggle={() => onToggle(c)}
+                    label={`Order history for ${c.name}`}
+                  /> {c.name}
+                </td>
+                <td>{c.phone}</td>
+                <td>{c.address || '—'}</td>
+                <td>{c.pan || '—'}</td>
+                <td style={{ textAlign: 'right' }}>
+                  {noShowByPhone === null
+                    ? <span style={{ color: 'var(--theme-text3)' }} title="Could not read the reservations book">?</span>
+                    : (noShowByPhone[normalizePhone(c.phone)] || 0) > 0
+                      ? <span className="badge badge-red">{noShowByPhone[normalizePhone(c.phone)]}</span>
+                      : <span style={{ color: 'var(--theme-text3)' }}>0</span>}
+                </td>
+                <td style={{ whiteSpace: 'nowrap' }}>{bsDate(c.created_at)}</td>
+                {/* Mouse affordance only — the RowDisclosure carries aria-expanded, so
+                    this duplicate hint stays out of the accessibility tree. */}
+                <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                  {expandedId === c.id ? '▲ hide orders' : '▼ orders'}
+                </td>
+              </tr>
+              {expandedId === c.id && (
+                <tr>
+                  <td colSpan={7} style={{ background: 'var(--theme-bg)', padding: '10px 18px' }}>
+                    {historyMap[c.id] === 'loading' || !historyMap[c.id] ? (
+                      <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading order history…</span>
+                    ) : historyMap[c.id].error ? (
+                      <ReportLoadError error={historyMap[c.id].error} />
+                    ) : historyMap[c.id].length === 0 ? (
+                      <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No billed orders found for this phone number.</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {historyMap[c.id].map(o => (
+                          <div key={o.id} style={{ display: 'flex', gap: 14, alignItems: 'baseline', fontSize: 12, color: 'var(--theme-text2)' }}>
+                            <span style={{ minWidth: 84 }}>{o.closed_at ? bsDate(o.closed_at) : ''}</span>
+                            <span style={{ minWidth: 120, fontWeight: 600, color: 'var(--theme-text1)' }}>{invoiceLabel(o, vatReg, prefix)}</span>
+                            <span style={{ minWidth: 70 }}>{o.close_type === 'writeoff' ? 'Comp' : o.payment_method}</span>
+                            <span style={{ minWidth: 90, fontWeight: 600 }}>{o.paid_amount != null ? fmtNpr(o.paid_amount) : '—'}</span>
+                            {o.payment_method === 'Credit' && (
+                              o.credit_settled_at
+                                ? <span className="badge-green" style={{ fontSize: 10 }}>Collected</span>
+                                // Same rule as the Outstanding Credit tab (S754): a credit-noted bill is not owed.
+                                : o.credit_note_id
+                                  ? <span className="badge-gray" style={{ fontSize: 10 }}>Credit noted</span>
+                                  : <span className="badge-amber" style={{ fontSize: 10 }}>Outstanding</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+})
+
 export default function PosCustomers() {
   const { clientId, profile, hasPosAccess, hasFeature } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
@@ -76,8 +179,13 @@ export default function PosCustomers() {
   // failed read renders as "unknown" rather than as a clean record for everyone.
   const [noShowByPhone, setNoShowByPhone] = useState(null)
   const [search, setSearch] = useState('')
+  // S842: the list follows a deferred copy of the box, so typing never waits on the whole book.
+  const deferredSearch = useDeferredValue(search)
   const [expandedId, setExpandedId] = useState(null)
   const [historyMap, setHistoryMap] = useState({})   // { customerId: orders[] | 'loading' }
+  // The memoized table's row toggle: stable, reading the newest toggleHistory (set before the return).
+  const toggleRef = useRef(null)
+  const onToggleHistory = useCallback(c => toggleRef.current?.(c), [])
 
   // Credit
   const [creditBills, setCreditBills] = useState([])
@@ -89,7 +197,13 @@ export default function PosCustomers() {
   const creditSeq = useRef(0)
   const [settlingId, setSettlingId] = useState(null)  // order id with the method picker open
   const [settleBusy, setSettleBusy] = useState(false)
-  const [settleMsg, setSettleMsg] = useState('')
+  // S842: what the last Settle press did (outcomeOf), shown beside that bill rather than above the
+  // table, where it sat off-screen and was never announced.
+  const [settleOutcome, setSettleOutcome] = useState(null)
+  const outcomeRef = useRef(null)
+  const focusOutcomeRef = useRef(false)
+  // S842 (owner decision): a method press asks first, naming what it will do (askSettle).
+  const { ask: askConfirm, confirmEl } = useConfirm()
   // Foodmandu/Pathao only — the platform's actual remittance statement is what should drive
   // this number, not the Charge-time guess (deliberately never computed at Charge — see
   // PosOrders.jsx). settleExVatBase is fetched once per Settle click (this order's ex-VAT,
@@ -208,6 +322,24 @@ export default function PosCustomers() {
     }
   }, [creditBills])
 
+  // S842: filtered once per deferred search or book read, not per render (the Settle panel's fields
+  // and every status line re-render this page too).
+  const customers = book.rows || NO_ROWS
+  const q = deferredSearch.trim().toLowerCase()
+  const filteredCustomers = useMemo(() => (q
+    // S815 4g: a phone matches by its digits, so "+977 984…" finds the regular stored as 984….
+    ? customers.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q) || phoneMatchesSearch(c.phone, q))
+    : customers), [customers, q])
+
+  // S842: a settle that took its row (and the opener the dialog would hand focus back to) with it
+  // leaves focus nowhere; once the dialog has gone, the line saying what happened takes it.
+  useEffect(() => {
+    if (confirmEl || !focusOutcomeRef.current) return
+    focusOutcomeRef.current = false
+    const at = document.activeElement
+    if (!at || at === document.body) outcomeRef.current?.focus()
+  }, [confirmEl, settleOutcome])
+
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
 
   async function loadCustomers() {
@@ -303,13 +435,15 @@ export default function PosCustomers() {
   }
 
   // S754: a settlement stores a commission and posts cash off figures that depend on settings, so
-  // it must not run on the fallback defaults. Returns the refusal sentence, or '' when it may go.
-  // Nothing is written before this check, so "nothing was settled" is true.
+  // it must not run on the fallback defaults. Returns the refusal as { msg, error }, or null when it
+  // may go (S842: the failed read rides along as the fine print). Nothing is written before this
+  // check, so "nothing was settled" is true.
   function settingsBlockReason() {
-    if (settingsRead === true) return ''
-    if (settingsRead === null) return "error:This outlet's billing settings are still loading — nothing was settled. Try Settle again in a moment."
-    return "error:Could not read this outlet's billing settings (VAT registration and delivery-partner rates), so the settlement cannot be worked out — nothing was settled. Reload the page and try again. " + errorText(settingsRead, 'operator')
+    if (settingsRead === true) return null
+    if (settingsRead === null) return { msg: "error:This outlet's billing settings are still loading — nothing was settled. Try Settle again in a moment." }
+    return { msg: "error:Could not read this outlet's billing settings (VAT registration and delivery-partner rates), so the settlement cannot be worked out — nothing was settled. Reload the page and try again. " + errorText(settingsRead, 'operator'), error: settingsRead }
   }
+  const BASE_NOT_LOADED = 'error:This bill\'s commission base has not loaded, so it cannot be settled yet — close this and try Settle again.'
 
   // Opens the Settle panel — for a Foodmandu/Pathao bill, also fetches this order's own items to
   // compute its ex-VAT (post-discount) value, the basis both platforms actually calculate
@@ -318,9 +452,9 @@ export default function PosCustomers() {
   // against the platform's real remittance, not a silent default.
   async function openSettle(order) {
     settleBaseReq.begin(order.id) // before any await: a bill opened earlier no longer owns the panel
-    setSettleMsg('')
+    setSettleOutcome(null)
     const blocked = settingsBlockReason()
-    if (blocked) { setSettlingId(null); setSettleMsg(blocked); return }
+    if (blocked) { setSettlingId(null); setSettleOutcome(outcomeOf(order, blocked.msg, blocked.error)); return }
     setSettlingId(order.id)
     setSettleCommissionPct('')
     setSettleExVatBase(null)
@@ -338,7 +472,7 @@ export default function PosCustomers() {
       // commission_amount = 0 on the settlement with no warning (S682). settleBill refuses while
       // the base is unknown, and this says why.
       setSettleExVatLoading(false)
-      setSettleMsg('error:Could not load this bill\'s lines, so the commission cannot be worked out — nothing was settled. Close this and try Settle again. ' + errorText(itemsErr, 'operator'))
+      setSettleOutcome(outcomeOf(order, 'error:Could not load this bill\'s lines, so the commission cannot be worked out — nothing was settled. Close this and try Settle again. ' + errorText(itemsErr, 'operator'), itemsErr))
       return
     }
     // Excludes comped items — commission has nothing to withhold on a line that was never
@@ -348,16 +482,36 @@ export default function PosCustomers() {
     setSettleExVatLoading(false)
   }
 
-  async function settleBill(order, method) {
+  // S842 (owner decision): a method press asks first. It used to be one irreversible tap: a set-once
+  // settlement and, for Cash, a Cash In on the drawer record, seven such buttons side by side. The
+  // dialog names the bill, the amount and where the money goes (settleConsequence), with the commission
+  // this press will store; a press that cannot go ahead says why beside the row and asks nothing.
+  function askSettle(order, method) {
     const blocked = settingsBlockReason()
-    if (blocked) { setSettleMsg(blocked); return }
+    if (blocked) { setSettleOutcome(outcomeOf(order, blocked.msg, blocked.error)); return }
+    const base = settleExVatBase?.orderId === order.id ? settleExVatBase.base : null
+    if (order.delivery_partner && base == null) { setSettleOutcome(outcomeOf(order, BASE_NOT_LOADED)); return }
+    const commission = order.delivery_partner ? Math.round(base * (parseFloat(settleCommissionPct) || 0) / 100) : null
+    const c = settleConsequence({ order, method, commission, bill: invoiceLabel(order, vatReg, prefix) })
+    setSettleOutcome(null)
+    askConfirm({
+      title: c.title, confirmLabel: c.confirmLabel, busyLabel: 'Settling…',
+      body: <>{c.lines.map((line, i) => <p key={i} style={{ margin: i ? '8px 0 0' : 0 }}>{line}</p>)}</>,
+      run: () => settleBill(order, method, commission),
+    })
+  }
+
+  // `commission` is the one the confirm showed (S842), so what was agreed to is what is stored.
+  async function settleBill(order, method, commission) {
+    const blocked = settingsBlockReason()
+    if (blocked) { setSettleOutcome(outcomeOf(order, blocked.msg, blocked.error)); return }
     // S809 CUSTOMERS-PARKING-16: only this bill's own base, never one a late load left for another.
     const base = settleExVatBase?.orderId === order.id ? settleExVatBase.base : null
     if (order.delivery_partner && base == null) {
-      setSettleMsg('error:This bill\'s commission base has not loaded, so it cannot be settled yet — close this and try Settle again.')
+      setSettleOutcome(outcomeOf(order, BASE_NOT_LOADED))
       return
     }
-    setSettleBusy(true); setSettleMsg('')
+    setSettleBusy(true); setSettleOutcome(null)
     // The write, the read-back of a lost answer, and the Cash In (paid − commission for a delivery
     // partner, S754) are settleCredit.js (S809 CUSTOMERS-PARKING-6, SHIFTS-4). S754's
     // `.is('credit_settled_at', null)` + `.select('id')` stay: a bill is settled once however often
@@ -373,15 +527,16 @@ export default function PosCustomers() {
     try {
       out = await settleCreditBill({
         db, order, method, profileId: profile?.id || null, tries: settleTriesRef.current, names: staffNames,
-        commission: order.delivery_partner ? Math.round(base * (parseFloat(settleCommissionPct) || 0) / 100) : null,
+        commission: order.delivery_partner ? commission : null,
       })
     } catch (err) {
       console.error('settle failed unexpectedly:', err)
-      out = { msg: 'warn:Something went wrong while settling, so it is not known whether this bill was settled. Do not hand any money back: reload the page and see whether it is under Collected. ' + errorText(err, 'operator'), closePanel: false, reload: false }
+      out = { msg: 'warn:Something went wrong while settling, so it is not known whether this bill was settled. Do not hand any money back: reload the page and see whether it is under Collected. ' + errorText(err, 'operator'), closePanel: false, reload: false, error: err }
     } finally {
       setSettleBusy(false)
     }
-    setSettleMsg(out.msg)
+    setSettleOutcome(outcomeOf(order, out.msg, out.error))
+    focusOutcomeRef.current = true
     // Only this bill's panel: another bill opened while this one was settling stays open.
     if (out.closePanel) setSettlingId(id => (id === order.id ? null : id))
     if (out.reload) await loadCredit()
@@ -390,18 +545,49 @@ export default function PosCustomers() {
   const vatReg = billingSettings.is_vat_registered
   const prefix = billingSettings.invoice_prefix
   const settleCommissionAmt = settleExVatBase != null ? Math.round(settleExVatBase.base * (parseFloat(settleCommissionPct) || 0) / 100) : 0
-  // A settle that needs action shows amber (warn:), a refusal red, a settlement green.
-  const settleMsgColor = settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : settleMsg.startsWith('warn:') ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'
+
+  // S842: the last settle's line. A settlement is a status (green, announced politely); a refusal or a
+  // settle that needs action is ActionError, its sentence first and the server's answer as fine print.
+  // Focusable, so a settle that took its row away can hand focus to it (the effect above).
+  const outcomeMoved = !!settleOutcome && !unsettled.some(b => b.id === settleOutcome.orderId)
+    && settled.some(b => b.id === settleOutcome.orderId)
+  const outcomeEl = top => settleOutcome && (
+    <div ref={outcomeRef} tabIndex={-1} style={{ outline: 'none' }}>
+      {settleOutcome.kind === 'ok' ? (
+        <p role="status" style={{ margin: top ? '0 0 14px' : 0, fontSize: 13, color: 'var(--theme-green-text)' }}>
+          ✓ {settleOutcome.text}{outcomeMoved ? ' It is under Collected now.' : ''}
+        </p>
+      ) : settleOutcome.kind === 'warn' ? (
+        // A settle that LANDED and wants a follow-up (no shift open, a Cash In not recorded): amber, as it
+        // was, never the red of a failure, because the bill is settled (S842).
+        <div role="alert" style={{ margin: top ? '0 0 14px' : 0, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          <span aria-hidden="true">△ </span>{settleOutcome.text}
+          {settleOutcome.detail && <div className="action-error-detail">{settleOutcome.detail}</div>}
+        </div>
+      ) : (
+        <ActionError error={{ text: settleOutcome.text, detail: settleOutcome.detail }} className={top ? 'action-error--top' : ''} />
+      )}
+    </div>
+  )
+  // Beside its bill: under the row while the bill is still owed, or where that row sat once the settle
+  // moved it to Collected (the list is newest first by closed_at, then id).
+  let outcomeIndex = -1
+  if (settleOutcome && !unsettled.some(b => b.id === settleOutcome.orderId)) {
+    const t = Date.parse(settleOutcome.closedAt)
+    const i = unsettled.findIndex(b => {
+      const bt = Date.parse(b.closed_at)
+      return bt < t || (bt === t && b.id > settleOutcome.orderId)
+    })
+    outcomeIndex = i === -1 ? unsettled.length : i
+  }
+  const outcomeRow = settleOutcome && (
+    <tr><td colSpan={7} style={{ padding: '8px 18px' }}>{outcomeEl(false)}</td></tr>
+  )
 
   // S833: still loading until a read has landed for this outlet.
-  const customers = book.rows || []
   const custLoading = !clientId || book.clientId !== clientId
   const custError = book.error
-  const q = search.trim().toLowerCase()
-  const filteredCustomers = q
-    // S815 4g: a phone matches by its digits, so "+977 984…" finds the regular stored as 984….
-    ? customers.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q) || phoneMatchesSearch(c.phone, q))
-    : customers
+  toggleRef.current = toggleHistory
 
   return (
     <div>
@@ -491,87 +677,16 @@ export default function PosCustomers() {
                 : 'No customers match your search.'}
             </div>
           ) : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Phone</th>
-                    <th>Address</th>
-                    <th><Tip text="Customer's own PAN, if given for a full tax invoice" width={200}>PAN</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Bookings under this phone number that were marked No-show on the Reservations page. Shown on the booking form when they book again." width={260}>No-shows</Tip></th>
-                    <th><Tip text="When this customer first appeared on a bill" width={200}>Since</Tip></th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCustomers.map(c => (
-                    <Fragment key={c.id}>
-                      <tr onClick={() => toggleHistory(c)} style={{ cursor: 'pointer' }}>
-                        {/* RowDisclosure is the keyboard/SR path to the expansion — the row
-                            onClick stays as the mouse convenience, never role="button" on the
-                            tr, which would strip the row out of the table's structure. */}
-                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                          <RowDisclosure
-                            expanded={expandedId === c.id}
-                            onToggle={() => toggleHistory(c)}
-                            label={`Order history for ${c.name}`}
-                          /> {c.name}
-                        </td>
-                        <td>{c.phone}</td>
-                        <td>{c.address || '—'}</td>
-                        <td>{c.pan || '—'}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          {noShowByPhone === null
-                            ? <span style={{ color: 'var(--theme-text3)' }} title="Could not read the reservations book">?</span>
-                            : (noShowByPhone[normalizePhone(c.phone)] || 0) > 0
-                              ? <span className="badge badge-red">{noShowByPhone[normalizePhone(c.phone)]}</span>
-                              : <span style={{ color: 'var(--theme-text3)' }}>0</span>}
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }}>{bsDate(c.created_at)}</td>
-                        {/* Mouse affordance only — the RowDisclosure carries aria-expanded, so
-                            this duplicate hint stays out of the accessibility tree. */}
-                        <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                          {expandedId === c.id ? '▲ hide orders' : '▼ orders'}
-                        </td>
-                      </tr>
-                      {expandedId === c.id && (
-                        <tr>
-                          <td colSpan={7} style={{ background: 'var(--theme-bg)', padding: '10px 18px' }}>
-                            {historyMap[c.id] === 'loading' || !historyMap[c.id] ? (
-                              <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading order history…</span>
-                            ) : historyMap[c.id].error ? (
-                              <ReportLoadError error={historyMap[c.id].error} />
-                            ) : historyMap[c.id].length === 0 ? (
-                              <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No billed orders found for this phone number.</span>
-                            ) : (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                {historyMap[c.id].map(o => (
-                                  <div key={o.id} style={{ display: 'flex', gap: 14, alignItems: 'baseline', fontSize: 12, color: 'var(--theme-text2)' }}>
-                                    <span style={{ minWidth: 84 }}>{o.closed_at ? bsDate(o.closed_at) : ''}</span>
-                                    <span style={{ minWidth: 120, fontWeight: 600, color: 'var(--theme-text1)' }}>{invoiceLabel(o, vatReg, prefix)}</span>
-                                    <span style={{ minWidth: 70 }}>{o.close_type === 'writeoff' ? 'Comp' : o.payment_method}</span>
-                                    <span style={{ minWidth: 90, fontWeight: 600 }}>{o.paid_amount != null ? fmtNpr(o.paid_amount) : '—'}</span>
-                                    {o.payment_method === 'Credit' && (
-                                      o.credit_settled_at
-                                        ? <span className="badge-green" style={{ fontSize: 10 }}>Collected</span>
-                                        // Same rule as the Outstanding Credit tab (S754): a credit-noted bill is not owed.
-                                        : o.credit_note_id
-                                          ? <span className="badge-gray" style={{ fontSize: 10 }}>Credit noted</span>
-                                          : <span className="badge-amber" style={{ fontSize: 10 }}>Outstanding</span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* S842: a narrowed list says how much of the book it shows (page-layout.md's N of M). */}
+              {q && (
+                <p role="status" style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--theme-text2)' }}>
+                  Showing {filteredCustomers.length} of {customers.length}.
+                </p>
+              )}
+              <CustomerBookTable rows={filteredCustomers} expandedId={expandedId} historyMap={historyMap}
+                noShowByPhone={noShowByPhone} vatReg={vatReg} prefix={prefix} onToggle={onToggleHistory} />
+            </>
           )}
         </>
       )}
@@ -585,11 +700,7 @@ export default function PosCustomers() {
             <>
               {/* A settle that succeeded and was followed by a failed refresh must still say it
                   succeeded — the message sits above the card, not inside the hidden list. */}
-              {settleMsg && (
-                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsgColor }}>
-                  {settleMsg.replace(/^(error|warn|ok):/, '')}
-                </p>
-              )}
+              {outcomeEl(true)}
               <ReportLoadError error={creditError} />
             </>
           ) : (
@@ -674,16 +785,14 @@ export default function PosCustomers() {
                 </>
               )}
 
-              {settleMsg && (
-                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsgColor }}>
-                  {settleMsg.replace(/^(error|warn|ok):/, '')}
-                </p>
-              )}
-
               {unsettled.length === 0 ? (
+                <>
+                {/* S842: the last bill was just settled, so its line stands where the list was. */}
+                {outcomeEl(true)}
                 <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13, marginBottom: 24 }}>
                   No outstanding credit — all Credit bills have been collected. 🎉
                 </div>
+                </>
               ) : (
                 <div className="table-wrap" style={{ marginBottom: 24 }}>
                   <table className="data-table">
@@ -699,8 +808,9 @@ export default function PosCustomers() {
                       </tr>
                     </thead>
                     <tbody>
-                      {unsettled.map(b => (
+                      {unsettled.map((b, i) => (
                         <Fragment key={b.id}>
+                        {outcomeIndex === i && outcomeRow}
                         <tr>
                           <td style={{ whiteSpace: 'nowrap' }}>{bsDate(b.closed_at)}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{invoiceLabel(b, vatReg, prefix)}</td>
@@ -716,12 +826,13 @@ export default function PosCustomers() {
                           <td style={{ textAlign: 'right' }}>
                             {settlingId === b.id ? (
                               <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                {/* S842: each press asks first (askSettle); nothing is written on the tap. */}
                                 {SETTLE_METHODS.map(m => (
                                   <button key={m} className="btn btn-ghost" disabled={settleBusy}
                                     style={{ fontSize: 12, padding: '4px 10px' }}
-                                    onClick={() => settleBill(b, m)}>{m}</button>
+                                    onClick={() => askSettle(b, m)}>{m}</button>
                                 ))}
-                                <button className="btn btn-ghost" disabled={settleBusy}
+                                <button className="btn btn-ghost" disabled={settleBusy} aria-label="Cancel settling"
                                   style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-text3)' }}
                                   onClick={() => setSettlingId(null)}>✕</button>
                               </div>
@@ -758,8 +869,10 @@ export default function PosCustomers() {
                             </td>
                           </tr>
                         )}
+                        {settleOutcome?.orderId === b.id && outcomeRow}
                         </Fragment>
                       ))}
+                      {outcomeIndex === unsettled.length && outcomeRow}
                     </tbody>
                   </table>
                 </div>
@@ -817,6 +930,7 @@ export default function PosCustomers() {
           )}
         </>
       )}
+      {confirmEl}
     </div>
   )
 }

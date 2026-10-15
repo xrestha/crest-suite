@@ -1,7 +1,7 @@
 // S809 CUSTOMERS-PARKING-6, SHIFTS-4: a Settle whose answer was lost is read back, never reported as
 // "not settled" and then as "already settled"; and the cash it brings is added to the drawer once.
 import {
-  SETTLE_TRY_MS, judgeSettled, settledWhen, postSettlementCash, settleCreditBill,
+  SETTLE_TRY_MS, judgeSettled, settledWhen, postSettlementCash, settleCreditBill, settleConsequence,
 } from './settleCredit'
 import { nepalTime } from '../../../shared/nepalTime'
 
@@ -251,5 +251,50 @@ describe('postSettlementCash — the drawer entry (SHIFTS-4)', () => {
     const out = await cash(db, { checkFirst: true })
     expect(out.text).toMatch(/^ Could not check whether this NPR 3,000 is already on the drawer record, so nothing was added/)
     expect(db.calls.openShift).toBe(0)
+  })
+})
+
+// S842: the page shows a failure through ActionError, so the answer behind each sentence comes back with
+// it, for the fine print. Nothing about the sentences or the read-back changed.
+describe('the answer behind a message (S842)', () => {
+  test('a refusal, a lost answer and an unreadable bill each hand back the error the sentence is about', async () => {
+    expect((await press(fakeDb({ settle: [RANK] }))).error).toBe(RANK.error)
+    expect((await press(fakeDb({ settle: [TIMEOUT], readBill: [unsettled()] }))).error).toBe(TIMEOUT.error)
+    expect((await press(fakeDb({ settle: [DROPPED], readBill: [DROPPED] }))).error).toBe(DROPPED.error)
+    expect((await press(fakeDb({ settle: [ok([])], readBill: [DROPPED] }))).error).toBe(DROPPED.error)
+  })
+  test("a settled bill whose Cash In was refused carries the refusal; a clean one carries none", async () => {
+    const refusal = { data: null, status: 403, error: { code: '42501', hint: 'pos_cash_movement_rank', message: 'pos_cash_movement_rank: recording cash …' } }
+    const warned = await press(fakeDb({ settle: [ok([{ id: 'b1' }])], openShift: [SHIFT], addCash: [refusal] }))
+    expect(warned.msg).toMatch(/^warn:NPR 3,000 collected from Hari via Cash\. It could not be added/)
+    expect(warned.error).toBe(refusal.error)
+    const clean = await press(fakeDb({ settle: [ok([{ id: 'b1' }])], openShift: [SHIFT], addCash: [ok([{}])] }))
+    expect(clean.error).toBeUndefined()
+  })
+})
+
+describe('settleConsequence — what a method press is about to do (S842)', () => {
+  test('Cash from a customer: the whole bill, the drawer, the open-shift caveat, and that it is final', () => {
+    const c = settleConsequence({ order: BILL, method: 'Cash', bill: 'TI12-CAC-82/83' })
+    expect(c.title).toBe("Settle Hari's bill by Cash?")
+    expect(c.confirmLabel).toBe('Settle as Cash')
+    expect(c.lines[0]).toBe('Bill TI12-CAC-82/83 from Hari, NPR 3,000, is marked as paid by Cash.')
+    expect(c.lines[1]).toMatch(/^NPR 3,000 goes on the open shift's drawer record as a Cash In/)
+    expect(c.lines[1]).toMatch(/If no shift is open, the bill is still settled but the cash goes on no drawer count/)
+    expect(c.lines[2]).toBe('A settlement cannot be undone, and its method cannot be changed afterwards.')
+  })
+  test('Cash from a delivery partner: the bill less the commission is what reaches the drawer', () => {
+    const c = settleConsequence({ order: PATHAO, method: 'Cash', commission: 1000 })
+    expect(c.title).toBe("Settle Pathao's bill by Cash?")
+    expect(c.lines[0]).toBe('This bill from Pathao, NPR 5,650, is marked as paid by Cash, with NPR 1,000 commission kept by Pathao: NPR 4,650 received.')
+    expect(c.lines[1]).toMatch(/^NPR 4,650 goes on the open shift's drawer record/)
+    expect(settleConsequence({ order: PATHAO, method: 'Cash', commission: 0 }).lines[0]).toMatch(/with no commission recorded: NPR 5,650 received\.$/)
+  })
+  test('any other method puts nothing in the drawer, and a bill with no name still reads', () => {
+    const c = settleConsequence({ order: { ...BILL, buyer_name: null }, method: 'eSewa' })
+    expect(c.title).toBe('Settle this bill by eSewa?')
+    expect(c.lines[0]).toBe('This bill from the customer, NPR 3,000, is marked as paid by eSewa.')
+    expect(c.lines[1]).toBe('Nothing goes into the cash drawer count — only a Cash settlement does.')
+    expect(c.confirmLabel).toBe('Settle as eSewa')
   })
 })

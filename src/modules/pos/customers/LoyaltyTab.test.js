@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor, within } from '@testing-library/react'
 import LoyaltyTab from './LoyaltyTab'
 
 // S833 (S809.4 3k): with no scheme the members still show with their points, and "+ Add scheme" with no
@@ -165,5 +165,31 @@ describe('LoyaltyTab reads', () => {
     await act(async () => { pending[0]({ data: [scheme('s1', 'Older')], error: null }) })
     expect(screen.queryByRole('cell', { name: 'Older' })).not.toBeInTheDocument()
     expect(screen.getByRole('cell', { name: 'Newer' })).toBeInTheDocument()
+  })
+})
+
+// S842: the scheme counts come from one pass over the members, and the list follows a deferred copy of
+// the search box. Same figures as before; this pins them.
+describe('LoyaltyTab counts and search (S842)', () => {
+  test("each scheme's Members count, the enrolled line, and a narrowed list's N of M", async () => {
+    mockData.schemes = [scheme('s1', 'Regulars'), scheme('s2', 'Family')]
+    mockData.members = [{ ...sita, loyalty_scheme_id: 's1' }, { ...ram, loyalty_scheme_id: 's1' },
+      { id: 'm3', name: 'Gita', phone: '9800000003', loyalty_scheme_id: 's2', loyalty_enrolled_at: null },
+      { id: 'm4', name: 'Hari', phone: '9800000004', loyalty_scheme_id: null, loyalty_enrolled_at: null }]
+    render(<LoyaltyTab pointValue={1} canManage onPointValueSaved={jest.fn()} />)
+    // The schemes table comes first; its sixth column is Members.
+    await screen.findAllByRole('cell', { name: 'Regulars' })
+    const membersOf = name => {
+      const row = screen.getAllByRole('row').find(r => within(r).queryAllByRole('cell')[0]?.textContent === name)
+      return within(row).getAllByRole('cell')[5]
+    }
+    expect(membersOf('Regulars')).toHaveTextContent(/^2$/)
+    expect(membersOf('Family')).toHaveTextContent(/^1$/)
+    expect(screen.getByText(/^3 of 4 customers enrolled\./)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Find a customer'), { target: { value: 'gita' } })
+    expect(await screen.findByText('Showing 1 of 4.')).toBeInTheDocument()
+    expect(screen.queryByText('Sita')).not.toBeInTheDocument()
+    expect(screen.getByText('Gita')).toBeInTheDocument()
   })
 })

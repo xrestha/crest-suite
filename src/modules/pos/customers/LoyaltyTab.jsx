@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -95,6 +95,8 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   const loadSeq = useRef(0)
   const [msg, setMsg] = useState('')
   const [search, setSearch] = useState('')
+  // S842: the member list follows a deferred copy of the box, so typing never waits on every row.
+  const deferredSearch = useDeferredValue(search)
   const [adjusting, setAdjusting] = useState(null) // the member whose points are being adjusted
   const [viewing, setViewing] = useState(null)     // the member whose points history is open
   const [moving, setMoving] = useState(null)       // the member whose points are moving to a new number
@@ -111,6 +113,18 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   const loading = !clientId || book.clientId !== clientId
   const loadError = book.error
   const { schemes = [], members = [], balances = {}, held = {} } = book.rows || {}
+  // S842: who is enrolled, and in which scheme, in one pass per read. The Members column filtered the
+  // whole book once per scheme on every render, each keystroke of the search included.
+  const { enrolledCount, countByScheme } = useMemo(() => {
+    const by = {}
+    let n = 0
+    for (const m of members) {
+      if (!m.loyalty_scheme_id) continue
+      n += 1
+      by[m.loyalty_scheme_id] = (by[m.loyalty_scheme_id] || 0) + 1
+    }
+    return { enrolledCount: n, countByScheme: by }
+  }, [members])
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -204,7 +218,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
   }
 
   function removeScheme(s) {
-    const enrolled = members.filter(m => m.loyalty_scheme_id === s.id).length
+    const enrolled = countByScheme[s.id] || 0
     askConfirm({
       title: `Delete the "${s.name}" scheme?`,
       confirmLabel: 'Delete Scheme', danger: true, busyLabel: 'Deleting…',
@@ -224,7 +238,8 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     })
   }
 
-  async function tag(customerId, schemeId) {
+  // A useCallback (S842) because the memoized member rows below call it.
+  const tag = useCallback(async (customerId, schemeId) => {
     if (!canManage) return
     setMsg('')
     // S815 4g: the stored row comes back, because the server dates a join (loyalty_enrolled_at) and the
@@ -236,7 +251,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setBook(prev => (prev.rows
       ? { ...prev, rows: { ...prev.rows, members: prev.rows.members.map(m => m.id === customerId ? { ...m, ...data[0] } : m) } }
       : prev))
-  }
+  }, [canManage, scopedUpdate])
 
   // A scheme's rate box: a rate that gives back half a bill or more asks first (CUSTOMERS-PARKING-10).
   function saveRate(s, v) {
@@ -309,12 +324,83 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
     setMsg(`ok:${change > 0 ? `${n} points added for` : `${n} points taken off`} ${member.name}. New balance: ${Number(newBalance).toLocaleString('en-IN')} points.`)
   }
 
-  const enrolled = members.filter(m => m.loyalty_scheme_id)
   const anyPoints = Object.values(balances).some(n => n > 0) // S833: words the no-scheme note
-  const q = search.trim().toLowerCase()
+  const q = deferredSearch.trim().toLowerCase()
   // S815 4g: a phone matches by its digits, "+977" and a leading 0 taken off (phoneMatchesSearch).
-  const shownMembers = !q ? members : members.filter(m =>
-    String(m.name || '').toLowerCase().includes(q) || phoneMatchesSearch(m.phone, q))
+  // S842: once per deferred search or read, not per render.
+  const shownMembers = useMemo(() => (!q ? members : members.filter(m =>
+    String(m.name || '').toLowerCase().includes(q) || phoneMatchesSearch(m.phone, q))), [members, q])
+
+  // S842: the member rows, built only when what they show changes (the deferred search, a read, the
+  // point value): a keystroke or a status line no longer re-renders every row's History button and menu.
+  const memberRows = useMemo(() => shownMembers.map(m => {
+    const bal = balances[m.id] || 0
+    const onTab = held[m.id] || 0
+    const partner = isDeliveryPartnerPhone(m.phone, deliveryPartners)
+    const movable = spendablePoints(bal, onTab)
+    return (
+      <tr key={m.id}>
+        <td>{m.name}</td>
+        <td style={{ whiteSpace: 'nowrap' }}>{m.phone}</td>
+        <td>
+          {partner ? (
+            // S809 2g/3k: a delivery partner earns and spends nothing, so it is never enrolled.
+            // One still on a scheme from before can be taken off it.
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Tip text="A delivery platform (Foodmandu, Pathao and the like) owes its bills and pays later, so it does not earn or spend points. It is in this list only because picking it on a bill puts its name and phone there." width={320}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Delivery partner — earns no points</span>
+              </Tip>
+              {m.loyalty_scheme_id && canManage && (
+                <button className="btn btn-ghost btn-sm" onClick={() => tag(m.id, '')}>Take off scheme</button>
+              )}
+            </span>
+          ) : schemes.length === 0 && !m.loyalty_scheme_id ? (
+            // S833: with no scheme there is nothing to pick, so the row says where it stands.
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Not enrolled</span>
+          ) : (
+            <select
+              className="form-select" style={{ maxWidth: 200 }}
+              value={m.loyalty_scheme_id || ''}
+              aria-label={`Loyalty scheme for ${m.name}`}
+              disabled={!canManage}
+              onChange={e => tag(m.id, e.target.value)}
+            >
+              <option value="">Not enrolled</option>
+              {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
+        </td>
+        <td style={{ textAlign: 'right', fontWeight: bal > 0 ? 700 : 400, color: bal > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>
+          {bal.toLocaleString('en-IN')}
+          {onTab > 0 && (
+            <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
+              {onTab.toLocaleString('en-IN')} held
+            </span>
+          )}
+        </td>
+        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
+          {bal > 0 && pointValue != null ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
+        </td>
+        <td style={{ textAlign: 'right' }}>
+          <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setMsg(''); setViewing(m) }}
+              aria-label={`Points history for ${m.name}`}>History</button>
+            {canManage && (
+              <RowMenu label={`More for ${m.name}`} items={[
+                // A partner can only lose points, so Adjust is offered only while it holds some.
+                (!partner || bal > 0) && { key: 'adjust', label: 'Adjust points…', onSelect: () => { setMsg(''); setAdjusting(m) } },
+                !partner && {
+                  key: 'move', label: 'Move to a new number…', onSelect: () => { setMsg(''); setMoving(m) },
+                  disabled: movable <= 0,
+                  hint: movable <= 0 ? (onTab > 0 ? 'Its points are held on an unpaid Credit bill' : 'No points to move') : undefined,
+                },
+              ]} />
+            )}
+          </span>
+        </td>
+      </tr>
+    )
+  }), [shownMembers, balances, held, deliveryPartners, schemes, canManage, pointValue, tag])
 
   return (
     <div>
@@ -432,7 +518,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                             onChange={() => patchScheme(s.id, { is_active: !s.is_active })}
                           />
                         </td>
-                        <td style={{ textAlign: 'right' }}>{members.filter(m => m.loyalty_scheme_id === s.id).length}</td>
+                        <td style={{ textAlign: 'right' }}>{countByScheme[s.id] || 0}</td>
                         <td style={{ textAlign: 'right' }}>
                           {canManage && <button className="btn btn-ghost btn-sm" onClick={() => removeScheme(s)}>Delete</button>}
                         </td>
@@ -480,7 +566,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
           <div className="card">
             <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Who is enrolled</h3>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
-              {enrolled.length} of {members.length} customer{members.length === 1 ? '' : 's'} enrolled. Anyone left on “Not enrolled” earns nothing.
+              {enrolledCount} of {members.length} customer{members.length === 1 ? '' : 's'} enrolled. Anyone left on “Not enrolled” earns nothing.
             </p>
             {members.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>
@@ -527,74 +613,7 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
                     </tr>
                   </thead>
                   <tbody>
-                    {shownMembers.map(m => {
-                      const bal = balances[m.id] || 0
-                      const onTab = held[m.id] || 0
-                      const partner = isDeliveryPartnerPhone(m.phone, deliveryPartners)
-                      const movable = spendablePoints(bal, onTab)
-                      return (
-                        <tr key={m.id}>
-                          <td>{m.name}</td>
-                          <td style={{ whiteSpace: 'nowrap' }}>{m.phone}</td>
-                          <td>
-                            {partner ? (
-                              // S809 2g/3k: a delivery partner earns and spends nothing, so it is never enrolled.
-                              // One still on a scheme from before can be taken off it.
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                <Tip text="A delivery platform (Foodmandu, Pathao and the like) owes its bills and pays later, so it does not earn or spend points. It is in this list only because picking it on a bill puts its name and phone there." width={320}>
-                                  <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Delivery partner — earns no points</span>
-                                </Tip>
-                                {m.loyalty_scheme_id && canManage && (
-                                  <button className="btn btn-ghost btn-sm" onClick={() => tag(m.id, '')}>Take off scheme</button>
-                                )}
-                              </span>
-                            ) : schemes.length === 0 && !m.loyalty_scheme_id ? (
-                              // S833: with no scheme there is nothing to pick, so the row says where it stands.
-                              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Not enrolled</span>
-                            ) : (
-                              <select
-                                className="form-select" style={{ maxWidth: 200 }}
-                                value={m.loyalty_scheme_id || ''}
-                                aria-label={`Loyalty scheme for ${m.name}`}
-                                disabled={!canManage}
-                                onChange={e => tag(m.id, e.target.value)}
-                              >
-                                <option value="">Not enrolled</option>
-                                {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: bal > 0 ? 700 : 400, color: bal > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>
-                            {bal.toLocaleString('en-IN')}
-                            {onTab > 0 && (
-                              <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
-                                {onTab.toLocaleString('en-IN')} held
-                              </span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                            {bal > 0 && pointValue != null ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                              <button className="btn btn-ghost btn-sm" onClick={() => { setMsg(''); setViewing(m) }}
-                                aria-label={`Points history for ${m.name}`}>History</button>
-                              {canManage && (
-                                <RowMenu label={`More for ${m.name}`} items={[
-                                  // A partner can only lose points, so Adjust is offered only while it holds some.
-                                  (!partner || bal > 0) && { key: 'adjust', label: 'Adjust points…', onSelect: () => { setMsg(''); setAdjusting(m) } },
-                                  !partner && {
-                                    key: 'move', label: 'Move to a new number…', onSelect: () => { setMsg(''); setMoving(m) },
-                                    disabled: movable <= 0,
-                                    hint: movable <= 0 ? (onTab > 0 ? 'Its points are held on an unpaid Credit bill' : 'No points to move') : undefined,
-                                  },
-                                ]} />
-                              )}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })}
+                    {memberRows}
                   </tbody>
                 </table>
               </div>
