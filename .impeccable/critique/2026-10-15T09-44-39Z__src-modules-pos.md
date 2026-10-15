@@ -106,3 +106,24 @@ The money path is the best-built part of Crest: every failure names the money, a
 3. What does the till look like when Send is the only lit thing?
 4. Is the estimate at Start for the cook or the dashboard? Would a per-dish median be more honest?
 5. Should the cashier's default be one screen (amount, method, tender, Confirm), with the other seven intents a level down?
+
+
+## Resolution (S846 — 2026-10-15, crest-v462)
+
+All five priority issues closed in one release; entry in `CHANGELOG/S804-S853.md`. Owner decisions: the
+non-veg mark is a filled triangle, veg stays a dot, egg gets its own mark (a letter E) and whole dishes
+can be Egg (migration `20261015160000`, applied live); the till's red is calmed the way IMS (S796) and
+HR (S804) were; kitchen Start is one tap at 10 minutes.
+
+| Issue | What closed it |
+| --- | --- |
+| [P1] Veg, non-veg and egg differ only by colour | `DietMark.jsx` SVG: dot / triangle / E; a key on the guest menu, the word on the dish sheet, the mark on till tiles and the till's choices window; `recipes.is_egg` and the recipe editor's Egg |
+| [P2] The payment window buries the money decision | Amount → method → cash received or QR → Confirm; one "Adjust this bill" fold naming what is applied; Void and Complimentary under "Other ways to close" |
+| [P2] Till controls outside the touch and keyboard system | Floor and takeaway tiles are one stretched `button.floor-tile__open` with plain-text chips; covers and KDS keypads, Pair-with chips, ↩ Undo, Accept/Dismiss, floor Retry and Reservations → take the touch floor and focus ring |
+| [P2] Close Shift opens on a red "Short by" | "Still to count" in ink until a denomination has a value |
+| [P2] The till spends its accent on almost everything | `posSignals.js` rewritten to the IMS/HR vocabulary: figures ink, categories grey, in progress ◷; repeated row buttons ghost; BOT grey |
+
+Also closed from the minor list: every KDS Start opened the dialog (now one tap, "Other time" for the
+keypad), `suggestShiftLabel` used the device clock (now `nepalHour`). The rest of the minor list and the
+persona flags are filed in `POS_TODO.md` B3 under S846. Not checked in a browser: the Chrome extension
+was not connected.

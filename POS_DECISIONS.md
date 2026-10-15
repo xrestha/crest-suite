@@ -204,6 +204,19 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~The 2026-10-15 `/impeccable critique` of the POS module (28/40: 1 P1, 4 P2)~~ — **shipped S846,
+  2026-10-15, crest-v462.** Report: `.impeccable/critique/2026-10-15T09-44-39Z__src-modules-pos.md`, with
+  its Resolution table. Owner decisions, given with the request: **the non-veg mark is a filled triangle,
+  veg stays a dot, egg gets its own mark, shown on till tiles too**; **calm the till's red the way IMS
+  and HR were done** (figures ink, categories grey, in progress ◷, repeated row buttons ghost; this
+  reopened S613's BOT colour, now grey, while KOT keeps purple); **kitchen Start is one tap with a
+  default time**. Asked in plain words, each the recommended option: whole dishes can be Egg
+  (`recipes.is_egg`, migration `20261015160000`, applied live; an Egg dish is `is_veg = false`, so older
+  readers and tablets treat it as non-veg); the egg mark is a letter E; the default Start time is 10
+  minutes, always (not the last time used, not an outlet setting). Decided in the plan without asking:
+  Void and Complimentary leave the top of the payment window for an "Other ways to close" row; the
+  payment window's rarer rows go behind one "Adjust this bill" fold that names what is applied.
+
 - [x] ~~The 2026-10-15 `/impeccable audit` of the POS module (13/20: 1 P0, 10 P1, ~20 P2, ~10 P3)~~ —
   **shipped across S841 (P0 + P1, crest-v457), S842 (the P2 list, crest-v458) and S844 (the P3 list and
   the Bill Register phone cards, crest-v460), 2026-10-15.** Report: `.impeccable/audit/2026-10-15T03-00-26Z__src-modules-pos.md`

@@ -149,7 +149,8 @@ Every read of bill lines that feeds this maths must select `combo_line_id` (or `
 ### Guest QR menu
 
 - `get_guest_menu_options(p_table_id)` gains `combos`: `[{ id, name, description, guest_price, sort,
-  groups: [{ id, name, sort, share, items: [{ recipe_id, name, is_veg, extra_price, is_default, sort }] }] }]`
+  groups: [{ id, name, sort, share, items: [{ recipe_id, name, is_veg, is_egg, extra_price, is_default, sort }] }] }]`
+  (`is_egg` since S846, `20261015160000`; read with `dietOfDish(is_veg, is_egg)`)
   — active combos on the guest menu, every pick with at least one available dish; only while
   Customization is live.
 - `submit_guest_order` takes, beside dish items, combo items: `{ combo_id, qty, note, picks:
