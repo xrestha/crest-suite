@@ -849,8 +849,8 @@ In this order. Service charge was offered and **not** chosen.
     test outlet with Customization on), not CASA ACAI CAFE as first written: CASA is a paying
     customer, and the template writes onto its menu. The guest steps were pressed in S767.
   - ~~Release 2: combos~~ — shipped S839 (both kinds; see POS_DECISIONS.md A and `docs/pos-combos.md`).
-    Left open from it (the till floor 455, `20261014170000`, is live): the `admin-user-ops` redeploy
-    (Danger Zone clears the combo tables); **browser checks** on BLOOM CAFE (set up a combo, ring one on the till with a
+    Left open from it (the till floor 455, `20261014170000`, and `admin-user-ops` v71 are live):
+    **browser checks** on BLOOM CAFE (set up a combo, ring one on the till with a
     swap and a dish's own choice, Pay with a discount on a mixed bill, comp and move it, a guest QR combo,
     the bill, ticket and KDS look); **HQ's menu push does not carry combos** (S838 carries option
     groups only); the till's combo picker shows the choice window's own quantity stepper, which it
