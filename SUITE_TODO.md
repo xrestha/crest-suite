@@ -32,10 +32,12 @@ migration defining each object, and re-checked each P1. For ASSETS-1 and ASSETS-
 the Income Tax Act 2058 (the Law Commission text). Nothing was written to the live database, and no
 app code changed.
 
-**Not checked live.** This session's safety check refused reads of the live database, so every
-database claim comes from `supabase/migrations/` (the last definition wins), not the live catalog.
-Each area file ends with `## Live checks pending`: about 110 read-only queries, each written out.
-The few that can change a severity or show real exposure are in S848.2 below.
+**Checked live afterwards.** Live reads were refused at first, so the review and verification were
+built from `supabase/migrations/` (the last definition wins). Once the owner approved, about 130
+read-only queries ran against the live project on the same day. Each area file's
+`## Live checks (run 2026-10-15)` records every query as run and its result. The checks changed no
+severity and rejected nothing. The catalog matched the migrations, and the live function bodies match
+their last migration. S848.2 summarises the exposure.
 
 **Result: 138 findings, 0 P0 · 9 P1 · 52 P2 · 77 P3.** This is after five duplicates were merged into
 the finding that owns them (S848.3). About 33 need a migration. There are 23 owner decisions: 11 to
@@ -44,9 +46,9 @@ GAPS-2 later reinstated part of it. The verifiers changed about eight severities
 "What happens" lines; each finding's "Verified:" line says what. Evidence per ID is in
 `docs/suite-review-s848/<AREA>.md`.
 
-**Live exposure is unknown but likely small.** The changelog records one outlet group, BLOOM CAFE's
-demo group (S789, renamed in S810). How many clients pay for Suite, and whether any has posted a tax
-schedule, needs the live checks.
+**Live exposure is small.** There are four clients. Three have Suite Pro, all dated to mid-2027:
+BLOOM CAFE and BLOOM CAFE - PKR (the demo group) and CASA ACAI CAFE. Most findings have no live case
+yet. The ones that do are in S848.2.
 
 **The nine P1s in plain words:**
 
@@ -244,6 +246,11 @@ list as recommended unless the owner says otherwise.
 
 ### To ask
 
+**Answered by the owner on 2026-10-15 (S848):** SU1 (a), SU2 (a), SU3 (a), SU4 (a), SU5 (a),
+SU6 (a), **SU7 (b), against the recommendation: build a way for the client to correct a wrong
+typed opening value**, SU8 (a), SU9 (a), SU10 (a), SU11 (a). SU12–SU23 stand as folded in. The owner
+also asked for the live checks to be run.
+
 - **SU1 (FORECAST-1). Who may rebuild the demand forecast on an outlet with a till?** (a) Supervisors
   and managers too, through a server read that hands back only daily totals. They already see the
   forecast's revenue and covers on that page **(rec)**. (b) Only the Owner; anyone else is told who to
@@ -303,20 +310,63 @@ list as recommended unless the owner says otherwise.
 - **SU22 (GROUP-16).** Free lines on a supplier bill are left out of "Same item, different price".
 - **SU23 (GAPS-1).** The Owner Report's Net Margin subtracts wastage and staff meals, as the P&L does.
 
-## S848.2 Live checks that matter most
+## S848.2 What the live checks found (2026-10-15)
 
-All are read-only. Each area file's `## Live checks pending` has the full list with exact SQL.
+Each result, with the query as run, is in that area file's `## Live checks (run 2026-10-15)`.
 
-- **GROUP-1 → P0 if any row comes back:** a group whose HQ outlet is no longer in the group
-  (`GROUP.md` and `DATABASE.md` live checks, first entry).
-- **DATABASE-2 confirmation:** whether the browser role may delete outlet-access rows; the expected
-  answer, false, confirms that Create User / Move login fail (`DATABASE.md`).
-- **Exposure of the tax P1s:** posted tax-pool runs per client, with what the 7% rule would have
-  allowed (`ASSETS.md`, "ASSETS-1 exposure").
-- **GROUP-2 exposure:** pushed branch recipes left with no ingredient lines (`GROUP.md`).
-- **GAPS-6:** whether any operator profile carries a grouped client (latent per S840's note; P1 if
-  one does).
-- **Suite clients:** how many clients have Suite on, with and without an end date (`ACCESS.md`).
+**Live today:**
+
+- **DATABASE-2 is confirmed.** The browser role holds only SELECT on the outlet-access table, and
+  the trigger runs as the caller. The audit log has no operator-made login move since 2026-09-08.
+  BLOOM CAFE - PKR, the only client added by hand since then, has no Owner login.
+- **PNL-1:** NPR 53,104 of Foodmandu/Pathao commission sits on no P&L line. BLOOM CAFE has NPR 40,976
+  across 204 settled bills, about 1.5% of its till sales. BLOOM CAFE - PKR has NPR 12,128. Commission
+  runs about 16% of delivery value.
+- **GAPS-1:** BLOOM CAFE's frozen Bhadra 2083 report shows Net Margin 21.9% "Healthy". On the P&L's
+  basis it is 20.0% "Watch" (staff meals NPR 12,400 and raw wastage NPR 5,281). Other BLOOM months
+  read 1.6–2.0 points high.
+- **GROUP-1 is not P0 today:** the only group's HQ, BLOOM CAFE, is in the group. But the audit log
+  shows it was taken out of its own group twice in September, once for about 46 hours. The exposed
+  state has happened, though only between one owner's own outlets.
+- **OWNER-DASHBOARD-1:** both BLOOM outlets save the whole month's fixed costs on day 1, so their
+  margin carries a full month's rent from day 1. CASA saves on days 14–29.
+- **OWNER-DASHBOARD-4:** CASA records overtime only on the attendance sheet (63.1 h so far in
+  Ashwin), and the estimate misses all of it.
+- **OWNER-DASHBOARD-7:** the overdue tile counts 24 lines where BLOOM has 2 overdue bills, and 12
+  where PKR has 1.
+- **OWNER-REPORT-4:** the Owner can rewrite or delete 8 reports at 3 clients today. There is no
+  trigger and no audit, and nothing ties a report's period to its own client. The fix should check
+  that too.
+- **OWNER-REPORT-7:** CASA's Ashadh and Shrawan 2083 reports, regenerated by Crest support on 13 Oct,
+  show Active Headcount 2 where payroll paid 4.
+- **FORECAST-3:** both BLOOM outlets sell with guest choices (2,075 and 1,391 choice lines), and none
+  of those ingredients reach the buying list.
+- **FORECAST-4 is bigger than filed.** Three clients run the rain setting at 50%, not 85%, so a wet
+  spell leaves the buying list about 37% short, not 11%. It is kept at P2: no rain is forecast now.
+- **ACCESS-5 is a trap.** The price row has no IMS key today, so nothing is under-invoiced. But the
+  next Plan Pricing save with the IMS boxes blank stores an empty IMS price. Billing-export would
+  then send IMS at NPR 0: NPR 3,500 a month per client, and CASA is the only real one.
+
+**No live case yet:** ACCESS-1/2/3/4, GROUP-2/3/5/6/7/9/12, PNL-2/3/5/7/8/9/11, every ASSETS
+finding, FORECAST-1, -6 and -7, OWNER-REPORT-1/2/5/9, OWNER-DASHBOARD-3/5, GAPS-2/5/6.
+
+- **The tax P1s:** the only posted tax schedule is CASA's FY 83/84, posted with every pool at 0.
+- **FORECAST-1:** no client has POS on together with an IMS supervisor or manager login. CASA has two
+  such logins, POS off, and so only risks losing the holiday days.
+
+**Found while checking, not yet filed as findings:**
+
+- The two BLOOM demo outlets are not marked as trials and have paid-through dates, so they count in
+  MRR and the billing export marks them billable.
+- The live Suite CHECK still admits 'starter' and 'growth', which DATABASE-9 already notes.
+- All 17 asset codes are `FA-001`… while the trigger issues `AST-`, so the next asset added in the app
+  starts a parallel series (extends DATABASE-9).
+- The schedule's asset link is NO ACTION live, a third column that can block a delete (extends
+  ASSETS-11).
+- CASA has two posted book runs with no schedule lines and no assets left (GAPS-12).
+- The audit log starts on 2026-08-30 and holds no asset rows.
+- Logged-in users run with an 8-second statement timeout, so a push that takes longer is rolled back
+  (softens GROUP-10).
 
 ## S848.3 Merged duplicates and carry-overs
 

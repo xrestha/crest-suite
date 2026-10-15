@@ -18,7 +18,7 @@ Checked and sound, so the next review can skip them: SuiteGate's rule is exactly
 - Evidence: as quoted.
 - Status: KNOWN (IMS_TODO.md:202, "Still open after stage 3": "`get_group_summary` … still values a PAN outlet's purchases ex-VAT"; repeated in CHANGELOG S754-S803:2157) — adds the false guide claim and the untipped column.
 - Fix: Migration: yes — put `get_group_summary.net_purchases` on the cost basis as 20260929120000 did for `get_group_pnl`. Until then, correct the guide line ("ex-VAT for every outlet; a PAN-bill outlet's own dashboard adds the VAT it cannot claim") and add a Net Purchases Tip naming the basis.
-- Confidence: confirmed by reading code + migrations (not checked live).
+- Confidence: confirmed by reading code + migrations (not checked live); live 2026-10-15: the live `get_group_summary` still has no `vat_is_cost` (the live `get_group_pnl` has it), but no grouped outlet issues PAN bills today (both BLOOM outlets are VAT-registered), so no console figure is wrong yet.
 - Verified: re-read the guide line, the 20261010170000 body, every later migration naming `get_group_summary` (only S836's covers patch), the Owner Dashboard's purchase maths and the IMS_TODO entry; arithmetic checked. CONFIRMED with corrections, P3 kept. Line references corrected; noted the S836 patch leaves the purchase basis unchanged.
 
 ### DOCS-3 [P3] The Suite guide, two rules files and two AuthContext comments still say no client has an outlet group; the BLOOM CAFE group has existed since at least S789 (was DOCS-10)
@@ -27,7 +27,7 @@ Checked and sound, so the next review can skip them: SuiteGate's rule is exactly
 - Evidence: as quoted.
 - Status: NEW
 - Fix: reword to dated history ("until S789 no client had a group; the BLOOM CAFE test/demo group is the first") and drop the present tense in all five places; keep the S617 lesson in multi-outlet.md, which is about what happens to a feature with no users.
-- Confidence: confirmed by reading code and the changelog (not checked live: whether any paying client has a `group_id`).
+- Confidence: confirmed by reading code and the changelog (not checked live: whether any paying client has a `group_id`); live 2026-10-15: there is one group, the BLOOM CAFE / BLOOM CAFE - PKR demo pair (S810), and no other client has a `group_id`; the group now holds 50 linked items (all of PKR's, from the S810 seed).
 - Verified: re-read the five sites and the S789, S798, S800 and S810 changelog entries. CONFIRMED with corrections, P3 kept. The group predates S810: S789 records it and S810 only renamed it. Dropped `suiteGuideData.js:211` from the finding: its "no client had a linked item on 2026-10-02" is dated and was true (S800); the S838/S840 pushes at Bloom were rolled-back probes, so whether any linked item exists now is a live check.
 
 ### DOCS-4 [P3] The Suite guide's schema-version list says Regenerate Snapshot moves an old month "onto version 6" and skips seven of the versions since, including the PAN-bill VAT change (was DOCS-11)
@@ -112,7 +112,7 @@ These raw DOCS findings describe the same defect another area already filed. Eac
 
 ### DOCS-M4 Demand Forecast Help says the buying list ignores the shelf (was DOCS-5)
 - Status: KNOWN (FORECAST-9, merged there).
-- Carry over: the same IMS-guide section still describes "migration not yet applied" fallbacks: `imsGuideData.js:899` (writes without `run_id` "without the column") and `:902` (`sample_count` "need migration 20260908120000"); both migrations are in the repo, so the text is dead if they are live (live check below).
+- Carry over: the same IMS-guide section still describes "migration not yet applied" fallbacks: `imsGuideData.js:899` (writes without `run_id` "without the column") and `:902` (`sample_count` "need migration 20260908120000"); both migrations are in the repo, so the text is dead if they are live (live check below; live 2026-10-15: `run_id`, `sample_count` and `pos_sample_count` all exist, so both lines are dead text).
 
 ### DOCS-M5 "Suite is live" documented as one date rule; the code has three (was DOCS-7)
 - Status: KNOWN (ACCESS-4, merged there).
@@ -142,10 +142,22 @@ These raw DOCS findings describe the same defect another area already filed. Eac
 
 None outright. Parts of raw findings dropped in verification: DOCS-11's claim that the admin-panel clause of `suiteGuideData.js:37` and `access-control.md:31` is dead (the desktop bar renders it, `Layout.js:2075-2078`); DOCS-10's citation of `suiteGuideData.js:211` (a dated, accurate statement).
 
-## Live checks pending
-- `SELECT id, name, group_id, suite_plan, is_trial FROM clients WHERE group_id IS NOT NULL ORDER BY group_id;` (DOCS-3: is Bloom the only group, and is any paying client grouped?)
-- `SELECT count(*) FROM items WHERE master_id IS NOT NULL;` (DOCS-3: whether `suiteGuideData.js:211`'s "no linked item" still holds)
-- `SELECT c.id, c.name FROM clients c JOIN settings s ON s.client_id = c.id WHERE c.group_id IS NOT NULL AND s.is_vat_registered IS FALSE;` (DOCS-2: grouped PAN-bill outlets affected today)
-- `SELECT position('vat_is_cost' IN prosrc) > 0 AS cost_basis FROM pg_proc WHERE proname = 'get_group_summary';` (DOCS-2: live body still ex-VAT)
-- `SELECT column_name FROM information_schema.columns WHERE table_name = 'demand_forecast_daily' AND column_name IN ('sample_count', 'pos_sample_count', 'run_id');` (DOCS-M4, for FORECAST-9: whether the IMS guide's "migration not yet applied" fallbacks are dead text)
+## Live checks (run 2026-10-15)
+- DOCS-3 (groups): one group only (`4a0a6b29…`), holding BLOOM CAFE and BLOOM CAFE - PKR, both `is_trial` false with Suite on. That pair is the S810 prospect demo built on the BLOOM test account, so no real customer has a `group_id`.
+  `SELECT id, name, group_id, suite_plan, is_trial FROM public.clients WHERE group_id IS NOT NULL ORDER BY group_id;`
+- DOCS-3 (linked items): 50. Every one of BLOOM CAFE - PKR's 50 items carries a `master_id`, each pointing at a distinct BLOOM CAFE item; BLOOM CAFE's own 50 items are unlinked. On 2026-10-02 (S800) the pair had 12 and 0 items. The rows carry a seeded `created_at` (2026-07-14 and 2026-07-15, 04:15) and no `items` audit rows, which matches the S810 demo seed (whose system audit rows were removed). So `suiteGuideData.js:211`'s dated "no client had a linked item on 2026-10-02" stays true for its date, and the Item Prices panel now has linked data at the demo group.
+  `SELECT count(*) FROM public.items WHERE master_id IS NOT NULL;`
+  `SELECT c.name, count(i.id) AS linked_items, min(i.created_at)::date AS first_created, max(i.created_at)::date AS last_created FROM public.items i JOIN public.clients c ON c.id = i.client_id WHERE i.master_id IS NOT NULL GROUP BY c.name;`
+  `SELECT mc.name AS master_client, count(*) AS linked, count(DISTINCT i.master_id) AS distinct_masters FROM public.items i JOIN public.items m ON m.id = i.master_id JOIN public.clients mc ON mc.id = m.client_id WHERE i.master_id IS NOT NULL GROUP BY mc.name;`
+  `SELECT c.name, count(*) AS items, count(*) FILTER (WHERE i.master_id IS NOT NULL) AS linked FROM public.items i JOIN public.clients c ON c.id = i.client_id WHERE c.group_id IS NOT NULL GROUP BY c.name;`
+  `SELECT action, count(*) AS rows, min(created_at)::date AS first_at, max(created_at)::date AS last_at FROM public.audit_logs WHERE table_name = 'items' AND new_data->>'master_id' IS NOT NULL AND (old_data IS NULL OR old_data->>'master_id' IS DISTINCT FROM new_data->>'master_id') GROUP BY action;`
+  `SELECT c.name, a.action, count(*) AS rows, min(a.created_at)::date AS first_at, max(a.created_at)::date AS last_at FROM public.audit_logs a JOIN public.clients c ON c.id = a.client_id WHERE a.table_name = 'items' AND c.group_id IS NOT NULL GROUP BY c.name, a.action ORDER BY 1, 2;`
+  `SELECT c.name, min(i.created_at) AS first_created, max(i.created_at) AS last_created FROM public.items i JOIN public.clients c ON c.id = i.client_id WHERE c.group_id IS NOT NULL GROUP BY c.name;`
+- DOCS-2 (grouped PAN-bill outlets): none. Both grouped outlets have `is_vat_registered = true`.
+  `SELECT c.id, c.name FROM public.clients c JOIN public.settings s ON s.client_id = c.id WHERE c.group_id IS NOT NULL AND s.is_vat_registered IS FALSE;`
+  `SELECT c.name, s.is_vat_registered FROM public.clients c LEFT JOIN public.settings s ON s.client_id = c.id WHERE c.group_id IS NOT NULL;`
+- DOCS-2 (live body): the live `get_group_summary` has no `vat_is_cost`, so it is still ex-VAT; the live `get_group_pnl` has it.
+  `SELECT proname, pg_get_function_identity_arguments(oid) AS args, position('vat_is_cost' IN prosrc) > 0 AS cost_basis FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('get_group_summary', 'get_group_pnl');`
+- DOCS-M4, for FORECAST-9: `run_id`, `sample_count` and `pos_sample_count` all exist on `demand_forecast_daily`, so the IMS guide's "migration not yet applied" fallbacks (`imsGuideData.js:899`, `:902`) describe a state the live database is not in: dead text.
+  `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'demand_forecast_daily' AND column_name IN ('sample_count', 'pos_sample_count', 'run_id');`
 - Removed: the `monthly_owner_reports` policy/grant check (settled from migrations: the policies in 20260721010000 and the grant in 20260721030000 are never changed later, including by 20261012150000_s821), the six `feature_flags` columns (settled: baseline schema plus five column migrations), and the undated-Suite and per-page-override client lists (ACCESS's live checks already carry both).

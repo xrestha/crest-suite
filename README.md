@@ -79,7 +79,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 | [`IMS_TODO.md`](IMS_TODO.md) | The S756 IMS re-analysis: the owner's 28 decisions and the fix list by stage, with what is still open. |
 | [`POS_TODO.md`](POS_TODO.md) | POS open items. Shipping something listed there closes the entry in the same commit. |
 | [`POS_DECISIONS.md`](POS_DECISIONS.md) | POS shipped history and everything decided *against*, rationale intact. Read before proposing POS work. |
-| [`SUITE_TODO.md`](SUITE_TODO.md) | Crest Suite (the owner layer) open items: the S848 re-analysis index, the owner decisions SU1–SU23 and the live checks still to run. Evidence per ID in `docs/suite-review-s848/`. |
+| [`SUITE_TODO.md`](SUITE_TODO.md) | Crest Suite (the owner layer) open items: the S848 re-analysis index, the owner decisions SU1–SU23 and what the live checks found. Evidence per ID in `docs/suite-review-s848/`. |
 | [`CHANGELOG/`](CHANGELOG/) | The session log, S023 to now, split by S-range. [`CHANGELOG/README.md`](CHANGELOG/README.md) is the index and holds the convention for adding an entry. |
 | [`DOCS-REMEDIATION.md`](DOCS-REMEDIATION.md) | The open work order this layout came from. T1–T14, with mechanical acceptance criteria. |
 
