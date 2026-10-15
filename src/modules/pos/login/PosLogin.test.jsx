@@ -19,6 +19,9 @@ const STAFF = [
 // The staff picker's answer for either picker; the guest-order poll's answer is set per test (S809 3c).
 // Plain functions, not jest.fn: CRA resets mock implementations before every test.
 let mockGuestAnswer = { data: [], error: null }
+// The staff picker's own answer when a test sets one (S841): a function, so a test can hand back a
+// promise that never settles, or one that rejects. Null answers with STAFF.
+let mockStaffCall = null
 const mockRpcCalls = []
 // pos-staff-login's answer and setSession's, set per test (S809 3h).
 let mockSignInAnswer = { data: null, error: null }
@@ -29,6 +32,7 @@ jest.mock('../../../supabaseClient', () => ({
     rpc: (name, args) => {
       mockRpcCalls.push([name, args])
       if (name === 'get_pos_device_guest_alerts') return Promise.resolve(mockGuestAnswer)
+      if (mockStaffCall) return mockStaffCall(args)
       return Promise.resolve({ data: [
         { id: 'p-ram', full_name: 'Ram', pos_job_title: 'Waiter' },
         { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
@@ -51,6 +55,7 @@ const renderPin = () => render(<MemoryRouter><PosLogin /></MemoryRouter>)
 beforeEach(() => {
   mockAuth = { session: null, ready: true, signOut: jest.fn(() => Promise.resolve(true)) }
   mockGuestAnswer = { data: [], error: null }
+  mockStaffCall = null
   mockRpcCalls.length = 0
   mockSignInAnswer = { data: null, error: null }
   mockSetSessionAnswer = { data: {}, error: null }
@@ -234,5 +239,61 @@ describe('signing in', () => {
     renderAt()
     await typePinAndLogin()
     expect((await screen.findByRole('alert')).textContent).toBe('Incorrect PIN. Try again.')
+  })
+})
+
+// S841: the staff list is every till's resting screen. A request that stalled, or rejected, left
+// "Loading…" up for good, with no Try again and no way back but a reload.
+describe('a staff list that does not come', () => {
+  const UNREACHABLE = "Couldn't reach the server. Check this device's connection and try again."
+  afterEach(() => jest.useRealTimers())
+
+  it('gives up after 20 seconds with no answer, says why, and Try again asks once more', async () => {
+    jest.useFakeTimers()
+    mockStaffCall = () => new Promise(() => {})
+    renderPin()
+    expect(screen.getByText('Loading…')).toBeTruthy()
+    await act(async () => { jest.advanceTimersByTime(19000) })
+    expect(screen.getByText('Loading…')).toBeTruthy()
+    await act(async () => { jest.advanceTimersByTime(1000) })
+    expect((await screen.findByText(UNREACHABLE)).getAttribute('role')).toBe('alert')
+    expect(screen.queryByText('Loading…')).toBeNull()
+
+    mockStaffCall = null
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: /Ram/ })).toBeTruthy()
+    expect(screen.queryByText(UNREACHABLE)).toBeNull()
+  })
+
+  it('a request that fails outright says the same, with Try again', async () => {
+    mockStaffCall = () => Promise.reject(new TypeError('Failed to fetch'))
+    renderPin()
+    expect((await screen.findByText(UNREACHABLE)).getAttribute('role')).toBe('alert')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.queryByText('Loading…')).toBeNull()
+  })
+
+  it('a refused device key still says the till needs activating again', async () => {
+    mockStaffCall = () => Promise.resolve({ data: null, error: { message: 'pos_device_not_active', code: '28000' } })
+    renderPin()
+    expect(await screen.findByText('This till needs to be activated again by the Owner')).toBeTruthy()
+    expect(screen.queryByText(UNREACHABLE)).toBeNull()
+  })
+
+  it('an older answer never lands over a newer one', async () => {
+    let answerFirst
+    mockStaffCall = args => (args.p_device_id === 'd-1'
+      ? new Promise(resolve => { answerFirst = resolve })
+      : Promise.resolve({ data: [{ id: 'p-gita', full_name: 'Gita', pos_job_title: 'Cook' }], error: null }))
+    const { rerender } = renderPin()
+    await waitFor(() => expect(answerFirst).toBeDefined())
+
+    localStorage.setItem('pos_device_id', 'd-2')
+    rerender(<MemoryRouter><PosLogin /></MemoryRouter>)
+    expect(await screen.findByRole('button', { name: /Gita/ })).toBeTruthy()
+
+    await act(async () => { answerFirst({ data: STAFF, error: null }) })
+    expect(screen.queryByRole('button', { name: /Ram/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Gita/ })).toBeTruthy()
   })
 })

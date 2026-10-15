@@ -69,16 +69,31 @@ export default function PosLogin() {
     // copy — a till mid-service was told "No staff accounts found. Ask your manager to add staff",
     // which sends the manager to the wrong page to fix a problem that isn't there. Self-Service's
     // equivalent screen already separated these two; this is that fix ported back.
-    const request = supabase.rpc('get_pos_device_staff', { p_client_id: clientId, p_device_id: deviceId, p_device_secret: deviceSecret })
-    request.then(({ data, error }) => {
+    // S841: bounded like the sign-in below, because a call that stalls before it reaches fetch left
+    // "Loading…" up with no Try again, and a rejection left it up for good. A newer load (Try again,
+    // a switched-off login, another device key) cancels this one, so an older answer cannot land
+    // over it.
+    let cancelled = false
+    const unreachable = () => {
+      setLoadError("Couldn't reach the server. Check this device's connection and try again.")
+      setLoading(false)
+    }
+    withTimeout(
+      supabase.rpc('get_pos_device_staff', { p_client_id: clientId, p_device_id: deviceId, p_device_secret: deviceSecret }),
+      20000, 'Loading staff',
+    ).then(({ data, error }) => {
+      if (cancelled) return
       // get_pos_device_staff RAISES on a dead key (rather than returning no rows) precisely so this
       // screen can say "activate again" instead of "no staff accounts found", which would send the
       // manager to POS Staff to fix a problem that is not there.
-      if (error && String(error.message || '').includes('pos_device_not_active')) setDeviceDead(true)
-      else if (error) setLoadError("Couldn't reach the server. Check this device's connection and try again.")
-      else setStaff(data || [])
-      setLoading(false)
+      if (error && String(error.message || '').includes('pos_device_not_active')) { setDeviceDead(true); setLoading(false) }
+      else if (error) unreachable()
+      else { setStaff(data || []); setLoading(false) }
+    }, () => {
+      // withTimeout's TimeoutError, or the request rejecting: the connection, not the device key.
+      if (!cancelled) unreachable()
     })
+    return () => { cancelled = true }
   }, [clientId, deviceId, deviceSecret, retryToken])
 
   // ── Nobody stays signed in behind the PIN screen (S809 ACCESS-1) ──

@@ -15,11 +15,12 @@ export default function StationPrintAlerts({ alerts, notice, busyId, onPrintHere
             <strong>{stationWord(a.job.station)} {a.job.kind === 'void' ? 'VOID slip' : a.job.kind === 'move' ? 'move slip' : 'ticket'}{a.job.label ? ` · ${a.job.label}` : ''}</strong>
             {' '}has not printed. <span className="station-print-alert__why">{a.reason}</span>
           </div>
+          {/* S841: till-hit--row gives both the 44px touch floor; a mouse keeps the btn-sm size. */}
           <div className="station-print-alert__actions">
-            <button type="button" className="btn btn-primary btn-sm" disabled={busyId != null} onClick={() => onPrintHere(a.job.id)}>
+            <button type="button" className="btn btn-primary btn-sm till-hit--row" disabled={busyId != null} onClick={() => onPrintHere(a.job.id)}>
               {busyId === a.job.id ? 'Checking…' : 'Print here'}
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" disabled={busyId === a.job.id} onClick={() => onDismiss(a.job.id)}
+            <button type="button" className="btn btn-ghost btn-sm till-hit--row" disabled={busyId === a.job.id} onClick={() => onDismiss(a.job.id)}
               aria-label={`Dismiss — the ${stationWord(a.job.station).toLowerCase()} has this ticket`}>
               Dismiss
             </button>

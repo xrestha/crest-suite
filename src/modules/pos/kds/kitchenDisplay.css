@@ -1,0 +1,8 @@
+/* The Kitchen Display's station chips (S841). A wall tablet is read from arm's length, so the chips
+   take the till's 15px label instead of .tab-btn's 12px. The inline fontSize the row carried before
+   never reached them: .tab-btn sets its own size on each chip. Two classes, so this wins over
+   .tab-btn whatever order the two stylesheets load in. The 44px touch floor and the focus pair come
+   from .till-hit--row (Layout.css). */
+.tab-btn.kds-chip {
+  font-size: 15px;
+}

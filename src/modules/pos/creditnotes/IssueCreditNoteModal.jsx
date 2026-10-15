@@ -188,9 +188,16 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     return () => { cancelled = true }
   }, [clientId, order.id, scopedFrom])
 
+  // S841: while Issue is running (the shift check, the insert, the print and the Inventory read; every
+  // await before setSubmitting(false)), Escape, the × and a backdrop tap do nothing, as Cancel is
+  // already disabled. Closing then unmounted the dialog: the note still landed and printed, but the
+  // "did not print / not in Inventory" notice was lost and onIssued never ran, so the bill kept a live
+  // Credit Note button.
+  const closeUnlessIssuing = submitting ? () => {} : onClose
+
   if (!hasPosAccess('manager')) {
     return (
-      <Modal title="Issue Credit Note" onClose={onClose} maxWidth={420}>
+      <Modal title="Issue Credit Note" onClose={closeUnlessIssuing} maxWidth={420}>
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Issuing a Credit Note requires Manager access or above.</p>
       </Modal>
     )
@@ -383,6 +390,15 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     })
   }
 
+  // S841: the dialog cannot be closed while it issues, so a throw anywhere in the sequence must still
+  // let go of it. How far it got is not known here, so this says where to look, never that nothing
+  // was issued.
+  function issueStopped(err) {
+    console.error('Issuing the credit note stopped:', err)
+    setSubmitting(false)
+    setMsg('error:Something went wrong on this screen, so it is not known whether this Credit Note was issued. Check the Credit Note Book before trying again: a note there is complete, and only its printing may be left. A second note for this bill would be refused. ' + errorLine(err))
+  }
+
   if (imsNotice) {
     // S809 2e: the refund and the points can no longer be left behind — they land with the note.
     const problems = [
@@ -413,7 +429,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   }
 
   return (
-    <Modal title="Issue Credit Note" onClose={onClose} maxWidth={520}>
+    <Modal title="Issue Credit Note" onClose={closeUnlessIssuing} maxWidth={520}>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
           Corrects {order.invoice_no != null ? invoiceLabel(order, vatReg, settings.invoice_prefix) : `Order #${order.order_no}`}. This is a formal VAT-Rules Credit Note — it reduces revenue for this fiscal month{askFood ? ', and puts the food back into stock only if you say it was not served' : ''}.
         </p>
@@ -426,7 +442,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               the amount to credit is unknown. Close this and open the bill again.
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={onClose}>Close</button>
+              <button className="btn btn-ghost" onClick={closeUnlessIssuing}>Close</button>
             </div>
           </>
         ) : (
@@ -580,7 +596,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                   <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
                   <button className="btn btn-primary"
-                    onClick={() => { issueBlocker?.focus?.(); handleConfirm() }}
+                    onClick={() => { issueBlocker?.focus?.(); void handleConfirm().catch(issueStopped) }}
                     disabled={submitting || (refundMode === 'cash' && refundShift.loading)}
                     aria-disabled={!submitting && issueBlocker ? true : undefined}>
                     {submitting ? 'Issuing…' : issueBlocker ? issueBlocker.label : 'Issue & Print'}

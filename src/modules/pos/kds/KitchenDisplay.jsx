@@ -21,6 +21,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { settleWithin } from '../../../utils/withTimeout'
 import { tapMiss } from './tapAnswer'
 import { ticketTableLabel } from './ticketStage'
+import './kitchenDisplay.css'
 
 const KDS_RELEASE_IDLE_MS = 60 * 1000
 
@@ -658,8 +659,9 @@ export default function KitchenDisplay() {
         </div>
         {!isTeamLocked && (
           // Which board is showing — a filter over one board, so aria-pressed (S776); the chips said it by colour only.
-          <FilterChips label="Station" active={station} onChange={selectStation} style={{ fontSize: 15 }}
-            options={STATIONS.map(s => ({ key: s, label: s === 'KOT' ? 'Kitchen (KOT)' : 'Bar (BOT)' }))} />
+          // S841: 15px and the 44px touch floor on each chip (kitchenDisplay.css, .till-hit--row).
+          <FilterChips label="Station" active={station} onChange={selectStation}
+            options={STATIONS.map(s => ({ key: s, label: s === 'KOT' ? 'Kitchen (KOT)' : 'Bar (BOT)', className: 'kds-chip till-hit--row' }))} />
         )}
       </div>
 
@@ -683,7 +685,7 @@ export default function KitchenDisplay() {
             <strong style={{ color: 'var(--theme-amber-text)' }}>🔇 Sound is off on this screen.</strong>{' '}
             The browser holds it until someone touches the screen, so new tickets will not ring. Tap anywhere to turn it on.
           </span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { unlockAudio(); setTimeout(() => setSoundOff(soundBlocked()), 300) }}>
+          <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => { unlockAudio(); setTimeout(() => setSoundOff(soundBlocked()), 300) }}>
             Turn sound on
           </button>
         </div>
@@ -700,7 +702,7 @@ export default function KitchenDisplay() {
           color: 'var(--theme-red-text)',
         }}>
           <span style={{ flex: 1 }}>{text}</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={dismiss}>Dismiss</button>
+          <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={dismiss}>Dismiss</button>
         </div>
       ))}
 
