@@ -21,9 +21,9 @@ import { LIVE_STATUSES, carryOverFrom } from '../reservations/reservationStatus'
 import { holdingBookingLabels } from '../reservations/reservationConflicts'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { errorText, errorLine } from '../../../shared/errorText'
+import { errorLine, isNetworkError } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { settleWithin } from '../../../utils/withTimeout'
+import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 import GuestMenuSetup from './GuestMenuSetup'
 import PosPrintersPanel from '../printing/PosPrintersPanel'
 import WeatherCityPicker from '../../dashboard/WeatherCityPicker'
@@ -44,6 +44,23 @@ const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Ma
 // refusal (pos_table_has_bills) is worded in errorText.
 const hasBillsText = name => `${name} has bills on record, so it can't be deleted. Take it out of service instead (set its Status to Inactive) — its bill history stays with it.`
 
+// S842: what a Save says afterwards. `{ ok }` is read out by the status line beside the button;
+// `{ error }` goes to ActionError (role="alert") under it, either as the page's own sentence or as
+// the error converted here, at the call site, after the sentence naming what did not change.
+const saved = text => ({ ok: text })
+const refused = text => ({ error: text })
+function notSaved(lead, err) {
+  const { text, detail } = asActionError(err, 'operator')
+  return { error: { text: `${lead} ${text}`, detail } }
+}
+// Always mounted, so the words are announced when they appear rather than arriving with the region.
+function SaveStatus({ result }) {
+  return <span role="status" style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{result?.ok || ''}</span>
+}
+
+// S842: an HSC code is one write per dish, on blur. Bounded, because the box stays disabled while it runs.
+const HSC_SAVE_MS = 15000
+
 export default function PosTableManagement() {
   const { clientId, hasPosAccess, hasWeather } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -63,7 +80,7 @@ export default function PosTableManagement() {
   const [qsOpen,   setQsOpen]   = useState(false)
   const [qs,       setQs]       = useState(QS_EMPTY)
   const [qsSaving, setQsSaving] = useState(false)
-  const [qsMsg,    setQsMsg]    = useState('')
+  const [qsMsg,    setQsMsg]    = useState(null) // S842: saved(...) | refused(...) | notSaved(...)
 
   // Add / Edit modal
   const [modal,   setModal]   = useState(false)
@@ -84,7 +101,7 @@ export default function PosTableManagement() {
   const [botCats,         setBotCats]         = useState(new Set(['Beverage']))
   const [routingLoading,  setRoutingLoading]  = useState(false)
   const [routingSaving,   setRoutingSaving]   = useState(false)
-  const [routingMsg,      setRoutingMsg]      = useState('')
+  const [routingMsg,      setRoutingMsg]      = useState(null)
   const [routingLoaded,   setRoutingLoaded]   = useState(false)
   const [routingLoadError, setRoutingLoadError] = useState(null)
 
@@ -93,7 +110,7 @@ export default function PosTableManagement() {
   const [newPreset,     setNewPreset]     = useState('')
   const [notesLoading,  setNotesLoading]  = useState(false)
   const [notesSaving,   setNotesSaving]   = useState(false)
-  const [notesMsg,      setNotesMsg]      = useState('')
+  const [notesMsg,      setNotesMsg]      = useState(null)
   const [notesLoaded,   setNotesLoaded]   = useState(false)
 
   // HSC Codes
@@ -101,7 +118,8 @@ export default function PosTableManagement() {
   const [hscLoading, setHscLoading] = useState(false)
   const [hscLoaded,  setHscLoaded]  = useState(false)
   const [hscSaving,  setHscSaving]  = useState({})   // { recipeId: bool }
-  const [hscError,   setHscError]   = useState(null) // the last HSC write that did not land
+  const [hscRowMsg,  setHscRowMsg]  = useState({})   // S842: { recipeId: saved(...) | an error }, shown under that dish
+  const [hscInputEpoch, setHscInputEpoch] = useState({}) // S842: { recipeId: n }, bumped to put a refused box back
   const [hscLoadError, setHscLoadError] = useState(null) // the item list could not be read
 
   // Discount Reasons
@@ -109,7 +127,7 @@ export default function PosTableManagement() {
   const [newDiscReason, setNewDiscReason] = useState('')
   const [discLoading,   setDiscLoading]   = useState(false)
   const [discSaving,    setDiscSaving]    = useState(false)
-  const [discMsg,       setDiscMsg]       = useState('')
+  const [discMsg,       setDiscMsg]       = useState(null)
   const [discLoaded,    setDiscLoaded]    = useState(false)
 
   // Delivery Partners — a client-editable list (platforms come and go), not a fixed
@@ -119,7 +137,7 @@ export default function PosTableManagement() {
   const [newPartnerName,  setNewPartnerName]   = useState('')
   const [deliveryLoading, setDeliveryLoading] = useState(false)
   const [deliverySaving,  setDeliverySaving]  = useState(false)
-  const [deliveryMsg,     setDeliveryMsg]     = useState('')
+  const [deliveryMsg,     setDeliveryMsg]     = useState(null)
   const [deliveryLoaded,  setDeliveryLoaded]  = useState(false)
 
   // Reservations (S677) — settings.pos_reservation_settings plus the outlet's public booking
@@ -128,7 +146,7 @@ export default function PosTableManagement() {
   const [resvMeasured, setResvMeasured] = useState(null) // turnoverByBand over the last 90 days, or null if unread
   const [resvLoading,  setResvLoading]  = useState(false)
   const [resvSaving,   setResvSaving]   = useState(false)
-  const [resvMsg,      setResvMsg]      = useState('')
+  const [resvMsg,      setResvMsg]      = useState(null)
   const [resvLoaded,   setResvLoaded]   = useState(false)
   const [resvLoadError, setResvLoadError] = useState(null)
   const [outletName,   setOutletName]   = useState('')
@@ -213,17 +231,17 @@ export default function PosTableManagement() {
   // "Table 1–10" on a floor that already had them. The Start box follows the prefix until it is typed in.
   function openQuickSetup() {
     setQs({ ...QS_EMPTY, start: nextQuickSetupStart(QS_EMPTY.prefix, tables) })
-    setQsMsg('')
+    setQsMsg(null)
     setQsOpen(true)
   }
 
   async function handleGenerate() {
     const count = parseInt(qs.count, 10) || 0
-    if (!qs.prefix.trim()) { setQsMsg('error:Prefix is required.'); return }
-    if (count < 1 || count > 50) { setQsMsg('error:Count must be 1–50.'); return }
-    if (qsClashes.length > 0) { setQsMsg('error:' + qsClashText); return }
+    if (!qs.prefix.trim()) { setQsMsg(refused('Prefix is required.')); return }
+    if (count < 1 || count > 50) { setQsMsg(refused('Count must be 1–50.')); return }
+    if (qsClashes.length > 0) { setQsMsg(refused(qsClashText)); return }
     if (!clientId) return
-    setQsSaving(true); setQsMsg('')
+    setQsSaving(true); setQsMsg(null)
     const start = parseInt(qs.start, 10) || 1
     const rows = quickSetupNames(qs).map((name, i) => ({
       name,
@@ -233,9 +251,9 @@ export default function PosTableManagement() {
     }))
     const { error } = await scopedInsert('pos_tables', rows)
     // S817 4i: it said "The quick-service setting was not saved" for a failed table insert.
-    if (error) { setQsMsg('error:No tables were created. ' + errorLine(error)); setQsSaving(false); return }
+    if (error) { setQsMsg(notSaved('No tables were created.', error)); setQsSaving(false); return }
     await load()
-    setQsMsg(`ok:Created ${count} table${count !== 1 ? 's' : ''}.`)
+    setQsMsg(saved(`Created ${count} table${count !== 1 ? 's' : ''}.`))
     setQsSaving(false)
     setQs(QS_EMPTY)
   }
@@ -514,7 +532,7 @@ export default function PosTableManagement() {
   }
 
   function toggleCat(cat, station) {
-    setRoutingMsg('')
+    setRoutingMsg(null)
     setBotCats(prev => {
       const next = new Set(prev)
       if (station === 'BOT') next.add(cat)
@@ -525,7 +543,7 @@ export default function PosTableManagement() {
 
   async function saveRouting() {
     if (!clientId) return   // guard the admin "no client selected" window: client_id:null would write the global-defaults row
-    setRoutingSaving(true); setRoutingMsg('')
+    setRoutingSaving(true); setRoutingMsg(null)
     const botArr = Array.from(botCats)
     const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
@@ -538,7 +556,7 @@ export default function PosTableManagement() {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_bot_categories: botArr }))
     }
     setRoutingSaving(false)
-    setRoutingMsg(error ? 'error:The ticket routing was not saved — kitchen and bar still print as before. ' + errorLine(error) : 'ok:Routing saved.')
+    setRoutingMsg(error ? notSaved('The ticket routing was not saved — kitchen and bar still print as before.', error) : saved('Routing saved.'))
   }
 
   // ── Quick Notes ──────────────────────────────────────────────────────────────
@@ -549,11 +567,8 @@ export default function PosTableManagement() {
   // discount reasons or delivery commission rates with the stub, and said "Saved." (S682). On a
   // failed read the tab now stays "not loaded" — Save is disabled — and says so; re-opening the
   // tab retries.
-  const loadFailed = what => error =>
-    `error:Could not load ${what} — Save is disabled until it loads. Re-open this tab to retry. ` + errorText(error, 'operator')
-  // The same sentence as an ActionError object (S754), for the tabs whose failed read replaces the
-  // tab body rather than riding beside Save — an empty-state card there would be a claim about the
-  // client ("no categories"), and the object form keeps the technical detail as fine print.
+  // As an ActionError object (S754), so the technical detail stays as fine print. Since S842 the
+  // three list tabs show it under their disabled Save too, as `{ error: loadFailedError(...) }`.
   const loadFailedError = (what, error) => {
     const { text, detail } = asActionError(error)
     return { text: `Could not load ${what} — Save is disabled until it loads. Re-open this tab to retry. ${text}`, detail }
@@ -563,9 +578,9 @@ export default function PosTableManagement() {
     setNotesLoading(true)
     const { data, error } = await supabase.from('settings').select('pos_note_presets').eq('client_id', clientId).maybeSingle()
     setNotesLoading(false)
-    if (error) { setNotesMsg(loadFailed('the quick notes')(error)); return }
+    if (error) { setNotesMsg({ error: loadFailedError('the quick notes', error) }); return }
     setNotePresets(data?.pos_note_presets || [])
-    setNotesMsg('')
+    setNotesMsg(null)
     setNotesLoaded(true)
   }
 
@@ -579,17 +594,17 @@ export default function PosTableManagement() {
     if (!v || notePresets.includes(v)) { setNewPreset(''); return }
     setNotePresets(prev => [...prev, v])
     setNewPreset('')
-    setNotesMsg('')
+    setNotesMsg(null)
   }
 
   function removePreset(p) {
     setNotePresets(prev => prev.filter(x => x !== p))
-    setNotesMsg('')
+    setNotesMsg(null)
   }
 
   async function saveNotePresets() {
     if (!clientId) return
-    setNotesSaving(true); setNotesMsg('')
+    setNotesSaving(true); setNotesMsg(null)
     const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
     let error = existErr || null
@@ -601,13 +616,13 @@ export default function PosTableManagement() {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_note_presets: notePresets }))
     }
     setNotesSaving(false)
-    setNotesMsg(error ? 'error:The quick notes were not saved — the till still offers the previous list. ' + errorLine(error) : 'ok:Quick notes saved.')
+    setNotesMsg(error ? notSaved('The quick notes were not saved — the till still offers the previous list.', error) : saved('Quick notes saved.'))
   }
 
   // ── HSC Codes ────────────────────────────────────────────────────────────────
 
   async function loadHscItems() {
-    setHscLoading(true); setHscLoadError(null)
+    setHscLoading(true); setHscLoadError(null); setHscRowMsg({})
     const { data, error } = await scopedFrom('recipes', 'id, name, category, hsc_code')
       .eq('is_active', true).eq('pos_enabled', true)
       // `.or(...)`, not `.neq` — category is nullable and a server-side .neq drops NULL rows,
@@ -634,17 +649,31 @@ export default function PosTableManagement() {
   async function saveHsc(recipe, value) {
     const trimmed = value.trim()
     if (trimmed === (recipe.hsc_code || '')) return
-    setHscSaving(s => ({ ...s, [recipe.id]: true })); setHscError(null)
+    setHscSaving(s => ({ ...s, [recipe.id]: true }))
+    setHscRowMsg(m => ({ ...m, [recipe.id]: null }))
     // The HSC code prints on the IRD Tax Invoice, so an optimistic write here is the wrong kind
     // of optimism: a refused update used to show the new code as saved while every bill kept
     // printing the old one (S682). State only follows a write that landed.
-    const { error } = await scopedUpdate('recipes', { hsc_code: trimmed || null }).eq('id', recipe.id)
-    if (error) {
-      const { text, detail } = asActionError(error)
-      setHscError({ text: `The HSC code for ${recipe.name} was not saved — bills still print "${recipe.hsc_code || 'none'}". ${text}`, detail })
+    // S842: a refusal also puts the box back to the stored code (it used to keep the refused one,
+    // looking saved), the message sits under the dish's own row, and a write that lands says Saved.
+    // `.select('id')`, because a write RLS filters out answers no error and no row.
+    const { data, error } = await settleWithin(
+      scopedUpdate('recipes', { hsc_code: trimmed || null }).eq('id', recipe.id).select('id'), HSC_SAVE_MS, 'Saving the HSC code')
+    const kept = `bills still print "${recipe.hsc_code || 'none'}"`
+    let result
+    if (error && (isTimeout(error) || isNetworkError(error))) {
+      // No answer: the write may still land, so the box keeps what was typed and nothing says "not saved".
+      result = { error: { text: `No answer came back, so it is not known whether the HSC code for ${recipe.name} was saved. Re-open this tab to see the code bills print.`, detail: asActionError(error).detail } }
+    } else if (error || !data?.length) {
+      result = error
+        ? notSaved(`The HSC code for ${recipe.name} was not saved — ${kept}.`, error)
+        : refused(`The HSC code for ${recipe.name} was not saved — ${kept}. This login may not change it, or the dish was removed on another device. Reload the page to check.`)
+      setHscInputEpoch(e => ({ ...e, [recipe.id]: (e[recipe.id] || 0) + 1 }))   // re-key the box back to the stored code
     } else {
       setHscItems(items => items.map(r => r.id === recipe.id ? { ...r, hsc_code: trimmed || null } : r))
+      result = saved('Saved')
     }
+    setHscRowMsg(m => ({ ...m, [recipe.id]: result }))
     setHscSaving(s => ({ ...s, [recipe.id]: false }))
   }
 
@@ -654,9 +683,9 @@ export default function PosTableManagement() {
     setDiscLoading(true)
     const { data, error } = await supabase.from('settings').select('pos_discount_reasons').eq('client_id', clientId).maybeSingle()
     setDiscLoading(false)
-    if (error) { setDiscMsg(loadFailed('the discount reasons')(error)); return }
+    if (error) { setDiscMsg({ error: loadFailedError('the discount reasons', error) }); return }
     setDiscReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
-    setDiscMsg('')
+    setDiscMsg(null)
     setDiscLoaded(true)
   }
 
@@ -670,17 +699,17 @@ export default function PosTableManagement() {
     if (!v || discReasons.includes(v)) { setNewDiscReason(''); return }
     setDiscReasons(prev => [...prev, v])
     setNewDiscReason('')
-    setDiscMsg('')
+    setDiscMsg(null)
   }
 
   function removeDiscReason(r) {
     setDiscReasons(prev => prev.filter(x => x !== r))
-    setDiscMsg('')
+    setDiscMsg(null)
   }
 
   async function saveDiscReasons() {
     if (!clientId) return
-    setDiscSaving(true); setDiscMsg('')
+    setDiscSaving(true); setDiscMsg(null)
     const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
     let error = existErr || null
@@ -692,7 +721,7 @@ export default function PosTableManagement() {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_discount_reasons: discReasons }))
     }
     setDiscSaving(false)
-    setDiscMsg(error ? 'error:The discount reasons were not saved — the till still offers the previous list. ' + errorLine(error) : 'ok:Discount reasons saved.')
+    setDiscMsg(error ? notSaved('The discount reasons were not saved — the till still offers the previous list.', error) : saved('Discount reasons saved.'))
   }
 
   // ── Delivery Partners ────────────────────────────────────────────────────────
@@ -708,12 +737,12 @@ export default function PosTableManagement() {
     const { data, error } = await supabase.from('settings')
       .select('pos_delivery_partners').eq('client_id', clientId).maybeSingle()
     setDeliveryLoading(false)
-    if (error) { setDeliveryMsg(loadFailed('the delivery partners')(error)); return }
+    if (error) { setDeliveryMsg({ error: loadFailedError('the delivery partners', error) }); return }
     setPartners(data?.pos_delivery_partners ?? [
       { name: 'Foodmandu', commission_pct: '', phone: '9800000001' },
       { name: 'Pathao',    commission_pct: '', phone: '9800000002' },
     ])
-    setDeliveryMsg('')
+    setDeliveryMsg(null)
     setDeliveryLoaded(true)
   }
 
@@ -727,22 +756,22 @@ export default function PosTableManagement() {
     if (!v || partners.some(p => p.name.toLowerCase() === v.toLowerCase())) { setNewPartnerName(''); return }
     setPartners(prev => [...prev, { name: v, commission_pct: '', phone: '' }])
     setNewPartnerName('')
-    setDeliveryMsg('')
+    setDeliveryMsg(null)
   }
 
   function updatePartner(idx, field, value) {
     setPartners(prev => prev.map((p, i) => i === idx ? { ...p, [field]: value } : p))
-    setDeliveryMsg('')
+    setDeliveryMsg(null)
   }
 
   function removePartner(idx) {
     setPartners(prev => prev.filter((_, i) => i !== idx))
-    setDeliveryMsg('')
+    setDeliveryMsg(null)
   }
 
   async function saveDeliverySettings() {
     if (!clientId) return
-    setDeliverySaving(true); setDeliveryMsg('')
+    setDeliverySaving(true); setDeliveryMsg(null)
     const cleaned = partners
       .map(p => ({
         name: (p.name || '').trim(),
@@ -763,7 +792,7 @@ export default function PosTableManagement() {
     }
     setPartners(cleaned)
     setDeliverySaving(false)
-    setDeliveryMsg(error ? 'error:The delivery partners were not saved — settling a platform bill still uses the previous commission rates. ' + errorLine(error) : 'ok:Delivery partner settings saved.')
+    setDeliveryMsg(error ? notSaved('The delivery partners were not saved — settling a platform bill still uses the previous commission rates.', error) : saved('Delivery partner settings saved.'))
   }
 
   // ── Reservations ──────────────────────────────────────────────────────────────
@@ -774,7 +803,7 @@ export default function PosTableManagement() {
   function bookingUrl() { return `${window.location.origin}/pos/book/${clientId}` }
 
   async function loadReservationSettings() {
-    setResvLoading(true); setResvMsg(''); setResvLoadError(null)
+    setResvLoading(true); setResvMsg(null); setResvLoadError(null)
     const since = new Date(Date.now() - 90 * 86400000).toISOString()
     const [{ data: s, error: sErr }, { data: client }, { data: orders, error: oErr }] = await Promise.all([
       supabase.from('settings').select('pos_reservation_settings').eq('client_id', clientId).maybeSingle(),
@@ -815,8 +844,8 @@ export default function PosTableManagement() {
     else setMainTab(key)
   }
 
-  function setResvField(key, value) { setResv(prev => ({ ...prev, [key]: value })); setResvMsg('') }
-  function setResvBand(key, value)  { setResv(prev => ({ ...prev, duration_by_band: { ...prev.duration_by_band, [key]: value } })); setResvMsg('') }
+  function setResvField(key, value) { setResv(prev => ({ ...prev, [key]: value })); setResvMsg(null) }
+  function setResvBand(key, value)  { setResv(prev => ({ ...prev, duration_by_band: { ...prev.duration_by_band, [key]: value } })); setResvMsg(null) }
   function toggleResvWeekday(key, n) {
     setResv(prev => {
       const has = (prev[key] || []).includes(n)
@@ -825,17 +854,17 @@ export default function PosTableManagement() {
       const other = key === 'closed_weekdays' ? 'walk_in_weekdays' : 'closed_weekdays'
       return { ...prev, [key]: next, [other]: (prev[other] || []).filter(x => x !== n || has) }
     })
-    setResvMsg('')
+    setResvMsg(null)
   }
   function addClosedDate() {
     if (!newClosedDate) return
     setResv(prev => ({ ...prev, closed_dates: [...new Set([...(prev.closed_dates || []), newClosedDate])].sort() }))
     setNewClosedDate('')
-    setResvMsg('')
+    setResvMsg(null)
   }
   function removeClosedDate(iso) {
     setResv(prev => ({ ...prev, closed_dates: (prev.closed_dates || []).filter(d => d !== iso) }))
-    setResvMsg('')
+    setResvMsg(null)
   }
   const closedDateLabel = iso => {
     const bs = adToBsSafe(new Date(iso + 'T00:00:00'))
@@ -844,7 +873,7 @@ export default function PosTableManagement() {
 
   async function saveReservationSettings() {
     if (!clientId) return
-    setResvSaving(true); setResvMsg('')
+    setResvSaving(true); setResvMsg(null)
     const cleaned = normalizeReservationSettings(resv)
     const payload = { pos_reservation_settings: cleaned }
     const { data: existing, error: existErr } = await supabase
@@ -859,12 +888,12 @@ export default function PosTableManagement() {
     }
     setResv(cleaned)
     setResvSaving(false)
-    setResvMsg(error ? 'error:The reservation settings were not saved — the public booking page still uses the previous hours and closures. ' + errorLine(error) : 'ok:Reservation settings saved.')
+    setResvMsg(error ? notSaved('The reservation settings were not saved — the public booking page still uses the previous hours and closures.', error) : saved('Reservation settings saved.'))
   }
 
   async function copyBookingUrl() {
-    try { await navigator.clipboard.writeText(bookingUrl()); setResvMsg('ok:Booking link copied.') }
-    catch { setResvMsg('error:Could not copy — select the link below and copy it by hand.') }
+    try { await navigator.clipboard.writeText(bookingUrl()); setResvMsg(saved('Booking link copied.')) }
+    catch { setResvMsg(refused('Could not copy — select the link below and copy it by hand.')) }
   }
 
   function printBookingQr() {
@@ -1027,12 +1056,9 @@ export default function PosTableManagement() {
                 <button className="btn btn-primary" onClick={saveRouting} disabled={routingSaving || !routingLoaded}>
                   {routingSaving ? 'Saving…' : 'Save Routing'}
                 </button>
-                {routingMsg && (
-                  <span style={{ fontSize: 12, color: routingMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                    {routingMsg.replace(/^(error|ok):/, '')}
-                  </span>
-                )}
+                <SaveStatus result={routingMsg} />
               </div>
+              <ActionError error={routingMsg?.error} />
             </>
           )}
         </div>
@@ -1071,16 +1097,15 @@ export default function PosTableManagement() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                   {notePresets.map(p => (
                     <span key={p} style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '6px 8px 6px 12px', borderRadius: 'var(--radius-lg)', fontSize: 12,
+                      display: 'flex', alignItems: 'center', gap: 2,
+                      padding: '2px 2px 2px 12px', borderRadius: 'var(--radius-lg)', fontSize: 12,
                       background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
                       color: 'var(--theme-text1)',
                     }}>
                       {p}
-                      <button
-                        onClick={() => removePreset(p)}
-                        title="Remove"
-                        style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+                      {/* S842: a named, classed control. It was a bare "×" read out as "times", ~9px to tap. */}
+                      <button type="button" className="btn btn-ghost btn-icon btn-icon--delete"
+                        onClick={() => removePreset(p)} aria-label={`Remove ${p}`} title={`Remove ${p}`}
                       >×</button>
                     </span>
                   ))}
@@ -1091,12 +1116,9 @@ export default function PosTableManagement() {
                 <button className="btn btn-primary" onClick={saveNotePresets} disabled={notesSaving || !notesLoaded}>
                   {notesSaving ? 'Saving…' : 'Save Quick Notes'}
                 </button>
-                {notesMsg && (
-                  <span style={{ fontSize: 12, color: notesMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                    {notesMsg.replace(/^(error|ok):/, '')}
-                  </span>
-                )}
+                <SaveStatus result={notesMsg} />
               </div>
+              <ActionError error={notesMsg?.error} />
             </>
           )}
         </div>
@@ -1112,7 +1134,6 @@ export default function PosTableManagement() {
             Leave blank unless it applies. Printed on the POS bill per line if set.
           </p>
 
-          <ActionError error={hscError} />
           {hscLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : hscLoadError ? (
@@ -1132,26 +1153,43 @@ export default function PosTableManagement() {
                 <span>Item</span>
                 <span>HSC Code</span>
               </div>
-              {hscItems.map((r, i) => (
-                <div key={r.id} style={{
-                  display: 'grid', gridTemplateColumns: '1fr 160px',
-                  alignItems: 'center', padding: '10px 18px',
-                  borderBottom: i < hscItems.length - 1 ? '1px solid var(--theme-border-lt, var(--theme-border))' : 'none',
-                }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{r.category}</div>
+              {hscItems.map((r, i) => {
+                // S842: this dish's own answer, under its own row; the tab-top line it replaced sat
+                // off-screen for every dish below the first few.
+                const rowMsg = hscRowMsg[r.id]
+                const errId = `hsc-error-${r.id}`
+                return (
+                  <div key={r.id} style={{
+                    display: 'grid', gridTemplateColumns: '1fr 160px',
+                    alignItems: 'center', padding: '10px 18px',
+                    borderBottom: i < hscItems.length - 1 ? '1px solid var(--theme-border-lt, var(--theme-border))' : 'none',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{r.category}</div>
+                    </div>
+                    <div>
+                      <input aria-label={`HSC code for ${r.name}`}
+                        key={hscInputEpoch[r.id] || 0}
+                        className="form-input"
+                        defaultValue={r.hsc_code || ''}
+                        onBlur={e => saveHsc(r, e.target.value)}
+                        placeholder="e.g. 2202"
+                        disabled={hscSaving[r.id]}
+                        aria-describedby={rowMsg?.error ? errId : undefined}
+                      />
+                      <span role="status" style={{ display: 'block', fontSize: 11, color: 'var(--theme-green-text)', marginTop: rowMsg?.ok ? 4 : 0 }}>
+                        {rowMsg?.ok ? <><span aria-hidden="true">✓ </span>{rowMsg.ok}</> : ''}
+                      </span>
+                    </div>
+                    {rowMsg?.error && (
+                      <div id={errId} style={{ gridColumn: '1 / -1' }}>
+                        <ActionError error={rowMsg.error} />
+                      </div>
+                    )}
                   </div>
-                  <input aria-label={`HSC code for ${r.name}`}
-                    className="form-input"
-                    defaultValue={r.hsc_code || ''}
-                    onBlur={e => saveHsc(r, e.target.value)}
-                    placeholder="e.g. 2202"
-                    disabled={hscSaving[r.id]}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -1190,16 +1228,14 @@ export default function PosTableManagement() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                   {discReasons.map(r => (
                     <span key={r} style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '6px 8px 6px 12px', borderRadius: 'var(--radius-lg)', fontSize: 12,
+                      display: 'flex', alignItems: 'center', gap: 2,
+                      padding: '2px 2px 2px 12px', borderRadius: 'var(--radius-lg)', fontSize: 12,
                       background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
                       color: 'var(--theme-text1)',
                     }}>
                       {r}
-                      <button
-                        onClick={() => removeDiscReason(r)}
-                        title="Remove"
-                        style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+                      <button type="button" className="btn btn-ghost btn-icon btn-icon--delete"
+                        onClick={() => removeDiscReason(r)} aria-label={`Remove ${r}`} title={`Remove ${r}`}
                       >×</button>
                     </span>
                   ))}
@@ -1210,12 +1246,9 @@ export default function PosTableManagement() {
                 <button className="btn btn-primary" onClick={saveDiscReasons} disabled={discSaving || !discLoaded}>
                   {discSaving ? 'Saving…' : 'Save Discount Reasons'}
                 </button>
-                {discMsg && (
-                  <span style={{ fontSize: 12, color: discMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                    {discMsg.replace(/^(error|ok):/, '')}
-                  </span>
-                )}
+                <SaveStatus result={discMsg} />
               </div>
+              <ActionError error={discMsg?.error} />
             </>
           )}
         </div>
@@ -1255,7 +1288,7 @@ export default function PosTableManagement() {
                 </div>
               ) : (
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 26px', gap: 8, marginBottom: 6 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 30px', gap: 8, marginBottom: 6 }}>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Platform</span>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <Tip text="Only a starting suggestion at settlement time (Customers → Outstanding Credit) — leave blank if you haven't negotiated/confirmed a rate yet">Commission %</Tip>
@@ -1267,17 +1300,16 @@ export default function PosTableManagement() {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {partners.map((p, idx) => (
-                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 26px', gap: 8, alignItems: 'center' }}>
+                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 30px', gap: 8, alignItems: 'center' }}>
                         <input className="form-input form-input--auto" aria-label={`Platform name, row ${idx + 1}`} value={p.name}
                           onChange={e => updatePartner(idx, 'name', e.target.value)} placeholder="Platform name" />
                         <input type="number" min="0" max="100" step="0.1" className="form-input form-input--auto" aria-label={`Commission % for ${p.name || `row ${idx + 1}`}`} value={p.commission_pct ?? ''}
                           onChange={e => updatePartner(idx, 'commission_pct', e.target.value)} placeholder="e.g. 20" />
                         <input className="form-input form-input--auto" aria-label={`Buyer phone for ${p.name || `row ${idx + 1}`}`} value={p.phone ?? ''}
                           onChange={e => updatePartner(idx, 'phone', e.target.value)} placeholder="9800000001" />
-                        <button
+                        <button type="button" className="btn btn-ghost btn-icon btn-icon--delete"
                           onClick={() => removePartner(idx)}
-                          title="Remove"
-                          style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1 }}
+                          aria-label={`Remove ${p.name || `row ${idx + 1}`}`} title={`Remove ${p.name || `row ${idx + 1}`}`}
                         >×</button>
                       </div>
                     ))}
@@ -1289,12 +1321,9 @@ export default function PosTableManagement() {
                 <button className="btn btn-primary" onClick={saveDeliverySettings} disabled={deliverySaving || !deliveryLoaded}>
                   {deliverySaving ? 'Saving…' : 'Save Delivery Partner Settings'}
                 </button>
-                {deliveryMsg && (
-                  <span style={{ fontSize: 12, color: deliveryMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                    {deliveryMsg.replace(/^(error|ok):/, '')}
-                  </span>
-                )}
+                <SaveStatus result={deliveryMsg} />
               </div>
+              <ActionError error={deliveryMsg?.error} />
             </>
           )}
         </div>
@@ -1312,48 +1341,51 @@ export default function PosTableManagement() {
           )}
 
           {qsOpen && (
-            <Modal onClose={() => setQsOpen(false)}>
-              <h3 style={{ margin: '0 0 4px', color: 'var(--theme-text1)' }}>⚡ Quick Setup</h3>
+            // S842: named by its title (it had none, so the dialog's name was an empty heading) and
+            // 520 wide, which pairs .field-grid's fields on a computer. The fields were an inline
+            // five-track row that left Prefix and Section ~28px each on a phone, and this dialog
+            // opens by itself for a new client.
+            <Modal title="Quick Setup" maxWidth={520} onClose={() => setQsOpen(false)}>
               <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 18px' }}>Generate a batch of tables in one click</p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 2fr 80px', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-prefix">
+              <div className="field-grid" style={{ marginBottom: 14 }}>
+                <div className="form-field field-grid__wide">
+                  <label htmlFor="pos-table-management-prefix">
                     Prefix <Tip text="The name prefix — each table will be Prefix + number, e.g. 'Table 1', 'Bar 1'" />
                   </label>
-                  <input id="pos-table-management-prefix" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-prefix"
                     value={qs.prefix} onChange={e => { const v = e.target.value; setQs(q => ({ ...q, prefix: v, ...(q.startTouched ? {} : { start: nextQuickSetupStart(v, tables) }) })) }} placeholder="e.g. Table" />
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-start">
+                <div className="form-field">
+                  <label htmlFor="pos-table-management-start">
                     Start # <Tip text="First table number. It starts one past the highest number already used with this prefix, so a new batch never repeats a table on the floor." />
                   </label>
-                  <input id="pos-table-management-start" type="number" min="1" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-start" type="number" min="1"
                     value={qs.start} onChange={e => { const v = e.target.value; setQs(q => ({ ...q, start: v, startTouched: true })) }} />
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-count">
+                <div className="form-field">
+                  <label htmlFor="pos-table-management-count">
                     Count <Tip text="How many tables to create (max 50)" />
                   </label>
-                  <input id="pos-table-management-count" type="number" min="1" max="50" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-count" type="number" min="1" max="50"
                     value={qs.count} onChange={e => setQs(q => ({ ...q, count: e.target.value }))} />
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-section">
+                <div className="form-field">
+                  <label htmlFor="pos-table-management-section">
                     Section <Tip text="Optional — groups these tables under a section tab (e.g. Main Hall, Bar, Outdoor)" />
                   </label>
-                  <input id="pos-table-management-section" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-section"
                     value={qs.section} onChange={e => setQs(q => ({ ...q, section: e.target.value }))}
                     placeholder="e.g. Main Hall" list="qs-section-list" />
                   <datalist id="qs-section-list">
                     {existingSections.map(s => <option key={s} value={s} />)}
                   </datalist>
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-seats">
+                <div className="form-field">
+                  <label htmlFor="pos-table-management-seats">
                     Seats <Tip text="Default capacity for all tables in this batch" />
                   </label>
-                  <input id="pos-table-management-seats" type="number" min="1" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-seats" type="number" min="1"
                     value={qs.capacity} onChange={e => setQs(q => ({ ...q, capacity: e.target.value }))} />
                 </div>
               </div>
@@ -1368,16 +1400,13 @@ export default function PosTableManagement() {
                 <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', margin: '0 0 14px' }}>{qsClashText}</p>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" onClick={handleGenerate} disabled={qsSaving || !!tablesError}>
                   {qsSaving ? 'Creating…' : `Generate ${parseInt(qs.count, 10) || 0} Tables`}
                 </button>
-                {qsMsg && (
-                  <span style={{ fontSize: 12, color: qsMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                    {qsMsg.replace(/^(error|ok):/, '')}
-                  </span>
-                )}
+                <SaveStatus result={qsMsg} />
               </div>
+              <ActionError error={qsMsg?.error} />
             </Modal>
           )}
 
@@ -1630,9 +1659,11 @@ export default function PosTableManagement() {
                   {(resv.closed_dates || []).length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                       {(resv.closed_dates || []).map(iso => (
-                        <span key={iso} className="badge badge-gray" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span key={iso} className="badge badge-gray" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingRight: 0 }}>
                           {closedDateLabel(iso)}
-                          <button type="button" className="btn-linklike" aria-label={`Remove ${iso}`} onClick={() => removeClosedDate(iso)} style={{ fontSize: 12 }}>×</button>
+                          <button type="button" className="btn btn-ghost btn-icon btn-icon--delete"
+                            aria-label={`Remove ${closedDateLabel(iso)}`} title={`Remove ${closedDateLabel(iso)}`}
+                            onClick={() => removeClosedDate(iso)}>×</button>
                         </span>
                       ))}
                     </div>
@@ -1672,24 +1703,18 @@ export default function PosTableManagement() {
                 <button className="btn btn-primary" onClick={saveReservationSettings} disabled={resvSaving || !resvLoaded}>
                   {resvSaving ? 'Saving…' : 'Save Reservation Settings'}
                 </button>
-                {resvMsg && (
-                  <span style={{ fontSize: 12, color: resvMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                    {resvMsg.replace(/^(error|ok):/, '')}
-                  </span>
-                )}
+                <SaveStatus result={resvMsg} />
               </div>
+              <ActionError error={resvMsg?.error} />
             </>
           )}
         </div>
       )}
 
-      {/* Add / Edit modal */}
+      {/* Add / Edit modal. S842: the heading is the Modal's title, so it names the dialog (it was a
+          second <h3> below an empty one), and 480 wide rather than the 960 default. */}
       {modal && (
-        <Modal onClose={closeModal}>
-          <h3 style={{ margin: '0 0 18px', color: 'var(--theme-text1)' }}>
-            {target ? `Edit — ${target.name}` : 'Add Table'}
-          </h3>
-
+        <Modal title={target ? `Edit — ${target.name}` : 'Add Table'} maxWidth={480} onClose={closeModal}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="pos-table-management-table-name">
@@ -1768,10 +1793,9 @@ export default function PosTableManagement() {
         </Modal>
       )}
 
-      {/* Guest Menu QR modal */}
+      {/* Guest Menu QR modal (S842: named by its title, 480 wide) */}
       {qrTable && (
-        <Modal onClose={() => setQrTable(null)}>
-          <h3 style={{ margin: '0 0 4px', color: 'var(--theme-text1)' }}>{qrTable.name} — Guest Menu QR</h3>
+        <Modal title={`${qrTable.name} — Guest Menu QR`} maxWidth={480} onClose={() => setQrTable(null)}>
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 18px' }}>
             Print this and place it on the table — scanning it opens a read-only menu, no app or login needed.
           </p>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -111,7 +111,10 @@ export default function PosStaff() {
   const [loadError,   setLoadError]   = useState(null)   // the staff list or the role scheme could not be read (S754)
   const [empWarn,     setEmpWarn]     = useState('')     // the HR employee list for + Add Staff could not be read
   const [saving,      setSaving]      = useState({})
-  const [msg,         setMsg]         = useState('')
+  const [msg,         setMsg]         = useState('')     // page-wide: the list read, the bulk Apply
+  // S842: a refusal about one login, shown under that login's row ({ id, error }). In the page-top
+  // line it was off-screen on a tablet for every row below the first few, where Block and Delete live.
+  const [rowMsg,      setRowMsg]      = useState(null)
   const [search,      setSearch]      = useState('')
 
   // Custom roles
@@ -143,6 +146,11 @@ export default function PosStaff() {
   const [pinResets,   setPinResets]   = useState({}) // user_id → { reset_at, reset_by_name }
   const pinResetReq = useLatestRequest()
   const pinResetSeq = useRef(0)
+
+  // S842: a row action clears both message slots, as the one slot used to; a refusal about one login
+  // goes under its row.
+  function clearMsgs() { setMsg(''); setRowMsg(null) }
+  function rowRefusal(id, error) { setMsg(''); setRowMsg({ id, error }) }
 
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
   const linkedEmployeeIds = new Set(staff.map(p => p.hr_employee_id).filter(Boolean))
@@ -243,7 +251,7 @@ export default function PosStaff() {
         </div>
       ),
       run: async () => {
-        setMsg('')
+        clearMsgs()
         const outcomes = await Promise.all(list.map(async p => {
           const level = levelOf(p)
           const { data, error } = await supabase.functions.invoke('admin-user-ops', {
@@ -411,7 +419,7 @@ export default function PosStaff() {
         </p>
       ),
       run: async () => {
-        setMsg('')
+        clearMsgs()
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
           body: { action: 'delete_pos_staff', client_id: clientId, userId: p.id },
         })
@@ -422,7 +430,7 @@ export default function PosStaff() {
           // is blocked already (here or by a Final Settlement), when there is nothing more to do.
           if (body?.code === 'pos_login_has_records') {
             if (p.settlement_blocked === true || p.pos_blocked_at) {
-              setMsg(`${p.full_name}'s login stays: it has recorded work at the till, so deleting it would take their name off those records. It is already blocked, so it cannot sign in.`)
+              rowRefusal(p.id, `${p.full_name}'s login stays: it has recorded work at the till, so deleting it would take their name off those records. It is already blocked, so it cannot sign in.`)
             } else {
               offerBlockInstead(p, why)
             }
@@ -430,7 +438,7 @@ export default function PosStaff() {
           }
           // Only a refusal the function WROTE proves the login survived; a dropped call does not.
           const answered = !!data?.error || error?.name === 'FunctionsHttpError'
-          setMsg(answered
+          rowRefusal(p.id, answered
             ? `${p.full_name}'s login was not deleted — their PIN still works. ` + why
             : `It is not known whether ${p.full_name}'s login was deleted — the call did not come back. Reload the page to see. ` + why)
           if (!answered) load()
@@ -492,7 +500,7 @@ export default function PosStaff() {
     })
   }
   async function setBlocked(p, blocking) {
-    setMsg('')
+    clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: blocking ? 'block_pos_staff' : 'unblock_pos_staff', client_id: clientId, userId: p.id },
     })
@@ -501,7 +509,7 @@ export default function PosStaff() {
       // The function writes its refusal as a sentence that says what happened; a dropped call proves
       // nothing either way, so the list is read again.
       const answered = !!data?.error || error?.name === 'FunctionsHttpError'
-      setMsg(answered
+      rowRefusal(p.id, answered
         ? why || `${p.full_name}'s login was not ${blocking ? 'blocked' : 'unblocked'}.`
         : `It is not known whether ${p.full_name}'s login was ${blocking ? 'blocked' : 'unblocked'}: the call did not come back. Reload the page to see. ` + why)
       if (!answered) load()
@@ -515,7 +523,7 @@ export default function PosStaff() {
 
   async function resetPin() {
     if (!pinValid(newPin)) { setPinMsg('PIN must be 4–6 digits.'); return }
-    setResetting(true); setPinMsg(''); setMsg('')
+    setResetting(true); setPinMsg(''); clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'reset_pos_pin', client_id: clientId, userId: pinTarget.id, pin: newPin },
     })
@@ -526,7 +534,7 @@ export default function PosStaff() {
     // that is still running, the till refuses the new PIN until then, so say so rather than close
     // as if all was well. Pressing Reset PIN again retries the lift.
     if (data?.lockout_cleared === false && data?.locked_until) {
-      setMsg(`${pinTarget.full_name || 'This login'}’s new PIN is saved, but the lockout from wrong tries could not be lifted, so the till will refuse it until ${nepalTime(data.locked_until)}. Reset the PIN again to lift the lockout now.`)
+      rowRefusal(pinTarget.id, `${pinTarget.full_name || 'This login'}’s new PIN is saved, but the lockout from wrong tries could not be lifted, so the till will refuse it until ${nepalTime(data.locked_until)}. Reset the PIN again to lift the lockout now.`)
     }
     setPinTarget(null); setResetting(false)
     void loadPinResets() // S835 (D39): the reset just made is now the latest
@@ -537,9 +545,9 @@ export default function PosStaff() {
     const role = effectiveRoles.find(r => r.label === jobTitle)
     // Never send "no role": a login with no marker reads as the Owner (S752). Removing someone's
     // POS access means deleting the login.
-    if (!role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
-    if (role.level === 'manager' && !canGrantAnything) { setMsg('Only the account owner can give a login Manager access.'); return }
-    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    if (!role) { rowRefusal(profileId, `“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
+    if (role.level === 'manager' && !canGrantAnything) { rowRefusal(profileId, 'Only the account owner can give a login Manager access.'); return }
+    setSaving(s => ({ ...s, [profileId]: true })); clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
         action:        'update_pos_role',
@@ -550,7 +558,7 @@ export default function PosStaff() {
       },
     })
     if (error || data?.error) {
-      setMsg(`${staff.find(s => s.id === profileId)?.full_name || 'That login'} keeps its previous role. ` + (await edgeRefusal(error, data)))
+      rowRefusal(profileId, `${staff.find(s => s.id === profileId)?.full_name || 'That login'} keeps its previous role. ` + (await edgeRefusal(error, data)))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId
         ? { ...p, pos_role: role?.level || null, pos_job_title: jobTitle || null }
@@ -562,12 +570,12 @@ export default function PosStaff() {
 
   // ── Team update ────────────────────────────────────────────────────────────
   async function updateTeam(profileId, team) {
-    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    setSaving(s => ({ ...s, [profileId]: true })); clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'update_pos_role', client_id: clientId, userId: profileId, pos_team: team },
     })
     if (error || data?.error) {
-      setMsg('The team was not changed. ' + (await edgeRefusal(error, data)))
+      rowRefusal(profileId, 'The team was not changed. ' + (await edgeRefusal(error, data)))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_team: team } : p))
     }
@@ -583,16 +591,16 @@ export default function PosStaff() {
     // S754: a capped manager cannot give more than their own cap, and "no limit" is more than any
     // cap. Said here, before the call, rather than as the server's refusal after it.
     if (viewerCap !== null && (limit === null || limit > viewerCap)) {
-      setMsg(`You can give a discount limit of up to ${viewerCap}% — your own limit. ${limit === null ? '"No limit" is more than that. ' : ''}Ask the account owner for more.`)
+      rowRefusal(profileId, `You can give a discount limit of up to ${viewerCap}% — your own limit. ${limit === null ? '"No limit" is more than that. ' : ''}Ask the account owner for more.`)
       setInputEpoch(n => n + 1)   // re-key the input back to the stored value
       return
     }
-    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    setSaving(s => ({ ...s, [profileId]: true })); clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'update_pos_role', client_id: clientId, userId: profileId, pos_discount_limit: limit },
     })
     if (error || data?.error) {
-      setMsg('The discount limit was not changed. ' + (await edgeRefusal(error, data)))
+      rowRefusal(profileId, 'The discount limit was not changed. ' + (await edgeRefusal(error, data)))
       setInputEpoch(n => n + 1)
     } else {
       setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_discount_limit: limit } : p))
@@ -602,12 +610,12 @@ export default function PosStaff() {
 
   // ── Allow Void update ────────────────────────────────────────────────────────
   async function updateAllowVoid(profileId, allow) {
-    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    setSaving(s => ({ ...s, [profileId]: true })); clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'update_pos_role', client_id: clientId, userId: profileId, pos_allow_void: allow },
     })
     if (error || data?.error) {
-      setMsg('Void permission was not changed. ' + (await edgeRefusal(error, data)))
+      rowRefusal(profileId, 'Void permission was not changed. ' + (await edgeRefusal(error, data)))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_allow_void: allow } : p))
     }
@@ -633,7 +641,8 @@ export default function PosStaff() {
             Assign roles to your team. Staff log in with their name and PIN.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexShrink: 0, flexWrap: 'wrap' }}>
+        {/* S842: no flexShrink: 0 here, the S794 clipping shape; the group wraps on a phone instead. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
           <input aria-label="Search staff"
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
@@ -659,7 +668,7 @@ export default function PosStaff() {
         ))}
       </div>
 
-      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
+      <ActionError error={msg} className="action-error--top" />
       {!loading && !loadError && empWarn && <p role="status" style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginBottom: 16 }}>{empWarn}</p>}
       {!loading && !loadError && mismatched.length > 0 && (
         <div role="alert" className="card" style={{
@@ -736,7 +745,8 @@ export default function PosStaff() {
                   : posBlocked ? 'This login is blocked — unblock it first; a new PIN would not let them sign in.'
                   : pinLockReason
                 return (
-                  <tr key={p.id}>
+                  <Fragment key={p.id}>
+                  <tr>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}</div>
                       {blocked && (
@@ -771,7 +781,7 @@ export default function PosStaff() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <select aria-label="POS role"
+                        <select aria-label={`POS role for ${p.full_name || 'this account'}`}
                           className="form-select"
                           style={{ minWidth: 160 }}
                           value={displayTitle || ''}
@@ -806,7 +816,7 @@ export default function PosStaff() {
                       }
                     </td>
                     <td>
-                      <select aria-label="POS team"
+                      <select aria-label={`POS team for ${p.full_name || 'this account'}`}
                         className="form-select"
                         style={{ minWidth: 140 }}
                         value={p.pos_team || 'foh'}
@@ -821,7 +831,7 @@ export default function PosStaff() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input aria-label="Discount limit percent"
+                        <input aria-label={`Discount limit percent for ${p.full_name || 'this account'}`}
                           type="number"
                           min={0}
                           max={viewerCap ?? 100}
@@ -866,7 +876,7 @@ export default function PosStaff() {
                             new PIN would only look like access restored (S754). */}
                         {/* aria-disabled, so a press on a phone says why (S809 3i; the S759 pattern). */}
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
-                          onClick={() => { if (resetReason) { setMsg(resetReason); return } openReset(p) }}
+                          onClick={() => { if (resetReason) { rowRefusal(p.id, resetReason); return } openReset(p) }}
                           aria-disabled={resetReason ? true : undefined}
                           title={resetReason || undefined}>
                           Reset PIN
@@ -876,7 +886,7 @@ export default function PosStaff() {
                             aria-disabled, not disabled: a press says why (the S759 pattern). */}
                         {!blocked && (
                           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => { if (removeReason) { setMsg(removeReason); return } if (posBlocked) unblockStaff(p); else blockStaff(p) }}
+                            onClick={() => { if (removeReason) { rowRefusal(p.id, removeReason); return } if (posBlocked) unblockStaff(p); else blockStaff(p) }}
                             aria-disabled={removeReason ? true : undefined}
                             title={removeReason || (posBlocked
                               ? 'Let this PIN sign in again — for a login blocked by mistake.'
@@ -887,7 +897,7 @@ export default function PosStaff() {
                         <button
                           className="btn btn-ghost"
                           style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
-                          onClick={() => { if (removeReason) { setMsg(removeReason); return } deleteStaff(p) }}
+                          onClick={() => { if (removeReason) { rowRefusal(p.id, removeReason); return } deleteStaff(p) }}
                           aria-disabled={removeReason ? true : undefined}
                           title={removeReason || 'Only for a login that has not recorded anything at the till; otherwise you are offered Block.'}
                         >
@@ -896,6 +906,18 @@ export default function PosStaff() {
                       </div>
                     </td>
                   </tr>
+                  {/* S842: this login's refusal, under its own row. Sticky at the left edge and no
+                      wider than a tablet's view, so a table scrolled sideways still shows all of it. */}
+                  {rowMsg?.id === p.id && (
+                    <tr className="detail-row">
+                      <td colSpan={8} style={{ paddingTop: 0 }}>
+                        <div style={{ position: 'sticky', left: 0, maxWidth: 'min(640px, calc(100vw - 64px))' }}>
+                          <ActionError error={rowMsg.error} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>
