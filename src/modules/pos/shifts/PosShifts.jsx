@@ -12,6 +12,7 @@ import { errorLine } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { withTimeout, settleWithin } from '../../../utils/withTimeout'
+import { profileNamesRpc, namesMapOf, useMissingProfileNames } from '../../../shared/profileNames'
 import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -503,6 +504,7 @@ export default function PosShifts() {
   const [confirmOpenOrders, setConfirmOpenOrders] = useState(null)
 
   const [staffNames, setStaffNames] = useState({})
+  const [staffNamesLoaded, setStaffNamesLoaded] = useState(false)
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -527,8 +529,14 @@ export default function PosShifts() {
     // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
     // DEFINER RPC. A raw query here silently showed "—" for every staff member except
     // whoever was logged in.
-    supabase.rpc('get_client_profile_names', { p_client_id: clientId })
-      .then(({ data }) => setStaffNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name]))))
+    // A failed read leaves the names as they were (logged): the shifts and their figures still stand.
+    setStaffNamesLoaded(false)
+    profileNamesRpc(supabase, clientId)
+      .then(({ data, error }) => {
+        if (error) { console.error('Shifts: staff names could not be read:', error); return }
+        setStaffNames(namesMapOf(data))
+        setStaffNamesLoaded(true)
+      }, err => console.error('Shifts: staff names could not be read:', err))
     supabase.from('clients').select('name').eq('id', clientId).single()
       .then(({ data }) => setOutletName(data?.name || ''))
     supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle()
@@ -549,6 +557,15 @@ export default function PosShifts() {
     setPageMsg(null)
     if (mainTab === 'history') loadHistory()
   }, [clientId]) // eslint-disable-line
+
+  // S840: the names read above leaves out Crest support, which the RPC names only for an id asked
+  // for, so a shift it opened or closed would show no name and print none on its slip. The ones the
+  // names read did not name are asked for once the shifts are in (usually none, and then nothing is sent).
+  useMissingProfileNames({
+    supabase, clientId, names: staffNames, ready: staffNamesLoaded,
+    ids: [openShift?.opened_by, ...history.flatMap(sh => [sh.opened_by, sh.closed_by])],
+    onFound: found => setStaffNames(prev => ({ ...prev, ...found })),
+  })
 
   // S809 SHIFTS-10 (owner decision): read again when this tab comes back into view, not on a timer.
   // The office PC left on Shifts at 8 pm shows 10 pm's figures the moment someone looks at it again,

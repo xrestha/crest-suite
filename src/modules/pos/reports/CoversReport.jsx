@@ -23,6 +23,7 @@ import { nepalHour, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
 import { turnoverByBand, turnoverExclusions, turnoverExclusionNote, isDineIn, dineInOnly, coversTotals, addReturnsByBand } from './coversMath'
 import { SOURCE_LABEL } from '../reservations/reservationStatus'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 const fmtNpr = npr
 // SVG presentation attributes only (tick fills, Bar fill) — var() does not resolve there. Never
@@ -129,7 +130,7 @@ export default function CoversReport() {
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .order('id')),
       supabase.from('settings').select('id, is_vat_registered, pos_open_time, pos_close_time').eq('client_id', clientId).maybeSingle(),
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
       // Seats at tables in service today (S814 4d, REPORTS-10): a table marked inactive in POS
       // Setup has no seats to sell, so it is not RevPASH's denominator — the floor's own rule.
       scopedFrom('pos_tables', 'id, capacity').neq('status', 'inactive'),
@@ -161,7 +162,8 @@ export default function CoversReport() {
     setSettingsId(settings?.id || null)
     setOpenTime(settings?.pos_open_time || '')
     setCloseTime(settings?.pos_close_time || '')
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    const firstNames = namesMapOf(profs)
+    setStaffNames(firstNames)
     setTotalSeats((tbls || []).reduce((s, t) => s + (t.capacity || 0), 0))
 
     // Credit-noted bills are KEPT (S754). Covers are guests served, and a credit note corrects the
@@ -173,6 +175,10 @@ export default function CoversReport() {
     const orderIds = new Set(orderList.map(o => o.id))
     const outsideIds = [...new Set(noteList.map(n => n.order_id).filter(id => id && !orderIds.has(id)))]
 
+    // S840: a bill Crest support opened is named only when its id is asked for, so the servers the
+    // names read did not name are asked for beside the second wave (usually none, and then nothing
+    // is sent). A failure leaves those rows unnamed, never the figures.
+    const namesFill = fillMissingNames(supabase, clientId, firstNames, orderList.map(o => o.opened_by))
     // Both derive their ids from the reads above and nothing from each other — one wave.
     const secondWave = await Promise.all([
       // Paged — a month of bill lines runs to thousands, past the silent 1000-row cap (S529).
@@ -197,6 +203,12 @@ export default function CoversReport() {
       return
     }
     const [{ data: items }, { data: outsideOrders }] = secondWave
+    let names = await namesFill
+    // A credited bill from before the range was not in the first ask; asked only if one is unnamed.
+    if (!names.error) names = await fillMissingNames(supabase, clientId, names.map, (outsideOrders || []).map(o => o.opened_by))
+    if (!rangeReq.isCurrent(reqKey)) return
+    if (names.error) console.error('Covers Report: some servers could not be named:', names.error)
+    if (names.map !== firstNames) setStaffNames(names.map)
     const byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
       ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
       return acc

@@ -34,6 +34,7 @@ import { bookedCoversByHour, overSeatsHours } from './reservationCapacity'
 import { fillTemplate, openWhatsApp } from './whatsappLink'
 import ReservationModal from './ReservationModal'
 import SeatTableModal, { SEAT_TABLE_SELECT } from './SeatTableModal'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 const REQUEST_POLL_MS = 15000
 // The day list refreshes on its own too, so a colleague's "Arrived" on the door phone reaches the
@@ -164,7 +165,7 @@ export default function PosReservations() {
         : Promise.resolve({ count: 0, error: null }),
       // Raw `profiles` reads are RLS-limited to the caller's own row; other staff members' names
       // come from get_client_profile_names(). Only the Activity view prints them.
-      filter === 'activity' ? supabase.rpc('get_client_profile_names', { p_client_id: clientId }) : Promise.resolve({ data: null, error: null }),
+      filter === 'activity' ? profileNamesRpc(supabase, clientId) : Promise.resolve({ data: null, error: null }),
     ])
     if (!dayReq.isCurrent(key)) return
     // A failed read is not an empty day, and must never render as one (S594). A failed QUIET
@@ -179,6 +180,17 @@ export default function PosReservations() {
     const listRows = filter === 'upcoming' || filter === 'unconfirmed'
       ? (dayRows || []).filter(r => stillInPlay(r, dayStartMs, Date.now()))
       : dayRows || []
+    // S840: a booking Crest support took is named only when its id is asked for, so the takers the
+    // names read did not name are asked for before anything is set (usually none, and then nothing
+    // is sent), so a quiet refresh never drops a name and puts it back. A failure only leaves those
+    // bookings without a "by" line.
+    let nameMap = null
+    if (names) {
+      const filled = await fillMissingNames(supabase, clientId, namesMapOf(names), listRows.map(r => r.created_by))
+      if (!dayReq.isCurrent(key)) return
+      if (filled.error) console.error('reservation activity: some bookers could not be named:', filled.error)
+      nameMap = filled.map
+    }
     // setIfChanged throughout: this runs on a 30 s timer for as long as the book is open, and the
     // usual answer is "nothing moved" — a bare setter would re-render the whole table each tick.
     setIfChanged(setRows, listRows, rowsSig)
@@ -188,7 +200,7 @@ export default function PosReservations() {
     setIfChanged(setSettings, normalizeReservationSettings(s?.pos_reservation_settings), v => JSON.stringify(v))
     setIfChanged(setHours, { open: s?.pos_open_time || '', close: s?.pos_close_time || '' }, v => `${v.open}|${v.close}`)
     setNewCount(changed || 0)
-    if (names) setIfChanged(setStaffNames, Object.fromEntries(names.map(p => [p.id, p.full_name])), v => JSON.stringify(v))
+    if (nameMap) setIfChanged(setStaffNames, nameMap, v => JSON.stringify(v))
     setLoading(false)
   }, [clientId, dayIso, filter, seenStamp, scopedFrom, commitRequests]) // eslint-disable-line react-hooks/exhaustive-deps
 

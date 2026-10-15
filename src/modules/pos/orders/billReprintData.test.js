@@ -41,7 +41,8 @@ describe('staffNameFor', () => {
   test('names the login that closed the bill, not whoever is reprinting it', async () => {
     const supabase = sb({ data: [{ id: 'u1', full_name: 'Sita' }, { id: 'u2', full_name: 'Ram' }], error: null })
     expect(await staffNameFor(supabase, 'c1', 'u2')).toEqual({ name: 'Ram', error: null })
-    expect(supabase.rpc).toHaveBeenCalledWith('get_client_profile_names', { p_client_id: 'c1' })
+    // Asked for by id (S840), so a bill Crest support closed is named on its reprint.
+    expect(supabase.rpc).toHaveBeenCalledWith('get_client_profile_names', { p_client_id: 'c1', p_ids: ['u2'] })
   })
 
   test('no staff id on the bill is an empty name and no request', async () => {

@@ -39,12 +39,14 @@ export function whenLabel(ts, { clock = '12' } = {}) {
 /**
  * The person behind an attribution id.
  *
- * `names` is the id→name map from get_client_profile_names; `namesFailed` says that read did not
+ * `names` is the id→name map from get_client_profile_names; `namesFailed` says a names read did not
  * come back, which must not look like "this person no longer exists" (a failed read is not an
- * empty one). An id with no name after a successful read belongs to no login of THIS client: a Crest
- * operator acting on it, or a group Owner whose home is a sibling outlet (get_client_profile_names
- * lists this client's profiles only). A deleted login never reaches here — the FK is ON DELETE SET
- * NULL. Neither case is worth guessing between on a slip, so the wording names neither.
+ * empty one). That function names this client's logins, the logins whose home is another outlet of
+ * its group (S798 3f-2), and a Crest operator login as "Crest support" when its id is asked for
+ * (S840: Requisitions asks for every id on the month's slips that its first read did not name). So
+ * an id with no name after a successful read belongs to no login this outlet can see, such as one
+ * since moved to an outlet outside the group. A deleted login never reaches here — the FK is ON
+ * DELETE SET NULL. That case is not worth guessing at on a slip, so the wording names nobody.
  */
 export function personLabel(id, names, namesFailed) {
   if (!id) return null

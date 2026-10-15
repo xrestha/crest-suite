@@ -6,6 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { settleWithin } from '../../../utils/withTimeout'
+import { profileNamesRpc, namesMapOf, useMissingProfileNames } from '../../../shared/profileNames'
 import Fab from '../../../components/Fab'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -74,7 +75,7 @@ export default function PosParkingSlips() {
     const results = await Promise.all([
       // Raw `profiles` reads are RLS-limited to the caller's own row — resolving OTHER staff
       // members' names needs get_client_profile_names(), a SECURITY DEFINER RPC.
-      settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), LIST_READ_MS, 'Reading staff names'),
+      settleWithin(profileNamesRpc(supabase, clientId), LIST_READ_MS, 'Reading staff names'),
       settleWithin(supabase.from('clients').select('name').eq('id', clientId).single(), LIST_READ_MS, 'Reading the outlet'),
       settleWithin(supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle(), LIST_READ_MS, 'Reading the outlet address'),
     ])
@@ -87,12 +88,21 @@ export default function PosParkingSlips() {
       return
     }
     const [{ data: profs }, { data: client }, { data: settings }] = results
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    setStaffNames(namesMapOf(profs))
     setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
     metaLoadedRef.current = true
     setMetaLoaded(true)
     setMetaError(null)
   }, [clientId])
+
+  // S840: the names read above leaves out Crest support, which the RPC names only for an id asked
+  // for, so a slip it issued would print and list with no issuer. Once both lists are in, the issuers
+  // the names read did not name are asked for (usually none, and then nothing is sent).
+  useMissingProfileNames({
+    supabase, clientId, names: staffNames, ready: metaLoaded,
+    ids: [...(open.rows || []), ...(all.rows || [])].map(slip => slip.issued_by),
+    onFound: found => setStaffNames(prev => ({ ...prev, ...found })),
+  })
 
   const loadOpen = useCallback(async () => {
     if (!clientId) return

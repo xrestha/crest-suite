@@ -27,6 +27,7 @@ import {
   netMovedOutSent, expectedHeldByOrderItem, flagOrderDiscrepancies, sentFoodMovedIn, movedText, moveDishesText,
   moveSideText,
 } from './kotMoves'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 // The BS day a timestamp fell on IN NEPAL (S754). This was adToBsSafe(new Date(ts)) — the runtime's
 // day — beside a nepalTime() clock, so a ticket sent at 00:15 Kathmandu read as the previous BS day
@@ -122,14 +123,20 @@ export default function KotLog() {
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
     ])
     if (!registerReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read would render an empty Register as if no tickets went out.
     const failed = firstError(results)
     if (failed) { setTabError('register', failed); setLogRows([]); setRegisterLoading(false); return }
     const [{ data: logs }, { data: profs }] = results
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    // S840: a ticket Crest support sent is named only when its id is asked for, so the senders the
+    // names read did not name are asked for now (usually none, and then nothing is sent). A failure
+    // leaves those tickets' Sent By blank, never the register. The same in each tab below.
+    const names = await fillMissingNames(supabase, clientId, namesMapOf(profs), (logs || []).map(r => r.sent_by))
+    if (!registerReq.isCurrent(reqKey)) return
+    if (names.error) console.error('KOT Register: some senders could not be named:', names.error)
+    setStaffNames(names.map)
     setLogRows(logs || [])
     setRegisterLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom, registerReq, setTabError])
@@ -237,7 +244,7 @@ export default function KotLog() {
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
       // S836, as in loadReconciliation: a dish moved to another table is moved, not removed.
       ...readSentMoves(scopedFrom, orderIds),
     ])
@@ -247,7 +254,10 @@ export default function KotLog() {
     const trailFailed = firstError(trailResults)
     if (trailFailed) { setTabError('trail', trailFailed); setBillTrailRows([]); setBillTrailLoading(false); return }
     const [{ data: logs }, { data: currentItems }, { data: profs }, { data: movesFrom }, { data: movesTo }] = trailResults
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    const names = await fillMissingNames(supabase, clientId, namesMapOf(profs), (logs || []).map(r => r.sent_by))
+    if (!trailReq.isCurrent(reqKey)) return
+    if (names.error) console.error('KOT Bill Trail: some senders could not be named:', names.error)
+    setStaffNames(names.map)
 
     const logsByOrder = {}
     for (const log of logs || []) {
@@ -308,14 +318,17 @@ export default function KotLog() {
         'id, order_id, order_no, table_name, item_name, qty_removed, reason, removed_by, removed_at, pos_orders(order_no, table_name, invoice_no, close_type)')
         .gte('removed_at', fromTs).lte('removed_at', toTs)
         .order('removed_at', { ascending: false }).order('id')),
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
     ])
     if (!pulledReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read would render the celebratory "nothing pulled" state.
     const pulledFailed = firstError(pulledResults)
     if (pulledFailed) { setTabError('pulled', pulledFailed); setPulledRows([]); setPulledLoading(false); return }
     const [{ data: rows }, { data: profs }] = pulledResults
-    setStaffNames(prev => ({ ...prev, ...Object.fromEntries((profs || []).map(p => [p.id, p.full_name])) }))
+    const names = await fillMissingNames(supabase, clientId, namesMapOf(profs), (rows || []).map(r => r.removed_by))
+    if (!pulledReq.isCurrent(reqKey)) return
+    if (names.error) console.error('KOT Pulled Items: some logins could not be named:', names.error)
+    setStaffNames(prev => ({ ...prev, ...names.map }))
     setPulledRows(rows || [])
     setPulledLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom, pulledReq, setTabError])
@@ -345,14 +358,17 @@ export default function KotLog() {
         'id, kind, from_order_no, to_order_no, from_table_name, to_table_name, lines, covers_moved, moved_by, moved_at')
         .gte('moved_at', fromTs).lte('moved_at', toTs)
         .order('moved_at').order('id')),
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
     ])
     if (!movesReq.isCurrent(reqKey)) return
     // S612 silent-zero rule: a failed read is not "nothing was moved in this range".
     const movesFailed = firstError(movesResults)
     if (movesFailed) { setTabError('moves', movesFailed); setMoveRows([]); setMovesLoading(false); return }
     const [{ data: rows }, { data: profs }] = movesResults
-    setStaffNames(prev => ({ ...prev, ...Object.fromEntries((profs || []).map(p => [p.id, p.full_name])) }))
+    const names = await fillMissingNames(supabase, clientId, namesMapOf(profs), (rows || []).map(r => r.moved_by))
+    if (!movesReq.isCurrent(reqKey)) return
+    if (names.error) console.error('KOT Moves: some logins could not be named:', names.error)
+    setStaffNames(prev => ({ ...prev, ...names.map }))
     setMoveRows(rows || [])
     setMovesLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom, movesReq, setTabError])

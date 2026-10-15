@@ -7,6 +7,7 @@ import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { settleWithin, isTimeout } from '../../../utils/withTimeout'
 import { isNetworkError } from '../../../shared/errorText'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 import { normalizePhone } from '../../../utils/phone'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 import { pointsValue, describeLedgerRow, billLabel, billsMissingPoints, nprPoints } from './loyaltyPoints'
@@ -43,7 +44,7 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
       fetchAllRows(() => scopedFrom('pos_loyalty_ledger', 'id, kind, points, note, order_id, created_by, created_at, pos_orders(order_no, invoice_no)')
         .eq('customer_id', customer.id)
         .order('created_at', { ascending: false }).order('id', { ascending: false })),
-      settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), CALL_MS, 'Reading staff names'),
+      settleWithin(profileNamesRpc(supabase, clientId), CALL_MS, 'Reading staff names'),
       // Bills that could be missing their points: only for a member, only since they joined (D13).
       scheme && scheme.is_active !== false
         ? fetchAllRows(() => {
@@ -55,7 +56,19 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
         : Promise.resolve({ data: [], error: null }),
     ])
     if (nameRes.error) { console.error('staff names read failed, By shows ?:', nameRes.error); setNames({ map: {}, failed: true }) }
-    else setNames({ map: Object.fromEntries((nameRes.data || []).map(p => [p.id, p.full_name])), failed: false })
+    else {
+      // S840: a row Crest support wrote is named only when its id is asked for, so the ids the first
+      // read did not name are asked for beside the rest of the load (usually none, and then nothing
+      // is sent). A failure there marks only those rows "?".
+      const first = namesMapOf(nameRes.data)
+      setNames({ map: first, failed: false })
+      void fillMissingNames(supabase, clientId, first, (ledRes.data || []).map(r => r.created_by), { ms: CALL_MS })
+        .then(filled => {
+          if (filled.map === first && !filled.error) return
+          if (filled.error) console.error('staff names for some rows could not be read, By shows ?:', filled.error)
+          setNames({ map: filled.map, failed: !!filled.error })
+        })
+    }
 
     // A failed read keeps what is already shown rather than blanking it.
     if (ledRes.error) setHistory(h => ({ ...h, loading: false, error: ledRes.error }))
@@ -211,7 +224,7 @@ export default function PointsHistoryModal({ customer, scheme, balance, held, po
                   <tr key={r.id}>
                     <td><span style={{ whiteSpace: 'nowrap' }}>{when(r.created_at)}</span></td>
                     <td>{d.what}{d.bill ? ` · ${d.bill}` : ''}</td>
-                    <td>{!r.created_by ? '—' : names.failed ? '?' : (names.map[r.created_by] || '—')}</td>
+                    <td>{!r.created_by ? '—' : (names.map[r.created_by] || (names.failed ? '?' : '—'))}</td>
                     {/* A ledger line is a record, not an alarm: earned points take the loyalty purple the
                         balances use, a minus stays quiet (as in Adjust). */}
                     <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: r.points > 0 ? 'var(--theme-purple-text)' : r.points < 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>

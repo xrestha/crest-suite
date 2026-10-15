@@ -8,6 +8,7 @@ import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
 import { DecisionButtons } from '../ApprovalControls'
 import { HR_REQUEST_STATUS } from '../payrollConstants'
+import { profileNamesRpc, namesMapOf, useMissingProfileNames } from '../../../shared/profileNames'
 
 // The Shift Swaps tab: the queue of swaps waiting on a manager's sign-off, and the permanent
 // record of every one already decided.
@@ -53,6 +54,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
   // or who approved/rejected it). No new table, no new RPC.
   const [history, setHistory] = useState([])
   const [adminNames, setAdminNames] = useState({})
+  const [adminNamesLoaded, setAdminNamesLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState(null)
 
@@ -111,11 +113,26 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount,
   // admin_decided_by is a profiles.id, not an hr_employees.id like requester/target — profiles
   // RLS only ever returns the caller's own row on a raw query, so resolving another admin/HR
   // manager's name needs get_client_profile_names() (same pattern PosShifts.jsx etc. already use).
+  // A failed read is logged and leaves the decider unnamed ('—'); the swaps themselves still stand.
   useEffect(() => {
     if (!clientId) return
-    supabase.rpc('get_client_profile_names', { p_client_id: clientId })
-      .then(({ data }) => setAdminNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name]))))
+    setAdminNamesLoaded(false)
+    profileNamesRpc(supabase, clientId)
+      .then(({ data, error }) => {
+        if (error) { console.error('Shift swaps: who decided could not be read:', error); return }
+        setAdminNames(namesMapOf(data))
+        setAdminNamesLoaded(true)
+      }, err => console.error('Shift swaps: who decided could not be read:', err))
   }, [clientId])
+
+  // S840: that read leaves out Crest support, which the RPC names only for an id asked for, so a
+  // swap it decided would read "—". The deciders it did not name are asked for once the swaps are in
+  // (usually none, and then nothing is sent).
+  useMissingProfileNames({
+    supabase, clientId, names: adminNames, ready: adminNamesLoaded,
+    ids: [...requests, ...history].map(r => r.admin_decided_by),
+    onFound: found => setAdminNames(prev => ({ ...prev, ...found })),
+  })
 
   // The decision notification is fire-and-forget: a failure to notify does not undo the decision,
   // but the manager is told (S798, ROSTER-8), since the two employees are waiting on it.

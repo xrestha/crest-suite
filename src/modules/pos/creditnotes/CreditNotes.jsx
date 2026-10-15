@@ -14,6 +14,7 @@ import { nepalBsLong, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, todayNepalBs } from '../reports/reportRange'
 import { settleWithin } from '../../../utils/withTimeout'
 import { readHscMap, REPRINT_READ_MS } from '../orders/billReprintData'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 import { printCreditNote } from './creditNoteHtml'
 import IssueCreditNoteModal from './IssueCreditNoteModal'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -143,7 +144,7 @@ export default function CreditNotes() {
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
       supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).single(),
     ])
@@ -154,7 +155,13 @@ export default function CreditNotes() {
     const failed = results.find(r => r.error)
     if (failed) { setNotesError(failed.error); setNotes([]); setNotesLoading(false); return }
     const [{ data: cn }, { data: profs }, { data: settings }, { data: cl }] = results
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    // S840: a note Crest support issued is named only when its id is asked for, so the issuers the
+    // read above did not name are asked for now (usually none, and then nothing is sent). A failure
+    // leaves those notes' Issued By blank and the book itself standing.
+    const names = await fillMissingNames(supabase, clientId, namesMapOf(profs), (cn || []).map(n => n.issued_by))
+    if (!notesReq.isCurrent(key)) return
+    if (names.error) console.error('Credit Note Book: some issuers could not be named:', names.error)
+    setStaffNames(names.map)
     setBillingSettings({
       is_vat_registered: settings?.is_vat_registered ?? true,
       invoice_prefix: settings?.invoice_prefix || '',

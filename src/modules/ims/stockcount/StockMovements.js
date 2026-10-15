@@ -19,6 +19,7 @@ import Tabs from '../../../components/Tabs'
 import { movementFigures } from './stockMovementRows'
 import { isCostedByBuild } from '../recipes/buildYourOwnRating'
 import { isMissingColumn } from '../../customization/customizationData'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 // Module scope so the memoized derivation below can reference them without them becoming
 // unstable dependencies (they're pure column definitions).
@@ -169,7 +170,7 @@ export default function StockMovements() {
         'items(name, uom, item_code, per_uom_rate, categories(name)), ' +
         'pos_orders(order_no, close_type, closed_by)'
       ).eq('period_id', periodId).order('created_at', { ascending: false }).order('id')),
-      supabase.rpc('get_client_profile_names', { p_client_id: effectiveClientId }),
+      profileNamesRpc(supabase, effectiveClientId),
       // sales_entries is period_id-scoped, not client_id-scoped — stays on raw supabase.from() (see scopedDb notes).
       // No source filter: manual Sales Entry saves deplete stock too (S492), same as POS, so a
       // recipe with no BOM is a gap regardless of which one sold it.
@@ -190,7 +191,13 @@ export default function StockMovements() {
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setNoBomRecipes([]); return }
     const [{ data: movements }, { data: profs }, { data: soldEntries }, { data: book }, { data: byoRows }] = results
-    setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
+    // S840: a bill Crest support closed is named only when its id is asked for, so the closers the
+    // names read did not name are asked for now (usually none, and then nothing is sent). A failure
+    // leaves those rows' Staff blank, never the ledger.
+    const names = await fillMissingNames(supabase, effectiveClientId, namesMapOf(profs), (movements || []).map(m => m.pos_orders?.closed_by))
+    if (!periodReq.isCurrent(periodId)) return
+    if (names.error) console.error('Stock Movements: some staff could not be named:', names.error)
+    setStaffNames(names.map)
 
     // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
     // rows — explodeRecipeIngredients() (PosOrders.jsx/depleteManualSales()) produces nothing to

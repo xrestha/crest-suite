@@ -25,6 +25,7 @@ import { errorLine } from '../../../shared/errorText'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useIsOwnEmployee } from '../ownRecord'
 import { OwnRecordNote } from '../ApprovalControls'
+import { loadProfileNames } from '../../../shared/profileNames'
 
 const fmt = nprInt
 const fmtD = iso => {
@@ -209,12 +210,15 @@ export default function Advances() {
     setLoading(false)
 
     // Who wrote each advance off. `profiles` RLS is self-or-admin, so another manager's name needs
-    // the SECURITY DEFINER RPC. Best-effort: a failure leaves the date without a name, never a wrong one.
-    if ((advs.data || []).some(a => a.status === 'written_off' && a.written_off_by)) {
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }).then(({ data, error: nameErr }) => {
-        if (!loadReq.isCurrent(key) || nameErr) return
-        setProfileNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name])))
-      }, () => {})
+    // the SECURITY DEFINER RPC, asked for these ids so a write-off by Crest support is named too
+    // (S840). Best-effort: a failure leaves the date without a name, never a wrong one.
+    const writtenOffBy = (advs.data || []).filter(a => a.status === 'written_off' && a.written_off_by).map(a => a.written_off_by)
+    if (writtenOffBy.length > 0) {
+      loadProfileNames(supabase, clientId, writtenOffBy).then(({ map, error: nameErr }) => {
+        if (!loadReq.isCurrent(key)) return
+        if (nameErr) { console.error('Advances: who wrote advances off could not be read:', nameErr); return }
+        setProfileNames(map)
+      })
     }
   }, [clientId, scopedFrom, loadReq])
 

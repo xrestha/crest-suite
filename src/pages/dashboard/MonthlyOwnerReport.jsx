@@ -19,6 +19,7 @@ import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
+import { loadProfileNames } from '../../shared/profileNames'
 import './MonthlyOwnerReport.css'
 
 const fmt = nprOrDash
@@ -190,12 +191,14 @@ export default function MonthlyOwnerReport() {
       // Who made it, for the header's "when it was made" line (D42). A failed or empty names read
       // leaves the name out of that line rather than printing a dash as if nobody made it; the
       // report itself is already on screen, so this read never blocks it.
+      // Asked for by id, so a report Crest support made reads "Crest support" (S840). Bounded: the
+      // report is already on screen, and a hung names read must not hold "Loading" over it.
       let name = ''
       if (existing.generated_by) {
-        const { data: names, error: namesErr } = await supabase.rpc('get_client_profile_names', { p_client_id: clientId })
+        const { map: names, error: namesErr } = await loadProfileNames(supabase, clientId, [existing.generated_by])
         if (!periodReq.isCurrent(key)) return   // superseded during the names read
         if (namesErr) console.error('Owner Report: could not read who made it', namesErr)
-        else name = (names || []).find(n => n.id === existing.generated_by)?.full_name || ''
+        else name = names[existing.generated_by] || ''
       }
       setGeneratorName(name)
       setLoading(false)

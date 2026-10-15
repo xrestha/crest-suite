@@ -1,4 +1,5 @@
 import { settleWithin } from '../../../utils/withTimeout'
+import { loadProfileNames } from '../../../shared/profileNames'
 
 // What a reprint needs that the bill row does not carry (S809 CHECKOUT-11): the HSC codes of ITS
 // lines and the name of the staff member who closed (or comped) it. The till used to print a reprint
@@ -27,13 +28,14 @@ export async function readHscMap(scopedFrom, recipeIds) {
 
 /**
  * `{ name, error }` for the login that closed or comped a bill. A raw `profiles` read returns only
- * the caller's own row under RLS, so another staff member's name comes from the DEFINER RPC.
- * No staff id (an old bill, or one closed before closed_by was stamped) is an empty name, not an error.
+ * the caller's own row under RLS, so another staff member's name comes from the DEFINER RPC, asked
+ * for this one id: a bill Crest support closed then reprints "Crest support", which the RPC names
+ * only for an id asked for (S840). No staff id (an old bill, or one closed before closed_by was
+ * stamped) is an empty name, not an error.
  */
 export async function staffNameFor(supabase, clientId, staffId) {
   if (!staffId) return { name: '', error: null }
-  const { data, error } = await settleWithin(
-    supabase.rpc('get_client_profile_names', { p_client_id: clientId }), REPRINT_READ_MS, 'Reading staff names')
+  const { map, error } = await loadProfileNames(supabase, clientId, [staffId], { ms: REPRINT_READ_MS, label: 'Reading staff names' })
   if (error) return { name: '', error }
-  return { name: (data || []).find(s => s.id === staffId)?.full_name || '', error: null }
+  return { name: map[staffId] || '', error: null }
 }

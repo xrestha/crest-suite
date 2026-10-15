@@ -21,6 +21,7 @@ import { settleWithin } from '../../../utils/withTimeout'
 import { settleCreditBill, SETTLE_READ_MS } from './settleCredit'
 import { customerBookAfterRead } from './customerBook'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -245,11 +246,25 @@ export default function PosCustomers() {
       settleWithin(fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, invoice_prefix, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_by, credit_settled_method, credit_note_id, vat_registered')
         .eq('payment_method', 'Credit').eq('status', 'billed')
         .order('closed_at', { ascending: false }).order('id')), LIST_READ_MS, 'Reading the Credit bills'),
-      settleWithin(supabase.rpc('get_client_profile_names', { p_client_id: clientId }), SETTLE_READ_MS, 'Reading staff names'),
+      settleWithin(profileNamesRpc(supabase, clientId), SETTLE_READ_MS, 'Reading staff names'),
     ])
     if (!creditReq.isCurrent(key)) return // a newer load (the reload after a settle) owns the tab
     if (names.error) { console.error('staff names read failed, By shows ?:', names.error); setNamesFailed(true) }
-    else { setNamesFailed(false); setStaffNames(Object.fromEntries((names.data || []).map(p => [p.id, p.full_name]))) }
+    else {
+      const first = namesMapOf(names.data)
+      setNamesFailed(false); setStaffNames(first)
+      // S840: a bill Crest support settled is named only when its id is asked for, so the settlers the
+      // first read did not name are asked for now (usually none, and then nothing is sent). It does
+      // not hold up the tab; a failure marks only those cells "?".
+      if (!error) {
+        void fillMissingNames(supabase, clientId, first, (data || []).map(b => b.credit_settled_by), { ms: SETTLE_READ_MS })
+          .then(filled => {
+            if (!creditReq.isCurrent(key)) return
+            if (filled.error) { console.error('staff names for some settlers could not be read, By shows ?:', filled.error); setNamesFailed(true); return }
+            if (filled.map !== first) setStaffNames(filled.map)
+          })
+      }
+    }
     setCreditLoading(false)
     // S754: a failed read rendered NPR 0 outstanding and "all Credit bills have been collected 🎉".
     // The error card replaces the whole tab; left un-loaded so reopening the tab retries.
@@ -796,7 +811,7 @@ export default function PosCustomers() {
                             <td style={{ textAlign: 'right' }}>{b.delivery_partner ? fmtNpr((b.paid_amount || 0) - (b.commission_amount || 0)) : '—'}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>{bsDate(b.credit_settled_at)}</td>
                             <td><span className={IDENTITY_BADGE} style={{ fontSize: 11 }}>{b.credit_settled_method}</span></td>
-                            <td>{namesFailed ? '?' : (staffNames[b.credit_settled_by] || '—')}</td>
+                            <td>{staffNames[b.credit_settled_by] || (namesFailed ? '?' : '—')}</td>
                           </tr>
                         ))}
                       </tbody>

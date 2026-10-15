@@ -18,6 +18,7 @@ import NewGatePassModal from './NewGatePassModal'
 // gatePassDayStartMs. It lives in shared/nepalTime.js, not in a POS modal file.
 import { nepalTime, nepalBs, serviceDayStartIso } from '../../../shared/nepalTime'
 import { FilterChips } from '../../../components/Tabs'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
 
@@ -121,7 +122,7 @@ export default function GatePasses() {
       supabase.from('settings').select('property_address, vat_number').eq('client_id', clientId).maybeSingle(),
       // Raw `profiles` reads are RLS-limited to the caller's own row — resolving OTHER staff
       // members' names needs get_client_profile_names(), a SECURITY DEFINER RPC.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
     ])
     if (loadClientRef.current !== clientId) return
     // The error OBJECT rather than firstError()'s string, so its code survives into the card's
@@ -132,6 +133,11 @@ export default function GatePasses() {
     setLoadError(null)
     const [{ data: v }, { data: client }, { data: settings }, { data: profs }] = results.slice(1)
     let p = results[0].data || []
+    // S840: a pass Crest support issued, let out or voided is named only when its id is asked for,
+    // so those the names read did not name are asked for beside the sweep below (usually none, and
+    // then nothing is sent). A failure leaves those names "unknown", never the passes.
+    const namesFill = fillMissingNames(supabase, clientId, namesMapOf(profs),
+      p.flatMap(x => [x.issued_by, x.exited_by, x.voided_by]))
 
     // Sweep-close any pass still "open" from a previous gate-pass day — same reasoning/pattern as
     // PosParkingSlips.jsx's loadOpen(): no server cron in this project, so this runs the moment
@@ -169,10 +175,13 @@ export default function GatePasses() {
       if (settled.stillOpen > 0) setSweepFailed(true)
     }
 
+    const names = await namesFill
+    if (loadClientRef.current !== clientId) return
+    if (names.error) console.error('Gate passes: some staff could not be named:', names.error)
     setPasses(p)
     setVendors(v || [])
     setBizInfo({ name: client?.name || '', address: settings?.property_address || '', vatNumber: settings?.vat_number || '' })
-    setStaffNames(Object.fromEntries((profs || []).map(pr => [pr.id, pr.full_name])))
+    setStaffNames(names.map)
     setLoading(false)
   }, [clientId, scopedFrom, scopedUpdate])
 

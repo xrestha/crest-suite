@@ -33,6 +33,7 @@ import { outletHasIms } from '../orders/posImsWaiting'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
@@ -297,7 +298,7 @@ export default function SalesReport() {
       // — resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
       // Credit notes by the moment they were ISSUED, on the same Nepal-day bounds as the bills.
       // Paged with a unique sort like every other read here: a note is rare, but this spans
       // whatever range the pickers hold, and a truncated read would silently drop minus rows.
@@ -314,7 +315,8 @@ export default function SalesReport() {
     setVatReg(settings?.is_vat_registered ?? true)
     setInvoicePrefix(settings?.invoice_prefix || '')
     setBotCategories(new Set(barCategoriesOf(settings?.pos_bot_categories)))
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    const firstNames = namesMapOf(profs)
+    setStaffNames(firstNames)
     const orderList = orderData || []
     const noteList = noteData || []
     const inRangeIds = new Set(orderList.map(o => o.id))
@@ -334,6 +336,11 @@ export default function SalesReport() {
     }
     const allOrders = [...orderList, ...creditedOutside]
     const byIdNext = Object.fromEntries(allOrders.map(o => [o.id, o]))
+    // S840: a bill Crest support closed, or a note it issued, is named only when its id is asked for,
+    // so those the names read did not name are asked for now, beside the line reads below (usually
+    // none, and then nothing is sent). A failure leaves those rows' Entered By blank, never the figures.
+    const namesFill = fillMissingNames(supabase, clientId, firstNames,
+      [...allOrders.map(o => o.closed_by), ...noteList.map(n => n.issued_by)])
 
     let byOrder = {}
     let paymentsNext = {}
@@ -420,6 +427,10 @@ export default function SalesReport() {
         }
       }
     }
+    const names = await namesFill
+    if (!rangeReq.isCurrent(reqKey)) return
+    if (names.error) console.error('Sales Report: some staff could not be named:', names.error)
+    if (names.map !== firstNames) setStaffNames(names.map)
     setOrders(orderList)
     setCreditNotes(noteList)
     setOrderById(byIdNext)

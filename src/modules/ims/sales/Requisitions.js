@@ -27,6 +27,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { chipKeys } from '../../../shared/rovingFocus'
 import { FilterChips } from '../../../components/Tabs'
 import { unitRateCell } from '../../../shared/unitRate'
+import { profileNamesRpc, namesMapOf, useMissingProfileNames } from '../../../shared/profileNames'
 
 const DEPARTMENTS = [
   'Kitchen',
@@ -103,6 +104,17 @@ export default function Requisitions() {
   // is required and must survive a refused write.
   const [rejecting, setRejecting] = useState(null)
 
+  // S840: init's names read leaves out Crest support, which the RPC names only for an id asked for,
+  // so the people on the month's slips that read did not name are asked for once the slips are in
+  // (usually none, and then nothing is sent). A failure here reads as "name could not be loaded" on
+  // exactly those slips, as a failed first read does on all of them.
+  useMissingProfileNames({
+    supabase, clientId: effectiveClientId, names, ready: !namesFailed,
+    ids: reqs.flatMap(r => [r.requested_by, r.issued_by, r.rejected_by]),
+    onFound: found => setNames(prev => ({ ...prev, ...found })),
+    onError: err => { console.error('Requisitions: some names on the slips could not be read:', err); setNamesFailed(true) },
+  })
+
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
   async function init() {
@@ -111,7 +123,7 @@ export default function Requisitions() {
     const [periodsRes, itemsRes, namesRes] = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
-      supabase.rpc('get_client_profile_names', { p_client_id: effectiveClientId }),
+      profileNamesRpc(supabase, effectiveClientId),
     ])
     const results = [periodsRes, itemsRes]
     // A failed read is not an empty period and must not render as one (S612 silent-zero rule).
@@ -119,7 +131,7 @@ export default function Requisitions() {
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: p }, { data: i }] = results
     setNamesFailed(!!namesRes.error)
-    setNames(Object.fromEntries((namesRes.data || []).map(n => [n.id, n.full_name])))
+    setNames(namesMapOf(namesRes.data))
     setPeriods(p || [])
     setItems(i || [])
     const open = (p || []).find(x => x.status === 'open') || (p || [])[0]

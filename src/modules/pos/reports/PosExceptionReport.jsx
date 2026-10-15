@@ -24,6 +24,7 @@ import { CLOSE_TYPE_BADGE } from '../posSignals'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
+import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 
 const fmtNpr = npr
 
@@ -88,7 +89,7 @@ export default function PosExceptionReport() {
       // — resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
       // whoever was logged in.
-      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+      profileNamesRpc(supabase, clientId),
       supabase.from('settings').select('is_vat_registered, invoice_prefix').eq('client_id', clientId).maybeSingle(),
       // Item-level comps (see PosOrders.jsx) — these live inside otherwise-'paid' orders, which
       // the query above never fetches (it's paid-with-a-discount or void/writeoff only), so they
@@ -107,7 +108,13 @@ export default function PosExceptionReport() {
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [{ data: orders }, { data: profs }, { data: settings }, { data: itemComps }] = results
 
-    setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
+    const firstNames = namesMapOf(profs)
+    setStaffNames(firstNames)
+    // S840: a bill Crest support closed, or a line it comped, is named only when its id is asked for,
+    // so those the names read did not name are asked for beside the reads below (usually none, and
+    // then nothing is sent). A failure leaves those rows unnamed, never the figures.
+    const namesFill = fillMissingNames(supabase, clientId, firstNames,
+      [...(orders || []).map(o => o.closed_by), ...(itemComps || []).map(i => i.comped_by)])
     setBillingSettings({
       is_vat_registered: settings?.is_vat_registered ?? true,
       invoice_prefix: settings?.invoice_prefix || '',
@@ -215,6 +222,10 @@ export default function PosExceptionReport() {
       itemCompRows = Object.values(groups)
     }
 
+    const names = await namesFill
+    if (!loadReq.isCurrent(reqKey)) return
+    if (names.error) console.error('Sales Exceptions: some staff could not be named:', names.error)
+    if (names.map !== firstNames) setStaffNames(names.map)
     setRows([...baseRows, ...itemCompRows].sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)))
     setLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom, loadReq, inventory, customizationEnabled])
