@@ -3,7 +3,7 @@
 import {
   buildDailyHistory, buildManualDailyHistory, periodsInLookback, weightedMean, forecastByWeekday,
   platesOf, splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList,
-  scaleForecastDays, usualSupplierByItem,
+  scaleForecastDays, usualSupplierByItem, holidaysByKeyOf, holidayKey,
   SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD,
 } from './demandForecastMath'
 import { computeOrderAmounts } from './posBillingMath'
@@ -91,6 +91,22 @@ describe('weightedMean', () => {
     expect(weightedMean([10])).toBe(10)
     expect(weightedMean([10, 4])).toBe(8)          // (2·10 + 1·4) / 3
     expect(weightedMean([0, 0, 12])).toBe(2)       // (3·0 + 2·0 + 1·12) / 6
+  })
+})
+
+// S748's rule, shared with the dashboard's Daily Purchases vs Sales chart since S850.
+describe('holidaysByKeyOf', () => {
+  it('one entry per date: the row with a multiplier wins, then public over optional', () => {
+    const map = holidaysByKeyOf([
+      { bs_year: 2083, bs_month: 7, bs_day: 25, name: 'Falgunanda Jayanti', holiday_type: 'optional', demand_multiplier: null },
+      { bs_year: 2083, bs_month: 7, bs_day: 25, name: 'Bhai Tika', holiday_type: 'public', demand_multiplier: null },
+      { bs_year: 2083, bs_month: 5, bs_day: 7, name: 'Gaura Parva', holiday_type: 'optional', demand_multiplier: 1.4 },
+      { bs_year: 2083, bs_month: 5, bs_day: 7, name: 'Krishna Janmashtami', holiday_type: 'public', demand_multiplier: null },
+    ])
+    expect(Object.keys(map)).toHaveLength(2)
+    expect(map[holidayKey(2083, 7, 25)].name).toBe('Bhai Tika')
+    expect(map[holidayKey(2083, 5, 7)]).toEqual({ name: 'Gaura Parva', holiday_type: 'optional', demand_multiplier: 1.4 })
+    expect(holidaysByKeyOf(null)).toEqual({})
   })
 })
 

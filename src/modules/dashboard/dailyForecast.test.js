@@ -1,9 +1,11 @@
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, HISTORY_DAYS,
-  splitAtToday,
+  splitAtToday, SNAPSHOT_MODEL, monthFestivals, salesFestivalFactor, salesFestivalJudged,
+  purchFestivalJudged, targetTotal, dayRanges,
 } from './dailyForecast'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
+import { holidayKey, holidaysByKeyOf } from '../../utils/demandForecastMath'
 
 // Ashwin 2083 is the month the S780 screenshots came from; Bhadra 2083 is its history.
 const OPEN = { y: 2083, m: 6 }
@@ -287,16 +289,145 @@ describe('snapshots', () => {
     expect(isCurrentSnapshot('sales', null)).toBe(false)
   })
 
-  test("S780's flat purchase snapshot is replaced; the sales one of the same model is kept", () => {
+  test("S780's flat purchase snapshot is replaced, and so is every Target that counted festivals as usual days (S850)", () => {
     const s780 = { model: 2, source: 'history', byWeekday: Array(7).fill(5022), capturedDay: 6, projectedMonthEnd: 155682 }
     expect(isCurrentSnapshot('purch', s780)).toBe(false)
-    expect(isCurrentSnapshot('sales', s780)).toBe(true)
+    // The S783 models (sales 2, purchases 3) learned from festival days; each is recaptured once.
+    expect(isCurrentSnapshot('sales', { ...s780, model: 2 })).toBe(false)
+    expect(isCurrentSnapshot('purch', { ...s780, model: 3 })).toBe(false)
     const fresh = makeSnapshot('purch', { source: 'history', byWeekday: [12798, 2822, 4065, 4088, 4944, 4095, 2346], sampleDays: 28 }, { monthEndDay, weekdayOf, capturedDay: 7 })
     expect(isCurrentSnapshot('purch', fresh)).toBe(true)
+    expect(SNAPSHOT_MODEL).toEqual({ sales: 3, purch: 4 })
   })
 
   test('the write guard reaches an empty column and an older model, never by a bare neq', () => {
     expect(staleSnapshotFilter('purch', 'purch_projection_snapshot'))
-      .toBe('purch_projection_snapshot->>model.is.null,purch_projection_snapshot->>model.neq.3')
+      .toBe('purch_projection_snapshot->>model.is.null,purch_projection_snapshot->>model.neq.4')
+  })
+})
+
+// S850: festivals from the Holiday Calendar. Owner decisions: not a sample of a usual week; on the
+// day, sales at the Demand Multiplier (Target and forecast), a festival with none drawn as usual and
+// not judging the pace; purchases never scaled and never judged on a festival.
+describe('festivals (S850)', () => {
+  const n = daysInBsMonth(PREV.y, PREV.m)
+  const lastOf = dow => { let d = n; while (bsToAd(PREV.y, PREV.m, d).getDay() !== dow) d--; return d }
+  const holidayOn = (d, demand_multiplier = null) => ({ [holidayKey(PREV.y, PREV.m, d)]: { name: 'Fulpati', holiday_type: 'public', demand_multiplier } })
+
+  test('a festival in the window is no sample: a Saturday that sold 3× leaves Saturday at its usual', () => {
+    const hist = bhadraHistory()
+    const sat = lastOf(6)
+    hist[0].salesMap[sat] = 60000
+    expect(baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, hist)).sales.byWeekday[6]).toBe(30000)
+    const days = historyWindowDays(OPEN.y, OPEN.m, hist, holidayOn(sat))
+    expect(days.filter(x => x.holiday)).toHaveLength(1)
+    const { sales } = baseFromHistory(days)
+    expect(sales.byWeekday[6]).toBe(20000)
+    expect(sales.sampleDays).toBe(HISTORY_DAYS - 1)
+  })
+
+  test('purchases: a restock day skipped for a festival does not lower the usual restock', () => {
+    const hist = bhadraHistory()
+    const sun = lastOf(0)
+    delete hist[0].purchMap[sun]
+    // Blind, three Sundays at 7,000 and one at nothing: the restock reads as 5,250.
+    expect(baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, hist)).purch.byWeekday[0]).toBe(5250)
+    expect(baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, hist, holidayOn(sun))).purch.byWeekday[0]).toBe(7000)
+  })
+
+  test('a weekday whose only sales were on a festival was trading: it takes the usual mean, never 0', () => {
+    const sat = lastOf(6)
+    const salesMap = {}
+    for (let d = 1; d <= n; d++) if (bsToAd(PREV.y, PREV.m, d).getDay() !== 6) salesMap[d] = 10000
+    salesMap[sat] = 30000
+    const hist = [{ bs_year: PREV.y, bs_month: PREV.m, salesMap, purchMap: {} }]
+    expect(baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, hist, holidayOn(sat))).sales.byWeekday[6]).toBe(10000)
+    // With no Saturday entry at all, festival or not, Saturday still reads as shut.
+    delete salesMap[sat]
+    expect(baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, hist, holidayOn(sat))).sales.byWeekday[6]).toBe(0)
+  })
+
+  test("a new client's own week does not count its festival days", () => {
+    const valueMap = {}
+    for (let d = 1; d <= 9; d++) valueMap[d] = d <= 2 ? 2000 : 10000
+    const isFestival = d => d <= 2
+    expect(baseFromMonth({ kind: 'sales', valueMap, dayNums: [1, 2, 3, 4, 5, 6, 7], weekdayOf, isFestival })).toBeNull()
+    const sales = baseFromMonth({ kind: 'sales', valueMap, dayNums: [1, 2, 3, 4, 5, 6, 7, 8, 9], weekdayOf, isFestival })
+    expect(sales.sampleDays).toBe(7)
+    expect(sales.byWeekday.every(v => v === 10000)).toBe(true)
+    expect(baseFromMonth({ kind: 'purch', valueMap, elapsed: 8, weekdayOf, isFestival })).toBeNull()
+    expect(baseFromMonth({ kind: 'purch', valueMap, elapsed: 9, weekdayOf, isFestival }).sampleDays).toBe(7)
+  })
+
+  test("the month's festivals carry the Demand Multiplier, or null where none (or no number) is set", () => {
+    const holidays = holidaysByKeyOf([
+      { bs_year: 2083, bs_month: 7, bs_day: 4, name: 'Bijaya Dashami', holiday_type: 'public', demand_multiplier: 0.3 },
+      { bs_year: 2083, bs_month: 7, bs_day: 22, name: 'Laxmi Puja', holiday_type: 'public', demand_multiplier: '1.5' },
+      { bs_year: 2083, bs_month: 7, bs_day: 25, name: 'Bhai Tika', holiday_type: 'public', demand_multiplier: null },
+      { bs_year: 2083, bs_month: 7, bs_day: 29, name: 'Chhath Parva', holiday_type: 'public', demand_multiplier: -1 },
+      { bs_year: 2083, bs_month: 6, bs_day: 25, name: 'Ghatasthapana', holiday_type: 'public', demand_multiplier: 0.5 },
+    ])
+    expect(monthFestivals(holidays, 2083, 7, daysInBsMonth(2083, 7))).toEqual({
+      4: { name: 'Bijaya Dashami', multiplier: 0.3 },
+      22: { name: 'Laxmi Puja', multiplier: 1.5 },
+      25: { name: 'Bhai Tika', multiplier: null },
+      29: { name: 'Chhath Parva', multiplier: null },
+    })
+  })
+
+  const base = { byWeekday: Array(7).fill(10000) }
+  const span = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i)
+  const sales = (festivals, extra) => ({
+    base, weekdayOf, monthEndDay, dayFactor: salesFestivalFactor(festivals), judged: salesFestivalJudged(festivals), ...extra,
+  })
+
+  test('a quiet Dashain week with no multiplier does not drag the rest of the month down', () => {
+    const festivals = Object.fromEntries(span(1, 6).map(d => [d, { name: 'Dashain', multiplier: null }]))
+    const valueMap = Object.fromEntries(span(1, 9).map(d => [d, d <= 6 ? 3000 : 10000]))
+    const r = projectMonth(sales(festivals, { valueMap, expectDays: span(1, 9), fromDay: 10 }))
+    expect(r.paceFactor).toBe(1)
+    expect(r.projDays[10]).toBe(10000)
+    // The festival days still count in the month-end total, at what they actually took.
+    expect(r.projectedTotal).toBe(6 * 3000 + 3 * 10000 + (monthEndDay - 9) * 10000)
+    // Judged as usual days, the same week pulled every remaining day down by over a third.
+    expect(projectMonth({ base, valueMap, expectDays: span(1, 9), fromDay: 10, monthEndDay, weekdayOf }).paceFactor).toBeLessThan(0.7)
+  })
+
+  test('a festival with a multiplier is judged against it, and scales its day ahead', () => {
+    const festivals = { 2: { name: 'Tika', multiplier: 0.3 }, 12: { name: 'Laxmi Puja', multiplier: 1.5 } }
+    const r = projectMonth(sales(festivals, { valueMap: { 1: 10000, 2: 3000, 3: 10000 }, expectDays: [1, 2, 3], fromDay: 4 }))
+    expect(r.paceFactor).toBe(1)
+    expect(r.projDays[12]).toBe(15000)
+    expect(r.projDays[11]).toBe(10000)
+  })
+
+  test('with every finished day a festival, a base is taken at face value; without one, nothing yet', () => {
+    const festivals = { 1: { name: 'Ashtami', multiplier: null }, 2: { name: 'Navami', multiplier: null } }
+    const r = projectMonth(sales(festivals, { valueMap: { 1: 500, 2: 500 }, expectDays: [1, 2], fromDay: 3 }))
+    expect(r.paceFactor).toBe(1)
+    expect(r.projDays[3]).toBe(10000)
+    expect(projectMonth(sales(festivals, { base: null, valueMap: { 1: 500, 2: 500 }, expectDays: [1, 2], fromDay: 3 }))).toBeNull()
+  })
+
+  test('purchases: no festival judges the pace, multiplier or not', () => {
+    const festivals = { 2: { name: 'Tika', multiplier: 0.3 } }
+    const r = projectMonth({ base: { byWeekday: Array(7).fill(1000) }, valueMap: { 1: 1000, 3: 1000 }, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf, judged: purchFestivalJudged(festivals) })
+    expect(r.paceFactor).toBe(1)
+  })
+
+  test('the Target keeps the usual week; festivals scale their days where it is drawn', () => {
+    const snap = makeSnapshot('sales', { source: 'history', byWeekday: Array(7).fill(1000), sampleDays: 28 }, { monthEndDay, weekdayOf, capturedDay: 1 })
+    expect(snap.projectedMonthEnd).toBe(1000 * monthEndDay)
+    const f = salesFestivalFactor({ 4: { multiplier: 0.3 }, 22: { multiplier: 1.5 }, 25: { multiplier: null } })
+    expect(targetValue('sales', snap, weekdayOf(4), f(4))).toBe(300)
+    expect(targetValue('sales', snap, weekdayOf(25), f(25))).toBe(1000)
+    expect(targetTotal(snap.byWeekday, { monthEndDay, weekdayOf, dayFactor: f })).toBe(1000 * monthEndDay - 700 + 500)
+    expect(targetTotal(snap.byWeekday, { monthEndDay, weekdayOf })).toBe(snap.projectedMonthEnd)
+  })
+
+  test('festival days print as runs', () => {
+    expect(dayRanges([1, 2, 3, 4, 5, 6, 22, 23, 24, 25, 26, 29])).toBe('1–6, 22–26, 29')
+    expect(dayRanges([5])).toBe('5')
+    expect(dayRanges([])).toBe('')
   })
 })

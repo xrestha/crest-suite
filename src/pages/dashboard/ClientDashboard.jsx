@@ -11,7 +11,9 @@ import { firstError } from '../../shared/queryError'
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, splitAtToday,
+  monthFestivals, salesFestivalFactor, salesFestivalJudged, purchFestivalJudged, targetTotal, dayRanges,
 } from '../../modules/dashboard/dailyForecast'
+import { holidaysByKeyOf } from '../../utils/demandForecastMath'
 import {
   adDateOf, adDateBack, rainPctValue, rainFactorForMonth, rainAhead, measuredRainEffect,
   WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
@@ -187,6 +189,14 @@ function TrendTooltipContent({ active, payload, label, big }) {
   return (
     <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 16px', whiteSpace: 'nowrap' }}>
       <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
+      {/* S850: a festival's day says which festival, and what it does to the sales lines. */}
+      {row.festival && (
+        <p style={{ margin: '2px 0 0', color: 'var(--theme-text3)', fontSize: big ? 11 : 10 }}>
+          {row.festival.name} · {row.festival.multiplier != null
+            ? `Demand Multiplier ×${row.festival.multiplier} on sales`
+            : 'no Demand Multiplier set in Holiday Calendar'}
+        </p>
+      )}
       {shown.map(en => {
         // Actual-vs-target gap on the two actual rows; the target rows themselves carry none, and
         // nothing renders until that metric's Target line has been captured.
@@ -305,19 +315,33 @@ const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 // shorter than the window's reach on a boundary; historyWindowDays() keeps only the days inside
 // it. Returns raw rows plus the first error, and never throws: a failed read must reach the
 // caller as a failure, not as an empty history (see the trend build in loadStats).
-async function loadForecastHistory(scopedFrom, period) {
+//
+// It also reads the Holiday Calendar over those months and this one (S850), through the DEFINER
+// get_forecast_holidays: the table reads EMPTY, not failed, for an IMS staff or till login, and
+// whichever login opens the dashboard first captures the month's Target. A failed holiday read is a
+// failed history read, so no Target is captured from a calendar that could not be read.
+async function loadForecastHistory(scopedFrom, period, clientId) {
   const prev = k => {
     const m = period.bs_month - k
     return m >= 1 ? { y: period.bs_year, m } : { y: period.bs_year - 1, m: m + 12 }
   }
   const wanted = [prev(1), prev(2)]
-  const { data: periodRows, error: periodErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
-    .lte('bs_year', period.bs_year)
-    .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    .limit(6)
+  const [{ data: periodRows, error: periodErr }, { data: holidayRows, error: holidayErr }] = await Promise.all([
+    scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+      .lte('bs_year', period.bs_year)
+      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      .limit(6),
+    // A few dozen rows across three months: no paging needed.
+    supabase.rpc('get_forecast_holidays', {
+      p_client_id: clientId, p_from_year: prev(2).y, p_from_month: prev(2).m,
+      p_to_year: period.bs_year, p_to_month: period.bs_month,
+    }),
+  ])
   if (periodErr) return { error: periodErr }
+  if (holidayErr) return { error: holidayErr }
+  const holidays = holidaysByKeyOf(holidayRows)
   const periods = (periodRows || []).filter(p => wanted.some(w => w.y === p.bs_year && w.m === p.bs_month))
-  if (!periods.length) return { periods: [], sales: [], purchases: [], returns: [], error: null }
+  if (!periods.length) return { periods: [], sales: [], purchases: [], returns: [], holidays, error: null }
   const ids = periods.map(p => p.id)
   const results = await Promise.all([
     fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, unit_price, discount, source').in('period_id', ids).order('id')),
@@ -326,7 +350,7 @@ async function loadForecastHistory(scopedFrom, period) {
   ])
   const error = firstError(results)
   if (error) return { error }
-  return { periods, sales: results[0].data || [], purchases: results[1].data || [], returns: results[2].data || [], error: null }
+  return { periods, sales: results[0].data || [], purchases: results[1].data || [], returns: results[2].data || [], holidays, error: null }
 }
 
 // `scope` (S800): 'home' is /dashboard, every module's headline cards; 'ims' is /ims/dashboard, the
@@ -370,6 +394,11 @@ export default function ClientDashboard({ scope = 'home' }) {
   const [purchTargetSnap, setPurchTargetSnap] = useState(() => readDashboardCache('purchTargetSnap', effectiveClientId)) // same shape
   // The history read failed AND it cost the chart something (a Target that could not be set).
   const [forecastHistoryFailed, setForecastHistoryFailed] = useState(() => readDashboardCache('forecastHistoryFailed', effectiveClientId) ?? false)
+  // The history or Holiday Calendar read failed, so this month's festivals are drawn as usual days
+  // (S850). Separate from the flag above: a Target captured earlier still draws, without them.
+  const [festivalsUnread, setFestivalsUnread] = useState(() => readDashboardCache('festivalsUnread', effectiveClientId) ?? false)
+  // The sales Target's month total with each festival at its Demand Multiplier (S850).
+  const [salesTargetTotal, setSalesTargetTotal] = useState(() => readDashboardCache('salesTargetTotal', effectiveClientId) ?? null)
   // What the rain adjustment (S784) re-runs the sales forecast from at render time, so the weather,
   // which arrives on its own, never has to wait for or re-run loadStats. salesDayLog is the days the
   // outlet's own rainy-day effect is measured over: the Target's history window plus this month.
@@ -537,7 +566,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const bsNow = nepalBsToday()
     const periodIsThisMonth = !!period && period.bs_year === bsNow.year && period.bs_month === bsNow.month
     const historyPromise = periodIsThisMonth
-      ? loadForecastHistory(scopedFrom, period).catch(err => ({ error: err?.message || String(err) }))
+      ? loadForecastHistory(scopedFrom, period, effectiveClientId).catch(err => ({ error: err?.message || String(err) }))
       : Promise.resolve(null)
 
     const dependentPromise = Promise.all([
@@ -839,6 +868,10 @@ export default function ClientDashboard({ scope = 'home' }) {
     const historyFailed = isCurrentMonth && !!forecastHistory?.error
     let historyBase = { sales: null, purch: null }
     let historyDays = []
+    // This month's festivals (S850, dailyForecast.js header). Empty when the calendar could not be
+    // read, which the footer says (festivalsUnread), rather than drawing festivals as usual days in
+    // silence.
+    let festivals = {}
     if (isCurrentMonth && forecastHistory && !historyFailed) {
       const inPeriod = (rows, id) => rows.filter(r => r.period_id === id)
       historyDays = historyWindowDays(period.bs_year, period.bs_month,
@@ -849,9 +882,13 @@ export default function ClientDashboard({ scope = 'home' }) {
           // Per period. No longer required: since S792 the legacy bill key carries period_id
           // (supplierAttribution.js allocationBillKey), so a whole-batch pass would agree.
           purchMap: dailyPurchaseMap(allocateBillDiscounts(inPeriod(forecastHistory.purchases, p.id)), inPeriod(forecastHistory.returns, p.id)),
-        })))
+        })), forecastHistory.holidays)
       historyBase = baseFromHistory(historyDays)
+      festivals = monthFestivals(forecastHistory.holidays, period.bs_year, period.bs_month, monthEndDay)
     }
+    const isFestival = d => !!festivals[d]
+    const salesFactorOf = salesFestivalFactor(festivals)
+    setAndCache(setFestivalsUnread, 'festivalsUnread', historyFailed)
 
     // The frozen Target: captured once per period, never recalculated, so a later visit can judge
     // the month against what was expected of it. A snapshot of an older model (a pre-S780 slope
@@ -872,41 +909,54 @@ export default function ClientDashboard({ scope = 'home' }) {
       // Finished days only (PLANNING-3): the Target is frozen for the month, so a morning's partial
       // takings captured here would stand as that weekday's usual until the month ends.
       if (!nextSalesTargetSnap) {
-        const base = historyBase.sales || baseFromMonth({ kind: 'sales', valueMap: daySalesMap, dayNums: salesDone, weekdayOf })
+        const base = historyBase.sales || baseFromMonth({ kind: 'sales', valueMap: daySalesMap, dayNums: salesDone, weekdayOf, isFestival })
         if (base) nextSalesTargetSnap = capture('sales', 'sales_projection_snapshot', base)
       }
       if (!nextPurchTargetSnap) {
         // No bill at all on a finished day means a client not recording purchases here, not a
         // month of zero spend, so it gets no purchase target from its own days.
         const base = historyBase.purch
-          || (purchDayNums.some(d => d <= purchElapsed) ? baseFromMonth({ kind: 'purch', valueMap: dayPurchMap, elapsed: purchElapsed, weekdayOf }) : null)
+          || (purchDayNums.some(d => d <= purchElapsed) ? baseFromMonth({ kind: 'purch', valueMap: dayPurchMap, elapsed: purchElapsed, weekdayOf, isFestival }) : null)
         if (base) nextPurchTargetSnap = capture('purch', 'purch_projection_snapshot', base)
       }
     }
     setAndCache(setSalesTargetSnap, 'salesTargetSnap', nextSalesTargetSnap)
     setAndCache(setPurchTargetSnap, 'purchTargetSnap', nextPurchTargetSnap)
     setAndCache(setForecastHistoryFailed, 'forecastHistoryFailed', historyFailed && (!nextSalesTargetSnap || !nextPurchTargetSnap))
+    // The sales Target's month total with each festival at its multiplier (S850); the stored
+    // projectedMonthEnd is the usual week's. Purchases are never scaled, so theirs is the stored one.
+    setAndCache(setSalesTargetTotal, 'salesTargetTotal', nextSalesTargetSnap
+      ? targetTotal(nextSalesTargetSnap.byWeekday, { monthEndDay, weekdayOf, dayFactor: salesFactorOf })
+      : null)
 
     // The live forecast leans on the Target's weekday pattern (or, before one exists, the history
     // base), scaled to how this month is running against it.
     const salesTrend = (dailySalesOn && isCurrentMonth)
-      ? projectMonth({ base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom, monthEndDay, weekdayOf })
+      ? projectMonth({
+          base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom, monthEndDay, weekdayOf,
+          dayFactor: salesFactorOf, judged: salesFestivalJudged(festivals),
+        })
       : null
     // The same call's inputs, kept for the rain adjustment to re-run at render (S784). Sales only:
-    // purchases follow restock days, whatever the weather.
+    // purchases follow restock days, whatever the weather. `festivals` rides along so the re-run
+    // keeps each festival's multiplier beside the rain (S850).
     const salesBase = nextSalesTargetSnap || historyBase.sales
     setAndCache(setSalesForecastInputs, 'salesForecastInputs', salesTrend ? {
       base: salesBase ? { byWeekday: salesBase.byWeekday } : null,
       valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom,
-      monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay,
+      monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay, festivals,
     } : null)
-    // The measured rain effect's samples: finished days only, like the pace.
+    // The measured rain effect's samples: finished days only, like the pace, and no festival day,
+    // whose sales say nothing about what rain does to a usual one (S850).
     setAndCache(setSalesDayLog, 'salesDayLog', isCurrentMonth ? [
-      ...historyDays.filter(x => x.sales != null).map(x => ({ ad: adDateBack(period.bs_year, period.bs_month, x.back), dow: x.dow, sales: x.sales })),
-      ...salesDone.map(d => ({ ad: adDateOf(period.bs_year, period.bs_month, d), dow: weekdayOf(d), sales: daySalesMap[d] })),
+      ...historyDays.filter(x => x.sales != null && !x.holiday).map(x => ({ ad: adDateBack(period.bs_year, period.bs_month, x.back), dow: x.dow, sales: x.sales })),
+      ...salesDone.filter(d => !isFestival(d)).map(d => ({ ad: adDateOf(period.bs_year, period.bs_month, d), dow: weekdayOf(d), sales: daySalesMap[d] })),
     ] : [])
     const purchTrend = (isCurrentMonth && elapsedDay > 0)
-      ? projectMonth({ base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: purchElapsed }, (_, i) => i + 1), fromDay: purchFrom, monthEndDay, weekdayOf })
+      ? projectMonth({
+          base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: purchElapsed }, (_, i) => i + 1), fromDay: purchFrom, monthEndDay, weekdayOf,
+          judged: purchFestivalJudged(festivals),
+        })
       : null
     const projDays = salesTrend?.projDays || {}
     const purchProjDays = purchTrend?.projDays || {}
@@ -942,8 +992,11 @@ export default function ClientDashboard({ scope = 'home' }) {
         // Frozen full-month line, unlike salesProj/purchProj above — non-null for every day in
         // range (not just from the last actual onward) so it's a static reference the actual line
         // can be compared against retroactively, not just a forward-looking tail.
-        salesTarget: targetValue('sales', nextSalesTargetSnap, weekdayOf(d)),
+        // A festival's multiplier scales its day on the sales Target (S850); purchases never.
+        salesTarget: targetValue('sales', nextSalesTargetSnap, weekdayOf(d), salesFactorOf(d)),
         purchTarget: targetValue('purch', nextPurchTargetSnap, weekdayOf(d)),
+        // For the tooltip and the footer: { name, multiplier } on a festival, else absent.
+        ...(festivals[d] && { festival: festivals[d] }),
       })
     }
     setAndCache(setDailyTrend, 'dailyTrend', trend)
@@ -1542,11 +1595,15 @@ export default function ClientDashboard({ scope = 'home' }) {
       })
     : null
   const rainAheadView = weatherByAd ? rainAhead({ weatherByAd, todayAd: weatherTodayAd, forecastAd: weatherForecastAd }) : null
+  // A festival's multiplier stays on its day beside the rain (S850): the two multiply. An input
+  // cached before S850 has no `festivals`, which reads as none.
+  const inputFestivals = salesForecastInputs?.festivals || {}
   const rainTrend = rainAdj
     ? projectMonth({
         ...salesForecastInputs,
         weekdayOf: d => bsToAd(salesForecastInputs.bsYear, salesForecastInputs.bsMonth, d).getDay(),
-        dayFactor: rainAdj.factorOf,
+        dayFactor: d => rainAdj.factorOf(d) * salesFestivalFactor(inputFestivals)(d),
+        judged: salesFestivalJudged(inputFestivals),
       })
     : null
   // The days AHEAD the rain moved, for the footer. A rainy day already gone only corrected the pace.
@@ -1595,13 +1652,21 @@ export default function ClientDashboard({ scope = 'home' }) {
   // for the moment before loadStats replaces it, and its slope fit is exactly what S780 removed.
   const salesTarget = isCurrentSnapshot('sales', salesTargetSnap) ? salesTargetSnap : null
   const purchTarget = isCurrentSnapshot('purch', purchTargetSnap) ? purchTargetSnap : null
+  // What the sales Target line adds up to, festivals at their multipliers (S850). The stored figure
+  // is the usual week's, and stands in only until loadStats has worked the month out.
+  const salesTargetMonthEnd = salesTarget ? (salesTargetTotal ?? salesTarget.projectedMonthEnd) : null
+  // This month's festivals, off the chart's own rows, for the footer: which days, and how many of
+  // them carry no Demand Multiplier and are therefore drawn as usual days.
+  const festivalRows = dailyTrend.filter(r => r.festival)
+  const festivalDayNums = festivalRows.map(r => parseInt(String(r.day).replace('Day ', ''), 10))
+  const festivalsUnset = festivalRows.filter(r => r.festival.multiplier == null).length
   // Where a Target came from, in the words the footer and the screen-reader summary use.
   const targetBasis = snap => (snap.source === 'history'
     ? "last 4 weeks' pace"
     : `set on Day ${snap.capturedDay} from this month's first ${snap.sampleDays} days`)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${festivalDayNums.length ? ` Festival days from Holiday Calendar: day ${dayRanges(festivalDayNums)}.` : ''}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-IN')}`).join(', ')}.`
@@ -2439,7 +2504,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                 <span style={{ color: DAILY_TREND_COLORS.salesTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
                 <Tip text={`${salesTarget.source === 'history'
                   ? `What a usual day sells, from the 4 weeks before ${periodLabel} began.`
-                  : `What a usual day sells, from this month's first ${salesTarget.sampleDays} days of sales (there weren't 4 weeks of daily sales before ${periodLabel} to learn from).`} Each weekday has its own figure, so a busy Saturday sits higher than a quiet Monday. It stays fixed for the rest of ${periodLabel}: compare your actual sales line against it to see whether you're ahead of or behind your usual trade. Sales Proj. is different: it updates every day. Hover any day: the tooltip shows how far that day ran off target, in green when it went your way. A grey ≈ means the day was close enough to count as on target.`}>Sales Target</Tip>
+                  : `What a usual day sells, from this month's first ${salesTarget.sampleDays} days of sales (there weren't 4 weeks of daily sales before ${periodLabel} to learn from).`} Each weekday has its own figure, so a busy Saturday sits higher than a quiet Monday. Festival days in Holiday Calendar are left out of that usual week, and a festival with a Demand Multiplier sits at the usual day × that multiplier. It stays fixed for the rest of ${periodLabel}: compare your actual sales line against it to see whether you're ahead of or behind your usual trade. Sales Proj. is different: it updates every day. Hover any day: the tooltip shows how far that day ran off target, in green when it went your way. A grey ≈ means the day was close enough to count as on target.`}>Sales Target</Tip>
               </span>
             )}
             {purchTarget && (
@@ -2447,13 +2512,13 @@ export default function ClientDashboard({ scope = 'home' }) {
                 <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
                 <Tip text={`${purchTarget.source === 'history'
                   ? `What you usually spend on each weekday, from the 4 weeks before ${periodLabel} began.`
-                  : `What you usually spend on each weekday, from this month's first ${purchTarget.sampleDays} days (there weren't 4 weeks of purchases before ${periodLabel} to learn from).`} A weekday you bought nothing on counts as zero, so your usual restock day sits high and your quiet buying days sit low. It stays fixed for the rest of ${periodLabel}. Hover any day: here green means UNDER the target, because spending less than usual is the win. A grey ≈ means the day was close enough to count as on target.`}>Purch. Target</Tip>
+                  : `What you usually spend on each weekday, from this month's first ${purchTarget.sampleDays} days (there weren't 4 weeks of purchases before ${periodLabel} to learn from).`} A weekday you bought nothing on counts as zero, so your usual restock day sits high and your quiet buying days sit low. Festival days in Holiday Calendar are left out of that usual week, and the purchase target is never scaled for a festival. It stays fixed for the rest of ${periodLabel}. Hover any day: here green means UNDER the target, because spending less than usual is the win. A grey ≈ means the day was close enough to count as on target.`}>Purch. Target</Tip>
               </span>
             )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
-            {(salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed) && (
+            {(salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed || festivalsUnread) && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {salesProjection && (
                   <span>
@@ -2467,7 +2532,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                 )}
                 {salesTarget && (
                   <span>
-                    Sales target ({targetBasis(salesTarget)}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    Sales target ({targetBasis(salesTarget)}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTargetMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {purchTarget && (
@@ -2475,9 +2540,26 @@ export default function ClientDashboard({ scope = 'home' }) {
                     Purchase target ({targetBasis(purchTarget)}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
+                {/* S850: printed, not only hovered, so a screenshot keeps which days are festivals. */}
+                {festivalDayNums.length > 0 && (
+                  <span>
+                    <Tip text={`Festival days come from Holiday Calendar. They are left out when working out a usual weekday, so a festival last month does not raise or lower this month's target. On a festival with a Demand Multiplier set, the sales target and sales forecast for that day are a usual day × that multiplier. A festival with none set is drawn as a usual day, and how it sells does not change the forecast for the rest of the month. Purchases are never scaled on festivals: a kitchen often stocks up before one rather than buying less on it.`}>
+                      Festival days
+                    </Tip>: Day {dayRanges(festivalDayNums)}
+                    {festivalsUnset > 0 && (
+                      <span style={{ color: 'var(--theme-text3)' }}>
+                        {' '}· {festivalsUnset} with no Demand Multiplier, drawn as usual days
+                      </span>
+                    )}
+                  </span>
+                )}
                 {forecastHistoryFailed ? (
                   <span style={{ color: 'var(--theme-amber-text)' }}>
-                    Past months could not be read, so the forecast uses this month only. A target will be set once they load.
+                    Past months or the holiday calendar could not be read, so the forecast uses this month only. A target will be set once they load.
+                  </span>
+                ) : festivalsUnread ? (
+                  <span style={{ color: 'var(--theme-amber-text)' }}>
+                    Past months or the holiday calendar could not be read, so festival days are drawn as usual days.
                   </span>
                 ) : (salesProjection || purchProjection) && (
                   <span style={{ color: 'var(--theme-text3)' }}>
@@ -2648,7 +2730,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                     {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {salesProjectionView && <StatPill label="Projected sales" value={`NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />}
-                    {salesTarget && <StatPill label="Sales target" value={`NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
+                    {salesTarget && <StatPill label="Sales target" value={`NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
                     {purchTarget && <StatPill label="Purchase target" value={`NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}
                     <StatPill label="Period" value={periodLabel} />
                   </div>

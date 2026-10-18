@@ -20,13 +20,28 @@
 // yet entered), but a day with no purchase is a real zero, because a kitchen buys on some days
 // and not others. So a purchase weekday is averaged over every such day in the window, never only
 // over the days a bill landed.
+//
+// FESTIVALS (S850, owner decisions): every day in the Holiday Calendar, optional ones included, the
+// set Demand Forecast uses. Dashain is not evidence about an ordinary week, so a festival day is
+// never a sample of a usual weekday, for either metric. On the festival itself:
+//   - SALES: a festival with a Demand Multiplier is a usual day × that figure, on the Target line
+//     and the forecast alike, and judges the pace against that lowered (or raised) expectation; one
+//     with no multiplier is drawn as a usual day and does not judge the pace, so a quiet Dashain
+//     week does not pull the forecast down for the rest of Kartik.
+//   - PURCHASES: never scaled (a kitchen stocks up before a festival as often as it buys less on
+//     it), and no festival day judges their pace either.
+// The snapshot keeps the usual week; festivals are applied when the line is drawn, so a multiplier
+// set after the Target was captured still shows on its day.
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
+import { holidayKey } from '../../utils/demandForecastMath'
 import { returnCostValue } from '../ims/reports/supplierAttribution'
 
 // Per kind, because the purchase snapshot changed shape after the sales one (S783: flat daily
 // average → per weekday). A stored snapshot of an older model is treated as absent and replaced
-// once; bumping one kind never disturbs the other's frozen Target.
-export const SNAPSHOT_MODEL = { sales: 2, purch: 3 }
+// once; bumping one kind never disturbs the other's frozen Target. S850 bumped both (festival days
+// left out of the history): the database's snapshot guard compares models, so a bump here is
+// accepted as newer, and any guard that names the current models must move in the same commit.
+export const SNAPSHOT_MODEL = { sales: 3, purch: 4 }
 export const HISTORY_DAYS = 28
 export const MIN_HISTORY_DAYS = 14
 export const MIN_MONTH_DAYS_FOR_TARGET = 7
@@ -72,7 +87,9 @@ export function dailyPurchaseMap(allocatedPurchases, returns) {
 // minted before anyone used the app does not read as a run of zero days.
 //
 // periods: [{ bs_year, bs_month, salesMap, purchMap }] — the maps as built by the two helpers above.
-export function historyWindowDays(openYear, openMonth, periods) {
+// holidays: holidaysByKeyOf() output. A festival day stays in the window (it is a day the client
+// traded, or chose not to) and is marked, so the bases below can leave it out.
+export function historyWindowDays(openYear, openMonth, periods, holidays = {}) {
   const start = bsToAd(openYear, openMonth, 1)
   const days = []
   ;(periods || []).forEach(p => {
@@ -81,7 +98,10 @@ export function historyWindowDays(openYear, openMonth, periods) {
       const ad = bsToAd(p.bs_year, p.bs_month, d)
       const back = Math.round((start - ad) / DAY_MS)
       if (back < 1 || back > HISTORY_DAYS) continue
-      days.push({ back, dow: ad.getDay(), sales: p.salesMap?.[d] ?? null, purch: p.purchMap?.[d] ?? null })
+      days.push({
+        back, dow: ad.getDay(), sales: p.salesMap?.[d] ?? null, purch: p.purchMap?.[d] ?? null,
+        holiday: !!holidays?.[holidayKey(p.bs_year, p.bs_month, d)],
+      })
     }
   })
   const active = days.filter(x => x.sales != null || x.purch != null)
@@ -90,26 +110,36 @@ export function historyWindowDays(openYear, openMonth, periods) {
   return days.filter(x => x.back <= earliest).sort((a, b) => b.back - a.back)
 }
 
-// Average per weekday. A weekday with no samples takes `fallback`: 0 for sales history (four
+// Average per weekday. A weekday with no samples takes `fallback(dow)`: 0 for sales history (four
 // weeks without one Saturday entry means the place is shut on Saturdays), the overall mean
 // wherever a weekday simply has not come round yet.
 function weekdayAverages(samples, fallback) {
+  const fallbackOf = typeof fallback === 'function' ? fallback : () => fallback
   const tot = Array(7).fill(0), cnt = Array(7).fill(0)
   samples.forEach(({ dow, v }) => { tot[dow] += v; cnt[dow]++ })
-  return tot.map((t, i) => Math.round(cnt[i] ? t / cnt[i] : fallback))
+  return tot.map((t, i) => Math.round(cnt[i] ? t / cnt[i] : fallbackOf(i)))
 }
 
 const meanOf = samples => (samples.length ? sum(samples.map(s => s.v)) / samples.length : 0)
 
 // { sales, purch } bases from the history window, each null when history is too thin to judge.
-// Purchases take every window day as a sample, a day without a bill at 0.
+// Purchases take every window day as a sample, a day without a bill at 0. Festival days are not
+// samples of either (S850), and "too thin" counts the usual days only.
 export function baseFromHistory(days) {
-  const salesDays = (days || []).filter(x => x.sales != null)
+  const all = days || []
+  const usual = all.filter(x => !x.holiday)
+  const salesDays = usual.filter(x => x.sales != null)
+  const salesSamples = salesDays.map(x => ({ dow: x.dow, v: x.sales }))
+  // A weekday whose only sales in the window fell on festivals was trading, not shut: it takes the
+  // usual-day mean, never the 0 that "no entry at all" means.
+  const festivalOnly = new Set(all.filter(x => x.holiday && x.sales != null).map(x => x.dow))
+  salesDays.forEach(x => festivalOnly.delete(x.dow))
+  const salesMean = meanOf(salesSamples)
   const sales = salesDays.length >= MIN_HISTORY_DAYS
-    ? { source: 'history', byWeekday: weekdayAverages(salesDays.map(x => ({ dow: x.dow, v: x.sales })), 0), sampleDays: salesDays.length }
+    ? { source: 'history', byWeekday: weekdayAverages(salesSamples, dow => (festivalOnly.has(dow) ? salesMean : 0)), sampleDays: salesDays.length }
     : null
-  const purchSamples = (days || []).map(x => ({ dow: x.dow, v: x.purch || 0 }))
-  const purch = purchSamples.length >= MIN_HISTORY_DAYS && days.some(x => x.purch != null)
+  const purchSamples = usual.map(x => ({ dow: x.dow, v: x.purch || 0 }))
+  const purch = purchSamples.length >= MIN_HISTORY_DAYS && all.some(x => x.purch != null)
     ? { source: 'history', byWeekday: weekdayAverages(purchSamples, meanOf(purchSamples)), sampleDays: purchSamples.length }
     : null
   return { sales, purch }
@@ -119,17 +149,52 @@ export function baseFromHistory(days) {
 //   sales: the days WITH an entry.
 //   purch: every calendar day up to `elapsed`, a day without a bill counting as zero.
 // Finished days only: the caller passes splitAtToday's salesDone / purchElapsed, never today.
-export function baseFromMonth({ kind, valueMap, dayNums, elapsed, weekdayOf }) {
+// A festival day (`isFestival`) is no sample here either, and does not count toward the week.
+export function baseFromMonth({ kind, valueMap, dayNums, elapsed, weekdayOf, isFestival = () => false }) {
   let samples
   if (kind === 'sales') {
-    if (dayNums.length < MIN_MONTH_DAYS_FOR_TARGET) return null
-    samples = dayNums.map(d => ({ dow: weekdayOf(d), v: valueMap[d] }))
+    const days = dayNums.filter(d => !isFestival(d))
+    if (days.length < MIN_MONTH_DAYS_FOR_TARGET) return null
+    samples = days.map(d => ({ dow: weekdayOf(d), v: valueMap[d] }))
   } else {
-    if (!elapsed || elapsed < MIN_MONTH_DAYS_FOR_TARGET) return null
-    samples = Array.from({ length: elapsed }, (_, i) => ({ dow: weekdayOf(i + 1), v: valueMap[i + 1] || 0 }))
+    const days = Array.from({ length: elapsed || 0 }, (_, i) => i + 1).filter(d => !isFestival(d))
+    if (days.length < MIN_MONTH_DAYS_FOR_TARGET) return null
+    samples = days.map(d => ({ dow: weekdayOf(d), v: valueMap[d] || 0 }))
   }
   return { source: 'month', byWeekday: weekdayAverages(samples, meanOf(samples)), sampleDays: samples.length }
 }
+
+// The open month's festivals, as the chart uses them: { [day]: { name, multiplier } }, where
+// multiplier is the Demand Multiplier set in Holiday Calendar, or null when none is set (or it is
+// not a usable number). `holidays` is holidaysByKeyOf() output.
+export function monthFestivals(holidays, bsYear, bsMonth, monthEndDay) {
+  const out = {}
+  for (let d = 1; d <= monthEndDay; d++) {
+    const h = holidays?.[holidayKey(bsYear, bsMonth, d)]
+    if (!h) continue
+    const m = h.demand_multiplier == null ? NaN : parseFloat(h.demand_multiplier)
+    out[d] = { name: h.name, multiplier: Number.isFinite(m) && m >= 0 ? m : null }
+  }
+  return out
+}
+
+// Day numbers as runs, for a footer that has to fit a festival month: [1,2,3,5,22,23] → "1–3, 5, 22–23".
+export function dayRanges(days) {
+  const sorted = [...new Set(days)].sort((a, b) => a - b)
+  const runs = []
+  sorted.forEach(d => {
+    const last = runs[runs.length - 1]
+    if (last && d === last[1] + 1) last[1] = d
+    else runs.push([d, d])
+  })
+  return runs.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ')
+}
+
+// What a festival does to each metric's line (see the header): sales scale by the multiplier and
+// judge the pace only where one is set; purchases never scale and no festival judges their pace.
+export const salesFestivalFactor = festivals => d => festivals?.[d]?.multiplier ?? 1
+export const salesFestivalJudged = festivals => d => !(festivals?.[d] && festivals[d].multiplier == null)
+export const purchFestivalJudged = festivals => d => !festivals?.[d]
 
 // The day in progress is never a sample (S792 PLANNING-2/3; the rule Demand Forecast has kept since
 // S694). POS stamps sales_entries.bs_day with today at every bill close, so from the morning's first
@@ -167,21 +232,28 @@ export function splitAtToday({ salesDayNums, elapsedDay, today }) {
 // `dayFactor(d)` scales one day's expectation (S784: the rain adjustment, weatherEffect.js). It
 // applies to the elapsed days as well as the future ones, so a rainy week already past is judged
 // against a rain-lowered expectation and does not drag the pace down, only for the rain to be
-// counted a second time on the days ahead. With every factor 1 the arithmetic is unchanged.
-export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay, weekdayOf, dayFactor = () => 1 }) {
-  const n = expectDays.length
-  if (n === 0) return null
-  const actual = sum(expectDays.map(d => valueMap[d] || 0))
+// counted a second time on the days ahead. With every factor 1 the arithmetic is unchanged. A
+// festival's Demand Multiplier rides the same factor (S850).
+//
+// `judged(d)` says whether an elapsed day may judge the pace (S850: a festival with no multiplier
+// may not, for sales; no festival may, for purchases). A day not judged still counts in the
+// month-end total at what it actually took. With every day judged the arithmetic is unchanged; with
+// none judged yet, a base is taken at face value.
+export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay, weekdayOf, dayFactor = () => 1, judged = () => true }) {
+  if (expectDays.length === 0) return null
+  const paceDays = expectDays.filter(d => judged(d))
+  const n = paceDays.length
+  const actual = sum(paceDays.map(d => valueMap[d] || 0))
   let perDay, paceFactor = null
   if (base) {
-    const expected = sum(expectDays.map(d => base.byWeekday[weekdayOf(d)] * dayFactor(d)))
+    const expected = sum(paceDays.map(d => base.byWeekday[weekdayOf(d)] * dayFactor(d)))
     const ratio = expected > 0 ? actual / expected : 1
     const w = n / (n + PACE_DAMPING)
     paceFactor = Math.max(0, 1 + w * (ratio - 1))
     perDay = d => base.byWeekday[weekdayOf(d)] * paceFactor * dayFactor(d)
   } else {
     if (n < MIN_DAYS_FOR_FORECAST) return null
-    const weight = sum(expectDays.map(d => dayFactor(d)))
+    const weight = sum(paceDays.map(d => dayFactor(d)))
     const perNormalDay = weight > 0 ? actual / weight : actual / n
     perDay = d => perNormalDay * dayFactor(d)
   }
@@ -196,10 +268,17 @@ export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay,
   return { projDays, projectedTotal: Math.round(actualBefore + projSum), paceFactor }
 }
 
-// The frozen Target, as stored in monthly_periods.sales/purch_projection_snapshot.
-export function makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay }) {
+// A usual week laid over the month, each day × `dayFactor(d)`: the Target's month total. With no
+// factor it is the stored projectedMonthEnd; the sales line passes its festival factor (S850).
+export function targetTotal(byWeekday, { monthEndDay, weekdayOf, dayFactor = () => 1 }) {
   let total = 0
-  for (let d = 1; d <= monthEndDay; d++) total += base.byWeekday[weekdayOf(d)]
+  for (let d = 1; d <= monthEndDay; d++) total += byWeekday[weekdayOf(d)] * dayFactor(d)
+  return Math.round(total)
+}
+
+// The frozen Target, as stored in monthly_periods.sales/purch_projection_snapshot. It holds the
+// usual week only; festivals are applied where it is drawn (targetValue, targetTotal).
+export function makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay }) {
   return {
     model: SNAPSHOT_MODEL[kind],
     source: base.source,
@@ -207,7 +286,7 @@ export function makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay }
     sampleDays: base.sampleDays,
     capturedDay,
     capturedAt: new Date().toISOString(),
-    projectedMonthEnd: Math.round(total),
+    projectedMonthEnd: targetTotal(base.byWeekday, { monthEndDay, weekdayOf }),
   }
 }
 
@@ -222,4 +301,6 @@ export const isCurrentSnapshot = (kind, snap) =>
 export const staleSnapshotFilter = (kind, column) =>
   `${column}->>model.is.null,${column}->>model.neq.${SNAPSHOT_MODEL[kind]}`
 
-export const targetValue = (kind, snap, dow) => (isCurrentSnapshot(kind, snap) ? snap.byWeekday[dow] : null)
+// The Target on one day: its weekday's usual × `factor` (a sales festival's Demand Multiplier).
+export const targetValue = (kind, snap, dow, factor = 1) =>
+  (isCurrentSnapshot(kind, snap) ? Math.round(snap.byWeekday[dow] * factor) : null)

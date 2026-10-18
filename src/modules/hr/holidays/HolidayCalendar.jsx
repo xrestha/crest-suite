@@ -597,7 +597,7 @@ export default function HolidayCalendar() {
           {/* Demand Multiplier */}
           <div style={{ marginTop: 14 }}>
             <label style={lbl} htmlFor="hol-demand-multiplier">
-              <Tip text="Scales this day's Demand Forecast (covers, revenue, and item quantities) by this factor — e.g. 0.3 if you close/run quiet on this day, 1.5 if it's your busiest day of the year. Leave blank for no adjustment; the day still shows a holiday flag either way." width={320}>
+              <Tip text="Scales this day's Demand Forecast (covers, revenue, and item quantities) and the Dashboard's sales target and sales forecast by this factor — e.g. 0.3 if you close/run quiet on this day, 1.5 if it's your busiest day of the year. Leave blank for no adjustment; the day still shows a holiday flag either way." width={320}>
                 Demand Multiplier (optional)
               </Tip>
             </label>
@@ -610,7 +610,7 @@ export default function HolidayCalendar() {
               placeholder="e.g. 1.5"
             />
             <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 4 }}>
-              Feeds Demand Forecast and Roster's Labor Forecast tab. Blank = forecast unaffected.
+              Feeds Demand Forecast, Roster's Labor Forecast tab and the Dashboard's Daily Purchases vs Sales chart. Blank = forecast unaffected.
             </div>
           </div>
 

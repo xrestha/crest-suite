@@ -603,7 +603,8 @@ History: #s740-leave-reopen-and-overtime-undo, #s741-leave-back-fill,
   `planSeed()` counts a removed row as present and never corrects its date. **Every reader outside the
   page filters `removed_at IS NULL`** (grep `hr_holiday_calendar`: today `Overtime.jsx`,
   `LeaveManagement.jsx`, `demandForecastData.js`, `setupSignals.js`, and in SQL
-  `hr_public_holiday_count` and `hr_backfill_approved_leave`). Delete for good exists and forgets the
+  `hr_public_holiday_count`, `hr_backfill_approved_leave` and `get_forecast_holidays`, the
+  dashboard chart's read, S850). Delete for good exists and forgets the
   removal.
 
 Why: a missing or wrong holiday is a wrong rate on a real payslip, on the biggest working days of

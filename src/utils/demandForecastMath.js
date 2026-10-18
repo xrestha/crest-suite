@@ -95,6 +95,28 @@ export function weightedMean(values) {
   return num / den
 }
 
+// ── Holidays ───────────────────────────────────────────────────────────────
+
+export const holidayKey = (y, m, d) => `${y}:${m}:${d}`
+
+// Holiday Calendar rows → one entry per BS date. Several dates carry two holidays (Krishna
+// Janmashtami and Gaura Parva on one day, Bhai Tika and Falgunanda Jayanti on another), and keeping
+// whichever row arrived last let a multiplier set on one of them silently vanish. The row that
+// carries a multiplier wins, then a public holiday over an optional one (S748). Shared by Demand
+// Forecast and the dashboard's Daily Purchases vs Sales chart (S850), so the two agree on which
+// festival a day is and what it does to trade.
+export function holidaysByKeyOf(rows) {
+  const byKey = {}
+  const rank = x => (x.demand_multiplier != null ? 2 : 0) + (x.holiday_type === 'public' ? 1 : 0)
+  for (const h of rows || []) {
+    const key = holidayKey(h.bs_year, h.bs_month, h.bs_day)
+    const next = { name: h.name, holiday_type: h.holiday_type, demand_multiplier: h.demand_multiplier }
+    const prev = byKey[key]
+    if (!prev || rank(next) > rank(prev)) byKey[key] = next
+  }
+  return byKey
+}
+
 // One forecast row per coming day. `now` is injectable for tests; the day it falls on is never a
 // sample — a recompute at 8 AM used to feed one hour of trade into next week as a whole day.
 //

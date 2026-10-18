@@ -15,6 +15,7 @@ jest.mock('./demandForecastMath', () => ({
   buildDailyHistory: () => [],
   buildManualDailyHistory: () => [],
   periodsInLookback: () => [],
+  holidaysByKeyOf: () => ({}),
   // One covers row and one dish row per day: 14 rows for a 7-day run.
   forecastByWeekday: (_history, horizonDays) => Array.from({ length: horizonDays }, (_, i) => ({
     bs: { year: 2083, month: 6, day: i + 1 },
